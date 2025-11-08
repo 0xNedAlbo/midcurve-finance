@@ -63,6 +63,9 @@
     ".next",
     "out",
     "dist",
-    "build"
+    "build",
+    "vitest.config.ts",
+    "**/*.test.ts",
+    "**/*.e2e.test.ts"
   ]
 }
