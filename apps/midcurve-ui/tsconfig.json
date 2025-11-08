@@ -13,7 +13,6 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
-    "types": ["node", "react", "react-dom"],
     /* Type Checking */
     "strict": true,
     "noUnusedLocals": true,
