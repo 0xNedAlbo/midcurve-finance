@@ -16,6 +16,8 @@
     /* Type Checking */
     "strict": true,
     "noImplicitAny": true,
+    // TODO: Enable noUncheckedIndexedAccess per Vercel recommendations
+    // "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
@@ -40,11 +42,9 @@
         "./src/*"
       ]
     },
-    "typeRoots": [
-      "./node_modules/@types"
-    ],
     /* Next.js Specific */
     "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json",
     "plugins": [
       {
         "name": "next"
