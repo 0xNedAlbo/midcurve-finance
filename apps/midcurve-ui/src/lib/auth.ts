@@ -12,11 +12,9 @@ import NextAuth from 'next-auth';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { SiweMessage } from 'siwe';
-import { PrismaClient } from '@prisma/client';
 import { AuthUserService, AuthNonceService } from '@midcurve/services';
 import { normalizeAddress } from '@midcurve/shared';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 const authUserService = new AuthUserService();
 const authNonceService = new AuthNonceService();
 
