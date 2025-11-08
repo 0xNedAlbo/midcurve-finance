@@ -9,7 +9,9 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "dev": "turbo dev"
   },
   "author": "",
   "license": "MIT",
