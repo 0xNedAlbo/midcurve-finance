@@ -1,0 +1,26 @@
+# Source files (exclude from package)
+src/
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+coverage/
+.vitest/
+vitest.config.ts
+
+# Build configuration
+*.tsbuildinfo
+tsconfig.json
+
+# Development
+.vscode/
+.idea/
+*.swp
+.env*
+!.env.example
+
+# Yalc
+.yalc/
+yalc.lock
+
+# NOTE: dist/ is NOT listed here, so it will be INCLUDED in the package

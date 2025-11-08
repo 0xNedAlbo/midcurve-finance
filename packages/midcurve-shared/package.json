@@ -1,0 +1,66 @@
+{
+  "name": "@midcurve/shared",
+  "version": "0.1.0",
+  "description": "Shared types and utilities for Midcurve Finance - concentrated liquidity position management",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils/index.js",
+      "types": "./dist/utils/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build-old": "tsc",
+    "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist",
+    "prepare": "npm run build",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "yalc:push": "npm run build && yalc push"
+  },
+  "keywords": [
+    "midcurve",
+    "defi",
+    "concentrated-liquidity",
+    "uniswap-v3",
+    "types",
+    "utilities"
+  ],
+  "author": "Midcurve Finance",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4",
+    "yalc": "^1.0.0-pre.53"
+  },
+  "dependencies": {
+    "@uniswap/sdk-core": "^7.8.0",
+    "@uniswap/v3-sdk": "^3.26.0",
+    "jsbi": "^4.3.2",
+    "viem": "^2.38.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

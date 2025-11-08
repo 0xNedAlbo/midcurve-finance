@@ -1,0 +1,90 @@
+{
+  "name": "@midcurve/services",
+  "version": "0.1.0",
+  "description": "Shared business logic for Midcurve Finance - concentrated liquidity position management",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "prisma"
+  ],
+  "scripts": {
+    "build": "npm run prisma:generate && tsup src/index.ts --format esm,cjs --dts --out-dir dist",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit",
+    "test": "node --env-file=.env.test ./node_modules/.bin/vitest",
+    "test:run": "node --env-file=.env.test ./node_modules/.bin/vitest run",
+    "test:coverage": "node --env-file=.env.test ./node_modules/.bin/vitest run --coverage",
+    "test:unit": "vitest --project unit",
+    "test:unit:run": "vitest run --project unit",
+    "test:integration": "node --env-file=.env.test ./node_modules/.bin/vitest --project integration",
+    "test:integration:run": "node --env-file=.env.test ./node_modules/.bin/vitest run --project integration",
+    "test:integration:coverage": "node --env-file=.env.test ./node_modules/.bin/vitest run --project integration --coverage",
+    "db:dev:up": "docker-compose -f docker-compose.dev.yml up -d",
+    "db:dev:down": "docker-compose -f docker-compose.dev.yml down",
+    "db:dev:reset": "docker-compose -f docker-compose.dev.yml down -v && docker-compose -f docker-compose.dev.yml up -d",
+    "db:test:up": "docker-compose -f docker-compose.test.yml up -d",
+    "db:test:down": "docker-compose -f docker-compose.test.yml down",
+    "db:test:reset": "docker-compose -f docker-compose.test.yml down -v && docker-compose -f docker-compose.test.yml up -d",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "dotenv -e .env -- tsx prisma/seed.ts",
+    "backfill:position-hash": "dotenv -e .env -- tsx scripts/backfill-position-hash.ts",
+    "yalc:link": "yalc link @midcurve/shared && npm install",
+    "yalc:update": "yalc update @midcurve/shared",
+    "yalc:unlink": "yalc remove @midcurve/shared && npm install",
+    "yalc:clean": "rimraf .yalc yalc.lock",
+    "yalc:publish": "npm run build && yalc publish",
+    "yalc:push": "npm run build && yalc push"
+  },
+  "keywords": [
+    "midcurve",
+    "defi",
+    "concentrated-liquidity",
+    "uniswap-v3",
+    "orca",
+    "raydium",
+    "pancakeswap",
+    "risk-management"
+  ],
+  "author": "Midcurve Finance",
+  "license": "MIT",
+  "devDependencies": {
+    "@prisma/client": "^6.17.1",
+    "@types/node": "^20.10.0",
+    "dotenv-cli": "^10.0.0",
+    "prisma": "^6.17.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4",
+    "vitest-mock-extended": "^3.1.0",
+    "yalc": "^1.0.0-pre.53"
+  },
+  "dependencies": {
+    "@midcurve/shared": "https://github.com/0xNedAlbo/midcurve-shared.git#main",
+    "@uniswap/sdk-core": "^7.8.0",
+    "@uniswap/v3-sdk": "^3.26.0",
+    "jsbi": "^4.3.2",
+    "nanoid": "^5.1.6",
+    "pino": "^10.0.0",
+    "viem": "^2.38.2"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^6.17.1"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

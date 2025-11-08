@@ -1,0 +1,20 @@
+{
+  "name": "midcurve-finance",
+  "version": "0.1.0",
+  "description": "Midcurve Finance: a comprehensive risk management platform for concentrated liquidity (CL) provisioning",
+  "main": "index.js",
+  "packageManager": "npm@10.9.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "turbo": "^2.6.0"
+  }
+}

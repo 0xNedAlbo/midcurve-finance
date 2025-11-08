@@ -1,0 +1,87 @@
+{
+  "name": "@midcurve/api-shared",
+  "version": "0.1.0",
+  "description": "Shared API types and utilities for Midcurve Finance",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./types/common": {
+      "import": "./dist/types/common/index.js",
+      "types": "./dist/types/common/index.d.ts"
+    },
+    "./types/auth": {
+      "import": "./dist/types/auth/index.js",
+      "types": "./dist/types/auth/index.d.ts"
+    },
+    "./types/health": {
+      "import": "./dist/types/health/index.js",
+      "types": "./dist/types/health/index.d.ts"
+    },
+    "./types/tokens": {
+      "import": "./dist/types/tokens/index.js",
+      "types": "./dist/types/tokens/index.d.ts"
+    },
+    "./types/pools": {
+      "import": "./dist/types/pools/index.js",
+      "types": "./dist/types/pools/index.d.ts"
+    },
+    "./types/positions": {
+      "import": "./dist/types/positions/index.js",
+      "types": "./dist/types/positions/index.d.ts"
+    },
+    "./types/positions/uniswapv3": {
+      "import": "./dist/types/positions/uniswapv3/index.js",
+      "types": "./dist/types/positions/uniswapv3/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit",
+    "yalc:link": "yalc link @midcurve/shared && npm install",
+    "yalc:update": "yalc update @midcurve/shared",
+    "yalc:unlink": "yalc remove @midcurve/shared && npm install",
+    "yalc:clean": "rimraf .yalc yalc.lock",
+    "yalc:publish": "npm run build && yalc publish",
+    "yalc:push": "npm run build && yalc push"
+  },
+  "keywords": [
+    "midcurve",
+    "defi",
+    "concentrated-liquidity",
+    "api",
+    "types",
+    "typescript"
+  ],
+  "author": "Midcurve Finance",
+  "license": "MIT",
+  "dependencies": {
+    "@midcurve/shared": "https://github.com/0xNedAlbo/midcurve-shared.git#main",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4",
+    "yalc": "^1.0.0-pre.53"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
