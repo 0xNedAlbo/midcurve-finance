@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { SignupRequestSchema, type SignupResponse } from '@midcurve/api-shared';
 import { getAddress } from 'viem';
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user and wallet address in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Create user
       const user = await tx.user.create({
         data: {
