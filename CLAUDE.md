@@ -48,27 +48,37 @@ The platform enables liquidity providers to:
 ## Repository Structure
 
 ```
-midcurve/
-├── midcurve-shared/          # @midcurve/shared - Domain types & utilities
-├── midcurve-services/        # @midcurve/services - Business logic
-├── midcurve-api-shared/      # @midcurve/api-shared - API types & schemas
-├── midcurve-ui/              # Unified Next.js app (UI + API)
+midcurve-finance/
+├── apps/
+│   └── midcurve-ui/          # Unified Next.js app (UI + API)
+├── packages/
+│   ├── midcurve-shared/      # @midcurve/shared - Domain types & utilities
+│   ├── midcurve-services/    # @midcurve/services - Business logic
+│   └── midcurve-api-shared/  # @midcurve/api-shared - API types & schemas
+├── turbo.json                # Turborepo configuration
+├── package.json              # Workspace configuration
 └── CLAUDE.md                 # This file
 ```
 
-**⚠️ IMPORTANT - Git Repository Rule:**
+**⚠️ IMPORTANT - Git Repository Architecture:**
 
-- ❌ **NEVER create a git repository in the root directory** (`/Users/job/Documents/Programmieren/Midcurve/`)
-- ✅ **Each sub-package has its own independent git repository** (midcurve-shared/, midcurve-services/, midcurve-api-shared/, midcurve-ui/)
-- ❌ **DO NOT run `git init` in the root directory**
-- ❌ **DO NOT commit files in the root directory to git**
-- ✅ **Root directory files** (like CLAUDE.md) are for documentation only and should NOT be version controlled
+This is a **Turborepo monorepo** with a **single git repository** at the root level.
+
+- ✅ **Single git repository** at `/Users/job/Documents/Programmieren/midcurve-finance/`
+- ✅ **All packages tracked together** in one repository
+- ✅ **Turborepo manages builds** and dependencies across packages
+- ✅ **npm workspaces** handle package linking (apps/*, packages/*)
 
 **Rationale:**
-- Each package is independently versioned and published
-- Separate repositories allow independent release cycles
-- Root directory is a workspace container, not a git-managed project
-- Prevents accidental commits of workspace-level files
+- Simplified dependency management with Turborepo
+- Atomic commits across multiple packages
+- Shared tooling and CI/CD configuration
+- Easier local development with automatic package linking
+- Single source of truth for the entire codebase
+
+**Repository:**
+- GitHub: https://github.com/0xNedAlbo/midcurve-finance.git
+- Branch: `main`
 
 ## Package Roles & Responsibilities
 
@@ -106,7 +116,7 @@ midcurve/
 - ✅ **Discriminated unions** for type safety
 - ✅ **Generic interfaces** for flexibility
 
-**Documentation:** See [midcurve-shared/README.md](midcurve-shared/README.md)
+**Documentation:** See [packages/midcurve-shared/README.md](packages/midcurve-shared/README.md)
 
 ---
 
@@ -154,7 +164,7 @@ midcurve/
 - ✅ **Comprehensive testing** (121+ tests with 100% coverage)
 - ✅ **Multi-chain support** (Ethereum, Arbitrum, Base, BSC, Polygon, Optimism)
 
-**Documentation:** See [midcurve-services/CLAUDE.md](midcurve-services/CLAUDE.md)
+**Documentation:** See [packages/midcurve-services/CLAUDE.md](packages/midcurve-services/CLAUDE.md)
 
 ---
 
@@ -203,13 +213,13 @@ midcurve/
 - ✅ **Zero runtime dependencies** - Only peer deps (zod, @midcurve/shared)
 - ✅ **Tree-shakeable** - Granular exports for optimal bundle size
 
-**Documentation:** See [midcurve-api-shared/README.md](midcurve-api-shared/README.md)
+**Documentation:** See [packages/midcurve-api-shared/README.md](packages/midcurve-api-shared/README.md)
 
 ---
 
 ### @midcurve/ui - Unified Next.js Application
 
-**Location:** `midcurve-ui/`
+**Location:** `apps/midcurve-ui/`
 
 **Purpose:** Unified full-stack Next.js application containing both frontend UI and backend API routes.
 
@@ -777,27 +787,27 @@ This framework allows users to:
 
 Jump to package-specific implementation documentation:
 
-**📦 [@midcurve/shared](midcurve-shared/README.md)** - Domain Types & Utilities
+**📦 [@midcurve/shared](packages/midcurve-shared/README.md)** - Domain Types & Utilities
 - Core type definitions (Token, Pool, Position, User)
 - EVM address utilities
 - UniswapV3 math functions
 - Framework-agnostic, zero dependencies
 
-**🔧 [@midcurve/services](midcurve-services/CLAUDE.md)** - Business Logic Implementation
+**🔧 [@midcurve/services](packages/midcurve-services/CLAUDE.md)** - Business Logic Implementation
 - Service layer APIs (TokenService, Erc20TokenService)
 - Testing patterns and fixtures (121+ tests)
 - EVM utilities and on-chain data reading
 - Distributed caching implementation (PostgreSQL)
 - Database schema (Prisma)
 
-**📋 [@midcurve/api-shared](midcurve-api-shared/README.md)** - API Types & Schemas
+**📋 [@midcurve/api-shared](packages/midcurve-api-shared/README.md)** - API Types & Schemas
 - Request/response types for all endpoints
 - Zod validation schemas
 - Protocol-agnostic vs protocol-specific organization
 - BigInt serialization utilities
 - Framework-agnostic, works in browsers and Node.js
 
-**🌐 [@midcurve/api](midcurve-api/CLAUDE.md)** - REST API Implementation
+**🌐 [midcurve-ui](apps/midcurve-ui/CLAUDE.md)** - Unified Next.js Application (UI + API)
 - Project structure and routing (Next.js App Router)
 - Adding new endpoints (step-by-step guide)
 - Authentication (SIWE + API keys)
@@ -1482,31 +1492,33 @@ All interactive elements must include `cursor-pointer` class for proper UX feedb
 
 ### Git Repository Management
 
-**⚠️ CRITICAL: Root Directory is NOT a Git Repository**
+**✅ Single Turborepo Monorepo**
 
-- ❌ **NEVER run `git init` in the root directory** (`/Users/job/Documents/Programmieren/Midcurve/`)
-- ❌ **DO NOT create `.git/` folder in the root directory**
-- ✅ **Work within individual package repositories only** (midcurve-shared/, midcurve-services/, midcurve-api-shared/, midcurve-ui/)
+This project uses a **single git repository** at the root level with Turborepo for build orchestration.
 
-**Why?**
-- Each package is independently versioned with its own git repository
-- Root directory is a monorepo workspace container, not a project itself
-- Root files (CLAUDE.md, etc.) are documentation aids and should NOT be version controlled
+- ✅ **Root directory HAS a git repository** (`/Users/job/Documents/Programmieren/midcurve-finance/.git`)
+- ✅ **All packages tracked in one repository** (apps/*, packages/*)
+- ✅ **Atomic commits across multiple packages** possible
+- ✅ **Shared tooling and CI/CD** configuration
 
-**If you accidentally created a git repo in root:**
-```bash
-# Remove the git repository from root (if accidentally created)
-cd /Users/job/Documents/Programmieren/Midcurve
-rm -rf .git
-```
+**Repository:**
+- GitHub: https://github.com/0xNedAlbo/midcurve-finance.git
+- Branch: `main`
+
+**Why Single Repo?**
+- Simplified dependency management with Turborepo
+- Atomic commits across multiple packages
+- Shared tooling and CI/CD configuration
+- Easier local development with automatic package linking
+- Single source of truth for the entire codebase
 
 ### Git Workflow
-1. **Navigate to the specific package directory** (e.g., `cd midcurve-ui`)
+1. **Work from the root directory** (`/Users/job/Documents/Programmieren/midcurve-finance/`)
 2. Create feature branch from `main`
-3. Make changes in appropriate repo(s)
+3. Make changes in appropriate package(s) (apps/* or packages/*)
 4. Write tests for new functionality
 5. Run type checks and tests
-6. Commit with clear, descriptive messages (within the package repo)
+6. Commit with clear, descriptive messages (affects all modified packages)
 7. Push and create pull request
 
 ### Commit Message Format
