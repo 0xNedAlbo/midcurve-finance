@@ -49,12 +49,12 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "tsup": "^8.5.0",
     "typescript": "^5.3.3",
     "vitest": "^3.2.4",
     "yalc": "^1.0.0-pre.53"
   },
   "dependencies": {
+    "tsup": "^8.5.0",
     "@uniswap/sdk-core": "^7.8.0",
     "@uniswap/v3-sdk": "^3.26.0",
     "jsbi": "^4.3.2",
