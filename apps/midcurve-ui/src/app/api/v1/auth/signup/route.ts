@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user and wallet address in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: typeof prisma) => {
       // Create user
       const user = await tx.user.create({
         data: {
