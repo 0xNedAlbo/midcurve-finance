@@ -20,7 +20,10 @@
                 "RPC_URL_BSC",
                 "RPC_URL_POLYGON",
                 "RPC_URL_OPTIMISM",
-                "ETHERSCAN_API_KEY"
+                "ETHERSCAN_API_KEY",
+                "THE_GRAPH_API_KEY",
+                "LOG_LEVEL",
+                "NODE_ENV"
             ]
         },
         "check-types": {
@@ -41,7 +44,10 @@
                 "RPC_URL_BSC",
                 "RPC_URL_POLYGON",
                 "RPC_URL_OPTIMISM",
-                "ETHERSCAN_API_KEY"
+                "ETHERSCAN_API_KEY",
+                "THE_GRAPH_API_KEY",
+                "LOG_LEVEL",
+                "NODE_ENV"
             ]
         }
     }
