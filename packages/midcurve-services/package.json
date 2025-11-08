@@ -63,7 +63,6 @@
     "@types/node": "^20.10.0",
     "dotenv-cli": "^10.0.0",
     "prisma": "^6.17.1",
-    "tsup": "^8.5.0",
     "tsx": "^4.20.6",
     "typescript": "^5.3.3",
     "vitest": "^3.2.4",
@@ -71,14 +70,14 @@
     "yalc": "^1.0.0-pre.53"
   },
   "dependencies": {
+    "tsup": "^8.5.0",
     "@midcurve/shared": "https://github.com/0xNedAlbo/midcurve-shared.git#main",
     "@uniswap/sdk-core": "^7.8.0",
     "@uniswap/v3-sdk": "^3.26.0",
     "jsbi": "^4.3.2",
     "nanoid": "^5.1.6",
     "pino": "^10.0.0",
-    "viem": "^2.38.2",
-    "tsup": "^8.5.0",
+    "viem": "^2.38.2"
   },
   "peerDependencies": {
     "@prisma/client": "^6.17.1"
