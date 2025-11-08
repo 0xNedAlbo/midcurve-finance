@@ -9,6 +9,18 @@
                 ".next/**",
                 "!.next/cache/**",
                 "dist/**"
+            ],
+            "env": [
+                "NEXTAUTH_URL",
+                "NEXTAUTH_SECRET",
+                "DATABASE_URL",
+                "RPC_URL_ETHEREUM",
+                "RPC_URL_ARBITRUM",
+                "RPC_URL_BASE",
+                "RPC_URL_BSC",
+                "RPC_URL_POLYGON",
+                "RPC_URL_OPTIMISM",
+                "ETHERSCAN_API_KEY"
             ]
         },
         "check-types": {
@@ -18,7 +30,19 @@
         },
         "dev": {
             "persistent": true,
-            "cache": false
+            "cache": false,
+            "env": [
+                "NEXTAUTH_URL",
+                "NEXTAUTH_SECRET",
+                "DATABASE_URL",
+                "RPC_URL_ETHEREUM",
+                "RPC_URL_ARBITRUM",
+                "RPC_URL_BASE",
+                "RPC_URL_BSC",
+                "RPC_URL_POLYGON",
+                "RPC_URL_OPTIMISM",
+                "ETHERSCAN_API_KEY"
+            ]
         }
     }
 }
