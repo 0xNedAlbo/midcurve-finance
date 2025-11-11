@@ -55,5 +55,6 @@ yalc.lock
 /temp
 *.log
 
-# Prisma (schema and migrations synced from @midcurve/services package)
-/prisma/
+# Prisma - schema and migrations are committed
+# Only ignore generated client
+/node_modules/.prisma/
