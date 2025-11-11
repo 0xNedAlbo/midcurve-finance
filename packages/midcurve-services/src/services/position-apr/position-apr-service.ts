@@ -17,7 +17,7 @@
  * - Dependency injection for testability
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { PositionAprPeriod } from '@midcurve/shared';
 import type { CreateAprPeriodInput } from '../types/position-apr/position-apr-input.js';
 import type { AnyLedgerEvent } from '@midcurve/shared';

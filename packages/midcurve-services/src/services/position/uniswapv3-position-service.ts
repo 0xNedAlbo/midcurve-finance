@@ -5,7 +5,7 @@
  * Handles serialization/deserialization of Uniswap V3 position config and state.
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from '@midcurve/database';
 import type {
     UniswapV3PositionConfig,
     UniswapV3PositionState,

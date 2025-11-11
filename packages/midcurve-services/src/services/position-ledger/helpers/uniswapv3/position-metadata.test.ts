@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockDeep, mockReset, type DeepMockProxy } from 'vitest-mock-extended';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@midcurve/database';
 import { pino } from 'pino';
 import { fetchPositionMetadata } from './position-metadata.js';
 import type { UniswapV3Position } from '@midcurve/shared';

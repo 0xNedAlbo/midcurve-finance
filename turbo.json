@@ -1,8 +1,15 @@
 {
     "$schema": "https://turborepo.com/schema.json",
     "tasks": {
+        "db:generate": {
+            "cache": false,
+            "outputs": [
+                "src/generated/**"
+            ]
+        },
         "build": {
             "dependsOn": [
+                "^db:generate",
                 "^build"
             ],
             "outputs": [
@@ -32,6 +39,9 @@
             ]
         },
         "dev": {
+            "dependsOn": [
+                "^db:generate"
+            ],
             "persistent": true,
             "cache": false,
             "env": [

@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockDeep, type DeepMockProxy } from 'vitest-mock-extended';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { PublicClient } from 'viem';
 import { Erc20TokenService } from './erc20-token-service.js';
 import { EvmConfig } from '../../config/evm.js';

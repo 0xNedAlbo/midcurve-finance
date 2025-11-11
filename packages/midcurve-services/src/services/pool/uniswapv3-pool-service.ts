@@ -5,7 +5,7 @@
  * Handles address validation, normalization, token discovery, and pool state serialization.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type {
   UniswapV3PoolConfig,
   UniswapV3PoolState,

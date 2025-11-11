@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockDeep, type DeepMockProxy } from 'vitest-mock-extended';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import { UniswapV3QuoteTokenService } from './uniswapv3-quote-token-service.js';
 import {
   SCENARIO_WETH_USDC_ETH,

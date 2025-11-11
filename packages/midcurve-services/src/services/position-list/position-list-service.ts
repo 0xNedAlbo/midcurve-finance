@@ -13,7 +13,7 @@
  * services (e.g., UniswapV3PositionService).
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { AnyPosition } from '@midcurve/shared';
 import type {
   PositionListFilters,

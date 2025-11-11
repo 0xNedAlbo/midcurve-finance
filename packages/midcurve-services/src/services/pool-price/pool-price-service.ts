@@ -12,7 +12,7 @@
  * all abstract serialization methods.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { PoolPrice, PoolPriceConfigMap } from '@midcurve/shared';
 import type {
   CreatePoolPriceInput,

@@ -5,7 +5,7 @@
  * Provides consistent, realistic test data.
  */
 
-import type { User } from '@prisma/client';
+import type { User } from '@midcurve/database';
 import type { CreateUserInput } from '../types/user/index.js';
 
 /**

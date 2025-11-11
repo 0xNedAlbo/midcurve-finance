@@ -5,7 +5,7 @@
  * NOT shared with API/UI - those use types from @midcurve/shared.
  */
 
-import type { User, AuthWalletAddress, ApiKey } from '@prisma/client';
+import type { User, AuthWalletAddress, ApiKey } from '@midcurve/database';
 
 // =============================================================================
 // User Input Types

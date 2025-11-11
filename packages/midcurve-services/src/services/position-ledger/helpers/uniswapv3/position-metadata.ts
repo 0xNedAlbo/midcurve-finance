@@ -4,7 +4,7 @@
  * Provides functions for fetching position metadata from the database.
  */
 
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@midcurve/database';
 import type { Logger } from 'pino';
 import type { UniswapV3Position } from '@midcurve/shared';
 import { log } from '../../../../logging/index.js';

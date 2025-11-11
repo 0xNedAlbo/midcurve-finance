@@ -5,9 +5,10 @@
  * Handles user CRUD operations and wallet management across multiple EVM chains.
  */
 
-import type { PrismaClient, User, AuthWalletAddress } from '@prisma/client';
+import type { PrismaClient, User, AuthWalletAddress } from '@midcurve/database';
 import { validateAndNormalizeAddress } from '../../utils/auth/index.js';
 import type { CreateUserInput, UpdateUserInput } from '../types/auth/index.js';
+import { prisma } from '@midcurve/database';
 
 export interface AuthUserServiceDependencies {
   prisma?: PrismaClient;
@@ -19,7 +20,7 @@ export class AuthUserService {
   constructor(dependencies: AuthUserServiceDependencies = {}) {
     // Use provided Prisma client or create new one
     // This allows dependency injection for testing
-    this.prisma = dependencies.prisma ?? (new (require('@prisma/client').PrismaClient)() as PrismaClient);
+    this.prisma = dependencies.prisma ?? (prisma);
   }
 
   // ===========================================================================

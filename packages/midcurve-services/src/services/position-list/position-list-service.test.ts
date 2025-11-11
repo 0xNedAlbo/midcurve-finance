@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mockDeep, type DeepMockProxy } from 'vitest-mock-extended';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import { PositionListService } from './position-list-service.js';
 import type { AnyPosition } from '@midcurve/shared';
 

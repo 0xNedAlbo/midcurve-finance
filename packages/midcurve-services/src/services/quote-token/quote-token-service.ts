@@ -5,7 +5,7 @@
  * Handles user preferences, default configurations, and fallback logic.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { PoolConfigMap } from '@midcurve/shared';
 import type { QuoteTokenResult } from '@midcurve/shared';
 import type { QuoteTokenInput } from '../types/quote-token/quote-token-input.js';

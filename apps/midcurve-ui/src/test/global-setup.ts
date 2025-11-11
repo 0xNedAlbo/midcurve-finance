@@ -9,7 +9,7 @@
  */
 
 import { execSync } from 'child_process';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import { CoinGeckoClient } from '@midcurve/services';
 
 /**

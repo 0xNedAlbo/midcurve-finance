@@ -5,7 +5,7 @@
  * Handles discovery of pools for token pairs and enrichment with indexer metrics.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { Pool, PoolConfigMap } from '@midcurve/shared';
 import type { PoolDiscoveryResult } from '@midcurve/shared';
 import type { PoolDiscoveryInput } from '../types/pool-discovery/pool-discovery-input.js';

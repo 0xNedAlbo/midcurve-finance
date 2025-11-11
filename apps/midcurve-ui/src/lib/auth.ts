@@ -13,10 +13,11 @@ import { PrismaAdapter } from '@auth/prisma-adapter';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { SiweMessage } from 'siwe';
 import { normalizeAddress } from '@midcurve/shared';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@midcurve/database';
 import { getAuthUserService, getAuthNonceService } from '@/lib/services';
 
 export const { auth, signIn, signOut, handlers } = NextAuth({
+  // @ts-ignore - Type recursion issue with PrismaAdapter and custom generated client location
   adapter: PrismaAdapter(prisma),
 
   providers: [

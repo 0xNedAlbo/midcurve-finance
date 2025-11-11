@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mockDeep, type DeepMockProxy } from 'vitest-mock-extended';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import { UniswapV3PoolPriceService } from './uniswapv3-pool-price-service.js';
 import { EvmConfig } from '../../config/evm.js';
 import type { PublicClient } from 'viem';

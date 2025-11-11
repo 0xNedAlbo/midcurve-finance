@@ -11,7 +11,7 @@
  * Note: Unlike Position, Token has no mutable state - only immutable config.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { Token, TokenConfigMap } from '@midcurve/shared';
 import type {
   CreateTokenInput,

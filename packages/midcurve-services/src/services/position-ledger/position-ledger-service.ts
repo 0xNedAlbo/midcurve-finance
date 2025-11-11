@@ -14,7 +14,7 @@
  * - Discovery methods (fetching events from blockchain)
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type {
   PositionLedgerEvent,
   PositionLedgerEventConfigMap,

@@ -5,7 +5,7 @@
  * Handles serialization/deserialization of ERC-20 token config.
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from '@midcurve/database';
 import type { Token } from '@midcurve/shared';
 import type { Erc20TokenConfig } from '@midcurve/shared';
 import { isValidAddress, normalizeAddress } from '@midcurve/shared';

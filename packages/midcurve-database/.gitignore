@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Generated Prisma client (git-ignored, generated during build)
+src/generated/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# TypeScript build cache
+*.tsbuildinfo

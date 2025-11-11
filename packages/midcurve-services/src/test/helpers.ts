@@ -2,7 +2,7 @@
  * Test helper functions for integration tests
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 
 // Singleton Prisma client for integration tests
 let prismaInstance: PrismaClient | null = null;

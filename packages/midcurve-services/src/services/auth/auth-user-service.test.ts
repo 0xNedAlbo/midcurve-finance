@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockDeep, type DeepMockProxy } from 'vitest-mock-extended';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@midcurve/database';
 import { AuthUserService } from './auth-user-service.js';
 import {
   ALICE,

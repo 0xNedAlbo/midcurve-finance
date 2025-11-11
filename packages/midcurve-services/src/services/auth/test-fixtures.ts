@@ -5,7 +5,7 @@
  * Provides consistent, realistic test data for users, wallets, and API keys.
  */
 
-import type { User, AuthWalletAddress, ApiKey } from '@prisma/client';
+import type { User, AuthWalletAddress, ApiKey } from '@midcurve/database';
 import type { CreateUserInput } from '../types/auth/index.js';
 import { createHash } from 'crypto';
 

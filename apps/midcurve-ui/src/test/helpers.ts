@@ -4,7 +4,7 @@
  * Utilities for testing API endpoints end-to-end.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 
 // ============================================================================
 // Test Constants

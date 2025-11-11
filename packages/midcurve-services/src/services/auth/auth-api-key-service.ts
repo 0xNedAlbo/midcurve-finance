@@ -10,10 +10,11 @@
  * - Key hashes are never exposed
  */
 
-import type { PrismaClient, ApiKey } from '@prisma/client';
+import type { PrismaClient, ApiKey } from '@midcurve/database';
 import { createHash } from 'crypto';
 import { customAlphabet } from 'nanoid';
 import type { ApiKeyCreationResult } from '../types/auth/index.js';
+import { prisma } from '@midcurve/database';
 
 export interface AuthApiKeyServiceDependencies {
   prisma?: PrismaClient;
@@ -23,7 +24,7 @@ export class AuthApiKeyService {
   private readonly prisma: PrismaClient;
 
   constructor(dependencies: AuthApiKeyServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? (new (require('@prisma/client').PrismaClient)() as PrismaClient);
+    this.prisma = dependencies.prisma ?? (prisma);
   }
 
   /**

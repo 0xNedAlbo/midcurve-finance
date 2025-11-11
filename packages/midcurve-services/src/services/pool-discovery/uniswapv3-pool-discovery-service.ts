@@ -5,7 +5,7 @@
  * Enriches results with subgraph metrics (TVL, volume, fees).
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { Address } from 'viem';
 import { PoolDiscoveryService } from './pool-discovery-service.js';
 import type { PoolDiscoveryResult } from '@midcurve/shared';

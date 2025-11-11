@@ -5,7 +5,7 @@
  * These functions are stateless and can be tested independently.
  */
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from '@midcurve/database';
 import type { UniswapV3Position, UniswapV3Pool } from "@midcurve/shared";
 import type { Address } from "viem";
 import type { Logger } from "pino";

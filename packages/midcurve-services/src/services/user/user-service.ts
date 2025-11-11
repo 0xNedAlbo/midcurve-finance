@@ -5,8 +5,8 @@
  * Simple service for user identification and management.
  */
 
-import { PrismaClient } from '@prisma/client';
-import type { User } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
+import type { User } from '@midcurve/database';
 import type { CreateUserInput, UpdateUserInput } from '../types/user/index.js';
 
 /**

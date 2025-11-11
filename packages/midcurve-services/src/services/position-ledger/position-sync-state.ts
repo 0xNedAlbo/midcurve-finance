@@ -17,7 +17,7 @@
  * ```
  */
 
-import type { PrismaClient, PositionSyncState } from '@prisma/client';
+import type { PrismaClient, PositionSyncState } from '@midcurve/database';
 import {
   createEmptySyncState,
   fromSyncEventDB,

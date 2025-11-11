@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Prisma } from '@prisma/client';
-import { prisma } from '@/lib/prisma';
+import { Prisma, prisma } from '@midcurve/database';
 import { SignupRequestSchema, type SignupResponse } from '@midcurve/api-shared';
 import { getAddress } from 'viem';
 

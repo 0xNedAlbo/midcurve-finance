@@ -9,7 +9,7 @@
  * all abstract serialization and discovery methods.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@midcurve/database';
 import type { Position, PositionConfigMap } from '@midcurve/shared';
 import type {
   PositionDiscoverInput,

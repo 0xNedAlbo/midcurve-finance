@@ -5,7 +5,7 @@
  * Implements the core sync strategy for discovering and processing position events.
  */
 
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@midcurve/database';
 import type { Logger } from 'pino';
 import type { EtherscanClient } from '../../../../clients/etherscan/index.js';
 import type { EvmBlockService } from '../../../block/evm-block-service.js';
