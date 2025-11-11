@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "turbo build",
+  "outputDirectory": "apps/midcurve-ui/.next",
+  "installCommand": "npm install",
+  "framework": null,
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD ./apps/midcurve-ui ./packages"
+}
