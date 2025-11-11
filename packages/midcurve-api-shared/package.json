@@ -71,7 +71,7 @@
   "author": "Midcurve Finance",
   "license": "MIT",
   "dependencies": {
-    "@midcurve/shared": "https://github.com/0xNedAlbo/midcurve-shared.git#main",
+    "@midcurve/shared": "file:../midcurve-shared",
     "zod": "^3.22.0"
   },
   "devDependencies": {
