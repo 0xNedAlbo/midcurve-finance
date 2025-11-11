@@ -15,8 +15,24 @@ import { SiweMessage } from 'siwe';
 import { AuthUserService, AuthNonceService } from '@midcurve/services';
 import { normalizeAddress } from '@midcurve/shared';
 import { prisma } from '@/lib/prisma';
-const authUserService = new AuthUserService();
-const authNonceService = new AuthNonceService();
+
+// Lazy initialization of services - only create when first needed
+let _authUserService: AuthUserService | null = null;
+let _authNonceService: AuthNonceService | null = null;
+
+function getAuthUserService(): AuthUserService {
+  if (!_authUserService) {
+    _authUserService = new AuthUserService();
+  }
+  return _authUserService;
+}
+
+function getAuthNonceService(): AuthNonceService {
+  if (!_authNonceService) {
+    _authNonceService = new AuthNonceService();
+  }
+  return _authNonceService;
+}
 
 export const { auth, signIn, signOut, handlers } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -51,21 +67,21 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           }
 
           // 3. Validate nonce (prevent replay attacks)
-          const nonceValid = await authNonceService.validateNonce(siweMessage.nonce);
+          const nonceValid = await getAuthNonceService().validateNonce(siweMessage.nonce);
           if (!nonceValid) {
             console.error('SIWE: Invalid or expired nonce');
             return null;
           }
 
           // 4. Consume nonce (single use)
-          await authNonceService.consumeNonce(siweMessage.nonce);
+          await getAuthNonceService().consumeNonce(siweMessage.nonce);
 
           // 5. Normalize wallet address
           const address = normalizeAddress(siweMessage.address);
           const chainId = siweMessage.chainId;
 
           // 6. Check if wallet already exists
-          const existingUser = await authUserService.findUserByWallet(address, chainId);
+          const existingUser = await getAuthUserService().findUserByWallet(address, chainId);
 
           if (existingUser) {
             // Existing user - return for session creation
@@ -78,7 +94,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           }
 
           // 7. New user - create with initial wallet
-          const newUser = await authUserService.createUser({
+          const newUser = await getAuthUserService().createUser({
             name: `User ${address.slice(0, 6)}...${address.slice(-4)}`,
             walletAddress: address,
             walletChainId: chainId,
@@ -118,7 +134,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         session.user.id = token.userId as string;
 
         // Fetch and inject wallet addresses
-        const wallets = await authUserService.getUserWallets(token.userId as string);
+        const wallets = await getAuthUserService().getUserWallets(token.userId as string);
         session.user.wallets = wallets;
       }
 
