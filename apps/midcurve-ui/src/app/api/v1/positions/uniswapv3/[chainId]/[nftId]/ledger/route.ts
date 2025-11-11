@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PositionService, UniswapV3PositionLedgerService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -19,12 +19,10 @@ import { LedgerPathParamsSchema } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { LedgerEventsResponse, LedgerEventData } from '@midcurve/api-shared';
+import { getUniswapV3PositionLedgerService, getUniswapV3PositionService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const uniswapV3PositionService = new UniswapV3PositionService();
-const uniswapV3PositionLedgerService = new UniswapV3PositionLedgerService();
 
 /**
  * GET /api/v1/positions/uniswapv3/:chainId/:nftId/ledger
@@ -118,7 +116,7 @@ export async function GET(
       });
 
       // Fast indexed lookup by positionHash
-      const dbPosition = await uniswapV3PositionService.findByPositionHash(user.id, positionHash);
+      const dbPosition = await getUniswapV3PositionService().findByPositionHash(user.id, positionHash);
 
       // 3. Verify position exists and user owns it
       if (!dbPosition) {
@@ -143,7 +141,7 @@ export async function GET(
 
       // 4. Retrieve ledger events from service
       // Service returns events in descending order (blockNumber DESC, txIndex DESC, logIndex DESC)
-      const events = await uniswapV3PositionLedgerService.findAllItems(dbPosition.id);
+      const events = await getUniswapV3PositionLedgerService().findAllItems(dbPosition.id);
 
       apiLogger.info(
         {

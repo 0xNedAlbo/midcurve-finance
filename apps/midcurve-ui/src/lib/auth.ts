@@ -12,27 +12,9 @@ import NextAuth from 'next-auth';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { SiweMessage } from 'siwe';
-import { AuthUserService, AuthNonceService } from '@midcurve/services';
 import { normalizeAddress } from '@midcurve/shared';
 import { prisma } from '@/lib/prisma';
-
-// Lazy initialization of services - only create when first needed
-let _authUserService: AuthUserService | null = null;
-let _authNonceService: AuthNonceService | null = null;
-
-function getAuthUserService(): AuthUserService {
-  if (!_authUserService) {
-    _authUserService = new AuthUserService();
-  }
-  return _authUserService;
-}
-
-function getAuthNonceService(): AuthNonceService {
-  if (!_authNonceService) {
-    _authNonceService = new AuthNonceService();
-  }
-  return _authNonceService;
-}
+import { getAuthUserService, getAuthNonceService } from '@/lib/services';
 
 export const { auth, signIn, signOut, handlers } = NextAuth({
   adapter: PrismaAdapter(prisma),

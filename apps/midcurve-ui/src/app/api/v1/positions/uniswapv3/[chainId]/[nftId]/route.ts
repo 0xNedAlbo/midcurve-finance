@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PositionService, UniswapV3PositionSyncState } from '@midcurve/services';
+import { UniswapV3PositionSyncState } from '@midcurve/services';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -29,6 +29,7 @@ import {
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
+import { getUniswapV3PositionService } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
   DeleteUniswapV3PositionResponse,
@@ -38,8 +39,6 @@ import type {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const uniswapV3PositionService = new UniswapV3PositionService();
 
 /**
  * GET /api/v1/positions/uniswapv3/:chainId/:nftId
@@ -120,7 +119,7 @@ export async function GET(
       });
 
       // Fast indexed lookup by positionHash
-      const dbPosition = await uniswapV3PositionService.findByPositionHash(user.id, positionHash);
+      const dbPosition = await getUniswapV3PositionService().findByPositionHash(user.id, positionHash);
 
       // Verify position exists
       if (!dbPosition) {
@@ -145,7 +144,7 @@ export async function GET(
 
       // 3. Refresh position from on-chain data
       // This fetches current liquidity, fees, PnL, and updates the database
-      const position = await uniswapV3PositionService.refresh(dbPosition.id);
+      const position = await getUniswapV3PositionService().refresh(dbPosition.id);
 
       apiLog.businessOperation(apiLogger, requestId, 'refreshed', 'position', position.id, {
         chainId,
@@ -302,7 +301,7 @@ export async function DELETE(
       });
 
       // Fast indexed lookup by positionHash
-      const dbPosition = await uniswapV3PositionService.findByPositionHash(user.id, positionHash);
+      const dbPosition = await getUniswapV3PositionService().findByPositionHash(user.id, positionHash);
 
       // Idempotent: If position doesn't exist, consider it already deleted
       if (!dbPosition) {
@@ -335,7 +334,7 @@ export async function DELETE(
 
       // 3. Delete the position
       // Service handles protocol verification and deletion
-      await uniswapV3PositionService.delete(dbPosition.id);
+      await getUniswapV3PositionService().delete(dbPosition.id);
 
       apiLog.businessOperation(apiLogger, requestId, 'deleted', 'position', dbPosition.id, {
         chainId,
@@ -537,7 +536,7 @@ export async function PUT(
       };
 
       // 4. Create position from user data
-      const position = await uniswapV3PositionService.createPositionFromUserData(
+      const position = await getUniswapV3PositionService().createPositionFromUserData(
         user.id,
         chainId,
         nftId,
@@ -797,7 +796,7 @@ export async function PATCH(
 
       // 3. Find position by chainId and nftId
       const positionHash = `uniswapv3/${chainId}/${nftId}`;
-      const dbPosition = await uniswapV3PositionService.findByPositionHash(user.id, positionHash);
+      const dbPosition = await getUniswapV3PositionService().findByPositionHash(user.id, positionHash);
 
       // Return 404 if position not found or not owned
       if (!dbPosition) {
@@ -846,7 +845,7 @@ export async function PATCH(
       );
 
       // 5. Refresh position (will process missing events via Layer 2 Step 0)
-      const updatedPosition = await uniswapV3PositionService.refresh(dbPosition.id);
+      const updatedPosition = await getUniswapV3PositionService().refresh(dbPosition.id);
 
       apiLogger.info(
         { requestId, userId: user.id, chainId, nftId, positionId: dbPosition.id },

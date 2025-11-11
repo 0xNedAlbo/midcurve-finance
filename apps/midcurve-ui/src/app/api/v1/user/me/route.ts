@@ -32,7 +32,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { AuthUserService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -40,11 +40,10 @@ import {
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getAuthUserService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const userService = new AuthUserService();
 
 export async function GET(request: NextRequest): Promise<Response> {
   return withAuth(request, async (user, requestId) => {
@@ -52,7 +51,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
     try {
       // Fetch full user data
-      const userData = await userService.findUserById(user.id);
+      const userData = await getAuthUserService().findUserById(user.id);
 
       if (!userData) {
         apiLog.methodError(
@@ -72,7 +71,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       }
 
       // Fetch user's wallets
-      const wallets = await userService.getUserWallets(user.id);
+      const wallets = await getAuthUserService().getUserWallets(user.id);
 
       const response = createSuccessResponse({
         id: userData.id,

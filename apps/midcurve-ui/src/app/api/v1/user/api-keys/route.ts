@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
 import { auth } from '@/lib/auth';
-import { AuthApiKeyService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -21,11 +21,10 @@ import {
 } from '@midcurve/api-shared';
 import { CreateApiKeyRequestSchema } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getAuthApiKeyService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const apiKeyService = new AuthApiKeyService();
 
 /**
  * GET /api/v1/user/api-keys
@@ -57,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     // Fetch user's API keys (returns display data only - no hashes or full keys)
-    const apiKeys = await apiKeyService.getUserApiKeys(session.user.id);
+    const apiKeys = await getAuthApiKeyService().getUserApiKeys(session.user.id);
 
     // Convert Date objects to ISO strings
     const apiKeysFormatted = apiKeys.map((key) => ({
@@ -152,7 +151,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { name } = validation.data;
 
     // Create API key
-    const { apiKey, key } = await apiKeyService.createApiKey(session.user.id, name);
+    const { apiKey, key } = await getAuthApiKeyService().createApiKey(session.user.id, name);
 
     apiLog.businessOperation(apiLogger, requestId, 'created', 'api-key', apiKey.id, {
       userId: session.user.id,

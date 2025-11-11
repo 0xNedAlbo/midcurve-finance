@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PoolService, UniswapV3SubgraphClient } from '@midcurve/services';
+import { UniswapV3SubgraphClient } from '@midcurve/services';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import {
   createSuccessResponse,
@@ -23,11 +23,11 @@ import {
 } from '@midcurve/api-shared';
 import { serializeUniswapV3Pool } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getUniswapV3PoolService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const poolService = new UniswapV3PoolService();
 const subgraphClient = UniswapV3SubgraphClient.getInstance();
 
 /**
@@ -113,7 +113,7 @@ export async function GET(
       // This ensures we always return fresh on-chain state
       let pool;
       try {
-        pool = await poolService.discover({
+        pool = await getUniswapV3PoolService().discover({
           poolAddress: validatedAddress,
           chainId: validatedChainId,
         });

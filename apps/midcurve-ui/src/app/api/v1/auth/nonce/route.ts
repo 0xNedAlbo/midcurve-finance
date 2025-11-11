@@ -19,7 +19,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
-import { AuthNonceService } from '@midcurve/services';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -27,11 +26,10 @@ import {
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getAuthNonceService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const nonceService = new AuthNonceService();
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = nanoid();
@@ -41,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     // Generate nonce and store in cache (10-minute TTL)
-    const nonce = await nonceService.generateNonce();
+    const nonce = await getAuthNonceService().generateNonce();
 
     apiLog.businessOperation(apiLogger, requestId, 'generated', 'nonce', nonce.slice(0, 15));
 

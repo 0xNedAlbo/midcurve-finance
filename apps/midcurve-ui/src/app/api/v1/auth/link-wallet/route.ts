@@ -30,7 +30,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SiweMessage } from 'siwe';
 import { withAuth } from '@/middleware/with-auth';
-import { AuthUserService, AuthNonceService } from '@midcurve/services';
 import { normalizeAddress } from '@midcurve/shared';
 import {
   createSuccessResponse,
@@ -40,12 +39,10 @@ import {
   LinkWalletRequestSchema,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getAuthUserService, getAuthNonceService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const userService = new AuthUserService();
-const nonceService = new AuthNonceService();
 
 export async function POST(request: NextRequest): Promise<Response> {
   return withAuth(request, async (user, requestId) => {
@@ -101,7 +98,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       // 4. Validate nonce
-      const nonceValid = await nonceService.validateNonce(siweMessage.nonce);
+      const nonceValid = await getAuthNonceService().validateNonce(siweMessage.nonce);
       if (!nonceValid) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.NONCE_INVALID,
@@ -113,7 +110,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       // 5. Consume nonce (single use)
-      await nonceService.consumeNonce(siweMessage.nonce);
+      await getAuthNonceService().consumeNonce(siweMessage.nonce);
 
       // 6. Normalize wallet address
       const address = normalizeAddress(siweMessage.address);
@@ -121,7 +118,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       // 7. Link wallet to user (will throw if already registered)
       try {
-        const wallet = await userService.linkWallet(user.id, address, chainId);
+        const wallet = await getAuthUserService().linkWallet(user.id, address, chainId);
 
         apiLog.businessOperation(apiLogger, requestId, 'linked', 'wallet', wallet.id, {
           userId: user.id,

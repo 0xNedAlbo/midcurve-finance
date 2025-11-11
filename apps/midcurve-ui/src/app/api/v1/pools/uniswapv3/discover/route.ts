@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PoolDiscoveryService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -18,11 +18,10 @@ import {
 import { DiscoverUniswapV3PoolsQuerySchema } from '@midcurve/api-shared';
 import { serializePoolDiscoveryResult } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getUniswapV3PoolDiscoveryService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const poolDiscoveryService = new UniswapV3PoolDiscoveryService();
 
 /**
  * GET /api/v1/pools/uniswapv3/discover
@@ -79,7 +78,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       const { chainId, tokenA, tokenB } = validation.data;
 
       // Discover pools via service (returns PoolDiscoveryResult<'uniswapv3'>[])
-      const results = await poolDiscoveryService.findPoolsForTokenPair({
+      const results = await getUniswapV3PoolDiscoveryService().findPoolsForTokenPair({
         chainId,
         tokenA,
         tokenB,

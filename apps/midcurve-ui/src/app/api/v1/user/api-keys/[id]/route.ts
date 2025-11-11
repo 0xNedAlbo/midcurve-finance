@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
 import { auth } from '@/lib/auth';
-import { AuthApiKeyService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -28,11 +28,10 @@ import {
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getAuthApiKeyService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const apiKeyService = new AuthApiKeyService();
 
 export async function DELETE(
   request: NextRequest,
@@ -81,7 +80,7 @@ export async function DELETE(
 
     // Revoke API key (service validates ownership)
     try {
-      await apiKeyService.revokeApiKey(session.user.id, keyId);
+      await getAuthApiKeyService().revokeApiKey(session.user.id, keyId);
 
       apiLog.businessOperation(apiLogger, requestId, 'revoked', 'api-key', keyId, {
         userId: session.user.id,

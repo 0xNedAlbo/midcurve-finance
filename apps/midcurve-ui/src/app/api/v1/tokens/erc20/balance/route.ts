@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { UserTokenBalanceService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -23,12 +23,12 @@ import {
   type TokenBalanceData,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getUserTokenBalanceService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Create service instance (singleton pattern via getInstance())
-const balanceService = new UserTokenBalanceService();
 
 /**
  * GET /api/v1/tokens/erc20/balance?walletAddress=0x...&tokenAddress=0x...&chainId=1
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     let balance;
     let cached = false;
     try {
-      balance = await balanceService.getBalance(walletAddress, tokenAddress, chainId);
+      balance = await getUserTokenBalanceService().getBalance(walletAddress, tokenAddress, chainId);
 
       // Check if result was from cache by comparing timestamp
       // (If timestamp is very recent, it was likely a cache hit)

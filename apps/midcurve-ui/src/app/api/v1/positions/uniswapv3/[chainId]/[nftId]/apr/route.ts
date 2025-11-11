@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PositionService, PositionAprService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -19,12 +19,10 @@ import { AprPathParamsSchema } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { AprPeriodsResponse, AprPeriodData } from '@midcurve/api-shared';
+import { getPositionAprService, getUniswapV3PositionService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const uniswapV3PositionService = new UniswapV3PositionService();
-const positionAprService = new PositionAprService();
 
 /**
  * GET /api/v1/positions/uniswapv3/:chainId/:nftId/apr
@@ -114,7 +112,7 @@ export async function GET(
       });
 
       // Fast indexed lookup by positionHash
-      const dbPosition = await uniswapV3PositionService.findByPositionHash(user.id, positionHash);
+      const dbPosition = await getUniswapV3PositionService().findByPositionHash(user.id, positionHash);
 
       // 3. Verify position exists and user owns it
       if (!dbPosition) {
@@ -139,7 +137,7 @@ export async function GET(
 
       // 4. Retrieve APR periods from service
       // Service returns periods in descending order (startTimestamp DESC)
-      const periods = await positionAprService.getAprPeriods(dbPosition.id);
+      const periods = await getPositionAprService().getAprPeriods(dbPosition.id);
 
       apiLogger.info(
         {

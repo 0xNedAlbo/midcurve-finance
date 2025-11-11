@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PositionService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -19,11 +19,10 @@ import { ImportUniswapV3PositionRequestSchema } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { ImportUniswapV3PositionData } from '@midcurve/api-shared';
+import { getUniswapV3PositionService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const uniswapV3PositionService = new UniswapV3PositionService();
 
 /**
  * POST /api/v1/positions/uniswapv3/import
@@ -92,7 +91,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const { chainId, nftId } = validation.data;
 
       // 2. Import position (quote token auto-detected by service)
-      const position = await uniswapV3PositionService.discover(user.id, {
+      const position = await getUniswapV3PositionService().discover(user.id, {
         chainId,
         nftId,
         // quoteTokenAddress omitted → service uses QuoteTokenService

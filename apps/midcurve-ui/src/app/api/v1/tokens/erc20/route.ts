@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { Erc20TokenService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -17,11 +17,10 @@ import {
 } from '@midcurve/api-shared';
 import { CreateErc20TokenRequestSchema } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getErc20TokenService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const erc20TokenService = new Erc20TokenService();
 
 /**
  * POST /api/v1/tokens/erc20
@@ -69,7 +68,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const { address, chainId } = validation.data;
 
       // Discover token (handles all logic: validation, on-chain read, enrichment, creation)
-      const token = await erc20TokenService.discover({ address, chainId });
+      const token = await getErc20TokenService().discover({ address, chainId });
 
       apiLog.businessOperation(apiLogger, requestId, 'discovered', 'erc20-token', token.id, {
         address: address.slice(0, 10) + '...',

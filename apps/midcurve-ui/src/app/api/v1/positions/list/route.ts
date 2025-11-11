@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { PositionListService } from '@midcurve/services';
+
 import {
   createErrorResponse,
   createPaginatedResponse,
@@ -19,11 +19,10 @@ import { ListPositionsQuerySchema } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { ListPositionsResponse, ListPositionData } from '@midcurve/api-shared';
+import { getPositionListService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const positionListService = new PositionListService();
 
 /**
  * GET /api/v1/positions/list
@@ -127,7 +126,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       });
 
       // 2. Query positions from service
-      const result = await positionListService.list(user.id, {
+      const result = await getPositionListService().list(user.id, {
         protocols,
         status,
         sortBy,

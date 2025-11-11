@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { Erc20TokenService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -17,11 +17,10 @@ import {
 } from '@midcurve/api-shared';
 import { SearchErc20TokensQuerySchema } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
+import { getErc20TokenService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const erc20TokenService = new Erc20TokenService();
 
 /**
  * GET /api/v1/tokens/erc20/search
@@ -87,7 +86,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
       // Search tokens via service (searches both DB and CoinGecko)
       // If query provided, search both symbol AND name (OR logic)
-      const candidates = await erc20TokenService.searchTokens({
+      const candidates = await getErc20TokenService().searchTokens({
         chainId,
         symbol: !isAddress && query ? query : undefined,
         name: !isAddress && query ? query : undefined,

@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
-import { UniswapV3PoolService } from '@midcurve/services';
+
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -21,11 +21,10 @@ import {
 import type { GetPoolPriceResponse } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { z } from 'zod';
+import { getUniswapV3PoolService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const poolService = new UniswapV3PoolService();
 
 /**
  * Path params schema
@@ -86,7 +85,7 @@ export async function GET(
       // 2. Fetch current pool price from blockchain
       let priceData;
       try {
-        priceData = await poolService.getPoolPrice(validatedChainId, validatedAddress);
+        priceData = await getUniswapV3PoolService().getPoolPrice(validatedChainId, validatedAddress);
       } catch (error) {
         // Handle specific error cases
         if (error instanceof Error) {
