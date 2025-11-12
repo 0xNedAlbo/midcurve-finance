@@ -1,11 +1,15 @@
 import type { NextConfig } from 'next';
+import path from 'path';
 
 const nextConfig: NextConfig = {
   /* Next.js Configuration */
   reactStrictMode: true,
 
+  /* Output File Tracing */
+  outputFileTracingRoot: path.join(__dirname, '../../'),
+
   /* Transpile Packages */
-  transpilePackages: ['@midcurve/shared', '@midcurve/services', '@midcurve/api-shared'],
+  transpilePackages: ['@midcurve/shared', '@midcurve/services', '@midcurve/api-shared', '@midcurve/database'],
 
   /* Image Configuration */
   images: {
@@ -60,6 +64,11 @@ const nextConfig: NextConfig = {
     // Include Prisma query engine binaries in the build
     if (isServer) {
       config.externals.push('_http_common');
+
+      // Prisma monorepo workaround for Vercel
+      // Ensures Prisma binaries are included in the deployment
+      const { PrismaPlugin } = require('@prisma/nextjs-monorepo-workaround-plugin');
+      config.plugins = [...config.plugins, new PrismaPlugin()];
     }
 
     return config;
