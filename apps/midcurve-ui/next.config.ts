@@ -67,6 +67,11 @@ const nextConfig: NextConfig = {
     // Include Prisma query engine binaries in the build
     if (isServer) {
       config.externals.push('_http_common');
+
+      // Use Prisma monorepo workaround plugin
+      // This ensures binary files are copied to the Next.js output
+      const { PrismaPlugin } = require('@prisma/nextjs-monorepo-workaround-plugin');
+      config.plugins = [...config.plugins, new PrismaPlugin()];
     }
 
     return config;

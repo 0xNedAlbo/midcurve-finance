@@ -71,7 +71,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
-    "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "dotenv": "^17.2.3",

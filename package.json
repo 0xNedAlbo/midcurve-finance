@@ -16,6 +16,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "tsup": "^8.5.0",
     "turbo": "^2.6.0"
   }
