@@ -39,7 +39,7 @@ const nextConfig: NextConfig = {
   },
 
   /* Webpack Configuration */
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     // Fix for RainbowKit and other ESM packages
     config.resolve.fallback = {
       ...config.resolve.fallback,
@@ -56,6 +56,11 @@ const nextConfig: NextConfig = {
       ...config.resolve.alias,
       '@react-native-async-storage/async-storage': false,
     };
+
+    // Include Prisma query engine binaries in the build
+    if (isServer) {
+      config.externals.push('_http_common');
+    }
 
     return config;
   },
