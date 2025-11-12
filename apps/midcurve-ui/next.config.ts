@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
 
   /* Output File Tracing */
   outputFileTracingRoot: path.join(__dirname, '../../'),
+  outputFileTracingIncludes: {
+    '/api/**/*': ['../../packages/midcurve-database/src/generated/prisma/**/*'],
+  },
 
   /* Transpile Packages */
   transpilePackages: ['@midcurve/shared', '@midcurve/services', '@midcurve/api-shared', '@midcurve/database'],
@@ -64,25 +67,6 @@ const nextConfig: NextConfig = {
     // Include Prisma query engine binaries in the build
     if (isServer) {
       config.externals.push('_http_common');
-
-      // Prisma monorepo workaround for Vercel
-      // Ensures Prisma binaries are included in the deployment
-      try {
-        // Try multiple resolution paths for the plugin
-        let PrismaPlugin;
-        try {
-          PrismaPlugin = require('@prisma/nextjs-monorepo-workaround-plugin').PrismaPlugin;
-        } catch {
-          // Try from root node_modules
-          const rootPath = path.join(__dirname, '../../node_modules/@prisma/nextjs-monorepo-workaround-plugin');
-          PrismaPlugin = require(rootPath).PrismaPlugin;
-        }
-        config.plugins = [...config.plugins, new PrismaPlugin()];
-      } catch (error) {
-        // Plugin not found - this might happen in some build environments
-        // The binaryTargets in schema.prisma should still help
-        console.warn('Warning: @prisma/nextjs-monorepo-workaround-plugin not found:', error instanceof Error ? error.message : String(error));
-      }
     }
 
     return config;
