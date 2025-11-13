@@ -7,6 +7,7 @@
 
 import type { BigIntToString, PaginatedResponse } from '../../common/index.js';
 import type { AnyPosition } from '@midcurve/shared';
+import type { AprPeriodData } from './apr.js';
 import { z } from 'zod';
 import { PaginationParamsSchema } from '../../common/pagination.js';
 
@@ -85,8 +86,16 @@ export interface ListPositionsParams {
  * - Date fields converted to ISO 8601 strings
  * - Fully nested pool and token objects
  * - Config and state as unknown (not protocol-specific)
+ * - APR periods array (for accurate APR calculation in UI)
  */
-export type ListPositionData = BigIntToString<AnyPosition>;
+export type ListPositionData = BigIntToString<AnyPosition> & {
+  /**
+   * APR periods for the position (sorted descending by startTimestamp)
+   * Used for accurate APR calculation in UI components
+   * Optional - may be undefined for positions without historical data
+   */
+  aprPeriods?: AprPeriodData[];
+};
 
 /**
  * GET /api/v1/positions/list - Response

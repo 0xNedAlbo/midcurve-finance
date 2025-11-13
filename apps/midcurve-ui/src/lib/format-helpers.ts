@@ -76,17 +76,28 @@ export function formatPercentage(value: number, decimals: number = 1): string {
 /**
  * Calculates estimated APR from position data (simplified version)
  *
- * Formula: APR = (unClaimedFees / costBasis) / timeElapsed * 365 days * 100
+ * **DEPRECATED:** This function is deprecated and will be removed in a future version.
+ * Use `calculateAprSummary()` from `@/lib/apr-utils` instead, which provides:
+ * - Time-weighted cost basis calculation
+ * - Proper handling of realized vs unrealized APR
+ * - No artificial 9999% cap
+ * - More accurate results based on historical APR periods
  *
- * Only calculates APR based on unclaimed fees (not total collected fees).
- * This shows the current earning rate of the position.
+ * This simplified calculation:
+ * - Only considers unclaimed fees (ignores collected fees)
+ * - Uses simple time-based calculation (not time-weighted)
+ * - Caps at 9999% to avoid display issues
+ * - Can show inflated APR for short time periods (e.g., 9999% for positions with little history)
+ *
+ * Formula: APR = (unClaimedFees / costBasis) / timeElapsed * 365 days * 100
  *
  * Edge cases:
  * - If position is out of range: returns 0%
  * - If costBasis is 0: returns 0%
- * - If timeElapsed < 1 hour: returns 0% (insufficient data)
+ * - If timeElapsed < 5 minutes: returns 0% (insufficient data)
  * - If lastFeesCollectedAt is null: uses positionOpenedAt
  *
+ * @deprecated Use `calculateAprSummary()` from `@/lib/apr-utils` instead
  * @param params - Position data for APR calculation
  * @returns Object with APR percentage and threshold status
  */

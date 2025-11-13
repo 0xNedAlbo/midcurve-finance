@@ -6,7 +6,9 @@
  */
 
 import { TrendingUp, TrendingDown, Clock } from "lucide-react";
-import { formatCurrency, formatPnL, formatPercentage, calculateAPR } from "@/lib/format-helpers";
+import { formatCurrency, formatPnL, formatPercentage } from "@/lib/format-helpers";
+import { calculateAprSummary } from "@/lib/apr-utils";
+import type { AprPeriodData } from "@midcurve/api-shared";
 
 interface Token {
   symbol: string;
@@ -25,6 +27,7 @@ interface PositionCardMetricsProps {
   quoteToken: Token;
   isActive: boolean; // Used for visual cues
   isInRange: boolean; // Used for APR calculation
+  aprPeriods?: AprPeriodData[]; // APR periods for accurate calculation
   pnlCurveSlot?: React.ReactNode; // Protocol-specific PnL curve visualization
 }
 
@@ -35,11 +38,12 @@ export function PositionCardMetrics({
   unClaimedFees,
   collectedFees,
   currentCostBasis,
-  lastFeesCollectedAt,
-  positionOpenedAt,
+  lastFeesCollectedAt: _lastFeesCollectedAt, // Reserved for future use
+  positionOpenedAt: _positionOpenedAt, // Reserved for future use
   quoteToken,
   isActive: _isActive, // Reserved for future visual cues
-  isInRange,
+  isInRange: _isInRange, // Reserved for future use
+  aprPeriods,
   pnlCurveSlot,
 }: PositionCardMetricsProps) {
   // Calculate total PnL: realizedPnl + unrealizedPnl + unclaimedFees + collectedFees
@@ -67,15 +71,24 @@ export function PositionCardMetrics({
   const pnlFormatted = formatPnL(totalPnl, quoteToken.decimals);
   const formattedFees = formatCurrency(unClaimedFees, quoteToken.decimals);
 
-  // Calculate APR
-  const { apr, belowThreshold } = calculateAPR({
-    costBasis: currentCostBasis,
-    unClaimedFees,
-    lastFeesCollectedAt,
-    positionOpenedAt,
-    isInRange,
-    decimals: quoteToken.decimals,
-  });
+  // Calculate APR using new shared utility
+  let apr = 0;
+  let belowThreshold = true;
+
+  if (aprPeriods && aprPeriods.length > 0) {
+    try {
+      const summary = calculateAprSummary(
+        aprPeriods,
+        BigInt(currentCostBasis),
+        BigInt(unClaimedFees)
+      );
+      apr = summary.totalApr;
+      belowThreshold = false; // We have periods data, so we can calculate APR
+    } catch (error) {
+      console.error('Error calculating APR from periods:', error);
+      belowThreshold = true;
+    }
+  }
 
   const pnlBigInt = BigInt(totalPnl);
 

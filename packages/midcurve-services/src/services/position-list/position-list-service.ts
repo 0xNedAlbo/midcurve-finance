@@ -155,6 +155,11 @@ export class PositionListService {
                 token1: true,
               },
             },
+            aprPeriods: {
+              orderBy: {
+                startTimestamp: 'desc',
+              },
+            },
           },
           orderBy: {
             [sortBy]: sortDirection,

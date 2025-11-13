@@ -125,7 +125,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         offset,
       });
 
-      // 2. Query positions from service
+      // 2. Query positions from service (now includes aprPeriods in DB query)
       const result = await getPositionListService().list(user.id, {
         protocols,
         status,
@@ -135,9 +135,72 @@ export async function GET(request: NextRequest): Promise<Response> {
         offset,
       });
 
-      // 3. Serialize bigints to strings for JSON
+      // 3. Get raw results with aprPeriods to combine with service results
+      // The service already queries aprPeriods, we just need to fetch them again
+      // to serialize them properly for the API response
+      // TODO: Refactor service to return aprPeriods directly to avoid this double query
+      const prisma = (getPositionListService() as any)['_prisma'];
+      const where: any = {
+        userId: user.id,
+      };
+
+      if (status === 'active') {
+        where.isActive = true;
+      } else if (status === 'closed') {
+        where.isActive = false;
+      }
+
+      if (protocols && protocols.length > 0) {
+        where.protocol = { in: protocols };
+      }
+
+      const rawResults = await prisma.position.findMany({
+        where,
+        include: {
+          aprPeriods: {
+            orderBy: {
+              startTimestamp: 'desc',
+            },
+          },
+        },
+        orderBy: {
+          [sortBy]: sortDirection,
+        },
+        take: limit,
+        skip: offset,
+      });
+
       const serializedPositions = result.positions
-        .map((position) => serializeBigInt(position))
+        .map((position, index) => {
+          const serializedPosition = serializeBigInt(position);
+          if (!serializedPosition) return null;
+
+          // Add serialized APR periods from raw results
+          const rawResult = rawResults[index];
+          if (rawResult?.aprPeriods && rawResult.aprPeriods.length > 0 && serializedPosition) {
+            const positionWithPeriods: ListPositionData = {
+              ...(serializedPosition as any),
+              aprPeriods: rawResult.aprPeriods.map((period: any) => ({
+                id: period.id,
+                createdAt: period.createdAt.toISOString(),
+                updatedAt: period.updatedAt.toISOString(),
+                positionId: period.positionId,
+                startEventId: period.startEventId,
+                endEventId: period.endEventId,
+                startTimestamp: period.startTimestamp.toISOString(),
+                endTimestamp: period.endTimestamp.toISOString(),
+                durationSeconds: period.durationSeconds,
+                costBasis: period.costBasis.toString(),
+                collectedFeeValue: period.collectedFeeValue.toString(),
+                aprBps: period.aprBps,
+                eventCount: period.eventCount,
+              })),
+            };
+            return positionWithPeriods;
+          }
+
+          return serializedPosition as unknown as ListPositionData;
+        })
         .filter(Boolean) as ListPositionData[];
 
       // 4. Create paginated response
