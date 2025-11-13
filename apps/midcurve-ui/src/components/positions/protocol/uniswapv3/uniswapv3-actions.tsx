@@ -6,10 +6,12 @@
 
 import { useState } from "react";
 import { Plus, Minus, DollarSign } from "lucide-react";
+import { useAccount } from "wagmi";
 import type { ListPositionData } from "@midcurve/api-shared";
 import { IncreaseDepositModal } from "@/components/positions/increase-deposit-modal";
 import { WithdrawPositionModal } from "@/components/positions/withdraw-position-modal";
 import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
+import { areAddressesEqual } from "@/utils/evm";
 
 interface UniswapV3ActionsProps {
   position: ListPositionData;
@@ -17,10 +19,27 @@ interface UniswapV3ActionsProps {
 }
 
 export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
+  const { address: walletAddress, isConnected } = useAccount();
   const [showIncreaseModal, setShowIncreaseModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unClaimedFees) > 0n;
+
+  // Extract owner address from position state
+  const ownerAddress = position.state.ownerAddress;
+
+  // Check if connected wallet owns this position
+  const isOwner = !!(
+    isConnected &&
+    walletAddress &&
+    ownerAddress &&
+    areAddressesEqual(walletAddress, ownerAddress)
+  );
+
+  // Don't show action buttons if user doesn't own the position
+  if (!isOwner) {
+    return null;
+  }
 
   return (
     <>
