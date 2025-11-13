@@ -70,7 +70,10 @@ export async function disconnectPrisma(): Promise<void> {
  * Seed database with test data
  * Useful for setting up common test scenarios
  */
-export async function seedTestData() {
+export async function seedTestData(): Promise<{
+  testUser: { id: string; name: string | null; createdAt: Date; updatedAt: Date };
+  usdc: { id: string; tokenType: string; name: string; symbol: string; decimals: number; config: unknown; createdAt: Date; updatedAt: Date };
+}> {
   const prisma = getPrismaClient();
 
   // Example: Create a test user
@@ -101,7 +104,12 @@ export async function seedTestData() {
  * Count total records across all tables
  * Useful for verification in tests
  */
-export async function countAllRecords() {
+export async function countAllRecords(): Promise<{
+  users: number;
+  tokens: number;
+  pools: number;
+  positions: number;
+}> {
   const prisma = getPrismaClient();
 
   const counts = {
