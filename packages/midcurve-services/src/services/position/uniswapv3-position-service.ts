@@ -501,17 +501,18 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 );
 
                 if (events.length > 0) {
-                    // Get the latest event's block number (safe to use ! since we checked length)
-                    const latestEvent = events[events.length - 1]!;
-                    blockNumber = BigInt(latestEvent.blockNumber) - 1n; // Block before the last event
+                    // Get the first event's block number (position creation)
+                    // Events are sorted chronologically, so events[0] is the earliest
+                    const firstEvent = events[0]!;
+                    blockNumber = BigInt(firstEvent.blockNumber); // Block at or after creation
 
                     this.logger.debug(
                         {
-                            latestEventBlock: latestEvent.blockNumber,
+                            firstEventBlock: firstEvent.blockNumber,
                             queryBlock: blockNumber.toString(),
-                            eventType: latestEvent.eventType,
+                            eventType: firstEvent.eventType,
                         },
-                        "Found events - will query position state at historic block"
+                        "Found events - will query position state at block when position was created"
                     );
                 }
             } catch (error) {

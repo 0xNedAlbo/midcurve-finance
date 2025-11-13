@@ -76,11 +76,29 @@ export function PositionList({ className }: PositionListProps) {
   const filteredPositions = useMemo(() => {
     if (!data?.data) return [];
 
-    if (filterChain === "all") {
-      return data.data;
+    // First, filter out any undefined/null positions (defensive)
+    const invalidPositions = data.data.filter((position) => position == null || position.id == null);
+    if (invalidPositions.length > 0) {
+      console.warn(`[PositionList] Found ${invalidPositions.length} invalid positions in API response:`);
+      invalidPositions.forEach((pos, idx) => {
+        console.warn(`  Invalid position ${idx}:`, pos);
+        if (pos) {
+          console.warn(`    - has id: ${pos.id != null}`);
+          console.warn(`    - has config: ${pos.config != null}`);
+          console.warn(`    - has pool: ${pos.pool != null}`);
+        }
+      });
+      console.warn('[PositionList] Total positions count:', data.data.length);
+      console.warn('[PositionList] Full API data.data array:', data.data);
     }
 
-    return data.data.filter((position) => {
+    const validPositions = data.data.filter((position) => position != null && position.id != null);
+
+    if (filterChain === "all") {
+      return validPositions;
+    }
+
+    return validPositions.filter((position) => {
       // Extract chainId from position config (protocol-specific)
       if (position.protocol === "uniswapv3") {
         const config = position.config as { chainId: number };
@@ -260,9 +278,11 @@ export function PositionList({ className }: PositionListProps) {
           onWalletImportClick={() =>
             console.log("Wallet import modal - not implemented yet")
           }
-          onImportSuccess={(position) =>
-            console.log("Position imported:", position)
-          }
+          onImportSuccess={async (position) => {
+            console.log("Position imported:", position);
+            // Refetch positions to show the newly imported position
+            await refetch();
+          }}
         />
       )}
 

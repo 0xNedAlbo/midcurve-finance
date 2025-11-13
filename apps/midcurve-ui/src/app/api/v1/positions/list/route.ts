@@ -136,9 +136,9 @@ export async function GET(request: NextRequest): Promise<Response> {
       });
 
       // 3. Serialize bigints to strings for JSON
-      const serializedPositions = result.positions.map((position) =>
-        serializeBigInt(position)
-      ) as ListPositionData[];
+      const serializedPositions = result.positions
+        .map((position) => serializeBigInt(position))
+        .filter(Boolean) as ListPositionData[];
 
       // 4. Create paginated response
       const response: ListPositionsResponse = {

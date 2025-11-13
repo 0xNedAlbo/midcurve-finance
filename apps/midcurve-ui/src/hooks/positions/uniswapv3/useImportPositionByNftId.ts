@@ -9,7 +9,7 @@ import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/
 import { queryKeys } from '@/lib/query-keys';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type {
-  ImportUniswapV3PositionResponse,
+  ImportUniswapV3PositionData,
   ListPositionsResponse,
 } from '@midcurve/api-shared';
 
@@ -21,7 +21,7 @@ interface ImportPositionByNftIdParams {
 export function useImportPositionByNftId(
   options?: Omit<
     UseMutationOptions<
-      ImportUniswapV3PositionResponse,
+      ImportUniswapV3PositionData,
       ApiError,
       ImportPositionByNftIdParams,
       unknown
@@ -41,7 +41,8 @@ export function useImportPositionByNftId(
         nftId: parseInt(params.nftId, 10),
       };
 
-      return apiClient<ImportUniswapV3PositionResponse>(
+      // Note: apiClient unwraps { success, data } and returns just the data field
+      return apiClient<ImportUniswapV3PositionData>(
         '/api/v1/positions/uniswapv3/import',
         {
           method: 'POST',
@@ -52,7 +53,9 @@ export function useImportPositionByNftId(
     },
 
     onSuccess: (response, _variables, _context) => {
-      const newPosition = response.data;
+      // Note: apiClient already extracts the data field from { success, data }
+      // So response IS the position object directly, not wrapped in response.data
+      const newPosition = response;
 
       // Strategy 1: Optimistically insert at top of ALL list queries
       // This ensures the imported position appears immediately in the current view
@@ -90,10 +93,11 @@ export function useImportPositionByNftId(
 
       // Strategy 2: Cache the detail query for this specific position
       // If user navigates to detail page, data is already available
+      const config = newPosition.config as { chainId: number; nftId: number };
       queryClient.setQueryData(
         queryKeys.positions.uniswapv3.detail(
-          newPosition.config.chainId,
-          newPosition.config.nftId.toString()
+          config.chainId,
+          config.nftId.toString()
         ),
         newPosition
       );

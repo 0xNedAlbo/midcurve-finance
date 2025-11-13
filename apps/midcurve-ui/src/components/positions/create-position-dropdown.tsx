@@ -74,9 +74,10 @@ export function CreatePositionDropdown() {
     importMutation.mutate(
       { chainId, nftId: nftId.trim() },
       {
-        onSuccess: (response) => {
-          const position = response.data;
-          setImportSuccess(`NFT ${position.config.nftId} imported successfully!`);
+        onSuccess: (position) => {
+          // Note: mutation returns unwrapped position data directly (not response.data)
+          const config = position.config as { chainId: number; nftId: number };
+          setImportSuccess(`NFT ${config.nftId} imported successfully!`);
 
           // Auto-close after 2 seconds
           setTimeout(() => {
