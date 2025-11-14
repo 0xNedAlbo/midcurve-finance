@@ -293,24 +293,6 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">PnL Including Fees:</span>
-                  <span
-                    className={`${
-                      positionStates.current.pnlIncludingFees > 0n
-                        ? "text-green-400"
-                        : positionStates.current.pnlIncludingFees < 0n
-                        ? "text-red-400"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {formatCompactValue(
-                      positionStates.current.pnlIncludingFees,
-                      quoteToken.decimals
-                    )}{" "}
-                    {quoteToken.symbol}
-                  </span>
-                </div>
-                <div className="flex justify-between">
                   <span className="text-slate-400">PnL Excluding Fees:</span>
                   <span
                     className={`${
@@ -417,24 +399,6 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">PnL Including Fees:</span>
-                  <span
-                    className={`${
-                      positionStates.lowerRange.pnlIncludingFees > 0n
-                        ? "text-green-400"
-                        : positionStates.lowerRange.pnlIncludingFees < 0n
-                        ? "text-red-400"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {formatCompactValue(
-                      positionStates.lowerRange.pnlIncludingFees,
-                      quoteToken.decimals
-                    )}{" "}
-                    {quoteToken.symbol}
-                  </span>
-                </div>
-                <div className="flex justify-between">
                   <span className="text-slate-400">PnL Excluding Fees:</span>
                   <span
                     className={`${
@@ -535,24 +499,6 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-white">
                     {formatCompactValue(
                       positionStates.upperRange.positionValue,
-                      quoteToken.decimals
-                    )}{" "}
-                    {quoteToken.symbol}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">PnL Including Fees:</span>
-                  <span
-                    className={`${
-                      positionStates.upperRange.pnlIncludingFees > 0n
-                        ? "text-green-400"
-                        : positionStates.upperRange.pnlIncludingFees < 0n
-                        ? "text-red-400"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {formatCompactValue(
-                      positionStates.upperRange.pnlIncludingFees,
                       quoteToken.decimals
                     )}{" "}
                     {quoteToken.symbol}
