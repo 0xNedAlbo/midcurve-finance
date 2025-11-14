@@ -442,7 +442,9 @@ export function UniswapV3IncreaseDepositForm({
             !!insufficientFunds ||
             !baseTokenApproval.isApproved ||
             !quoteTokenApproval.isApproved ||
-            increaseLiquidity.isSuccess
+            increaseLiquidity.isSuccess ||
+            increaseLiquidity.isIncreasing ||
+            increaseLiquidity.isWaitingForConfirmation
           }
           onExecute={() => increaseLiquidity.increase()}
           showExecute={!increaseLiquidity.isSuccess}

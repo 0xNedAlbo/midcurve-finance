@@ -297,7 +297,12 @@ export function UniswapV3CollectFeesForm({
                 collectFees.isCollecting || collectFees.isWaitingForConfirmation
               }
               isComplete={collectFees.isSuccess}
-              isDisabled={!canCollect}
+              isDisabled={
+                !canCollect ||
+                collectFees.isCollecting ||
+                collectFees.isWaitingForConfirmation ||
+                collectFees.isSuccess
+              }
               onExecute={handleCollect}
               showExecute={!collectFees.isSuccess}
               transactionHash={collectFees.receipt?.transactionHash}

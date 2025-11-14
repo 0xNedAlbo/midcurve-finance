@@ -82,18 +82,19 @@ export function useDecreaseLiquidity(params: DecreaseLiquidityParams | null): Us
     isLoading: isWaitingForWithdraw,
     isSuccess: withdrawSuccess,
     data: receipt,
+    error: receiptError,
   } = useWaitForTransactionReceipt({
     hash: withdrawTxHash,
     chainId: params?.chainId,
   });
 
-  // Handle write errors
+  // Handle write errors and receipt errors
   useEffect(() => {
-    if (withdrawWriteError) {
-      setWithdrawError(withdrawWriteError);
+    if (withdrawWriteError || receiptError) {
+      setWithdrawError(withdrawWriteError || receiptError);
       setCurrentStep('idle');
     }
-  }, [withdrawWriteError]);
+  }, [withdrawWriteError, receiptError]);
 
   // Update current step based on transaction state
   useEffect(() => {

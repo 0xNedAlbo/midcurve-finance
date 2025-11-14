@@ -75,17 +75,18 @@ export function useIncreaseLiquidity(
     isLoading: isWaitingForConfirmation,
     isSuccess,
     data: receipt,
+    error: receiptError,
   } = useWaitForTransactionReceipt({
     hash: increaseTxHash,
     chainId: params?.chainId,
   });
 
-  // Handle increase errors
+  // Handle increase errors (both write errors and receipt errors)
   useEffect(() => {
-    if (writeError) {
-      setIncreaseError(writeError);
+    if (writeError || receiptError) {
+      setIncreaseError(writeError || receiptError);
     }
-  }, [writeError]);
+  }, [writeError, receiptError]);
 
   // Extract added liquidity from transaction receipt
   useEffect(() => {
