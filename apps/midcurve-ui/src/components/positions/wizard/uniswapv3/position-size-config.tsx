@@ -51,6 +51,7 @@ export function PositionSizeConfig({
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [lastEditedField, setLastEditedField] = useState<"base" | "quote" | null>(null);
+  const [lastSqrtPriceX96, setLastSqrtPriceX96] = useState<bigint | null>(null);
 
   // Use the position size calculation hook
   const positionCalculation = usePositionSizeCalculation({
@@ -64,12 +65,19 @@ export function PositionSizeConfig({
   });
 
   // Initialize input fields from liquidity prop when component first loads
+  // OR when pool price changes (detected by sqrtPriceX96 change)
   useEffect(() => {
-    if (!isInitialized && liquidity > 0n && pool.state.sqrtPriceX96) {
+    const currentSqrtPriceX96 = pool.state.sqrtPriceX96;
+    const shouldRecalculate =
+      (!isInitialized && liquidity > 0n && currentSqrtPriceX96) ||
+      (isInitialized && liquidity > 0n && currentSqrtPriceX96 && currentSqrtPriceX96 !== lastSqrtPriceX96);
+
+    if (shouldRecalculate) {
+
       try {
         const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
           liquidity,
-          BigInt(pool.state.sqrtPriceX96),
+          BigInt(currentSqrtPriceX96),
           tickLower,
           tickUpper
         );
@@ -95,6 +103,7 @@ export function PositionSizeConfig({
         setQuoteAmount(quoteAmountString);
         setBaseAmountBigInt(baseTokenAmount);
         setQuoteAmountBigInt(quoteTokenAmount);
+        setLastSqrtPriceX96(currentSqrtPriceX96);
         setIsInitialized(true);
       } catch (error) {
         console.error("Error initializing amounts from liquidity:", error);
@@ -113,6 +122,7 @@ export function PositionSizeConfig({
     baseToken,
     quoteToken,
     isInitialized,
+    lastSqrtPriceX96,
     positionCalculation.isQuoteToken0,
   ]);
 

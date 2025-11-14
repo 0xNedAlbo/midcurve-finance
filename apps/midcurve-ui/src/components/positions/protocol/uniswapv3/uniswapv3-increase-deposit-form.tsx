@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
@@ -17,10 +17,10 @@ import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
 import { PositionSizeConfig } from '@/components/positions/wizard/uniswapv3/position-size-config';
-import { apiClient } from '@/lib/api-client';
 import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
 import type { Erc20Token, UniswapV3Pool } from '@midcurve/shared';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
+import { usePoolPrice } from '@/hooks/pools/usePoolPrice';
 import { WalletBalanceSection } from '@/components/positions/wizard/uniswapv3/shared/wallet-balance-section';
 import { InsufficientFundsAlert, type InsufficientFundsInfo } from '@/components/positions/wizard/uniswapv3/shared/insufficient-funds-alert';
 
@@ -48,8 +48,6 @@ export function UniswapV3IncreaseDepositForm({
   onClose,
 }: UniswapV3IncreaseDepositFormProps) {
   const [additionalLiquidity, setAdditionalLiquidity] = useState<bigint>(0n);
-  const [isRefreshingPool, setIsRefreshingPool] = useState<boolean>(false);
-  const [refreshedPool, setRefreshedPool] = useState<UniswapV3Pool | null>(null);
 
   const {
     address: walletAddress,
@@ -58,6 +56,20 @@ export function UniswapV3IncreaseDepositForm({
   } = useAccount();
 
   const updateMutation = useUpdatePositionWithEvents();
+
+  // Get pool address for price queries
+  const poolAddress = (position.pool.config as { address: string }).address;
+
+  // Use pool price hook for lightweight price updates
+  const {
+    sqrtPriceX96: refreshedSqrtPriceX96,
+    currentTick: refreshedCurrentTick,
+    refetch: handleRefreshPool,
+  } = usePoolPrice({
+    chainId: position.config.chainId.toString(),
+    poolAddress,
+    enabled: true,
+  });
 
   // Type assertion for config (we know it's Uniswap V3)
   const config = position.config as {
@@ -119,37 +131,22 @@ export function UniswapV3IncreaseDepositForm({
   const baseBalance = baseBalanceQuery.balanceBigInt || 0n;
   const quoteBalance = quoteBalanceQuery.balanceBigInt || 0n;
 
-  // Use refreshed pool if available, otherwise use position's pool
-  const currentPool = (refreshedPool || position.pool) as UniswapV3Pool;
-
-  // Handle pool price refresh (MUST be called before any returns)
-  const handleRefreshPool = useCallback(async () => {
-    if (isRefreshingPool) return;
-
-    setIsRefreshingPool(true);
-    try {
-      const poolAddress = (position.pool.config as { address: string }).address;
-      const response = await apiClient<{
-        data: { pool: UniswapV3Pool };
-      }>(`/api/v1/pools/uniswapv3/${config.chainId}/${poolAddress}`, {
-        method: 'GET',
-      });
-
-      if (response.data?.pool) {
-        setRefreshedPool(response.data.pool as UniswapV3Pool);
-      }
-    } catch (error) {
-      console.error('Error refreshing pool price:', error);
-    } finally {
-      setIsRefreshingPool(false);
+  // Merge refreshed pool price into position pool (if available)
+  const currentPool: UniswapV3Pool = useMemo(() => {
+    if (!refreshedSqrtPriceX96 || !refreshedCurrentTick) {
+      return position.pool as unknown as UniswapV3Pool;
     }
-  }, [isRefreshingPool, position.pool.config, config.chainId]);
 
-  // Refresh pool state once when modal opens (MUST be called before any returns)
-  useEffect(() => {
-    handleRefreshPool();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array = run once on mount
+    // Create updated pool with refreshed price data
+    return {
+      ...position.pool,
+      state: {
+        ...position.pool.state,
+        sqrtPriceX96: refreshedSqrtPriceX96,
+        currentTick: refreshedCurrentTick,
+      },
+    } as unknown as UniswapV3Pool;
+  }, [position.pool, refreshedSqrtPriceX96, refreshedCurrentTick]);
 
   // Calculate required token amounts from additional liquidity (MUST be called before any returns)
   const requiredAmounts = useMemo(() => {

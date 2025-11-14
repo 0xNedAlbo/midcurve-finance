@@ -14,7 +14,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import type { GetPoolPriceResponse, ApiResponse } from '@midcurve/api-shared';
+import type { GetPoolPriceResponse } from '@midcurve/api-shared';
+import { apiClient } from '@/lib/api-client';
 
 /**
  * Hook props
@@ -119,27 +120,10 @@ export function usePoolPrice({
         throw new Error('chainId and poolAddress are required');
       }
 
-      const response = await fetch(
+      // apiClient automatically unwraps the response and handles errors
+      return apiClient<GetPoolPriceResponse>(
         `/api/v1/pools/uniswapv3/${chainId}/${poolAddress}/pool-price`
       );
-
-      if (!response.ok) {
-        // Try to parse error response
-        try {
-          const errorData = await response.json();
-          throw new Error(errorData.error?.message || 'Failed to fetch pool price');
-        } catch {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-      }
-
-      const data: ApiResponse<GetPoolPriceResponse> = await response.json();
-
-      if (!data.success || !data.data) {
-        throw new Error('Invalid response from API');
-      }
-
-      return data.data;
     },
     enabled: enabled && !!chainId && !!poolAddress,
     staleTime: 5000, // 5 seconds - aggressive caching for frequent refreshes

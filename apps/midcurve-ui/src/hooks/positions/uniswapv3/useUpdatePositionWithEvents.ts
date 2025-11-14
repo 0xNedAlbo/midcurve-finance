@@ -16,7 +16,7 @@ import { queryKeys } from '@/lib/query-keys';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type {
   UpdateUniswapV3PositionRequest,
-  UpdateUniswapV3PositionResponse,
+  UpdateUniswapV3PositionData,
 } from '@midcurve/api-shared';
 
 interface UpdatePositionWithEventsParams {
@@ -28,7 +28,7 @@ interface UpdatePositionWithEventsParams {
 export function useUpdatePositionWithEvents(
   options?: Omit<
     UseMutationOptions<
-      UpdateUniswapV3PositionResponse,
+      UpdateUniswapV3PositionData,
       ApiError,
       UpdatePositionWithEventsParams,
       unknown
@@ -46,7 +46,7 @@ export function useUpdatePositionWithEvents(
         events: params.events,
       };
 
-      return apiClient<UpdateUniswapV3PositionResponse>(
+      return apiClient<UpdateUniswapV3PositionData>(
         `/api/v1/positions/uniswapv3/${params.chainId}/${params.nftId}`,
         {
           method: 'PATCH',
@@ -57,8 +57,8 @@ export function useUpdatePositionWithEvents(
     },
 
     onSuccess: async (response) => {
-      // apiClient already unwraps the response data field
-      const updatedPosition = response.data;
+      // apiClient already unwraps the response data field, so response IS the position data
+      const updatedPosition = response;
 
       // Debug logging for position data
       console.log('[useUpdatePositionWithEvents] Updated position:', {
