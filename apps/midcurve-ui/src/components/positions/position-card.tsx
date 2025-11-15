@@ -122,7 +122,7 @@ export function PositionCard({ position, listIndex }: PositionCardProps) {
           quoteToken={quoteToken}
           isActive={position.isActive}
           isInRange={isInRange}
-          aprPeriods={position.aprPeriods}
+          totalApr={position.totalApr}
           pnlCurveSlot={
             position.protocol === "uniswapv3" ? (
               <UniswapV3MiniPnLCurve position={position} />

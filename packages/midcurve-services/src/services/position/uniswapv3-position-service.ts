@@ -3230,10 +3230,21 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 "collectedFees",
                 "unClaimedFees",
                 "lastFeesCollectedAt",
+                "totalApr",
                 "priceRangeLower",
                 "priceRangeUpper",
             ],
         });
+
+        // Calculate APR summary (combines realized + unrealized)
+        const aprSummary = await this._aprService.calculateAprSummary(
+            positionId,
+            fields.currentCostBasis,
+            fields.unClaimedFees
+        );
+
+        // Determine totalApr value (null if below threshold)
+        const totalApr = aprSummary.belowThreshold ? null : aprSummary.totalApr;
 
         await this.prisma.position.update({
             where: { id: positionId },
@@ -3245,6 +3256,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 collectedFees: fields.collectedFees.toString(),
                 unClaimedFees: fields.unClaimedFees.toString(),
                 lastFeesCollectedAt: fields.lastFeesCollectedAt,
+                totalApr,
                 priceRangeLower: fields.priceRangeLower.toString(),
                 priceRangeUpper: fields.priceRangeUpper.toString(),
             },
@@ -3256,8 +3268,9 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 currentValue: fields.currentValue.toString(),
                 currentCostBasis: fields.currentCostBasis.toString(),
                 unrealizedPnl: fields.unrealizedPnl.toString(),
+                totalApr: totalApr?.toFixed(2) ?? 'null (below threshold)',
             },
-            "Position common fields updated"
+            "Position common fields updated with APR"
         );
     }
 

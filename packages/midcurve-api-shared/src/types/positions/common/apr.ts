@@ -4,9 +4,12 @@
  * Types for the GET /api/v1/positions/uniswapv3/:chainId/:nftId/apr endpoint
  *
  * Returns ordered list of APR periods for a position (descending by startTimestamp)
+ * plus a summary of total APR metrics
  */
 
 import type { ApiResponse } from '../../common/api-response.js';
+import type { BigIntToString } from '../../common/serialization.js';
+import type { AprSummary } from '@midcurve/shared';
 import { z } from 'zod';
 
 /**
@@ -45,6 +48,19 @@ export interface AprPeriodData {
 }
 
 /**
+ * Serialized APR summary data for API response
+ *
+ * This is the JSON-serializable version of AprSummary from @midcurve/shared
+ * All bigint fields are converted to strings for JSON compatibility
+ *
+ * Contains comprehensive APR metrics:
+ * - Realized APR (from completed fee collection periods)
+ * - Unrealized APR (from current unclaimed fees)
+ * - Total APR (time-weighted combination)
+ */
+export type AprSummaryData = BigIntToString<AprSummary>;
+
+/**
  * Path parameters for APR endpoint
  */
 export interface AprPathParams {
@@ -54,8 +70,18 @@ export interface AprPathParams {
 
 /**
  * Response type for APR endpoint
+ *
+ * Returns both the detailed period-by-period breakdown AND a pre-calculated summary
  */
 export interface AprPeriodsResponse extends ApiResponse<AprPeriodData[]> {
+  /**
+   * Pre-calculated APR summary combining all periods
+   *
+   * This eliminates the need for frontend calculation and ensures
+   * consistency with the backend logic
+   */
+  summary: AprSummaryData;
+
   meta?: {
     timestamp: string;
     count: number;

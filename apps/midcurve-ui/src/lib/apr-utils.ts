@@ -1,7 +1,20 @@
 import type { AprPeriodData } from "@midcurve/api-shared";
 
 /**
+ * @deprecated This file is deprecated. APR calculations have been moved to the backend service layer.
+ *
+ * - Position cards now use pre-calculated `position.totalApr` from the database
+ * - APR breakdowns use pre-calculated summaries from the APR endpoint
+ * - Frontend no longer needs to calculate APR client-side
+ *
+ * This file will be removed in a future release.
+ */
+
+/**
  * APR summary metrics calculated from periods array
+ *
+ * @deprecated Use `AprSummaryData` from `@midcurve/api-shared` instead.
+ * APR summaries are now pre-calculated by the backend and returned via API endpoints.
  */
 export interface AprSummary {
   /** Total fees collected from completed periods (in quote token units) */
@@ -29,6 +42,19 @@ export interface AprSummary {
 /**
  * Calculate comprehensive APR summary from periods array
  *
+ * @deprecated This function is deprecated. APR calculations have been moved to the backend.
+ *
+ * **Migration Guide:**
+ * - Position cards: Use `position.totalApr` (pre-calculated in database)
+ * - APR breakdowns: Use `aprResponse.summary` from the APR endpoint
+ * - Backend: Use `PositionAprService.calculateAprSummary()` from `@midcurve/services`
+ *
+ * **Why deprecated:**
+ * - APR is now calculated once during position refresh (backend)
+ * - No need to recalculate on every component render (performance)
+ * - Consistent calculations across all clients
+ * - Reduces frontend bundle size
+ *
  * Computes realized APR (from completed periods), unrealized APR (from current
  * unclaimed fees), and total time-weighted APR.
  *
@@ -53,11 +79,22 @@ export interface AprSummary {
  *
  * @example
  * ```typescript
+ * // OLD (deprecated):
  * const summary = calculateAprSummary(
  *   aprPeriods,
  *   BigInt(position.currentCostBasis),
  *   BigInt(position.unClaimedFees)
  * );
+ * console.log(`Total APR: ${summary.totalApr.toFixed(2)}%`);
+ *
+ * // NEW (recommended):
+ * // For position cards:
+ * const apr = position.totalApr ?? 0;
+ * console.log(`Total APR: ${apr.toFixed(2)}%`);
+ *
+ * // For APR breakdowns:
+ * const aprResponse = await fetch(`/api/v1/positions/uniswapv3/${chainId}/${nftId}/apr`);
+ * const { summary } = await aprResponse.json();
  * console.log(`Total APR: ${summary.totalApr.toFixed(2)}%`);
  * ```
  */

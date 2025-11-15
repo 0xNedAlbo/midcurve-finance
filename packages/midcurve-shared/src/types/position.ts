@@ -182,6 +182,28 @@ export interface Position<P extends keyof PositionConfigMap> {
    */
   lastFeesCollectedAt: Date;
 
+  /**
+   * Total APR (time-weighted across all periods + unrealized)
+   *
+   * Combines realized APR (from completed fee collection periods) and
+   * unrealized APR (from current unclaimed fees) using time-weighting
+   * to provide a single, comprehensive APR metric.
+   *
+   * Null if position history is too short for reliable calculation
+   * (typically < 5 minutes of active history).
+   *
+   * This is a platform-independent metric that works across all protocols.
+   * Calculated in the service layer during position refresh.
+   *
+   * @example
+   * // Position with 25% APR
+   * totalApr = 25.03
+   *
+   * // Position too new for reliable APR
+   * totalApr = null
+   */
+  totalApr: number | null;
+
   // ============================================================================
   // PRICE RANGE
   // ============================================================================

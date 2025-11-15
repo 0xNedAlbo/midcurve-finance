@@ -67,6 +67,9 @@ export type {
 // Position APR Period types
 export type { PositionAprPeriod, AprPeriodSummary } from './position-apr-period.js';
 
+// Position APR Summary types
+export type { AprSummary } from './position-apr-summary.js';
+
 // Quote Token Result types
 export type {
   QuoteTokenResult,

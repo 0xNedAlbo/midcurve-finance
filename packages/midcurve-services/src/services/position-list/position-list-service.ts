@@ -240,6 +240,7 @@ export class PositionListService {
       collectedFees: BigInt(dbResult.collectedFees),
       unClaimedFees: BigInt(dbResult.unClaimedFees),
       lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
+      totalApr: dbResult.totalApr,
 
       // Price range (string → bigint)
       priceRangeLower: BigInt(dbResult.priceRangeLower),

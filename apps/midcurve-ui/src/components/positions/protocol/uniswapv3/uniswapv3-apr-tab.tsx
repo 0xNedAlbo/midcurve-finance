@@ -18,26 +18,36 @@ export function UniswapV3AprTab({ position }: UniswapV3AprTabProps) {
   // Extract config data
   const config = position.config as { chainId: number; nftId: number };
 
-  // Fetch APR periods (returns array directly, not response wrapper)
-  const { data: aprPeriods, isLoading } = useUniswapV3AprPeriods(
+  // Fetch APR periods and summary from enhanced endpoint
+  const { data: aprResponse, isLoading } = useUniswapV3AprPeriods(
     config.chainId,
     config.nftId.toString()
   );
 
   return (
     <div className="space-y-8">
-      {/* Section 1: APR Breakdown */}
+      {/* Section 1: APR Breakdown - uses pre-calculated summary */}
       <AprBreakdown
-        periods={aprPeriods ?? []}
-        currentCostBasis={position.currentCostBasis}
-        unclaimedFees={position.unClaimedFees}
+        summary={aprResponse?.summary ?? {
+          realizedFees: "0",
+          realizedTWCostBasis: "0",
+          realizedActiveDays: 0,
+          realizedApr: 0,
+          unrealizedFees: "0",
+          unrealizedCostBasis: "0",
+          unrealizedActiveDays: 0,
+          unrealizedApr: 0,
+          totalApr: 0,
+          totalActiveDays: 0,
+          belowThreshold: true,
+        }}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
       />
 
       {/* Section 2: APR Periods Table */}
       <AprPeriodsTable
-        periods={aprPeriods ?? []}
+        periods={aprResponse?.data ?? []}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
         isLoading={isLoading}

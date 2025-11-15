@@ -1,29 +1,19 @@
 "use client";
 
 import { formatCompactValue } from "@/lib/fraction-format";
-import { calculateAprSummary } from "@/lib/apr-utils";
-import type { AprPeriodData } from "@midcurve/api-shared";
+import type { AprSummaryData } from "@midcurve/api-shared";
 
 interface AprBreakdownProps {
-  periods: AprPeriodData[];
-  currentCostBasis: string; // Current position cost basis (for unrealized calculation)
-  unclaimedFees: string; // Current unclaimed fees (for unrealized calculation)
+  summary: AprSummaryData; // Pre-calculated APR summary from API
   quoteTokenSymbol: string;
   quoteTokenDecimals: number;
 }
 
 export function AprBreakdown({
-  periods,
-  currentCostBasis,
-  unclaimedFees,
+  summary,
   quoteTokenSymbol,
   quoteTokenDecimals,
 }: AprBreakdownProps) {
-  const summary = calculateAprSummary(
-    periods,
-    BigInt(currentCostBasis),
-    BigInt(unclaimedFees)
-  );
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
@@ -52,7 +42,7 @@ export function AprBreakdown({
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">Total Fees Collected</span>
                 <span className="text-white font-medium">
-                  {formatCompactValue(summary.realizedFees, quoteTokenDecimals)}{" "}
+                  {formatCompactValue(BigInt(summary.realizedFees), quoteTokenDecimals)}{" "}
                   {quoteTokenSymbol}
                 </span>
               </div>
@@ -60,7 +50,7 @@ export function AprBreakdown({
                 <span className="text-slate-400">Time-Weighted Cost Basis</span>
                 <span className="text-white font-medium">
                   {formatCompactValue(
-                    summary.realizedTWCostBasis,
+                    BigInt(summary.realizedTWCostBasis),
                     quoteTokenDecimals
                   )}{" "}
                   {quoteTokenSymbol}
@@ -91,7 +81,7 @@ export function AprBreakdown({
                 <span className="text-slate-400">Unclaimed Fees</span>
                 <span className="text-white font-medium">
                   {formatCompactValue(
-                    summary.unrealizedFees,
+                    BigInt(summary.unrealizedFees),
                     quoteTokenDecimals
                   )}{" "}
                   {quoteTokenSymbol}
@@ -101,7 +91,7 @@ export function AprBreakdown({
                 <span className="text-slate-400">Current Cost Basis</span>
                 <span className="text-white font-medium">
                   {formatCompactValue(
-                    summary.unrealizedCostBasis,
+                    BigInt(summary.unrealizedCostBasis),
                     quoteTokenDecimals
                   )}{" "}
                   {quoteTokenSymbol}
@@ -110,7 +100,7 @@ export function AprBreakdown({
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">Days Since Last Collect</span>
                 <span className="text-white font-medium">
-                  {summary.unrealizedCostBasis > 0n
+                  {BigInt(summary.unrealizedCostBasis) > 0n
                     ? `${summary.unrealizedActiveDays} days`
                     : "-"}
                 </span>

@@ -244,6 +244,9 @@ model Position {
     unClaimedFees       String // bigint as string
     lastFeesCollectedAt DateTime? // null = no fees collected yet
 
+    // APR metrics
+    totalApr Float? // Total APR (time-weighted across all periods + unrealized), null if below threshold
+
     // Price range (stored as string for bigint precision)
     priceRangeLower String // bigint as string
     priceRangeUpper String // bigint as string

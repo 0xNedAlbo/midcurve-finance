@@ -139,25 +139,37 @@ export async function GET(
       // Service returns periods in descending order (startTimestamp DESC)
       const periods = await getPositionAprService().getAprPeriods(dbPosition.id);
 
+      // 5. Calculate APR summary (combines realized + unrealized)
+      const aprSummary = await getPositionAprService().calculateAprSummary(
+        dbPosition.id,
+        BigInt(dbPosition.currentCostBasis),
+        BigInt(dbPosition.unClaimedFees)
+      );
+
       apiLogger.info(
         {
           requestId,
           positionId: dbPosition.id,
           periodCount: periods.length,
+          totalApr: aprSummary.totalApr.toFixed(2),
+          belowThreshold: aprSummary.belowThreshold,
           chainId,
           nftId,
         },
-        'APR periods retrieved successfully'
+        'APR periods and summary retrieved successfully'
       );
 
-      // 5. Serialize bigints to strings for JSON
+      // 6. Serialize bigints to strings for JSON
       const serializedPeriods = periods.map((period): AprPeriodData =>
         serializeBigInt(period) as unknown as AprPeriodData
       );
 
-      // 6. Create success response
+      const serializedSummary = serializeBigInt(aprSummary);
+
+      // 7. Create success response with both periods and summary
       const response: AprPeriodsResponse = {
         ...createSuccessResponse(serializedPeriods),
+        summary: serializedSummary as any, // BigIntToString conversion handled by serializeBigInt
         meta: {
           timestamp: new Date().toISOString(),
           count: periods.length,

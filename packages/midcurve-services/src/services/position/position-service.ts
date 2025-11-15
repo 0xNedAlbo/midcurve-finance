@@ -49,6 +49,7 @@ interface PositionDbResult {
   collectedFees: string;
   unClaimedFees: string;
   lastFeesCollectedAt: Date;
+  totalApr: number | null;
   priceRangeLower: string;
   priceRangeUpper: string;
   poolId: string;
@@ -576,6 +577,7 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
       collectedFees: BigInt(dbResult.collectedFees),
       unClaimedFees: BigInt(dbResult.unClaimedFees),
       lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
+      totalApr: dbResult.totalApr,
       priceRangeLower: BigInt(dbResult.priceRangeLower),
       priceRangeUpper: BigInt(dbResult.priceRangeUpper),
       pool: dbResult.pool as any, // Pool with token0, token1 from include
