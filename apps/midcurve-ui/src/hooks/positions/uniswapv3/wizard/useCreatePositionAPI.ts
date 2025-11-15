@@ -80,6 +80,11 @@ async function extractIncreaseEventFromReceipt(receipt: TransactionReceipt) {
 }
 
 /**
+ * Result type for useCreatePositionAPI hook
+ */
+export type UseCreatePositionAPIResult = ReturnType<typeof useCreatePositionAPI>;
+
+/**
  * Hook to create a position in the database via API after successful on-chain mint
  *
  * Automatically invalidates the positions list query to trigger a refetch.

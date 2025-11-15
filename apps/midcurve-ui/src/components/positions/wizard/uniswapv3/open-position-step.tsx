@@ -388,6 +388,7 @@ export function OpenPositionStep({
         baseApproval={baseApproval}
         quoteApproval={quoteApproval}
         mintPosition={mintPosition}
+        createPositionAPI={createPositionAPI}
         canExecuteTransactions={canExecuteTransactions}
         isConnected={isConnected}
         chain={chain}
