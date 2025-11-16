@@ -14,7 +14,7 @@ export default function Dashboard() {
   // Handle authentication redirect
   useEffect(() => {
     if (status === "unauthenticated" || (!session && status !== "loading")) {
-      router.push("/auth/signin");
+      router.push("/?modal=signin");
     }
   }, [status, session, router]);
 

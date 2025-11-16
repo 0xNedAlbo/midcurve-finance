@@ -127,7 +127,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
 
   pages: {
     signIn: '/', // Home page with wallet connect
-    error: '/auth/error', // Error page (future)
+    error: '/', // Show errors on home page
   },
 
   debug: process.env.NODE_ENV === 'development',
