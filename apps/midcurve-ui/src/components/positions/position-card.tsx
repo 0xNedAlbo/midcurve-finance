@@ -94,6 +94,7 @@ export function PositionCard({ position, listIndex }: PositionCardProps) {
           quoteToken={quoteToken}
           status={position.isActive ? "active" : "closed"}
           protocol={position.protocol}
+          positionOpenedAt={position.positionOpenedAt}
           statusLineBadges={
             position.protocol === "uniswapv3" ? (
               <UniswapV3RangeStatus position={position} />

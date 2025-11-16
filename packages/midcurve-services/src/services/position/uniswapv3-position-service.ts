@@ -494,6 +494,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             );
 
             let blockNumber: bigint | undefined;
+            let positionOpenedAt: Date | undefined;
             try {
                 const events = await this.etherscanClient.fetchPositionEvents(
                     chainId,
@@ -506,9 +507,13 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     const firstEvent = events[0]!;
                     blockNumber = BigInt(firstEvent.blockNumber); // Block at or after creation
 
+                    // Extract timestamp from first event for accurate position age
+                    positionOpenedAt = firstEvent.blockTimestamp;
+
                     this.logger.debug(
                         {
                             firstEventBlock: firstEvent.blockNumber,
+                            firstEventTime: positionOpenedAt.toISOString(),
                             queryBlock: blockNumber.toString(),
                             eventType: firstEvent.eventType,
                         },
@@ -756,6 +761,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 isToken0Quote, // Boolean flag for token roles
                 config,
                 state,
+                positionOpenedAt, // Blockchain timestamp from first event (if available)
             });
 
             this.logger.info(

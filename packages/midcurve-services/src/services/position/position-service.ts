@@ -334,7 +334,7 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
           lastFeesCollectedAt: now,
           priceRangeLower: zeroValue,
           priceRangeUpper: zeroValue,
-          positionOpenedAt: now,
+          positionOpenedAt: input.positionOpenedAt ?? now,
           positionClosedAt: null,
           isActive: true,
         },

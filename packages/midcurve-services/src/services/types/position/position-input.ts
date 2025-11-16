@@ -114,6 +114,12 @@ export type CreatePositionInput<P extends keyof PositionConfigMap> = Pick<
 > & {
   /** Pool ID for database foreign key (service maps this to full Pool object) */
   poolId: string;
+  /**
+   * Optional: Actual timestamp when position was opened on blockchain
+   * If omitted, will default to current time (discovery time)
+   * Should be extracted from first blockchain event for accuracy
+   */
+  positionOpenedAt?: Date;
 };
 
 /**

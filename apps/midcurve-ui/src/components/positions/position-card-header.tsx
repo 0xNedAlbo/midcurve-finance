@@ -19,6 +19,7 @@ interface PositionCardHeaderProps {
   quoteToken: Token;
   status: "active" | "closed";
   protocol: string;
+  positionOpenedAt?: string; // ISO timestamp for calculating position age
   statusLineBadges?: React.ReactNode; // Protocol-specific badges for first line (e.g., range status)
   protocolLineBadges?: React.ReactNode; // Protocol-specific badges for second line (e.g., chain, fee, NFT ID)
 }
@@ -28,6 +29,7 @@ export function PositionCardHeader({
   quoteToken,
   status,
   protocol,
+  positionOpenedAt,
   statusLineBadges,
   protocolLineBadges,
 }: PositionCardHeaderProps) {
@@ -38,6 +40,18 @@ export function PositionCardHeader({
   const statusColor = status === "active"
     ? "text-green-400 bg-green-500/10 border-green-500/20"
     : "text-slate-400 bg-slate-500/10 border-slate-500/20";
+
+  // Calculate position age in days
+  const positionAge = positionOpenedAt ? (() => {
+    const now = Date.now();
+    const opened = new Date(positionOpenedAt).getTime();
+    const diffMs = now - opened;
+    const days = diffMs / (1000 * 60 * 60 * 24);
+    const formattedDays = days < 1 ? days.toFixed(1) : Math.floor(days).toString();
+    return status === "closed"
+      ? `${formattedDays} days ago`
+      : `${formattedDays} days`;
+  })() : null;
 
   return (
     <div className="flex items-center gap-2 md:gap-3">
@@ -75,6 +89,13 @@ export function PositionCardHeader({
 
             {/* Protocol-specific badges (e.g., range status) */}
             {statusLineBadges}
+
+            {/* Position Age Badge */}
+            {positionAge && (
+              <span className="px-1.5 md:px-2 py-0.5 rounded text-[10px] md:text-xs font-medium border text-slate-300 bg-slate-500/10 border-slate-500/20">
+                {positionAge}
+              </span>
+            )}
           </div>
 
           {/* Protocol Name and Protocol-specific badges for third line */}

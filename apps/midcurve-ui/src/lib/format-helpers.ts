@@ -8,15 +8,15 @@
 import { formatCompactValue } from "./fraction-format";
 
 /**
- * Formats a monetary value (in quote token units) with $ prefix
+ * Formats a monetary value (in quote token units)
  * @param value - Bigint value as string (serialized from API)
  * @param decimals - Token decimals (default 18)
- * @returns Formatted string like "$12,450.00" or "$0.₍7₎1234…"
+ * @returns Formatted string like "12,450.00" or "0.₍7₎1234…"
  */
 export function formatCurrency(value: string, decimals: number = 18): string {
   const bigintValue = BigInt(value);
   const formatted = formatCompactValue(bigintValue, decimals);
-  return `$${formatted}`;
+  return formatted;
 }
 
 /**
@@ -37,17 +37,17 @@ export function formatPnL(
 
   if (bigintValue > 0n) {
     return {
-      text: `+$${formatted}`,
+      text: `+${formatted}`,
       colorClass: "text-green-400",
     };
   } else if (bigintValue < 0n) {
     return {
-      text: `-$${formatted}`,
+      text: `-${formatted}`,
       colorClass: "text-red-400",
     };
   } else {
     return {
-      text: "$0.00",
+      text: "0.00",
       colorClass: "text-slate-400",
     };
   }
@@ -57,7 +57,7 @@ export function formatPnL(
  * Formats unclaimed fees (always positive)
  * @param value - Bigint value as string (serialized from API)
  * @param decimals - Token decimals (default 18)
- * @returns Formatted string like "$45.23"
+ * @returns Formatted string like "45.23"
  */
 export function formatFees(value: string, decimals: number = 18): string {
   return formatCurrency(value, decimals);
