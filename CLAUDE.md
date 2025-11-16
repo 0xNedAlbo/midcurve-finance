@@ -317,7 +317,7 @@ midcurve-ui/
 ### Infrastructure
 - **PostgreSQL** - Primary database with JSON columns for flexibility
 - **Vercel** - Serverless deployment platform
-- **Yalc** - Local package management for development
+- **npm workspaces** - Monorepo package linking
 
 ---
 
@@ -370,14 +370,14 @@ midcurve-ui/
 
 **Workflow:**
 ```bash
-# In services repo: Update schema and create migration
-cd midcurve-services
+# From monorepo root: Update schema and create migration
+cd packages/midcurve-services
 # Edit prisma/schema.prisma
 npx prisma migrate dev --name your_migration_name
-npm run yalc:push  # Publish to consumers
 
-# In UI repo: Schema and migrations auto-sync
-cd midcurve-ui
+# Changes automatically available to all packages via npm workspaces
+# UI app postinstall hook syncs schema + migrations + generates client
+cd ../../apps/midcurve-ui
 npm install  # Triggers postinstall → schema + migrations sync → prisma generate
 
 # During Vercel deployment: Migrations automatically applied
@@ -386,81 +386,83 @@ npm install  # Triggers postinstall → schema + migrations sync → prisma gene
 ```
 
 **Migration Application:**
-- **Development:** Migrations applied manually in services repo with `prisma migrate dev`
+- **Development:** Migrations applied manually in services package with `prisma migrate dev`
 - **Production/Vercel:** Migrations applied automatically during build via `prisma migrate deploy`
 - **Safety:** `prisma migrate deploy` is idempotent (safe to run on every deployment)
 
-### 3. Local Package Management with Yalc
+### 3. Workspace Protocol for Package Linking
 
-**Why Yalc?**
-- ✅ **Copy mechanism** (not symlinks) - Works reliably with peer dependencies
-- ✅ **Verifies packaging** - Ensures correct `package.json` setup before consumption
-- ✅ **Single Prisma instance** - No duplication with peer dependency pattern
-- ✅ **Hot reload** - Changes propagate automatically with `yalc:push`
+**Why npm Workspaces?**
 
-**⚠️ CRITICAL RULES - Yalc Dependency Management:**
+This monorepo uses **npm workspaces** with the `workspace:*` protocol for automatic package linking.
 
-1. **GitHub References in package.json (Production/Default)**
-   - ✅ **ALWAYS** use GitHub URLs in `package.json` dependencies
-   - ❌ **NEVER** use `file:.yalc/` paths in committed `package.json`
-   - ❌ **NEVER** use `file:../` relative paths in committed `package.json`
+**Benefits:**
+- ✅ **Automatic linking** - Packages reference each other without manual steps
+- ✅ **Type safety** - TypeScript resolves types across packages instantly
+- ✅ **Build orchestration** - Turborepo ensures correct build order
+- ✅ **Single Prisma instance** - Peer dependency pattern works correctly
+- ✅ **Fast iteration** - Changes in one package immediately available to others
+- ✅ **No external tools** - Native npm/pnpm/yarn feature
 
+**Package References:**
+
+All internal packages use the `workspace:*` protocol in their `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@midcurve/shared": "workspace:*",
+    "@midcurve/services": "workspace:*",
+    "@midcurve/api-shared": "workspace:*"
+  }
+}
+```
+
+**How It Works:**
+
+1. **Root package.json** declares workspaces:
    ```json
    {
-     "dependencies": {
-       "@midcurve/shared": "https://github.com/0xNedAlbo/midcurve-shared.git#main",
-       "@midcurve/services": "https://github.com/0xNedAlbo/midcurve-services.git#main",
-       "@midcurve/api-shared": "https://github.com/0xNedAlbo/midcurve-api-shared.git#main"
-     }
+     "workspaces": [
+       "apps/*",
+       "packages/*"
+     ]
    }
    ```
 
-2. **Use `yalc link` NOT `yalc add`**
-   - ✅ **ALWAYS** use `yalc link @midcurve/package-name` for local development
-   - ❌ **NEVER** use `yalc add @midcurve/package-name` (modifies package.json)
-   - `yalc link` creates symlinks WITHOUT modifying `package.json`
-   - `yalc add` modifies `package.json` to use `file:.yalc/` paths (incorrect!)
+2. **npm install** at root creates symlinks:
+   - `apps/midcurve-ui/node_modules/@midcurve/shared` → `../../packages/midcurve-shared`
+   - `apps/midcurve-ui/node_modules/@midcurve/services` → `../../packages/midcurve-services`
 
-3. **Package.json Scripts Must Use `yalc link`**
-   ```json
-   {
-     "scripts": {
-       "yalc:link:services": "yalc link @midcurve/services && npm install",
-       "yalc:link:shared": "yalc link @midcurve/shared && npm install"
-     }
-   }
-   ```
-
-**Why This Matters:**
-- GitHub URLs ensure CI/CD and fresh installs work correctly
-- `yalc link` allows local development without polluting version control
-- Prevents "file not found" errors in production/CI environments
-- Keeps repository clean and prevents dependency path confusion
+3. **Turborepo** manages build dependencies:
+   - Defined in `turbo.json` with `dependsOn` configuration
+   - Ensures packages build in correct order
+   - Caches builds for fast incremental updates
 
 **Development Workflow:**
+
 ```bash
-# In services repo after making changes:
-cd midcurve-services
-npm run build
-npm run yalc:push  # Builds and updates all consumers
-
-# UI automatically picks up changes (if yalc watch is running)
-# Or manually update:
-cd midcurve-ui
-npm run yalc:update
-```
-
-**Setup (one-time):**
-```bash
-# In services repo:
-cd midcurve-services
-npm run yalc:publish
-
-# In UI repo:
-cd midcurve-ui
-npm run yalc:link:services  # Uses 'yalc link' NOT 'yalc add'
+# Install all dependencies (from monorepo root)
 npm install
+
+# Build all packages in dependency order
+npm run build
+
+# Build specific package
+cd packages/midcurve-services
+npm run build
+
+# Changes immediately available to dependent packages
+# No manual push/pull/link commands needed
 ```
+
+**Why This Is Better Than External Tools:**
+
+- **No yalc needed** - Workspaces handle linking natively
+- **No manual steps** - Just `npm install` and everything works
+- **No sync issues** - Changes propagate automatically
+- **Standard tooling** - Works with npm, pnpm, and yarn
+- **Better IDE support** - TypeScript resolves paths correctly
 
 ### 4. Abstraction Strategy for Multi-Platform Support
 
@@ -862,32 +864,31 @@ Extensible to:
 
 ```bash
 # Clone the monorepo
-cd /path/to/midcurve
+git clone https://github.com/0xNedAlbo/midcurve-finance.git
+cd midcurve-finance
 
-# Install shared package
-cd midcurve-shared
+# Install all dependencies at once (from root)
 npm install
-npm run build
 
-# Install services package
-cd ../midcurve-services
-cp .env.example .env
-# Edit .env with DATABASE_URL and RPC URLs
-npm install
-npm run prisma:generate
-npm run build
-
-# Publish services to yalc (for API consumption)
-npm run yalc:publish
-
-# Install UI package (contains both UI and API)
-cd ../midcurve-ui
+# Set up environment variables for UI app
+cd apps/midcurve-ui
 cp .env.example .env
 # Edit .env with DATABASE_URL, RPC URLs, and other config
-npm run yalc:link:services
-npm install  # Auto-syncs Prisma schema and generates client
+
+# Build all packages in dependency order
+cd ../..
+npm run build
+
+# Start development server
+cd apps/midcurve-ui
 npm run dev  # Runs unified app on port 3000
 ```
+
+**What Happens During `npm install`:**
+1. Installs dependencies for all packages (apps/*, packages/*)
+2. Creates workspace symlinks (automatic package linking)
+3. Turborepo sets up build cache
+4. UI postinstall hook syncs Prisma schema and generates client
 
 ### Environment Variables
 
@@ -923,51 +924,62 @@ COINGECKO_API_KEY="your-coingecko-key"  # Optional, but recommended
 
 **Working on shared types/utilities:**
 ```bash
-cd midcurve-shared
+cd packages/midcurve-shared
 # Make changes to src/
-npm run build  # Services and API will pick up changes (file: reference)
+npm run build  # Dependent packages pick up changes via workspace
 npm test       # Run tests
 ```
 
 **Working on services:**
 ```bash
-cd midcurve-services
+cd packages/midcurve-services
 # Make changes to src/
-npm run build
-npm run yalc:push  # Updates UI automatically
-npm test           # Run 121+ tests
+npm run build  # UI automatically uses latest via workspace
+npm test       # Run 121+ tests
 ```
 
 **Working on api-shared (API types):**
 ```bash
-cd midcurve-api-shared
+cd packages/midcurve-api-shared
 # Make changes to src/types/
-npm run build
-npm run yalc:push  # Updates UI automatically
-npm test           # Run tests (when implemented)
+npm run build  # UI automatically uses latest via workspace
+npm test       # Run tests (when implemented)
 ```
 
 **Working on UI (contains frontend + API):**
 ```bash
-cd midcurve-ui
-npm run dev        # Start dev server
+cd apps/midcurve-ui
+npm run dev  # Start dev server
 # UI + API run at http://localhost:3000
-# If services or api-shared changes, they auto-propagate via yalc
+# Changes to packages/* automatically available via workspace symlinks
 ```
 
 **Database migrations:**
 ```bash
-cd midcurve-services
+cd packages/midcurve-services
 # Edit prisma/schema.prisma
 npx prisma migrate dev --name your_migration_name
-npm run yalc:push  # Propagates schema to UI
+
+# Schema changes automatically available via workspace
+# Run postinstall in UI to sync schema + generate client
+cd ../../apps/midcurve-ui
+npm install
+```
+
+**Building All Packages:**
+```bash
+# From monorepo root - builds in dependency order
+npm run build
+
+# Turborepo parallelizes where possible and caches builds
+# Only rebuilds changed packages
 ```
 
 ### Testing
 
 **Shared:**
 ```bash
-cd midcurve-shared
+cd packages/midcurve-shared
 npm test              # Watch mode
 npm run test:run      # Single run
 npm run test:coverage # With coverage
@@ -975,7 +987,7 @@ npm run test:coverage # With coverage
 
 **Services:**
 ```bash
-cd midcurve-services
+cd packages/midcurve-services
 npm test              # Watch mode (121+ tests)
 npm run test:run      # Single run
 npm run test:coverage # With coverage
@@ -983,7 +995,7 @@ npm run test:coverage # With coverage
 
 **API-Shared:**
 ```bash
-cd midcurve-api-shared
+cd packages/midcurve-api-shared
 npm test              # Watch mode (when implemented)
 npm run test:run      # Single run (when implemented)
 npm run type-check    # Type checking only
@@ -991,11 +1003,17 @@ npm run type-check    # Type checking only
 
 **UI (Frontend + API):**
 ```bash
-cd midcurve-ui
+cd apps/midcurve-ui
 npm run typecheck     # Type checking
 npm run test:api      # API E2E tests (vitest)
 npm run test:e2e      # UI E2E tests (playwright)
 npm run test:e2e:ui   # Interactive UI test mode
+```
+
+**Run Tests for All Packages:**
+```bash
+# From monorepo root - runs tests in parallel
+npm test
 ```
 
 ---
@@ -1096,7 +1114,7 @@ THE_GRAPH_API_KEY     (Optional)
 - ✅ Zod validation schemas for all endpoints
 - ✅ ESM + CJS builds with tsup
 - ✅ Comprehensive documentation (README.md)
-- ✅ Yalc-based local development
+- ✅ Workspace-based local development
 
 **@midcurve/ui:**
 - ✅ Next.js 15 + App Router setup
@@ -1111,7 +1129,7 @@ THE_GRAPH_API_KEY     (Optional)
 - ✅ Position list UI with wallet integration
 - ✅ Migrated to use @midcurve/api-shared
 - ✅ Vercel deployment configuration
-- ✅ Yalc-based dependency management
+- ✅ npm workspaces integration
 - ✅ Playwright E2E tests (33 tests)
 - ✅ Vitest API E2E tests
 
@@ -1218,13 +1236,15 @@ THE_GRAPH_API_KEY     (Optional)
 - Services layer is portable across multiple consumers
 - Prevents "multiple Prisma clients" errors
 
-### 3. Why Yalc (Not npm link)?
+### 3. Why npm Workspaces (Not npm link)?
 
 **Rationale:**
-- npm link uses symlinks (breaks peer dependency resolution)
-- Yalc copies packages (verifies packaging correctness)
-- Single Prisma instance guaranteed with peer deps
-- Hot reload with `yalc push` for fast iteration
+- Native npm feature (no external tools needed)
+- Automatic symlink creation (no manual linking)
+- Works reliably with peer dependencies (single Prisma instance)
+- Turborepo handles build orchestration and caching
+- Standard tooling across npm, pnpm, and yarn
+- Better IDE support and TypeScript resolution
 
 ### 4. Why Import Types from @midcurve/shared (Not Prisma)?
 
@@ -1472,10 +1492,10 @@ All interactive elements must include `cursor-pointer` class for proper UX feedb
 **Solution:** Ensure services uses peer dependency, UI installs `@prisma/client` directly
 
 **Issue:** "Schema out of sync after services update"
-**Solution:** Run `npm run prisma:generate` in UI repo
+**Solution:** Run `npm install` in UI app to trigger postinstall (syncs schema + generates client)
 
-**Issue:** "Yalc package not updating"
-**Solution:** Run `npm run yalc:push` in services, then `npm run yalc:update` in UI
+**Issue:** "Package changes not reflected"
+**Solution:** Build the package (`npm run build`) - workspace symlinks make changes immediately available
 
 **Issue:** "RPC URL not configured"
 **Solution:** Add `RPC_URL_<CHAIN>` to `.env` file in UI repo
