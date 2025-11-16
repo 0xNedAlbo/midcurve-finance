@@ -19,6 +19,7 @@ import {
   getTickSpacing,
 } from "@midcurve/shared";
 import type { UniswapV3Pool, Erc20Token } from "@midcurve/shared";
+import { PnLCurveTooltip } from "@/components/positions/pnl-curve-tooltip";
 
 interface PositionPnLCurveProps {
   pool: UniswapV3Pool;
@@ -213,38 +214,22 @@ export function PositionPnLCurve({
     return null;
   };
 
-  // Custom tooltip component
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  // Recharts tooltip adapter - converts Recharts API to our shared component
+  const RechartsTooltipAdapter = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
 
     const data = payload[0].payload;
     // Handle scatter points that might not have all properties
     if (!data.hasOwnProperty("positionValue")) return null;
 
-    // Determine actual profit/loss status based on PnL value
-    const isProfitable = data.pnl > 0;
-    const statusLabel = isProfitable ? "Profit (Fees)" : "Loss (IL)";
-    const statusColor = isProfitable ? "text-green-400" : "text-red-400";
-
     return (
-      <div className="bg-slate-800/95 border border-slate-700 rounded-lg p-3 shadow-xl backdrop-blur-sm">
-        <p className="text-slate-300 text-sm">
-          <strong>Price:</strong> {quoteToken.symbol} {Number(label).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-        </p>
-        <p className="text-slate-300 text-sm">
-          <strong>Position Value:</strong> {quoteToken.symbol} {data.positionValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-        </p>
-        <p
-          className={`text-sm font-medium ${
-            data.pnl >= 0 ? "text-green-400" : "text-red-400"
-          }`}
-        >
-          <strong>PnL:</strong> {quoteToken.symbol} {data.pnl.toLocaleString(undefined, { maximumFractionDigits: 2 })} ({data.pnlPercent.toFixed(2)}%)
-        </p>
-        <p className={`text-xs ${statusColor}`}>
-          Status: {statusLabel}
-        </p>
-      </div>
+      <PnLCurveTooltip
+        price={Number(label)}
+        positionValue={data.positionValue}
+        pnl={data.pnl}
+        pnlPercent={data.pnlPercent}
+        quoteToken={quoteToken}
+      />
     );
   };
 
@@ -378,7 +363,7 @@ export function PositionPnLCurve({
             isAnimationActive={false}
           />
 
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<RechartsTooltipAdapter />} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

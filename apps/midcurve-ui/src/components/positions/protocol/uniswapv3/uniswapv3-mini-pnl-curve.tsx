@@ -12,9 +12,11 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ListPositionData } from "@midcurve/api-shared";
 import { generatePnLCurve, tickToPrice } from "@midcurve/shared";
+import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
   position: ListPositionData;
@@ -31,6 +33,8 @@ interface UniswapV3MiniPnLCurveProps {
 interface CurvePoint {
   price: number;
   pnl: number;
+  positionValue: number;
+  pnlPercent: number;
   phase: "below" | "in-range" | "above";
 }
 
@@ -40,6 +44,10 @@ export function UniswapV3MiniPnLCurve({
   height = 60,
   overrideTick,
 }: UniswapV3MiniPnLCurveProps) {
+  // Tooltip state
+  const [hoveredPoint, setHoveredPoint] = useState<CurvePoint | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+
   // Extract Uniswap V3 specific data from position
   const curveData = useMemo(() => {
     try {
@@ -128,6 +136,8 @@ export function UniswapV3MiniPnLCurve({
       const points: CurvePoint[] = pnlPoints.map((point) => ({
         price: Number(point.price) / quoteDivisor,
         pnl: Number(point.pnl) / quoteDivisor,
+        positionValue: Number(point.positionValue) / quoteDivisor,
+        pnlPercent: point.pnlPercent,
         phase: point.phase,
       }));
 
@@ -224,12 +234,60 @@ export function UniswapV3MiniPnLCurve({
   // Generate unique IDs for clip paths (avoid conflicts with multiple positions)
   const uniqueId = `${position.protocol}-${position.id}`;
 
+  // Get quote token for tooltip
+  const quoteToken = position.isToken0Quote
+    ? position.pool.token0
+    : position.pool.token1;
+
+  // Mouse event handlers for tooltip
+  const handleMouseMove = (e: React.MouseEvent<SVGRectElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+
+    // Find closest point by X coordinate
+    const closestPoint = points.reduce((closest, point) => {
+      const pointX = xScale(point.price);
+      const closestX = xScale(closest.price);
+      return Math.abs(pointX - mouseX) < Math.abs(closestX - mouseX)
+        ? point
+        : closest;
+    });
+
+    setHoveredPoint(closestPoint);
+
+    // Calculate tooltip position with edge detection
+    const OFFSET = 10;
+    const tooltipWidth = 280;
+    const tooltipHeight = 120;
+
+    // Use clientX/clientY for fixed positioning (viewport coordinates)
+    let x = e.clientX + OFFSET;
+    let y = e.clientY + OFFSET;
+
+    // Flip horizontally if too close to right edge
+    if (x + tooltipWidth > window.innerWidth) {
+      x = e.clientX - tooltipWidth - OFFSET;
+    }
+
+    // Flip vertically if too close to bottom
+    if (y + tooltipHeight > window.innerHeight) {
+      y = e.clientY - tooltipHeight - OFFSET;
+    }
+
+    setTooltipPosition({ x, y });
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredPoint(null);
+  };
+
   return (
-    <svg
-      width={width}
-      height={height}
-      className="overflow-visible"
-    >
+    <div className="relative inline-block">
+      <svg
+        width={width}
+        height={height}
+        className="overflow-visible"
+      >
       {/* Clip paths for PnL areas */}
       <defs>
         {/* Positive PnL area (above zero line) */}
@@ -340,6 +398,36 @@ export function UniswapV3MiniPnLCurve({
         stroke="#1e293b"
         strokeWidth={1}
       />
+
+      {/* Invisible overlay for mouse tracking */}
+      <rect
+        x={0}
+        y={0}
+        width={width}
+        height={height}
+        fill="transparent"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        className="cursor-crosshair"
+      />
     </svg>
+
+      {/* Tooltip - render via portal to avoid parent container positioning issues */}
+      {hoveredPoint && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{ left: `${tooltipPosition.x}px`, top: `${tooltipPosition.y}px` }}
+        >
+          <PnLCurveTooltip
+            price={hoveredPoint.price}
+            positionValue={hoveredPoint.positionValue}
+            pnl={hoveredPoint.pnl}
+            pnlPercent={hoveredPoint.pnlPercent}
+            quoteToken={quoteToken as any}
+          />
+        </div>,
+        document.body
+      )}
+    </div>
   );
 }
