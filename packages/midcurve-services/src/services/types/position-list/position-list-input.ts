@@ -65,12 +65,11 @@ export interface PositionListFilters {
    * Field to sort results by:
    * - 'createdAt': When position was added to database
    * - 'positionOpenedAt': When position was opened on-chain
-   * - 'currentValue': Current position value in quote tokens
-   * - 'unrealizedPnl': Current unrealized PnL in quote tokens
+   * - 'totalApr': Total APR (fees + rewards)
    *
    * @default 'createdAt'
    */
-  sortBy?: 'createdAt' | 'positionOpenedAt' | 'currentValue' | 'unrealizedPnl';
+  sortBy?: 'createdAt' | 'positionOpenedAt' | 'totalApr';
 
   /**
    * Sort direction

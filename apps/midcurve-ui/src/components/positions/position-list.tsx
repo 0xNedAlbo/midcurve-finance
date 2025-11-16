@@ -26,7 +26,7 @@ interface PositionListProps {
 // Valid filter values for validation
 const VALID_STATUS_VALUES = ["all", "active", "closed"] as const;
 const VALID_CHAIN_VALUES = ["all", "ethereum", "arbitrum", "base"] as const;
-const VALID_SORT_VALUES = ["positionOpenedAt", "currentValue", "unrealizedPnl"] as const;
+const VALID_SORT_VALUES = ["positionOpenedAt", "totalApr"] as const;
 
 export function PositionList({ className }: PositionListProps) {
   const router = useRouter();
@@ -46,7 +46,7 @@ export function PositionList({ className }: PositionListProps) {
   const sortParam = searchParams.get("sortBy");
   const sortBy = (VALID_SORT_VALUES.includes(sortParam as any)
     ? sortParam
-    : "currentValue") as ListPositionsParams["sortBy"];
+    : "totalApr") as ListPositionsParams["sortBy"];
 
   const sortDirectionParam = searchParams.get("sortDirection");
   const sortDirection = (sortDirectionParam === "asc" || sortDirectionParam === "desc"
@@ -215,9 +215,8 @@ export function PositionList({ className }: PositionListProps) {
             onChange={(e) => handleFilterChange({ sortBy: e.target.value })}
             className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
           >
-            <option value="currentValue">Sort by: Current Value</option>
             <option value="positionOpenedAt">Sort by: Position Age</option>
-            <option value="unrealizedPnl">Sort by: Unrealized PnL</option>
+            <option value="totalApr">Sort by: APR</option>
           </select>
 
           {/* Sort Direction Toggle */}

@@ -22,8 +22,7 @@ export type PositionStatus = 'active' | 'closed' | 'all';
 export type PositionSortBy =
   | 'createdAt'
   | 'positionOpenedAt'
-  | 'currentValue'
-  | 'unrealizedPnl';
+  | 'totalApr';
 
 /**
  * Sort direction options
@@ -127,8 +126,7 @@ export const PositionStatusSchema = z.enum(['active', 'closed', 'all']);
 export const PositionSortBySchema = z.enum([
   'createdAt',
   'positionOpenedAt',
-  'currentValue',
-  'unrealizedPnl',
+  'totalApr',
 ]);
 
 /**
