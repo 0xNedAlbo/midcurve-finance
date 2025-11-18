@@ -62,17 +62,7 @@ export function useUpdatePositionWithEvents(
       const updatedPosition = response;
 
       // Step 1: Update position in ALL list caches (instant UI update)
-      const cachesUpdated = updatePositionInListCache(queryClient, updatedPosition);
-
-      // Debug logging for position data
-      console.log('[useUpdatePositionWithEvents] Updated position:', {
-        id: updatedPosition.id,
-        cachesUpdated,
-        realizedPnl: updatedPosition.realizedPnl,
-        unrealizedPnl: updatedPosition.unrealizedPnl,
-        collectedFees: updatedPosition.collectedFees,
-        unClaimedFees: updatedPosition.unClaimedFees,
-      });
+      updatePositionInListCache(queryClient, updatedPosition);
 
       // Step 2: Invalidate position detail (if user is viewing it)
       // This triggers a background refetch but doesn't block the UI
