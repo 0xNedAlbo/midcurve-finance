@@ -51,12 +51,7 @@ export function useRefreshPosition() {
       return await apiClient<GetUniswapV3PositionResponse>(endpoint);
     },
     onSuccess: async (data, variables) => {
-      // Invalidate the positions list to ensure UI consistency
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.positions.lists(),
-      });
-
-      // Also update the individual position cache if it exists
+      // Update the individual position cache if it exists
       if (variables.protocol === "uniswapv3") {
         queryClient.setQueryData(
           queryKeys.positions.uniswapv3.detail(

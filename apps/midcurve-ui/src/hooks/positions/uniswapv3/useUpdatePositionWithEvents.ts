@@ -14,6 +14,7 @@
 import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { updatePositionInListCache } from '@/lib/update-position-in-list-cache';
 import type {
   UpdateUniswapV3PositionRequest,
   UpdateUniswapV3PositionData,
@@ -56,26 +57,36 @@ export function useUpdatePositionWithEvents(
       );
     },
 
-    onSuccess: async (response) => {
+    onSuccess: async (response, variables, context) => {
       // apiClient already unwraps the response data field, so response IS the position data
       const updatedPosition = response;
+
+      // Step 1: Update position in ALL list caches (instant UI update)
+      const cachesUpdated = updatePositionInListCache(queryClient, updatedPosition);
 
       // Debug logging for position data
       console.log('[useUpdatePositionWithEvents] Updated position:', {
         id: updatedPosition.id,
+        cachesUpdated,
         realizedPnl: updatedPosition.realizedPnl,
         unrealizedPnl: updatedPosition.unrealizedPnl,
         collectedFees: updatedPosition.collectedFees,
         unClaimedFees: updatedPosition.unClaimedFees,
       });
 
-      // Invalidate position detail (if user is viewing it)
+      // Step 2: Invalidate position detail (if user is viewing it)
+      // This triggers a background refetch but doesn't block the UI
       await queryClient.invalidateQueries({
         queryKey: queryKeys.positions.uniswapv3.detail(
           updatedPosition.config.chainId,
           updatedPosition.config.nftId.toString()
         ),
       });
+
+      // Step 3: Call user's onSuccess handler if provided
+      if (options?.onSuccess) {
+        await options.onSuccess(updatedPosition, variables, context);
+      }
     },
   });
 }
