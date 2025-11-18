@@ -378,6 +378,12 @@ export class PositionAprService {
       let realizedTotalDays = 0;
 
       for (const period of periods) {
+        // Skip periods with zero duration to avoid division by zero errors
+        // These can occur when events have identical timestamps
+        if (period.durationSeconds === 0) {
+          continue;
+        }
+
         const durationDays = period.durationSeconds / 86400;
         realizedFees += period.collectedFeeValue;
 
@@ -388,10 +394,13 @@ export class PositionAprService {
         realizedTotalDays += durationDays;
       }
 
+      const divisor = Math.floor(realizedTotalDays * 1000);
+
       // Time-weighted cost basis = weighted sum / total days (with precision adjustment)
+      // Handle edge case where total days is so small that flooring gives 0
       const realizedTWCostBasis =
-        realizedTotalDays > 0
-          ? realizedWeightedCostBasisSum / BigInt(Math.floor(realizedTotalDays * 1000))
+        divisor > 0
+          ? realizedWeightedCostBasisSum / BigInt(divisor)
           : 0n;
 
       // Calculate realized APR
