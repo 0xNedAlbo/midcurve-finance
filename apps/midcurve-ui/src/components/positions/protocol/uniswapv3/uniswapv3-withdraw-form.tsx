@@ -97,59 +97,25 @@ export function UniswapV3WithdrawForm({
     if (isRefreshing) return;
 
     setIsRefreshing(true);
-    const oldSqrtPriceX96 = refreshedSqrtPriceX96 || poolState.sqrtPriceX96;
-    console.log('[WithdrawModal] Refreshing pool price...', {
-      oldSqrtPriceX96,
-      poolAddress: (position.pool.config as { address: string }).address,
-      chainId: config.chainId,
-    });
 
     try {
       const poolAddress = (position.pool.config as { address: string }).address;
-      const apiUrl = `/api/v1/pools/uniswapv3/${config.chainId}/${poolAddress}`;
-      console.log('[WithdrawModal] Fetching pool data from:', apiUrl);
 
       // Note: apiClient unwraps the 'data' field, so response = { pool: {...}, metrics?: {...} }
       const response = await apiClient<{ pool: { state: { sqrtPriceX96: string } } }>(
-        apiUrl,
+        `/api/v1/pools/uniswapv3/${config.chainId}/${poolAddress}`,
         { method: 'GET' }
       );
 
-      console.log('[WithdrawModal] API response received:', {
-        hasPool: !!response.pool,
-        hasState: !!response.pool?.state,
-        hasSqrtPrice: !!response.pool?.state?.sqrtPriceX96,
-        fullResponse: response,
-      });
-
       if (response.pool?.state?.sqrtPriceX96) {
-        const newSqrtPriceX96 = response.pool.state.sqrtPriceX96;
-        const priceChanged = oldSqrtPriceX96 !== newSqrtPriceX96;
-
-        console.log('[WithdrawModal] Pool price refreshed', {
-          oldSqrtPriceX96,
-          newSqrtPriceX96,
-          priceChanged,
-          changePct: priceChanged
-            ? ((Number(BigInt(newSqrtPriceX96) - BigInt(oldSqrtPriceX96)) / Number(BigInt(oldSqrtPriceX96))) * 100).toFixed(4) + '%'
-            : '0%',
-        });
-
-        setRefreshedSqrtPriceX96(newSqrtPriceX96);
-      } else {
-        console.warn('[WithdrawModal] Response missing sqrtPriceX96 - response structure:', response);
+        setRefreshedSqrtPriceX96(response.pool.state.sqrtPriceX96);
       }
     } catch (error) {
-      console.error('[WithdrawModal] Error refreshing pool price:', error);
-      console.error('[WithdrawModal] Error details:', {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      console.error('Error refreshing pool price:', error);
     } finally {
       setIsRefreshing(false);
-      console.log('[WithdrawModal] Refresh complete, isRefreshing set to false');
     }
-  }, [isRefreshing, position.pool.config, config.chainId, refreshedSqrtPriceX96, poolState.sqrtPriceX96]);
+  }, [isRefreshing, position.pool.config, config.chainId]);
 
   // Calculate current position value in quote tokens from liquidity
   const currentPositionValue = useMemo(() => {
@@ -208,16 +174,7 @@ export function UniswapV3WithdrawForm({
   const withdrawAmounts = useMemo(() => {
     const sqrtPriceX96 = BigInt(currentSqrtPriceX96 || '0');
 
-    console.log('[WithdrawModal] Calculating withdraw amounts...', {
-      liquidityToRemove: liquidityToRemove.toString(),
-      currentSqrtPriceX96,
-      tickLower: config.tickLower,
-      tickUpper: config.tickUpper,
-      isToken0Quote: position.isToken0Quote,
-    });
-
     if (liquidityToRemove === 0n || sqrtPriceX96 === 0n) {
-      console.log('[WithdrawModal] Skipping calculation (zero liquidity or price)');
       return { baseAmount: 0n, quoteAmount: 0n };
     }
 
@@ -233,54 +190,25 @@ export function UniswapV3WithdrawForm({
       const baseAmount = isQuoteToken0 ? token1Amount : token0Amount;
       const quoteAmount = isQuoteToken0 ? token0Amount : token1Amount;
 
-      console.log('[WithdrawModal] Withdraw amounts calculated', {
-        token0Amount: token0Amount.toString(),
-        token1Amount: token1Amount.toString(),
-        baseAmount: baseAmount.toString(),
-        quoteAmount: quoteAmount.toString(),
-        baseFormatted: `${(Number(baseAmount) / 10 ** baseToken.decimals).toFixed(6)} ${baseToken.symbol}`,
-        quoteFormatted: `${(Number(quoteAmount) / 10 ** quoteToken.decimals).toFixed(6)} ${quoteToken.symbol}`,
-      });
-
       return { baseAmount, quoteAmount };
     } catch (error) {
-      console.error('[WithdrawModal] Error calculating withdraw amounts:', error);
+      console.error('Error calculating withdraw amounts:', error);
       return { baseAmount: 0n, quoteAmount: 0n };
     }
-  }, [liquidityToRemove, currentSqrtPriceX96, config.tickLower, config.tickUpper, position.isToken0Quote, baseToken, quoteToken]);
+  }, [liquidityToRemove, currentSqrtPriceX96, config.tickLower, config.tickUpper, position.isToken0Quote]);
 
   // Calculate minimum amounts with slippage (1% = 100 bps)
   const amount0Min = useMemo(() => {
     const isQuoteToken0 = position.isToken0Quote;
     const amount = isQuoteToken0 ? withdrawAmounts.quoteAmount : withdrawAmounts.baseAmount;
-    const minAmount = (amount * 9900n) / 10000n; // 1% slippage
-
-    console.log('[WithdrawModal] Calculated amount0Min (token0 with slippage)', {
-      isQuoteToken0,
-      amount: amount.toString(),
-      amount0Min: minAmount.toString(),
-      token0Symbol: position.pool.token0.symbol,
-      formatted: `${(Number(minAmount) / 10 ** position.pool.token0.decimals).toFixed(6)} ${position.pool.token0.symbol}`,
-    });
-
-    return minAmount;
-  }, [position.isToken0Quote, withdrawAmounts, position.pool.token0]);
+    return (amount * 9900n) / 10000n; // 1% slippage
+  }, [position.isToken0Quote, withdrawAmounts]);
 
   const amount1Min = useMemo(() => {
     const isQuoteToken0 = position.isToken0Quote;
     const amount = isQuoteToken0 ? withdrawAmounts.baseAmount : withdrawAmounts.quoteAmount;
-    const minAmount = (amount * 9900n) / 10000n; // 1% slippage
-
-    console.log('[WithdrawModal] Calculated amount1Min (token1 with slippage)', {
-      isQuoteToken0,
-      amount: amount.toString(),
-      amount1Min: minAmount.toString(),
-      token1Symbol: position.pool.token1.symbol,
-      formatted: `${(Number(minAmount) / 10 ** position.pool.token1.decimals).toFixed(6)} ${position.pool.token1.symbol}`,
-    });
-
-    return minAmount;
-  }, [position.isToken0Quote, withdrawAmounts, position.pool.token1]);
+    return (amount * 9900n) / 10000n; // 1% slippage
+  }, [position.isToken0Quote, withdrawAmounts]);
 
   // Prepare decrease liquidity parameters
   const decreaseParams = useMemo(() => {
