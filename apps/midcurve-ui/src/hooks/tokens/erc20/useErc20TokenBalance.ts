@@ -185,7 +185,8 @@ export function useErc20TokenBalance(
     queryKey,
     queryFn,
     enabled: enabled && !!walletAddress && !!tokenAddress,
-    staleTime: 30 * 1000, // Consider data fresh for 30 seconds
+    staleTime: 4 * 1000, // Consider data fresh for 4 seconds
+    refetchInterval: 4 * 1000, // Auto-refetch every 4 seconds
     gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
     retry: (failureCount, error) => {
       // Don't retry validation errors (4xx)
