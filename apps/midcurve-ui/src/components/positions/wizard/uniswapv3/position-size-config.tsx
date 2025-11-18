@@ -50,6 +50,7 @@ export function PositionSizeConfig({
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isUserEditing, setIsUserEditing] = useState<boolean>(false);
   const [lastEditedField, setLastEditedField] = useState<"base" | "quote" | null>(null);
   const [lastSqrtPriceX96, setLastSqrtPriceX96] = useState<bigint | null>(null);
 
@@ -67,6 +68,9 @@ export function PositionSizeConfig({
   // Initialize input fields from liquidity prop when component first loads
   // OR when pool price changes (detected by sqrtPriceX96 change)
   useEffect(() => {
+    // Don't overwrite user input while they're actively editing
+    if (isUserEditing) return;
+
     const currentSqrtPriceX96 = pool.state.sqrtPriceX96;
     const shouldRecalculate =
       (!isInitialized && liquidity > 0n && currentSqrtPriceX96) ||
@@ -105,13 +109,16 @@ export function PositionSizeConfig({
         setQuoteAmountBigInt(quoteTokenAmount);
         setLastSqrtPriceX96(currentSqrtPriceX96);
         setIsInitialized(true);
+        setIsUserEditing(false); // Reset editing flag after initialization
       } catch (error) {
         console.error("Error initializing amounts from liquidity:", error);
         setIsInitialized(true); // Still mark as initialized to prevent retry
+        setIsUserEditing(false); // Reset editing flag even on error
       }
     } else if (!isInitialized && liquidity === 0n) {
       // If liquidity is 0, just mark as initialized with default values
       setIsInitialized(true);
+      setIsUserEditing(false); // Reset editing flag
     }
   }, [
     liquidity,
@@ -122,12 +129,14 @@ export function PositionSizeConfig({
     baseToken,
     quoteToken,
     isInitialized,
+    isUserEditing,
     lastSqrtPriceX96,
     positionCalculation.isQuoteToken0,
   ]);
 
   // Handle base token amount change
   const handleBaseAmountChange = useCallback((value: string, valueBigInt: bigint) => {
+    setIsUserEditing(true);
     setBaseAmount(value);
     setBaseAmountBigInt(valueBigInt);
     setLastEditedField("base");
@@ -135,6 +144,7 @@ export function PositionSizeConfig({
 
   // Handle quote token amount change
   const handleQuoteAmountChange = useCallback((value: string, valueBigInt: bigint) => {
+    setIsUserEditing(true);
     setQuoteAmount(value);
     setQuoteAmountBigInt(valueBigInt);
     setLastEditedField("quote");
