@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "dev:pretty": "next dev -p 3000 | pino-pretty",
-    "build": "cd ../../packages/midcurve-database && npm run db:migrate:deploy && cd ../../apps/midcurve-ui && next build",
+    "build": "dotenv -e .env -- sh -c 'cd ../../packages/midcurve-database && npm run db:migrate:deploy' && next build",
     "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

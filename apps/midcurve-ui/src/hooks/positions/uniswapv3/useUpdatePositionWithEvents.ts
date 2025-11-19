@@ -34,10 +34,13 @@ export function useUpdatePositionWithEvents(
       UpdatePositionWithEventsParams,
       unknown
     >,
-    'mutationFn' | 'onSuccess'
+    'mutationFn'
   >
 ) {
   const queryClient = useQueryClient();
+
+  // Extract user's onSuccess callback before spreading options
+  const userOnSuccess = options?.onSuccess;
 
   return useMutation({
     ...options,
@@ -57,7 +60,7 @@ export function useUpdatePositionWithEvents(
       );
     },
 
-    onSuccess: async (response, variables, context) => {
+    onSuccess: async (response, variables, context, meta) => {
       // apiClient already unwraps the response data field, so response IS the position data
       const updatedPosition = response;
 
@@ -74,8 +77,8 @@ export function useUpdatePositionWithEvents(
       });
 
       // Step 3: Call user's onSuccess handler if provided
-      if (options?.onSuccess) {
-        await options.onSuccess(updatedPosition, variables, context);
+      if (userOnSuccess) {
+        await userOnSuccess(updatedPosition, variables, context, meta);
       }
     },
   });
