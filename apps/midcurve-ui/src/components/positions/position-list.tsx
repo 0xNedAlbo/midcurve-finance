@@ -292,7 +292,7 @@ export function PositionList({ className }: PositionListProps) {
             {filteredPositions.map((position, index) => (
               <PositionCard
                 key={position.id}
-                position={position}
+                initialData={position}
                 listIndex={index}
               />
             ))}

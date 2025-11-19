@@ -3,6 +3,21 @@
  *
  * Platform-specific query hook for fetching detailed position data.
  * Returns fresh on-chain state merged with database records.
+ *
+ * Supports `initialData` option to show placeholder data (from list query)
+ * immediately while fresh data loads in the background.
+ *
+ * @param chainId - Chain ID where position exists
+ * @param nftId - NFT ID of the position
+ * @param options - React Query options, including initialData for placeholder
+ *
+ * @example
+ * ```tsx
+ * // With initial data from list query (no loading skeleton)
+ * const { data: position } = useUniswapV3Position(1, '12345', {
+ *   initialData: listPositionData,
+ * });
+ * ```
  */
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';

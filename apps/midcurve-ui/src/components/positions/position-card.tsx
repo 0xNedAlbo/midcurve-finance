@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 import type { ListPositionData } from "@midcurve/api-shared";
@@ -17,16 +17,33 @@ import { ReloadHistoryModal } from "./reload-history-modal";
 import { useIsDeletingPosition } from "@/hooks/positions/useDeletePosition";
 import { useIsReloadingPositionHistory } from "@/hooks/positions/useReloadPositionHistory";
 import { useRefreshPosition } from "@/hooks/positions/useRefreshPosition";
+import { usePositionDetail } from "@/hooks/positions/usePositionDetail";
 import { getChainSlugByChainId } from "@/config/chains";
 
 interface PositionCardProps {
-  position: ListPositionData;
-  listIndex: number;
+  initialData: ListPositionData;
+  listIndex: number; // Reserved for future use (staggered loading, etc.)
 }
 
-export function PositionCard({ position, listIndex }: PositionCardProps) {
+export function PositionCard({ initialData, listIndex: _listIndex }: PositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
+
+  // Extract protocol-specific identifiers for detail query
+  const protocol = initialData.protocol;
+  const config =
+    protocol === "uniswapv3"
+      ? (initialData.config as { chainId: number; nftId: number })
+      : undefined;
+
+  // Fetch fresh position data from detail endpoint
+  // Shows initialData immediately, then updates with fresh data when loaded
+  const { data: position = initialData } = usePositionDetail({
+    protocol,
+    chainId: config?.chainId,
+    nftId: config?.nftId?.toString(),
+    initialData,
+  });
 
   // Check if this specific position is being deleted
   const isDeleting = useIsDeletingPosition(position.id);
@@ -49,7 +66,7 @@ export function PositionCard({ position, listIndex }: PositionCardProps) {
   // Calculate in-range status (protocol-agnostic dispatcher)
   const isInRange = calculateIsInRange(position);
 
-  // Real refresh handler - extracts protocol-specific params
+  // Manual refresh handler - triggers mutation to force immediate refresh
   const handleRefresh = () => {
     switch (position.protocol) {
       case "uniswapv3": {
@@ -70,26 +87,8 @@ export function PositionCard({ position, listIndex }: PositionCardProps) {
     }
   };
 
-  // Auto-refresh timer: Load once on mount + every 60s
-  useEffect(() => {
-    // Initial load with calculated delay based on list position (listIndex * 2 seconds)
-    const initialDelay = listIndex * 2000;
-    const initialTimer = setTimeout(() => {
-      handleRefresh();
-    }, initialDelay);
-
-    // Recurring refresh every 60s (no additional delay)
-    const recurringTimer = setInterval(() => {
-      handleRefresh();
-    }, 60000);
-
-    // Cleanup on unmount
-    return () => {
-      clearTimeout(initialTimer);
-      clearInterval(recurringTimer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position.id]); // Only re-run if position.id changes
+  // Note: Auto-refresh is handled by usePositionDetail hook (refetchInterval: 60s)
+  // No need for manual timer here
 
   return (
     <div className="bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-sm border border-slate-700/50 rounded-xl p-3 md:p-4 lg:p-6 hover:border-slate-600/50 transition-all duration-200">
