@@ -13,7 +13,9 @@ import { UniswapV3Actions } from "./protocol/uniswapv3/uniswapv3-actions";
 import { UniswapV3MiniPnLCurve } from "./protocol/uniswapv3/uniswapv3-mini-pnl-curve";
 import { PositionActionsMenu } from "./position-actions-menu";
 import { DeletePositionModal } from "./delete-position-modal";
+import { ReloadHistoryModal } from "./reload-history-modal";
 import { useIsDeletingPosition } from "@/hooks/positions/useDeletePosition";
+import { useIsReloadingPositionHistory } from "@/hooks/positions/useReloadPositionHistory";
 import { useRefreshPosition } from "@/hooks/positions/useRefreshPosition";
 import { getChainSlugByChainId } from "@/config/chains";
 
@@ -24,9 +26,13 @@ interface PositionCardProps {
 
 export function PositionCard({ position, listIndex }: PositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
 
   // Check if this specific position is being deleted
   const isDeleting = useIsDeletingPosition(position.id);
+
+  // Check if this specific position's history is being reloaded
+  const isReloadingHistory = useIsReloadingPositionHistory(position.id);
 
   // Refresh mutation
   const refreshMutation = useRefreshPosition();
@@ -162,8 +168,10 @@ export function PositionCard({ position, listIndex }: PositionCardProps) {
             />
           </button>
           <PositionActionsMenu
+            onReloadHistory={() => setShowReloadHistoryModal(true)}
             onDelete={() => setShowDeleteModal(true)}
             isDeleting={isDeleting}
+            isReloadingHistory={isReloadingHistory}
           />
         </div>
       </div>
@@ -173,6 +181,16 @@ export function PositionCard({ position, listIndex }: PositionCardProps) {
         <UniswapV3Actions position={position} isInRange={isInRange} />
       )}
       {/* Future: Orca, other protocols */}
+
+      {/* Reload History Modal */}
+      <ReloadHistoryModal
+        isOpen={showReloadHistoryModal}
+        onClose={() => setShowReloadHistoryModal(false)}
+        position={position}
+        onReloadSuccess={() => {
+          // Modal closes automatically after cache invalidation completes
+        }}
+      />
 
       {/* Delete Position Modal */}
       <DeletePositionModal

@@ -49,6 +49,42 @@ export function getDeleteEndpoint(position: ListPositionData): string {
 }
 
 /**
+ * Get reload-history endpoint for a position
+ *
+ * Routes to protocol-specific reload-history endpoint based on position protocol.
+ *
+ * @param position - Position data (protocol-agnostic type)
+ * @returns API endpoint URL for reloading the position's history
+ * @throws Error if protocol doesn't support history reload
+ *
+ * @example
+ * ```typescript
+ * // UniswapV3 position
+ * getReloadHistoryEndpoint(position)
+ * // => "/api/v1/positions/uniswapv3/1/123456/reload-history"
+ *
+ * // Orca position (future)
+ * getReloadHistoryEndpoint(position)
+ * // => "/api/v1/positions/orca/abc123def456/reload-history"
+ * ```
+ */
+export function getReloadHistoryEndpoint(position: ListPositionData): string {
+  switch (position.protocol) {
+    case 'uniswapv3': {
+      const config = position.config as { chainId: number; nftId: number };
+      return `/api/v1/positions/uniswapv3/${config.chainId}/${config.nftId}/reload-history`;
+    }
+    // Future: Add Orca, Raydium, etc.
+    // case 'orca': {
+    //   const config = position.config as { positionId: string };
+    //   return `/api/v1/positions/orca/${config.positionId}/reload-history`;
+    // }
+    default:
+      throw new Error(`Reload history not supported for protocol: ${position.protocol}`);
+  }
+}
+
+/**
  * Get human-readable position identifier
  *
  * Formats position identifier for display based on protocol conventions.
