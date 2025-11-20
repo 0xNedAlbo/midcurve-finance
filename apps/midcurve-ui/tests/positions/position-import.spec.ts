@@ -8,9 +8,9 @@
  * - Success feedback
  */
 
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 import { setupAuthenticatedSession } from '../fixtures/auth';
-import { mockApiEndpoint, waitForPageReady, fillFormField } from '../fixtures/test-helpers';
+import { mockApiEndpoint, waitForPageReady } from '../fixtures/test-helpers';
 import { MOCK_POSITION_LIST, createMockApiResponse } from '../fixtures/test-data';
 
 const TEST_IMPORT_ADDRESS = '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0';

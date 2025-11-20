@@ -8,7 +8,7 @@
  * - Filtering and sorting
  */
 
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 import { setupAuthenticatedSession } from '../fixtures/auth';
 import { mockApiEndpoint, waitForPageReady } from '../fixtures/test-helpers';
 import { MOCK_POSITION_LIST, createMockApiResponse } from '../fixtures/test-data';

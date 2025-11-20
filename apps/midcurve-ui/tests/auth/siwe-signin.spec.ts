@@ -8,7 +8,7 @@
 
 import { test, expect } from '@playwright/test';
 import { mockApiEndpoint, waitForPageReady } from '../fixtures/test-helpers';
-import { TEST_WALLET_ADDRESS, TEST_SESSION } from '../fixtures/auth';
+import { TEST_SESSION } from '../fixtures/auth';
 
 test.describe('SIWE Authentication Flow', () => {
   test.beforeEach(async ({ page }) => {
@@ -176,10 +176,7 @@ test.describe('SIWE Nonce Generation', () => {
     });
 
     await test.step('Setup nonce endpoint mock', async () => {
-      let nonceCalled = false;
-
       await page.route('**/api/auth/nonce', async (route) => {
-        nonceCalled = true;
         await route.fulfill({
           status: 200,
           contentType: 'application/json',

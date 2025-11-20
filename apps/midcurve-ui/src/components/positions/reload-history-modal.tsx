@@ -108,11 +108,11 @@ export function ReloadHistoryModal({
             {/* Warning message */}
             <div className="space-y-2">
               <p className="text-slate-300 text-sm leading-relaxed">
-                This will completely rebuild the position's event history from the blockchain.
+                This will completely rebuild the position&apos;s event history from the blockchain.
               </p>
               <p className="text-slate-400 text-xs leading-relaxed">
                 All ledger events, APR periods, and cached data will be refetched.
-                This process may take 30-60 seconds depending on the position's age.
+                This process may take 30-60 seconds depending on the position&apos;s age.
               </p>
             </div>
 

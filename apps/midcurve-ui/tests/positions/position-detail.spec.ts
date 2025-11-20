@@ -8,7 +8,7 @@
  * - Token amounts and prices
  */
 
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 import { setupAuthenticatedSession } from '../fixtures/auth';
 import { mockApiEndpoint, waitForPageReady } from '../fixtures/test-helpers';
 import { MOCK_POSITION_ENRICHED, createMockApiResponse } from '../fixtures/test-data';
