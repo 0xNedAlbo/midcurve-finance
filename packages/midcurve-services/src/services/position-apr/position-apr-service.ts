@@ -129,9 +129,14 @@ export class PositionAprService {
       // 4. Calculate APR for each period and save
       const savedPeriods: PositionAprPeriod[] = [];
 
-      for (const periodEvents of periods) {
+      for (const period of periods) {
         try {
-          const periodInput = this.buildAprPeriodFromEvents(positionId, periodEvents);
+          const periodInput = this.buildAprPeriodFromEvents(
+            positionId,
+            period.events,
+            period.periodStart,
+            period.periodEnd
+          );
 
           log.dbOperation(this.logger, 'create', 'PositionAprPeriod', {
             positionId,
@@ -489,38 +494,63 @@ export class PositionAprService {
   /**
    * Divide ledger events into APR periods
    *
-   * Periods are bounded by COLLECT events:
-   * - Period 1: [first event, first COLLECT]
-   * - Period 2: [first COLLECT, second COLLECT]
-   * - Period N: [last COLLECT, last event]
+   * Periods are time ranges BETWEEN COLLECT events:
+   * - Period 1: From position start → first COLLECT
+   * - Period 2: From first COLLECT → second COLLECT
+   * - Period N: From (N-1)th COLLECT → Nth COLLECT
+   *
+   * The "open period" (last COLLECT → present) is IGNORED, as no fees have been collected yet.
+   *
+   * Each period tracks:
+   * - startTimestamp: End time of previous COLLECT (or position opening)
+   * - endTimestamp: This COLLECT's timestamp
+   * - All events that occurred between these times
+   * - Fees collected AT the end (from the COLLECT event)
    *
    * @param events - Ledger events sorted chronologically (ascending)
-   * @returns Array of event groups, each representing one period
+   * @returns Array of period data with start/end times and events
    */
-  private divideEventsIntoPeriods(events: AnyLedgerEvent[]): AnyLedgerEvent[][] {
-    const periods: AnyLedgerEvent[][] = [];
-    let currentPeriod: AnyLedgerEvent[] = [];
+  private divideEventsIntoPeriods(events: AnyLedgerEvent[]): Array<{
+    periodStart: Date;
+    periodEnd: Date;
+    events: AnyLedgerEvent[];
+  }> {
+    const periods: Array<{ periodStart: Date; periodEnd: Date; events: AnyLedgerEvent[] }> = [];
 
-    for (const event of events) {
-      currentPeriod.push(event);
+    // Find all COLLECT events
+    const collectEvents = events.filter(e => e.eventType === 'COLLECT');
 
-      // COLLECT event ends the period
-      if (event.eventType === 'COLLECT') {
-        periods.push(currentPeriod);
-        currentPeriod = [event]; // Next period starts with this COLLECT event
-      }
+    if (collectEvents.length === 0) {
+      // No COLLECT events means no closed periods (ignore open period)
+      return [];
     }
 
-    // Add remaining events as the last period (if any)
-    // This handles cases where position is still active (no final COLLECT)
-    if (currentPeriod.length > 0) {
-      // Only add if it's not just a duplicate COLLECT event
-      const lastPeriodEndedWithCollect =
-        periods.length > 0 && periods[periods.length - 1]![periods[periods.length - 1]!.length - 1]!.eventType === 'COLLECT';
+    // Create periods between COLLECTS
+    for (let i = 0; i < collectEvents.length; i++) {
+      const collectEvent = collectEvents[i]!;
+      const prevCollect = i > 0 ? collectEvents[i - 1] : null;
 
-      if (!lastPeriodEndedWithCollect || currentPeriod.length > 1) {
-        periods.push(currentPeriod);
+      // Period start: previous COLLECT's timestamp (or first event for first period)
+      const periodStart = prevCollect ? prevCollect.timestamp : events[0]!.timestamp;
+
+      // Period end: this COLLECT's timestamp
+      const periodEnd = collectEvent.timestamp;
+
+      // Gather all events in this time range (including the ending COLLECT)
+      const periodEvents = events.filter(
+        e => e.timestamp >= periodStart && e.timestamp <= periodEnd
+      );
+
+      // Skip the first event if it's the previous COLLECT (don't double-count)
+      if (prevCollect && periodEvents[0]?.id === prevCollect.id) {
+        periodEvents.shift();
       }
+
+      periods.push({
+        periodStart,
+        periodEnd,
+        events: periodEvents,
+      });
     }
 
     return periods;
@@ -533,23 +563,27 @@ export class PositionAprService {
    *
    * @param positionId - Position database ID
    * @param events - Events in this period (chronological order)
+   * @param periodStart - Actual start of period (from previous COLLECT or position open)
+   * @param periodEnd - Actual end of period (this COLLECT's timestamp)
    * @returns APR period input ready for database insertion
    */
   private buildAprPeriodFromEvents(
     positionId: string,
-    events: AnyLedgerEvent[]
+    events: AnyLedgerEvent[],
+    periodStart: Date,
+    periodEnd: Date
   ): CreateAprPeriodInput {
     if (events.length === 0) {
       throw new Error('Cannot build APR period from empty event array');
     }
 
-    // Period boundaries
+    // Period boundaries (for event IDs)
     const startEvent = events[0]!;
     const endEvent = events[events.length - 1]!;
 
-    // Time range
-    const startTimestamp = startEvent.timestamp;
-    const endTimestamp = endEvent.timestamp;
+    // Time range (use explicit period boundaries, not event timestamps)
+    const startTimestamp = periodStart;
+    const endTimestamp = periodEnd;
 
     // Time-weighted average cost basis across all events in period
     // This accounts for how long each cost basis was active, providing

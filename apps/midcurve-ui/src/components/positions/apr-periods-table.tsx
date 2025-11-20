@@ -55,7 +55,7 @@ export function AprPeriodsTable({
             </thead>
             <tbody>
               {periods.map((period) => {
-                const startDate = new Date(period.startTimestamp);
+                const endDate = new Date(period.endTimestamp);
                 const durationDays = period.durationSeconds / 86400;
                 const aprPercentage = period.aprBps / 100; // Convert basis points to percentage
 
@@ -66,8 +66,8 @@ export function AprPeriodsTable({
                   >
                     <td className="py-3 px-2">
                       <div className="text-white">
-                        {startDate.toLocaleDateString()}{" "}
-                        {startDate.toLocaleTimeString()}
+                        {endDate.toLocaleDateString()}{" "}
+                        {endDate.toLocaleTimeString()}
                       </div>
                     </td>
                     <td className="py-3 px-2 text-right text-slate-300">
@@ -99,6 +99,27 @@ export function AprPeriodsTable({
                   </tr>
                 );
               })}
+              {/* Position opened row - shows start of first period (last element, pre-sorted by API) */}
+              {periods.length > 0 && (() => {
+                const openedDate = new Date(periods[periods.length - 1].startTimestamp);
+
+                return (
+                  <tr className="border-t border-slate-700/50">
+                    <td className="py-3 px-2">
+                      <div className="text-slate-400 italic">
+                        {openedDate.toLocaleDateString()}{" "}
+                        {openedDate.toLocaleTimeString()}
+                      </div>
+                    </td>
+                    <td className="py-3 px-2 text-right text-slate-400 italic">
+                      Position opened
+                    </td>
+                    <td className="py-3 px-2 text-right text-slate-400">-</td>
+                    <td className="py-3 px-2 text-right text-slate-400">-</td>
+                    <td className="py-3 px-2 text-right text-slate-400">-</td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
