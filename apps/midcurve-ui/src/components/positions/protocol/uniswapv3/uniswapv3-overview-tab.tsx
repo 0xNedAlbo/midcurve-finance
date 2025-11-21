@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { calculatePositionStates, calculateBreakEvenPrice } from "@/lib/position-states";
@@ -13,16 +14,22 @@ import {
   ChevronDown,
   ChevronUp,
   Minus,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
 import { UniswapV3RangeStatusLine } from "./uniswapv3-range-status-line";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
+import { UniswapV3PositionSimulator } from "./uniswapv3-position-simulator";
 
 interface UniswapV3OverviewTabProps {
   position: GetUniswapV3PositionResponse;
 }
 
 export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
+  // Simulation mode toggle
+  const [isSimulating, setIsSimulating] = useState(false);
+
   // Get quote token info for formatting
   const quoteToken = position.isToken0Quote
     ? position.pool.token0
@@ -215,8 +222,33 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
 
       {/* Position States Section */}
       <div className="space-y-4">
-        <h3 className="text-xl font-semibold text-white mb-6">Position States</h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xl font-semibold text-white">Position States</h3>
+          <button
+            onClick={() => setIsSimulating(!isSimulating)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              isSimulating
+                ? "bg-purple-500/20 text-purple-400 border border-purple-500/50 hover:bg-purple-500/30"
+                : "bg-slate-700/50 text-slate-300 border border-slate-600/50 hover:bg-slate-700"
+            }`}
+          >
+            {isSimulating ? (
+              <>
+                <X className="w-4 h-4" />
+                Exit Simulation
+              </>
+            ) : (
+              <>
+                <SlidersHorizontal className="w-4 h-4" />
+                Simulation
+              </>
+            )}
+          </button>
+        </div>
 
+        {isSimulating ? (
+          <UniswapV3PositionSimulator position={position} />
+        ) : (
         <div className="space-y-6">
           {/* Current Position State */}
           <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
@@ -536,6 +568,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
