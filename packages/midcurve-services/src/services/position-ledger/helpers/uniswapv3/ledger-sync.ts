@@ -148,13 +148,24 @@ export async function syncLedgerEvents(
         'Force full resync: using NFPM deployment block'
       );
     } else {
-      // Incremental sync: start from last event block (or NFPM deployment if no events)
+      // Incremental sync: start from last event block + 1 (to avoid deleting the anchor event)
+      // We want to keep the last event so we can chain new events from it
       const lastEvent = await getLastLedgerEvent(positionId, prisma);
       const lastEventBlock = lastEvent?.config.blockNumber ?? null;
       const nfpmBlock = getNfpmDeploymentBlock(chainId);
 
-      // MIN(lastEventBlock || nfpmBlock, finalizedBlock)
-      const startBlock = lastEventBlock !== null ? lastEventBlock : nfpmBlock;
+      // If we have a last event, start from the NEXT block to preserve the chain anchor
+      // If no events exist, start from NFPM deployment block
+      let startBlock: bigint;
+      if (lastEventBlock !== null) {
+        // Start from block AFTER last event to preserve the event chain
+        startBlock = lastEventBlock + 1n;
+      } else {
+        // No events yet - start from NFPM deployment
+        startBlock = nfpmBlock;
+      }
+
+      // Don't go beyond finalized block
       fromBlock = startBlock < finalizedBlock ? startBlock : finalizedBlock;
 
       logger.debug(
@@ -163,9 +174,10 @@ export async function syncLedgerEvents(
           lastEventBlock: lastEventBlock?.toString() ?? 'null',
           nfpmBlock: nfpmBlock.toString(),
           finalizedBlock: finalizedBlock.toString(),
+          startBlock: startBlock.toString(),
           fromBlock: fromBlock.toString(),
         },
-        'Determined fromBlock for incremental sync'
+        'Determined fromBlock for incremental sync (preserving last event)'
       );
     }
 
@@ -473,8 +485,20 @@ async function processAndSaveEvents(
   const poolMetadata = await fetchPoolWithTokens(poolId, prisma, logger);
 
   // 3. Get last existing event for state initialization
+  // IMPORTANT: This must be called AFTER deleteEventsFromBlock() to ensure
+  // we reference an event that still exists in the database
   const existingEvents = await ledgerService.findAllItems(positionId);
   const lastEvent = existingEvents[0]; // Newest first (descending order)
+
+  logger.debug(
+    {
+      positionId,
+      lastEventId: lastEvent?.id ?? null,
+      lastEventBlock: lastEvent?.config.blockNumber ?? null,
+      lastEventTimestamp: lastEvent?.timestamp ?? null,
+    },
+    'Retrieved last existing event after deletion'
+  );
 
   // 4. Build initial state from last event
   let previousState = buildInitialState(lastEvent);

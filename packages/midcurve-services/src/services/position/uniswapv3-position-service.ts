@@ -1288,6 +1288,67 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         "Ledger events synced successfully after missing events detection"
                     );
 
+                    // CRITICAL: Re-read on-chain state after processing missing events
+                    // The COLLECT event may have changed feeGrowthInside values, so we need
+                    // fresh on-chain data to calculate unclaimed fees correctly
+                    this.logger.debug(
+                        { id, chainId, nftId },
+                        "Re-reading on-chain position state after missing events processing"
+                    );
+
+                    const [positionDataAfterSync, ownerAddressAfterSync] = await Promise.all([
+                        client.readContract({
+                            address: positionManagerAddress,
+                            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                            functionName: "positions",
+                            args: [BigInt(nftId)],
+                        }) as Promise<
+                            readonly [
+                                bigint, // nonce
+                                Address, // operator
+                                Address, // token0
+                                Address, // token1
+                                number, // fee
+                                number, // tickLower
+                                number, // tickUpper
+                                bigint, // liquidity
+                                bigint, // feeGrowthInside0LastX128
+                                bigint, // feeGrowthInside1LastX128
+                                bigint, // tokensOwed0
+                                bigint // tokensOwed1
+                            ]
+                        >,
+                        client.readContract({
+                            address: positionManagerAddress,
+                            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                            functionName: "ownerOf",
+                            args: [BigInt(nftId)],
+                        }) as Promise<Address>,
+                    ]);
+
+                    // Update updatedState with fresh on-chain values
+                    updatedState = {
+                        ownerAddress: normalizeAddress(ownerAddressAfterSync),
+                        liquidity: positionDataAfterSync[7],
+                        feeGrowthInside0LastX128: positionDataAfterSync[8],
+                        feeGrowthInside1LastX128: positionDataAfterSync[9],
+                        tokensOwed0: positionDataAfterSync[10],
+                        tokensOwed1: positionDataAfterSync[11],
+                        unclaimedFees0: 0n, // Will be calculated later
+                        unclaimedFees1: 0n,
+                    };
+
+                    this.logger.debug(
+                        {
+                            id,
+                            feeGrowthInside0LastX128: updatedState.feeGrowthInside0LastX128.toString(),
+                            feeGrowthInside1LastX128: updatedState.feeGrowthInside1LastX128.toString(),
+                            tokensOwed0: updatedState.tokensOwed0.toString(),
+                            tokensOwed1: updatedState.tokensOwed1.toString(),
+                        },
+                        "On-chain state refreshed after missing events processing"
+                    );
+
                     // Re-fetch position after sync to get updated state
                     // syncLedgerEvents() processes missing events and updates position state
                     // We need fresh data before calculating values
