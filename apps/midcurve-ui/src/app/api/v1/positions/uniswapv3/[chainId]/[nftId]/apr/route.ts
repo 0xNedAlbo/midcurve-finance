@@ -143,7 +143,8 @@ export async function GET(
       const aprSummary = await getPositionAprService().calculateAprSummary(
         dbPosition.id,
         BigInt(dbPosition.currentCostBasis),
-        BigInt(dbPosition.unClaimedFees)
+        BigInt(dbPosition.unClaimedFees),
+        dbPosition.positionOpenedAt
       );
 
       apiLogger.info(
