@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 import type { ListPositionData } from "@midcurve/api-shared";
@@ -22,10 +22,10 @@ import { getChainSlugByChainId } from "@/config/chains";
 
 interface PositionCardProps {
   initialData: ListPositionData;
-  listIndex: number; // Reserved for future use (staggered loading, etc.)
+  listIndex: number; // Used for staggered initial refresh
 }
 
-export function PositionCard({ initialData, listIndex: _listIndex }: PositionCardProps) {
+export function PositionCard({ initialData, listIndex }: PositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
 
@@ -38,12 +38,25 @@ export function PositionCard({ initialData, listIndex: _listIndex }: PositionCar
 
   // Fetch fresh position data from detail endpoint
   // Shows initialData immediately, then updates with fresh data when loaded
-  const { data: position = initialData } = usePositionDetail({
+  const { data: position = initialData, refetch } = usePositionDetail({
     protocol,
     chainId: config?.chainId,
     nftId: config?.nftId?.toString(),
     initialData,
   });
+
+  // Staggered initial refresh on mount
+  // Each card refreshes with a delay of listIndex * 2 seconds
+  // This prevents API rate limiting and spreads server load
+  useEffect(() => {
+    const delay = listIndex * 2000; // 2 seconds per position index
+    const timeoutId = setTimeout(() => {
+      refetch();
+    }, delay);
+
+    // Cleanup: clear timeout if component unmounts before refresh
+    return () => clearTimeout(timeoutId);
+  }, [listIndex, refetch]);
 
   // Check if this specific position is being deleted
   const isDeleting = useIsDeletingPosition(position.id);
