@@ -330,6 +330,7 @@ export class PositionAprService {
    * @param positionId - Position database ID
    * @param currentCostBasis - Current position cost basis in quote token units
    * @param unclaimedFees - Current unclaimed fees in quote token units
+   * @param positionOpenedAt - Timestamp when position was opened
    * @returns APR summary with realized, unrealized, and total metrics
    * @throws Error if calculation fails
    *
@@ -338,7 +339,8 @@ export class PositionAprService {
    * const summary = await aprService.calculateAprSummary(
    *   position.id,
    *   position.currentCostBasis,
-   *   position.unClaimedFees
+   *   position.unClaimedFees,
+   *   position.positionOpenedAt
    * );
    * console.log(`Total APR: ${summary.totalApr.toFixed(2)}%`);
    * ```
@@ -346,7 +348,8 @@ export class PositionAprService {
   async calculateAprSummary(
     positionId: string,
     currentCostBasis: bigint,
-    unclaimedFees: bigint
+    unclaimedFees: bigint,
+    positionOpenedAt: Date
   ): Promise<AprSummary> {
     log.methodEntry(this.logger, 'calculateAprSummary', { positionId });
 
@@ -354,24 +357,55 @@ export class PositionAprService {
       // Fetch all APR periods (descending by start time)
       const periods = await this.getAprPeriods(positionId);
 
-      // Handle case: No periods yet
+      // Handle case: No periods yet (no COLLECT events)
+      // Calculate unrealized metrics based on time since position opened
       if (periods.length === 0) {
-        this.logger.debug({ positionId }, 'No APR periods found, returning zero summary');
-        const zeroSummary: AprSummary = {
+        this.logger.debug({ positionId }, 'No APR periods found, calculating from position opening');
+
+        // Calculate days since position opened
+        const unrealizedActiveDays = Math.max(
+          0,
+          (Date.now() - positionOpenedAt.getTime()) / (1000 * 86400)
+        );
+
+        // Calculate unrealized APR from unclaimed fees
+        const unrealizedApr =
+          currentCostBasis > 0n && unrealizedActiveDays > 0
+            ? (Number(unclaimedFees) / Number(currentCostBasis)) *
+              (365 / unrealizedActiveDays) *
+              100
+            : 0;
+
+        // Check if below minimum threshold (5 minutes = 0.00347 days)
+        const MIN_THRESHOLD_DAYS = 5 / (60 * 24);
+        const belowThreshold = unrealizedActiveDays < MIN_THRESHOLD_DAYS;
+
+        const summary: AprSummary = {
           realizedFees: 0n,
           realizedTWCostBasis: 0n,
           realizedActiveDays: 0,
           realizedApr: 0,
           unrealizedFees: unclaimedFees,
           unrealizedCostBasis: currentCostBasis,
-          unrealizedActiveDays: 0,
-          unrealizedApr: 0,
-          totalApr: 0,
-          totalActiveDays: 0,
-          belowThreshold: true,
+          unrealizedActiveDays: Math.floor(unrealizedActiveDays * 10) / 10,
+          unrealizedApr,
+          totalApr: unrealizedApr,  // Total APR = unrealized APR when no periods
+          totalActiveDays: Math.floor(unrealizedActiveDays * 10) / 10,
+          belowThreshold,
         };
-        log.methodExit(this.logger, 'calculateAprSummary', { totalApr: 0 });
-        return zeroSummary;
+
+        this.logger.debug(
+          {
+            positionId,
+            unrealizedActiveDays,
+            unrealizedApr: unrealizedApr.toFixed(2),
+            belowThreshold,
+          },
+          'Calculated APR from position opening (no COLLECT events)'
+        );
+
+        log.methodExit(this.logger, 'calculateAprSummary', { totalApr: summary.totalApr });
+        return summary;
       }
 
       // ========================================================================
@@ -421,12 +455,13 @@ export class PositionAprService {
       // UNREALIZED METRICS (current open period since last COLLECT)
       // ========================================================================
 
-      // Days since last period ended (or 0 if no periods)
-      const lastPeriodEnd =
-        periods.length > 0 ? new Date(periods[0]!.endTimestamp) : null;
-      const unrealizedActiveDays = lastPeriodEnd
-        ? Math.max(0, (Date.now() - lastPeriodEnd.getTime()) / (1000 * 86400))
-        : 0;
+      // Days since last period ended
+      // Note: We know periods.length > 0 here (handled above), so lastPeriodEnd is always set
+      const lastPeriodEnd = new Date(periods[0]!.endTimestamp);
+      const unrealizedActiveDays = Math.max(
+        0,
+        (Date.now() - lastPeriodEnd.getTime()) / (1000 * 86400)
+      );
 
       // Calculate unrealized APR
       // Formula: APR% = (fees / costBasis) * (365 / days) * 100

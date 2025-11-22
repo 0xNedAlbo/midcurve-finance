@@ -902,20 +902,24 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     this.calculatePriceRange(createdPosition, pool);
 
                 // Update position with calculated fields
-                await this.updatePositionCommonFields(createdPosition.id, {
-                    currentValue,
-                    currentCostBasis: ledgerSummary.costBasis,
-                    realizedPnl: ledgerSummary.realizedPnl,
-                    unrealizedPnl,
-                    collectedFees: ledgerSummary.collectedFees,
-                    unClaimedFees: fees.unclaimedFeesValue,
-                    lastFeesCollectedAt:
-                        ledgerSummary.lastFeesCollectedAt.getTime() === 0
-                            ? createdPosition.positionOpenedAt
-                            : ledgerSummary.lastFeesCollectedAt,
-                    priceRangeLower,
-                    priceRangeUpper,
-                });
+                await this.updatePositionCommonFields(
+                    createdPosition.id,
+                    {
+                        currentValue,
+                        currentCostBasis: ledgerSummary.costBasis,
+                        realizedPnl: ledgerSummary.realizedPnl,
+                        unrealizedPnl,
+                        collectedFees: ledgerSummary.collectedFees,
+                        unClaimedFees: fees.unclaimedFeesValue,
+                        lastFeesCollectedAt:
+                            ledgerSummary.lastFeesCollectedAt.getTime() === 0
+                                ? createdPosition.positionOpenedAt
+                                : ledgerSummary.lastFeesCollectedAt,
+                        priceRangeLower,
+                        priceRangeUpper,
+                    },
+                    createdPosition.positionOpenedAt
+                );
 
                 this.logger.info(
                     {
@@ -1603,20 +1607,24 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         this.calculatePriceRange(syncedPosition, pool);
 
                     // Update position with calculated fields
-                    await this.updatePositionCommonFields(id, {
-                        currentValue,
-                        currentCostBasis: ledgerSummary.costBasis,
-                        realizedPnl: ledgerSummary.realizedPnl,
-                        unrealizedPnl,
-                        collectedFees: ledgerSummary.collectedFees,
-                        unClaimedFees: fees.unclaimedFeesValue,
-                        lastFeesCollectedAt:
-                            ledgerSummary.lastFeesCollectedAt.getTime() === 0
-                                ? syncedPosition.positionOpenedAt
-                                : ledgerSummary.lastFeesCollectedAt,
-                        priceRangeLower,
-                        priceRangeUpper,
-                    });
+                    await this.updatePositionCommonFields(
+                        id,
+                        {
+                            currentValue,
+                            currentCostBasis: ledgerSummary.costBasis,
+                            realizedPnl: ledgerSummary.realizedPnl,
+                            unrealizedPnl,
+                            collectedFees: ledgerSummary.collectedFees,
+                            unClaimedFees: fees.unclaimedFeesValue,
+                            lastFeesCollectedAt:
+                                ledgerSummary.lastFeesCollectedAt.getTime() === 0
+                                    ? syncedPosition.positionOpenedAt
+                                    : ledgerSummary.lastFeesCollectedAt,
+                            priceRangeLower,
+                            priceRangeUpper,
+                        },
+                        syncedPosition.positionOpenedAt
+                    );
 
                     this.logger.info(
                         {
@@ -1946,20 +1954,24 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 this.calculatePriceRange(refreshedPosition, pool);
 
             // Update position with recalculated fields
-            await this.updatePositionCommonFields(id, {
-                currentValue,
-                currentCostBasis: ledgerSummary.costBasis,
-                realizedPnl: ledgerSummary.realizedPnl,
-                unrealizedPnl,
-                collectedFees: ledgerSummary.collectedFees,
-                unClaimedFees: fees.unclaimedFeesValue,
-                lastFeesCollectedAt:
-                    ledgerSummary.lastFeesCollectedAt.getTime() === 0
-                        ? refreshedPosition.positionOpenedAt
-                        : ledgerSummary.lastFeesCollectedAt,
-                priceRangeLower,
-                priceRangeUpper,
-            });
+            await this.updatePositionCommonFields(
+                id,
+                {
+                    currentValue,
+                    currentCostBasis: ledgerSummary.costBasis,
+                    realizedPnl: ledgerSummary.realizedPnl,
+                    unrealizedPnl,
+                    collectedFees: ledgerSummary.collectedFees,
+                    unClaimedFees: fees.unclaimedFeesValue,
+                    lastFeesCollectedAt:
+                        ledgerSummary.lastFeesCollectedAt.getTime() === 0
+                            ? refreshedPosition.positionOpenedAt
+                            : ledgerSummary.lastFeesCollectedAt,
+                    priceRangeLower,
+                    priceRangeUpper,
+                },
+                refreshedPosition.positionOpenedAt
+            );
 
             this.logger.info(
                 {
@@ -3273,6 +3285,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
      *
      * @param positionId - Position database ID
      * @param fields - Fields to update
+     * @param positionOpenedAt - Timestamp when position was opened (for APR calculation)
      */
     private async updatePositionCommonFields(
         positionId: string,
@@ -3286,7 +3299,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             lastFeesCollectedAt: Date;
             priceRangeLower: bigint;
             priceRangeUpper: bigint;
-        }
+        },
+        positionOpenedAt: Date
     ): Promise<void> {
         log.dbOperation(this.logger, "update", "Position", {
             id: positionId,
@@ -3308,7 +3322,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
         const aprSummary = await this._aprService.calculateAprSummary(
             positionId,
             fields.currentCostBasis,
-            fields.unClaimedFees
+            fields.unClaimedFees,
+            positionOpenedAt
         );
 
         // Determine totalApr value (null if below threshold)

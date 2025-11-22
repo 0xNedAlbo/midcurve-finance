@@ -366,4 +366,110 @@ describe('PositionAprService - Period Attribution Bug Fix', () => {
       expect(aprPeriod.aprBps).toBeCloseTo(3650, -1);
     });
   });
+
+  describe('calculateAprSummary - Bug Fix for Positions Without COLLECT Events', () => {
+    it('should calculate APR for position >5min old with unclaimed fees but no COLLECT events', async () => {
+      const positionId = 'test-position-1';
+
+      // Position opened 1 hour ago
+      const positionOpenedAt = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
+
+      // Current cost basis: 10,000 USDC
+      const currentCostBasis = 10000_000000n;
+
+      // Unclaimed fees: 10 USDC (accumulated over 1 hour)
+      const unclaimedFees = 10_000000n;
+
+      // Mock: No APR periods (no COLLECT events yet)
+      mockPrisma.positionAprPeriod.findMany.mockResolvedValue([]);
+
+      // Calculate APR summary
+      const summary = await aprService.calculateAprSummary(
+        positionId,
+        currentCostBasis,
+        unclaimedFees,
+        positionOpenedAt
+      );
+
+      // Verify unrealized active days is ~0.0417 days (1 hour)
+      expect(summary.unrealizedActiveDays).toBeGreaterThan(0.04);
+      expect(summary.unrealizedActiveDays).toBeLessThan(0.05);
+
+      // Verify total active days matches unrealized (no realized periods)
+      expect(summary.totalActiveDays).toBe(summary.unrealizedActiveDays);
+
+      // Verify realized metrics are zero
+      expect(summary.realizedFees).toBe(0n);
+      expect(summary.realizedActiveDays).toBe(0);
+      expect(summary.realizedApr).toBe(0);
+
+      // Verify unrealized APR is calculated
+      // Expected: (10 / 10000) * (365 / 0.0417) * 100 = ~87.5%
+      expect(summary.unrealizedApr).toBeGreaterThan(85);
+      expect(summary.unrealizedApr).toBeLessThan(90);
+
+      // Verify total APR equals unrealized APR (no realized periods)
+      expect(summary.totalApr).toBe(summary.unrealizedApr);
+
+      // Verify belowThreshold is FALSE (position is > 5 minutes old)
+      expect(summary.belowThreshold).toBe(false);
+    });
+
+    it('should return belowThreshold=true for position <5min old with no COLLECT events', async () => {
+      const positionId = 'test-position-2';
+
+      // Position opened 2 minutes ago (below 5 minute threshold)
+      const positionOpenedAt = new Date(Date.now() - 2 * 60 * 1000);
+
+      const currentCostBasis = 10000_000000n;
+      const unclaimedFees = 1_000000n;
+
+      // Mock: No APR periods
+      mockPrisma.positionAprPeriod.findMany.mockResolvedValue([]);
+
+      const summary = await aprService.calculateAprSummary(
+        positionId,
+        currentCostBasis,
+        unclaimedFees,
+        positionOpenedAt
+      );
+
+      // Verify unrealized active days is ~0.00139 days (2 minutes)
+      expect(summary.unrealizedActiveDays).toBeGreaterThan(0.001);
+      expect(summary.unrealizedActiveDays).toBeLessThan(0.002);
+
+      // Verify belowThreshold is TRUE (< 5 minutes)
+      expect(summary.belowThreshold).toBe(true);
+
+      // APR should still be calculated (just marked as below threshold)
+      expect(summary.totalApr).toBeGreaterThan(0);
+    });
+
+    it('should handle zero unclaimed fees for position with no COLLECT events', async () => {
+      const positionId = 'test-position-3';
+
+      // Position opened 1 hour ago
+      const positionOpenedAt = new Date(Date.now() - 60 * 60 * 1000);
+
+      const currentCostBasis = 10000_000000n;
+      const unclaimedFees = 0n; // No fees accumulated yet
+
+      // Mock: No APR periods
+      mockPrisma.positionAprPeriod.findMany.mockResolvedValue([]);
+
+      const summary = await aprService.calculateAprSummary(
+        positionId,
+        currentCostBasis,
+        unclaimedFees,
+        positionOpenedAt
+      );
+
+      // Verify unrealized APR is 0 (no fees)
+      expect(summary.unrealizedApr).toBe(0);
+      expect(summary.totalApr).toBe(0);
+
+      // Verify belowThreshold is FALSE (position age is sufficient)
+      expect(summary.belowThreshold).toBe(false);
+    });
+  });
 });
