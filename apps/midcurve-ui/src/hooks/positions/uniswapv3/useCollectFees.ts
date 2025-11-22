@@ -97,9 +97,10 @@ export function useCollectFees(
 
       if (collectLog && collectLog.data) {
         // Extract amounts from event data
-        // Event data format: amount0 (32 bytes) + amount1 (32 bytes)
-        const amount0Hex = "0x" + collectLog.data.slice(2, 66);
-        const amount1Hex = "0x" + collectLog.data.slice(66, 130);
+        // Event data format: recipient (address, 32 bytes) + amount0 (uint256, 32 bytes) + amount1 (uint256, 32 bytes)
+        // Skip recipient (bytes 0-32), extract amount0 and amount1
+        const amount0Hex = "0x" + collectLog.data.slice(66, 130);     // Bytes 32-64 (amount0)
+        const amount1Hex = "0x" + collectLog.data.slice(130, 194);    // Bytes 64-96 (amount1)
 
         setCollectedAmount0(BigInt(amount0Hex));
         setCollectedAmount1(BigInt(amount1Hex));

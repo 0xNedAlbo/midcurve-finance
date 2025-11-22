@@ -3127,12 +3127,13 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             let lastFeesCollectedAt: Date | null = null;
 
             for (const event of events) {
-                if (event.eventType === "COLLECT" && event.rewards.length > 0) {
+                if (event.eventType === "COLLECT") {
                     // Sum up all reward values (already in quote token)
                     for (const reward of event.rewards) {
                         collectedFees += reward.tokenValue;
                     }
                     // Track most recent collection timestamp
+                    // (even for empty collects, as they update fee growth checkpoints)
                     if (
                         !lastFeesCollectedAt ||
                         event.timestamp > lastFeesCollectedAt

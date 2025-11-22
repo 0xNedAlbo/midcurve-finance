@@ -215,8 +215,17 @@ export async function syncLedgerEvents(
       convertMissingEventToRawEvent(event, chainId, nftId.toString())
     );
 
-    logger.debug(
-      { positionId, missingEventCount: missingEventsRaw.length },
+    logger.info(
+      {
+        positionId,
+        missingEventCount: missingEventsRaw.length,
+        missingEvents: missingEventsRaw.map(e => ({
+          eventType: e.eventType,
+          blockNumber: e.blockNumber.toString(),
+          txHash: e.transactionHash.slice(0, 10) + '...',
+          logIndex: e.logIndex,
+        })),
+      },
       'Converted missing events to raw format'
     );
 
@@ -230,6 +239,12 @@ export async function syncLedgerEvents(
         missingCount: missingEventsRaw.length,
         mergedCount: mergedEvents.length,
         deduplicatedCount: deduplicatedEvents.length,
+        deduplicatedEvents: deduplicatedEvents.map(e => ({
+          eventType: e.eventType,
+          blockNumber: e.blockNumber.toString(),
+          txHash: e.transactionHash.slice(0, 10) + '...',
+          logIndex: e.logIndex,
+        })),
       },
       'Merged and deduplicated events'
     );
@@ -275,6 +290,20 @@ export async function syncLedgerEvents(
         const foundInEtherscan = etherscanEvents.some((ethEvent) =>
           ethEvent.transactionHash === missingEvent.transactionHash &&
           ethEvent.logIndex === missingEvent.logIndex
+        );
+
+        // Log evaluation details for debugging
+        logger.debug(
+          {
+            positionId,
+            transactionHash: missingEvent.transactionHash,
+            blockNumber: missingEvent.blockNumber,
+            eventBlock: eventBlock.toString(),
+            finalizedBlock: finalizedBlock.toString(),
+            foundInEtherscan,
+            isFinalized: eventBlock <= finalizedBlock,
+          },
+          'Evaluating missing event for removal'
         );
 
         if (foundInEtherscan) {
@@ -567,6 +596,22 @@ async function processAndSaveEvents(
     if (!justAddedEvent) {
       throw new Error(`Failed to save event for position ${positionId}`);
     }
+
+    logger.info(
+      {
+        positionId,
+        eventId: justAddedEvent.id,
+        eventType: justAddedEvent.eventType,
+        blockNumber: rawEvent.blockNumber.toString(),
+        timestamp: justAddedEvent.timestamp.toISOString(),
+        rewards: justAddedEvent.rewards.map(r => ({
+          tokenId: r.tokenId,
+          tokenValue: r.tokenValue.toString(),
+        })),
+      },
+      'Event saved to ledger successfully'
+    );
+
     previousEventId = justAddedEvent.id;
 
     // Extract state from the event input config
