@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * UniswapV3Actions - Action buttons for Uniswap V3 positions
  *
