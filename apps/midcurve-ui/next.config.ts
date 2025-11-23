@@ -5,6 +5,16 @@ const nextConfig: NextConfig = {
   /* Next.js Configuration */
   reactStrictMode: true,
 
+  /* Build Configuration */
+  eslint: {
+    // Disable ESLint during production builds (devDependencies not available)
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    // TypeScript errors will still fail the build, but give more helpful error messages
+    ignoreBuildErrors: false,
+  },
+
   /* Output File Tracing */
   outputFileTracingRoot: path.join(__dirname, '../../'),
   outputFileTracingIncludes: {

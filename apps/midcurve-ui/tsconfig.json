@@ -65,6 +65,8 @@
     "dist",
     "build",
     "vitest.config.ts",
+    "playwright.config.ts",
+    "tests",
     "**/*.test.ts",
     "**/*.e2e.test.ts"
   ]
