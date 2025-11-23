@@ -36,6 +36,7 @@
     "@cowprotocol/widget-lib": "^0.20.0",
     "@cowprotocol/widget-react": "^0.14.0",
     "@midcurve/api-shared": "workspace:^",
+    "@midcurve/database": "workspace:^",
     "@midcurve/services": "workspace:^",
     "@midcurve/shared": "workspace:^",
     "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
