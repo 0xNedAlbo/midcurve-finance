@@ -1,6 +1,6 @@
 {
-  "buildCommand": "cd ../.. && turbo build --filter=@midcurve/ui",
-  "installCommand": "cd ../.. && npm install",
-  "framework": "nextjs",
-  "outputDirectory": ".next"
+  "buildCommand": "cd ../.. && pnpm turbo run build --filter=@midcurve/ui...",
+  "installCommand": "cd ../.. && pnpm install",
+  "outputDirectory": ".next",
+  "framework": "nextjs"
 }
