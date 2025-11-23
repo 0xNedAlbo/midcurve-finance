@@ -12,6 +12,7 @@
     "!src/**/*.test.ts"
   ],
   "scripts": {
+    "prepare": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
