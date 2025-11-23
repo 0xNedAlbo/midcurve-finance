@@ -165,6 +165,9 @@ importers:
       '@midcurve/shared':
         specifier: file:../midcurve-shared
         version: file:packages/midcurve-shared(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(zod@3.25.76)
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)
       zod:
         specifier: ^3.22.0
         version: 3.25.76
@@ -172,9 +175,6 @@ importers:
       '@types/node':
         specifier: ^20.10.0
         version: 20.19.25
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)
       typescript:
         specifier: ^5.3.3
         version: 5.9.3

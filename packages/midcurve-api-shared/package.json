@@ -72,11 +72,11 @@
   "license": "MIT",
   "dependencies": {
     "@midcurve/shared": "file:../midcurve-shared",
+    "tsup": "^8.5.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "tsup": "^8.5.0",
     "typescript": "^5.3.3",
     "vitest": "^3.2.4",
     "yalc": "^1.0.0-pre.53"
