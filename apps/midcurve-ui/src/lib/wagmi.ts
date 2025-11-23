@@ -7,6 +7,7 @@ import {
   polygon,
   optimism,
 } from 'wagmi/chains';
+import { createStorage, noopStorage } from 'wagmi';
 
 // Get WalletConnect project ID from environment
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
@@ -20,4 +21,7 @@ export const config = getDefaultConfig({
   projectId,
   chains: [mainnet, arbitrum, base, bsc, polygon, optimism],
   ssr: true, // Enable server-side rendering support
+  storage: createStorage({
+    storage: typeof window !== 'undefined' ? window.localStorage : noopStorage,
+  }),
 });
