@@ -9,12 +9,10 @@
         },
         "build": {
             "dependsOn": [
-                "^db:generate",
-                "^build"
+                "^db:generate"
             ],
             "outputs": [
                 ".next/**",
-                "!.next/cache/**",
                 "dist/**"
             ],
             "env": [

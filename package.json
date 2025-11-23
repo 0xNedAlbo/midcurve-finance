@@ -1,23 +1,27 @@
 {
   "name": "midcurve-finance",
   "version": "0.1.0",
+  "private": true,
   "description": "Midcurve Finance: a comprehensive risk management platform for concentrated liquidity (CL) provisioning",
   "main": "index.js",
-  "packageManager": "npm@10.9.4",
+  "packageManager": "pnpm@9.12.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
+  "engines": {
+    "node": "20.19.x"
+  },
   "scripts": {
-    "build": "turbo build",
-    "typecheck": "turbo typecheck",
-    "dev": "turbo dev"
+    "build": "turbo run build --filter=@midcurve/ui...",
+    "dev": "turbo run dev --filter=@midcurve/ui...",
+    "typecheck": "turbo run typecheck --filter=@midcurve/ui..."
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "tsup": "^8.5.0",
-    "turbo": "^2.6.0"
+    "turbo": "^2.6.1"
   }
 }
