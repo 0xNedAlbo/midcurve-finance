@@ -37,6 +37,7 @@
     "@cowprotocol/widget-react": "^0.14.0",
     "@midcurve/api-shared": "workspace:^",
     "@midcurve/services": "workspace:^",
+    "@midcurve/shared": "workspace:^",
     "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "@rainbow-me/rainbowkit": "^2.2.9",
     "@tailwindcss/postcss": "^4.0.0",
