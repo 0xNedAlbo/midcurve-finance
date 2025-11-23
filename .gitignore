@@ -9,7 +9,6 @@ node_modules/
 # Package managers
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
 .npmrc
 
 # Environment variables
