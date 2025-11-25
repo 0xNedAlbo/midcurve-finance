@@ -102,3 +102,21 @@ export type {
   PoolDiscoveryInput,
   UniswapV3PoolDiscoveryInput,
 } from './pool-discovery/index.js';
+
+// Hyperliquid hedge types (DB serialization)
+export type {
+  HyperliquidPerpHedgeConfigDB,
+  HyperliquidPerpHedgeStateDB,
+} from './hyperliquid/index.js';
+export {
+  hyperliquidPerpHedgeConfigSchema,
+  hyperliquidPerpHedgeStateSchema,
+  parseHyperliquidPerpHedgeConfig,
+  safeParseHyperliquidPerpHedgeConfig,
+  serializeHyperliquidPerpHedgeConfig,
+  parseHyperliquidPerpHedgeState,
+  safeParseHyperliquidPerpHedgeState,
+  serializeHyperliquidPerpHedgeState,
+  dbConfigToShared,
+  dbStateToShared,
+} from './hyperliquid/index.js';

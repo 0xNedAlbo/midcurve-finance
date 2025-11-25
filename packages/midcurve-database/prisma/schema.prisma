@@ -139,6 +139,7 @@ model User {
     // Midcurve position relations
     positions             Position[]
     quoteTokenPreferences UserQuoteTokenPreference[]
+    hedges                Hedge[]
 
     // Indexes for efficient queries
     @@index([name])
@@ -269,6 +270,7 @@ model Position {
     ledgerEvents PositionLedgerEvent[]
     aprPeriods   PositionAprPeriod[]
     syncState    PositionSyncState? // 1:1 relation, optional for backward compatibility
+    hedges       Hedge[]
 
     // Indexes for efficient queries
     @@index([protocol])
@@ -442,4 +444,113 @@ model UserQuoteTokenPreference {
     @@index([userId])
     @@index([protocol])
     @@map("user_quote_token_preferences")
+}
+
+// =============================================================================
+// Hedging Models
+// =============================================================================
+
+// Hedge - Represents a hedging instrument linked to a concentrated liquidity position
+// Supports multiple protocols: Hyperliquid perpetual shorts, options, etc.
+model Hedge {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // Ownership
+    userId String
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // Required position reference (1 Position -> n Hedges)
+    positionId String
+    position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+    // Classification
+    hedgeType String // 'hyperliquid-perp', future: 'option', 'spot-short'
+    protocol  String // 'hyperliquid', future: 'deribit', 'binance'
+
+    // Financial data (stored as string for bigint precision)
+    notionalValue String // current hedge notional in quote units
+    costBasis     String
+    realizedPnl   String
+    unrealizedPnl String
+    currentApr    Float // positive or negative APR, 0 if unavailable
+
+    // Lifecycle
+    isActive Boolean   @default(true)
+    openedAt DateTime
+    closedAt DateTime?
+
+    // Protocol-specific data (JSON)
+    config Json // immutable: HyperliquidPerpHedgeConfig
+    state  Json // mutable: HyperliquidPerpHedgeState
+
+    // Relations
+    ledgerEvents HedgeLedgerEvent[]
+    syncState    HedgeSyncState?
+
+    // Indexes
+    @@index([userId])
+    @@index([positionId])
+    @@index([protocol])
+    @@index([hedgeType])
+    @@index([isActive])
+    @@map("hedges")
+}
+
+// HedgeLedgerEvent - Records all financial events for a hedge
+// Similar to PositionLedgerEvent but for hedging instruments
+model HedgeLedgerEvent {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // Hedge reference
+    hedgeId String
+    hedge   Hedge  @relation(fields: [hedgeId], references: [id], onDelete: Cascade)
+
+    // Event identification
+    timestamp DateTime
+    eventType String // 'OPEN', 'INCREASE', 'DECREASE', 'CLOSE', 'FUNDING', 'FEE', 'LIQUIDATION'
+    inputHash String   @unique // deduplication hash
+
+    // Financial deltas (stored as string for bigint precision)
+    deltaNotional    String
+    deltaCostBasis   String
+    deltaRealizedPnl String
+    deltaMargin      String?
+
+    // Token changes and protocol-specific data
+    tokenAmounts Json // array of { tokenId, tokenAmount, tokenValue }
+    config       Json // protocol-specific config (tx, block, etc.)
+    state        Json // raw event payload
+
+    // Indexes
+    @@index([hedgeId, timestamp])
+    @@index([eventType])
+    @@index([inputHash])
+    @@map("hedge_ledger_events")
+}
+
+// HedgeSyncState - Tracks synchronization state for a hedge
+// 1:1 relationship with Hedge
+model HedgeSyncState {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // Hedge reference (1:1)
+    hedgeId String @unique
+    hedge   Hedge  @relation(fields: [hedgeId], references: [id], onDelete: Cascade)
+
+    // Sync tracking
+    lastSyncAt DateTime?
+    lastSyncBy String? // 'user-refresh', 'auto-refresh'
+
+    // Protocol-specific sync state (JSON)
+    state Json
+
+    // Indexes
+    @@index([lastSyncAt])
+    @@map("hedge_sync_states")
 }

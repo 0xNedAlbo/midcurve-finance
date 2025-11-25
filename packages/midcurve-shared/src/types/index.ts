@@ -99,3 +99,67 @@ export type {
   UniswapV3DecreaseLedgerEvent,
   UniswapV3CollectLedgerEvent,
 } from './uniswapv3/index.js';
+
+// Hedge types
+export type {
+  Hedge,
+  HyperliquidPerpHedge,
+  AnyHedge,
+} from './hedge.js';
+
+export {
+  isHyperliquidPerpHedge,
+  assertHyperliquidPerpHedge,
+  narrowHedgeType,
+} from './hedge.js';
+
+export type {
+  HedgeConfigMap,
+  HedgeType,
+  HedgeProtocol,
+} from './hedge-config.js';
+
+export { getHedgeProtocol } from './hedge-config.js';
+
+// Hedge Ledger Event types
+export type {
+  HedgeLedgerEvent,
+  HedgeEventType,
+  HedgeTokenAmount,
+} from './hedge-ledger-event.js';
+
+// Hyperliquid types (protocol-specific)
+export type {
+  HyperliquidPerpHedgeConfig,
+  HyperliquidAccountType,
+  HyperliquidMarginMode,
+  HyperliquidEnvironment,
+  HyperliquidAccountConfig,
+  HyperliquidMarketConfig,
+  HyperliquidHedgeParams,
+  HyperliquidRiskLimits,
+  HyperliquidPositionLinks,
+  HyperliquidPerpHedgeState,
+  HyperliquidDataSource,
+  HyperliquidPositionStatus,
+  HyperliquidOrderSide,
+  HyperliquidPositionSide,
+  HyperliquidPositionValue,
+  HyperliquidPositionLeverage,
+  HyperliquidPositionFunding,
+  HyperliquidPosition,
+  HyperliquidOrder,
+  HyperliquidAccountSnapshot,
+  HyperliquidRawData,
+  HyperliquidHedgeLedgerEventConfig,
+  HyperliquidHedgeLedgerEventState,
+  HyperliquidTradeEvent,
+  HyperliquidFundingEvent,
+  HyperliquidLiquidationEvent,
+} from './hyperliquid/index.js';
+
+export {
+  isHyperliquidTradeEvent,
+  isHyperliquidFundingEvent,
+  isHyperliquidLiquidationEvent,
+} from './hyperliquid/index.js';
