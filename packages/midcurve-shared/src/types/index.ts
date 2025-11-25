@@ -163,3 +163,13 @@ export {
   isHyperliquidFundingEvent,
   isHyperliquidLiquidationEvent,
 } from './hyperliquid/index.js';
+
+// Risk layer types
+export type {
+  RiskAssetId,
+  RiskAssetRole,
+  RiskAsset,
+  PositionRiskPair,
+  HedgeEligibility,
+  PositionRiskView,
+} from './risk/index.js';

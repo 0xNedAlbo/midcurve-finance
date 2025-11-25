@@ -40,6 +40,9 @@ export * from './services/pool-discovery/index.js';
 export * from './services/cache/index.js';
 export * from './services/block/index.js';
 
+// Export risk layer
+export * from './services/risk/index.js';
+
 // Export service types
 export * from './services/types/auth/index.js';
 export * from './services/types/block/index.js';
