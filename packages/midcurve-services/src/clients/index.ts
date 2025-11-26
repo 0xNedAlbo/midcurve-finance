@@ -58,4 +58,5 @@ export {
   type HyperliquidClientConfig,
   type CreateSubAccountResult,
   type SubAccountClearinghouseState,
+  type HyperliquidMarketData,
 } from './hyperliquid/index.js';

@@ -39,22 +39,39 @@ export function HedgeCreateForm({
   const [leverage, setLeverage] = useState(1);
   const [biasPercent, setBiasPercent] = useState(0);
 
+  // Derive max leverage from market data with fallback
+  const maxLeverage = hedgeMarket?.marketData?.maxLeverage ?? 50;
+
+  // Use mark price from market data if available, otherwise fall back to currentPrice
+  const markPrice = hedgeMarket?.marketData?.markPx
+    ? parseFloat(hedgeMarket.marketData.markPx)
+    : currentPrice;
+
+  // Parse funding rate if available
+  const fundingRate = hedgeMarket?.marketData?.fundingRate
+    ? parseFloat(hedgeMarket.marketData.fundingRate)
+    : null;
+
+  // Check if we have real market data
+  const hasMarketData = !!hedgeMarket?.marketData;
+
   // Calculate derived values
   const multiplier = 1 + biasPercent / 100;
   const hedgeSize = (baseAssetAmount * BigInt(Math.round(multiplier * 10000))) / 10000n;
   const hedgeSizeNum = Number(hedgeSize) / Math.pow(10, baseAssetDecimals);
 
-  // Calculate notional value in quote currency
-  const notionalValue = hedgeSizeNum * currentPrice;
+  // Calculate notional value using mark price
+  const notionalValue = hedgeSizeNum * markPrice;
 
   // Calculate required margin
   const requiredMargin = notionalValue / leverage;
 
   // Estimate liquidation price (simplified calculation)
   // For a short: liquidation occurs when price rises
+  // Hyperliquid isolated margin: liquidation when margin_ratio < maintenance_margin
   // Rough estimate: entry_price * (1 + 1/leverage * margin_fraction)
   // Using 80% margin threshold for liquidation
-  const estimatedLiquidationPrice = currentPrice * (1 + (0.8 / leverage));
+  const estimatedLiquidationPrice = markPrice * (1 + (0.8 / leverage));
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
@@ -115,7 +132,7 @@ export function HedgeCreateForm({
           value={leverage}
           onChange={setLeverage}
           min={1}
-          max={50}
+          max={maxLeverage}
         />
 
         {/* Margin Mode (fixed) */}
@@ -142,6 +159,37 @@ export function HedgeCreateForm({
         <div className="border-t border-slate-700/50 pt-6">
           <h4 className="text-sm font-medium text-slate-300 mb-4">Hedge Preview</h4>
 
+          {/* Market Data Row */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+            <div className="p-3 bg-slate-700/30 rounded-lg">
+              <div className="text-xs text-slate-400">
+                Mark Price {!hasMarketData && <span className="text-slate-500">(est.)</span>}
+              </div>
+              <div className="text-lg font-semibold text-white">
+                {markPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {riskQuoteSymbol}
+              </div>
+            </div>
+
+            {fundingRate !== null && (
+              <div className="p-3 bg-slate-700/30 rounded-lg">
+                <div className="text-xs text-slate-400">Funding Rate (8h)</div>
+                <div className={`text-lg font-semibold ${
+                  fundingRate >= 0 ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {fundingRate >= 0 ? '+' : ''}{(fundingRate * 100).toFixed(4)}%
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 bg-slate-700/30 rounded-lg">
+              <div className="text-xs text-slate-400">Max Leverage</div>
+              <div className="text-lg font-semibold text-white">
+                {maxLeverage}x
+              </div>
+            </div>
+          </div>
+
+          {/* Position Details Row */}
           <div className="grid grid-cols-2 gap-4">
             <div className="p-3 bg-slate-700/30 rounded-lg">
               <div className="text-xs text-slate-400">Hedge Size</div>
@@ -165,7 +213,9 @@ export function HedgeCreateForm({
             </div>
 
             <div className="p-3 bg-slate-700/30 rounded-lg">
-              <div className="text-xs text-slate-400">Est. Liquidation Price</div>
+              <div className="text-xs text-slate-400">
+                Est. Liquidation Price {!hasMarketData && <span className="text-slate-500">(est.)</span>}
+              </div>
               <div className="text-lg font-semibold text-amber-400">
                 {estimatedLiquidationPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })} {riskQuoteSymbol}
               </div>

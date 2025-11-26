@@ -32,6 +32,7 @@ import type { LocalAccount } from 'viem/accounts';
 
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
+import { CacheService } from '../../services/cache/index.js';
 import {
   type HyperliquidSubaccountInfo,
   type HyperliquidEnvironment,
@@ -57,6 +58,24 @@ export interface CreateSubAccountResult {
   address: `0x${string}`;
   /** Name given to the subaccount */
   name: string;
+}
+
+/**
+ * Market data for a specific perpetual asset
+ */
+export interface HyperliquidMarketData {
+  /** Asset symbol (e.g., "ETH", "BTC") */
+  coin: string;
+  /** Current mark price */
+  markPx: string;
+  /** Current 8-hour funding rate (e.g., "0.0001" = 0.01%) */
+  fundingRate: string;
+  /** Maximum allowed leverage for this market */
+  maxLeverage: number;
+  /** Size decimal places for orders */
+  szDecimals: number;
+  /** Whether only isolated margin is allowed */
+  onlyIsolated: boolean;
 }
 
 /**
@@ -143,12 +162,16 @@ export class HyperliquidClient {
   private readonly logger: ServiceLogger;
   private readonly transport: HttpTransport;
   private readonly isTestnet: boolean;
+  private readonly environment: HyperliquidEnvironment;
+  private readonly cacheService: CacheService;
 
   constructor(config: HyperliquidClientConfig) {
     this.logger = createServiceLogger('HyperliquidClient');
     // SDK uses isTestnet (opposite of isMainnet)
+    this.environment = config.environment;
     this.isTestnet = config.environment === 'testnet';
     this.transport = new HttpTransport({ isTestnet: this.isTestnet });
+    this.cacheService = CacheService.getInstance();
 
     this.logger.info(
       { environment: config.environment, isTestnet: this.isTestnet },
@@ -537,6 +560,123 @@ export class HyperliquidClient {
   async countUnusedSubAccounts(userAddress: `0x${string}`): Promise<number> {
     const unused = await this.findUnusedSubAccounts(userAddress);
     return unused.length;
+  }
+
+  // ============ Market Data Operations ============
+
+  /**
+   * Get market data for a specific coin
+   *
+   * Fetches metadata (max leverage, decimals) and real-time context (mark price, funding rate)
+   * from Hyperliquid. Uses CacheService to cache the full response for 5 minutes.
+   *
+   * Note: Uses direct fetch instead of SDK to avoid `keepalive: true` incompatibility
+   * with Next.js server-side fetch implementation.
+   *
+   * @param coin - Asset symbol (e.g., "ETH", "BTC")
+   * @returns Market data or null if coin not found
+   */
+  async getMarketData(coin: string): Promise<HyperliquidMarketData | null> {
+    log.methodEntry(this.logger, 'getMarketData', { coin });
+
+    const cacheKey = `hyperliquid:markets:${this.environment}`;
+    const CACHE_TTL_SECONDS = 300; // 5 minutes - market data changes frequently
+
+    try {
+      // Check cache for full markets response
+      type MarketsCache = {
+        universe: Array<{
+          name: string;
+          maxLeverage: number;
+          szDecimals: number;
+          onlyIsolated?: boolean;
+        }>;
+        assetCtxs: Array<{
+          markPx: string;
+          funding: string;
+        }>;
+      };
+
+      let marketsData = await this.cacheService.get<MarketsCache>(cacheKey);
+
+      if (!marketsData) {
+        log.externalApiCall(this.logger, 'Hyperliquid', 'metaAndAssetCtxs', {});
+
+        // Fetch fresh data from Hyperliquid using direct fetch
+        // Note: SDK's HttpTransport uses keepalive: true which is incompatible
+        // with Next.js server-side fetch. Using direct fetch as workaround.
+        const apiUrl = this.isTestnet
+          ? 'https://api.hyperliquid-testnet.xyz/info'
+          : 'https://api.hyperliquid.xyz/info';
+
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'metaAndAssetCtxs' }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Hyperliquid API error: ${response.status} ${response.statusText}`);
+        }
+
+        const rawData = await response.json() as [
+          { universe: MarketsCache['universe'] },
+          MarketsCache['assetCtxs']
+        ];
+
+        marketsData = {
+          universe: rawData[0].universe,
+          assetCtxs: rawData[1],
+        };
+
+        // Cache the full response
+        await this.cacheService.set(cacheKey, marketsData, CACHE_TTL_SECONDS);
+
+        this.logger.debug(
+          { marketCount: marketsData.universe.length },
+          'Fetched and cached Hyperliquid markets data'
+        );
+      }
+
+      // Extract the specific coin
+      const coinIndex = marketsData.universe.findIndex((u) => u.name === coin);
+      if (coinIndex === -1) {
+        this.logger.debug({ coin }, 'Coin not found in Hyperliquid universe');
+        log.methodExit(this.logger, 'getMarketData', { found: false });
+        return null;
+      }
+
+      const universeEntry = marketsData.universe[coinIndex];
+      const assetCtx = marketsData.assetCtxs[coinIndex];
+
+      // Safety check - should never happen if coinIndex is valid, but TypeScript requires it
+      if (!universeEntry || !assetCtx) {
+        this.logger.warn({ coin, coinIndex }, 'Missing universe or assetCtx data for valid coin index');
+        log.methodExit(this.logger, 'getMarketData', { found: false });
+        return null;
+      }
+
+      const marketData: HyperliquidMarketData = {
+        coin,
+        markPx: assetCtx.markPx,
+        fundingRate: assetCtx.funding,
+        maxLeverage: universeEntry.maxLeverage,
+        szDecimals: universeEntry.szDecimals,
+        onlyIsolated: universeEntry.onlyIsolated ?? false,
+      };
+
+      this.logger.debug(
+        { coin, markPx: marketData.markPx, maxLeverage: marketData.maxLeverage },
+        'Market data retrieved'
+      );
+
+      log.methodExit(this.logger, 'getMarketData', { found: true });
+      return marketData;
+    } catch (error) {
+      const wrappedError = this.wrapError(error, 'getMarketData');
+      log.methodError(this.logger, 'getMarketData', wrappedError, { coin });
+      throw wrappedError;
+    }
   }
 
   // ============ Private Helpers ============

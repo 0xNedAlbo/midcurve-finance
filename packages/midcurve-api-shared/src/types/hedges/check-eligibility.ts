@@ -58,6 +58,28 @@ export interface RiskViewResponse {
 }
 
 /**
+ * Live market data from the hedge exchange
+ *
+ * Optional data for display purposes - may be unavailable if API fails.
+ */
+export interface HedgeMarketData {
+  /** Current mark price (e.g., "3150.50") */
+  markPx: string;
+
+  /** Current 8-hour funding rate (e.g., "0.0001" = 0.01%) */
+  fundingRate: string;
+
+  /** Maximum allowed leverage for this market */
+  maxLeverage: number;
+
+  /** Size decimal places for orders */
+  szDecimals: number;
+
+  /** Whether only isolated margin is allowed */
+  onlyIsolated?: boolean;
+}
+
+/**
  * Hedge market information when position is eligible
  *
  * Contains the protocol-specific market parameters for opening a hedge.
@@ -74,6 +96,9 @@ export interface HedgeMarketResponse {
 
   /** Quote currency (e.g., "USD") */
   quote: string;
+
+  /** Live market data (optional for graceful degradation) */
+  marketData?: HedgeMarketData;
 }
 
 /**

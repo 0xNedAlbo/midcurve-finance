@@ -21,6 +21,7 @@ import {
 import {
   RiskLayerService,
   HyperliquidHedgeResolver,
+  HyperliquidClient,
   type HyperliquidResolvedMarket,
 } from '@midcurve/services';
 import { apiLogger, apiLog } from '@/lib/logger';
@@ -147,6 +148,35 @@ export async function GET(request: NextRequest): Promise<Response> {
             market: hlData.market,
             quote: hlData.quote,
           };
+
+          // Fetch live market data (optional - graceful failure)
+          try {
+            const hlClient = new HyperliquidClient({ environment: 'mainnet' });
+            const marketData = await hlClient.getMarketData(hlData.coin);
+
+            if (marketData) {
+              hedgeMarket.marketData = {
+                markPx: marketData.markPx,
+                fundingRate: marketData.fundingRate,
+                maxLeverage: marketData.maxLeverage,
+                szDecimals: marketData.szDecimals,
+                onlyIsolated: marketData.onlyIsolated,
+              };
+            } else {
+              console.error('[check-eligibility] getMarketData returned null for coin:', hlData.coin);
+            }
+          } catch (marketDataError) {
+            // Log but don't fail the request - market data is optional enhancement
+            console.error('[check-eligibility] Failed to fetch market data:', marketDataError);
+            apiLogger.error(
+              {
+                coin: hlData.coin,
+                error: marketDataError instanceof Error ? marketDataError.message : String(marketDataError),
+                stack: marketDataError instanceof Error ? marketDataError.stack : undefined,
+              },
+              'Failed to fetch Hyperliquid market data'
+            );
+          }
         }
       }
 

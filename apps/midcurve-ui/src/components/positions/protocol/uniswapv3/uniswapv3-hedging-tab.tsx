@@ -1,7 +1,7 @@
 "use client";
 
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
-import { tickToPrice } from "@midcurve/shared";
+import { tickToPrice, getTokenAmountsFromLiquidity_withTick } from "@midcurve/shared";
 import { HedgeTab } from "@/components/positions/hedging";
 import { useHedgeEligibility } from "@/hooks/hedges/useHedgeEligibility";
 
@@ -36,8 +36,10 @@ export function UniswapV3HedgingTab({ position }: UniswapV3HedgingTabProps) {
     ? position.pool.token1
     : position.pool.token0;
 
-  // Get current pool price from tick
+  // Extract position config and state with proper typing
   const poolState = position.pool.state as { currentTick: number };
+  const positionConfig = position.config as { tickLower: number; tickUpper: number };
+  const positionState = position.state as { liquidity: string };
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
 
@@ -51,15 +53,19 @@ export function UniswapV3HedgingTab({ position }: UniswapV3HedgingTabProps) {
   // Convert to number for calculations
   const currentPrice = Number(currentPriceBigInt) / Math.pow(10, quoteToken.decimals);
 
-  // Calculate base asset amount from position
-  // For Uniswap V3, we need to derive this from position value and price
-  // Using simplified calculation: baseAssetAmount ≈ currentValue / currentPrice (for positions in range)
-  // This is a rough estimate - actual calculation should come from the position state
-  const currentValueNum = parseFloat(position.currentValue) / Math.pow(10, quoteToken.decimals);
-  const estimatedBaseAmount = currentPrice > 0
-    ? (currentValueNum / currentPrice) * Math.pow(10, baseToken.decimals)
-    : 0;
-  const baseAssetAmount = BigInt(Math.floor(estimatedBaseAmount));
+  // Calculate actual token amounts from position using Uniswap V3 math
+  // This uses the liquidity, current tick, and position tick range to compute exact amounts
+  const liquidity = BigInt(positionState.liquidity);
+  const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity_withTick(
+    liquidity,
+    poolState.currentTick,
+    positionConfig.tickLower,
+    positionConfig.tickUpper
+  );
+
+  // Determine base asset amount based on quote/base assignment
+  // If token0 is quote, then token1 is base (and vice versa)
+  const baseAssetAmount = position.isToken0Quote ? token1Amount : token0Amount;
 
   // Extract PnL values
   const positionUnrealizedPnl = BigInt(position.currentValue) - BigInt(position.currentCostBasis) + BigInt(position.unClaimedFees);
