@@ -48,3 +48,14 @@ export {
   POOL_HISTORICAL_DATA_QUERY,
   POOL_CREATION_QUERY,
 } from './subgraph/uniswapv3/index.js';
+
+export {
+  HyperliquidClient,
+  HyperliquidClientError,
+  HyperliquidApiError,
+  SubAccountNotFoundError,
+  SubAccountNotEmptyError,
+  type HyperliquidClientConfig,
+  type CreateSubAccountResult,
+  type SubAccountClearinghouseState,
+} from './hyperliquid/index.js';

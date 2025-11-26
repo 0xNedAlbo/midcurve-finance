@@ -164,6 +164,19 @@ export {
   isHyperliquidLiquidationEvent,
 } from './hyperliquid/index.js';
 
+// Hyperliquid subaccount types and utilities
+export type { HyperliquidSubaccountInfo } from './hyperliquid/index.js';
+export {
+  SUBACCOUNT_ACTIVE_PREFIX,
+  SUBACCOUNT_UNUSED_PREFIX,
+  generateSubaccountName,
+  generateUnusedName,
+  isActiveSubaccountName,
+  isUnusedSubaccountName,
+  isMidcurveSubaccount,
+  extractUnusedIndex,
+} from './hyperliquid/index.js';
+
 // Risk layer types
 export type {
   RiskAssetId,

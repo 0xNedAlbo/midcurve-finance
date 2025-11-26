@@ -29,11 +29,13 @@ export type HyperliquidEnvironment = 'mainnet' | 'testnet';
  * Account configuration for Hyperliquid
  */
 export interface HyperliquidAccountConfig {
-  /** EVM address used on Hyperliquid */
+  /** EVM address used on Hyperliquid (master account) */
   userAddress: string;
   /** Type of account */
   accountType: HyperliquidAccountType;
-  /** Subaccount name (one per hedge) */
+  /** Subaccount address from Hyperliquid (immutable identifier) */
+  subAccountAddress?: string;
+  /** Subaccount name - current name on Hyperliquid (mc-{hash} or unused-{n}) */
   subAccountName?: string;
 }
 

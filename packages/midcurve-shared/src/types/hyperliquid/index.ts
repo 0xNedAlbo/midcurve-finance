@@ -15,6 +15,19 @@ export type {
   HyperliquidPositionLinks,
 } from './hedge-config.js';
 
+// Subaccount types and utilities
+export type { HyperliquidSubaccountInfo } from './subaccount.js';
+export {
+  SUBACCOUNT_ACTIVE_PREFIX,
+  SUBACCOUNT_UNUSED_PREFIX,
+  generateSubaccountName,
+  generateUnusedName,
+  isActiveSubaccountName,
+  isUnusedSubaccountName,
+  isMidcurveSubaccount,
+  extractUnusedIndex,
+} from './subaccount.js';
+
 // Hedge state types
 export type {
   HyperliquidPerpHedgeState,
