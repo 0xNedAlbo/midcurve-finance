@@ -3,6 +3,7 @@
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
 import { tickToPrice } from "@midcurve/shared";
 import { HedgeTab } from "@/components/positions/hedging";
+import { useHedgeEligibility } from "@/hooks/hedges/useHedgeEligibility";
 
 interface UniswapV3HedgingTabProps {
   position: GetUniswapV3PositionResponse;
@@ -64,10 +65,16 @@ export function UniswapV3HedgingTab({ position }: UniswapV3HedgingTabProps) {
   const positionUnrealizedPnl = BigInt(position.currentValue) - BigInt(position.currentCostBasis) + BigInt(position.unClaimedFees);
   const positionRealizedPnl = BigInt(position.realizedPnl) + BigInt(position.collectedFees);
 
-  // Map token symbols to risk asset symbols for hedge display
-  // e.g., WETH → ETH, USDC → USD
-  const riskBaseSymbol = getRiskAssetSymbol(baseToken.symbol);
-  const riskQuoteSymbol = getRiskAssetSymbol(quoteToken.symbol);
+  // Check hedge eligibility via API
+  const {
+    data: eligibility,
+    isLoading: isLoadingEligibility,
+    error: eligibilityError,
+  } = useHedgeEligibility(position.positionHash);
+
+  // Use API response for risk symbols if available, fallback to local mapping
+  const riskBaseSymbol = eligibility?.riskView.riskBase ?? getRiskAssetSymbol(baseToken.symbol);
+  const riskQuoteSymbol = eligibility?.riskView.riskQuote ?? getRiskAssetSymbol(quoteToken.symbol);
 
   return (
     <HedgeTab
@@ -83,7 +90,10 @@ export function UniswapV3HedgingTab({ position }: UniswapV3HedgingTabProps) {
       positionRealizedPnl={positionRealizedPnl}
       hedge={null} // No hedge for now - will be fetched from API later
       ledgerEvents={[]}
-      isLoading={false}
+      isLoading={isLoadingEligibility}
+      // Eligibility info from API
+      eligibility={eligibility ?? undefined}
+      eligibilityError={eligibilityError ?? undefined}
     />
   );
 }

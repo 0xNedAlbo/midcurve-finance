@@ -5,6 +5,7 @@ import { formatCompactValue } from "@/lib/fraction-format";
 import { LeverageSelector } from "./leverage-selector";
 import { BiasSelector } from "./bias-selector";
 import { Shield, AlertTriangle, Lock } from "lucide-react";
+import type { HedgeMarketResponse } from "@midcurve/api-shared";
 
 interface HedgeCreateFormProps {
   baseAssetAmount: bigint;
@@ -15,6 +16,8 @@ interface HedgeCreateFormProps {
   riskQuoteSymbol: string;  // Risk quote symbol (USD) for hedge market
   currentPrice: number;
   onSubmit?: (config: HedgeFormConfig) => void;
+  // Hedge market info from eligibility check (optional)
+  hedgeMarket?: HedgeMarketResponse;
 }
 
 export interface HedgeFormConfig {
@@ -31,6 +34,7 @@ export function HedgeCreateForm({
   riskBaseSymbol,
   riskQuoteSymbol,
   currentPrice,
+  hedgeMarket,
 }: HedgeCreateFormProps) {
   const [leverage, setLeverage] = useState(1);
   const [biasPercent, setBiasPercent] = useState(0);
@@ -97,7 +101,7 @@ export function HedgeCreateForm({
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold text-blue-400">
-                {riskBaseSymbol}-{riskQuoteSymbol}
+                {hedgeMarket?.market ?? `${riskBaseSymbol}-${riskQuoteSymbol}`}
               </span>
             </div>
             <div className="text-sm text-slate-500 mt-1">
