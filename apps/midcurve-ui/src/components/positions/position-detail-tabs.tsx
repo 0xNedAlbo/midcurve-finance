@@ -8,7 +8,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { BarChart3, Clock, TrendingUp, Settings } from "lucide-react";
+import { BarChart3, Clock, TrendingUp, Settings, Shield } from "lucide-react";
 
 interface PositionDetailTabsProps {
   activeTab: string;
@@ -30,6 +30,11 @@ const tabs = [
     id: "apr-analysis",
     icon: TrendingUp,
     label: "APR Analysis",
+  },
+  {
+    id: "hedging",
+    icon: Shield,
+    label: "Hedging",
   },
   {
     id: "technical",
