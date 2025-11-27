@@ -8,7 +8,7 @@ interface LeverageSelectorProps {
   disabled?: boolean;
 }
 
-const QUICK_SELECT_VALUES = [1, 2, 5, 10, 25, 50];
+const QUICK_SELECT_VALUES = [1, 2, 3, 5, 10, 25, 50];
 
 export function LeverageSelector({
   value,
