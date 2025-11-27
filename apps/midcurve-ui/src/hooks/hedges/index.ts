@@ -5,3 +5,6 @@
  */
 
 export { useHedgeEligibility } from './useHedgeEligibility';
+
+// Hyperliquid-specific hooks
+export * from './hyperliquid';

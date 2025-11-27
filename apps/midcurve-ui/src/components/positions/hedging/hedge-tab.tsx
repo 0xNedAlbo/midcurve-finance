@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { HyperliquidPerpHedge } from "@midcurve/shared";
 import type { CheckHedgeEligibilityResponse } from "@midcurve/api-shared";
-import { HedgeCreateForm } from "./hedge-create-form";
+import { HedgeCreateForm, type HedgeFormConfig } from "./hedge-create-form";
+import { OpenHedgeModal } from "./open-hedge-modal";
 import { HedgeSummaryCard } from "./hedge-summary-card";
 import { HedgePnLComparison } from "./hedge-pnl-comparison";
 import { HedgeMetricsCard } from "./hedge-metrics-card";
@@ -12,6 +13,9 @@ import { HedgeLedgerTable, type HedgeLedgerEvent } from "./hedge-ledger-table";
 import { Bug, ShieldOff, AlertTriangle, Loader2 } from "lucide-react";
 
 interface HedgeTabProps {
+  // Position identifier for hedge linking
+  positionHash: string;
+
   // Position data
   baseAssetAmount: bigint;
   baseAssetDecimals: number;
@@ -193,6 +197,7 @@ const DUMMY_LEDGER_EVENTS: HedgeLedgerEvent[] = [
 ];
 
 export function HedgeTab({
+  positionHash,
   baseAssetAmount,
   baseAssetDecimals,
   baseAssetSymbol,
@@ -211,6 +216,24 @@ export function HedgeTab({
 }: HedgeTabProps) {
   // Dev toggle for testing both states
   const [showDummyHedge, setShowDummyHedge] = useState(false);
+
+  // Modal state for opening hedge
+  const [isOpenHedgeModalOpen, setIsOpenHedgeModalOpen] = useState(false);
+  const [hedgeConfig, setHedgeConfig] = useState<HedgeFormConfig | null>(null);
+
+  // Handle open hedge button click
+  const handleOpenHedge = (config: HedgeFormConfig) => {
+    setHedgeConfig(config);
+    setIsOpenHedgeModalOpen(true);
+  };
+
+  // Handle hedge success - switch to showing dummy hedge for now
+  const handleHedgeSuccess = () => {
+    // For now, just show the dummy hedge to demonstrate the UI switch
+    // In the future, this will trigger a data refresh
+    setShowDummyHedge(true);
+    setIsOpenHedgeModalOpen(false);
+  };
 
   // Determine which hedge to display
   const displayHedge = showDummyHedge ? DUMMY_HEDGE : hedge;
@@ -432,6 +455,24 @@ export function HedgeTab({
           riskBaseSymbol={riskBaseSymbol}
           riskQuoteSymbol={riskQuoteSymbol}
           currentPrice={currentPrice}
+          hedgeMarket={eligibility?.hedgeMarket ?? undefined}
+          onOpenHedge={handleOpenHedge}
+        />
+      )}
+
+      {/* Open Hedge Modal */}
+      {hedgeConfig && (
+        <OpenHedgeModal
+          isOpen={isOpenHedgeModalOpen}
+          onClose={() => setIsOpenHedgeModalOpen(false)}
+          onHedgeSuccess={handleHedgeSuccess}
+          positionHash={positionHash}
+          baseAssetAmount={baseAssetAmount}
+          baseAssetDecimals={baseAssetDecimals}
+          riskBaseSymbol={riskBaseSymbol}
+          riskQuoteSymbol={riskQuoteSymbol}
+          currentPrice={currentPrice}
+          hedgeConfig={hedgeConfig}
           hedgeMarket={eligibility?.hedgeMarket ?? undefined}
         />
       )}

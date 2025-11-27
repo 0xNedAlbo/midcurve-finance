@@ -39,6 +39,7 @@
     "@midcurve/database": "workspace:^",
     "@midcurve/services": "workspace:^",
     "@midcurve/shared": "workspace:^",
+    "@nktkas/hyperliquid": "^0.27.0",
     "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "@rainbow-me/rainbowkit": "^2.2.9",
     "@tailwindcss/postcss": "^4.0.0",

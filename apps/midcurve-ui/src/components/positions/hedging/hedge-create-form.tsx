@@ -16,6 +16,8 @@ interface HedgeCreateFormProps {
   riskQuoteSymbol: string;  // Risk quote symbol (USD) for hedge market
   currentPrice: number;
   onSubmit?: (config: HedgeFormConfig) => void;
+  // Callback when "Open Hedge" button is clicked
+  onOpenHedge?: (config: HedgeFormConfig) => void;
   // Hedge market info from eligibility check (optional)
   hedgeMarket?: HedgeMarketResponse;
 }
@@ -34,6 +36,7 @@ export function HedgeCreateForm({
   riskBaseSymbol,
   riskQuoteSymbol,
   currentPrice,
+  onOpenHedge,
   hedgeMarket,
 }: HedgeCreateFormProps) {
   const [leverage, setLeverage] = useState(1);
@@ -238,19 +241,19 @@ export function HedgeCreateForm({
           </div>
         </div>
 
-        {/* Submit Button (disabled) */}
-        <div className="relative group">
-          <button
-            disabled
-            className="w-full py-3 px-4 bg-blue-600/50 text-blue-200 font-medium rounded-lg cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            <Shield className="w-4 h-4" />
-            Open Hedge
-          </button>
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 whitespace-nowrap shadow-lg z-10">
-            Coming soon - Backend integration required
-          </div>
-        </div>
+        {/* Submit Button */}
+        <button
+          onClick={() => onOpenHedge?.({ leverage, biasPercent, marginMode: "isolated" })}
+          disabled={!onOpenHedge}
+          className={`w-full py-3 px-4 font-medium rounded-lg flex items-center justify-center gap-2 transition-colors ${
+            onOpenHedge
+              ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+              : "bg-blue-600/50 text-blue-200 cursor-not-allowed"
+          }`}
+        >
+          <Shield className="w-4 h-4" />
+          Open Hedge
+        </button>
       </div>
     </div>
   );

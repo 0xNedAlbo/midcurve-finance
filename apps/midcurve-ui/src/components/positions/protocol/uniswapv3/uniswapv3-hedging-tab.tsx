@@ -84,6 +84,7 @@ export function UniswapV3HedgingTab({ position }: UniswapV3HedgingTabProps) {
 
   return (
     <HedgeTab
+      positionHash={position.positionHash}
       baseAssetAmount={baseAssetAmount}
       baseAssetDecimals={baseToken.decimals}
       baseAssetSymbol={baseToken.symbol}
