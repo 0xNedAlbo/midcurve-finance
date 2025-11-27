@@ -25,9 +25,13 @@ export * from './logging/index.js';
 // Export clients
 export * from './clients/index.js';
 
+// Export crypto module
+export * from './crypto/index.js';
+
 // Export services
 export * from './services/auth/index.js';
 export * from './services/user/index.js';
+export * from './services/hyperliquid-api-wallet/index.js';
 export * from './services/token/index.js';
 export * from './services/pool/index.js';
 export * from './services/pool-price/index.js';

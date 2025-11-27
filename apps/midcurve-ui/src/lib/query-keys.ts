@@ -112,5 +112,6 @@ export const queryKeys = {
     me: () => [...queryKeys.user.all, 'me'] as const,
     wallets: () => [...queryKeys.user.all, 'wallets'] as const,
     apiKeys: () => [...queryKeys.user.all, 'api-keys'] as const,
+    hyperliquidWallets: () => [...queryKeys.user.all, 'hyperliquid-wallets'] as const,
   },
 };

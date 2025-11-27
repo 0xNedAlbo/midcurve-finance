@@ -102,6 +102,43 @@ model ApiKey {
     @@map("api_keys")
 }
 
+// HyperliquidApiWallet - Encrypted private keys for backend signing
+// Enables automatic signing of Hyperliquid operations without per-transaction user approval
+model HyperliquidApiWallet {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // Ownership
+    userId String
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // Wallet identification (plain - needed for lookups)
+    walletAddress String // EIP-55 checksummed address
+    label         String // User-friendly name ("My Trading Wallet")
+
+    // Encrypted key storage
+    // Format: Base64(IV):Base64(AuthTag):Base64(Ciphertext)
+    encryptedPrivateKey String
+    encryptionVersion   Int    @default(1) // For future key rotation
+
+    // Environment binding (prevent testnet keys on mainnet)
+    environment String // 'mainnet' | 'testnet'
+
+    // Status
+    isActive   Boolean   @default(true)
+    lastUsedAt DateTime?
+
+    // Expiration (Hyperliquid API wallets expire after 180 days by default)
+    expiresAt DateTime
+
+    // Constraints
+    @@unique([userId, walletAddress, environment])
+    @@index([userId])
+    @@index([isActive])
+    @@map("hyperliquid_api_wallets")
+}
+
 // =============================================================================
 // Cache & Core Models
 // =============================================================================
@@ -133,8 +170,9 @@ model User {
     authSessions AuthSession[]
 
     // Midcurve auth relations
-    walletAddresses AuthWalletAddress[]
-    apiKeys         ApiKey[]
+    walletAddresses       AuthWalletAddress[]
+    apiKeys               ApiKey[]
+    hyperliquidApiWallets HyperliquidApiWallet[]
 
     // Midcurve position relations
     positions             Position[]
