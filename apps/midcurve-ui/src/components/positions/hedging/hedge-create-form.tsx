@@ -180,11 +180,9 @@ export function HedgeCreateForm({
                   fundingRate >= 0 ? 'text-green-400' : 'text-red-400'
                 }`}>
                   {fundingRate >= 0 ? '+' : ''}{(fundingRate * 100).toFixed(4)}%
-                </div>
-                <div className={`text-sm ${
-                  annualizedFundingRate! >= 0 ? 'text-green-400/70' : 'text-red-400/70'
-                }`}>
-                  {annualizedFundingRate! >= 0 ? '+' : ''}{(annualizedFundingRate! * 100).toFixed(2)}% APR
+                  <span className="text-sm font-normal opacity-70 ml-1">
+                    ({annualizedFundingRate! >= 0 ? '+' : ''}{(annualizedFundingRate! * 100).toFixed(2)}% APR)
+                  </span>
                 </div>
               </div>
             )}
