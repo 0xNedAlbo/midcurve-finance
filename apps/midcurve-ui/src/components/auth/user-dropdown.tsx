@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
-import { User, LogOut, ChevronDown, Key, Settings } from "lucide-react";
+import { LogOut, ChevronDown, Settings } from "lucide-react";
 import Link from "next/link";
 
 interface UserDropdownProps {
@@ -98,22 +98,6 @@ export function UserDropdown({ mode }: UserDropdownProps) {
           </div>
 
           <div className="py-1">
-            <button
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
-            >
-              <User className="w-4 h-4" />
-              Profile
-            </button>
-
-            <button
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
-            >
-              <Key className="w-4 h-4" />
-              API Keys
-            </button>
-
             <Link
               href="/dashboard/settings"
               onClick={() => setIsOpen(false)}
