@@ -52,6 +52,9 @@ export function HedgeCreateForm({
     ? parseFloat(hedgeMarket.marketData.fundingRate)
     : null;
 
+  // Annualize: hourly rate × 24 hours × 365 days = × 8760
+  const annualizedFundingRate = fundingRate !== null ? fundingRate * 8760 : null;
+
   // Check if we have real market data
   const hasMarketData = !!hedgeMarket?.marketData;
 
@@ -172,11 +175,16 @@ export function HedgeCreateForm({
 
             {fundingRate !== null && (
               <div className="p-3 bg-slate-700/30 rounded-lg">
-                <div className="text-xs text-slate-400">Funding Rate (8h)</div>
+                <div className="text-xs text-slate-400">Funding Rate (1h)</div>
                 <div className={`text-lg font-semibold ${
                   fundingRate >= 0 ? 'text-green-400' : 'text-red-400'
                 }`}>
                   {fundingRate >= 0 ? '+' : ''}{(fundingRate * 100).toFixed(4)}%
+                </div>
+                <div className={`text-sm ${
+                  annualizedFundingRate! >= 0 ? 'text-green-400/70' : 'text-red-400/70'
+                }`}>
+                  {annualizedFundingRate! >= 0 ? '+' : ''}{(annualizedFundingRate! * 100).toFixed(2)}% APR
                 </div>
               </div>
             )}
