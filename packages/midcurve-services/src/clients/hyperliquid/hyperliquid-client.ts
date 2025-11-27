@@ -25,6 +25,7 @@ import {
 import {
   subAccounts,
   clearinghouseState,
+  metaAndAssetCtxs,
 } from '@nktkas/hyperliquid/api/info';
 import type { SubAccountsResponse } from '@nktkas/hyperliquid/api/info';
 import type { ClearinghouseStateResponse } from '@nktkas/hyperliquid/api/info';
@@ -170,7 +171,13 @@ export class HyperliquidClient {
     // SDK uses isTestnet (opposite of isMainnet)
     this.environment = config.environment;
     this.isTestnet = config.environment === 'testnet';
-    this.transport = new HttpTransport({ isTestnet: this.isTestnet });
+    // IMPORTANT: keepalive: false required for Next.js server-side compatibility
+    // The SDK's default keepalive: true breaks Next.js fetch implementation
+    // See: https://github.com/nktkas/hyperliquid/pull/45
+    this.transport = new HttpTransport({
+      isTestnet: this.isTestnet,
+      fetchOptions: { keepalive: false },
+    });
     this.cacheService = CacheService.getInstance();
 
     this.logger.info(
@@ -570,9 +577,6 @@ export class HyperliquidClient {
    * Fetches metadata (max leverage, decimals) and real-time context (mark price, funding rate)
    * from Hyperliquid. Uses CacheService to cache the full response for 5 minutes.
    *
-   * Note: Uses direct fetch instead of SDK to avoid `keepalive: true` incompatibility
-   * with Next.js server-side fetch implementation.
-   *
    * @param coin - Asset symbol (e.g., "ETH", "BTC")
    * @returns Market data or null if coin not found
    */
@@ -589,7 +593,7 @@ export class HyperliquidClient {
           name: string;
           maxLeverage: number;
           szDecimals: number;
-          onlyIsolated?: boolean;
+          onlyIsolated?: true;
         }>;
         assetCtxs: Array<{
           markPx: string;
@@ -602,27 +606,8 @@ export class HyperliquidClient {
       if (!marketsData) {
         log.externalApiCall(this.logger, 'Hyperliquid', 'metaAndAssetCtxs', {});
 
-        // Fetch fresh data from Hyperliquid using direct fetch
-        // Note: SDK's HttpTransport uses keepalive: true which is incompatible
-        // with Next.js server-side fetch. Using direct fetch as workaround.
-        const apiUrl = this.isTestnet
-          ? 'https://api.hyperliquid-testnet.xyz/info'
-          : 'https://api.hyperliquid.xyz/info';
-
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'metaAndAssetCtxs' }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Hyperliquid API error: ${response.status} ${response.statusText}`);
-        }
-
-        const rawData = await response.json() as [
-          { universe: MarketsCache['universe'] },
-          MarketsCache['assetCtxs']
-        ];
+        // Fetch fresh data from Hyperliquid using SDK
+        const rawData = await metaAndAssetCtxs({ transport: this.transport });
 
         marketsData = {
           universe: rawData[0].universe,
