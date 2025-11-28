@@ -13,7 +13,7 @@ applications:
             - cp -r apps/midcurve-ui/public apps/midcurve-ui/.next/standalone/apps/midcurve-ui/public || true
             - cp -r apps/midcurve-ui/.next/static apps/midcurve-ui/.next/standalone/apps/midcurve-ui/.next/static
       artifacts:
-        baseDirectory: .next/standalone/apps/midcurve-ui
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
