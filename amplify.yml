@@ -1,18 +1,19 @@
 version: 1
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - npm install -g pnpm@9.12.0
-        - pnpm install --frozen-lockfile
-    build:
-      commands:
-        - pnpm turbo run build --filter=@midcurve/ui...
-  artifacts:
-    baseDirectory: apps/midcurve-ui/.next
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - node_modules/**/*
-      - apps/midcurve-ui/.next/cache/**/*
+applications:
+  - appRoot: apps/midcurve-ui
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm install -g pnpm@9.12.0
+            - cd $CODEBUILD_SRC_DIR && pnpm install --frozen-lockfile
+        build:
+          commands:
+            - cd $CODEBUILD_SRC_DIR && pnpm turbo run build --filter=@midcurve/ui...
+      artifacts:
+        baseDirectory: .next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - .next/cache/**/*
