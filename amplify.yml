@@ -10,12 +10,12 @@ applications:
         build:
           commands:
             - turbo run build --filter=@midcurve/ui...
-            - cp -r public .next/standalone/apps/midcurve-ui/public
-            - cp -r .next/static .next/standalone/apps/midcurve-ui/.next/static
+            - cp -r apps/midcurve-ui/public apps/midcurve-ui/.next/standalone/apps/midcurve-ui/public || true
+            - cp -r apps/midcurve-ui/.next/static apps/midcurve-ui/.next/standalone/apps/midcurve-ui/.next/static
       artifacts:
-        baseDirectory: .next/standalone
+        baseDirectory: apps/midcurve-ui/.next/standalone
         files:
           - '**/*'
       cache:
         paths:
-          - .next/cache/**/*
+          - apps/midcurve-ui/.next/cache/**/*
