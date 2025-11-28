@@ -5,11 +5,14 @@ applications:
       phases:
         preBuild:
           commands:
+            - echo "Current dir:" && pwd
+            - echo "CODEBUILD_SRC_DIR:" && echo $CODEBUILD_SRC_DIR
+            - echo "Listing parent dirs:" && ls -la ../.. && ls -la ..
             - npm install -g pnpm@9.12.0
-            - cd $CODEBUILD_SRC_DIR && pnpm install --frozen-lockfile
+            - cd ../../ && pwd && pnpm install --frozen-lockfile
         build:
           commands:
-            - cd $CODEBUILD_SRC_DIR && pnpm turbo run build --filter=@midcurve/ui...
+            - cd ../../ && pnpm turbo run build --filter=@midcurve/ui...
       artifacts:
         baseDirectory: .next
         files:
