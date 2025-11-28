@@ -9,6 +9,19 @@ applications:
             - cd ../../ && pnpm install --frozen-lockfile
         build:
           commands:
+            # Write runtime environment variables to .env.production for SSR
+            - |
+              cat <<EOF > apps/midcurve-ui/.env.production
+              DATABASE_URL=$DATABASE_URL
+              NEXTAUTH_URL=$NEXTAUTH_URL
+              NEXTAUTH_SECRET=$NEXTAUTH_SECRET
+              RPC_URL_ETHEREUM=$RPC_URL_ETHEREUM
+              RPC_URL_ARBITRUM=$RPC_URL_ARBITRUM
+              RPC_URL_BASE=$RPC_URL_BASE
+              RPC_URL_BSC=$RPC_URL_BSC
+              RPC_URL_POLYGON=$RPC_URL_POLYGON
+              RPC_URL_OPTIMISM=$RPC_URL_OPTIMISM
+              EOF
             - turbo run build --filter=@midcurve/ui...
             - cp -r apps/midcurve-ui/public apps/midcurve-ui/.next/standalone/apps/midcurve-ui/public || true
             - cp -r apps/midcurve-ui/.next/static apps/midcurve-ui/.next/standalone/apps/midcurve-ui/.next/static
