@@ -9,13 +9,12 @@ applications:
             - cd ../../ && pnpm install --frozen-lockfile
         build:
           commands:
-            - echo "Build phase pwd:" && pwd
-            - cd ../../ && echo "After cd pwd:" && pwd && ls -la
-            - cd ../../ && pnpm turbo run build --filter=@midcurve/ui...
+            - pnpm turbo run build --filter=@midcurve/ui...
       artifacts:
-        baseDirectory: .next
+        baseDirectory: apps/midcurve-ui/.next
         files:
           - '**/*'
       cache:
         paths:
-          - .next/cache/**/*
+          - node_modules/**/*
+          - apps/midcurve-ui/.next/cache/**/*
