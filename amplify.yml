@@ -12,10 +12,8 @@ applications:
             - turbo run build --filter=@midcurve/ui...
             - cp -r apps/midcurve-ui/public apps/midcurve-ui/.next/standalone/apps/midcurve-ui/public || true
             - cp -r apps/midcurve-ui/.next/static apps/midcurve-ui/.next/standalone/apps/midcurve-ui/.next/static
-            - echo "Standalone contents:" && ls -la apps/midcurve-ui/.next/standalone/
-            - echo "App standalone contents:" && ls -la apps/midcurve-ui/.next/standalone/apps/midcurve-ui/ || echo "not found"
       artifacts:
-        baseDirectory: .next/standalone
+        baseDirectory: .next/standalone/apps/midcurve-ui
         files:
           - '**/*'
       cache:
