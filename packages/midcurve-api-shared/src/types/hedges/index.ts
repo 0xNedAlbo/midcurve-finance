@@ -5,3 +5,4 @@
  */
 
 export * from './check-eligibility.js';
+export * from './open-hedge.js';

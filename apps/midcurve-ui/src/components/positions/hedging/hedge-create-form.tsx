@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { LeverageSelector } from "./leverage-selector";
 import { BiasSelector } from "./bias-selector";
-import { Shield, AlertTriangle, Lock } from "lucide-react";
+import { Shield, AlertTriangle, Lock, ArrowRight, Loader2 } from "lucide-react";
 import type { HedgeMarketResponse } from "@midcurve/api-shared";
+import { useHyperliquidWallets } from "@/hooks/user/useHyperliquidWallets";
 
 interface HedgeCreateFormProps {
   baseAssetAmount: bigint;
@@ -41,6 +43,14 @@ export function HedgeCreateForm({
 }: HedgeCreateFormProps) {
   const [leverage, setLeverage] = useState(1);
   const [biasPercent, setBiasPercent] = useState(0);
+
+  // Check for API wallet
+  const { data: wallets, isLoading: walletsLoading } = useHyperliquidWallets();
+  const activeWallet = wallets?.find(
+    (w) => w.isActive && new Date(w.expiresAt) > new Date()
+  );
+  const expiredWallet = wallets?.find((w) => w.isActive);
+  const hasExpiredWallet = !activeWallet && expiredWallet;
 
   // Derive max leverage from market data with fallback
   const maxLeverage = hedgeMarket?.marketData?.maxLeverage ?? 50;
@@ -241,19 +251,48 @@ export function HedgeCreateForm({
           </div>
         </div>
 
-        {/* Submit Button */}
-        <button
-          onClick={() => onOpenHedge?.({ leverage, biasPercent, marginMode: "isolated" })}
-          disabled={!onOpenHedge}
-          className={`w-full py-3 px-4 font-medium rounded-lg flex items-center justify-center gap-2 transition-colors ${
-            onOpenHedge
-              ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-              : "bg-blue-600/50 text-blue-200 cursor-not-allowed"
-          }`}
-        >
-          <Shield className="w-4 h-4" />
-          Open Hedge
-        </button>
+        {/* Submit Button / Wallet Warning */}
+        {walletsLoading ? (
+          <div className="w-full py-3 px-4 bg-slate-700/50 rounded-lg flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+            <span className="text-sm text-slate-400">Checking wallet status...</span>
+          </div>
+        ) : !activeWallet ? (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-medium text-amber-300">
+                  {hasExpiredWallet ? "API Wallet Expired" : "API Wallet Required"}
+                </h4>
+                <p className="text-xs text-amber-200/70 mt-1">
+                  {hasExpiredWallet
+                    ? "Your Hyperliquid API wallet has expired. Please renew it in Settings to enable one-click hedging."
+                    : "Register a Hyperliquid API wallet in Settings to enable one-click hedging."}
+                </p>
+                <Link
+                  href="/dashboard/settings"
+                  className="inline-flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 mt-2 cursor-pointer"
+                >
+                  Go to Settings <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => onOpenHedge?.({ leverage, biasPercent, marginMode: "isolated" })}
+            disabled={!onOpenHedge}
+            className={`w-full py-3 px-4 font-medium rounded-lg flex items-center justify-center gap-2 transition-colors ${
+              onOpenHedge
+                ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                : "bg-blue-600/50 text-blue-200 cursor-not-allowed"
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            Open Hedge
+          </button>
+        )}
       </div>
     </div>
   );

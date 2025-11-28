@@ -1,22 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
-import { useAccount } from "wagmi";
+import { useState, useEffect } from "react";
 import {
   Shield,
   AlertCircle,
-  Wallet,
   Check,
   ExternalLink,
+  Loader2,
 } from "lucide-react";
 import type { HedgeMarketResponse } from "@midcurve/api-shared";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { TransactionStep } from "@/components/positions/TransactionStep";
-import {
-  useOpenHyperliquidHedge,
-  type HedgeStep,
-} from "@/hooks/hedges/hyperliquid/useOpenHyperliquidHedge";
-import { UserRejectedError } from "@/hooks/hedges/hyperliquid/useHyperliquidClient";
+import { useOpenHedgeBackend } from "@/hooks/hedges/hyperliquid/useOpenHedgeBackend";
 import type { HedgeFormConfig } from "../open-hedge-modal";
 
 interface HyperliquidOpenHedgeFormProps {
@@ -33,17 +28,24 @@ interface HyperliquidOpenHedgeFormProps {
   onOperationStateChange?: (isInProgress: boolean) => void;
 }
 
+type HedgeStep = "idle" | "preparing" | "funding" | "placing" | "monitoring" | "complete";
+
+/**
+ * Helper to delay execution for simulated step progression
+ */
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Hyperliquid Open Hedge Form
  *
- * Displays the 5-step flow for opening a hedge on Hyperliquid:
- * 1. Prepare Subaccount
- * 2. Fund Subaccount
- * 3. Place Order
- * 4. Monitor Execution
- * 5. Complete
+ * Displays the 4-step flow for opening a hedge on Hyperliquid:
+ * 1. Prepare Trading Account (subaccount)
+ * 2. Fund Trading Account (margin transfer)
+ * 3. Place Short Order
+ * 4. Order Execution (monitoring)
  *
- * Uses TransactionStep component for consistent step visualization.
+ * All operations happen on the backend via a single API call.
+ * Step progression is simulated for better UX.
  */
 export function HyperliquidOpenHedgeForm({
   positionHash,
@@ -58,16 +60,14 @@ export function HyperliquidOpenHedgeForm({
   onHedgeSuccess,
   onOperationStateChange,
 }: HyperliquidOpenHedgeFormProps) {
-  const { isConnected } = useAccount();
-
-  const hedge = useOpenHyperliquidHedge();
+  const [currentStep, setCurrentStep] = useState<HedgeStep>("idle");
+  const openHedge = useOpenHedgeBackend();
 
   // Notify parent of operation state changes
   useEffect(() => {
-    const isInProgress =
-      hedge.isRunning && !hedge.isComplete && hedge.currentStep !== "idle";
+    const isInProgress = currentStep !== "idle" && currentStep !== "complete";
     onOperationStateChange?.(isInProgress);
-  }, [hedge.isRunning, hedge.isComplete, hedge.currentStep, onOperationStateChange]);
+  }, [currentStep, onOperationStateChange]);
 
   // Calculate hedge parameters
   const multiplier = 1 + hedgeConfig.biasPercent / 100;
@@ -84,37 +84,42 @@ export function HyperliquidOpenHedgeForm({
   const requiredMargin = notionalValue / hedgeConfig.leverage;
   const marginWithBuffer = requiredMargin * 1.02; // 2% buffer
 
-  // Get current error (if any)
-  const currentError =
-    hedge.prepareSubaccountStatus.error ||
-    hedge.fundSubaccountStatus.error ||
-    hedge.placeOrderStatus.error ||
-    hedge.monitorOrderStatus.error;
-
-  const isUserRejected = currentError instanceof UserRejectedError;
-
   // Start the hedge opening process
   const handleStart = async () => {
+    setCurrentStep("preparing");
+
     try {
-      await hedge.start({
+      // Simulate step progression for UX while backend handles everything
+      const stepDelayMs = 400;
+
+      // Start the backend call
+      const resultPromise = openHedge.mutateAsync({
         positionHash,
+        leverage: hedgeConfig.leverage,
+        biasPercent: hedgeConfig.biasPercent,
+        marginMode: hedgeConfig.marginMode,
         coin: riskBaseSymbol,
         hedgeSize: hedgeSizeNum.toFixed(6),
-        leverage: hedgeConfig.leverage,
-        notionalValueUsd: notionalValue,
-        markPrice,
+        notionalValueUsd: notionalValue.toFixed(2),
+        markPrice: markPrice.toFixed(2),
       });
-    } catch {
-      // Error already handled in hook
-    }
-  };
 
-  // Retry from failed step
-  const handleRetry = async () => {
-    try {
-      await hedge.retry();
+      // Simulate step progression
+      await delay(stepDelayMs);
+      setCurrentStep("funding");
+      await delay(stepDelayMs);
+      setCurrentStep("placing");
+      await delay(stepDelayMs);
+      setCurrentStep("monitoring");
+
+      // Wait for result
+      await resultPromise;
+
+      setCurrentStep("complete");
     } catch {
-      // Error already handled in hook
+      // Error is handled by the mutation, keep current step for retry
+      // Reset to idle on error so user can retry
+      setCurrentStep("idle");
     }
   };
 
@@ -124,40 +129,17 @@ export function HyperliquidOpenHedgeForm({
     onClose();
   };
 
-  // Get step description based on current state
-  const getStepDescription = (step: HedgeStep): string => {
-    switch (step) {
-      case "preparing_subaccount":
-        return "Setting up isolated margin account on Hyperliquid...";
-      case "funding_subaccount":
-        return `Transferring $${marginWithBuffer.toFixed(2)} to subaccount...`;
-      case "placing_order":
-        return `Opening ${hedgeSizeNum.toFixed(4)} ${riskBaseSymbol} short position...`;
-      case "monitoring_order":
-        return "Waiting for order to fill...";
-      case "complete":
-        return "Hedge opened successfully!";
-      default:
-        return "";
-    }
+  // Check which steps are complete
+  const isStepComplete = (step: HedgeStep): boolean => {
+    const order: HedgeStep[] = ["idle", "preparing", "funding", "placing", "monitoring", "complete"];
+    const currentIndex = order.indexOf(currentStep);
+    const stepIndex = order.indexOf(step);
+    return stepIndex < currentIndex;
   };
 
-  // Wallet not connected
-  if (!isConnected) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12">
-        <div className="p-4 bg-slate-700/50 rounded-full mb-4">
-          <Wallet className="w-8 h-8 text-slate-400" />
-        </div>
-        <h3 className="text-lg font-semibold text-white mb-2">
-          Connect Your Wallet
-        </h3>
-        <p className="text-sm text-slate-400 text-center max-w-sm">
-          Please connect your wallet to open a hedge position on Hyperliquid.
-        </p>
-      </div>
-    );
-  }
+  const isStepLoading = (step: HedgeStep): boolean => {
+    return currentStep === step;
+  };
 
   return (
     <div className="space-y-6">
@@ -213,28 +195,28 @@ export function HyperliquidOpenHedgeForm({
         <TransactionStep
           title="Prepare Trading Account"
           description={
-            hedge.prepareSubaccountStatus.isComplete && hedge.subaccountAddress
-              ? `Subaccount ready: ${hedge.subaccountAddress.slice(0, 8)}...${hedge.subaccountAddress.slice(-6)}`
+            isStepComplete("preparing") && openHedge.data?.subaccountAddress
+              ? `Subaccount ready: ${openHedge.data.subaccountAddress.slice(0, 8)}...${openHedge.data.subaccountAddress.slice(-6)}`
               : "Create or reuse a Hyperliquid subaccount"
           }
-          isLoading={hedge.prepareSubaccountStatus.isLoading}
-          isComplete={hedge.prepareSubaccountStatus.isComplete}
-          isDisabled={hedge.currentStep !== "idle" && !hedge.prepareSubaccountStatus.error}
+          isLoading={isStepLoading("preparing")}
+          isComplete={isStepComplete("preparing")}
+          isDisabled={currentStep !== "idle"}
           onExecute={handleStart}
-          showExecute={hedge.currentStep === "idle"}
+          showExecute={currentStep === "idle"}
         />
 
         {/* Step 2: Fund Subaccount */}
         <TransactionStep
           title="Fund Trading Account"
           description={
-            hedge.fundSubaccountStatus.isComplete && hedge.marginTransferred
-              ? `Transferred $${hedge.marginTransferred} to subaccount`
+            isStepComplete("funding") && openHedge.data?.marginTransferred
+              ? `Transferred $${openHedge.data.marginTransferred} to subaccount`
               : `Transfer $${marginWithBuffer.toFixed(2)} to subaccount`
           }
-          isLoading={hedge.fundSubaccountStatus.isLoading}
-          isComplete={hedge.fundSubaccountStatus.isComplete}
-          isDisabled={!hedge.prepareSubaccountStatus.isComplete}
+          isLoading={isStepLoading("funding")}
+          isComplete={isStepComplete("funding")}
+          isDisabled={true}
           onExecute={() => {}}
           showExecute={false}
         />
@@ -243,13 +225,13 @@ export function HyperliquidOpenHedgeForm({
         <TransactionStep
           title="Place Short Order"
           description={
-            hedge.placeOrderStatus.isComplete && hedge.orderId
-              ? `Order placed (ID: ${hedge.orderId})`
+            isStepComplete("placing") && openHedge.data?.orderId
+              ? `Order placed (ID: ${openHedge.data.orderId})`
               : `Open ${hedgeSizeNum.toFixed(4)} ${riskBaseSymbol} short at market`
           }
-          isLoading={hedge.placeOrderStatus.isLoading}
-          isComplete={hedge.placeOrderStatus.isComplete}
-          isDisabled={!hedge.fundSubaccountStatus.isComplete}
+          isLoading={isStepLoading("placing")}
+          isComplete={isStepComplete("placing")}
+          isDisabled={true}
           onExecute={() => {}}
           showExecute={false}
         />
@@ -258,38 +240,30 @@ export function HyperliquidOpenHedgeForm({
         <TransactionStep
           title="Order Execution"
           description={
-            hedge.monitorOrderStatus.isComplete && hedge.fillPrice
-              ? `Filled at $${parseFloat(hedge.fillPrice).toLocaleString()}`
-              : hedge.placeOrderStatus.isComplete && hedge.fillPrice
-                ? `Filled at $${parseFloat(hedge.fillPrice).toLocaleString()}`
-                : "Waiting for order to fill..."
+            currentStep === "complete" && openHedge.data?.fillPrice
+              ? `Filled at $${parseFloat(openHedge.data.fillPrice).toLocaleString()}`
+              : "Waiting for order to fill..."
           }
-          isLoading={hedge.monitorOrderStatus.isLoading}
-          isComplete={
-            hedge.monitorOrderStatus.isComplete ||
-            (hedge.placeOrderStatus.isComplete && !!hedge.fillPrice)
-          }
-          isDisabled={!hedge.placeOrderStatus.isComplete}
+          isLoading={isStepLoading("monitoring")}
+          isComplete={currentStep === "complete"}
+          isDisabled={true}
           onExecute={() => {}}
           showExecute={false}
         />
       </div>
 
-      {/* Status Message */}
-      {hedge.isRunning && !hedge.isComplete && (
+      {/* Status Message - Processing */}
+      {currentStep !== "idle" && currentStep !== "complete" && !openHedge.error && (
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <Wallet className="w-5 h-5 text-blue-400 mt-0.5" />
+            <Loader2 className="w-5 h-5 text-blue-400 mt-0.5 animate-spin" />
             <div>
-              <h4 className="text-blue-400 font-medium">
-                {hedge.currentStep === "preparing_subaccount" ||
-                hedge.currentStep === "funding_subaccount" ||
-                hedge.currentStep === "placing_order"
-                  ? "Signature Required"
-                  : "Processing"}
-              </h4>
+              <h4 className="text-blue-400 font-medium">Processing</h4>
               <p className="text-sm text-blue-200/80 mt-1">
-                {getStepDescription(hedge.currentStep)}
+                {currentStep === "preparing" && "Setting up isolated margin account..."}
+                {currentStep === "funding" && `Transferring $${marginWithBuffer.toFixed(2)} to subaccount...`}
+                {currentStep === "placing" && `Placing ${hedgeSizeNum.toFixed(4)} ${riskBaseSymbol} short order...`}
+                {currentStep === "monitoring" && "Waiting for order to fill..."}
               </p>
             </div>
           </div>
@@ -297,21 +271,19 @@ export function HyperliquidOpenHedgeForm({
       )}
 
       {/* Error Display */}
-      {currentError && (
+      {openHedge.error && (
         <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <h4 className="text-red-400 font-medium">
-                {isUserRejected ? "Signature Rejected" : "Error"}
-              </h4>
+              <h4 className="text-red-400 font-medium">Error</h4>
               <p className="text-sm text-red-200/80 mt-1">
-                {currentError.message}
+                {openHedge.error.message}
               </p>
             </div>
           </div>
           <button
-            onClick={handleRetry}
+            onClick={handleStart}
             className="mt-3 px-4 py-2 text-sm font-medium bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg transition-colors cursor-pointer"
           >
             Retry
@@ -320,20 +292,20 @@ export function HyperliquidOpenHedgeForm({
       )}
 
       {/* Success State */}
-      {hedge.isComplete && (
+      {currentStep === "complete" && openHedge.data && (
         <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <Check className="w-5 h-5 text-green-400 mt-0.5" />
             <div className="flex-1">
               <h4 className="text-green-400 font-medium">Hedge Opened!</h4>
               <p className="text-sm text-green-200/80 mt-1">
-                Your {hedge.fillSize ?? hedgeSizeNum.toFixed(4)} {riskBaseSymbol}{" "}
+                Your {openHedge.data.fillSize ?? hedgeSizeNum.toFixed(4)} {riskBaseSymbol}{" "}
                 short position is now active
-                {hedge.fillPrice &&
-                  ` at $${parseFloat(hedge.fillPrice).toLocaleString()}`}
+                {openHedge.data.fillPrice &&
+                  ` at $${parseFloat(openHedge.data.fillPrice).toLocaleString()}`}
                 .
               </p>
-              {hedge.subaccountAddress && (
+              {openHedge.data.subaccountAddress && (
                 <a
                   href={`https://app.hyperliquid.xyz/trade/${riskBaseSymbol}`}
                   target="_blank"
@@ -351,7 +323,7 @@ export function HyperliquidOpenHedgeForm({
 
       {/* Action Buttons */}
       <div className="flex gap-3">
-        {!hedge.isRunning && !hedge.isComplete && (
+        {currentStep === "idle" && !openHedge.isPending && (
           <button
             onClick={onClose}
             className="flex-1 py-3 px-4 text-slate-300 hover:text-white font-medium rounded-lg transition-colors cursor-pointer"
@@ -360,15 +332,15 @@ export function HyperliquidOpenHedgeForm({
           </button>
         )}
 
-        {hedge.isComplete ? (
+        {currentStep === "complete" ? (
           <button
             onClick={handleFinish}
             className="flex-1 py-3 px-4 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2"
           >
             <Check className="w-4 h-4" />
-            Done
+            Finish
           </button>
-        ) : !hedge.isRunning ? (
+        ) : currentStep === "idle" && !openHedge.isPending ? (
           <button
             onClick={handleStart}
             className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2"

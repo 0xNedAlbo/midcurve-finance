@@ -78,6 +78,9 @@ export enum ApiErrorCode {
   API_KEY_NOT_FOUND = 'API_KEY_NOT_FOUND',
   WALLET_NOT_FOUND = 'WALLET_NOT_FOUND',
   INVALID_SIWE_MESSAGE = 'INVALID_SIWE_MESSAGE',
+
+  // Hedge errors
+  HEDGE_OPEN_ERROR = 'HEDGE_OPEN_ERROR',
 }
 
 /**
@@ -167,4 +170,5 @@ export const ErrorCodeToHttpStatus: Record<ApiErrorCode, number> = {
   [ApiErrorCode.API_KEY_NOT_FOUND]: 404,
   [ApiErrorCode.WALLET_NOT_FOUND]: 404,
   [ApiErrorCode.INVALID_SIWE_MESSAGE]: 400,
+  [ApiErrorCode.HEDGE_OPEN_ERROR]: 500,
 };

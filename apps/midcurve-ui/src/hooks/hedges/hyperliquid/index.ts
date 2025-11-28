@@ -1,2 +1,1 @@
-export * from "./useHyperliquidClient";
-export * from "./useOpenHyperliquidHedge";
+export * from "./useOpenHedgeBackend";
