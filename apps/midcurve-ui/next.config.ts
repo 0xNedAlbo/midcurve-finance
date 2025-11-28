@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   /* Next.js Configuration */
   reactStrictMode: true,
 
+  /* Output Configuration for AWS Amplify */
+  output: 'standalone',
+
   /* Build Configuration */
   eslint: {
     // Disable ESLint during production builds (devDependencies not available)

@@ -10,11 +10,13 @@ applications:
         build:
           commands:
             - turbo run build --filter=@midcurve/ui...
+            - echo "Build artifacts location:" && pwd && ls -la
+            - ls -la .next || echo ".next not found in current dir"
+            - ls -la apps/midcurve-ui/.next || echo ".next not found in apps/midcurve-ui"
       artifacts:
-        baseDirectory: apps/midcurve-ui/.next
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
         paths:
-          - node_modules/**/*
-          - apps/midcurve-ui/.next/cache/**/*
+          - .next/cache/**/*
