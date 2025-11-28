@@ -15,6 +15,7 @@ applications:
               DATABASE_URL=$DATABASE_URL
               NEXTAUTH_URL=$NEXTAUTH_URL
               NEXTAUTH_SECRET=$NEXTAUTH_SECRET
+              AUTH_TRUST_HOST=true
               RPC_URL_ETHEREUM=$RPC_URL_ETHEREUM
               RPC_URL_ARBITRUM=$RPC_URL_ARBITRUM
               RPC_URL_BASE=$RPC_URL_BASE
