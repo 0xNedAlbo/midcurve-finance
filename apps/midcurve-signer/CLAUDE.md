@@ -61,12 +61,12 @@ type AllowedCurrency =
   | { currencyType: 'erc20'; chainId: number; address: string; symbol: string; }
   | { currencyType: 'evmNative'; chainId: number; symbol: string; };
 
-// Discriminated union for allowed effects (contract calls)
+// Allowed effect (contract call permission)
 type AllowedEffect = {
   effectType: 'evmContractCall';
   chainId: number;
-  contractAddress: string;
-  functionSelectors: string[];  // 4-byte function selectors (0x...)
+  address: string;       // Contract address
+  selector: string;      // 4-byte function selector (0x...)
 };
 
 // Strategy envelope with type-specific config
@@ -78,19 +78,54 @@ interface StrategyEnvelope {
 
 **EIP-712 Signing:**
 
-The intent is signed using EIP-712 typed data. Nested structures (`allowedCurrencies`, `allowedEffects`, `strategy`) are JSON-stringified and keccak256-hashed as `bytes32` fields:
+The intent is signed using EIP-712 typed data with **native arrays** for `allowedCurrencies` and `allowedEffects`. Discriminated unions are flattened (all possible fields present, with `zeroAddress` for unused fields). Strategy config is hashed because it varies by `strategyType`.
 
 ```typescript
 const StrategyIntentV1Types = {
+  AllowedCurrency: [
+    { name: 'currencyType', type: 'string' },
+    { name: 'chainId', type: 'uint256' },
+    { name: 'address', type: 'address' },  // zeroAddress for evmNative
+    { name: 'symbol', type: 'string' },
+  ],
+  AllowedEffect: [
+    { name: 'effectType', type: 'string' },
+    { name: 'chainId', type: 'uint256' },
+    { name: 'contractAddress', type: 'address' },
+    { name: 'functionSelector', type: 'bytes4' },
+  ],
+  StrategyEnvelope: [
+    { name: 'strategyType', type: 'string' },
+    { name: 'configHash', type: 'bytes32' },  // keccak256(JSON.stringify(config))
+  ],
   StrategyIntentV1: [
     { name: 'id', type: 'string' },
     { name: 'name', type: 'string' },
     { name: 'description', type: 'string' },
-    { name: 'allowedCurrenciesHash', type: 'bytes32' },
-    { name: 'allowedEffectsHash', type: 'bytes32' },
-    { name: 'strategyHash', type: 'bytes32' },
+    { name: 'allowedCurrencies', type: 'AllowedCurrency[]' },
+    { name: 'allowedEffects', type: 'AllowedEffect[]' },
+    { name: 'strategy', type: 'StrategyEnvelope' },
   ],
 };
+```
+
+**EIP-712 Mapper:**
+
+The `eip712-mapper.ts` module converts domain types (with clean discriminated unions) to EIP-712 flattened types:
+
+```typescript
+import { toEip712Intent } from './eip712-mapper';
+
+// Domain intent → EIP-712 message
+const eip712Message = toEip712Intent(intent);
+
+// Then used with hashTypedData/signTypedData
+const hash = hashTypedData({
+  domain: createStrategyIntentDomain(chainId),
+  types: StrategyIntentV1Types,
+  primaryType: 'StrategyIntentV1',
+  message: eip712Message,
+});
 ```
 
 **Signed Intent:**
@@ -187,9 +222,10 @@ src/
 │   └── page.tsx
 ├── lib/
 │   ├── intent/
+│   │   ├── eip712-types.ts     # EIP-712 domain and type definitions
+│   │   ├── eip712-mapper.ts    # Domain ↔ EIP-712 type conversion
 │   │   ├── intent-verifier.ts  # EIP-712 signature verification
-│   │   ├── check-intent.ts     # Intent + wallet verification
-│   │   └── eip712-types.ts     # EIP-712 domain and type definitions
+│   │   └── check-intent.ts     # Intent + wallet verification
 │   ├── kms/
 │   │   ├── kms-signer.ts     # AWS KMS signing
 │   │   ├── local-signer.ts   # Local dev fallback

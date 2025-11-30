@@ -40,18 +40,34 @@ export function createStrategyIntentDomain(chainId: number): TypedDataDomain {
 /**
  * EIP-712 type definitions for StrategyIntentV1
  *
- * The structure is flattened for EIP-712 signing since nested objects
- * require explicit type definitions. We hash the complex nested structures
- * (allowedCurrencies, allowedEffects, strategy) as JSON strings.
+ * Uses native EIP-712 arrays for allowedCurrencies and allowedEffects.
+ * Discriminated unions are flattened (all possible fields present).
+ * Strategy config is hashed because it varies by strategyType.
  */
 export const StrategyIntentV1Types = {
+  AllowedCurrency: [
+    { name: 'currencyType', type: 'string' },
+    { name: 'chainId', type: 'uint256' },
+    { name: 'address', type: 'address' },
+    { name: 'symbol', type: 'string' },
+  ],
+  AllowedEffect: [
+    { name: 'effectType', type: 'string' },
+    { name: 'chainId', type: 'uint256' },
+    { name: 'contractAddress', type: 'address' },
+    { name: 'functionSelector', type: 'bytes4' },
+  ],
+  StrategyEnvelope: [
+    { name: 'strategyType', type: 'string' },
+    { name: 'configHash', type: 'bytes32' },
+  ],
   StrategyIntentV1: [
     { name: 'id', type: 'string' },
     { name: 'name', type: 'string' },
     { name: 'description', type: 'string' },
-    { name: 'allowedCurrenciesHash', type: 'bytes32' },
-    { name: 'allowedEffectsHash', type: 'bytes32' },
-    { name: 'strategyHash', type: 'bytes32' },
+    { name: 'allowedCurrencies', type: 'AllowedCurrency[]' },
+    { name: 'allowedEffects', type: 'AllowedEffect[]' },
+    { name: 'strategy', type: 'StrategyEnvelope' },
   ],
 } as const;
 

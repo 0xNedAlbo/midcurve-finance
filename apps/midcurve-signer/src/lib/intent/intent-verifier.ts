@@ -12,8 +12,6 @@
 import {
   hashTypedData,
   recoverAddress,
-  keccak256,
-  toHex,
   type Hex,
   type Address,
 } from 'viem';
@@ -29,6 +27,7 @@ import {
   StrategyIntentV1Types,
   STRATEGY_INTENT_PRIMARY_TYPE,
 } from './eip712-types';
+import { toEip712Intent } from './eip712-mapper';
 
 /**
  * Verification result
@@ -58,42 +57,6 @@ export type IntentVerificationErrorCode =
  */
 function toTypedIntent(validated: ValidatedStrategyIntentV1): StrategyIntentV1 {
   return validated as unknown as StrategyIntentV1;
-}
-
-/**
- * Hash a JSON object for EIP-712 signing
- * Used for complex nested structures (allowedCurrencies, allowedEffects, strategy)
- */
-function hashJsonObject(obj: unknown): Hex {
-  const json = JSON.stringify(obj, Object.keys(obj as object).sort());
-  return keccak256(toHex(json));
-}
-
-/**
- * EIP-712 message structure for StrategyIntentV1
- */
-interface StrategyIntentV1Message {
-  id: string;
-  name: string;
-  description: string;
-  allowedCurrenciesHash: Hex;
-  allowedEffectsHash: Hex;
-  strategyHash: Hex;
-}
-
-/**
- * Prepare intent for EIP-712 signing
- * Converts nested structures to hashes
- */
-function prepareIntentForSigning(intent: StrategyIntentV1): StrategyIntentV1Message {
-  return {
-    id: intent.id,
-    name: intent.name ?? '',
-    description: intent.description ?? '',
-    allowedCurrenciesHash: hashJsonObject(intent.allowedCurrencies),
-    allowedEffectsHash: hashJsonObject(intent.allowedEffects),
-    strategyHash: hashJsonObject(intent.strategy),
-  };
 }
 
 class StrategyIntentVerifier {
@@ -188,7 +151,8 @@ class StrategyIntentVerifier {
   ): Promise<Address | null> {
     try {
       const domain = createStrategyIntentDomain(chainId);
-      const message = prepareIntentForSigning(intent);
+      // Convert domain intent to EIP-712 flattened format
+      const message = toEip712Intent(intent);
 
       // Hash the typed data
       const hash = hashTypedData({
