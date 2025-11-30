@@ -1,27 +1,33 @@
 /**
- * Intent Verification Service
+ * Strategy Intent Verification Service
  *
- * Verifies EIP-712 signed intents:
- * 1. Validates the intent schema
+ * Verifies EIP-712 signed strategy intents:
+ * 1. Validates the intent schema using Zod
  * 2. Verifies the signature matches the signer
- * 3. Checks nonce hasn't been used (replay protection)
- * 4. Checks intent hasn't expired
+ *
+ * Note: Nonce checking and expiration are NOT implemented in StrategyIntentV1.
+ * These are permission grants, not per-operation intents.
  */
 
-import { hashTypedData, recoverAddress, type Hex, type Address } from 'viem';
-import { prisma } from '../prisma';
+import {
+  hashTypedData,
+  recoverAddress,
+  keccak256,
+  toHex,
+  type Hex,
+  type Address,
+} from 'viem';
 import { signerLogger, signerLog } from '../logger';
 import {
-  type Intent,
-  type SignedIntent,
-  IntentSchema,
-  type IntentType,
-  type ValidatedIntent,
+  SignedStrategyIntentV1Schema,
+  type ValidatedSignedStrategyIntentV1,
+  type ValidatedStrategyIntentV1,
 } from '@midcurve/api-shared';
+import type { StrategyIntentV1 } from '@midcurve/shared';
 import {
-  createIntentDomain,
-  INTENT_TYPE_DEFINITIONS,
-  INTENT_PRIMARY_TYPES,
+  createStrategyIntentDomain,
+  StrategyIntentV1Types,
+  STRATEGY_INTENT_PRIMARY_TYPE,
 } from './eip712-types';
 
 /**
@@ -31,7 +37,7 @@ export interface VerificationResult {
   valid: boolean;
   error?: string;
   errorCode?: string;
-  intent?: Intent;
+  intent?: StrategyIntentV1;
   recoveredAddress?: Address;
 }
 
@@ -42,43 +48,74 @@ export const IntentVerificationError = {
   INVALID_SCHEMA: 'INVALID_SCHEMA',
   INVALID_SIGNATURE: 'INVALID_SIGNATURE',
   SIGNER_MISMATCH: 'SIGNER_MISMATCH',
-  NONCE_USED: 'NONCE_USED',
-  INTENT_EXPIRED: 'INTENT_EXPIRED',
-  UNKNOWN_INTENT_TYPE: 'UNKNOWN_INTENT_TYPE',
 } as const;
 
 export type IntentVerificationErrorCode =
   (typeof IntentVerificationError)[keyof typeof IntentVerificationError];
 
 /**
- * Convert a validated intent (from Zod) to a typed Intent
- *
- * This is needed because Zod infers `string` for addresses,
- * but our Intent type uses `Address` (0x${string}).
- * Since we validate the address format with regex, this cast is safe.
+ * Convert a validated intent (from Zod) to a typed StrategyIntentV1
  */
-function toTypedIntent(validated: ValidatedIntent): Intent {
-  return validated as unknown as Intent;
+function toTypedIntent(validated: ValidatedStrategyIntentV1): StrategyIntentV1 {
+  return validated as unknown as StrategyIntentV1;
 }
 
-class IntentVerifier {
-  private readonly logger = signerLogger.child({ component: 'IntentVerifier' });
+/**
+ * Hash a JSON object for EIP-712 signing
+ * Used for complex nested structures (allowedCurrencies, allowedEffects, strategy)
+ */
+function hashJsonObject(obj: unknown): Hex {
+  const json = JSON.stringify(obj, Object.keys(obj as object).sort());
+  return keccak256(toHex(json));
+}
+
+/**
+ * EIP-712 message structure for StrategyIntentV1
+ */
+interface StrategyIntentV1Message {
+  id: string;
+  name: string;
+  description: string;
+  allowedCurrenciesHash: Hex;
+  allowedEffectsHash: Hex;
+  strategyHash: Hex;
+}
+
+/**
+ * Prepare intent for EIP-712 signing
+ * Converts nested structures to hashes
+ */
+function prepareIntentForSigning(intent: StrategyIntentV1): StrategyIntentV1Message {
+  return {
+    id: intent.id,
+    name: intent.name ?? '',
+    description: intent.description ?? '',
+    allowedCurrenciesHash: hashJsonObject(intent.allowedCurrencies),
+    allowedEffectsHash: hashJsonObject(intent.allowedEffects),
+    strategyHash: hashJsonObject(intent.strategy),
+  };
+}
+
+class StrategyIntentVerifier {
+  private readonly logger = signerLogger.child({
+    component: 'StrategyIntentVerifier',
+  });
 
   /**
-   * Verify a signed intent
+   * Verify a signed strategy intent
    *
    * @param signedIntent - The signed intent to verify
-   * @param skipNonceCheck - Skip nonce verification (for testing)
+   * @param chainId - The chain ID for EIP-712 domain
    */
   async verify(
-    signedIntent: SignedIntent,
-    skipNonceCheck = false
+    signedIntent: ValidatedSignedStrategyIntentV1,
+    chainId: number
   ): Promise<VerificationResult> {
     const requestId = `verify-${Date.now()}`;
 
     try {
       // 1. Validate intent schema
-      const schemaResult = IntentSchema.safeParse(signedIntent.intent);
+      const schemaResult = SignedStrategyIntentV1Schema.safeParse(signedIntent);
       if (!schemaResult.success) {
         return {
           valid: false,
@@ -88,22 +125,14 @@ class IntentVerifier {
       }
 
       // Convert validated intent to typed intent
-      const intent = toTypedIntent(schemaResult.data);
+      const intent = toTypedIntent(schemaResult.data.intent);
 
-      // 2. Check intent hasn't expired
-      if (intent.expiresAt) {
-        const expiresAt = new Date(intent.expiresAt);
-        if (expiresAt < new Date()) {
-          return {
-            valid: false,
-            error: 'Intent has expired',
-            errorCode: IntentVerificationError.INTENT_EXPIRED,
-          };
-        }
-      }
-
-      // 3. Verify signature
-      const recoveredAddress = await this.recoverSigner(intent, signedIntent.signature);
+      // 2. Verify signature
+      const recoveredAddress = await this.recoverSigner(
+        intent,
+        signedIntent.signature as Hex,
+        chainId
+      );
 
       if (!recoveredAddress) {
         return {
@@ -113,37 +142,20 @@ class IntentVerifier {
         };
       }
 
-      // 4. Check recovered address matches claimed signer
-      if (recoveredAddress.toLowerCase() !== intent.signer.toLowerCase()) {
+      // 3. Check recovered address matches claimed signer
+      if (recoveredAddress.toLowerCase() !== signedIntent.signer.toLowerCase()) {
         return {
           valid: false,
-          error: `Signer mismatch: expected ${intent.signer}, got ${recoveredAddress}`,
+          error: `Signer mismatch: expected ${signedIntent.signer}, got ${recoveredAddress}`,
           errorCode: IntentVerificationError.SIGNER_MISMATCH,
         };
-      }
-
-      // 5. Check nonce hasn't been used (replay protection)
-      if (!skipNonceCheck) {
-        const nonceUsed = await this.isNonceUsed(
-          intent.signer,
-          intent.chainId,
-          intent.nonce
-        );
-
-        if (nonceUsed) {
-          return {
-            valid: false,
-            error: 'Nonce has already been used',
-            errorCode: IntentVerificationError.NONCE_USED,
-          };
-        }
       }
 
       signerLog.intentVerification(
         this.logger,
         requestId,
         true,
-        `${intent.intentType}:${intent.nonce}`
+        `strategy:${intent.id}`
       );
 
       return {
@@ -155,7 +167,7 @@ class IntentVerifier {
       this.logger.error({
         requestId,
         error: error instanceof Error ? error.message : String(error),
-        msg: 'Intent verification failed with error',
+        msg: 'Strategy intent verification failed with error',
       });
 
       return {
@@ -167,52 +179,24 @@ class IntentVerifier {
   }
 
   /**
-   * Record a nonce as used (call after successful signing)
-   */
-  async recordNonceUsed(intent: Intent): Promise<void> {
-    await prisma.intentNonce.create({
-      data: {
-        signer: intent.signer.toLowerCase(),
-        chainId: intent.chainId,
-        nonce: intent.nonce,
-        intentType: intent.intentType,
-        usedAt: new Date(),
-      },
-    });
-  }
-
-  /**
    * Recover the signer address from an intent and signature
    */
   private async recoverSigner(
-    intent: Intent,
-    signature: Hex
+    intent: StrategyIntentV1,
+    signature: Hex,
+    chainId: number
   ): Promise<Address | null> {
     try {
-      const intentType = intent.intentType as IntentType;
-      const types = INTENT_TYPE_DEFINITIONS[intentType];
-      const primaryType = INTENT_PRIMARY_TYPES[intentType];
+      const domain = createStrategyIntentDomain(chainId);
+      const message = prepareIntentForSigning(intent);
 
-      if (!types || !primaryType) {
-        this.logger.error({
-          intentType,
-          msg: 'Unknown intent type',
-        });
-        return null;
-      }
-
-      const domain = createIntentDomain(intent.chainId);
-
-      // Prepare the message for signing (remove optional fields that are undefined)
-      const message = this.prepareMessageForSigning(intent);
-
-      // Hash the typed data - use type assertion for compatibility
+      // Hash the typed data
       const hash = hashTypedData({
         domain,
-        types,
-        primaryType,
+        types: StrategyIntentV1Types,
+        primaryType: STRATEGY_INTENT_PRIMARY_TYPE,
         message,
-      } as Parameters<typeof hashTypedData>[0]);
+      });
 
       // Recover the address from the signature
       const recoveredAddress = await recoverAddress({
@@ -229,44 +213,7 @@ class IntentVerifier {
       return null;
     }
   }
-
-  /**
-   * Check if a nonce has already been used
-   */
-  private async isNonceUsed(
-    signer: Address,
-    chainId: number,
-    nonce: string
-  ): Promise<boolean> {
-    const existing = await prisma.intentNonce.findUnique({
-      where: {
-        signer_chainId_nonce: {
-          signer: signer.toLowerCase(),
-          chainId,
-          nonce,
-        },
-      },
-    });
-
-    return existing !== null;
-  }
-
-  /**
-   * Prepare intent for EIP-712 signing by removing undefined optional fields
-   */
-  private prepareMessageForSigning(intent: Intent): Record<string, unknown> {
-    // Create a copy with only defined values
-    const message: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(intent)) {
-      if (value !== undefined) {
-        message[key] = value;
-      }
-    }
-
-    return message;
-  }
 }
 
 // Export singleton instance
-export const intentVerifier = new IntentVerifier();
+export const strategyIntentVerifier = new StrategyIntentVerifier();

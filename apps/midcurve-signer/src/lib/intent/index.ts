@@ -1,7 +1,7 @@
 /**
  * Intent Module
  *
- * EIP-712 intent verification and compliance checking.
+ * Strategy intent verification and compliance checking.
  */
 
 export * from './eip712-types';

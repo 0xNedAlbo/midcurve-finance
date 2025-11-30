@@ -1,22 +1,21 @@
 /**
  * checkIntent Function
  *
- * Generic intent compliance checker. Each endpoint can implement specific
- * checks, but this provides a base implementation.
+ * Verifies a signed strategy intent and retrieves the user's automation wallet.
  *
- * For now, this is a generic implementation that:
+ * This is a simplified implementation that:
  * 1. Verifies the intent signature
- * 2. Ensures the intent type matches the endpoint
- * 3. Ensures the signer owns the automation wallet
+ * 2. Ensures the user has an automation wallet
+ * 3. Returns the wallet info for signing
  *
- * In the future, endpoint-specific checks can be added:
- * - ClosePosition: verify position NFT ownership
- * - HedgePosition: verify hedge parameters are reasonable
- * - etc.
+ * Future enhancements could include:
+ * - Checking if the signer is authorized for the user
+ * - Validating intent-specific permissions
  */
 
-import type { Intent, SignedIntent, IntentType } from '@midcurve/api-shared';
-import { intentVerifier } from './intent-verifier';
+import type { StrategyIntentV1 } from '@midcurve/shared';
+import type { ValidatedSignedStrategyIntentV1 } from '@midcurve/api-shared';
+import { strategyIntentVerifier } from './intent-verifier';
 import { walletService } from '../../services/wallet-service';
 import { signerLogger } from '../logger';
 import type { Address } from 'viem';
@@ -28,7 +27,8 @@ export interface CheckIntentResult {
   valid: boolean;
   error?: string;
   errorCode?: string;
-  intent?: Intent;
+  intent?: StrategyIntentV1;
+  signer?: Address;
   walletAddress?: Address;
   kmsKeyId?: string;
 }
@@ -39,34 +39,31 @@ export interface CheckIntentResult {
 export interface CheckIntentOptions {
   /** User ID making the request */
   userId: string;
-  /** Expected intent type (must match the intent) */
-  expectedIntentType: IntentType;
-  /** Skip nonce verification (for testing) */
-  skipNonceCheck?: boolean;
+  /** Chain ID for EIP-712 domain */
+  chainId: number;
 }
 
 const logger = signerLogger.child({ component: 'checkIntent' });
 
 /**
- * Check if an intent is valid and authorized
+ * Check if a strategy intent is valid and authorized
  *
  * This function:
  * 1. Validates the intent schema and signature
- * 2. Verifies the intent type matches what's expected
- * 3. Verifies the user owns an automation wallet
- * 4. Verifies the intent signer matches the user's linked wallets
+ * 2. Verifies the user owns an automation wallet
+ * 3. Returns wallet info for transaction signing
  *
- * @param signedIntent - The signed intent to check
+ * @param signedIntent - The signed strategy intent to check
  * @param options - Check options
  */
 export async function checkIntent(
-  signedIntent: SignedIntent,
+  signedIntent: ValidatedSignedStrategyIntentV1,
   options: CheckIntentOptions
 ): Promise<CheckIntentResult> {
-  const { userId, expectedIntentType, skipNonceCheck } = options;
+  const { userId, chainId } = options;
 
   // 1. Verify the intent signature and schema
-  const verifyResult = await intentVerifier.verify(signedIntent, skipNonceCheck);
+  const verifyResult = await strategyIntentVerifier.verify(signedIntent, chainId);
 
   if (!verifyResult.valid) {
     return {
@@ -77,17 +74,9 @@ export async function checkIntent(
   }
 
   const intent = verifyResult.intent!;
+  const signer = verifyResult.recoveredAddress!;
 
-  // 2. Check intent type matches expected
-  if (intent.intentType !== expectedIntentType) {
-    return {
-      valid: false,
-      error: `Intent type mismatch: expected ${expectedIntentType}, got ${intent.intentType}`,
-      errorCode: 'INTENT_TYPE_MISMATCH',
-    };
-  }
-
-  // 3. Get user's automation wallet
+  // 2. Get user's automation wallet
   const wallet = await walletService.getWalletByUserId(userId);
 
   if (!wallet) {
@@ -98,7 +87,7 @@ export async function checkIntent(
     };
   }
 
-  // 4. Get the KMS key ID for signing
+  // 3. Get the KMS key ID for signing
   const kmsKeyId = await walletService.getKmsKeyId(userId);
 
   if (!kmsKeyId) {
@@ -109,68 +98,18 @@ export async function checkIntent(
     };
   }
 
-  // TODO: In the future, add checks to verify the intent signer is authorized
-  // This could include:
-  // - Checking the signer is one of the user's linked wallets
-  // - Checking the signer has approved the automation wallet
-  // For now, we trust the internal API authentication
-
   logger.info({
     userId,
-    intentType: intent.intentType,
-    signer: intent.signer,
+    strategyType: intent.strategy.strategyType,
+    signer,
     walletAddress: wallet.walletAddress,
-    msg: 'Intent check passed',
+    msg: 'Strategy intent check passed',
   });
 
   return {
     valid: true,
     intent,
-    walletAddress: wallet.walletAddress,
-    kmsKeyId,
-  };
-}
-
-/**
- * Generic checkIntent that defers specific validation
- *
- * This is a placeholder that allows endpoints to do their own
- * intent type checking. As we add more endpoints, we can add
- * endpoint-specific validation here.
- */
-export async function checkIntentGeneric(
-  signedIntent: SignedIntent,
-  userId: string,
-  skipNonceCheck = false
-): Promise<CheckIntentResult> {
-  // Verify the intent
-  const verifyResult = await intentVerifier.verify(signedIntent, skipNonceCheck);
-
-  if (!verifyResult.valid) {
-    return {
-      valid: false,
-      error: verifyResult.error,
-      errorCode: verifyResult.errorCode,
-    };
-  }
-
-  const intent = verifyResult.intent!;
-
-  // Get user's wallet and key
-  const wallet = await walletService.getWalletByUserId(userId);
-  const kmsKeyId = await walletService.getKmsKeyId(userId);
-
-  if (!wallet || !kmsKeyId) {
-    return {
-      valid: false,
-      error: 'User does not have an automation wallet',
-      errorCode: 'NO_WALLET',
-    };
-  }
-
-  return {
-    valid: true,
-    intent,
+    signer,
     walletAddress: wallet.walletAddress,
     kmsKeyId,
   };

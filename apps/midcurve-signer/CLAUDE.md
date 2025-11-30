@@ -41,15 +41,72 @@ The Midcurve Signer API is a **private, internal-only signing service** that pro
 
 ## Key Concepts
 
-### Strategy Intent
+### Strategy Intent (StrategyIntentV1)
 
-An **intent** is a strategy-level authorization that the user signs ONCE when establishing an automation strategy. It is NOT per-transaction.
+A **StrategyIntentV1** is a platform-agnostic authorization document that the user signs ONCE when establishing an automation strategy. It is NOT per-transaction—it grants permission for a class of operations.
+
+**Structure:**
+```typescript
+interface StrategyIntentV1 {
+  id: string;                        // Unique identifier (UUID)
+  name?: string;                     // Human-readable name
+  description?: string;              // Description of what this intent allows
+  allowedCurrencies: AllowedCurrency[];  // Tokens the strategy can use
+  allowedEffects: AllowedEffect[];       // Contract calls the strategy can make
+  strategy: StrategyEnvelope;            // Strategy-specific configuration
+}
+
+// Discriminated union for allowed currencies
+type AllowedCurrency =
+  | { currencyType: 'erc20'; chainId: number; address: string; symbol: string; }
+  | { currencyType: 'evmNative'; chainId: number; symbol: string; };
+
+// Discriminated union for allowed effects (contract calls)
+type AllowedEffect = {
+  effectType: 'evmContractCall';
+  chainId: number;
+  contractAddress: string;
+  functionSelectors: string[];  // 4-byte function selectors (0x...)
+};
+
+// Strategy envelope with type-specific config
+interface StrategyEnvelope {
+  strategyType: 'basicUniswapV3';  // Extensible via registry
+  config: BasicUniswapV3StrategyConfig;
+}
+```
+
+**EIP-712 Signing:**
+
+The intent is signed using EIP-712 typed data. Nested structures (`allowedCurrencies`, `allowedEffects`, `strategy`) are JSON-stringified and keccak256-hashed as `bytes32` fields:
+
+```typescript
+const StrategyIntentV1Types = {
+  StrategyIntentV1: [
+    { name: 'id', type: 'string' },
+    { name: 'name', type: 'string' },
+    { name: 'description', type: 'string' },
+    { name: 'allowedCurrenciesHash', type: 'bytes32' },
+    { name: 'allowedEffectsHash', type: 'bytes32' },
+    { name: 'strategyHash', type: 'bytes32' },
+  ],
+};
+```
+
+**Signed Intent:**
+```typescript
+interface SignedStrategyIntentV1 {
+  intent: StrategyIntentV1;
+  signature: Hex;      // EIP-712 signature
+  signer: Address;     // Address that signed (user's wallet)
+}
+```
 
 **Examples:**
-- "Close position NFT #12345 on Arbitrum when price drops below 2000 USDC/WETH"
-- "Keep position NFT #12345 hedged with a Hyperliquid short matching ETH exposure"
+- "Allow WETH and USDC operations on Arbitrum for BasicUniswapV3 strategy on pool 0x..."
+- "Permit calls to Uniswap NonfungiblePositionManager for mint, burn, collect functions"
 
-The intent document is sent with ALL subsequent signing requests and verified for compliance.
+The signed intent is sent with ALL subsequent signing requests and verified for signature validity.
 
 ### Key Management
 
@@ -66,9 +123,11 @@ The intent document is sent with ALL subsequent signing requests and verified fo
 ### checkIntent()
 
 Every signing endpoint calls `checkIntent()` to verify:
-1. Intent signature is valid (EIP-712)
-2. Intent is not expired
-3. Operation is allowed by intent boundaries
+1. Intent schema is valid (Zod validation via `SignedStrategyIntentV1Schema`)
+2. EIP-712 signature is valid (recovered signer matches claimed signer)
+3. User has an automation wallet
+
+**Note:** Intent compliance checking (verifying that an operation is within intent boundaries) is NOT YET IMPLEMENTED. Currently, the signer only verifies that the intent signature is valid.
 
 ## API Endpoints
 
@@ -128,9 +187,9 @@ src/
 │   └── page.tsx
 ├── lib/
 │   ├── intent/
-│   │   ├── verify.ts         # EIP-712 verification
-│   │   ├── check-intent.ts   # Intent compliance checking
-│   │   └── eip712.ts         # Typed data definitions
+│   │   ├── intent-verifier.ts  # EIP-712 signature verification
+│   │   ├── check-intent.ts     # Intent + wallet verification
+│   │   └── eip712-types.ts     # EIP-712 domain and type definitions
 │   ├── kms/
 │   │   ├── kms-signer.ts     # AWS KMS signing
 │   │   ├── local-signer.ts   # Local dev fallback

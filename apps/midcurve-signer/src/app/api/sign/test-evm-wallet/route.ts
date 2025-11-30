@@ -1,30 +1,29 @@
 /**
- * POST /api/sign/test-evm-wallet - Test Automation Wallet Signing
+ * POST /api/sign/test-evm-wallet - Test Strategy Intent Verification
  *
- * Tests the EVM automation wallet signing capability by:
- * 1. Verifying the user's signed intent
- * 2. Signing a test message with the automation wallet
- * 3. Returning the signature and verification proof
+ * Tests the strategy intent verification by:
+ * 1. Verifying the user's signed strategy intent (EIP-712)
+ * 2. Returning verification result
  *
- * This endpoint is used to verify that:
- * - The user can sign intents correctly (EIP-712)
- * - The automation wallet can sign transactions
- * - The end-to-end signing flow works
+ * This endpoint only verifies the signature structure.
+ * No actual signing or transaction execution is performed.
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
  * - Body: {
  *     userId: string,
- *     signedIntent: { intent: TestWalletIntent, signature: Hex }
+ *     chainId: number,
+ *     signedIntent: SignedStrategyIntentV1
  *   }
  *
  * Response:
  * - 200: {
  *     success: true,
+ *     intentId: string,
+ *     strategyType: string,
+ *     signer: Address,
  *     walletAddress: Address,
- *     testSignature: Hex,
- *     intentVerified: true,
- *     message: string
+ *     verified: true
  *   }
  * - 400: Invalid request / intent verification failed
  * - 401: Unauthorized
@@ -33,19 +32,17 @@
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { keccak256, toHex } from 'viem';
 import {
   withInternalAuth,
   parseJsonBody,
   type AuthenticatedRequest,
 } from '@/middleware/internal-auth';
 import { checkIntent } from '@/lib/intent';
-import { intentVerifier } from '@/lib/intent/intent-verifier';
-import { getSigner } from '@/lib/kms';
-import { walletService } from '@/services/wallet-service';
-import { prisma } from '@/lib/prisma';
 import { signerLogger, signerLog } from '@/lib/logger';
-import { SignedIntentSchema, type TestWalletIntent, type SignedIntent } from '@midcurve/api-shared';
+import {
+  SignedStrategyIntentV1Schema,
+  ChainIdSchema,
+} from '@midcurve/api-shared';
 
 const logger = signerLogger.child({ endpoint: 'test-evm-wallet' });
 
@@ -54,7 +51,8 @@ const logger = signerLogger.child({ endpoint: 'test-evm-wallet' });
  */
 const TestWalletRequestSchema = z.object({
   userId: z.string().min(1, 'userId is required'),
-  signedIntent: SignedIntentSchema,
+  chainId: ChainIdSchema,
+  signedIntent: SignedStrategyIntentV1Schema,
 });
 
 type TestWalletRequest = z.infer<typeof TestWalletRequestSchema>;
@@ -64,7 +62,6 @@ type TestWalletRequest = z.infer<typeof TestWalletRequestSchema>;
  */
 export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   const { requestId, request } = ctx;
-  const startTime = Date.now();
 
   // Parse body
   const bodyResult = await parseJsonBody<TestWalletRequest>(request);
@@ -94,29 +91,12 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, signedIntent } = validation.data;
+  const { userId, chainId, signedIntent } = validation.data;
 
-  // Verify this is a test-wallet intent
-  if (signedIntent.intent.intentType !== 'test-wallet') {
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'INVALID_INTENT_TYPE',
-        message: `Expected test-wallet intent, got ${signedIntent.intent.intentType}`,
-        requestId,
-      },
-      { status: 400 }
-    );
-  }
-
-  const testIntent = signedIntent.intent as TestWalletIntent;
-
-  // Check intent (verifies signature, nonce, expiry, and user authorization)
-  // Cast to SignedIntent since Zod validates the shape but infers string for addresses
-  const checkResult = await checkIntent(signedIntent as unknown as SignedIntent, {
+  // Check intent (verifies signature and user authorization)
+  const checkResult = await checkIntent(signedIntent, {
     userId,
-    expectedIntentType: 'test-wallet',
-    skipNonceCheck: false,
+    chainId,
   });
 
   if (!checkResult.valid) {
@@ -124,7 +104,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       logger,
       requestId,
       false,
-      `test-wallet:${testIntent.nonce}`,
+      `strategy:${signedIntent.intent.id}`,
       checkResult.error
     );
 
@@ -139,102 +119,22 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  try {
-    // Get signer and sign a test message
-    const signer = getSigner();
-    const kmsKeyId = checkResult.kmsKeyId!;
-    const walletAddress = checkResult.walletAddress!;
+  const intent = checkResult.intent!;
 
-    // Create a test message to sign
-    const testMessage = `Midcurve Test Signature - ${testIntent.message} - ${requestId}`;
-    const messageHash = keccak256(toHex(testMessage));
+  signerLog.intentVerification(
+    logger,
+    requestId,
+    true,
+    `strategy:${intent.id}`
+  );
 
-    // Sign with the automation wallet
-    const signatureResult = await signer.signHash(kmsKeyId, messageHash);
-
-    // Record the nonce as used (replay protection)
-    await intentVerifier.recordNonceUsed(testIntent);
-
-    // Update wallet last used timestamp
-    await walletService.updateLastUsed(userId);
-
-    // Create audit log
-    await prisma.signingAuditLog.create({
-      data: {
-        userId,
-        walletAddress,
-        operation: 'test-evm-wallet',
-        intentHash: keccak256(toHex(JSON.stringify(testIntent))),
-        chainId: testIntent.chainId,
-        status: 'success',
-        requestedAt: new Date(startTime),
-        completedAt: new Date(),
-        durationMs: Date.now() - startTime,
-      },
-    });
-
-    signerLog.signingOperation(
-      logger,
-      requestId,
-      'test-evm-wallet',
-      walletAddress,
-      testIntent.chainId,
-      true
-    );
-
-    return NextResponse.json({
-      success: true,
-      walletAddress,
-      testMessage,
-      testSignature: signatureResult.signature,
-      intentVerified: true,
-      intentSigner: testIntent.signer,
-      requestId,
-    });
-  } catch (error) {
-    logger.error({
-      requestId,
-      userId,
-      error: error instanceof Error ? error.message : String(error),
-      msg: 'Test signing failed',
-    });
-
-    // Create failure audit log
-    await prisma.signingAuditLog.create({
-      data: {
-        userId,
-        walletAddress: checkResult.walletAddress ?? 'unknown',
-        operation: 'test-evm-wallet',
-        intentHash: keccak256(toHex(JSON.stringify(testIntent))),
-        chainId: testIntent.chainId,
-        status: 'error',
-        errorCode: 'SIGNING_FAILED',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        requestedAt: new Date(startTime),
-        completedAt: new Date(),
-        durationMs: Date.now() - startTime,
-      },
-    });
-
-    signerLog.signingOperation(
-      logger,
-      requestId,
-      'test-evm-wallet',
-      checkResult.walletAddress ?? 'unknown',
-      testIntent.chainId,
-      false,
-      undefined,
-      'SIGNING_FAILED'
-    );
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'SIGNING_FAILED',
-        message: 'Failed to sign test message',
-        requestId,
-      },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: true,
+    intentId: intent.id,
+    strategyType: intent.strategy.strategyType,
+    signer: checkResult.signer,
+    walletAddress: checkResult.walletAddress,
+    verified: true,
+    requestId,
+  });
 });

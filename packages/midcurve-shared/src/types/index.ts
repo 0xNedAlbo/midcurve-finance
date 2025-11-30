@@ -186,3 +186,29 @@ export type {
   HedgeEligibility,
   PositionRiskView,
 } from './risk/index.js';
+
+// Strategy intent types
+export type {
+  AllowedCurrencyType,
+  Erc20AllowedCurrency,
+  EvmNativeAllowedCurrency,
+  AllowedCurrency,
+  AllowedEffectType,
+  EvmContractCallEffect,
+  AllowedEffect,
+  StrategyType,
+  StrategyConfigMap,
+  StrategyEnvelope,
+  AnyStrategyEnvelope,
+  StrategyIntentV1,
+  AnyStrategyIntent,
+  SignedStrategyIntentV1,
+  BasicUniswapV3StrategyConfig,
+} from './strategy/index.js';
+
+export {
+  isErc20Currency,
+  isEvmNativeCurrency,
+  isEvmContractCallEffect,
+  isBasicUniswapV3Strategy,
+} from './strategy/index.js';
