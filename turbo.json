@@ -28,7 +28,12 @@
                 "ETHERSCAN_API_KEY",
                 "THE_GRAPH_API_KEY",
                 "LOG_LEVEL",
-                "NODE_ENV"
+                "NODE_ENV",
+                "SIGNER_INTERNAL_API_KEY",
+                "SIGNER_USE_LOCAL_KEYS",
+                "AUTOMATION_WALLET_ENCRYPTION_KEY",
+                "AWS_REGION",
+                "AWS_KMS_KEY_ARN"
             ]
         },
         "check-types": {
@@ -55,7 +60,12 @@
                 "ETHERSCAN_API_KEY",
                 "THE_GRAPH_API_KEY",
                 "LOG_LEVEL",
-                "NODE_ENV"
+                "NODE_ENV",
+                "SIGNER_INTERNAL_API_KEY",
+                "SIGNER_USE_LOCAL_KEYS",
+                "AUTOMATION_WALLET_ENCRYPTION_KEY",
+                "AWS_REGION",
+                "AWS_KMS_KEY_ARN"
             ]
         }
     }

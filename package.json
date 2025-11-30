@@ -15,6 +15,7 @@
   "scripts": {
     "build": "turbo run build --filter=@midcurve/ui...",
     "dev": "turbo run dev --filter=@midcurve/ui...",
+    "dev:signer": "turbo run dev --filter=@midcurve/signer",
     "typecheck": "turbo run typecheck --filter=@midcurve/ui..."
   },
   "author": "",

@@ -15,3 +15,4 @@ export * from './pools/index.js';
 export * from './positions/index.js';
 export * from './hedges/index.js';
 export * from './hyperliquid-api-wallet/index.js';
+export * from './intents/index.js';
