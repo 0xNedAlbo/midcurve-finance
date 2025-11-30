@@ -9,9 +9,9 @@
  * Each user can have ONE automation wallet per chain (enforced by database constraint).
  */
 
-import { prisma, Prisma } from '../lib/prisma.js';
-import { getSigner, type KmsWalletCreationResult } from '../lib/kms/index.js';
-import { signerLogger, signerLog } from '../lib/logger.js';
+import { prisma, Prisma } from '../lib/prisma';
+import { getSigner, type KmsWalletCreationResult } from '../lib/kms';
+import { signerLogger, signerLog } from '../lib/logger';
 import type { Address } from 'viem';
 
 /**

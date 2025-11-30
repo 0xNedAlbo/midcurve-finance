@@ -17,8 +17,8 @@ import {
   type LocalAccount,
 } from 'viem/accounts';
 import { type Address, type Hash, type Hex } from 'viem';
-import type { EvmSigner, LocalSignerConfig, KmsWalletCreationResult, SignatureResult } from './types.js';
-import { signerLogger, signerLog } from '../logger.js';
+import type { EvmSigner, LocalSignerConfig, KmsWalletCreationResult, SignatureResult } from './types';
+import { signerLogger, signerLog } from '../logger';
 
 /**
  * Environment variable name for the master encryption key

@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { UserDropdown } from "@/components/auth/user-dropdown";
-import { HyperliquidConnection } from "@/components/settings/hyperliquid-connection";
+import { AutomationWalletSection } from "@/components/settings/automation-wallet-section";
 
 export default function SettingsPage() {
   const { data: session, status } = useSession();
@@ -55,8 +55,8 @@ export default function SettingsPage() {
 
         {/* Settings Sections */}
         <div className="space-y-8">
-          {/* Hyperliquid Connection Section */}
-          <HyperliquidConnection />
+          {/* Automation Wallet Section */}
+          <AutomationWalletSection />
         </div>
       </div>
     </div>

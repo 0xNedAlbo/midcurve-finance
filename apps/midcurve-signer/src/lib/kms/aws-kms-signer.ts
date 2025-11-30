@@ -26,8 +26,8 @@ import {
 } from '@aws-sdk/client-kms';
 import { type Address, type Hash, type Hex } from 'viem';
 import { publicKeyToAddress } from 'viem/accounts';
-import type { EvmSigner, AwsKmsSignerConfig, KmsWalletCreationResult, SignatureResult } from './types.js';
-import { signerLogger, signerLog } from '../logger.js';
+import type { EvmSigner, AwsKmsSignerConfig, KmsWalletCreationResult, SignatureResult } from './types';
+import { signerLogger, signerLog } from '../logger';
 
 /**
  * Parse DER-encoded ECDSA signature to r and s values

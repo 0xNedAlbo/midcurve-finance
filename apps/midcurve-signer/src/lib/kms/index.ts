@@ -9,10 +9,10 @@
  * - SIGNER_LOCAL_ENCRYPTION_KEY: 32-byte hex key for local encryption
  */
 
-import type { EvmSigner } from './types.js';
-import { AwsKmsSigner } from './aws-kms-signer.js';
-import { LocalDevSigner } from './local-dev-signer.js';
-import { signerLogger } from '../logger.js';
+import type { EvmSigner } from './types';
+import { AwsKmsSigner } from './aws-kms-signer';
+import { LocalDevSigner } from './local-dev-signer';
+import { signerLogger } from '../logger';
 
 // Re-export types
 export type {
@@ -21,11 +21,11 @@ export type {
   LocalSignerConfig,
   KmsWalletCreationResult,
   SignatureResult,
-} from './types.js';
+} from './types';
 
 // Re-export classes
-export { AwsKmsSigner } from './aws-kms-signer.js';
-export { LocalDevSigner } from './local-dev-signer.js';
+export { AwsKmsSigner } from './aws-kms-signer';
+export { LocalDevSigner } from './local-dev-signer';
 
 /**
  * Singleton signer instance

@@ -19,7 +19,6 @@ import {
   UniswapV3PositionLedgerService,
   PositionListService,
   PositionAprService,
-  HyperliquidApiWalletService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -34,7 +33,6 @@ let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _uniswapV3PositionLedgerService: UniswapV3PositionLedgerService | null = null;
 let _positionListService: PositionListService | null = null;
 let _positionAprService: PositionAprService | null = null;
-let _hyperliquidApiWalletService: HyperliquidApiWalletService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -144,14 +142,4 @@ export function getPositionListService(): PositionListService {
     _positionListService = new PositionListService();
   }
   return _positionListService;
-}
-
-/**
- * Get singleton instance of HyperliquidApiWalletService
- */
-export function getHyperliquidApiWalletService(): HyperliquidApiWalletService {
-  if (!_hyperliquidApiWalletService) {
-    _hyperliquidApiWalletService = new HyperliquidApiWalletService();
-  }
-  return _hyperliquidApiWalletService;
 }

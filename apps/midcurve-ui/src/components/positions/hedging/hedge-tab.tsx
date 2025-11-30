@@ -3,8 +3,10 @@
 import { useState } from "react";
 import type { HyperliquidPerpHedge } from "@midcurve/shared";
 import type { CheckHedgeEligibilityResponse } from "@midcurve/api-shared";
-import { HedgeCreateForm, type HedgeFormConfig } from "./hedge-create-form";
-import { OpenHedgeModal } from "./open-hedge-modal";
+import { HedgeCreateForm } from "./hedge-create-form";
+// NOTE: OpenHedgeModal disabled during migration to automation wallets
+// import { OpenHedgeModal } from "./open-hedge-modal";
+// import type { HedgeFormConfig } from "./hedge-create-form";
 import { HedgeSummaryCard } from "./hedge-summary-card";
 import { HedgePnLComparison } from "./hedge-pnl-comparison";
 import { HedgeMetricsCard } from "./hedge-metrics-card";
@@ -197,7 +199,7 @@ const DUMMY_LEDGER_EVENTS: HedgeLedgerEvent[] = [
 ];
 
 export function HedgeTab({
-  positionHash,
+  positionHash: _positionHash, // NOTE: Used by OpenHedgeModal, currently disabled
   baseAssetAmount,
   baseAssetDecimals,
   baseAssetSymbol,
@@ -217,23 +219,13 @@ export function HedgeTab({
   // Dev toggle for testing both states
   const [showDummyHedge, setShowDummyHedge] = useState(false);
 
-  // Modal state for opening hedge
-  const [isOpenHedgeModalOpen, setIsOpenHedgeModalOpen] = useState(false);
-  const [hedgeConfig, setHedgeConfig] = useState<HedgeFormConfig | null>(null);
-
-  // Handle open hedge button click
-  const handleOpenHedge = (config: HedgeFormConfig) => {
-    setHedgeConfig(config);
-    setIsOpenHedgeModalOpen(true);
-  };
-
-  // Handle hedge success - switch to showing dummy hedge for now
-  const handleHedgeSuccess = () => {
-    // For now, just show the dummy hedge to demonstrate the UI switch
-    // In the future, this will trigger a data refresh
-    setShowDummyHedge(true);
-    setIsOpenHedgeModalOpen(false);
-  };
+  // NOTE: Hedge opening modal disabled during migration to automation wallets
+  // Will be re-enabled once the intent-based signing flow is implemented
+  // When re-enabling, uncomment:
+  // const [isOpenHedgeModalOpen, setIsOpenHedgeModalOpen] = useState(false);
+  // const [hedgeConfig, setHedgeConfig] = useState<HedgeFormConfig | null>(null);
+  // const handleOpenHedge = (config: HedgeFormConfig) => { setHedgeConfig(config); setIsOpenHedgeModalOpen(true); };
+  // const handleHedgeSuccess = () => { setShowDummyHedge(true); setIsOpenHedgeModalOpen(false); };
 
   // Determine which hedge to display
   const displayHedge = showDummyHedge ? DUMMY_HEDGE : hedge;
@@ -456,11 +448,10 @@ export function HedgeTab({
           riskQuoteSymbol={riskQuoteSymbol}
           currentPrice={currentPrice}
           hedgeMarket={eligibility?.hedgeMarket ?? undefined}
-          onOpenHedge={handleOpenHedge}
         />
       )}
 
-      {/* Open Hedge Modal */}
+      {/* Open Hedge Modal - Disabled during migration to automation wallets
       {hedgeConfig && (
         <OpenHedgeModal
           isOpen={isOpenHedgeModalOpen}
@@ -476,6 +467,7 @@ export function HedgeTab({
           hedgeMarket={eligibility?.hedgeMarket ?? undefined}
         />
       )}
+      */}
     </div>
   );
 }

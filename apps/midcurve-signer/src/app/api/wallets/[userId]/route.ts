@@ -15,7 +15,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { walletService } from '@/services/wallet-service.js';
+import { walletService } from '@/services/wallet-service';
 
 interface RouteContext {
   params: Promise<{ userId: string }>;

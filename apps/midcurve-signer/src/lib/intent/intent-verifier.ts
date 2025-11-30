@@ -9,8 +9,8 @@
  */
 
 import { hashTypedData, recoverAddress, type Hex, type Address } from 'viem';
-import { prisma } from '../prisma.js';
-import { signerLogger, signerLog } from '../logger.js';
+import { prisma } from '../prisma';
+import { signerLogger, signerLog } from '../logger';
 import {
   type Intent,
   type SignedIntent,
@@ -22,7 +22,7 @@ import {
   createIntentDomain,
   INTENT_TYPE_DEFINITIONS,
   INTENT_PRIMARY_TYPES,
-} from './eip712-types.js';
+} from './eip712-types';
 
 /**
  * Verification result

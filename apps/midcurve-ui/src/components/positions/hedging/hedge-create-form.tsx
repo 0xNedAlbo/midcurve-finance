@@ -7,7 +7,7 @@ import { LeverageSelector } from "./leverage-selector";
 import { BiasSelector } from "./bias-selector";
 import { Shield, AlertTriangle, Lock, ArrowRight, Loader2 } from "lucide-react";
 import type { HedgeMarketResponse } from "@midcurve/api-shared";
-import { useHyperliquidWallets } from "@/hooks/user/useHyperliquidWallets";
+import { useAutomationWallet } from "@/hooks/user/useAutomationWallet";
 
 interface HedgeCreateFormProps {
   baseAssetAmount: bigint;
@@ -18,8 +18,6 @@ interface HedgeCreateFormProps {
   riskQuoteSymbol: string;  // Risk quote symbol (USD) for hedge market
   currentPrice: number;
   onSubmit?: (config: HedgeFormConfig) => void;
-  // Callback when "Open Hedge" button is clicked
-  onOpenHedge?: (config: HedgeFormConfig) => void;
   // Hedge market info from eligibility check (optional)
   hedgeMarket?: HedgeMarketResponse;
 }
@@ -38,19 +36,14 @@ export function HedgeCreateForm({
   riskBaseSymbol,
   riskQuoteSymbol,
   currentPrice,
-  onOpenHedge,
   hedgeMarket,
 }: HedgeCreateFormProps) {
   const [leverage, setLeverage] = useState(1);
   const [biasPercent, setBiasPercent] = useState(0);
 
-  // Check for API wallet
-  const { data: wallets, isLoading: walletsLoading } = useHyperliquidWallets();
-  const activeWallet = wallets?.find(
-    (w) => w.isActive && new Date(w.expiresAt) > new Date()
-  );
-  const expiredWallet = wallets?.find((w) => w.isActive);
-  const hasExpiredWallet = !activeWallet && expiredWallet;
+  // Check for automation wallet
+  const { data: automationWallet, isLoading: walletsLoading } = useAutomationWallet();
+  const hasWallet = !!automationWallet;
 
   // Derive max leverage from market data with fallback
   const maxLeverage = hedgeMarket?.marketData?.maxLeverage ?? 50;
@@ -257,18 +250,16 @@ export function HedgeCreateForm({
             <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
             <span className="text-sm text-slate-400">Checking wallet status...</span>
           </div>
-        ) : !activeWallet ? (
+        ) : !hasWallet ? (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
               <div>
                 <h4 className="text-sm font-medium text-amber-300">
-                  {hasExpiredWallet ? "API Wallet Expired" : "API Wallet Required"}
+                  Automation Wallet Required
                 </h4>
                 <p className="text-xs text-amber-200/70 mt-1">
-                  {hasExpiredWallet
-                    ? "Your Hyperliquid API wallet has expired. Please renew it in Settings to enable one-click hedging."
-                    : "Register a Hyperliquid API wallet in Settings to enable one-click hedging."}
+                  Create an automation wallet in Settings to enable hedging features.
                 </p>
                 <Link
                   href="/dashboard/settings"
@@ -280,18 +271,20 @@ export function HedgeCreateForm({
             </div>
           </div>
         ) : (
-          <button
-            onClick={() => onOpenHedge?.({ leverage, biasPercent, marginMode: "isolated" })}
-            disabled={!onOpenHedge}
-            className={`w-full py-3 px-4 font-medium rounded-lg flex items-center justify-center gap-2 transition-colors ${
-              onOpenHedge
-                ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                : "bg-blue-600/50 text-blue-200 cursor-not-allowed"
-            }`}
-          >
-            <Shield className="w-4 h-4" />
-            Open Hedge
-          </button>
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-medium text-blue-300">
+                  Coming Soon
+                </h4>
+                <p className="text-xs text-blue-200/70 mt-1">
+                  Hedge opening is being migrated to use the new KMS-backed automation wallet system.
+                  This feature will be available soon.
+                </p>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -22,8 +22,8 @@ import {
   withInternalAuth,
   parseJsonBody,
   type AuthenticatedRequest,
-} from '@/middleware/internal-auth.js';
-import { walletService, WalletServiceError } from '@/services/wallet-service.js';
+} from '@/middleware/internal-auth';
+import { walletService, WalletServiceError } from '@/services/wallet-service';
 
 /**
  * Request body schema

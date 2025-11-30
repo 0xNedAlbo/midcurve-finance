@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
-import { signerLogger, signerLog } from '../lib/logger.js';
+import { signerLogger, signerLog } from '../lib/logger';
 
 /**
  * Environment variable for the internal API key

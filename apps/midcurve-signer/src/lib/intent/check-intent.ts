@@ -16,9 +16,9 @@
  */
 
 import type { Intent, SignedIntent, IntentType } from '@midcurve/api-shared';
-import { intentVerifier } from './intent-verifier.js';
-import { walletService } from '../../services/wallet-service.js';
-import { signerLogger } from '../logger.js';
+import { intentVerifier } from './intent-verifier';
+import { walletService } from '../../services/wallet-service';
+import { signerLogger } from '../logger';
 import type { Address } from 'viem';
 
 /**

@@ -38,13 +38,13 @@ import {
   withInternalAuth,
   parseJsonBody,
   type AuthenticatedRequest,
-} from '@/middleware/internal-auth.js';
-import { checkIntent } from '@/lib/intent/index.js';
-import { intentVerifier } from '@/lib/intent/intent-verifier.js';
-import { getSigner } from '@/lib/kms/index.js';
-import { walletService } from '@/services/wallet-service.js';
-import { prisma } from '@/lib/prisma.js';
-import { signerLogger, signerLog } from '@/lib/logger.js';
+} from '@/middleware/internal-auth';
+import { checkIntent } from '@/lib/intent';
+import { intentVerifier } from '@/lib/intent/intent-verifier';
+import { getSigner } from '@/lib/kms';
+import { walletService } from '@/services/wallet-service';
+import { prisma } from '@/lib/prisma';
+import { signerLogger, signerLog } from '@/lib/logger';
 import { SignedIntentSchema, type TestWalletIntent, type SignedIntent } from '@midcurve/api-shared';
 
 const logger = signerLogger.child({ endpoint: 'test-evm-wallet' });
