@@ -187,28 +187,80 @@ export type {
   PositionRiskView,
 } from './risk/index.js';
 
-// Strategy intent types
+// Strategy types
 export type {
+  // Allowed currency types
   AllowedCurrencyType,
   Erc20AllowedCurrency,
   EvmNativeAllowedCurrency,
   AllowedCurrency,
+  // Allowed effect types
   AllowedEffectType,
   EvmContractCallEffect,
   AllowedEffect,
+  // Strategy envelope types
   StrategyType,
   StrategyConfigMap,
   StrategyEnvelope,
   AnyStrategyEnvelope,
+  // Strategy intent types
   StrategyIntentV1,
   AnyStrategyIntent,
   SignedStrategyIntentV1,
+  // Strategy status types
+  StrategyStatus,
+  // Strategy entity types
+  Strategy,
+  BasicUniswapV3Strategy,
+  AnyStrategy,
+  // Strategy event types
+  StrategyEventType,
+  BaseStrategyEvent,
+  OhlcData,
+  OhlcStrategyEvent,
+  FundingEventType,
+  FundingStrategyEvent,
+  PositionEventType,
+  PositionStrategyEvent,
+  EffectResultType,
+  EffectStrategyEvent,
+  StrategyActionType,
+  ActionStrategyEvent,
+  StrategyEvent,
+  // Strategy action types
+  StrategyActionStatus,
+  StrategyAction,
+  // Strategy config types
   BasicUniswapV3StrategyConfig,
+  BasicUniswapV3StrategyState,
 } from './strategy/index.js';
 
 export {
+  // Allowed currency type guards
   isErc20Currency,
   isEvmNativeCurrency,
+  // Allowed effect type guards
   isEvmContractCallEffect,
+  // Strategy envelope type guards
   isBasicUniswapV3Strategy,
+  // Strategy status helpers
+  isRunnableStatus,
+  isTerminatedStatus,
+  canResumeFromStatus,
+  // Strategy entity type guards
+  isBasicUniswapV3StrategyType,
+  assertBasicUniswapV3Strategy,
+  narrowStrategyType,
+  // Strategy event type guards
+  isOhlcEvent,
+  isFundingEvent,
+  isPositionEvent,
+  isEffectEvent,
+  isActionEvent,
+  // Strategy action status helpers
+  isTerminalActionStatus,
+  isProcessingActionStatus,
+  canCancelAction,
+  // Strategy state helpers
+  createInitialBasicUniswapV3State,
 } from './strategy/index.js';

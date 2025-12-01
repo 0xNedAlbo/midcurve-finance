@@ -5,7 +5,10 @@
  * Uses the StrategyConfigMap pattern for compile-time type safety.
  */
 
-import type { BasicUniswapV3StrategyConfig } from './configs/index.js';
+import type {
+  BasicUniswapV3StrategyConfig,
+  BasicUniswapV3StrategyState,
+} from './configs/index.js';
 
 /**
  * Known strategy type identifiers
@@ -13,13 +16,16 @@ import type { BasicUniswapV3StrategyConfig } from './configs/index.js';
 export type StrategyType = 'basicUniswapV3';
 
 /**
- * Strategy Config Mapping
+ * Strategy Config and State Mapping
  *
- * Maps strategy type identifiers to their corresponding config types.
- * Ensures type safety: StrategyEnvelope<'basicUniswapV3'> can only have BasicUniswapV3StrategyConfig.
+ * Maps strategy type identifiers to their corresponding config and state types.
+ * Follows the same pattern as HedgeConfigMap for consistency.
  */
 export interface StrategyConfigMap {
-  basicUniswapV3: BasicUniswapV3StrategyConfig;
+  basicUniswapV3: {
+    config: BasicUniswapV3StrategyConfig;
+    state: BasicUniswapV3StrategyState;
+  };
 }
 
 /**
@@ -34,7 +40,9 @@ export interface StrategyEnvelope<T extends StrategyType = StrategyType> {
   /** Strategy type identifier */
   strategyType: T;
   /** Strategy-specific configuration (type-safe when T is known) */
-  config: T extends keyof StrategyConfigMap ? StrategyConfigMap[T] : unknown;
+  config: T extends keyof StrategyConfigMap
+    ? StrategyConfigMap[T]['config']
+    : unknown;
 }
 
 /**

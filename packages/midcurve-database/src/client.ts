@@ -9,7 +9,7 @@
  * globalThis to prevent hot-reload from creating multiple instances.
  */
 
-import { PrismaClient } from './generated/prisma';
+import { PrismaClient } from './generated/prisma/index.js';
 
 const prismaClientSingleton = () => {
   return new PrismaClient({

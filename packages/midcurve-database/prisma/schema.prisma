@@ -166,6 +166,9 @@ model EvmAutomationWallet {
   isActive   Boolean   @default(true)
   lastUsedAt DateTime?
 
+  // Relations
+  strategies Strategy[]
+
   // Constraints
   @@unique([userId, walletAddress])
   @@unique([kmsKeyId])
@@ -270,6 +273,7 @@ model User {
   positions             Position[]
   quoteTokenPreferences UserQuoteTokenPreference[]
   hedges                Hedge[]
+  strategies            Strategy[]
 
   // Indexes for efficient queries
   @@index([name])
@@ -397,10 +401,11 @@ model Position {
   state  Json // Mutable: ownerAddress, liquidity, feeGrowth, tokensOwed, etc.
 
   // Relations
-  ledgerEvents PositionLedgerEvent[]
-  aprPeriods   PositionAprPeriod[]
-  syncState    PositionSyncState? // 1:1 relation, optional for backward compatibility
-  hedges       Hedge[]
+  ledgerEvents      PositionLedgerEvent[]
+  aprPeriods        PositionAprPeriod[]
+  syncState         PositionSyncState? // 1:1 relation, optional for backward compatibility
+  hedges            Hedge[]
+  strategyPositions StrategyPosition[] // Join table for strategy management
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -683,4 +688,124 @@ model HedgeSyncState {
   // Indexes
   @@index([lastSyncAt])
   @@map("hedge_sync_states")
+}
+
+// =============================================================================
+// Strategy Models (Automated Position Management)
+// =============================================================================
+
+// Strategy - Automated position management strategy
+// Each strategy owns a KMS-managed automation wallet and can manage multiple positions
+model Strategy {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Ownership
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Classification
+  strategyType String // 'basicUniswapV3', future: 'autoHedge', 'gridBot'
+  name         String // User-friendly name ("My ETH/USDC Strategy")
+  description  String? // Optional description
+
+  // Wallet integration (each strategy has its own automation wallet)
+  automationWalletId String
+  automationWallet   EvmAutomationWallet @relation(fields: [automationWalletId], references: [id])
+
+  // Intent (EIP-712 signed authorization document)
+  intentSignature String // Base64 EIP-712 signature
+  intentPayload   String // JSON serialized StrategyIntentV1
+
+  // Lifecycle status
+  status      String    @default("pending") // 'pending', 'active', 'paused', 'stopped', 'completed', 'error'
+  activatedAt DateTime?
+  stoppedAt   DateTime?
+
+  // Execution tracking
+  lastRunAt DateTime?
+  lastError String?
+
+  // Protocol-specific data (JSON) - follows Hedge pattern
+  config Json // Immutable: strategy-type-specific configuration
+  state  Json // Mutable: strategy-type-specific runtime state
+
+  // Relations
+  positions StrategyPosition[] // Many-to-many join with Position
+  actions   StrategyAction[]
+
+  // Indexes
+  @@index([userId])
+  @@index([strategyType])
+  @@index([status])
+  @@index([automationWalletId])
+  @@map("strategies")
+}
+
+// StrategyPosition - Join table for Strategy <-> Position relationship
+// A strategy can manage multiple positions (concurrent or sequential)
+// A position can only belong to one strategy at a time
+model StrategyPosition {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // References
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  positionId String
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  // Relationship metadata
+  role      String    @default("primary") // 'primary', 'secondary', 'hedge'
+  addedAt   DateTime  @default(now())
+  removedAt DateTime? // null = still active in strategy
+
+  // Indexes
+  @@unique([strategyId, positionId])
+  @@index([strategyId])
+  @@index([positionId])
+  @@index([role])
+  @@map("strategy_positions")
+}
+
+// StrategyAction - User-initiated actions submitted to a strategy
+// Actions are validated, stored, then converted to events for strategy processing
+model StrategyAction {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // References
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  userId String // User who submitted the action
+
+  // Action details
+  actionType String // 'deposit', 'withdraw', 'increasePosition', 'decreasePosition', 'closePosition', 'collect', 'compound', 'rebalance'
+  payload    Json // Action-specific payload
+
+  // Intent (EIP-712 signed authorization)
+  intentSignature String
+  intentPayload   String // JSON serialized action intent
+
+  // Status tracking
+  status       String  @default("pending") // 'pending', 'accepted', 'rejected', 'executing', 'finished', 'errored'
+  errorMessage String?
+  result       Json? // Action result (on success)
+
+  // Timing
+  processedAt DateTime? // When action was processed by strategy
+  completedAt DateTime? // When action finished (success or error)
+
+  // Indexes
+  @@index([strategyId])
+  @@index([userId])
+  @@index([status])
+  @@index([actionType])
+  @@index([createdAt])
+  @@map("strategy_actions")
 }

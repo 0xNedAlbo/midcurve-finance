@@ -60,3 +60,18 @@ export {
   type SubAccountClearinghouseState,
   type HyperliquidMarketData,
 } from './hyperliquid/index.js';
+
+export {
+  SignerClient,
+  SignerClientError,
+  SignerAuthenticationError,
+  SignerNotFoundError,
+  SignerValidationError,
+  SignerVerificationError,
+  type SignerClientConfig,
+  type KeyProvider,
+  type AutomationWallet,
+  type CreateWalletRequest,
+  type VerifyIntentRequest,
+  type VerifyIntentResult,
+} from './signer/index.js';
