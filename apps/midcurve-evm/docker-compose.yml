@@ -1,0 +1,29 @@
+version: "3.8"
+
+# Base configuration - no persistence (ephemeral dev mode)
+# For persistent storage, use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  geth-dev:
+    image: ethereum/client-go:stable
+    container_name: midcurve-geth-dev
+    command:
+      [
+        "--dev",
+        "--datadir", "/data",
+        "--http",
+        "--http.addr", "0.0.0.0",
+        "--http.port", "8545",
+        "--http.api", "eth,net,web3,personal,txpool",
+        "--ws",
+        "--ws.addr", "0.0.0.0",
+        "--ws.port", "8546",
+        "--ws.api", "eth,net,web3",
+        "--http.corsdomain", "*",
+        "--http.vhosts", "*"
+      ]
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+    # No volumes - data is ephemeral (lost on container restart)
+    restart: unless-stopped

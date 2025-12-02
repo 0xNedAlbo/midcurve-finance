@@ -1,0 +1,23 @@
+{
+  "name": "@midcurve/evm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local EVM development node using Geth in Docker",
+  "scripts": {
+    "up": "docker-compose up -d",
+    "down": "docker-compose down",
+    "stop": "docker-compose stop",
+    "start": "docker-compose start",
+    "restart": "docker-compose restart",
+    "logs": "docker-compose logs -f geth-dev",
+    "status": "docker-compose ps",
+    "reset": "docker-compose down -v && docker-compose up -d",
+    "health": "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}'",
+    "up:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
+    "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
+    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
+  },
+  "engines": {
+    "node": "20.19.x"
+  }
+}

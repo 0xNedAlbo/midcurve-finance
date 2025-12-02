@@ -1,0 +1,12 @@
+version: "3.8"
+
+# Production override - adds persistent storage
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  geth-dev:
+    volumes:
+      - geth-dev-data:/data
+
+volumes:
+  geth-dev-data:
