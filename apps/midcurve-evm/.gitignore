@@ -1,0 +1,10 @@
+# Foundry build artifacts
+contracts/cache/
+contracts/out/
+
+# Node
+node_modules/
+
+# Environment
+.env
+.env.local
