@@ -54,12 +54,10 @@ echo "Checking registered stores..."
 POOL_STORE=$(cast call "$SYSTEM_REGISTRY" "poolStore()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "0x0")
 POSITION_STORE=$(cast call "$SYSTEM_REGISTRY" "positionStore()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "0x0")
 BALANCE_STORE=$(cast call "$SYSTEM_REGISTRY" "balanceStore()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "0x0")
-OHLC_STORE=$(cast call "$SYSTEM_REGISTRY" "ohlcStore()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "0x0")
 
 echo "  PoolStore:     $POOL_STORE"
 echo "  PositionStore: $POSITION_STORE"
 echo "  BalanceStore:  $BALANCE_STORE"
-echo "  OhlcStore:     $OHLC_STORE"
 echo ""
 
 # Check if stores are deployed
@@ -81,4 +79,3 @@ echo "Store addresses (registered in SystemRegistry):"
 echo "  PoolStore:      $POOL_STORE"
 echo "  PositionStore:  $POSITION_STORE"
 echo "  BalanceStore:   $BALANCE_STORE"
-echo "  OhlcStore:      $OHLC_STORE"

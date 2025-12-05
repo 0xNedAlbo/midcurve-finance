@@ -21,9 +21,6 @@ contract SystemRegistry is CoreControlled, ISystemRegistry {
     address public override balanceStore;
 
     /// @inheritdoc ISystemRegistry
-    address public override ohlcStore;
-
-    /// @inheritdoc ISystemRegistry
     function setPoolStore(address _poolStore) external override onlyCore {
         address oldAddress = poolStore;
         poolStore = _poolStore;
@@ -42,12 +39,5 @@ contract SystemRegistry is CoreControlled, ISystemRegistry {
         address oldAddress = balanceStore;
         balanceStore = _balanceStore;
         emit BalanceStoreUpdated(oldAddress, _balanceStore);
-    }
-
-    /// @inheritdoc ISystemRegistry
-    function setOhlcStore(address _ohlcStore) external override onlyCore {
-        address oldAddress = ohlcStore;
-        ohlcStore = _ohlcStore;
-        emit OhlcStoreUpdated(oldAddress, _ohlcStore);
     }
 }

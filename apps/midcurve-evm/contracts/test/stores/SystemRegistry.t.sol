@@ -13,12 +13,10 @@ contract SystemRegistryTest is Test {
     address constant POOL_STORE = address(0x1001);
     address constant POSITION_STORE = address(0x1002);
     address constant BALANCE_STORE = address(0x1003);
-    address constant OHLC_STORE = address(0x1004);
 
     event PoolStoreUpdated(address indexed oldAddress, address indexed newAddress);
     event PositionStoreUpdated(address indexed oldAddress, address indexed newAddress);
     event BalanceStoreUpdated(address indexed oldAddress, address indexed newAddress);
-    event OhlcStoreUpdated(address indexed oldAddress, address indexed newAddress);
 
     function setUp() public {
         registry = new SystemRegistry();
@@ -28,7 +26,6 @@ contract SystemRegistryTest is Test {
         assertEq(registry.poolStore(), address(0));
         assertEq(registry.positionStore(), address(0));
         assertEq(registry.balanceStore(), address(0));
-        assertEq(registry.ohlcStore(), address(0));
         assertEq(registry.CORE(), CORE);
     }
 
@@ -59,15 +56,6 @@ contract SystemRegistryTest is Test {
         assertEq(registry.balanceStore(), BALANCE_STORE);
     }
 
-    function test_setOhlcStore() public {
-        vm.prank(CORE);
-        vm.expectEmit(true, true, false, false);
-        emit OhlcStoreUpdated(address(0), OHLC_STORE);
-        registry.setOhlcStore(OHLC_STORE);
-
-        assertEq(registry.ohlcStore(), OHLC_STORE);
-    }
-
     function test_revert_setPoolStore_notCore() public {
         vm.prank(NON_CORE);
         vm.expectRevert(CoreControlled.OnlyCoreAllowed.selector);
@@ -84,12 +72,6 @@ contract SystemRegistryTest is Test {
         vm.prank(NON_CORE);
         vm.expectRevert(CoreControlled.OnlyCoreAllowed.selector);
         registry.setBalanceStore(BALANCE_STORE);
-    }
-
-    function test_revert_setOhlcStore_notCore() public {
-        vm.prank(NON_CORE);
-        vm.expectRevert(CoreControlled.OnlyCoreAllowed.selector);
-        registry.setOhlcStore(OHLC_STORE);
     }
 
     function test_updateStore() public {

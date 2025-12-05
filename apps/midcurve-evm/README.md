@@ -6,7 +6,7 @@ Local EVM development node with SEMSEE Store contracts pre-deployed.
 
 This package provides a private Ethereum network running in Docker with:
 - **SystemRegistry** pre-deployed at `0x0000000000000000000000000000000000001000`
-- **Store contracts** (PoolStore, PositionStore, BalanceStore, OhlcStore) automatically deployed on startup
+- **Store contracts** (PoolStore, PositionStore, BalanceStore) automatically deployed on startup
 - **Foundry** for contract development and testing
 
 ## Prerequisites
@@ -40,7 +40,6 @@ npm run down
 | PoolStore | Dynamic | Registered in SystemRegistry |
 | PositionStore | Dynamic | Registered in SystemRegistry |
 | BalanceStore | Dynamic | Registered in SystemRegistry |
-| OhlcStore | Dynamic | Registered in SystemRegistry |
 
 ## Available Scripts
 
@@ -96,7 +95,7 @@ npm run down
 
 3. **Store Deployment** (automatic)
    - Waits for Geth to be healthy
-   - Deploys PoolStore, PositionStore, BalanceStore, OhlcStore
+   - Deploys PoolStore, PositionStore, BalanceStore
    - Registers store addresses in SystemRegistry (as Core)
 
 ### Contract Structure
@@ -110,14 +109,12 @@ contracts/
 │   │   ├── ISystemRegistry.sol
 │   │   ├── IPoolStore.sol
 │   │   ├── IPositionStore.sol
-│   │   ├── IBalanceStore.sol
-│   │   └── IOhlcStore.sol
+│   │   └── IBalanceStore.sol
 │   └── stores/
 │       ├── SystemRegistry.sol
 │       ├── PoolStore.sol
 │       ├── PositionStore.sol
-│       ├── BalanceStore.sol
-│       └── OhlcStore.sol
+│       └── BalanceStore.sol
 ├── script/
 │   └── DeployStores.s.sol
 └── test/

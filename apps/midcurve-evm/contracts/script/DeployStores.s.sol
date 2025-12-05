@@ -6,13 +6,12 @@ import "../src/stores/SystemRegistry.sol";
 import "../src/stores/PoolStore.sol";
 import "../src/stores/PositionStore.sol";
 import "../src/stores/BalanceStore.sol";
-import "../src/stores/OhlcStore.sol";
 
 /**
  * @title DeployStores
  * @notice Deployment script for SEMSEE Store contracts
  * @dev Assumes SystemRegistry is already deployed at 0x1000 via genesis allocation.
- *      Deploys PoolStore, PositionStore, BalanceStore, OhlcStore and registers them.
+ *      Deploys PoolStore, PositionStore, BalanceStore and registers them.
  *
  *      Usage:
  *        forge script script/DeployStores.s.sol --rpc-url http://localhost:8545 --broadcast
@@ -46,7 +45,6 @@ contract DeployStores is Script {
             console.log("  PoolStore:", registry.poolStore());
             console.log("  PositionStore:", registry.positionStore());
             console.log("  BalanceStore:", registry.balanceStore());
-            console.log("  OhlcStore:", registry.ohlcStore());
             console.log("Skipping deployment.");
             return;
         }
@@ -66,9 +64,6 @@ contract DeployStores is Script {
         BalanceStore balanceStore = new BalanceStore();
         console.log("BalanceStore deployed at:", address(balanceStore));
 
-        OhlcStore ohlcStore = new OhlcStore();
-        console.log("OhlcStore deployed at:", address(ohlcStore));
-
         // Register stores in SystemRegistry
         registry.setPoolStore(address(poolStore));
         console.log("Registered PoolStore in SystemRegistry");
@@ -79,9 +74,6 @@ contract DeployStores is Script {
         registry.setBalanceStore(address(balanceStore));
         console.log("Registered BalanceStore in SystemRegistry");
 
-        registry.setOhlcStore(address(ohlcStore));
-        console.log("Registered OhlcStore in SystemRegistry");
-
         vm.stopBroadcast();
 
         console.log("");
@@ -90,6 +82,5 @@ contract DeployStores is Script {
         console.log("PoolStore:", address(poolStore));
         console.log("PositionStore:", address(positionStore));
         console.log("BalanceStore:", address(balanceStore));
-        console.log("OhlcStore:", address(ohlcStore));
     }
 }
