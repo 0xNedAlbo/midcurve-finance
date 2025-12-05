@@ -1,29 +1,63 @@
 version: "3.8"
 
-# Base configuration - no persistence (ephemeral dev mode)
+# Base configuration - ephemeral dev mode with pre-deployed contracts
 # For persistent storage, use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# IMPORTANT: Run ./genesis/generate-genesis.sh before starting!
 
 services:
   geth-dev:
-    image: ethereum/client-go:stable
+    build:
+      context: .
+      dockerfile: Dockerfile.geth
     container_name: midcurve-geth-dev
     command:
       [
-        "--dev",
         "--datadir", "/data",
+        "--networkid", "31337",
         "--http",
         "--http.addr", "0.0.0.0",
         "--http.port", "8545",
-        "--http.api", "eth,net,web3,personal,txpool",
+        "--http.api", "eth,net,web3,personal,txpool,debug",
         "--ws",
         "--ws.addr", "0.0.0.0",
         "--ws.port", "8546",
         "--ws.api", "eth,net,web3",
         "--http.corsdomain", "*",
-        "--http.vhosts", "*"
+        "--http.vhosts", "*",
+        "--allow-insecure-unlock",
+        "--unlock", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "--password", "/secrets/password.txt",
+        "--mine",
+        "--miner.etherbase", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "--nodiscover"
       ]
     ports:
       - "8545:8545"
       - "8546:8546"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     # No volumes - data is ephemeral (lost on container restart)
     restart: unless-stopped
+
+  deploy-stores:
+    build:
+      context: .
+      dockerfile: Dockerfile.foundry
+    container_name: midcurve-deploy-stores
+    depends_on:
+      geth-dev:
+        condition: service_healthy
+    # Deploy stores and register in SystemRegistry
+    # Uses Core address (0x1) as sender
+    command: >
+      forge script /app/contracts/script/DeployStores.s.sol
+      --rpc-url http://geth-dev:8545
+      --private-key 0x0000000000000000000000000000000000000000000000000000000000000001
+      --broadcast
+      -vvvv
+    restart: "no"

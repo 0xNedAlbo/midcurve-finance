@@ -2,11 +2,20 @@ version: "3.8"
 
 # Production override - adds persistent storage
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# In production mode:
+# - Geth data persists across restarts
+# - Store deployment is idempotent (skips if already deployed)
 
 services:
   geth-dev:
     volumes:
       - geth-dev-data:/data
+
+  deploy-stores:
+    # In prod mode, the deployment script checks if stores are already registered
+    # and skips deployment if SystemRegistry.poolStore() != address(0)
+    restart: "no"
 
 volumes:
   geth-dev-data:

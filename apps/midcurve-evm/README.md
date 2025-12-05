@@ -1,20 +1,28 @@
 # @midcurve/evm
 
-Local EVM development node using Geth in Docker for testing and development.
+Local EVM development node with SEMSEE Store contracts pre-deployed.
+
+## Overview
+
+This package provides a private Ethereum network running in Docker with:
+- **SystemRegistry** pre-deployed at `0x0000000000000000000000000000000000001000`
+- **Store contracts** (PoolStore, PositionStore, BalanceStore, OhlcStore) automatically deployed on startup
+- **Foundry** for contract development and testing
 
 ## Prerequisites
 
 - Docker and Docker Compose installed
+- [Foundry](https://getfoundry.sh/) installed (for contract development)
 - Port 8545 (HTTP RPC) and 8546 (WebSocket) available
 
 ## Quick Start
 
 ```bash
-# Start the node
+# Start the node (builds contracts, generates genesis, deploys stores)
 npm run up
 
-# Check status
-npm run status
+# Check deployment status
+npm run check:deployment
 
 # View logs
 npm run logs
@@ -23,71 +31,168 @@ npm run logs
 npm run down
 ```
 
+## Well-Known Addresses
+
+| Contract | Address | Description |
+|----------|---------|-------------|
+| Core | `0x0000...0001` | Caller identity for Core operations |
+| SystemRegistry | `0x0000...1000` | Central registry (pre-deployed via genesis) |
+| PoolStore | Dynamic | Registered in SystemRegistry |
+| PositionStore | Dynamic | Registered in SystemRegistry |
+| BalanceStore | Dynamic | Registered in SystemRegistry |
+| OhlcStore | Dynamic | Registered in SystemRegistry |
+
 ## Available Scripts
 
-### Development (Ephemeral - No Persistence)
+### Contract Development
 
 | Script | Description |
 |--------|-------------|
-| `npm run up` | Start the Geth dev node (data lost on restart) |
-| `npm run down` | Stop and remove the container |
-| `npm run stop` | Stop the container |
-| `npm run start` | Start a stopped container |
-| `npm run restart` | Restart the container |
-| `npm run logs` | Follow container logs |
+| `npm run build:contracts` | Build Solidity contracts with Foundry |
+| `npm run test:contracts` | Run contract tests |
+| `npm run generate:genesis` | Generate genesis.json with SystemRegistry bytecode |
+
+### Development (Ephemeral)
+
+| Script | Description |
+|--------|-------------|
+| `npm run up` | Start node with fresh deployment |
+| `npm run down` | Stop and remove containers |
+| `npm run logs` | Follow Geth logs |
+| `npm run logs:deploy` | View deployment logs |
 | `npm run status` | Show container status |
-| `npm run reset` | Restart fresh |
-| `npm run health` | Check if the RPC endpoint is responding |
+| `npm run reset` | Restart with fresh state |
+| `npm run health` | Check RPC endpoint |
+| `npm run deploy:stores` | Manually deploy stores |
+| `npm run check:deployment` | Verify contract deployment |
 
-### Production (Persistent Storage)
+### Production (Persistent)
 
 | Script | Description |
 |--------|-------------|
-| `npm run up:prod` | Start with persistent volume |
-| `npm run down:prod` | Stop (data preserved in volume) |
-| `npm run reset:prod` | Remove volume data and restart fresh |
+| `npm run up:prod` | Start with persistent storage |
+| `npm run down:prod` | Stop (data preserved) |
+| `npm run reset:prod` | Remove data and restart fresh |
 
 ## Endpoints
 
 - **HTTP RPC:** `http://localhost:8545`
 - **WebSocket:** `ws://localhost:8546`
+- **Chain ID:** `31337`
 
-## Configuration
+## Architecture
 
-The Geth node runs in `--dev` mode which:
-- Pre-funds a developer account with ETH
-- Mines blocks on demand (when transactions are sent)
-- Enables all development APIs
+### How It Works
 
-### Enabled APIs
+1. **Genesis Generation** (`npm run generate:genesis`)
+   - Builds contracts with Foundry
+   - Extracts SystemRegistry runtime bytecode
+   - Generates `genesis.json` with SystemRegistry pre-deployed at `0x1000`
 
-- `eth` - Ethereum protocol
-- `net` - Network info
-- `web3` - Web3 utilities
-- `personal` - Account management
-- `txpool` - Transaction pool inspection
+2. **Node Startup** (`docker-compose up`)
+   - Builds custom Geth image with genesis initialization
+   - Starts private PoA network (Clique consensus)
+   - Pre-funds Core (`0x1`) and signer accounts
+
+3. **Store Deployment** (automatic)
+   - Waits for Geth to be healthy
+   - Deploys PoolStore, PositionStore, BalanceStore, OhlcStore
+   - Registers store addresses in SystemRegistry (as Core)
+
+### Contract Structure
+
+```
+contracts/
+├── src/
+│   ├── libraries/
+│   │   └── CoreControlled.sol      # onlyCore modifier
+│   ├── interfaces/
+│   │   ├── ISystemRegistry.sol
+│   │   ├── IPoolStore.sol
+│   │   ├── IPositionStore.sol
+│   │   ├── IBalanceStore.sol
+│   │   └── IOhlcStore.sol
+│   └── stores/
+│       ├── SystemRegistry.sol
+│       ├── PoolStore.sol
+│       ├── PositionStore.sol
+│       ├── BalanceStore.sol
+│       └── OhlcStore.sol
+├── script/
+│   └── DeployStores.s.sol
+└── test/
+    └── stores/                      # Unit tests
+```
 
 ## Usage with viem
 
 ```typescript
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, getContract } from 'viem';
+import { localhost } from 'viem/chains';
 
+// Create client
 const client = createPublicClient({
+  chain: { ...localhost, id: 31337 },
   transport: http('http://localhost:8545'),
 });
 
-const blockNumber = await client.getBlockNumber();
+// Read from SystemRegistry
+const SYSTEM_REGISTRY = '0x0000000000000000000000000000000000001000';
+
+const poolStoreAddress = await client.readContract({
+  address: SYSTEM_REGISTRY,
+  abi: [{ name: 'poolStore', type: 'function', inputs: [], outputs: [{ type: 'address' }] }],
+  functionName: 'poolStore',
+});
+
+console.log('PoolStore:', poolStoreAddress);
 ```
 
 ## Data Persistence
 
-**Development mode** (`npm run up`): Data is ephemeral - chain state is lost when the container stops. This is ideal for testing where you want a fresh state each time.
+**Development mode** (`npm run up`): Data is ephemeral - chain state and contracts are reset on each restart. Ideal for testing.
 
-**Production mode** (`npm run up:prod`): Data is persisted in a Docker named volume (`geth-dev-data`). Chain state survives container restarts.
+**Production mode** (`npm run up:prod`): Data persists in Docker volume. Stores are only deployed once (deployment script is idempotent).
 
-To reset production data:
+## Verification
+
+Check deployment status:
+
 ```bash
-npm run reset:prod
+# Using npm script
+npm run check:deployment
+
+# Using cast (Foundry)
+cast code 0x0000000000000000000000000000000000001000 --rpc-url http://localhost:8545
+cast call 0x1000 "poolStore()(address)" --rpc-url http://localhost:8545
+```
+
+## Troubleshooting
+
+### "SystemRegistry not deployed"
+
+Genesis may not be configured correctly. Regenerate:
+
+```bash
+npm run generate:genesis
+npm run reset
+```
+
+### "Stores not registered"
+
+Deployment may have failed. Check logs and redeploy:
+
+```bash
+npm run logs:deploy
+npm run deploy:stores
+```
+
+### Container won't start
+
+Check Docker logs:
+
+```bash
+docker logs midcurve-geth-dev
 ```
 
 ## Debian/Linux Production Setup
@@ -120,133 +225,17 @@ WantedBy=multi-user.target
 ### 2. Enable and Start Service
 
 ```bash
-# Reload systemd
 sudo systemctl daemon-reload
-
-# Enable on boot
 sudo systemctl enable midcurve-geth
-
-# Start the service
 sudo systemctl start midcurve-geth
-
-# Check status
 sudo systemctl status midcurve-geth
 ```
 
 ### 3. Service Management
 
 ```bash
-# Start
 sudo systemctl start midcurve-geth
-
-# Stop
 sudo systemctl stop midcurve-geth
-
-# Restart
 sudo systemctl restart midcurve-geth
-
-# View status
-sudo systemctl status midcurve-geth
-
-# View logs (systemd)
 sudo journalctl -u midcurve-geth -f
-
-# View logs (docker)
-docker logs -f midcurve-geth-dev
-```
-
-### 4. Log Rotation
-
-Docker handles log rotation automatically. Configure in `/etc/docker/daemon.json`:
-
-```json
-{
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "50m",
-    "max-file": "5"
-  }
-}
-```
-
-Restart Docker after changes:
-```bash
-sudo systemctl restart docker
-```
-
-Alternatively, configure per-container in `docker-compose.prod.yml`:
-
-```yaml
-services:
-  geth-dev:
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
-```
-
-### 5. Logrotate for External Log Files (Optional)
-
-If you redirect logs to files, create `/etc/logrotate.d/midcurve-geth`:
-
-```
-/var/log/midcurve/geth/*.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0640 root adm
-    sharedscripts
-    postrotate
-        docker kill --signal=USR1 midcurve-geth-dev 2>/dev/null || true
-    endscript
-}
-```
-
-### 6. Firewall Configuration (UFW)
-
-```bash
-# Allow RPC access (localhost only - recommended)
-# No firewall rules needed, Docker binds to localhost by default
-
-# Allow RPC access from specific IP (if needed)
-sudo ufw allow from 192.168.1.0/24 to any port 8545
-
-# Allow WebSocket access from specific IP (if needed)
-sudo ufw allow from 192.168.1.0/24 to any port 8546
-```
-
-### 7. Health Check Script
-
-Create `/opt/midcurve/scripts/geth-healthcheck.sh`:
-
-```bash
-#!/bin/bash
-RESPONSE=$(curl -s -X POST http://localhost:8545 \
-  -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  --max-time 5)
-
-if echo "$RESPONSE" | grep -q "result"; then
-  echo "OK: Geth is responding"
-  exit 0
-else
-  echo "FAIL: Geth not responding"
-  exit 1
-fi
-```
-
-```bash
-chmod +x /opt/midcurve/scripts/geth-healthcheck.sh
-```
-
-### 8. Cron Health Monitoring (Optional)
-
-Add to root crontab (`sudo crontab -e`):
-
-```cron
-*/5 * * * * /opt/midcurve/scripts/geth-healthcheck.sh || systemctl restart midcurve-geth
 ```

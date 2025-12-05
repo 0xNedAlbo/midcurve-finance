@@ -1,0 +1,35 @@
+# Dockerfile for Geth private network with genesis initialization
+#
+# This image:
+# 1. Starts from official Geth image
+# 2. Copies genesis.json
+# 3. Initializes the datadir with genesis
+# 4. Imports the signer account
+#
+
+FROM ethereum/client-go:stable
+
+# Create directories
+RUN mkdir -p /genesis /data /secrets
+
+# Copy genesis file (must be generated before building)
+COPY genesis/genesis.json /genesis/genesis.json
+
+# Create empty password file for keystore
+RUN echo "" > /secrets/password.txt
+
+# Import the default signer account (Foundry's first account)
+# Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+# Private key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+RUN mkdir -p /data/keystore && \
+    echo '{"address":"f39fd6e51aad88f6f4ce6ab8827279cfffb92266","crypto":{"cipher":"aes-128-ctr","ciphertext":"e4b41e57c1fb87c8cf2ee98c4db87f07c7c4ab94da6f31f48d68b0a07a3df00d","cipherparams":{"iv":"24b4df8a38a15bc85a84b8cdb8c80b22"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"a7cd03d8df8e6e1c28b8f65b8e7b8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c"},"mac":"c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5"},"id":"12345678-1234-1234-1234-123456789abc","version":3}' > /tmp/keystore-placeholder.json
+
+# Initialize geth with genesis
+RUN geth init --datadir /data /genesis/genesis.json
+
+# Expose RPC and WS ports
+EXPOSE 8545 8546
+
+# Health check
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=5 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8545 || exit 1

@@ -1,21 +1,27 @@
 {
   "name": "@midcurve/evm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local EVM development node using Geth in Docker",
+  "description": "Local EVM development node with SEMSEE Store contracts",
   "scripts": {
-    "up": "docker-compose up -d",
+    "build:contracts": "cd contracts && forge build",
+    "test:contracts": "cd contracts && forge test -vvv",
+    "generate:genesis": "./genesis/generate-genesis.sh",
+    "up": "npm run generate:genesis && docker-compose build && docker-compose up -d",
     "down": "docker-compose down",
     "stop": "docker-compose stop",
     "start": "docker-compose start",
     "restart": "docker-compose restart",
     "logs": "docker-compose logs -f geth-dev",
+    "logs:deploy": "docker-compose logs deploy-stores",
     "status": "docker-compose ps",
-    "reset": "docker-compose down -v && docker-compose up -d",
+    "reset": "docker-compose down -v && npm run up",
     "health": "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}'",
-    "up:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
+    "deploy:stores": "./scripts/deploy-stores.sh",
+    "check:deployment": "./scripts/check-deployment.sh",
+    "up:prod": "npm run generate:genesis && docker-compose -f docker-compose.yml -f docker-compose.prod.yml build && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
-    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
+    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod"
   },
   "engines": {
     "node": "20.19.x"

@@ -1,0 +1,19 @@
+# Dockerfile for Foundry deployment container
+#
+# This image contains the compiled contracts and deployment scripts.
+# Used to deploy Store contracts after Geth node starts.
+#
+
+FROM ghcr.io/foundry-rs/foundry:latest
+
+WORKDIR /app
+
+# Copy contracts source and build artifacts
+COPY contracts/ /app/contracts/
+
+# Build contracts (ensures artifacts are available)
+RUN cd /app/contracts && forge build
+
+# Default command runs the deployment script
+# Override with --rpc-url for different networks
+CMD ["forge", "script", "/app/contracts/script/DeployStores.s.sol", "--rpc-url", "http://geth-dev:8545", "--broadcast", "-vvvv"]
