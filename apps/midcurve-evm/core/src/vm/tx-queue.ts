@@ -1,41 +1,42 @@
 /**
- * Transaction Queue
+ * Transaction Queue with Nonce Management
  *
- * Serializes all blockchain transactions from the Core account to prevent
- * nonce collisions. When multiple strategies need callbacks delivered
- * simultaneously, this queue ensures transactions are sent one at a time.
+ * Manages nonces for the Core account to enable parallel transaction sending.
+ * Instead of waiting for each transaction to be mined before sending the next,
+ * this queue assigns nonces sequentially and sends transactions immediately.
  *
- * Without this, parallel mailbox processing causes nonce collisions:
- * - Strategy A's callback tries nonce 42
- * - Strategy B's callback also tries nonce 42 (before A's tx is mined)
- * - One fails with "nonce too low"
+ * Flow:
+ * 1. Transaction comes in → assigned next nonce → sent immediately
+ * 2. Multiple transactions can be in-flight simultaneously
+ * 3. Receipts are waited for in parallel
+ *
+ * This is much faster than waiting for each tx to be mined (~4s) before
+ * sending the next one. With 7 subscribers, sequential mining takes ~28s
+ * while parallel sending takes ~4s total.
  */
 
-import type { Address, Hex } from 'viem';
+import type { Address, Hex, PublicClient } from 'viem';
 import type { CallResult } from './types.js';
 
-export type TransactionExecutor = (
+/**
+ * Function that sends a transaction with an explicit nonce
+ */
+export type TransactionSender = (
   to: Address,
   data: Hex,
-  gasLimit: bigint
+  gasLimit: bigint,
+  nonce: number
 ) => Promise<CallResult>;
 
-interface QueuedTransaction {
-  to: Address;
-  data: Hex;
-  gasLimit: bigint;
-  resolve: (result: CallResult) => void;
-  reject: (error: Error) => void;
-}
-
 /**
- * TxQueue serializes transaction execution to prevent nonce collisions.
+ * TxQueue manages nonces to enable parallel transaction sending.
  *
  * Usage:
  * ```typescript
- * const txQueue = new TxQueue(executor);
+ * const txQueue = new TxQueue(sender, publicClient, coreAddress);
+ * await txQueue.initialize();
  *
- * // These can be called in parallel - they'll be queued internally
+ * // These run in parallel - different nonces assigned to each
  * const [result1, result2] = await Promise.all([
  *   txQueue.enqueue(addr1, data1, gas),
  *   txQueue.enqueue(addr2, data2, gas),
@@ -43,61 +44,99 @@ interface QueuedTransaction {
  * ```
  */
 export class TxQueue {
-  private queue: QueuedTransaction[] = [];
-  private processing = false;
+  private currentNonce: number = 0;
+  private initialized = false;
+  private initPromise: Promise<void> | null = null;
+  private pendingTxCount = 0;
 
-  constructor(private executor: TransactionExecutor) {}
-
-  /**
-   * Enqueue a transaction for execution.
-   * Returns a promise that resolves when the transaction completes.
-   */
-  async enqueue(to: Address, data: Hex, gasLimit: bigint): Promise<CallResult> {
-    return new Promise((resolve, reject) => {
-      this.queue.push({ to, data, gasLimit, resolve, reject });
-      this.processNext();
-    });
-  }
+  constructor(
+    private sender: TransactionSender,
+    private publicClient: PublicClient,
+    private accountAddress: Address
+  ) {}
 
   /**
-   * Process the next transaction in the queue.
-   * Only one transaction processes at a time.
+   * Initialize the queue by fetching the current nonce from the network.
+   * Safe to call multiple times - only initializes once.
    */
-  private async processNext(): Promise<void> {
-    if (this.processing || this.queue.length === 0) {
+  async initialize(): Promise<void> {
+    if (this.initialized) {
       return;
     }
 
-    this.processing = true;
+    // Ensure only one initialization runs
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
-    const tx = this.queue.shift()!;
+    this.initPromise = this.doInitialize();
+    return this.initPromise;
+  }
+
+  private async doInitialize(): Promise<void> {
+    // Get current nonce from the network
+    const nonce = await this.publicClient.getTransactionCount({
+      address: this.accountAddress,
+      blockTag: 'pending', // Include pending transactions
+    });
+
+    this.currentNonce = nonce;
+    this.initialized = true;
+  }
+
+  /**
+   * Enqueue a transaction for execution.
+   * Transactions are sent immediately with an assigned nonce.
+   * Returns a promise that resolves when the transaction is mined.
+   */
+  async enqueue(to: Address, data: Hex, gasLimit: bigint): Promise<CallResult> {
+    // Ensure initialized
+    await this.initialize();
+
+    // Assign nonce atomically (synchronous operation)
+    const nonce = this.currentNonce++;
+    this.pendingTxCount++;
 
     try {
-      const result = await this.executor(tx.to, tx.data, tx.gasLimit);
-      tx.resolve(result);
-    } catch (error) {
-      tx.reject(error instanceof Error ? error : new Error(String(error)));
+      // Send transaction immediately with assigned nonce
+      // The sender handles both sending and waiting for receipt
+      const result = await this.sender(to, data, gasLimit, nonce);
+      return result;
     } finally {
-      this.processing = false;
-      // Process next item if any
-      if (this.queue.length > 0) {
-        // Use setImmediate/setTimeout to prevent stack overflow on long queues
-        setImmediate(() => this.processNext());
-      }
+      this.pendingTxCount--;
     }
   }
 
   /**
-   * Get the number of pending transactions in the queue
+   * Get the number of pending (in-flight) transactions
    */
   get pendingCount(): number {
-    return this.queue.length;
+    return this.pendingTxCount;
   }
 
   /**
-   * Check if currently processing a transaction
+   * Get the next nonce that will be assigned
    */
-  get isProcessing(): boolean {
-    return this.processing;
+  get nextNonce(): number {
+    return this.currentNonce;
+  }
+
+  /**
+   * Check if the queue is initialized
+   */
+  get isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * Reset the nonce from the network.
+   * Useful if transactions fail and nonce gets out of sync.
+   */
+  async resetNonce(): Promise<void> {
+    const nonce = await this.publicClient.getTransactionCount({
+      address: this.accountAddress,
+      blockTag: 'pending',
+    });
+    this.currentNonce = nonce;
   }
 }

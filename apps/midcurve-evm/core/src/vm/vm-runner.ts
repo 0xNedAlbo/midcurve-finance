@@ -14,6 +14,7 @@ import { semseeChain, DEFAULT_RPC_CONFIG } from './chain.js';
 import type { VmRunnerConfig, CallResult, DeployResult, StoreAddresses } from './types.js';
 import {
   CORE_PRIVATE_KEY,
+  CORE_ADDRESS,
   SYSTEM_REGISTRY_ADDRESS,
   GAS_LIMITS,
 } from '../utils/addresses.js';
@@ -63,9 +64,11 @@ export class VmRunner {
       transport: http(rpcUrl),
     });
 
-    // Transaction queue to serialize all Core transactions (prevents nonce collisions)
-    this.txQueue = new TxQueue((to, data, gasLimit) =>
-      this.executeTransaction(to, data, gasLimit)
+    // Transaction queue with nonce management for parallel transaction sending
+    this.txQueue = new TxQueue(
+      (to, data, gasLimit, nonce) => this.executeTransaction(to, data, gasLimit, nonce),
+      this.publicClient,
+      CORE_ADDRESS
     );
 
     logger.info({ rpcUrl, wsUrl }, 'VmRunner created');
@@ -194,37 +197,43 @@ export class VmRunner {
    * - Delivering callbacks to strategies
    * - Updating store contracts
    *
-   * NOTE: All calls are serialized through the TxQueue to prevent nonce collisions.
-   * This is necessary because parallel callbacks to different strategies all use
-   * the same Core account.
+   * NOTE: Transactions are sent in parallel with managed nonces.
+   * The TxQueue assigns incrementing nonces to each transaction,
+   * allowing multiple transactions to be in-flight simultaneously.
+   * This is much faster than waiting for each tx to be mined (~4s each).
    */
   async callAsCore(
     to: Address,
     data: Hex,
     gasLimit: bigint = GAS_LIMITS.CALLBACK
   ): Promise<CallResult> {
-    logger.debug({ to, dataLength: data.length, gasLimit, queueSize: this.txQueue.pendingCount }, 'Queueing Core call');
+    logger.debug({ to, dataLength: data.length, gasLimit, pendingTxs: this.txQueue.pendingCount }, 'Sending Core call');
 
-    // Enqueue the transaction - it will be executed when previous txs complete
+    // Enqueue the transaction - nonce is assigned immediately, tx sent in parallel
     return this.txQueue.enqueue(to, data, gasLimit);
   }
 
   /**
-   * Execute a transaction immediately (called by TxQueue).
-   * This is the actual transaction execution logic.
+   * Execute a transaction with an explicit nonce (called by TxQueue).
+   * Transactions are sent immediately without waiting for previous ones to mine.
    */
   private async executeTransaction(
     to: Address,
     data: Hex,
-    gasLimit: bigint
+    gasLimit: bigint,
+    nonce: number
   ): Promise<CallResult> {
     try {
+      logger.debug({ to, nonce, gasLimit }, 'Sending transaction with nonce');
+
       const hash = await this.walletClient.sendTransaction({
         to,
         data,
         gas: gasLimit,
+        nonce,
       });
 
+      // Wait for receipt - this happens in parallel with other transactions
       const receipt = await this.publicClient.waitForTransactionReceipt({
         hash,
       });
@@ -241,13 +250,13 @@ export class VmRunner {
       }
 
       logger.debug(
-        { success: result.success, gasUsed: result.gasUsed, logCount: result.logs.length },
-        'Call completed'
+        { success: result.success, gasUsed: result.gasUsed, logCount: result.logs.length, nonce },
+        'Transaction mined'
       );
 
       return result;
     } catch (error) {
-      logger.error({ error, to }, 'Call failed');
+      logger.error({ error, to, nonce }, 'Transaction failed');
 
       return {
         success: false,
