@@ -29,6 +29,13 @@ export const EVENT_TOPICS = {
   // LogMessage(LogLevel indexed level, string message, bytes data)
   // LogLevel is an enum which is uint8 in the ABI
   LOG_MESSAGE: eventSignature('LogMessage(uint8,string,bytes)'),
+
+  // Strategy lifecycle events (from IStrategy interface)
+  // StrategyStarted() - emitted when strategy transitions to Running state
+  STRATEGY_STARTED: eventSignature('StrategyStarted()'),
+
+  // StrategyShutdown() - emitted when strategy transitions to Shutdown state
+  STRATEGY_SHUTDOWN: eventSignature('StrategyShutdown()'),
 } as const;
 
 /**
@@ -127,3 +134,42 @@ export interface UnknownLog {
  * Result of decoding a log - either a known event or unknown
  */
 export type DecodeResult = DecodedEvent | UnknownLog;
+
+/**
+ * Strategy state enum (matches IStrategy.StrategyState in Solidity)
+ */
+export enum StrategyState {
+  Created = 0,
+  Running = 1,
+  Shutdown = 2,
+}
+
+/**
+ * ABI for strategy lifecycle events
+ */
+export const STRATEGY_LIFECYCLE_ABI = [
+  {
+    type: 'event',
+    name: 'StrategyStarted',
+    inputs: [],
+  },
+  {
+    type: 'event',
+    name: 'StrategyShutdown',
+    inputs: [],
+  },
+  {
+    type: 'function',
+    name: 'state',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'owner',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+] as const;

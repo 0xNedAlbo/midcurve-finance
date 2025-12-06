@@ -8,6 +8,10 @@
  * - Mock effect execution (real execution coming later)
  */
 
+// IMPORTANT: This must be the first import to set up WebSocket polyfill
+// before any other modules (like Hyperliquid SDK) try to use it.
+import './setup-websocket.js';
+
 import { CoreOrchestrator } from './orchestrator/orchestrator.js';
 import { HyperliquidFeed } from './datasources/hyperliquid-feed.js';
 import { createLogger } from './utils/logger.js';
@@ -15,6 +19,7 @@ import { TIMEFRAME_TO_INTERVAL } from './datasources/types.js';
 import type { Subscription } from './subscriptions/types.js';
 import { SUBSCRIPTION_TYPES } from './events/types.js';
 import { decodeAbiParameters } from 'viem';
+import { getMarketInfo, computeMarketId } from './utils/market-registry.js';
 
 const logger = createLogger('semsee-node');
 
@@ -55,7 +60,7 @@ async function handleSubscription(
   subscription: Subscription,
   hyperliquidFeed: HyperliquidFeed
 ): Promise<void> {
-  const { subscriptionType, payload } = subscription;
+  const { subscriptionType, payload, strategyAddress } = subscription;
 
   switch (subscriptionType) {
     case SUBSCRIPTION_TYPES.OHLC: {
@@ -69,25 +74,65 @@ async function handleSubscription(
           payload
         );
 
-        // Extract symbol from marketId (reverse of keccak256)
-        // For now, we need a mapping or the symbol stored somewhere
-        // TODO: Implement proper symbol lookup
-        const symbol = getSymbolFromMarketId(marketId as `0x${string}`);
+        // Look up market info from registry
+        const marketInfo = getMarketInfo(marketId as string);
 
-        if (symbol && TIMEFRAME_TO_INTERVAL[Number(timeframe)]) {
-          await hyperliquidFeed.subscribeMarket(symbol, Number(timeframe));
-          logger.info(
-            { symbol, timeframe: Number(timeframe) },
-            'Activated OHLC subscription'
+        if (!marketInfo) {
+          logger.error(
+            {
+              strategy: strategyAddress,
+              marketId,
+              timeframe: Number(timeframe),
+              expectedEthUsdMarketId: computeMarketId('ETH', 'USD'),
+            },
+            'Unknown market ID - cannot activate subscription. Market is not registered in market-registry.ts.'
           );
-        } else {
-          logger.warn(
-            { marketId, timeframe },
-            'Unknown market or unsupported timeframe'
-          );
+          // TODO: Send error response back to strategy
+          return;
         }
+
+        const { base } = marketInfo;
+        const tf = Number(timeframe);
+
+        if (!TIMEFRAME_TO_INTERVAL[tf]) {
+          logger.error(
+            {
+              strategy: strategyAddress,
+              symbol: base,
+              timeframe: tf,
+              supportedTimeframes: Object.keys(TIMEFRAME_TO_INTERVAL),
+            },
+            'Unsupported timeframe - cannot activate subscription'
+          );
+          // TODO: Send error response back to strategy
+          return;
+        }
+
+        await hyperliquidFeed.subscribeMarket(base, tf);
+        logger.info(
+          {
+            strategy: strategyAddress,
+            symbol: base,
+            timeframe: tf,
+            marketId,
+          },
+          'Activated OHLC subscription'
+        );
       } catch (error) {
-        logger.error({ error, payload }, 'Failed to decode OHLC subscription');
+        // Determine if this is a decode error or a subscription error
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isDecodeError = errorMessage.includes('decode') || errorMessage.includes('ABI');
+
+        logger.error(
+          {
+            error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+            payload,
+            strategy: strategyAddress,
+          },
+          isDecodeError
+            ? 'Failed to decode OHLC subscription payload'
+            : 'Failed to activate OHLC subscription (data source error)'
+        );
       }
       break;
     }
@@ -96,30 +141,20 @@ async function handleSubscription(
     case SUBSCRIPTION_TYPES.POSITION:
     case SUBSCRIPTION_TYPES.BALANCE:
       // These data sources are not implemented yet
-      logger.debug(
-        { subscriptionType },
-        'Subscription type not yet supported'
+      logger.warn(
+        { subscriptionType, strategy: strategyAddress },
+        'Subscription type not yet supported - subscription will not be activated'
       );
       break;
 
     default:
-      logger.warn({ subscriptionType }, 'Unknown subscription type');
+      logger.warn(
+        { subscriptionType, strategy: strategyAddress },
+        'Unknown subscription type - subscription will not be activated'
+      );
   }
 }
 
-/**
- * Get symbol from marketId
- * TODO: This is a placeholder - in production, we need a proper mapping
- */
-function getSymbolFromMarketId(marketId: `0x${string}`): string | null {
-  // Hardcoded mapping for common markets
-  const knownMarkets: Record<string, string> = {
-    // These would be the actual keccak256 hashes
-    // For now, return null and log the marketId
-  };
-
-  return knownMarkets[marketId] ?? null;
-}
 
 /**
  * Main entry point
@@ -158,7 +193,19 @@ async function main(): Promise<void> {
     await handleSubscription(subscription, hyperliquidFeed);
   });
 
-  // Initialize orchestrator (connects to Geth)
+  // Start Hyperliquid feed FIRST (must be connected before orchestrator scans for strategies)
+  // The orchestrator initialization scans for existing running strategies, which may
+  // trigger subscriptions immediately. WebSocket must be ready before that happens.
+  logger.info('Starting Hyperliquid feed...');
+  try {
+    await hyperliquidFeed.start();
+    logger.info('Hyperliquid feed started');
+  } catch (error) {
+    logger.error({ error }, 'Failed to start Hyperliquid feed');
+    // Continue without Hyperliquid - other data sources may work
+  }
+
+  // Initialize orchestrator (connects to Geth, scans for running strategies)
   logger.info('Initializing orchestrator...');
   try {
     await orchestrator.initialize();
@@ -169,16 +216,6 @@ async function main(): Promise<void> {
       'Failed to initialize orchestrator. Is Geth running?'
     );
     process.exit(1);
-  }
-
-  // Start Hyperliquid feed
-  logger.info('Starting Hyperliquid feed...');
-  try {
-    await hyperliquidFeed.start();
-    logger.info('Hyperliquid feed started');
-  } catch (error) {
-    logger.error({ error }, 'Failed to start Hyperliquid feed');
-    // Continue without Hyperliquid - other data sources may work
   }
 
   logger.info('SEMSEE Node running');

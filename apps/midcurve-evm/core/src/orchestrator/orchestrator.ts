@@ -14,6 +14,7 @@ import type { ExternalEvent } from '../stores/types.js';
 import { EffectEngine, MockEffectExecutor } from '../effects/index.js';
 import type { EffectResult } from '../effects/types.js';
 import { MailboxManager } from './mailbox-manager.js';
+import { StrategyWatcher } from './strategy-watcher.js';
 import type {
   MailboxEvent,
   OrchestratorConfig,
@@ -121,10 +122,14 @@ export class CoreOrchestrator {
   private storeSynchronizer: StoreSynchronizer;
   private effectEngine: EffectEngine;
   private mailboxManager: MailboxManager;
+  private strategyWatcher: StrategyWatcher;
   private callbackGasLimit: bigint;
 
   private isInitialized = false;
   private isShuttingDown = false;
+
+  // Track processed strategy transactions to prevent duplicate processing
+  private processedStrategyTxs: Set<string> = new Set();
 
   constructor(config: OrchestratorConfig = {}) {
     this.logger = createLogger('orchestrator');
@@ -164,6 +169,9 @@ export class CoreOrchestrator {
       this.processMailboxEvent(strategy, event)
     );
 
+    // Strategy watcher is initialized in initialize() after vmRunner is ready
+    this.strategyWatcher = null!; // Will be set in initialize()
+
     // Wire up callbacks
     this.effectEngine.setOnEffectComplete((strategy, result) =>
       this.deliverEffectResult(strategy, result)
@@ -186,6 +194,24 @@ export class CoreOrchestrator {
 
     // Initialize store synchronizer (gets store addresses)
     await this.storeSynchronizer.initialize();
+
+    // Initialize strategy watcher (now that vmRunner is ready)
+    this.strategyWatcher = new StrategyWatcher({
+      publicClient: this.vmRunner.getPublicClient(),
+      logger: this.logger.child({ component: 'strategy-watcher' }),
+      onStrategyStarted: (address, logs, txHash) =>
+        this.handleStrategyStarted(address, logs, txHash),
+      onStrategyShutdown: (address, logs, txHash) =>
+        this.handleStrategyShutdown(address, logs, txHash),
+    });
+
+    // IMPORTANT: Scan for existing strategies BEFORE starting the watcher
+    // This prevents duplicate processing of strategies that started recently
+    // (the scan finds them, then the watcher would also see the same block)
+    await this.strategyWatcher.scanExistingStrategies();
+
+    // Now start watching for NEW strategy events (from future blocks)
+    await this.strategyWatcher.start();
 
     this.isInitialized = true;
     this.logger.info('Orchestrator initialized');
@@ -376,6 +402,100 @@ export class CoreOrchestrator {
   }
 
   /**
+   * Handle a strategy started event.
+   * Called by StrategyWatcher when a StrategyStarted event is detected.
+   *
+   * @param strategyAddress The address of the strategy that started
+   * @param logs All logs from the transaction (includes SubscriptionRequested events)
+   * @param txHash Optional transaction hash for deduplication
+   */
+  async handleStrategyStarted(
+    strategyAddress: Address,
+    logs: Log[],
+    txHash?: string
+  ): Promise<void> {
+    // Create a unique key for this strategy start event
+    const dedupKey = txHash
+      ? `start:${strategyAddress.toLowerCase()}:${txHash.toLowerCase()}`
+      : `start:${strategyAddress.toLowerCase()}:${Date.now()}`;
+
+    // Check if we've already processed this transaction
+    if (this.processedStrategyTxs.has(dedupKey)) {
+      this.logger.debug(
+        { strategy: strategyAddress, txHash },
+        'Strategy startup already processed, skipping'
+      );
+      return;
+    }
+
+    // Mark as processed
+    this.processedStrategyTxs.add(dedupKey);
+
+    this.logger.info(
+      { strategy: strategyAddress, logCount: logs.length },
+      'Processing strategy startup'
+    );
+
+    // Create mailbox for this strategy
+    this.mailboxManager.getOrCreateMailbox(strategyAddress);
+
+    // Process all logs in order (SubscriptionRequested comes BEFORE StrategyStarted)
+    await this.processLogsInOrder(strategyAddress, logs);
+
+    this.logger.info(
+      { strategy: strategyAddress },
+      'Strategy startup processing complete'
+    );
+  }
+
+  /**
+   * Handle a strategy shutdown event.
+   * Called by StrategyWatcher when a StrategyShutdown event is detected.
+   *
+   * @param strategyAddress The address of the strategy that shut down
+   * @param logs All logs from the transaction (includes UnsubscriptionRequested events)
+   * @param txHash Optional transaction hash for deduplication
+   */
+  async handleStrategyShutdown(
+    strategyAddress: Address,
+    logs: Log[],
+    txHash?: string
+  ): Promise<void> {
+    // Create a unique key for this strategy shutdown event
+    const dedupKey = txHash
+      ? `shutdown:${strategyAddress.toLowerCase()}:${txHash.toLowerCase()}`
+      : `shutdown:${strategyAddress.toLowerCase()}:${Date.now()}`;
+
+    // Check if we've already processed this transaction
+    if (this.processedStrategyTxs.has(dedupKey)) {
+      this.logger.debug(
+        { strategy: strategyAddress, txHash },
+        'Strategy shutdown already processed, skipping'
+      );
+      return;
+    }
+
+    // Mark as processed
+    this.processedStrategyTxs.add(dedupKey);
+
+    this.logger.info(
+      { strategy: strategyAddress, logCount: logs.length },
+      'Processing strategy shutdown'
+    );
+
+    // Process all logs in order (UnsubscriptionRequested comes BEFORE StrategyShutdown)
+    await this.processLogsInOrder(strategyAddress, logs);
+
+    // Remove strategy mailbox
+    this.mailboxManager.removeMailbox(strategyAddress);
+
+    this.logger.info(
+      { strategy: strategyAddress },
+      'Strategy shutdown processing complete'
+    );
+  }
+
+  /**
    * Deliver an effect result to a strategy.
    * Called by EffectEngine when an action completes.
    */
@@ -555,6 +675,11 @@ export class CoreOrchestrator {
     this.logger.info('Shutting down orchestrator...');
     this.isShuttingDown = true;
 
+    // Stop watching for strategy events
+    if (this.strategyWatcher) {
+      await this.strategyWatcher.stop();
+    }
+
     // Wait for pending work to complete (with timeout)
     const maxWait = 30000; // 30 seconds
     const startTime = Date.now();
@@ -568,5 +693,12 @@ export class CoreOrchestrator {
     }
 
     this.logger.info('Orchestrator shutdown complete');
+  }
+
+  /**
+   * Get the public client for external use (e.g., startup scan).
+   */
+  getPublicClient() {
+    return this.vmRunner.getPublicClient();
   }
 }

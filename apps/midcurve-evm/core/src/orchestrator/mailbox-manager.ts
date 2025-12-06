@@ -34,7 +34,7 @@ export class MailboxManager {
   ) {}
 
   /**
-   * Get or create a mailbox for a strategy
+   * Get or create a mailbox for a strategy (internal use)
    */
   private getMailbox(strategyAddress: Address): StrategyMailbox {
     const normalizedAddress = strategyAddress.toLowerCase() as Address;
@@ -49,6 +49,17 @@ export class MailboxManager {
     }
 
     return mailbox;
+  }
+
+  /**
+   * Get or create a mailbox for a strategy (public API)
+   * Use this to ensure a mailbox exists for a strategy before sending events.
+   *
+   * @param strategyAddress The strategy address
+   * @returns The mailbox for the strategy
+   */
+  getOrCreateMailbox(strategyAddress: Address): StrategyMailbox {
+    return this.getMailbox(strategyAddress);
   }
 
   /**

@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "semsee-node": "./dist/main.js"
+    "semsee-node": "./dist/main.js",
+    "semsee": "./dist/cli/index.js"
   },
   "scripts": {
     "start": "tsx src/main.ts",
@@ -14,9 +15,11 @@
     "build": "tsc",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cli": "tsx src/cli/index.ts"
   },
   "dependencies": {
+    "commander": "^12.1.0",
     "hyperliquid": "^1.5.0",
     "pino": "^9.6.0",
     "viem": "^2.38.0",

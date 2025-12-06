@@ -12,6 +12,8 @@ import {
   type HyperliquidCandle,
 } from './types.js';
 
+// Note: WebSocket polyfill is set up in setup-websocket.ts (imported first in main.ts)
+
 /**
  * Precision for converting floating point prices to bigint
  * 18 decimals (standard ERC-20 precision)
@@ -73,14 +75,63 @@ export class HyperliquidFeed {
     try {
       // Connect to Hyperliquid (initializes WebSocket connection)
       await this.client.connect();
+
+      // The connect() method returns before WebSocket is actually ready.
+      // We need to wait for the WebSocket to be in OPEN state before proceeding.
+      await this.waitForConnection();
+
       this.isStarted = true;
-      this.logger.info('HyperliquidFeed started');
+      this.logger.info('HyperliquidFeed started and WebSocket connected');
     } catch (error) {
       // Log the actual error message for debugging
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error({ errorMessage }, 'Failed to start HyperliquidFeed');
       throw error;
     }
+  }
+
+  /**
+   * Wait for the WebSocket connection to be ready.
+   * Polls the connection state until it's open or timeout is reached.
+   */
+  private async waitForConnection(
+    timeoutMs: number = 10000,
+    pollIntervalMs: number = 100
+  ): Promise<void> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeoutMs) {
+      // Try a test subscription to see if WebSocket is ready
+      // The Hyperliquid SDK doesn't expose WebSocket state directly,
+      // so we check by attempting a lightweight operation
+      try {
+        // Check if we can access the subscriptions API without error
+        // This is a heuristic - the WebSocket needs to be open for subscriptions to work
+        const ws = (this.client as unknown as { ws?: { isConnected?: boolean; readyState?: number } }).ws;
+
+        // If we can access internal ws state
+        if (ws) {
+          if (ws.isConnected === true || ws.readyState === 1) {
+            this.logger.debug('WebSocket connection confirmed ready');
+            return;
+          }
+        }
+
+        // Alternative: wait a bit after connect() for the socket to stabilize
+        // This is a fallback if we can't inspect internal state
+        if (Date.now() - startTime >= 2000) {
+          // After 2 seconds, assume ready and let errors surface naturally
+          this.logger.debug('WebSocket assumed ready after wait period');
+          return;
+        }
+      } catch {
+        // Ignore errors during checking, just wait and retry
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    throw new Error(`WebSocket connection timeout after ${timeoutMs}ms`);
   }
 
   /**
@@ -165,7 +216,11 @@ export class HyperliquidFeed {
       );
     } catch (error) {
       this.logger.error(
-        { symbol, interval, error },
+        {
+          symbol,
+          interval,
+          error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+        },
         'Failed to subscribe to market'
       );
       throw error;
