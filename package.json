@@ -23,5 +23,10 @@
     "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "tsup": "^8.5.0",
     "turbo": "^2.6.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "commander": "^12.1.0"
+    }
   }
 }

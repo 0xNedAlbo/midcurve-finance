@@ -21,7 +21,19 @@
     "check:deployment": "./scripts/check-deployment.sh",
     "up:prod": "npm run generate:genesis && docker-compose -f docker-compose.yml -f docker-compose.prod.yml build && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
-    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod"
+    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod",
+    "cli": "SEMSEE_CWD=$PWD && cd core && SEMSEE_CWD=$SEMSEE_CWD tsx src/cli/index.ts",
+    "strategy:create": "pnpm run cli create",
+    "strategy:deploy": "pnpm run cli deploy",
+    "strategy:start": "pnpm run cli start",
+    "strategy:shutdown": "pnpm run cli shutdown",
+    "strategy:status": "pnpm run cli status",
+    "strategy:logs": "pnpm run cli logs",
+    "strategy:event": "pnpm run cli event",
+    "strategy:fund": "pnpm run cli fund"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
   },
   "engines": {
     "node": "20.19.x"
