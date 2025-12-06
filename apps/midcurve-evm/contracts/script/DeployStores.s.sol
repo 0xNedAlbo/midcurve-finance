@@ -10,49 +10,32 @@ import "../src/stores/BalanceStore.sol";
 /**
  * @title DeployStores
  * @notice Deployment script for SEMSEE Store contracts
- * @dev Assumes SystemRegistry is already deployed at 0x1000 via genesis allocation.
- *      Deploys PoolStore, PositionStore, BalanceStore and registers them.
+ * @dev Deploys all SEMSEE infrastructure contracts:
+ *      - SystemRegistry (central registry)
+ *      - PoolStore, PositionStore, BalanceStore (data stores)
  *
  *      Usage:
  *        forge script script/DeployStores.s.sol --rpc-url http://localhost:8545 --broadcast
  *
- *      The script broadcasts from the CORE address (0x1) which must have ETH balance.
+ *      Environment:
+ *        Uses CORE_PRIVATE_KEY if set, otherwise Foundry's default account 0.
  */
 contract DeployStores is Script {
-    address constant SYSTEM_REGISTRY = 0x0000000000000000000000000000000000001000;
-    address constant CORE = 0x0000000000000000000000000000000000000001;
+    // Foundry default account (private key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80)
+    // This is pre-funded in Anvil with 10,000 ETH
+    address constant CORE = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 
     function run() external {
-        // Check if SystemRegistry exists at well-known address
-        uint256 codeSize;
-        assembly {
-            codeSize := extcodesize(SYSTEM_REGISTRY)
-        }
+        console.log("=== SEMSEE Contract Deployment ===");
+        console.log("Deploying from Core address:", CORE);
+        console.log("");
 
-        if (codeSize == 0) {
-            console.log("ERROR: SystemRegistry not deployed at 0x1000");
-            console.log("Ensure genesis.json is configured correctly");
-            revert("SystemRegistry not found");
-        }
+        // Start broadcasting transactions
+        vm.startBroadcast();
 
-        console.log("SystemRegistry found at:", SYSTEM_REGISTRY);
-
-        SystemRegistry registry = SystemRegistry(SYSTEM_REGISTRY);
-
-        // Check if stores are already registered (idempotency for prod mode)
-        if (registry.poolStore() != address(0)) {
-            console.log("Stores already deployed and registered:");
-            console.log("  PoolStore:", registry.poolStore());
-            console.log("  PositionStore:", registry.positionStore());
-            console.log("  BalanceStore:", registry.balanceStore());
-            console.log("Skipping deployment.");
-            return;
-        }
-
-        console.log("Deploying Store contracts from Core address:", CORE);
-
-        // Start broadcasting transactions from Core
-        vm.startBroadcast(CORE);
+        // Deploy SystemRegistry
+        SystemRegistry registry = new SystemRegistry();
+        console.log("SystemRegistry deployed at:", address(registry));
 
         // Deploy stores
         PoolStore poolStore = new PoolStore();
@@ -78,9 +61,12 @@ contract DeployStores is Script {
 
         console.log("");
         console.log("=== Deployment Complete ===");
-        console.log("SystemRegistry:", SYSTEM_REGISTRY);
+        console.log("SystemRegistry:", address(registry));
         console.log("PoolStore:", address(poolStore));
         console.log("PositionStore:", address(positionStore));
         console.log("BalanceStore:", address(balanceStore));
+        console.log("");
+        console.log("IMPORTANT: Update SYSTEM_REGISTRY_ADDRESS in core/src/utils/addresses.ts");
+        console.log("           with the SystemRegistry address shown above.");
     }
 }

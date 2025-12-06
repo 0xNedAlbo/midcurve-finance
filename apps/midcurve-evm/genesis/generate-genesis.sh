@@ -7,6 +7,11 @@
 # 2. Extracts the runtime bytecode for SystemRegistry
 # 3. Generates genesis.json from the template
 #
+# Environment Variables:
+#   CORE_ADDRESS - The address of the Core orchestrator (without 0x prefix)
+#                  This account is used for both block signing (Clique PoA)
+#                  and orchestrator operations (deploying stores, calling strategies)
+#                  Default: Foundry's default account 0
 
 set -e
 
@@ -14,12 +19,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONTRACTS_DIR="$PROJECT_DIR/contracts"
 
-# Default signer address (Foundry's default first account)
-# Private key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-SIGNER_ADDRESS="${SIGNER_ADDRESS:-f39Fd6e51aad88F6F4ce6aB8827279cffFb92266}"
+# Default Core address (Foundry's default first account)
+# Derived from private key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+# To use a custom key, set CORE_ADDRESS env var to the derived address (without 0x)
+CORE_ADDRESS="${CORE_ADDRESS:-f39Fd6e51aad88F6F4ce6aB8827279cffFb92266}"
+
+# For backwards compatibility
+SIGNER_ADDRESS="${SIGNER_ADDRESS:-$CORE_ADDRESS}"
 
 echo "=== Generating Genesis Configuration ==="
-echo "Signer address: 0x$SIGNER_ADDRESS"
+echo "Core/Signer address: 0x$SIGNER_ADDRESS"
 
 # Build contracts
 echo ""
@@ -56,10 +65,8 @@ echo "Generating genesis.json..."
 # Note: Using lowercase for addresses without 0x prefix in genesis
 SIGNER_LOWER=$(echo "$SIGNER_ADDRESS" | tr '[:upper:]' '[:lower:]')
 
-# Remove comments from JSON (they're not valid JSON, just for documentation)
-# and substitute placeholders
+# Substitute placeholders in template
 cat "$SCRIPT_DIR/genesis-template.json" | \
-    grep -v '"comment"' | \
     sed "s/__SIGNER_ADDRESS__/$SIGNER_LOWER/g" | \
     sed "s/__SYSTEM_REGISTRY_BYTECODE__/$SYSTEM_REGISTRY_BYTECODE/g" \
     > "$SCRIPT_DIR/genesis.json"
