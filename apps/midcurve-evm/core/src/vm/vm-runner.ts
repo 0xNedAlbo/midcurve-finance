@@ -19,6 +19,7 @@ import {
 } from '../utils/addresses.js';
 import { SYSTEM_REGISTRY_ABI } from '../abi/SystemRegistry.js';
 import { createLogger } from '../utils/logger.js';
+import { TxQueue } from './tx-queue.js';
 
 const logger = createLogger('vm-runner');
 
@@ -38,6 +39,7 @@ export class VmRunner {
   private publicClient: PublicClient;
   private walletClient: WalletClientWithAccount;
   private storeAddresses: StoreAddresses | null = null;
+  private txQueue: TxQueue;
 
   constructor(config: VmRunnerConfig = {}) {
     const rpcUrl = config.rpcUrl ?? DEFAULT_RPC_CONFIG.httpUrl;
@@ -60,6 +62,11 @@ export class VmRunner {
       chain: semseeChain,
       transport: http(rpcUrl),
     });
+
+    // Transaction queue to serialize all Core transactions (prevents nonce collisions)
+    this.txQueue = new TxQueue((to, data, gasLimit) =>
+      this.executeTransaction(to, data, gasLimit)
+    );
 
     logger.info({ rpcUrl, wsUrl }, 'VmRunner created');
   }
@@ -186,14 +193,31 @@ export class VmRunner {
    * This is used for:
    * - Delivering callbacks to strategies
    * - Updating store contracts
+   *
+   * NOTE: All calls are serialized through the TxQueue to prevent nonce collisions.
+   * This is necessary because parallel callbacks to different strategies all use
+   * the same Core account.
    */
   async callAsCore(
     to: Address,
     data: Hex,
     gasLimit: bigint = GAS_LIMITS.CALLBACK
   ): Promise<CallResult> {
-    logger.debug({ to, dataLength: data.length, gasLimit }, 'Calling as Core');
+    logger.debug({ to, dataLength: data.length, gasLimit, queueSize: this.txQueue.pendingCount }, 'Queueing Core call');
 
+    // Enqueue the transaction - it will be executed when previous txs complete
+    return this.txQueue.enqueue(to, data, gasLimit);
+  }
+
+  /**
+   * Execute a transaction immediately (called by TxQueue).
+   * This is the actual transaction execution logic.
+   */
+  private async executeTransaction(
+    to: Address,
+    data: Hex,
+    gasLimit: bigint
+  ): Promise<CallResult> {
     try {
       const hash = await this.walletClient.sendTransaction({
         to,

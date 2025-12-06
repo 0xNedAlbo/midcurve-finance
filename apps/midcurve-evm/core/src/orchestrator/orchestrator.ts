@@ -248,11 +248,20 @@ export class CoreOrchestrator {
 
     if (subscribers.length === 0) {
       this.logger.debug(
-        { eventType: event.type },
+        { eventType: event.type, subscriptionType, subscriptionPayload },
         'No subscribers for event'
       );
       return;
     }
+
+    this.logger.info(
+      {
+        eventType: event.type,
+        subscriberCount: subscribers.length,
+        subscribers: subscribers.map((s) => s.slice(0, 10) + '...'),
+      },
+      'Dispatching event to subscribers'
+    );
 
     // 4. Dispatch to all subscribers (parallel across strategies)
     this.mailboxManager.dispatchToStrategies(subscribers, {

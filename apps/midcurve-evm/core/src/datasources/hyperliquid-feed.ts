@@ -40,6 +40,15 @@ export class HyperliquidFeed {
   /** Whether the feed is started */
   private isStarted = false;
 
+  /**
+   * Store the most recent candle per subscription.
+   * Key: "symbol:interval", Value: the latest candle data
+   *
+   * When a new candle period starts (timestamp changes), we emit the
+   * PREVIOUS candle (which is now complete with final OHLCV values).
+   */
+  private pendingCandles: Map<string, HyperliquidCandle> = new Map();
+
   constructor(logger: pino.Logger, config: HyperliquidFeedConfig = {}) {
     this.logger = logger.child({ component: 'hyperliquid-feed' });
 
@@ -269,6 +278,19 @@ export class HyperliquidFeed {
 
   /**
    * Handle incoming candle data from Hyperliquid
+   *
+   * Hyperliquid sends real-time updates within each candle period (every trade
+   * updates the current candle's OHLCV). We only emit to strategies when a new
+   * candle period starts (timestamp changes).
+   *
+   * IMPORTANT: When timestamp changes, we emit the PREVIOUS (stored) candle,
+   * not the newly arrived one. This ensures strategies receive the FINAL OHLCV
+   * values for the completed candle period.
+   *
+   * Flow:
+   * 1. Store every incoming candle in pendingCandles
+   * 2. When timestamp changes: emit the stored candle (now complete with final values)
+   * 3. Then store the new candle for the next period
    */
   private handleCandle(candle: HyperliquidCandle): void {
     if (!this.orchestrator) {
@@ -276,7 +298,24 @@ export class HyperliquidFeed {
       return;
     }
 
-    // Convert Hyperliquid candle to SEMSEE format
+    const subscriptionKey = `${candle.s}:${candle.i}`;
+    const pendingCandle = this.pendingCandles.get(subscriptionKey);
+
+    // Check if we have a pending candle from a previous period
+    if (pendingCandle && pendingCandle.t !== candle.t) {
+      // Timestamp changed! The pending candle is now complete.
+      // Emit it with its final OHLCV values.
+      this.emitCandle(pendingCandle);
+    }
+
+    // Store the current candle as pending (will be emitted when next period starts)
+    this.pendingCandles.set(subscriptionKey, candle);
+  }
+
+  /**
+   * Emit a completed candle to the orchestrator
+   */
+  private emitCandle(candle: HyperliquidCandle): void {
     const interval = candle.i as HyperliquidInterval;
     const timeframe = INTERVAL_TO_TIMEFRAME[interval] ?? 1;
 
@@ -287,17 +326,22 @@ export class HyperliquidFeed {
       candle: this.convertCandle(candle),
     };
 
-    this.logger.debug(
+    this.logger.info(
       {
         symbol: candle.s,
         interval: candle.i,
+        open: candle.o,
+        high: candle.h,
+        low: candle.l,
         close: candle.c,
+        volume: candle.v,
+        timestamp: candle.t,
       },
-      'Received candle update'
+      'Candle period complete - emitting OHLC'
     );
 
     // Publish to orchestrator (async, fire-and-forget)
-    this.orchestrator.publishEvent(ohlcEvent).catch((error) => {
+    this.orchestrator!.publishEvent(ohlcEvent).catch((error) => {
       this.logger.error(
         { symbol: candle.s, error },
         'Failed to publish candle event'
@@ -331,9 +375,16 @@ export class HyperliquidFeed {
   /**
    * Generate a market ID from a symbol
    * Format: keccak256("symbol/USD")
+   *
+   * Hyperliquid uses symbols like "ETH-PERP" but our market IDs use "ETH/USD"
+   * So we strip the "-PERP" suffix to get the base symbol
    */
   private generateMarketId(symbol: string): Hex {
-    const normalizedSymbol = symbol.toUpperCase();
+    // Strip -PERP suffix if present (Hyperliquid perpetual contracts)
+    let normalizedSymbol = symbol.toUpperCase();
+    if (normalizedSymbol.endsWith('-PERP')) {
+      normalizedSymbol = normalizedSymbol.slice(0, -5);
+    }
     return keccak256(toHex(`${normalizedSymbol}/USD`));
   }
 
