@@ -162,10 +162,14 @@ export class StrategyWatcher {
 
       this.logger.info(
         { count: startedLogs.length },
-        'Found StrategyStarted events'
+        'Found StrategyStarted events in history, checking current state...'
       );
 
       // For each, check if still running (not shutdown)
+      let runningCount = 0;
+      let shutdownCount = 0;
+      let errorCount = 0;
+
       for (const log of startedLogs) {
         const strategyAddress = log.address;
 
@@ -178,6 +182,7 @@ export class StrategyWatcher {
           });
 
           if (state === StrategyState.Running) {
+            runningCount++;
             this.logger.info(
               { strategy: strategyAddress },
               'Found running strategy, loading subscriptions'
@@ -197,12 +202,14 @@ export class StrategyWatcher {
               await this.onStrategyStarted(strategyAddress, strategyLogs, log.transactionHash);
             }
           } else {
+            shutdownCount++;
             this.logger.debug(
               { strategy: strategyAddress, state },
               'Strategy not running, skipping'
             );
           }
         } catch (error) {
+          errorCount++;
           this.logger.warn(
             { strategy: strategyAddress, error },
             'Failed to check strategy state (may not be a valid strategy)'
@@ -210,7 +217,10 @@ export class StrategyWatcher {
         }
       }
 
-      this.logger.info('Strategy scan complete');
+      this.logger.info(
+        { total: startedLogs.length, running: runningCount, shutdown: shutdownCount, errors: errorCount },
+        'Strategy scan complete'
+      );
     } catch (error) {
       this.logger.error({ error }, 'Failed to scan for existing strategies');
     }
