@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IFunding} from "../interfaces/IFunding.sol";
 import {CoreControlled} from "../libraries/CoreControlled.sol";
 import {FundingLib} from "../libraries/FundingLib.sol";
+import {IBalanceStore} from "../interfaces/IBalanceStore.sol";
 
 /**
  * @title FundingMixin
@@ -45,6 +46,11 @@ import {FundingLib} from "../libraries/FundingLib.sol";
  */
 abstract contract FundingMixin is CoreControlled, IFunding {
     using FundingLib for *;
+
+    // =========== Constants ===========
+
+    /// @notice BalanceStore precompile address
+    IBalanceStore internal constant BALANCE_STORE = IBalanceStore(0x0000000000000000000000000000000000001003);
 
     // =========== State ===========
 
@@ -237,6 +243,27 @@ abstract contract FundingMixin is CoreControlled, IFunding {
      */
     function hasPendingWithdrawals() external view returns (bool) {
         return pendingWithdrawalCount > 0;
+    }
+
+    /**
+     * @notice Get the balance of a specific token on a specific chain
+     * @dev Queries BalanceStore using this strategy as msg.sender
+     * @param chainId The chain ID
+     * @param token The token address
+     * @return The token balance
+     */
+    function getBalance(uint256 chainId, address token) external view returns (uint256) {
+        return BALANCE_STORE.getBalance(chainId, token);
+    }
+
+    /**
+     * @notice Get all balances on a specific chain
+     * @dev Queries BalanceStore using this strategy as msg.sender
+     * @param chainId The chain ID
+     * @return Array of balance entries for all tracked tokens on the chain
+     */
+    function getAllBalances(uint256 chainId) external view returns (IBalanceStore.BalanceEntry[] memory) {
+        return BALANCE_STORE.getAllBalances(chainId);
     }
 
     // =========== Hooks (Override in derived contracts) ===========

@@ -6,20 +6,20 @@ import {
   type Address,
 } from 'viem';
 import { semseeChain } from '../../vm/chain.js';
-import { BALANCE_STORE_ABI } from '../../abi/index.js';
+import { FUNDING_ABI } from '../../abi/index.js';
 import { ETH_ADDRESS } from '../../funding/types.js';
 
-// BalanceStore address (from SystemRegistry)
-const BALANCE_STORE_ADDRESS = '0x0000000000000000000000000000000000001003' as Address;
-
 /**
- * Balance command - Query strategy balances from BalanceStore
+ * Balance command - Query strategy balances via FundingMixin
+ *
+ * The strategy contract has getBalance() and getAllBalances() methods
+ * that query BalanceStore using the strategy as msg.sender.
  *
  * Usage:
  *   semsee balance <strategyAddress> [chainId]
  */
 export const balanceCommand = new Command('balance')
-  .description('Query strategy balances from BalanceStore')
+  .description('Query strategy balances via FundingMixin')
   .argument('<strategyAddress>', 'Strategy contract address')
   .argument('[chainId]', 'Optional chain ID to filter by')
   .action(async (strategyAddress: string, chainId?: string) => {
@@ -29,20 +29,19 @@ export const balanceCommand = new Command('balance')
     });
 
     try {
-      console.log(`\\n📊 Querying balances for strategy: ${strategyAddress}`);
+      console.log(`\n📊 Querying balances for strategy: ${strategyAddress}`);
 
       if (chainId) {
-        // Query specific chain
+        // Query specific chain via strategy's getAllBalances
         const chainIdBigInt = BigInt(chainId);
         const entries = await publicClient.readContract({
-          address: BALANCE_STORE_ADDRESS,
-          abi: BALANCE_STORE_ABI,
+          address: strategyAddress as Address,
+          abi: FUNDING_ABI,
           functionName: 'getAllBalances',
           args: [chainIdBigInt],
-          account: strategyAddress as Address,
         });
 
-        console.log(`\\n   Chain ${chainId}:`);
+        console.log(`\n   Chain ${chainId}:`);
 
         if (entries.length === 0) {
           console.log(`   No balances found`);
@@ -72,15 +71,14 @@ export const balanceCommand = new Command('balance')
         for (const chain of supportedChains) {
           try {
             const entries = await publicClient.readContract({
-              address: BALANCE_STORE_ADDRESS,
-              abi: BALANCE_STORE_ABI,
+              address: strategyAddress as Address,
+              abi: FUNDING_ABI,
               functionName: 'getAllBalances',
               args: [BigInt(chain)],
-              account: strategyAddress as Address,
             });
 
             if (entries.length > 0) {
-              console.log(`\\n   Chain ${chain}:`);
+              console.log(`\n   Chain ${chain}:`);
               for (const entry of entries) {
                 const tokenDisplay =
                   entry.token.toLowerCase() === ETH_ADDRESS.toLowerCase()
@@ -105,16 +103,16 @@ export const balanceCommand = new Command('balance')
         }
 
         if (totalEntries === 0) {
-          console.log(`\\n   No balances found across any chain`);
+          console.log(`\n   No balances found across any chain`);
         }
       }
 
-      console.log(`\\n✅ Balance query complete`);
+      console.log(`\n✅ Balance query complete`);
     } catch (error) {
       if (error instanceof Error) {
-        console.error(`\\n❌ Error: ${error.message}`);
+        console.error(`\n❌ Error: ${error.message}`);
       } else {
-        console.error('\\n❌ Unknown error occurred');
+        console.error('\n❌ Unknown error occurred');
       }
       process.exit(1);
     }

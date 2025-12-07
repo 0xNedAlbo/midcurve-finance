@@ -116,6 +116,40 @@ export const FUNDING_ABI = [
     outputs: [],
     stateMutability: 'nonpayable',
   },
+
+  // ============= Balance Query Functions =============
+
+  // getBalance(uint256 chainId, address token) returns (uint256)
+  {
+    type: 'function',
+    name: 'getBalance',
+    inputs: [
+      { name: 'chainId', type: 'uint256' },
+      { name: 'token', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+
+  // getAllBalances(uint256 chainId) returns (BalanceEntry[] memory)
+  {
+    type: 'function',
+    name: 'getAllBalances',
+    inputs: [{ name: 'chainId', type: 'uint256' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple[]',
+        components: [
+          { name: 'chainId', type: 'uint256' },
+          { name: 'token', type: 'address' },
+          { name: 'balance', type: 'uint256' },
+          { name: 'lastUpdated', type: 'uint256' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
 ] as const;
 
 /**
