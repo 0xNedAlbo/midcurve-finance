@@ -8,6 +8,9 @@ import { eventCommand } from './commands/event.js';
 import { statusCommand } from './commands/status.js';
 import { fundCommand } from './commands/fund.js';
 import { createCommand } from './commands/create.js';
+import { withdrawCommand } from './commands/withdraw.js';
+import { updateEthBalanceCommand } from './commands/update-eth-balance.js';
+import { balanceCommand } from './commands/balance.js';
 
 const program = new Command();
 
@@ -32,6 +35,11 @@ program.addCommand(eventCommand);
 // Utility commands
 program.addCommand(fundCommand);
 
+// Funding commands
+program.addCommand(withdrawCommand);
+program.addCommand(updateEthBalanceCommand);
+program.addCommand(balanceCommand);
+
 // Custom help footer
 program.addHelpText('after', `
 
@@ -46,6 +54,15 @@ Examples:
   $ semsee status 0x1234...             Show strategy status
   $ semsee shutdown 0x1234...           Shutdown a running strategy
   $ semsee fund 0x1234... 100           Fund an account with 100 ETH
+
+Funding Commands:
+  $ semsee withdraw erc20 <strategy> <chainId> <token> <amount>
+                                        Request ERC-20 withdrawal to owner
+  $ semsee withdraw eth <strategy> <chainId> <amount>
+                                        Request ETH withdrawal to owner
+  $ semsee update-eth-balance <strategy> <chainId>
+                                        Update ETH balance after deposit
+  $ semsee balance <strategy> [chainId] Query strategy balances
 
 Workflow:
   1. npm run up                         Start the SEMSEE node (Geth + stores)

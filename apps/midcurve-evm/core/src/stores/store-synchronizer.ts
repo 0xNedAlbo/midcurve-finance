@@ -179,17 +179,60 @@ export class StoreSynchronizer {
   }
 
   /**
-   * Update balance in BalanceStore
+   * Update balance in BalanceStore using BalanceEntry.
+   * Used when processing external balance events.
    */
-  async updateBalance(entry: BalanceEntry): Promise<void> {
+  async updateBalance(entry: BalanceEntry): Promise<void>;
+
+  /**
+   * Update balance in BalanceStore with individual parameters.
+   * Used by FundingManager for deposit/withdrawal updates.
+   */
+  async updateBalance(
+    strategyAddress: Address,
+    chainId: bigint,
+    token: Address,
+    balance: bigint
+  ): Promise<void>;
+
+  /**
+   * Implementation of updateBalance overloads
+   */
+  async updateBalance(
+    entryOrStrategy: BalanceEntry | Address,
+    chainIdParam?: bigint,
+    tokenParam?: Address,
+    balanceParam?: bigint
+  ): Promise<void> {
     if (!this.balanceStoreAddress) {
       throw new Error('StoreSynchronizer not initialized');
+    }
+
+    // Determine which overload was called
+    let strategy: Address;
+    let chainId: bigint;
+    let token: Address;
+    let balance: bigint;
+
+    if (typeof entryOrStrategy === 'object' && 'strategy' in entryOrStrategy) {
+      // Called with BalanceEntry
+      const entry = entryOrStrategy;
+      strategy = entry.strategy;
+      chainId = entry.chainId;
+      token = entry.token;
+      balance = entry.balance;
+    } else {
+      // Called with individual parameters
+      strategy = entryOrStrategy;
+      chainId = chainIdParam!;
+      token = tokenParam!;
+      balance = balanceParam!;
     }
 
     const calldata = encodeFunctionData({
       abi: BALANCE_STORE_ABI,
       functionName: 'updateBalance',
-      args: [entry.strategy, entry.chainId, entry.token, entry.balance],
+      args: [strategy, chainId, token, balance],
     });
 
     const result = await this.vmRunner.callAsCore(
@@ -200,7 +243,7 @@ export class StoreSynchronizer {
 
     if (!result.success) {
       this.logger.error(
-        { strategy: entry.strategy, token: entry.token, error: result.error },
+        { strategy, token, error: result.error },
         'Failed to update balance'
       );
       throw new Error(`Failed to update balance: ${result.error}`);
@@ -208,9 +251,10 @@ export class StoreSynchronizer {
 
     this.logger.debug(
       {
-        strategy: entry.strategy,
-        token: entry.token,
-        balance: entry.balance.toString(),
+        strategy,
+        chainId: chainId.toString(),
+        token,
+        balance: balance.toString(),
         gasUsed: result.gasUsed.toString(),
       },
       'Balance updated'

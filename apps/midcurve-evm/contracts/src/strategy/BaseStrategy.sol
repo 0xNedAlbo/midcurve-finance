@@ -20,7 +20,7 @@ import {LoggingLib} from "../libraries/LoggingLib.sol";
  * - IPoolConsumer for pool state
  * - IBalanceConsumer for balance updates
  * - IUniswapV3Actions for position management
- * - IFundingActions for withdrawals
+ * - IFunding for deposits and withdrawals
  *
  * Lifecycle:
  * 1. Deploy: Constructor runs, owner set to deployer, state = Created

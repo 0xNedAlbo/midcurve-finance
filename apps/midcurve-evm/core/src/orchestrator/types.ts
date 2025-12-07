@@ -39,6 +39,26 @@ export interface MailboxStats {
 }
 
 /**
+ * Configuration for external chain RPC URLs (for funding operations)
+ */
+export interface ChainRpcConfig {
+  /** Chain ID */
+  chainId: number;
+  /** RPC URL for this chain */
+  rpcUrl: string;
+}
+
+/**
+ * Configuration for funding operations
+ */
+export interface FundingConfig {
+  /** Private key for automation wallet (hex string with 0x prefix) */
+  automationWalletKey: Hex;
+  /** RPC URLs for external chains */
+  chainRpcUrls: ChainRpcConfig[];
+}
+
+/**
  * Configuration for the orchestrator
  */
 export interface OrchestratorConfig {
@@ -50,6 +70,9 @@ export interface OrchestratorConfig {
 
   /** Callback gas limit */
   callbackGasLimit?: bigint;
+
+  /** Funding configuration (optional - required for funding operations) */
+  funding?: FundingConfig;
 }
 
 /**

@@ -5,6 +5,11 @@ import { createLogger, getLogMethod } from '../utils/logger.js';
 import { GAS_LIMITS } from '../utils/addresses.js';
 import { VmRunner } from '../vm/vm-runner.js';
 import { EventDecoder, SUBSCRIPTION_TYPES } from '../events/index.js';
+import type {
+  Erc20WithdrawRequestedEvent,
+  EthWithdrawRequestedEvent,
+  EthBalanceUpdateRequestedEvent,
+} from '../events/types.js';
 import {
   SubscriptionManager,
   MemorySubscriptionStore,
@@ -13,6 +18,12 @@ import { StoreSynchronizer } from '../stores/index.js';
 import type { ExternalEvent } from '../stores/types.js';
 import { EffectEngine, MockEffectExecutor } from '../effects/index.js';
 import type { EffectResult } from '../effects/types.js';
+import {
+  FundingManager,
+  FundingExecutor,
+  DepositWatcher,
+} from '../funding/index.js';
+import { FUNDING_ABI } from '../abi/Funding.js';
 import { MailboxManager } from './mailbox-manager.js';
 import { StrategyWatcher } from './strategy-watcher.js';
 import type {
@@ -121,6 +132,7 @@ export class CoreOrchestrator {
   private subscriptionManager: SubscriptionManager;
   private storeSynchronizer: StoreSynchronizer;
   private effectEngine: EffectEngine;
+  private fundingManager?: FundingManager;
   private mailboxManager: MailboxManager;
   private strategyWatcher: StrategyWatcher;
   private callbackGasLimit: bigint;
@@ -130,6 +142,9 @@ export class CoreOrchestrator {
 
   // Track processed strategy transactions to prevent duplicate processing
   private processedStrategyTxs: Set<string> = new Set();
+
+  // Track strategy owners for funding operations
+  private strategyOwners: Map<Address, Address> = new Map();
 
   constructor(config: OrchestratorConfig = {}) {
     this.logger = createLogger('orchestrator');
@@ -169,6 +184,45 @@ export class CoreOrchestrator {
       this.processMailboxEvent(strategy, event)
     );
 
+    // Initialize funding manager if configuration provided
+    if (config.funding) {
+      const chainRpcUrls = new Map<number, string>();
+      for (const chain of config.funding.chainRpcUrls) {
+        chainRpcUrls.set(chain.chainId, chain.rpcUrl);
+      }
+
+      const fundingExecutor = new FundingExecutor(
+        config.funding.automationWalletKey,
+        chainRpcUrls,
+        this.logger.child({ component: 'funding-executor' })
+      );
+
+      const depositWatcher = new DepositWatcher(
+        fundingExecutor.getAutomationWalletAddress(),
+        chainRpcUrls,
+        this.logger.child({ component: 'deposit-watcher' })
+      );
+
+      this.fundingManager = new FundingManager(
+        fundingExecutor,
+        depositWatcher,
+        this.logger.child({ component: 'funding' }),
+        // updateBalanceCallback - will be set after store synchronizer is ready
+        undefined,
+        // notifyStrategyCallback - will call strategy via vmRunner
+        (strategyAddress, functionName, args) =>
+          this.callStrategyFunction(strategyAddress, functionName, args)
+      );
+
+      this.logger.info(
+        {
+          automationWallet: fundingExecutor.getAutomationWalletAddress(),
+          configuredChains: fundingExecutor.getConfiguredChains(),
+        },
+        'Funding manager initialized'
+      );
+    }
+
     // Strategy watcher is initialized in initialize() after vmRunner is ready
     this.strategyWatcher = null!; // Will be set in initialize()
 
@@ -176,6 +230,43 @@ export class CoreOrchestrator {
     this.effectEngine.setOnEffectComplete((strategy, result) =>
       this.deliverEffectResult(strategy, result)
     );
+  }
+
+  /**
+   * Call a function on a strategy contract.
+   * Used by FundingManager to deliver callbacks.
+   */
+  private async callStrategyFunction(
+    strategyAddress: Address,
+    functionName: string,
+    args: unknown[]
+  ): Promise<void> {
+    // Encode function call based on function name
+    const calldata = encodeFunctionData({
+      abi: FUNDING_ABI,
+      functionName: functionName as 'onErc20Deposit' | 'onEthBalanceUpdated' | 'onWithdrawComplete',
+      args: args as [bigint, Address, bigint] | [bigint, bigint] | [Hex, boolean, Hex, string],
+    });
+
+    const result = await this.vmRunner.callAsCore(
+      strategyAddress,
+      calldata,
+      this.callbackGasLimit
+    );
+
+    if (result.success) {
+      // Process any logs emitted during the callback
+      await this.processLogsInOrder(strategyAddress, result.logs);
+    } else {
+      this.logger.error(
+        {
+          strategy: strategyAddress,
+          functionName,
+          error: result.error,
+        },
+        'Funding callback failed'
+      );
+    }
   }
 
   /**
@@ -212,6 +303,18 @@ export class CoreOrchestrator {
 
     // Now start watching for NEW strategy events (from future blocks)
     await this.strategyWatcher.start();
+
+    // Start funding manager if configured
+    if (this.fundingManager) {
+      // Wire up the balance update callback now that store synchronizer is ready
+      this.fundingManager.setUpdateBalanceCallback(
+        (strategyAddress, chainId, token, balance) =>
+          this.storeSynchronizer.updateBalance(strategyAddress, chainId, token, balance)
+      );
+
+      await this.fundingManager.start();
+      this.logger.info('Funding manager started');
+    }
 
     this.isInitialized = true;
     this.logger.info('Orchestrator initialized');
@@ -406,7 +509,73 @@ export class CoreOrchestrator {
             `[Strategy] ${decoded.message}`
           );
           break;
+
+        case 'Erc20WithdrawRequested':
+          await this.processFundingEvent(strategyAddress, decoded);
+          break;
+
+        case 'EthWithdrawRequested':
+          await this.processFundingEvent(strategyAddress, decoded);
+          break;
+
+        case 'EthBalanceUpdateRequested':
+          await this.processFundingEvent(strategyAddress, decoded);
+          break;
       }
+    }
+  }
+
+  /**
+   * Process a funding-related event.
+   */
+  private async processFundingEvent(
+    strategyAddress: Address,
+    event:
+      | Erc20WithdrawRequestedEvent
+      | EthWithdrawRequestedEvent
+      | EthBalanceUpdateRequestedEvent
+  ): Promise<void> {
+    if (!this.fundingManager) {
+      this.logger.warn(
+        { strategy: strategyAddress, eventType: event.type },
+        'Funding event received but FundingManager not configured'
+      );
+      return;
+    }
+
+    const ownerAddress = this.strategyOwners.get(strategyAddress);
+    if (!ownerAddress) {
+      this.logger.error(
+        { strategy: strategyAddress },
+        'Strategy owner not found for funding operation'
+      );
+      return;
+    }
+
+    switch (event.type) {
+      case 'Erc20WithdrawRequested':
+        await this.fundingManager.processErc20WithdrawRequest(
+          strategyAddress,
+          ownerAddress,
+          event
+        );
+        break;
+
+      case 'EthWithdrawRequested':
+        await this.fundingManager.processEthWithdrawRequest(
+          strategyAddress,
+          ownerAddress,
+          event
+        );
+        break;
+
+      case 'EthBalanceUpdateRequested':
+        await this.fundingManager.processEthBalanceUpdateRequest(
+          strategyAddress,
+          ownerAddress,
+          event
+        );
+        break;
     }
   }
 
@@ -444,6 +613,38 @@ export class CoreOrchestrator {
       { strategy: strategyAddress, logCount: logs.length },
       'Processing strategy startup'
     );
+
+    // Fetch and track strategy owner for funding operations
+    try {
+      const owner = await this.vmRunner.getPublicClient().readContract({
+        address: strategyAddress,
+        abi: [
+          {
+            type: 'function',
+            name: 'owner',
+            inputs: [],
+            outputs: [{ name: '', type: 'address' }],
+            stateMutability: 'view',
+          },
+        ],
+        functionName: 'owner',
+      });
+      this.strategyOwners.set(strategyAddress, owner);
+      this.logger.debug(
+        { strategy: strategyAddress, owner },
+        'Fetched strategy owner'
+      );
+
+      // Register with funding manager if available
+      if (this.fundingManager) {
+        this.fundingManager.registerStrategy(strategyAddress, owner);
+      }
+    } catch (error) {
+      this.logger.warn(
+        { strategy: strategyAddress, error },
+        'Failed to fetch strategy owner'
+      );
+    }
 
     // Create mailbox for this strategy
     this.mailboxManager.getOrCreateMailbox(strategyAddress);
@@ -497,6 +698,12 @@ export class CoreOrchestrator {
 
     // Remove strategy mailbox
     this.mailboxManager.removeMailbox(strategyAddress);
+
+    // Clean up funding registration and owner tracking
+    if (this.fundingManager) {
+      this.fundingManager.unregisterStrategy(strategyAddress);
+    }
+    this.strategyOwners.delete(strategyAddress);
 
     this.logger.info(
       { strategy: strategyAddress },
@@ -687,6 +894,11 @@ export class CoreOrchestrator {
     // Stop watching for strategy events
     if (this.strategyWatcher) {
       await this.strategyWatcher.stop();
+    }
+
+    // Stop funding manager
+    if (this.fundingManager) {
+      this.fundingManager.stop();
     }
 
     // Wait for pending work to complete (with timeout)

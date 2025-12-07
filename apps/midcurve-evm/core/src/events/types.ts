@@ -1,4 +1,4 @@
-import type { Hex, Log } from 'viem';
+import type { Address, Hex, Log } from 'viem';
 import { keccak256, toHex } from 'viem';
 import { LogLevel } from '../utils/logger.js';
 
@@ -36,6 +36,22 @@ export const EVENT_TOPICS = {
 
   // StrategyShutdown() - emitted when strategy transitions to Shutdown state
   STRATEGY_SHUTDOWN: eventSignature('StrategyShutdown()'),
+
+  // Funding events (from IFunding interface)
+  // Erc20WithdrawRequested(bytes32 indexed requestId, uint256 indexed chainId, address indexed token, uint256 amount, address recipient)
+  ERC20_WITHDRAW_REQUESTED: eventSignature(
+    'Erc20WithdrawRequested(bytes32,uint256,address,uint256,address)'
+  ),
+
+  // EthWithdrawRequested(bytes32 indexed requestId, uint256 indexed chainId, uint256 amount, address recipient)
+  ETH_WITHDRAW_REQUESTED: eventSignature(
+    'EthWithdrawRequested(bytes32,uint256,uint256,address)'
+  ),
+
+  // EthBalanceUpdateRequested(bytes32 indexed requestId, uint256 indexed chainId)
+  ETH_BALANCE_UPDATE_REQUESTED: eventSignature(
+    'EthBalanceUpdateRequested(bytes32,uint256)'
+  ),
 } as const;
 
 /**
@@ -114,13 +130,57 @@ export interface LogMessageEvent {
 }
 
 /**
+ * Decoded ERC-20 withdraw request event
+ */
+export interface Erc20WithdrawRequestedEvent {
+  type: 'Erc20WithdrawRequested';
+  requestId: Hex;
+  chainId: bigint;
+  token: Address;
+  amount: bigint;
+  recipient: Address;
+  log: Log;
+}
+
+/**
+ * Decoded ETH withdraw request event
+ */
+export interface EthWithdrawRequestedEvent {
+  type: 'EthWithdrawRequested';
+  requestId: Hex;
+  chainId: bigint;
+  amount: bigint;
+  recipient: Address;
+  log: Log;
+}
+
+/**
+ * Decoded ETH balance update request event
+ */
+export interface EthBalanceUpdateRequestedEvent {
+  type: 'EthBalanceUpdateRequested';
+  requestId: Hex;
+  chainId: bigint;
+  log: Log;
+}
+
+/**
+ * Union of all funding-related events
+ */
+export type FundingEvent =
+  | Erc20WithdrawRequestedEvent
+  | EthWithdrawRequestedEvent
+  | EthBalanceUpdateRequestedEvent;
+
+/**
  * Union of all decoded event types
  */
 export type DecodedEvent =
   | SubscriptionRequestedEvent
   | UnsubscriptionRequestedEvent
   | ActionRequestedEvent
-  | LogMessageEvent;
+  | LogMessageEvent
+  | FundingEvent;
 
 /**
  * Unknown log that couldn't be decoded
