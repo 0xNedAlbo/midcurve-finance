@@ -10,3 +10,4 @@ export {
   type UpdateBalanceCallback,
   type NotifyStrategyCallback,
 } from './funding-manager.js';
+export { NonceManager, isNonceError } from './nonce-manager.js';

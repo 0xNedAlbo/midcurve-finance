@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {BaseFunding} from "../BaseFunding.sol";
+import {BaseStrategy} from "../BaseStrategy.sol";
+import {IStrategy} from "../../interfaces/IStrategy.sol";
+import {FundingMixin} from "../FundingMixin.sol";
 import {LoggingLib} from "../../libraries/LoggingLib.sol";
 
 /**
  * @title FundingExampleStrategy
- * @notice Example strategy demonstrating the BaseFunding mixin
- * @dev Shows how to use BaseFunding with minimal code by:
- *      - Extending BaseFunding for complete IFunding implementation
- *      - Overriding only the hooks needed for custom behavior
- *      - Using LoggingLib for debugging
+ * @notice Example strategy demonstrating the FundingMixin pattern
+ * @dev Shows how to compose BaseStrategy with FundingMixin:
+ *      - Extends BaseStrategy for lifecycle management
+ *      - Extends FundingMixin for IFunding implementation
+ *      - Bridges the two via abstract function implementations
+ *      - Overrides only the hooks needed for custom behavior
  *
- * All IFunding methods (withdrawErc20, withdrawEth, updateEthBalance, callbacks)
- * are already implemented by BaseFunding. This strategy only adds:
- * - Custom state tracking (deposit counts, last ETH balance)
- * - Logging for debugging
+ * The mixin pattern allows combining multiple capabilities without
+ * diamond inheritance issues. Each mixin requires bridge functions
+ * that connect it to BaseStrategy's owner/state/effectId.
  *
  * Usage Example:
  * 1. Deploy: semsee deploy FundingExampleStrategy
@@ -24,7 +26,7 @@ import {LoggingLib} from "../../libraries/LoggingLib.sol";
  * 4. Withdraw: semsee withdraw erc20 <address> <chainId> <token> <amount>
  * 5. Check balance: semsee balance <address>
  */
-contract FundingExampleStrategy is BaseFunding {
+contract FundingExampleStrategy is BaseStrategy, FundingMixin {
     using LoggingLib for *;
 
     // =========== Custom State ===========
@@ -46,8 +48,32 @@ contract FundingExampleStrategy is BaseFunding {
     /**
      * @notice Deploy the strategy (owner = msg.sender)
      */
-    constructor() BaseFunding() {
+    constructor() BaseStrategy() {
         LoggingLib.logInfo("FundingExampleStrategy deployed (not started)");
+    }
+
+    // =========== FundingMixin Bridge Functions ===========
+    // These connect FundingMixin to BaseStrategy
+
+    /**
+     * @notice Bridge: Get owner address for FundingMixin
+     */
+    function _fundingOwner() internal view override returns (address) {
+        return owner;
+    }
+
+    /**
+     * @notice Bridge: Generate effect ID for FundingMixin
+     */
+    function _fundingNextEffectId() internal override returns (bytes32) {
+        return _nextEffectId();
+    }
+
+    /**
+     * @notice Bridge: Check running state for FundingMixin
+     */
+    function _fundingIsRunning() internal view override returns (bool) {
+        return this.state() == IStrategy.StrategyState.Running;
     }
 
     // =========== Lifecycle Hooks ===========

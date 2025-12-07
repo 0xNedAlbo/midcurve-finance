@@ -312,6 +312,9 @@ export class CoreOrchestrator {
           this.storeSynchronizer.updateBalance(strategyAddress, chainId, token, balance)
       );
 
+      // Initialize nonces for all configured chains before processing requests
+      await this.fundingManager.initialize();
+
       await this.fundingManager.start();
       this.logger.info('Funding manager started');
     }

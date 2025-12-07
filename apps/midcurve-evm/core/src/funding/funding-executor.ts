@@ -17,6 +17,7 @@ import {
   type EthWithdrawParams,
   type FundingResult,
 } from './types.js';
+import { NonceManager, isNonceError } from './nonce-manager.js';
 
 /**
  * Chain client pair for a specific chain
@@ -50,6 +51,7 @@ const SUPPORTED_CHAINS: Record<number, Chain> = {
 export class FundingExecutor {
   private chainClients: Map<number, ChainClients> = new Map();
   private automationWalletAddress: Address;
+  private nonceManager: NonceManager;
 
   constructor(
     private automationWalletKey: Hex,
@@ -60,6 +62,31 @@ export class FundingExecutor {
     this.automationWalletAddress = account.address;
 
     this.initializeChainClients();
+
+    // Create nonce manager (will be initialized later via initialize())
+    // Extract only the public clients for nonce management
+    const publicClients = new Map<number, { public: ReturnType<typeof createPublicClient> }>();
+    for (const [chainId, clients] of this.chainClients) {
+      publicClients.set(chainId, { public: clients.public });
+    }
+    this.nonceManager = new NonceManager(
+      publicClients,
+      this.automationWalletAddress,
+      this.logger
+    );
+  }
+
+  /**
+   * Initialize nonces for all configured chains.
+   * Must be called before processing any funding requests.
+   */
+  async initialize(): Promise<void> {
+    this.logger.info('Initializing nonces for all configured chains');
+    await this.nonceManager.initializeAll();
+    this.logger.info(
+      { chains: this.nonceManager.getInitializedChains() },
+      'Nonce initialization complete'
+    );
   }
 
   /**
@@ -128,6 +155,7 @@ export class FundingExecutor {
 
     try {
       const clients = this.getChainClients(chainId);
+      const nonce = this.nonceManager.getNextNonce(chainId);
 
       this.logger.info(
         {
@@ -136,20 +164,22 @@ export class FundingExecutor {
           token: params.token,
           amount: params.amount.toString(),
           recipient,
+          nonce: nonce.toString(),
         },
         'Executing ERC-20 withdrawal'
       );
 
-      // Execute the transfer
+      // Execute the transfer with explicit nonce
       const hash = await clients.wallet.writeContract({
         address: params.token,
         abi: ERC20_ABI,
         functionName: 'transfer',
         args: [recipient, params.amount],
+        nonce: Number(nonce),
       });
 
       this.logger.info(
-        { requestId, txHash: hash },
+        { requestId, txHash: hash, nonce: nonce.toString() },
         'ERC-20 withdrawal transaction sent'
       );
 
@@ -184,6 +214,15 @@ export class FundingExecutor {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
 
+      // Check if it's a nonce error and reset if needed
+      if (isNonceError(error)) {
+        this.logger.warn(
+          { requestId, chainId, error: errorMessage },
+          'Nonce error detected, resetting nonce for chain'
+        );
+        await this.nonceManager.resetChain(chainId);
+      }
+
       this.logger.error(
         { requestId, chainId, error: errorMessage },
         'ERC-20 withdrawal execution failed'
@@ -209,6 +248,7 @@ export class FundingExecutor {
 
     try {
       const clients = this.getChainClients(chainId);
+      const nonce = this.nonceManager.getNextNonce(chainId);
 
       this.logger.info(
         {
@@ -216,18 +256,20 @@ export class FundingExecutor {
           chainId,
           amount: params.amount.toString(),
           recipient,
+          nonce: nonce.toString(),
         },
         'Executing ETH withdrawal'
       );
 
-      // Execute the transfer
+      // Execute the transfer with explicit nonce
       const hash = await clients.wallet.sendTransaction({
         to: recipient,
         value: params.amount,
+        nonce: Number(nonce),
       });
 
       this.logger.info(
-        { requestId, txHash: hash },
+        { requestId, txHash: hash, nonce: nonce.toString() },
         'ETH withdrawal transaction sent'
       );
 
@@ -261,6 +303,15 @@ export class FundingExecutor {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
+
+      // Check if it's a nonce error and reset if needed
+      if (isNonceError(error)) {
+        this.logger.warn(
+          { requestId, chainId, error: errorMessage },
+          'Nonce error detected, resetting nonce for chain'
+        );
+        await this.nonceManager.resetChain(chainId);
+      }
 
       this.logger.error(
         { requestId, chainId, error: errorMessage },

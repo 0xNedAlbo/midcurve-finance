@@ -427,6 +427,17 @@ export class FundingManager {
   }
 
   /**
+   * Initialize the funding manager.
+   * This must be called before processing any funding requests.
+   * Initializes nonces for all configured chains.
+   */
+  async initialize(): Promise<void> {
+    this.logger.info('Initializing funding manager');
+    await this.executor.initialize();
+    this.logger.info('Funding manager initialized');
+  }
+
+  /**
    * Start the funding manager (starts deposit watching)
    */
   async start(): Promise<void> {
