@@ -25,16 +25,12 @@ export const CORE_PRIVATE_KEY: Hex = (process.env.CORE_PRIVATE_KEY as Hex) ??
 export const CORE_ADDRESS: Address = privateKeyToAddress(CORE_PRIVATE_KEY);
 
 /**
- * SystemRegistry address - deployed by DeployStores script
+ * SystemRegistry address - pre-deployed at genesis
  *
- * Set via environment variable after running the deployment script.
- * The deployment script outputs the address - copy it to SYSTEM_REGISTRY_ADDRESS env var.
- *
- * Note: With deterministic deployment (same deployer + nonce), the address is predictable.
- * First deployment from CORE account (nonce 0) = 0x5FbDB2315678afecb367f032d93F642f64180aa3
+ * The SystemRegistry is deployed via genesis.json at a well-known address.
+ * This matches the hardcoded address in Solidity contracts (BaseStrategy, FundingMixin, etc.)
  */
-export const SYSTEM_REGISTRY_ADDRESS: Address = (process.env.SYSTEM_REGISTRY_ADDRESS as Address) ??
-  '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+export const SYSTEM_REGISTRY_ADDRESS: Address = '0x0000000000000000000000000000000000001000';
 
 /**
  * Gas limits for different operations

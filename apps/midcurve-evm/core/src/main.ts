@@ -18,8 +18,9 @@ import { createLogger } from './utils/logger.js';
 import { TIMEFRAME_TO_INTERVAL } from './datasources/types.js';
 import type { Subscription } from './subscriptions/types.js';
 import { SUBSCRIPTION_TYPES } from './events/types.js';
-import { decodeAbiParameters } from 'viem';
+import { decodeAbiParameters, type Hex } from 'viem';
 import { getMarketInfo, computeMarketId } from './utils/market-registry.js';
+import type { FundingConfig, ChainRpcConfig } from './orchestrator/types.js';
 
 const logger = createLogger('semsee-node');
 
@@ -38,18 +39,62 @@ interface SemseeConfig {
 
   /** Log level */
   logLevel: string;
+
+  /** Funding configuration (optional) */
+  funding?: FundingConfig;
+}
+
+/**
+ * Parse chain RPC URLs from environment variable
+ * Format: "1:https://eth.rpc.url,42161:https://arb.rpc.url"
+ */
+function parseChainRpcUrls(envValue: string | undefined): ChainRpcConfig[] {
+  if (!envValue) return [];
+
+  return envValue.split(',').map((entry) => {
+    const [chainIdStr, rpcUrl] = entry.split(':');
+    const chainId = parseInt(chainIdStr, 10);
+    if (isNaN(chainId) || !rpcUrl) {
+      throw new Error(`Invalid FUNDING_CHAIN_RPC_URLS format: "${entry}". Expected "chainId:rpcUrl"`);
+    }
+    // Rejoin in case the URL contains colons (https://)
+    const fullRpcUrl = entry.substring(chainIdStr.length + 1);
+    return { chainId, rpcUrl: fullRpcUrl };
+  });
 }
 
 /**
  * Load configuration from environment variables
  */
 function loadConfig(): SemseeConfig {
-  return {
+  const config: SemseeConfig = {
     rpcUrl: process.env.SEMSEE_RPC_URL ?? 'http://localhost:8545',
     wsUrl: process.env.SEMSEE_WS_URL ?? 'ws://localhost:8546',
     hyperliquidTestnet: process.env.HYPERLIQUID_TESTNET === 'true',
     logLevel: process.env.LOG_LEVEL ?? 'info',
   };
+
+  // Load funding configuration if automation wallet key is provided
+  const automationWalletKey = process.env.FUNDING_AUTOMATION_WALLET_KEY;
+  if (automationWalletKey) {
+    const chainRpcUrls = parseChainRpcUrls(process.env.FUNDING_CHAIN_RPC_URLS);
+    if (chainRpcUrls.length === 0) {
+      logger.warn(
+        'FUNDING_AUTOMATION_WALLET_KEY is set but FUNDING_CHAIN_RPC_URLS is empty. ' +
+        'Funding operations will not work without chain RPC URLs.'
+      );
+    }
+    config.funding = {
+      automationWalletKey: automationWalletKey as Hex,
+      chainRpcUrls,
+    };
+    logger.info(
+      { configuredChains: chainRpcUrls.map((c) => c.chainId) },
+      'Funding configuration loaded'
+    );
+  }
+
+  return config;
 }
 
 /**
@@ -177,6 +222,7 @@ async function main(): Promise<void> {
   const orchestrator = new CoreOrchestrator({
     rpcUrl: config.rpcUrl,
     wsUrl: config.wsUrl,
+    funding: config.funding,
   });
 
   // Create Hyperliquid feed
@@ -211,8 +257,9 @@ async function main(): Promise<void> {
     await orchestrator.initialize();
     logger.info('Orchestrator initialized');
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(
-      { error },
+      { error: errorMessage },
       'Failed to initialize orchestrator. Is Geth running?'
     );
     process.exit(1);

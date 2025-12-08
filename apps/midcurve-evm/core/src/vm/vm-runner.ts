@@ -52,9 +52,11 @@ export class VmRunner {
     // Public client for reading state
     // Note: Using HTTP transport for reliability. WebSocket can be added later
     // if real-time event subscriptions are needed.
+    // pollingInterval: 1000ms for faster event detection in local dev environment
     this.publicClient = createPublicClient({
       chain: semseeChain,
       transport: http(rpcUrl),
+      pollingInterval: 1_000, // 1 second polling for event watchers
     });
 
     // Wallet client for sending transactions as Core

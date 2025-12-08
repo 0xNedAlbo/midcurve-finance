@@ -1,23 +1,32 @@
 /**
- * POST /api/sign/erc20/approve - Sign ERC-20 Approval Transaction
+ * POST /api/sign/withdraw/erc20 - Sign ERC-20 Withdrawal Transaction
  *
- * Signs an ERC-20 approve transaction using the strategy's automation wallet.
+ * Signs an ERC-20 transfer transaction from the automation wallet to the
+ * strategy owner. The recipient is HARD-WIRED by querying SEMSEE directly.
+ *
+ * Security:
+ * - Recipient queried from strategy.owner() on SEMSEE (cannot be spoofed)
+ * - SEMSEE is local/internal network (no external network access)
+ * - Core provides gas estimates (external chain access)
  *
  * Flow:
  * 1. Validate request schema
  * 2. Look up strategy's automation wallet
- * 3. Build the approve transaction
- * 4. Sign with KMS
- * 5. Return signed transaction (caller broadcasts)
+ * 3. Query strategy owner from SEMSEE (HARD-WIRED recipient)
+ * 4. Build the transfer transaction
+ * 5. Sign with KMS
+ * 6. Return signed transaction (caller broadcasts)
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
  * - Body: {
- *     strategyAddress: string,  // Strategy address (to look up automation wallet)
- *     chainId: number,
- *     tokenAddress: string,
- *     spenderAddress: string,
- *     amount: string  // BigInt as string
+ *     strategyAddress: string,  // Strategy address (to look up wallet + owner)
+ *     chainId: number,          // Target external chain
+ *     tokenAddress: string,     // ERC-20 token contract
+ *     amount: string,           // BigInt as string
+ *     maxFeePerGas: string,     // BigInt as string (Core provides)
+ *     maxPriorityFeePerGas: string,  // BigInt as string (Core provides)
+ *     gasLimit: string          // BigInt as string (Core provides)
  *   }
  *
  * Response:
@@ -27,12 +36,15 @@
  *     txHash: string,     // Transaction hash
  *     from: string,       // Automation wallet address
  *     to: string,         // Token contract address
+ *     recipient: string,  // Strategy owner (queried from SEMSEE)
  *     chainId: number,
- *     nonce: number       // Transaction nonce used
+ *     nonce: number,
+ *     calldata: string
  *   }
  * - 400: Invalid request
  * - 401: Unauthorized
  * - 404: Strategy has no automation wallet
+ * - 500: Signing failed or owner lookup failed
  */
 
 import { NextResponse } from 'next/server';
@@ -50,20 +62,21 @@ import {
 } from '@/middleware/internal-auth';
 import { walletService } from '@/services/wallet-service';
 import { getSigner } from '@/lib/kms';
+import { getStrategyOwner } from '@/lib/semsee';
 import { signerLogger, signerLog } from '@/lib/logger';
 import { ChainIdSchema } from '@midcurve/api-shared';
 
-const logger = signerLogger.child({ endpoint: 'erc20-approve' });
+const logger = signerLogger.child({ endpoint: 'erc20-withdraw' });
 
 /**
- * ERC-20 approve ABI for encoding
+ * ERC-20 transfer ABI for encoding
  */
-const ERC20_APPROVE_ABI = [
+const ERC20_TRANSFER_ABI = [
   {
-    name: 'approve',
+    name: 'transfer',
     type: 'function',
     inputs: [
-      { name: 'spender', type: 'address' },
+      { name: 'to', type: 'address' },
       { name: 'amount', type: 'uint256' },
     ],
     outputs: [{ type: 'bool' }],
@@ -73,28 +86,28 @@ const ERC20_APPROVE_ABI = [
 /**
  * Request body schema
  */
-const Erc20ApproveRequestSchema = z.object({
+const Erc20WithdrawRequestSchema = z.object({
   strategyAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid strategy address'),
   chainId: ChainIdSchema,
   tokenAddress: z
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid token address'),
-  spenderAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid spender address'),
   amount: z.string().min(1, 'amount is required'),
+  maxFeePerGas: z.string().min(1, 'maxFeePerGas is required'),
+  maxPriorityFeePerGas: z.string().min(1, 'maxPriorityFeePerGas is required'),
+  gasLimit: z.string().min(1, 'gasLimit is required'),
 });
 
-type Erc20ApproveRequest = z.infer<typeof Erc20ApproveRequestSchema>;
+type Erc20WithdrawRequest = z.infer<typeof Erc20WithdrawRequestSchema>;
 
 /**
- * POST /api/sign/erc20/approve
+ * POST /api/sign/withdraw/erc20
  */
 export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   const { requestId, request } = ctx;
 
   // 1. Parse request body
-  const bodyResult = await parseJsonBody<Erc20ApproveRequest>(request);
+  const bodyResult = await parseJsonBody<Erc20WithdrawRequest>(request);
   if (!bodyResult.success) {
     return NextResponse.json(
       {
@@ -108,7 +121,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   }
 
   // 2. Validate request schema
-  const validation = Erc20ApproveRequestSchema.safeParse(bodyResult.data);
+  const validation = Erc20WithdrawRequestSchema.safeParse(bodyResult.data);
   if (!validation.success) {
     return NextResponse.json(
       {
@@ -121,16 +134,22 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { strategyAddress, chainId, tokenAddress, spenderAddress, amount } =
-    validation.data;
+  const {
+    strategyAddress,
+    chainId,
+    tokenAddress,
+    amount,
+    maxFeePerGas,
+    maxPriorityFeePerGas,
+    gasLimit,
+  } = validation.data;
 
   logger.info({
     requestId,
     strategyAddress,
     chainId,
     tokenAddress,
-    spenderAddress,
-    msg: 'Processing ERC-20 approve signing request',
+    msg: 'Processing ERC-20 withdraw signing request',
   });
 
   // 3. Get strategy's automation wallet
@@ -165,24 +184,51 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  // 5. Get and increment nonce for this chain
+  // 5. Query strategy owner from SEMSEE (HARD-WIRED recipient)
+  let ownerAddress: Address;
+  try {
+    ownerAddress = await getStrategyOwner(strategyAddress as Address);
+    logger.info({
+      requestId,
+      strategyAddress,
+      ownerAddress,
+      msg: 'Strategy owner retrieved from SEMSEE',
+    });
+  } catch (error) {
+    logger.error({
+      requestId,
+      strategyAddress,
+      error: error instanceof Error ? error.message : String(error),
+      msg: 'Failed to query strategy owner from SEMSEE',
+    });
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'OWNER_LOOKUP_FAILED',
+        message: 'Failed to query strategy owner from SEMSEE',
+        requestId,
+      },
+      { status: 500 }
+    );
+  }
+
+  // 6. Get and increment nonce for this chain
   const nonce = await walletService.getAndIncrementNonce(strategyAddress as Address, chainId);
 
-  // 6. Build the approve transaction
+  // 7. Build the transfer transaction
   const calldata = encodeFunctionData({
-    abi: ERC20_APPROVE_ABI,
-    functionName: 'approve',
-    args: [spenderAddress as Address, BigInt(amount)],
+    abi: ERC20_TRANSFER_ABI,
+    functionName: 'transfer',
+    args: [ownerAddress, BigInt(amount)],
   });
 
-  // 7. Sign the transaction hash
-  // Note: For a complete implementation, we'd serialize the full transaction
-  // and sign it. For now, we'll sign the calldata hash as a proof of concept.
+  // 8. Sign the transaction
   const signer = getSigner();
 
   try {
     // Create a transaction hash to sign
-    // In production, this would be the proper EIP-1559 transaction hash
+    // Note: For a complete implementation, we'd properly serialize and sign
     const txHash = keccak256(calldata);
 
     const signatureResult = await signer.signTransaction(kmsKeyId, txHash);
@@ -190,7 +236,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     signerLog.signingOperation(
       logger,
       requestId,
-      'erc20-approve',
+      'erc20-withdraw',
       walletAddress,
       chainId,
       true,
@@ -198,7 +244,6 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
 
     // Serialize the signed transaction
-    // Note: This is simplified - production would include full tx params
     const signedTx = serializeTransaction(
       {
         to: tokenAddress as Address,
@@ -206,10 +251,9 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
         chainId,
         type: 'eip1559',
         nonce,
-        // Placeholder values - caller should provide or we should fetch
-        maxFeePerGas: BigInt(0),
-        maxPriorityFeePerGas: BigInt(0),
-        gas: BigInt(100000),
+        maxFeePerGas: BigInt(maxFeePerGas),
+        maxPriorityFeePerGas: BigInt(maxPriorityFeePerGas),
+        gas: BigInt(gasLimit),
       },
       {
         r: signatureResult.r,
@@ -223,8 +267,10 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       strategyAddress,
       walletAddress,
       tokenAddress,
-      spenderAddress,
-      msg: 'ERC-20 approve transaction signed successfully',
+      ownerAddress,
+      chainId,
+      amount,
+      msg: 'ERC-20 withdraw transaction signed successfully',
     });
 
     // Update last used timestamp
@@ -236,6 +282,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       txHash,
       from: walletAddress,
       to: tokenAddress,
+      recipient: ownerAddress,
       chainId,
       nonce,
       calldata,
@@ -245,7 +292,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     signerLog.signingOperation(
       logger,
       requestId,
-      'erc20-approve',
+      'erc20-withdraw',
       walletAddress,
       chainId,
       false,
@@ -256,7 +303,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     logger.error({
       requestId,
       error: error instanceof Error ? error.message : String(error),
-      msg: 'Failed to sign ERC-20 approve transaction',
+      msg: 'Failed to sign ERC-20 withdraw transaction',
     });
 
     return NextResponse.json(

@@ -1,12 +1,13 @@
 # SEMSEE Embedded EVM - Development Configuration
 #
-# Uses Geth in --dev mode with persistent state.
-# Contracts are deployed dynamically on first startup.
+# Uses Geth with Clique PoA consensus and custom genesis.json.
+# SystemRegistry is pre-deployed at genesis address 0x1000.
 #
 # Startup flow:
-# 1. geth: Starts Geth node in dev mode (pre-funded dev account)
-# 2. fund-core: Transfers ETH from dev account to CORE account
-# 3. deploy-stores: Deploys SystemRegistry and Store contracts
+# 1. geth: Starts Geth with custom genesis (Clique PoA, period=0 for instant mining)
+#          - SystemRegistry pre-deployed at 0x0000000000000000000000000000000000001000
+#          - Core account pre-funded with 1,000,000 ETH
+# 2. deploy-stores: Deploys Store contracts and registers them in SystemRegistry
 
 services:
   geth:
@@ -27,38 +28,29 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  fund-core:
-    build:
-      context: .
-      dockerfile: Dockerfile.foundry
-    container_name: midcurve-fund-core
-    depends_on:
-      geth:
-        condition: service_healthy
-    environment:
-      - CORE_ADDRESS=${CORE_ADDRESS:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266}
-      - RPC_URL=http://geth:8545
-    command: /app/scripts/fund-core.sh
-    restart: "no"
-
   deploy-stores:
     build:
       context: .
       dockerfile: Dockerfile.foundry
     container_name: midcurve-deploy-stores
     depends_on:
-      fund-core:
-        condition: service_completed_successfully
+      geth:
+        condition: service_healthy
     working_dir: /app/contracts
     environment:
       - CORE_PRIVATE_KEY=${CORE_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
-    # Deploy SystemRegistry and Store contracts
-    # Uses CORE_PRIVATE_KEY from environment (defaults to Foundry account 0)
+    # Deploy Store contracts and register in genesis SystemRegistry
+    # Send a dummy transaction first to trigger indexing, wait for it, then deploy
     command: >
-      sh -c "forge script script/DeployStores.s.sol
+      sh -c "echo 'Triggering transaction indexing with dummy tx...' &&
+      cast send --private-key $$CORE_PRIVATE_KEY --rpc-url http://geth:8545 --value 0 0x0000000000000000000000000000000000000001 2>/dev/null || true &&
+      echo 'Waiting for indexing to complete...' &&
+      sleep 3 &&
+      forge script script/DeployStores.s.sol
       --rpc-url http://geth:8545
       --private-key $$CORE_PRIVATE_KEY
       --broadcast
+      --slow
       -vvvv"
     restart: "no"
 

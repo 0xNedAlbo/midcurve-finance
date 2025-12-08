@@ -10,9 +10,11 @@ import "../src/stores/BalanceStore.sol";
 /**
  * @title DeployStores
  * @notice Deployment script for SEMSEE Store contracts
- * @dev Deploys all SEMSEE infrastructure contracts:
- *      - SystemRegistry (central registry)
+ * @dev Deploys Store contracts and registers them in the genesis SystemRegistry:
  *      - PoolStore, PositionStore, BalanceStore (data stores)
+ *
+ *      The SystemRegistry is pre-deployed at 0x0000000000000000000000000000000000001000
+ *      via genesis.json. This script only deploys the stores and registers them.
  *
  *      Usage:
  *        forge script script/DeployStores.s.sol --rpc-url http://localhost:8545 --broadcast
@@ -25,17 +27,20 @@ contract DeployStores is Script {
     // This is pre-funded in Anvil with 10,000 ETH
     address constant CORE = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 
+    // Genesis SystemRegistry address (pre-deployed via genesis.json)
+    address constant SYSTEM_REGISTRY = 0x0000000000000000000000000000000000001000;
+
     function run() external {
         console.log("=== SEMSEE Contract Deployment ===");
         console.log("Deploying from Core address:", CORE);
+        console.log("Using genesis SystemRegistry at:", SYSTEM_REGISTRY);
         console.log("");
+
+        // Get reference to genesis SystemRegistry
+        SystemRegistry registry = SystemRegistry(SYSTEM_REGISTRY);
 
         // Start broadcasting transactions
         vm.startBroadcast();
-
-        // Deploy SystemRegistry
-        SystemRegistry registry = new SystemRegistry();
-        console.log("SystemRegistry deployed at:", address(registry));
 
         // Deploy stores
         PoolStore poolStore = new PoolStore();
@@ -47,7 +52,7 @@ contract DeployStores is Script {
         BalanceStore balanceStore = new BalanceStore();
         console.log("BalanceStore deployed at:", address(balanceStore));
 
-        // Register stores in SystemRegistry
+        // Register stores in genesis SystemRegistry
         registry.setPoolStore(address(poolStore));
         console.log("Registered PoolStore in SystemRegistry");
 
@@ -61,12 +66,9 @@ contract DeployStores is Script {
 
         console.log("");
         console.log("=== Deployment Complete ===");
-        console.log("SystemRegistry:", address(registry));
+        console.log("SystemRegistry (genesis):", SYSTEM_REGISTRY);
         console.log("PoolStore:", address(poolStore));
         console.log("PositionStore:", address(positionStore));
         console.log("BalanceStore:", address(balanceStore));
-        console.log("");
-        console.log("IMPORTANT: Update SYSTEM_REGISTRY_ADDRESS in core/src/utils/addresses.ts");
-        console.log("           with the SystemRegistry address shown above.");
     }
 }

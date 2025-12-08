@@ -5,11 +5,7 @@ import { createLogger, getLogMethod } from '../utils/logger.js';
 import { GAS_LIMITS } from '../utils/addresses.js';
 import { VmRunner } from '../vm/vm-runner.js';
 import { EventDecoder, SUBSCRIPTION_TYPES } from '../events/index.js';
-import type {
-  Erc20WithdrawRequestedEvent,
-  EthWithdrawRequestedEvent,
-  EthBalanceUpdateRequestedEvent,
-} from '../events/types.js';
+import type { EthBalanceUpdateRequestedEvent } from '../events/types.js';
 import {
   SubscriptionManager,
   MemorySubscriptionStore,
@@ -294,6 +290,8 @@ export class CoreOrchestrator {
         this.handleStrategyStarted(address, logs, txHash),
       onStrategyShutdown: (address, logs, txHash) =>
         this.handleStrategyShutdown(address, logs, txHash),
+      onFundingEvent: (address, logs, txHash) =>
+        this.handleFundingEvent(address, logs, txHash),
     });
 
     // IMPORTANT: Scan for existing strategies BEFORE starting the watcher
@@ -513,14 +511,6 @@ export class CoreOrchestrator {
           );
           break;
 
-        case 'Erc20WithdrawRequested':
-          await this.processFundingEvent(strategyAddress, decoded);
-          break;
-
-        case 'EthWithdrawRequested':
-          await this.processFundingEvent(strategyAddress, decoded);
-          break;
-
         case 'EthBalanceUpdateRequested':
           await this.processFundingEvent(strategyAddress, decoded);
           break;
@@ -530,13 +520,12 @@ export class CoreOrchestrator {
 
   /**
    * Process a funding-related event.
+   * Note: Withdrawals are now handled via signed requests to WithdrawalApi,
+   * not via contract events.
    */
   private async processFundingEvent(
     strategyAddress: Address,
-    event:
-      | Erc20WithdrawRequestedEvent
-      | EthWithdrawRequestedEvent
-      | EthBalanceUpdateRequestedEvent
+    event: EthBalanceUpdateRequestedEvent
   ): Promise<void> {
     if (!this.fundingManager) {
       this.logger.warn(
@@ -555,31 +544,12 @@ export class CoreOrchestrator {
       return;
     }
 
-    switch (event.type) {
-      case 'Erc20WithdrawRequested':
-        await this.fundingManager.processErc20WithdrawRequest(
-          strategyAddress,
-          ownerAddress,
-          event
-        );
-        break;
-
-      case 'EthWithdrawRequested':
-        await this.fundingManager.processEthWithdrawRequest(
-          strategyAddress,
-          ownerAddress,
-          event
-        );
-        break;
-
-      case 'EthBalanceUpdateRequested':
-        await this.fundingManager.processEthBalanceUpdateRequest(
-          strategyAddress,
-          ownerAddress,
-          event
-        );
-        break;
-    }
+    // Only ETH balance update events are contract-initiated
+    await this.fundingManager.processEthBalanceUpdateRequest(
+      strategyAddress,
+      ownerAddress,
+      event
+    );
   }
 
   /**
@@ -711,6 +681,84 @@ export class CoreOrchestrator {
     this.logger.info(
       { strategy: strategyAddress },
       'Strategy shutdown processing complete'
+    );
+  }
+
+  /**
+   * Handle a funding event from a strategy.
+   * Called by StrategyWatcher when an EthBalanceUpdateRequested event is detected.
+   *
+   * @param strategyAddress The address of the strategy that emitted the event
+   * @param logs All logs from the transaction
+   * @param txHash Optional transaction hash for deduplication
+   */
+  async handleFundingEvent(
+    strategyAddress: Address,
+    logs: Log[],
+    txHash?: string
+  ): Promise<void> {
+    // Create a unique key for this funding event
+    const dedupKey = txHash
+      ? `funding:${strategyAddress.toLowerCase()}:${txHash.toLowerCase()}`
+      : `funding:${strategyAddress.toLowerCase()}:${Date.now()}`;
+
+    // Check if we've already processed this transaction
+    if (this.processedStrategyTxs.has(dedupKey)) {
+      this.logger.debug(
+        { strategy: strategyAddress, txHash },
+        'Funding event already processed, skipping'
+      );
+      return;
+    }
+
+    // Mark as processed
+    this.processedStrategyTxs.add(dedupKey);
+
+    this.logger.info(
+      { strategy: strategyAddress, logCount: logs.length },
+      'Processing funding event'
+    );
+
+    // Ensure strategy owner is tracked (may not be if strategy started before Core)
+    if (!this.strategyOwners.has(strategyAddress)) {
+      try {
+        const owner = await this.vmRunner.getPublicClient().readContract({
+          address: strategyAddress,
+          abi: [
+            {
+              type: 'function',
+              name: 'owner',
+              inputs: [],
+              outputs: [{ name: '', type: 'address' }],
+              stateMutability: 'view',
+            },
+          ],
+          functionName: 'owner',
+        });
+        this.strategyOwners.set(strategyAddress, owner);
+        this.logger.debug(
+          { strategy: strategyAddress, owner },
+          'Fetched strategy owner for funding event'
+        );
+
+        // Also register with funding manager if available
+        if (this.fundingManager) {
+          this.fundingManager.registerStrategy(strategyAddress, owner);
+        }
+      } catch (error) {
+        this.logger.warn(
+          { strategy: strategyAddress, error },
+          'Failed to fetch strategy owner for funding event'
+        );
+      }
+    }
+
+    // Process all logs in order (will pick up EthBalanceUpdateRequested)
+    await this.processLogsInOrder(strategyAddress, logs);
+
+    this.logger.info(
+      { strategy: strategyAddress },
+      'Funding event processing complete'
     );
   }
 

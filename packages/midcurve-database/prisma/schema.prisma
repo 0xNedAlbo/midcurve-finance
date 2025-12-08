@@ -449,17 +449,21 @@ model UserQuoteTokenPreference {
 // =============================================================================
 
 // EvmAutomationWallet - Managed wallets for automated DeFi operations
+// Each strategy has ONE automation wallet for executing cross-chain operations
 model EvmAutomationWallet {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // User reference (one wallet per user)
-  userId String @unique
+  // Strategy reference (one wallet per strategy)
+  strategyAddress String @unique // SEMSEE EVM strategy contract address (EIP-55 checksummed)
+
+  // Owner reference (for authorization, NOT unique - one user can have many strategies)
+  userId String
 
   // Wallet info
   walletAddress String // EVM address (EIP-55 checksummed)
-  label         String // User-friendly name ("Automation Wallet")
+  label         String // User-friendly name ("Strategy Automation Wallet")
 
   // KMS key info
   kmsKeyId    String // AWS KMS KeyId or local key identifier
@@ -474,6 +478,7 @@ model EvmAutomationWallet {
 
   // Indexes
   @@index([walletAddress])
+  @@index([userId]) // Lookup all wallets for a user
   @@map("evm_automation_wallets")
 }
 

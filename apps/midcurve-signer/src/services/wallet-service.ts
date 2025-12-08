@@ -6,7 +6,8 @@
  * - Retrieve wallet information
  * - Update wallet status
  *
- * Each user can have ONE automation wallet per chain (enforced by database constraint).
+ * Each STRATEGY has ONE automation wallet (enforced by database constraint).
+ * A user can have multiple strategies, each with its own automation wallet.
  */
 
 import { prisma, Prisma } from '../lib/prisma';
@@ -19,6 +20,7 @@ import type { Address } from 'viem';
  */
 export interface CreateWalletResult {
   id: string;
+  strategyAddress: Address;
   userId: string;
   walletAddress: Address;
   label: string;
@@ -32,6 +34,7 @@ export interface CreateWalletResult {
  */
 export interface WalletInfo {
   id: string;
+  strategyAddress: Address;
   userId: string;
   walletAddress: Address;
   label: string;
@@ -46,6 +49,7 @@ export interface WalletInfo {
  * Input for creating a new wallet
  */
 export interface CreateWalletInput {
+  strategyAddress: Address;
   userId: string;
   label: string;
 }
@@ -68,26 +72,26 @@ class WalletService {
   private readonly logger = signerLogger.child({ service: 'WalletService' });
 
   /**
-   * Create a new automation wallet for a user
+   * Create a new automation wallet for a strategy
    *
    * This creates a KMS key and stores the wallet record in the database.
-   * Each user can only have one automation wallet.
+   * Each strategy can only have one automation wallet.
    *
-   * @throws WalletServiceError if user already has a wallet or creation fails
+   * @throws WalletServiceError if strategy already has a wallet or creation fails
    */
   async createWallet(input: CreateWalletInput): Promise<CreateWalletResult> {
-    const { userId, label } = input;
-    signerLog.methodEntry(this.logger, 'createWallet', { userId, label });
+    const { strategyAddress, userId, label } = input;
+    signerLog.methodEntry(this.logger, 'createWallet', { strategyAddress, userId, label });
 
     try {
-      // Check if user already has a wallet
+      // Check if strategy already has a wallet
       const existingWallet = await prisma.evmAutomationWallet.findFirst({
-        where: { userId, isActive: true },
+        where: { strategyAddress, isActive: true },
       });
 
       if (existingWallet) {
         throw new WalletServiceError(
-          'User already has an automation wallet',
+          'Strategy already has an automation wallet',
           'WALLET_EXISTS',
           409
         );
@@ -96,7 +100,7 @@ class WalletService {
       // Create KMS key
       const signer = getSigner();
       const kmsResult: KmsWalletCreationResult = await signer.createKey(
-        `${userId}:${label}`
+        `${strategyAddress}:${label}`
       );
 
       // Get provider type from signer
@@ -107,6 +111,7 @@ class WalletService {
       // Create database record
       const wallet = await prisma.evmAutomationWallet.create({
         data: {
+          strategyAddress,
           userId,
           walletAddress: kmsResult.walletAddress,
           label,
@@ -117,9 +122,10 @@ class WalletService {
       });
 
       this.logger.info({
+        strategyAddress,
         userId,
         walletAddress: wallet.walletAddress,
-        msg: 'Automation wallet created',
+        msg: 'Automation wallet created for strategy',
       });
 
       signerLog.methodExit(this.logger, 'createWallet', {
@@ -129,6 +135,7 @@ class WalletService {
 
       return {
         id: wallet.id,
+        strategyAddress: wallet.strategyAddress as Address,
         userId: wallet.userId,
         walletAddress: wallet.walletAddress as Address,
         label: wallet.label,
@@ -147,13 +154,13 @@ class WalletService {
         error.code === 'P2002'
       ) {
         throw new WalletServiceError(
-          'Wallet already exists for this user',
+          'Wallet already exists for this strategy',
           'WALLET_EXISTS',
           409
         );
       }
 
-      signerLog.methodError(this.logger, 'createWallet', error, { userId });
+      signerLog.methodError(this.logger, 'createWallet', error, { strategyAddress });
       throw new WalletServiceError(
         'Failed to create wallet',
         'CREATE_FAILED',
@@ -163,13 +170,13 @@ class WalletService {
   }
 
   /**
-   * Get wallet by user ID
+   * Get wallet by strategy address
    */
-  async getWalletByUserId(userId: string): Promise<WalletInfo | null> {
-    signerLog.methodEntry(this.logger, 'getWalletByUserId', { userId });
+  async getWalletByStrategyAddress(strategyAddress: Address): Promise<WalletInfo | null> {
+    signerLog.methodEntry(this.logger, 'getWalletByStrategyAddress', { strategyAddress });
 
     const wallet = await prisma.evmAutomationWallet.findFirst({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
     });
 
     if (!wallet) {
@@ -178,6 +185,7 @@ class WalletService {
 
     return {
       id: wallet.id,
+      strategyAddress: wallet.strategyAddress as Address,
       userId: wallet.userId,
       walletAddress: wallet.walletAddress as Address,
       label: wallet.label,
@@ -187,6 +195,30 @@ class WalletService {
       updatedAt: wallet.updatedAt,
       lastUsedAt: wallet.lastUsedAt,
     };
+  }
+
+  /**
+   * Get all wallets for a user (across all strategies)
+   */
+  async getWalletsByUserId(userId: string): Promise<WalletInfo[]> {
+    signerLog.methodEntry(this.logger, 'getWalletsByUserId', { userId });
+
+    const wallets = await prisma.evmAutomationWallet.findMany({
+      where: { userId, isActive: true },
+    });
+
+    return wallets.map((wallet) => ({
+      id: wallet.id,
+      strategyAddress: wallet.strategyAddress as Address,
+      userId: wallet.userId,
+      walletAddress: wallet.walletAddress as Address,
+      label: wallet.label,
+      keyProvider: wallet.keyProvider,
+      isActive: wallet.isActive,
+      createdAt: wallet.createdAt,
+      updatedAt: wallet.updatedAt,
+      lastUsedAt: wallet.lastUsedAt,
+    }));
   }
 
   /**
@@ -218,6 +250,7 @@ class WalletService {
       ) {
         return {
           id: walletCaseInsensitive.id,
+          strategyAddress: walletCaseInsensitive.strategyAddress as Address,
           userId: walletCaseInsensitive.userId,
           walletAddress: walletCaseInsensitive.walletAddress as Address,
           label: walletCaseInsensitive.label,
@@ -234,6 +267,7 @@ class WalletService {
 
     return {
       id: wallet.id,
+      strategyAddress: wallet.strategyAddress as Address,
       userId: wallet.userId,
       walletAddress: wallet.walletAddress as Address,
       label: wallet.label,
@@ -246,11 +280,11 @@ class WalletService {
   }
 
   /**
-   * Get the KMS key ID for a wallet (internal use only)
+   * Get the KMS key ID for a strategy's wallet (internal use only)
    */
-  async getKmsKeyId(userId: string): Promise<string | null> {
+  async getKmsKeyId(strategyAddress: Address): Promise<string | null> {
     const wallet = await prisma.evmAutomationWallet.findFirst({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
       select: { kmsKeyId: true },
     });
 
@@ -258,29 +292,29 @@ class WalletService {
   }
 
   /**
-   * Update last used timestamp
+   * Update last used timestamp for a strategy's wallet
    */
-  async updateLastUsed(userId: string): Promise<void> {
+  async updateLastUsed(strategyAddress: Address): Promise<void> {
     await prisma.evmAutomationWallet.updateMany({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
       data: { lastUsedAt: new Date() },
     });
   }
 
   /**
-   * Deactivate a wallet (soft delete)
+   * Deactivate a strategy's wallet (soft delete)
    */
-  async deactivateWallet(userId: string): Promise<boolean> {
-    signerLog.methodEntry(this.logger, 'deactivateWallet', { userId });
+  async deactivateWallet(strategyAddress: Address): Promise<boolean> {
+    signerLog.methodEntry(this.logger, 'deactivateWallet', { strategyAddress });
 
     const result = await prisma.evmAutomationWallet.updateMany({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
       data: { isActive: false },
     });
 
     if (result.count > 0) {
       this.logger.info({
-        userId,
+        strategyAddress,
         msg: 'Automation wallet deactivated',
       });
       return true;
@@ -290,7 +324,7 @@ class WalletService {
   }
 
   /**
-   * Get and increment nonce for a wallet on a specific chain
+   * Get and increment nonce for a strategy's wallet on a specific chain
    *
    * This is an atomic operation that:
    * 1. Creates a nonce record if it doesn't exist (starting at 0)
@@ -300,18 +334,18 @@ class WalletService {
    * @returns The nonce to use for the current transaction
    * @throws WalletServiceError if wallet not found or operation fails
    */
-  async getAndIncrementNonce(userId: string, chainId: number): Promise<number> {
-    signerLog.methodEntry(this.logger, 'getAndIncrementNonce', { userId, chainId });
+  async getAndIncrementNonce(strategyAddress: Address, chainId: number): Promise<number> {
+    signerLog.methodEntry(this.logger, 'getAndIncrementNonce', { strategyAddress, chainId });
 
     // First, get the wallet
     const wallet = await prisma.evmAutomationWallet.findFirst({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
       select: { id: true },
     });
 
     if (!wallet) {
       throw new WalletServiceError(
-        'User does not have an active automation wallet',
+        'Strategy does not have an active automation wallet',
         'NO_WALLET',
         404
       );
@@ -343,7 +377,7 @@ class WalletService {
     const currentNonce = nonceRecord.nonce - 1;
 
     this.logger.debug({
-      userId,
+      strategyAddress,
       chainId,
       nonce: currentNonce,
       msg: 'Nonce retrieved and incremented',
@@ -359,17 +393,17 @@ class WalletService {
    *
    * @returns Current nonce value, or 0 if no transactions have been made on this chain
    */
-  async getCurrentNonce(userId: string, chainId: number): Promise<number> {
-    signerLog.methodEntry(this.logger, 'getCurrentNonce', { userId, chainId });
+  async getCurrentNonce(strategyAddress: Address, chainId: number): Promise<number> {
+    signerLog.methodEntry(this.logger, 'getCurrentNonce', { strategyAddress, chainId });
 
     const wallet = await prisma.evmAutomationWallet.findFirst({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
       select: { id: true },
     });
 
     if (!wallet) {
       throw new WalletServiceError(
-        'User does not have an active automation wallet',
+        'Strategy does not have an active automation wallet',
         'NO_WALLET',
         404
       );
@@ -395,17 +429,17 @@ class WalletService {
    *
    * @param nonce The nonce value to set (typically from eth_getTransactionCount)
    */
-  async resetNonce(userId: string, chainId: number, nonce: number): Promise<void> {
-    signerLog.methodEntry(this.logger, 'resetNonce', { userId, chainId, nonce });
+  async resetNonce(strategyAddress: Address, chainId: number, nonce: number): Promise<void> {
+    signerLog.methodEntry(this.logger, 'resetNonce', { strategyAddress, chainId, nonce });
 
     const wallet = await prisma.evmAutomationWallet.findFirst({
-      where: { userId, isActive: true },
+      where: { strategyAddress, isActive: true },
       select: { id: true },
     });
 
     if (!wallet) {
       throw new WalletServiceError(
-        'User does not have an active automation wallet',
+        'Strategy does not have an active automation wallet',
         'NO_WALLET',
         404
       );
@@ -429,7 +463,7 @@ class WalletService {
     });
 
     this.logger.info({
-      userId,
+      strategyAddress,
       chainId,
       nonce,
       msg: 'Nonce reset to specified value',

@@ -13,13 +13,13 @@ pragma solidity ^0.8.20;
  * ```solidity
  * using FundingLib for *;
  *
- * function withdrawErc20(uint256 chainId, address token, uint256 amount)
+ * function updateEthBalance(uint256 chainId)
  *     external
  *     onlyOwner
  *     returns (bytes32 requestId)
  * {
  *     requestId = _nextEffectId();
- *     FundingLib.emitErc20WithdrawRequested(requestId, chainId, token, amount, owner);
+ *     FundingLib.emitEthBalanceUpdateRequested(requestId, chainId);
  * }
  * ```
  */
@@ -29,73 +29,11 @@ library FundingLib {
 
     // ============= Events (duplicated from IFunding for library emission) =============
 
-    /// @notice Emitted when owner requests ERC-20 token withdrawal
-    event Erc20WithdrawRequested(
-        bytes32 indexed requestId,
-        uint256 indexed chainId,
-        address indexed token,
-        uint256 amount,
-        address recipient
-    );
-
-    /// @notice Emitted when owner requests native ETH withdrawal
-    event EthWithdrawRequested(
-        bytes32 indexed requestId,
-        uint256 indexed chainId,
-        uint256 amount,
-        address recipient
-    );
-
     /// @notice Emitted when owner requests ETH balance update
     event EthBalanceUpdateRequested(
         bytes32 indexed requestId,
         uint256 indexed chainId
     );
-
-    /**
-     * @notice Emit ERC-20 withdrawal request event
-     * @param requestId Unique identifier for tracking this request
-     * @param chainId The chain where tokens should be transferred
-     * @param token The ERC-20 token address
-     * @param amount The amount to withdraw
-     * @param recipient The address to receive tokens (should be owner)
-     */
-    function emitErc20WithdrawRequested(
-        bytes32 requestId,
-        uint256 chainId,
-        address token,
-        uint256 amount,
-        address recipient
-    ) internal {
-        emit Erc20WithdrawRequested(
-            requestId,
-            chainId,
-            token,
-            amount,
-            recipient
-        );
-    }
-
-    /**
-     * @notice Emit ETH withdrawal request event
-     * @param requestId Unique identifier for tracking this request
-     * @param chainId The chain where ETH should be transferred
-     * @param amount The amount to withdraw (in wei)
-     * @param recipient The address to receive ETH (should be owner)
-     */
-    function emitEthWithdrawRequested(
-        bytes32 requestId,
-        uint256 chainId,
-        uint256 amount,
-        address recipient
-    ) internal {
-        emit EthWithdrawRequested(
-            requestId,
-            chainId,
-            amount,
-            recipient
-        );
-    }
 
     /**
      * @notice Emit ETH balance update request event

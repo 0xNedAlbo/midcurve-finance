@@ -1,4 +1,4 @@
-import type { Address, Hex, Log } from 'viem';
+import type { Hex, Log } from 'viem';
 import { decodeAbiParameters } from 'viem';
 import { LogLevel } from '../utils/logger.js';
 import {
@@ -9,8 +9,6 @@ import {
   type UnsubscriptionRequestedEvent,
   type ActionRequestedEvent,
   type LogMessageEvent,
-  type Erc20WithdrawRequestedEvent,
-  type EthWithdrawRequestedEvent,
   type EthBalanceUpdateRequestedEvent,
 } from './types.js';
 
@@ -52,12 +50,6 @@ export class EventDecoder {
 
       case EVENT_TOPICS.LOG_MESSAGE:
         return this.decodeLogMessage(log);
-
-      case EVENT_TOPICS.ERC20_WITHDRAW_REQUESTED:
-        return this.decodeErc20WithdrawRequested(log);
-
-      case EVENT_TOPICS.ETH_WITHDRAW_REQUESTED:
-        return this.decodeEthWithdrawRequested(log);
 
       case EVENT_TOPICS.ETH_BALANCE_UPDATE_REQUESTED:
         return this.decodeEthBalanceUpdateRequested(log);
@@ -189,69 +181,6 @@ export class EventDecoder {
       level,
       message: message as string,
       data: data as Hex,
-      log,
-    };
-  }
-
-  /**
-   * Decode Erc20WithdrawRequested event
-   * Event: Erc20WithdrawRequested(bytes32 indexed requestId, uint256 indexed chainId, address indexed token, uint256 amount, address recipient)
-   */
-  private decodeErc20WithdrawRequested(log: Log): Erc20WithdrawRequestedEvent {
-    // topic[0] = event signature
-    // topic[1] = indexed requestId (bytes32)
-    // topic[2] = indexed chainId (uint256)
-    // topic[3] = indexed token (address)
-    const requestId = log.topics[1] as Hex;
-    const chainId = BigInt(log.topics[2] as Hex);
-    const token = ('0x' + (log.topics[3] as string).slice(26)) as Address;
-
-    // Non-indexed amount and recipient are in the data field
-    const [amount, recipient] = decodeAbiParameters(
-      [
-        { name: 'amount', type: 'uint256' },
-        { name: 'recipient', type: 'address' },
-      ],
-      log.data as Hex
-    );
-
-    return {
-      type: 'Erc20WithdrawRequested',
-      requestId,
-      chainId,
-      token,
-      amount: amount as bigint,
-      recipient: recipient as Address,
-      log,
-    };
-  }
-
-  /**
-   * Decode EthWithdrawRequested event
-   * Event: EthWithdrawRequested(bytes32 indexed requestId, uint256 indexed chainId, uint256 amount, address recipient)
-   */
-  private decodeEthWithdrawRequested(log: Log): EthWithdrawRequestedEvent {
-    // topic[0] = event signature
-    // topic[1] = indexed requestId (bytes32)
-    // topic[2] = indexed chainId (uint256)
-    const requestId = log.topics[1] as Hex;
-    const chainId = BigInt(log.topics[2] as Hex);
-
-    // Non-indexed amount and recipient are in the data field
-    const [amount, recipient] = decodeAbiParameters(
-      [
-        { name: 'amount', type: 'uint256' },
-        { name: 'recipient', type: 'address' },
-      ],
-      log.data as Hex
-    );
-
-    return {
-      type: 'EthWithdrawRequested',
-      requestId,
-      chainId,
-      amount: amount as bigint,
-      recipient: recipient as Address,
       log,
     };
   }

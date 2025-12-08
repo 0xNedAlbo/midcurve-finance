@@ -3,22 +3,12 @@ import type pino from 'pino';
 import { FundingExecutor } from './funding-executor.js';
 import { DepositWatcher } from './deposit-watcher.js';
 import {
-  type WithdrawRequest,
   type EthBalanceUpdateRequest,
   type FundingRequest,
-  type FundingResult,
   type DetectedErc20Deposit,
-  type Erc20WithdrawParams,
-  type EthWithdrawParams,
   ETH_ADDRESS,
-  isErc20Withdraw,
-  isEthWithdraw,
 } from './types.js';
-import type {
-  Erc20WithdrawRequestedEvent,
-  EthWithdrawRequestedEvent,
-  EthBalanceUpdateRequestedEvent,
-} from '../events/types.js';
+import type { EthBalanceUpdateRequestedEvent } from '../events/types.js';
 
 /**
  * Callback to update BalanceStore
@@ -43,11 +33,13 @@ export type NotifyStrategyCallback = (
  * FundingManager coordinates all funding operations.
  *
  * Responsibilities:
- * - Process withdrawal requests from strategies
- * - Process ETH balance update requests
+ * - Process ETH balance update requests from strategies
  * - Handle deposit notifications from DepositWatcher
  * - Coordinate with BalanceStore updates
  * - Deliver callbacks to strategies
+ *
+ * Note: Withdrawals are now handled via signed requests through WithdrawalApi.
+ * This manager only handles ETH balance updates and deposit monitoring.
  *
  * Key Flow:
  * 1. BalanceStore is ALWAYS updated BEFORE strategy callback
@@ -79,102 +71,6 @@ export class FundingManager {
    */
   setNotifyStrategyCallback(callback: NotifyStrategyCallback): void {
     this.notifyStrategyCallback = callback;
-  }
-
-  /**
-   * Process an ERC-20 withdrawal request event
-   */
-  async processErc20WithdrawRequest(
-    strategyAddress: Address,
-    ownerAddress: Address,
-    event: Erc20WithdrawRequestedEvent
-  ): Promise<void> {
-    const params: Erc20WithdrawParams = {
-      type: 'erc20',
-      chainId: event.chainId,
-      token: event.token,
-      amount: event.amount,
-    };
-
-    const request: WithdrawRequest = {
-      requestId: event.requestId,
-      strategyAddress,
-      ownerAddress,
-      operation: 'withdraw',
-      params,
-      recipient: event.recipient,
-      createdAt: Date.now(),
-    };
-
-    this.pendingRequests.set(event.requestId, request);
-
-    this.logger.info(
-      {
-        requestId: event.requestId,
-        strategy: strategyAddress,
-        chainId: event.chainId.toString(),
-        token: event.token,
-        amount: event.amount.toString(),
-        recipient: event.recipient,
-      },
-      'Processing ERC-20 withdrawal request'
-    );
-
-    // Execute the withdrawal
-    const result = await this.executor.executeErc20Withdraw(
-      event.requestId,
-      params,
-      event.recipient
-    );
-
-    await this.handleWithdrawResult(request, result);
-  }
-
-  /**
-   * Process an ETH withdrawal request event
-   */
-  async processEthWithdrawRequest(
-    strategyAddress: Address,
-    ownerAddress: Address,
-    event: EthWithdrawRequestedEvent
-  ): Promise<void> {
-    const params: EthWithdrawParams = {
-      type: 'eth',
-      chainId: event.chainId,
-      amount: event.amount,
-    };
-
-    const request: WithdrawRequest = {
-      requestId: event.requestId,
-      strategyAddress,
-      ownerAddress,
-      operation: 'withdraw',
-      params,
-      recipient: event.recipient,
-      createdAt: Date.now(),
-    };
-
-    this.pendingRequests.set(event.requestId, request);
-
-    this.logger.info(
-      {
-        requestId: event.requestId,
-        strategy: strategyAddress,
-        chainId: event.chainId.toString(),
-        amount: event.amount.toString(),
-        recipient: event.recipient,
-      },
-      'Processing ETH withdrawal request'
-    );
-
-    // Execute the withdrawal
-    const result = await this.executor.executeEthWithdraw(
-      event.requestId,
-      params,
-      event.recipient
-    );
-
-    await this.handleWithdrawResult(request, result);
   }
 
   /**
@@ -252,82 +148,6 @@ export class FundingManager {
       );
     } finally {
       this.pendingRequests.delete(event.requestId);
-    }
-  }
-
-  /**
-   * Handle withdrawal result
-   */
-  private async handleWithdrawResult(
-    request: WithdrawRequest,
-    result: FundingResult
-  ): Promise<void> {
-    try {
-      if (result.success) {
-        // Get the new balance after withdrawal
-        let newBalance: bigint;
-        const params = request.params;
-
-        if (isErc20Withdraw(params)) {
-          newBalance = await this.executor.getErc20Balance(
-            params.chainId,
-            params.token
-          );
-
-          // Update BalanceStore FIRST
-          if (this.updateBalanceCallback) {
-            await this.updateBalanceCallback(
-              request.strategyAddress,
-              params.chainId,
-              params.token,
-              newBalance
-            );
-          }
-        } else if (isEthWithdraw(params)) {
-          newBalance = await this.executor.getEthBalance(params.chainId);
-
-          // Update BalanceStore FIRST
-          if (this.updateBalanceCallback) {
-            await this.updateBalanceCallback(
-              request.strategyAddress,
-              params.chainId,
-              ETH_ADDRESS,
-              newBalance
-            );
-          }
-        }
-      }
-
-      // Then notify strategy of completion
-      if (this.notifyStrategyCallback) {
-        // Convert txHash to bytes32 (0x0 if undefined)
-        const txHashBytes32 =
-          result.txHash ||
-          ('0x0000000000000000000000000000000000000000000000000000000000000000' as Hex);
-
-        await this.notifyStrategyCallback(
-          request.strategyAddress,
-          'onWithdrawComplete',
-          [
-            request.requestId,
-            result.success,
-            txHashBytes32,
-            result.errorMessage || '',
-          ]
-        );
-      }
-
-      this.logger.info(
-        {
-          requestId: request.requestId,
-          strategy: request.strategyAddress,
-          success: result.success,
-          txHash: result.txHash,
-        },
-        'Withdrawal completed'
-      );
-    } finally {
-      this.pendingRequests.delete(request.requestId);
     }
   }
 

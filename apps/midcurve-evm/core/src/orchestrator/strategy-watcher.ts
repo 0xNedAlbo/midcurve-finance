@@ -9,15 +9,16 @@
  * from strategies that are started via CLI or other external callers.
  */
 
-import type { Address, Log, PublicClient, WatchEventReturnType } from 'viem';
+import type { Address, Log, PublicClient, WatchEventReturnType, WatchBlockNumberReturnType } from 'viem';
 import type pino from 'pino';
-import { EVENT_TOPICS, STRATEGY_LIFECYCLE_ABI, StrategyState } from '../events/types.js';
+import { EVENT_TOPICS, STRATEGY_LIFECYCLE_ABI, FUNDING_EVENTS_ABI, StrategyState } from '../events/types.js';
 
 export interface StrategyWatcherConfig {
   publicClient: PublicClient;
   logger: pino.Logger;
   onStrategyStarted: (strategyAddress: Address, logs: Log[], txHash?: string) => Promise<void>;
   onStrategyShutdown: (strategyAddress: Address, logs: Log[], txHash?: string) => Promise<void>;
+  onFundingEvent?: (strategyAddress: Address, logs: Log[], txHash?: string) => Promise<void>;
 }
 
 export class StrategyWatcher {
@@ -25,13 +26,17 @@ export class StrategyWatcher {
   private publicClient: PublicClient;
   private onStrategyStarted: StrategyWatcherConfig['onStrategyStarted'];
   private onStrategyShutdown: StrategyWatcherConfig['onStrategyShutdown'];
-  private unwatch: WatchEventReturnType | null = null;
+  private onFundingEvent?: StrategyWatcherConfig['onFundingEvent'];
+  private unwatchLifecycle: WatchEventReturnType | null = null;
+  private unwatchFunding: WatchBlockNumberReturnType | null = null;
+  private lastProcessedBlock: bigint = 0n;
 
   constructor(config: StrategyWatcherConfig) {
     this.logger = config.logger;
     this.publicClient = config.publicClient;
     this.onStrategyStarted = config.onStrategyStarted;
     this.onStrategyShutdown = config.onStrategyShutdown;
+    this.onFundingEvent = config.onFundingEvent;
   }
 
   /**
@@ -42,7 +47,7 @@ export class StrategyWatcher {
 
     // Watch for both StrategyStarted and StrategyShutdown events
     // from ANY address (no address filter)
-    this.unwatch = this.publicClient.watchEvent({
+    this.unwatchLifecycle = this.publicClient.watchEvent({
       events: STRATEGY_LIFECYCLE_ABI.filter((item) => item.type === 'event'),
       onLogs: async (logs) => {
         for (const log of logs) {
@@ -50,9 +55,52 @@ export class StrategyWatcher {
         }
       },
       onError: (error) => {
-        this.logger.error({ error }, 'Strategy watcher error');
+        this.logger.error({ error }, 'Strategy lifecycle watcher error');
       },
     });
+
+    // Watch for funding events (EthBalanceUpdateRequested) using block polling
+    // This is more reliable than watchEvent with HTTP transport
+    if (this.onFundingEvent) {
+      // Get current block to start watching from
+      this.lastProcessedBlock = await this.publicClient.getBlockNumber();
+      this.logger.info({ startBlock: this.lastProcessedBlock.toString() }, 'Starting funding event watcher from block');
+
+      this.unwatchFunding = this.publicClient.watchBlockNumber({
+        onBlockNumber: async (blockNumber) => {
+          if (blockNumber <= this.lastProcessedBlock) {
+            return; // Already processed
+          }
+
+          try {
+            // Get all funding events in the new blocks
+            const logs = await this.publicClient.getLogs({
+              events: FUNDING_EVENTS_ABI,
+              fromBlock: this.lastProcessedBlock + 1n,
+              toBlock: blockNumber,
+            });
+
+            if (logs.length > 0) {
+              this.logger.info(
+                { logCount: logs.length, fromBlock: (this.lastProcessedBlock + 1n).toString(), toBlock: blockNumber.toString() },
+                'Received funding event logs from block poll'
+              );
+              for (const log of logs) {
+                await this.handleFundingEvent(log);
+              }
+            }
+
+            this.lastProcessedBlock = blockNumber;
+          } catch (error) {
+            this.logger.error({ error, blockNumber: blockNumber.toString() }, 'Failed to fetch funding logs');
+          }
+        },
+        onError: (error) => {
+          this.logger.error({ error }, 'Block number watcher error');
+        },
+      });
+      this.logger.info('Funding event watcher started (using block polling)');
+    }
 
     this.logger.info('Strategy watcher started');
   }
@@ -126,6 +174,62 @@ export class StrategyWatcher {
           error,
         },
         'Failed to process strategy event'
+      );
+    }
+  }
+
+  /**
+   * Handle a funding event (EthBalanceUpdateRequested)
+   */
+  private async handleFundingEvent(log: Log): Promise<void> {
+    const strategyAddress = log.address;
+    const txHash = log.transactionHash;
+
+    if (!txHash) {
+      this.logger.warn({ log }, 'Funding log missing transaction hash');
+      return;
+    }
+
+    this.logger.info(
+      {
+        strategy: strategyAddress,
+        txHash,
+      },
+      'Funding event detected (EthBalanceUpdateRequested)'
+    );
+
+    try {
+      // Fetch full transaction receipt to get ALL logs from this tx
+      const receipt = await this.publicClient.getTransactionReceipt({
+        hash: txHash,
+      });
+
+      // Filter logs from this strategy only
+      const strategyLogs = receipt.logs.filter(
+        (l) => l.address.toLowerCase() === strategyAddress.toLowerCase()
+      );
+
+      this.logger.debug(
+        {
+          strategy: strategyAddress,
+          totalLogs: receipt.logs.length,
+          strategyLogs: strategyLogs.length,
+        },
+        'Funding event transaction receipt fetched'
+      );
+
+      // Call the funding event handler
+      if (this.onFundingEvent) {
+        await this.onFundingEvent(strategyAddress, strategyLogs, txHash);
+      }
+    } catch (error) {
+      this.logger.error(
+        {
+          strategy: strategyAddress,
+          txHash,
+          error,
+        },
+        'Failed to process funding event'
       );
     }
   }
@@ -230,10 +334,14 @@ export class StrategyWatcher {
    * Stop watching for strategy events
    */
   async stop(): Promise<void> {
-    if (this.unwatch) {
-      this.unwatch();
-      this.unwatch = null;
-      this.logger.info('Strategy watcher stopped');
+    if (this.unwatchLifecycle) {
+      this.unwatchLifecycle();
+      this.unwatchLifecycle = null;
     }
+    if (this.unwatchFunding) {
+      this.unwatchFunding();
+      this.unwatchFunding = null;
+    }
+    this.logger.info('Strategy watcher stopped');
   }
 }

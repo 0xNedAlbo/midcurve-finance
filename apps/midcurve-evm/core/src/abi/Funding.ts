@@ -1,34 +1,13 @@
 /**
  * ABI for IFunding interface
  * From contracts/src/interfaces/IFunding.sol
+ *
+ * Note: Withdrawals are now handled via signed requests to Core's WithdrawalApi,
+ * not via contract events. This simplifies the flow and allows withdrawals
+ * regardless of strategy state.
  */
 export const FUNDING_ABI = [
   // ============= Events =============
-
-  // Erc20WithdrawRequested(bytes32 indexed requestId, uint256 indexed chainId, address indexed token, uint256 amount, address recipient)
-  {
-    type: 'event',
-    name: 'Erc20WithdrawRequested',
-    inputs: [
-      { name: 'requestId', type: 'bytes32', indexed: true },
-      { name: 'chainId', type: 'uint256', indexed: true },
-      { name: 'token', type: 'address', indexed: true },
-      { name: 'amount', type: 'uint256', indexed: false },
-      { name: 'recipient', type: 'address', indexed: false },
-    ],
-  },
-
-  // EthWithdrawRequested(bytes32 indexed requestId, uint256 indexed chainId, uint256 amount, address recipient)
-  {
-    type: 'event',
-    name: 'EthWithdrawRequested',
-    inputs: [
-      { name: 'requestId', type: 'bytes32', indexed: true },
-      { name: 'chainId', type: 'uint256', indexed: true },
-      { name: 'amount', type: 'uint256', indexed: false },
-      { name: 'recipient', type: 'address', indexed: false },
-    ],
-  },
 
   // EthBalanceUpdateRequested(bytes32 indexed requestId, uint256 indexed chainId)
   {
@@ -41,31 +20,6 @@ export const FUNDING_ABI = [
   },
 
   // ============= Owner Functions =============
-
-  // withdrawErc20(uint256 chainId, address token, uint256 amount) returns (bytes32 requestId)
-  {
-    type: 'function',
-    name: 'withdrawErc20',
-    inputs: [
-      { name: 'chainId', type: 'uint256' },
-      { name: 'token', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: 'requestId', type: 'bytes32' }],
-    stateMutability: 'nonpayable',
-  },
-
-  // withdrawEth(uint256 chainId, uint256 amount) returns (bytes32 requestId)
-  {
-    type: 'function',
-    name: 'withdrawEth',
-    inputs: [
-      { name: 'chainId', type: 'uint256' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ name: 'requestId', type: 'bytes32' }],
-    stateMutability: 'nonpayable',
-  },
 
   // updateEthBalance(uint256 chainId) returns (bytes32 requestId)
   {

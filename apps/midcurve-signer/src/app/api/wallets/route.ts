@@ -1,18 +1,18 @@
 /**
  * POST /api/wallets - Create Automation Wallet
  *
- * Creates a new EVM automation wallet for a user.
+ * Creates a new EVM automation wallet for a strategy.
  * The wallet is backed by AWS KMS (or local encryption in dev).
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
- * - Body: { userId: string, label: string }
+ * - Body: { strategyAddress: string, userId: string, label: string }
  *
  * Response:
- * - 201: { success: true, wallet: { id, userId, walletAddress, label, keyProvider, createdAt } }
+ * - 201: { success: true, wallet: { id, strategyAddress, userId, walletAddress, label, keyProvider, createdAt } }
  * - 400: Invalid request body
  * - 401: Unauthorized
- * - 409: User already has a wallet
+ * - 409: Strategy already has a wallet
  * - 500: Server error
  */
 
@@ -24,11 +24,13 @@ import {
   type AuthenticatedRequest,
 } from '@/middleware/internal-auth';
 import { walletService, WalletServiceError } from '@/services/wallet-service';
+import type { Address } from 'viem';
 
 /**
  * Request body schema
  */
 const CreateWalletSchema = z.object({
+  strategyAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid strategy address'),
   userId: z.string().min(1, 'userId is required'),
   label: z.string().min(1, 'label is required').max(100, 'label too long'),
 });
@@ -70,13 +72,18 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   }
 
   try {
-    const wallet = await walletService.createWallet(validation.data);
+    const wallet = await walletService.createWallet({
+      strategyAddress: validation.data.strategyAddress as Address,
+      userId: validation.data.userId,
+      label: validation.data.label,
+    });
 
     return NextResponse.json(
       {
         success: true,
         wallet: {
           id: wallet.id,
+          strategyAddress: wallet.strategyAddress,
           userId: wallet.userId,
           walletAddress: wallet.walletAddress,
           label: wallet.label,

@@ -241,3 +241,45 @@ export function isEthBalanceUpdateRequest(
 ): request is EthBalanceUpdateRequest {
   return request.operation === 'ethBalanceUpdate';
 }
+
+// ============= Signed Withdrawal Request Types =============
+
+/**
+ * Message payload for signed withdrawal requests (EIP-712)
+ */
+export interface WithdrawRequestMessage {
+  /** The strategy address requesting withdrawal */
+  strategyAddress: Address;
+  /** The chain to withdraw from */
+  chainId: bigint;
+  /** The token address (ETH_ADDRESS for native ETH) */
+  token: Address;
+  /** The amount to withdraw */
+  amount: bigint;
+  /** The recipient address */
+  recipient: Address;
+  /** Timestamp nonce for replay protection (Date.now()) */
+  nonce: bigint;
+  /** Expiry timestamp (nonce + validity window) */
+  expiry: bigint;
+}
+
+/**
+ * Signed withdrawal request (message + signature)
+ */
+export interface SignedWithdrawRequest {
+  /** The withdrawal request message */
+  message: WithdrawRequestMessage;
+  /** EIP-712 signature from strategy owner */
+  signature: Hex;
+}
+
+/**
+ * Verified signed withdrawal request (after signature verification)
+ */
+export interface VerifiedWithdrawRequest extends SignedWithdrawRequest {
+  /** The recovered owner address from signature */
+  recoveredOwner: Address;
+  /** Request ID (generated from message hash) */
+  requestId: Hex;
+}

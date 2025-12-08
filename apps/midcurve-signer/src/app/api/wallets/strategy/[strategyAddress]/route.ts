@@ -1,27 +1,29 @@
 /**
- * GET /api/wallets/[userId] - Get User's Automation Wallets
+ * GET /api/wallets/strategy/[strategyAddress] - Get Strategy's Automation Wallet
  *
- * Retrieves ALL automation wallets for a specific user (across all strategies).
+ * Retrieves the automation wallet for a specific strategy.
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
- * - Path: userId
+ * - Path: strategyAddress (0x... EVM address)
  *
  * Response:
- * - 200: { success: true, wallets: [{ strategyAddress, walletAddress, ... }, ...] }
+ * - 200: { success: true, wallet: { id, strategyAddress, userId, walletAddress, ... } }
  * - 401: Unauthorized
+ * - 404: Wallet not found
  * - 500: Server error
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { walletService } from '@/services/wallet-service';
+import type { Address } from 'viem';
 
 interface RouteContext {
-  params: Promise<{ userId: string }>;
+  params: Promise<{ strategyAddress: string }>;
 }
 
 /**
- * GET /api/wallets/[userId]
+ * GET /api/wallets/strategy/[strategyAddress]
  */
 export async function GET(
   request: NextRequest,
@@ -56,14 +58,37 @@ export async function GET(
   }
 
   const params = await context.params;
-  const { userId } = params;
+  const { strategyAddress } = params;
+
+  // Validate address format
+  if (!/^0x[a-fA-F0-9]{40}$/.test(strategyAddress)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'INVALID_ADDRESS',
+        message: 'Invalid strategy address format',
+      },
+      { status: 400 }
+    );
+  }
 
   try {
-    const wallets = await walletService.getWalletsByUserId(userId);
+    const wallet = await walletService.getWalletByStrategyAddress(strategyAddress as Address);
+
+    if (!wallet) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'NOT_FOUND',
+          message: 'Wallet not found for this strategy',
+        },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      wallets: wallets.map((wallet) => ({
+      wallet: {
         id: wallet.id,
         strategyAddress: wallet.strategyAddress,
         userId: wallet.userId,
@@ -74,15 +99,15 @@ export async function GET(
         createdAt: wallet.createdAt.toISOString(),
         updatedAt: wallet.updatedAt.toISOString(),
         lastUsedAt: wallet.lastUsedAt?.toISOString() ?? null,
-      })),
+      },
     });
   } catch (error) {
-    console.error('Error fetching wallets:', error);
+    console.error('Error fetching wallet:', error);
     return NextResponse.json(
       {
         success: false,
         error: 'INTERNAL_ERROR',
-        message: 'Failed to fetch wallets',
+        message: 'Failed to fetch wallet',
       },
       { status: 500 }
     );

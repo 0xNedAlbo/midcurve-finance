@@ -17,8 +17,9 @@ CONTRACTS_DIR="$PROJECT_DIR/contracts"
 
 RPC_URL="${1:-http://localhost:8545}"
 
-# Core private key (address 0x1 has this trivial private key)
-CORE_PRIVATE_KEY="0x0000000000000000000000000000000000000000000000000000000000000001"
+# Core private key (Foundry's default account 0)
+# Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+CORE_PRIVATE_KEY="${CORE_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 
 echo "=== Deploying Store Contracts ==="
 echo "RPC URL: $RPC_URL"
