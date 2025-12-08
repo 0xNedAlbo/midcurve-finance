@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { execSync, spawnSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { resolve, basename, dirname } from 'path';
-import { createPublicClient, http, type Address } from 'viem';
+import { createPublicClient, http, type Address, type Hex } from 'viem';
 import { semseeChain } from '../../vm/chain.js';
 import { CORE_PRIVATE_KEY } from '../../utils/addresses.js';
 import { STRATEGY_ABI, STRATEGY_STATES } from '../abis.js';
@@ -12,7 +12,8 @@ export const deployCommand = new Command('deploy')
   .argument('<path>', 'Path to strategy .sol file (relative to current directory)')
   .option('-n, --name <name>', 'Contract name (default: extracted from file)')
   .option('-s, --start', 'Start the strategy after deployment')
-  .action(async (pathArg: string, options: { name?: string; start?: boolean }) => {
+  .option('-k, --key <privateKey>', 'Private key of deployer/owner (default: OWNER_PRIVATE_KEY env var)', process.env.OWNER_PRIVATE_KEY)
+  .action(async (pathArg: string, options: { name?: string; start?: boolean; key?: string }) => {
     // Resolve the path relative to original working directory (before cd into core/)
     const cwd = process.env.SEMSEE_CWD || process.cwd();
     const fullPath = resolve(cwd, pathArg);
@@ -68,6 +69,9 @@ export const deployCommand = new Command('deploy')
       process.exit(1);
     }
 
+    // Determine which private key to use for deployment
+    const deployerKey = (options.key as Hex) || CORE_PRIVATE_KEY;
+
     console.log(`\n📦 Deploying ${contractName}...`);
 
     try {
@@ -78,7 +82,7 @@ export const deployCommand = new Command('deploy')
           'create',
           `${relativePath}:${contractName}`,
           '--rpc-url', 'http://localhost:8545',
-          '--private-key', CORE_PRIVATE_KEY,
+          '--private-key', deployerKey,
           '--json',
         ],
         {
@@ -131,7 +135,8 @@ export const deployCommand = new Command('deploy')
         const { createWalletClient } = await import('viem');
         const { privateKeyToAccount } = await import('viem/accounts');
 
-        const account = privateKeyToAccount(CORE_PRIVATE_KEY);
+        // Use the same key that deployed (owner)
+        const account = privateKeyToAccount(deployerKey);
         const walletClient = createWalletClient({
           account,
           chain: semseeChain,

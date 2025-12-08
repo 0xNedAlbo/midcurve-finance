@@ -124,6 +124,36 @@ abstract contract FundingMixin is CoreControlled, IFunding {
         FundingLib.emitEthBalanceUpdateRequested(requestId, chainId);
     }
 
+    // =========== Token Watchlist Management (Owner Only) ===========
+
+    /**
+     * @notice Add a token to the deposit watchlist
+     * @dev Core will start monitoring Transfer events for this token to the automation wallet.
+     *      Call this after deploying/starting the strategy to enable deposit detection.
+     * @param chainId The chain where the token is deployed (e.g., 1 for Ethereum, 42161 for Arbitrum)
+     * @param token The ERC-20 token address to watch for deposits
+     */
+    function addWatchedToken(
+        uint256 chainId,
+        address token
+    ) external fundingOnlyOwner {
+        FundingLib.emitTokenWatchlistAdd(chainId, token);
+    }
+
+    /**
+     * @notice Remove a token from the deposit watchlist
+     * @dev Core will stop monitoring Transfer events for this token.
+     *      Use when you no longer want to receive deposits of this token.
+     * @param chainId The chain where the token is deployed
+     * @param token The ERC-20 token address to stop watching
+     */
+    function removeWatchedToken(
+        uint256 chainId,
+        address token
+    ) external fundingOnlyOwner {
+        FundingLib.emitTokenWatchlistRemove(chainId, token);
+    }
+
     // =========== IFunding: Callbacks (Core Only) ===========
 
     /**

@@ -45,8 +45,8 @@ export const GAS_LIMITS = {
   // User-initiated actions
   USER_ACTION: 500_000n,
 
-  // Store update operations
-  STORE_UPDATE: 100_000n,
+  // Store update operations (BalanceStore.updateBalance uses ~180k gas for new token)
+  STORE_UPDATE: 250_000n,
 } as const;
 
 /**

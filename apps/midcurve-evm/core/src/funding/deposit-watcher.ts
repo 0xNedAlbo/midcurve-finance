@@ -152,9 +152,33 @@ export class DepositWatcher {
     const registration = this.strategies.get(strategyAddress);
     if (registration) {
       registration.watchedTokens.add(token);
-      this.logger.debug(
-        { strategy: strategyAddress, token },
+      this.logger.info(
+        { strategy: strategyAddress, token, tokenCount: registration.watchedTokens.size },
         'Added watched token for strategy'
+      );
+    } else {
+      this.logger.warn(
+        { strategy: strategyAddress, token },
+        'Cannot add watched token - strategy not registered'
+      );
+    }
+  }
+
+  /**
+   * Remove a token from watch for a specific strategy
+   */
+  removeWatchedToken(strategyAddress: Address, token: Address): void {
+    const registration = this.strategies.get(strategyAddress);
+    if (registration) {
+      registration.watchedTokens.delete(token);
+      this.logger.info(
+        { strategy: strategyAddress, token, tokenCount: registration.watchedTokens.size },
+        'Removed watched token for strategy'
+      );
+    } else {
+      this.logger.warn(
+        { strategy: strategyAddress, token },
+        'Cannot remove watched token - strategy not registered'
       );
     }
   }

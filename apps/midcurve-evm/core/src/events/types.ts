@@ -1,4 +1,4 @@
-import type { Hex, Log } from 'viem';
+import type { Address, Hex, Log } from 'viem';
 import { keccak256, toHex } from 'viem';
 import { LogLevel } from '../utils/logger.js';
 
@@ -42,6 +42,13 @@ export const EVENT_TOPICS = {
   ETH_BALANCE_UPDATE_REQUESTED: eventSignature(
     'EthBalanceUpdateRequested(bytes32,uint256)'
   ),
+
+  // Token watchlist events (from FundingLib)
+  // TokenWatchlistAdd(uint256 indexed chainId, address indexed token)
+  TOKEN_WATCHLIST_ADD: eventSignature('TokenWatchlistAdd(uint256,address)'),
+
+  // TokenWatchlistRemove(uint256 indexed chainId, address indexed token)
+  TOKEN_WATCHLIST_REMOVE: eventSignature('TokenWatchlistRemove(uint256,address)'),
 } as const;
 
 /**
@@ -130,6 +137,26 @@ export interface EthBalanceUpdateRequestedEvent {
 }
 
 /**
+ * Decoded token watchlist add event
+ */
+export interface TokenWatchlistAddEvent {
+  type: 'TokenWatchlistAdd';
+  chainId: bigint;
+  token: Address;
+  log: Log;
+}
+
+/**
+ * Decoded token watchlist remove event
+ */
+export interface TokenWatchlistRemoveEvent {
+  type: 'TokenWatchlistRemove';
+  chainId: bigint;
+  token: Address;
+  log: Log;
+}
+
+/**
  * Union of all decoded event types
  */
 export type DecodedEvent =
@@ -137,7 +164,9 @@ export type DecodedEvent =
   | UnsubscriptionRequestedEvent
   | ActionRequestedEvent
   | LogMessageEvent
-  | EthBalanceUpdateRequestedEvent;
+  | EthBalanceUpdateRequestedEvent
+  | TokenWatchlistAddEvent
+  | TokenWatchlistRemoveEvent;
 
 /**
  * Unknown log that couldn't be decoded
@@ -192,7 +221,7 @@ export const STRATEGY_LIFECYCLE_ABI = [
 ] as const;
 
 /**
- * ABI for funding events (EthBalanceUpdateRequested)
+ * ABI for funding events (EthBalanceUpdateRequested, TokenWatchlistAdd, TokenWatchlistRemove)
  */
 export const FUNDING_EVENTS_ABI = [
   {
@@ -201,6 +230,22 @@ export const FUNDING_EVENTS_ABI = [
     inputs: [
       { name: 'requestId', type: 'bytes32', indexed: true },
       { name: 'chainId', type: 'uint256', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'TokenWatchlistAdd',
+    inputs: [
+      { name: 'chainId', type: 'uint256', indexed: true },
+      { name: 'token', type: 'address', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'TokenWatchlistRemove',
+    inputs: [
+      { name: 'chainId', type: 'uint256', indexed: true },
+      { name: 'token', type: 'address', indexed: true },
     ],
   },
 ] as const;

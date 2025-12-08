@@ -7,7 +7,7 @@ import { CORE_PRIVATE_KEY, CORE_ADDRESS } from '../../utils/addresses.js';
 export const fundCommand = new Command('fund')
   .description('Fund an account with ETH from the Core account')
   .argument('<address>', 'Address to fund')
-  .argument('[amount]', 'Amount in ETH (default: 100)', '100')
+  .argument('[amount]', 'Amount in ETH (default: 0.1)', '0.1')
   .action(async (address: string, amount: string) => {
     const targetAddress = address as Address;
     const ethAmount = parseEther(amount);

@@ -10,13 +10,13 @@
     "semsee": "./dist/cli/index.js"
   },
   "scripts": {
-    "start": "tsx src/main.ts",
-    "dev": "tsx watch src/main.ts",
+    "start": "tsx --env-file=.env src/main.ts",
+    "dev": "tsx --env-file=.env watch src/main.ts",
     "build": "tsc",
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
-    "cli": "tsx src/cli/index.ts"
+    "cli": "tsx --env-file=.env src/cli/index.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

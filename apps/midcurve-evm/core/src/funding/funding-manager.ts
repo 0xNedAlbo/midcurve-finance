@@ -241,9 +241,29 @@ export class FundingManager {
 
   /**
    * Add a token to watch for a strategy
+   * @param strategyAddress The strategy that wants to watch this token
+   * @param chainId The chain where the token is deployed (for logging)
+   * @param token The ERC-20 token address to watch
    */
-  addWatchedToken(strategyAddress: Address, token: Address): void {
+  addWatchedToken(strategyAddress: Address, chainId: bigint, token: Address): void {
     this.depositWatcher.addWatchedToken(strategyAddress, token);
+    this.logger.info(
+      { strategy: strategyAddress, chainId: chainId.toString(), token },
+      'Token added to watchlist'
+    );
+  }
+
+  /**
+   * Remove a token from watch for a strategy
+   * @param strategyAddress The strategy that wants to stop watching this token
+   * @param token The ERC-20 token address to stop watching
+   */
+  removeWatchedToken(strategyAddress: Address, token: Address): void {
+    this.depositWatcher.removeWatchedToken(strategyAddress, token);
+    this.logger.info(
+      { strategy: strategyAddress, token },
+      'Token removed from watchlist'
+    );
   }
 
   /**

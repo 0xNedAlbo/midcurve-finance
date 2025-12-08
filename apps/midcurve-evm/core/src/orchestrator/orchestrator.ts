@@ -18,7 +18,10 @@ import {
   FundingManager,
   FundingExecutor,
   DepositWatcher,
+  WithdrawalApi,
+  WithdrawalServer,
 } from '../funding/index.js';
+import { StrategyState, STRATEGY_LIFECYCLE_ABI } from '../events/types.js';
 import { FUNDING_ABI } from '../abi/Funding.js';
 import { MailboxManager } from './mailbox-manager.js';
 import { StrategyWatcher } from './strategy-watcher.js';
@@ -129,6 +132,8 @@ export class CoreOrchestrator {
   private storeSynchronizer: StoreSynchronizer;
   private effectEngine: EffectEngine;
   private fundingManager?: FundingManager;
+  private withdrawalApi?: WithdrawalApi;
+  private withdrawalServer?: WithdrawalServer;
   private mailboxManager: MailboxManager;
   private strategyWatcher: StrategyWatcher;
   private callbackGasLimit: bigint;
@@ -208,6 +213,56 @@ export class CoreOrchestrator {
         // notifyStrategyCallback - will call strategy via vmRunner
         (strategyAddress, functionName, args) =>
           this.callStrategyFunction(strategyAddress, functionName, args)
+      );
+
+      // Initialize withdrawal API and server
+      this.withdrawalApi = new WithdrawalApi(
+        fundingExecutor,
+        this.logger.child({ component: 'withdrawal-api' }),
+        // getStrategyOwner callback
+        async (strategyAddress) => {
+          const owner = this.strategyOwners.get(strategyAddress);
+          if (!owner) {
+            // Fetch owner if not cached
+            const fetchedOwner = await this.vmRunner.getPublicClient().readContract({
+              address: strategyAddress,
+              abi: STRATEGY_LIFECYCLE_ABI,
+              functionName: 'owner',
+            }) as Address;
+            this.strategyOwners.set(strategyAddress, fetchedOwner);
+            return fetchedOwner;
+          }
+          return owner;
+        },
+        // isStrategyRunning callback
+        async (strategyAddress) => {
+          try {
+            const state = await this.vmRunner.getPublicClient().readContract({
+              address: strategyAddress,
+              abi: STRATEGY_LIFECYCLE_ABI,
+              functionName: 'state',
+            });
+            return state === StrategyState.Running;
+          } catch {
+            return false;
+          }
+        },
+        // updateBalance callback - will be set in initialize()
+        undefined,
+        // notifyWithdrawComplete callback
+        async (strategyAddress, requestId, success, txHash, errorMessage) => {
+          await this.callStrategyFunction(strategyAddress, 'onWithdrawComplete', [
+            requestId,
+            success,
+            txHash,
+            errorMessage,
+          ]);
+        }
+      );
+
+      this.withdrawalServer = new WithdrawalServer(
+        this.withdrawalApi,
+        this.logger.child({ component: 'withdrawal-server' })
       );
 
       this.logger.info(
@@ -315,6 +370,18 @@ export class CoreOrchestrator {
 
       await this.fundingManager.start();
       this.logger.info('Funding manager started');
+    }
+
+    // Start withdrawal server if configured
+    if (this.withdrawalApi && this.withdrawalServer) {
+      // Wire up balance update callback
+      this.withdrawalApi.setUpdateBalanceCallback(
+        (strategyAddress, chainId, token, balance) =>
+          this.storeSynchronizer.updateBalance(strategyAddress, chainId, token, balance)
+      );
+
+      await this.withdrawalServer.start();
+      this.logger.info({ port: this.withdrawalServer.getPort() }, 'Withdrawal server started');
     }
 
     this.isInitialized = true;
@@ -513,6 +580,32 @@ export class CoreOrchestrator {
 
         case 'EthBalanceUpdateRequested':
           await this.processFundingEvent(strategyAddress, decoded);
+          break;
+
+        case 'TokenWatchlistAdd':
+          if (this.fundingManager) {
+            this.fundingManager.addWatchedToken(
+              strategyAddress,
+              decoded.chainId,
+              decoded.token
+            );
+          } else {
+            this.logger.warn(
+              { strategy: strategyAddress, token: decoded.token },
+              'TokenWatchlistAdd event received but FundingManager not configured'
+            );
+          }
+          break;
+
+        case 'TokenWatchlistRemove':
+          if (this.fundingManager) {
+            this.fundingManager.removeWatchedToken(strategyAddress, decoded.token);
+          } else {
+            this.logger.warn(
+              { strategy: strategyAddress, token: decoded.token },
+              'TokenWatchlistRemove event received but FundingManager not configured'
+            );
+          }
           break;
       }
     }
@@ -950,6 +1043,14 @@ export class CoreOrchestrator {
     // Stop funding manager
     if (this.fundingManager) {
       this.fundingManager.stop();
+    }
+
+    // Stop withdrawal server and API
+    if (this.withdrawalServer) {
+      await this.withdrawalServer.stop();
+    }
+    if (this.withdrawalApi) {
+      this.withdrawalApi.stop();
     }
 
     // Wait for pending work to complete (with timeout)

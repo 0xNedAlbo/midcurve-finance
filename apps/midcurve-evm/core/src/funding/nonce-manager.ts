@@ -73,6 +73,9 @@ export class NonceManager {
    * Get and increment nonce atomically.
    * Must be called before sending a transaction.
    *
+   * @deprecated Use reserveNonce() for safer nonce management.
+   * This method increments before returning, so failures leave nonce out of sync.
+   *
    * @throws Error if chain nonce is not initialized
    */
   getNextNonce(chainId: number): bigint {
@@ -85,6 +88,49 @@ export class NonceManager {
 
     this.logger.debug({ chainId, nonce: current.toString() }, 'Assigned nonce');
     return current;
+  }
+
+  /**
+   * Reserve a nonce for use without incrementing.
+   * Call commit() after successful transaction submission to increment.
+   * Call release() if the transaction fails before submission.
+   *
+   * This pattern ensures the nonce stays in sync with on-chain state
+   * even when transactions fail for non-nonce reasons (network errors,
+   * insufficient funds, gas estimation failures, etc.)
+   *
+   * @throws Error if chain nonce is not initialized
+   * @returns Object with nonce value and commit/release callbacks
+   */
+  reserveNonce(chainId: number): { nonce: bigint; commit: () => void; release: () => void } {
+    if (!this.initialized.has(chainId)) {
+      throw new Error(`Chain ${chainId} nonce not initialized. Call initializeChain() first.`);
+    }
+
+    const current = this.nonces.get(chainId)!;
+
+    this.logger.debug({ chainId, nonce: current.toString() }, 'Reserved nonce');
+
+    return {
+      nonce: current,
+      commit: () => {
+        // Only increment if the nonce matches (wasn't reset in between)
+        const currentNonce = this.nonces.get(chainId);
+        if (currentNonce === current) {
+          this.nonces.set(chainId, current + 1n);
+          this.logger.debug({ chainId, nonce: current.toString() }, 'Committed nonce');
+        } else {
+          this.logger.debug(
+            { chainId, reserved: current.toString(), current: currentNonce?.toString() },
+            'Nonce was reset, skipping commit'
+          );
+        }
+      },
+      release: () => {
+        // Nothing to do - nonce was never incremented
+        this.logger.debug({ chainId, nonce: current.toString() }, 'Released nonce (not used)');
+      },
+    };
   }
 
   /**

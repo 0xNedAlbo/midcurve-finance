@@ -35,6 +35,18 @@ library FundingLib {
         uint256 indexed chainId
     );
 
+    /// @notice Emitted when a token is added to the watchlist for deposit detection
+    event TokenWatchlistAdd(
+        uint256 indexed chainId,
+        address indexed token
+    );
+
+    /// @notice Emitted when a token is removed from the watchlist
+    event TokenWatchlistRemove(
+        uint256 indexed chainId,
+        address indexed token
+    );
+
     /**
      * @notice Emit ETH balance update request event
      * @param requestId Unique identifier for tracking this request
@@ -45,5 +57,31 @@ library FundingLib {
         uint256 chainId
     ) internal {
         emit EthBalanceUpdateRequested(requestId, chainId);
+    }
+
+    /**
+     * @notice Emit token watchlist add event
+     * @dev Core will start watching for Transfer events of this token to automation wallet
+     * @param chainId The chain where the token is deployed
+     * @param token The ERC-20 token address to watch
+     */
+    function emitTokenWatchlistAdd(
+        uint256 chainId,
+        address token
+    ) internal {
+        emit TokenWatchlistAdd(chainId, token);
+    }
+
+    /**
+     * @notice Emit token watchlist remove event
+     * @dev Core will stop watching for Transfer events of this token
+     * @param chainId The chain where the token is deployed
+     * @param token The ERC-20 token address to stop watching
+     */
+    function emitTokenWatchlistRemove(
+        uint256 chainId,
+        address token
+    ) internal {
+        emit TokenWatchlistRemove(chainId, token);
     }
 }

@@ -179,7 +179,7 @@ export class StrategyWatcher {
   }
 
   /**
-   * Handle a funding event (EthBalanceUpdateRequested)
+   * Handle a funding event (EthBalanceUpdateRequested, TokenWatchlistAdd, TokenWatchlistRemove)
    */
   private async handleFundingEvent(log: Log): Promise<void> {
     const strategyAddress = log.address;
@@ -194,8 +194,9 @@ export class StrategyWatcher {
       {
         strategy: strategyAddress,
         txHash,
+        topic: log.topics[0],
       },
-      'Funding event detected (EthBalanceUpdateRequested)'
+      'Funding event detected'
     );
 
     try {

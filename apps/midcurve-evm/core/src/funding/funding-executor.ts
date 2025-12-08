@@ -152,25 +152,28 @@ export class FundingExecutor {
     recipient: Address
   ): Promise<FundingResult> {
     const chainId = Number(params.chainId);
+    const clients = this.getChainClients(chainId);
+
+    // Reserve nonce without incrementing - only commit on successful submission
+    const { nonce, commit, release } = this.nonceManager.reserveNonce(chainId);
+
+    this.logger.info(
+      {
+        requestId,
+        chainId,
+        token: params.token,
+        amount: params.amount.toString(),
+        recipient,
+        nonce: nonce.toString(),
+      },
+      'Executing ERC-20 withdrawal'
+    );
+
+    let hash: Hex | undefined;
 
     try {
-      const clients = this.getChainClients(chainId);
-      const nonce = this.nonceManager.getNextNonce(chainId);
-
-      this.logger.info(
-        {
-          requestId,
-          chainId,
-          token: params.token,
-          amount: params.amount.toString(),
-          recipient,
-          nonce: nonce.toString(),
-        },
-        'Executing ERC-20 withdrawal'
-      );
-
       // Execute the transfer with explicit nonce
-      const hash = await clients.wallet.writeContract({
+      hash = await clients.wallet.writeContract({
         address: params.token,
         abi: ERC20_ABI,
         functionName: 'transfer',
@@ -178,12 +181,43 @@ export class FundingExecutor {
         nonce: Number(nonce),
       });
 
+      // Transaction submitted successfully - commit the nonce
+      commit();
+
       this.logger.info(
         { requestId, txHash: hash, nonce: nonce.toString() },
         'ERC-20 withdrawal transaction sent'
       );
+    } catch (error) {
+      // Transaction failed before submission - release the nonce (don't increment)
+      release();
 
-      // Wait for confirmation
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+
+      // Check if it's a nonce error and reset if needed
+      if (isNonceError(error)) {
+        this.logger.warn(
+          { requestId, chainId, error: errorMessage },
+          'Nonce error detected, resetting nonce for chain'
+        );
+        await this.nonceManager.resetChain(chainId);
+      }
+
+      this.logger.error(
+        { requestId, chainId, error: errorMessage },
+        'ERC-20 withdrawal execution failed'
+      );
+
+      return {
+        requestId,
+        success: false,
+        errorMessage,
+      };
+    }
+
+    // Wait for confirmation (nonce already committed at this point)
+    try {
       const receipt = await clients.public.waitForTransactionReceipt({ hash });
 
       if (receipt.status === 'success') {
@@ -214,23 +248,15 @@ export class FundingExecutor {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
 
-      // Check if it's a nonce error and reset if needed
-      if (isNonceError(error)) {
-        this.logger.warn(
-          { requestId, chainId, error: errorMessage },
-          'Nonce error detected, resetting nonce for chain'
-        );
-        await this.nonceManager.resetChain(chainId);
-      }
-
       this.logger.error(
-        { requestId, chainId, error: errorMessage },
-        'ERC-20 withdrawal execution failed'
+        { requestId, chainId, txHash: hash, error: errorMessage },
+        'Error waiting for ERC-20 withdrawal confirmation'
       );
 
       return {
         requestId,
         success: false,
+        txHash: hash,
         errorMessage,
       };
     }
@@ -245,35 +271,69 @@ export class FundingExecutor {
     recipient: Address
   ): Promise<FundingResult> {
     const chainId = Number(params.chainId);
+    const clients = this.getChainClients(chainId);
+
+    // Reserve nonce without incrementing - only commit on successful submission
+    const { nonce, commit, release } = this.nonceManager.reserveNonce(chainId);
+
+    this.logger.info(
+      {
+        requestId,
+        chainId,
+        amount: params.amount.toString(),
+        recipient,
+        nonce: nonce.toString(),
+      },
+      'Executing ETH withdrawal'
+    );
+
+    let hash: Hex | undefined;
 
     try {
-      const clients = this.getChainClients(chainId);
-      const nonce = this.nonceManager.getNextNonce(chainId);
-
-      this.logger.info(
-        {
-          requestId,
-          chainId,
-          amount: params.amount.toString(),
-          recipient,
-          nonce: nonce.toString(),
-        },
-        'Executing ETH withdrawal'
-      );
-
       // Execute the transfer with explicit nonce
-      const hash = await clients.wallet.sendTransaction({
+      hash = await clients.wallet.sendTransaction({
         to: recipient,
         value: params.amount,
         nonce: Number(nonce),
       });
 
+      // Transaction submitted successfully - commit the nonce
+      commit();
+
       this.logger.info(
         { requestId, txHash: hash, nonce: nonce.toString() },
         'ETH withdrawal transaction sent'
       );
+    } catch (error) {
+      // Transaction failed before submission - release the nonce (don't increment)
+      release();
 
-      // Wait for confirmation
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+
+      // Check if it's a nonce error and reset if needed
+      if (isNonceError(error)) {
+        this.logger.warn(
+          { requestId, chainId, error: errorMessage },
+          'Nonce error detected, resetting nonce for chain'
+        );
+        await this.nonceManager.resetChain(chainId);
+      }
+
+      this.logger.error(
+        { requestId, chainId, error: errorMessage },
+        'ETH withdrawal execution failed'
+      );
+
+      return {
+        requestId,
+        success: false,
+        errorMessage,
+      };
+    }
+
+    // Wait for confirmation (nonce already committed at this point)
+    try {
       const receipt = await clients.public.waitForTransactionReceipt({ hash });
 
       if (receipt.status === 'success') {
@@ -304,23 +364,15 @@ export class FundingExecutor {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
 
-      // Check if it's a nonce error and reset if needed
-      if (isNonceError(error)) {
-        this.logger.warn(
-          { requestId, chainId, error: errorMessage },
-          'Nonce error detected, resetting nonce for chain'
-        );
-        await this.nonceManager.resetChain(chainId);
-      }
-
       this.logger.error(
-        { requestId, chainId, error: errorMessage },
-        'ETH withdrawal execution failed'
+        { requestId, chainId, txHash: hash, error: errorMessage },
+        'Error waiting for ETH withdrawal confirmation'
       );
 
       return {
         requestId,
         success: false,
+        txHash: hash,
         errorMessage,
       };
     }

@@ -1,4 +1,4 @@
-import type { Hex, Log } from 'viem';
+import type { Address, Hex, Log } from 'viem';
 import { decodeAbiParameters } from 'viem';
 import { LogLevel } from '../utils/logger.js';
 import {
@@ -10,6 +10,8 @@ import {
   type ActionRequestedEvent,
   type LogMessageEvent,
   type EthBalanceUpdateRequestedEvent,
+  type TokenWatchlistAddEvent,
+  type TokenWatchlistRemoveEvent,
 } from './types.js';
 
 /**
@@ -53,6 +55,12 @@ export class EventDecoder {
 
       case EVENT_TOPICS.ETH_BALANCE_UPDATE_REQUESTED:
         return this.decodeEthBalanceUpdateRequested(log);
+
+      case EVENT_TOPICS.TOKEN_WATCHLIST_ADD:
+        return this.decodeTokenWatchlistAdd(log);
+
+      case EVENT_TOPICS.TOKEN_WATCHLIST_REMOVE:
+        return this.decodeTokenWatchlistRemove(log);
 
       default:
         return { type: 'Unknown', log };
@@ -202,6 +210,48 @@ export class EventDecoder {
       type: 'EthBalanceUpdateRequested',
       requestId,
       chainId,
+      log,
+    };
+  }
+
+  /**
+   * Decode TokenWatchlistAdd event
+   * Event: TokenWatchlistAdd(uint256 indexed chainId, address indexed token)
+   */
+  private decodeTokenWatchlistAdd(log: Log): TokenWatchlistAddEvent {
+    // topic[0] = event signature
+    // topic[1] = indexed chainId (uint256)
+    // topic[2] = indexed token (address, padded to 32 bytes)
+    const chainId = BigInt(log.topics[1] as Hex);
+    // Address is right-padded in topics, extract last 20 bytes (40 hex chars)
+    const tokenHex = log.topics[2] as Hex;
+    const token = ('0x' + tokenHex.slice(-40)) as Address;
+
+    return {
+      type: 'TokenWatchlistAdd',
+      chainId,
+      token,
+      log,
+    };
+  }
+
+  /**
+   * Decode TokenWatchlistRemove event
+   * Event: TokenWatchlistRemove(uint256 indexed chainId, address indexed token)
+   */
+  private decodeTokenWatchlistRemove(log: Log): TokenWatchlistRemoveEvent {
+    // topic[0] = event signature
+    // topic[1] = indexed chainId (uint256)
+    // topic[2] = indexed token (address, padded to 32 bytes)
+    const chainId = BigInt(log.topics[1] as Hex);
+    // Address is right-padded in topics, extract last 20 bytes (40 hex chars)
+    const tokenHex = log.topics[2] as Hex;
+    const token = ('0x' + tokenHex.slice(-40)) as Address;
+
+    return {
+      type: 'TokenWatchlistRemove',
+      chainId,
+      token,
       log,
     };
   }
