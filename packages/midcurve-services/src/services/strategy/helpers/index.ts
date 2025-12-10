@@ -21,4 +21,6 @@ export {
   parseMetricsFromDb,
   serializeMetricsToDb,
   StrategyQuoteTokenMismatchError,
+  PositionNoBasicCurrencyError,
+  StrategyBasicCurrencyMismatchError,
 } from './metrics-calculator.js';

@@ -10,5 +10,6 @@ export * from './types/index.js';
 
 // Export all utilities
 export * from './utils/math.js';
+export * from './utils/decimals.js';
 export * from './utils/evm/index.js';
 export * from './utils/uniswapv3/index.js';

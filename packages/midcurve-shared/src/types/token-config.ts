@@ -6,6 +6,10 @@
 
 import type { Token } from './token.js';
 
+// =============================================================================
+// ERC-20 TOKEN CONFIG
+// =============================================================================
+
 /**
  * ERC-20 token configuration (EVM-compatible chains)
  * Used for: Ethereum, BSC, Arbitrum, Base, Polygon, Optimism, etc.
@@ -22,7 +26,46 @@ export interface Erc20TokenConfig {
    * Examples: 1 (Ethereum), 56 (BSC), 137 (Polygon), 42161 (Arbitrum)
    */
   chainId: number;
+
+  /**
+   * Optional link to a basic currency for cross-platform aggregation.
+   * If set, this token's value is treated as equivalent to the basic currency (1:1).
+   *
+   * Examples:
+   * - USDC, USDT, DAI → USD basic currency
+   * - WETH → ETH basic currency
+   * - WBTC, cbBTC → BTC basic currency
+   *
+   * Note: Value-accruing tokens (stETH, rETH, wstETH) should NOT be linked
+   * since they don't have a 1:1 relationship with their underlying asset.
+   */
+  basicCurrencyId?: string;
 }
+
+// =============================================================================
+// BASIC CURRENCY CONFIG
+// =============================================================================
+
+/**
+ * Basic Currency configuration (platform-agnostic)
+ *
+ * Basic currencies are canonical units for cross-platform metrics aggregation.
+ * They represent abstract value units (USD, ETH, BTC) that platform-specific
+ * tokens can link to for normalization.
+ *
+ * All basic currencies use 18 decimals for consistent precision.
+ */
+export interface BasicCurrencyConfig {
+  /**
+   * Currency code identifier
+   * Examples: 'USD', 'ETH', 'BTC'
+   */
+  currencyCode: string;
+}
+
+// =============================================================================
+// TOKEN CONFIG MAP
+// =============================================================================
 
 /**
  * Token Config Mapping
@@ -32,12 +75,22 @@ export interface Erc20TokenConfig {
  */
 export interface TokenConfigMap {
   erc20: Erc20TokenConfig;
+  'basic-currency': BasicCurrencyConfig;
 }
+
+// =============================================================================
+// TYPE ALIASES
+// =============================================================================
 
 /**
  * Type alias for ERC-20 token
  */
 export type Erc20Token = Token<'erc20'>;
+
+/**
+ * Type alias for basic currency token
+ */
+export type BasicCurrencyToken = Token<'basic-currency'>;
 
 /**
  * Union type for any token

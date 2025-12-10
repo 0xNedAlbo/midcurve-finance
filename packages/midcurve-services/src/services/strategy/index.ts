@@ -23,4 +23,6 @@ export {
   parseMetricsFromDb,
   serializeMetricsToDb,
   StrategyQuoteTokenMismatchError,
+  PositionNoBasicCurrencyError,
+  StrategyBasicCurrencyMismatchError,
 } from './helpers/index.js';

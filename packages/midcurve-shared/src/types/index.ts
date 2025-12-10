@@ -16,9 +16,10 @@ export type {
   TokenType,
   TokenConfigMap,
   Erc20Token,
+  BasicCurrencyToken,
   AnyToken,
 } from './token.js';
-export type { Erc20TokenConfig } from './token-config.js';
+export type { Erc20TokenConfig, BasicCurrencyConfig } from './token-config.js';
 
 // Pool types
 export type { Pool, Protocol, PoolType, UniswapV3Pool, AnyPool } from './pool.js';
@@ -109,6 +110,8 @@ export type {
   StrategyMetrics,
   StrategyAutomationWallet,
   Strategy,
+  AggregationResult,
+  PositionWithQuoteToken,
 } from './strategy.js';
 
 // Strategy utility functions
@@ -118,4 +121,6 @@ export {
   getTotalStrategyPnl,
   getTotalRealizedStrategyPnl,
   getTotalUnrealizedStrategyPnl,
+  resolveBasicCurrencyId,
+  aggregatePositionMetricsWithBasicCurrency,
 } from './strategy.js';

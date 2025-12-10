@@ -83,4 +83,14 @@ export interface Token<T extends keyof TokenConfigMap> {
 }
 
 // Re-export type aliases
-export type { Erc20Token, AnyToken } from './token-config.js';
+export type {
+  Erc20Token,
+  BasicCurrencyToken,
+  AnyToken,
+} from './token-config.js';
+
+// Re-export config types for service layer
+export type {
+  Erc20TokenConfig,
+  BasicCurrencyConfig,
+} from './token-config.js';

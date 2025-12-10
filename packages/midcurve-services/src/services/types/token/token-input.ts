@@ -30,12 +30,14 @@ export type UpdateTokenInput<T extends keyof TokenConfigMap> = Partial<
  * Input type aliases for creating tokens
  */
 export type CreateErc20TokenInput = CreateTokenInput<"erc20">;
+export type CreateBasicCurrencyTokenInput = CreateTokenInput<"basic-currency">;
 export type CreateAnyTokenInput = CreateTokenInput<keyof TokenConfigMap>;
 
 /**
  * Input type aliases for updating tokens
  */
 export type UpdateErc20TokenInput = UpdateTokenInput<"erc20">;
+export type UpdateBasicCurrencyTokenInput = UpdateTokenInput<"basic-currency">;
 export type UpdateAnyTokenInput = UpdateTokenInput<keyof TokenConfigMap>;
 
 /**
@@ -48,12 +50,22 @@ export interface Erc20TokenDiscoverInput {
 }
 
 /**
+ * Input for discovering a basic currency token
+ * Basic currencies are pre-defined and not discovered on-chain.
+ * This is a placeholder for the abstract discover() method.
+ */
+export interface BasicCurrencyDiscoverInput {
+    /** Currency code (e.g., 'USD', 'ETH', 'BTC') */
+    currencyCode: string;
+}
+
+/**
  * Mapped type for token discovery inputs
  * Maps each token type to its discovery input type
  */
 export interface TokenDiscoverInputMap {
     erc20: Erc20TokenDiscoverInput;
-    // Future: solana: SolanaTokenDiscoverInput, etc.
+    'basic-currency': BasicCurrencyDiscoverInput;
 }
 
 /**
@@ -111,12 +123,34 @@ export interface Erc20TokenSearchCandidate {
 }
 
 /**
+ * Input for searching basic currency tokens
+ * Basic currencies are pre-defined, so search just filters the known currencies.
+ */
+export interface BasicCurrencySearchInput {
+    /** Optional currency code filter (e.g., 'USD', 'ETH', 'BTC') */
+    currencyCode?: string;
+}
+
+/**
+ * Search result candidate for basic currencies
+ * Returns the pre-defined basic currency info.
+ */
+export interface BasicCurrencySearchCandidate {
+    /** Currency code (e.g., 'USD', 'ETH', 'BTC') */
+    currencyCode: string;
+    /** Currency name (e.g., 'US Dollar', 'Ethereum', 'Bitcoin') */
+    name: string;
+    /** Currency symbol (same as currencyCode for basic currencies) */
+    symbol: string;
+}
+
+/**
  * Mapped type for token search inputs
  * Maps each token type to its search input type
  */
 export interface TokenSearchInputMap {
     erc20: Erc20TokenSearchInput;
-    // Future: solana: SolanaTokenSearchInput, etc.
+    'basic-currency': BasicCurrencySearchInput;
 }
 
 /**
@@ -125,7 +159,7 @@ export interface TokenSearchInputMap {
  */
 export interface TokenSearchCandidateMap {
     erc20: Erc20TokenSearchCandidate;
-    // Future: solana: SolanaTokenSearchCandidate, etc.
+    'basic-currency': BasicCurrencySearchCandidate;
 }
 
 /**

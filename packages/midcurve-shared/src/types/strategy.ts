@@ -7,7 +7,8 @@
  */
 
 import type { AnyPosition } from './position.js';
-import type { AnyToken } from './token.js';
+import type { AnyToken, Erc20TokenConfig } from './token.js';
+import { normalizeToBasicCurrencyDecimals } from '../utils/decimals.js';
 
 // =============================================================================
 // STRATEGY STATE
@@ -209,6 +210,15 @@ export interface Strategy {
    */
   metrics: StrategyMetrics;
 
+  /**
+   * Position IDs that were skipped during metrics aggregation.
+   *
+   * Positions are skipped when their quote token is not linkable to the
+   * strategy's basic currency (quoteTokenId). This allows the UI to display
+   * which positions are not included in the strategy's metrics.
+   */
+  skippedPositionIds: string[];
+
   // ============================================================================
   // CONFIGURATION
   // ============================================================================
@@ -326,4 +336,176 @@ export function getTotalUnrealizedStrategyPnl(
   metrics: StrategyMetrics
 ): bigint {
   return metrics.unrealizedPnl + metrics.unrealizedCashflow;
+}
+
+// =============================================================================
+// BASIC CURRENCY AGGREGATION
+// =============================================================================
+
+/**
+ * Result of aggregation with basic currency normalization
+ */
+export interface AggregationResult {
+  /**
+   * Aggregated metrics normalized to basic currency decimals (18)
+   */
+  metrics: StrategyMetrics;
+
+  /**
+   * IDs of positions that were included in aggregation
+   */
+  includedPositionIds: string[];
+
+  /**
+   * IDs of positions that were skipped during aggregation
+   */
+  skippedPositionIds: string[];
+
+  /**
+   * Reasons why each position was skipped (for debugging/logging)
+   */
+  skipReasons: Map<string, string>;
+}
+
+/**
+ * Position with its resolved quote token for aggregation
+ *
+ * The resolvedQuoteToken is determined by the position's isToken0Quote flag
+ * and the pool's token0/token1.
+ */
+export interface PositionWithQuoteToken {
+  /**
+   * The position to aggregate
+   */
+  position: AnyPosition;
+
+  /**
+   * The resolved quote token for this position
+   * (pool.token0 if isToken0Quote, else pool.token1)
+   */
+  quoteToken: AnyToken;
+}
+
+/**
+ * Resolves the basic currency ID for a given token.
+ *
+ * - If token is a basic currency, returns its own ID
+ * - If token is ERC-20 with basicCurrencyId, returns that ID
+ * - Otherwise returns null (token is not linkable)
+ *
+ * @param token - Token to resolve basic currency for
+ * @returns Basic currency ID or null if not linkable
+ */
+export function resolveBasicCurrencyId(token: AnyToken): string | null {
+  if (token.tokenType === 'basic-currency') {
+    // Token IS a basic currency
+    return token.id;
+  }
+
+  if (token.tokenType === 'erc20') {
+    // Check if ERC-20 token is linked to a basic currency
+    const config = token.config as Erc20TokenConfig;
+    return config.basicCurrencyId ?? null;
+  }
+
+  // Unknown token type - not linkable
+  return null;
+}
+
+/**
+ * Aggregate position metrics with basic currency normalization.
+ *
+ * This function:
+ * 1. Checks if each position's quote token is linkable to the target basic currency
+ * 2. Converts position metrics from quote token decimals to basic currency decimals (18)
+ * 3. Skips positions whose quote tokens aren't linked to the target basic currency
+ *
+ * @param positions - Positions with their resolved quote tokens
+ * @param targetBasicCurrencyId - Target basic currency ID for the strategy
+ * @returns Aggregated metrics and information about skipped positions
+ *
+ * @example
+ * const positions = [
+ *   { position: usdcPosition, quoteToken: usdcToken }, // USDC linked to USD
+ *   { position: ethPosition, quoteToken: wethToken },  // WETH linked to ETH (skipped)
+ * ];
+ * const result = aggregatePositionMetricsWithBasicCurrency(positions, usdBasicCurrencyId);
+ * // result.metrics contains only USDC position metrics, normalized to 18 decimals
+ * // result.skippedPositionIds contains the ETH position ID
+ */
+export function aggregatePositionMetricsWithBasicCurrency(
+  positions: PositionWithQuoteToken[],
+  targetBasicCurrencyId: string
+): AggregationResult {
+  const result: AggregationResult = {
+    metrics: createEmptyMetrics(),
+    includedPositionIds: [],
+    skippedPositionIds: [],
+    skipReasons: new Map(),
+  };
+
+  for (const { position, quoteToken } of positions) {
+    // Resolve the basic currency for this position's quote token
+    const linkedBasicCurrencyId = resolveBasicCurrencyId(quoteToken);
+
+    // Check if quote token is linkable
+    if (linkedBasicCurrencyId === null) {
+      result.skippedPositionIds.push(position.id);
+      result.skipReasons.set(
+        position.id,
+        `Quote token ${quoteToken.symbol} (${quoteToken.tokenType}) has no linked basic currency`
+      );
+      continue;
+    }
+
+    // Check if linked to the same basic currency as the strategy
+    if (linkedBasicCurrencyId !== targetBasicCurrencyId) {
+      result.skippedPositionIds.push(position.id);
+      result.skipReasons.set(
+        position.id,
+        `Quote token ${quoteToken.symbol} is linked to different basic currency (${linkedBasicCurrencyId})`
+      );
+      continue;
+    }
+
+    // Position is compatible - add metrics with decimal normalization
+    const decimals = quoteToken.decimals;
+
+    result.metrics.currentValue += normalizeToBasicCurrencyDecimals(
+      position.currentValue,
+      decimals
+    );
+    result.metrics.currentCostBasis += normalizeToBasicCurrencyDecimals(
+      position.currentCostBasis,
+      decimals
+    );
+    result.metrics.realizedPnl += normalizeToBasicCurrencyDecimals(
+      position.realizedPnl,
+      decimals
+    );
+    result.metrics.unrealizedPnl += normalizeToBasicCurrencyDecimals(
+      position.unrealizedPnl,
+      decimals
+    );
+    result.metrics.collectedFees += normalizeToBasicCurrencyDecimals(
+      position.collectedFees,
+      decimals
+    );
+    result.metrics.unClaimedFees += normalizeToBasicCurrencyDecimals(
+      position.unClaimedFees,
+      decimals
+    );
+    result.metrics.realizedCashflow += normalizeToBasicCurrencyDecimals(
+      position.realizedCashflow,
+      decimals
+    );
+    result.metrics.unrealizedCashflow += normalizeToBasicCurrencyDecimals(
+      position.unrealizedCashflow,
+      decimals
+    );
+
+    result.includedPositionIds.push(position.id);
+  }
+
+  return result;
 }

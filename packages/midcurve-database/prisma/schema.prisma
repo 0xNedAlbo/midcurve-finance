@@ -58,6 +58,7 @@ model Strategy {
   quoteToken   Token?  @relation(fields: [quoteTokenId], references: [id])
 
   // Aggregate metrics (same field names as Position for easy joins/views)
+  // All metrics are normalized to basic currency decimals (18)
   currentValue       String @default("0") // bigint as string
   currentCostBasis   String @default("0") // bigint as string
   realizedPnl        String @default("0") // bigint as string
@@ -66,6 +67,10 @@ model Strategy {
   unClaimedFees      String @default("0") // bigint as string
   realizedCashflow   String @default("0") // bigint as string
   unrealizedCashflow String @default("0") // bigint as string
+
+  // Position IDs skipped during metrics aggregation
+  // Positions are skipped when their quote token isn't linkable to strategy's basic currency
+  skippedPositionIds String[] @default([])
 
   // Free-form config (JSON)
   config Json

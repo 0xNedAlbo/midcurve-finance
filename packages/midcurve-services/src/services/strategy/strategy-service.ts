@@ -15,8 +15,13 @@ import type {
   AnyPosition,
   AnyToken,
   StrategyAutomationWallet,
+  PositionWithQuoteToken,
 } from '@midcurve/shared';
-import { aggregatePositionMetrics } from '@midcurve/shared';
+import {
+  aggregatePositionMetrics,
+  aggregatePositionMetricsWithBasicCurrency,
+  resolveBasicCurrencyId,
+} from '@midcurve/shared';
 import type {
   CreateStrategyInput,
   UpdateStrategyInput,
@@ -31,7 +36,8 @@ import {
   parseMetricsFromDb,
   serializeMetricsToDb,
   createEmptyMetrics,
-  StrategyQuoteTokenMismatchError,
+  PositionNoBasicCurrencyError,
+  StrategyBasicCurrencyMismatchError,
 } from './helpers/index.js';
 
 /**
@@ -67,6 +73,7 @@ interface StrategyDbResult {
   unClaimedFees: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
+  skippedPositionIds: string[];
   config: unknown;
   quoteToken?: any;
   positions?: any[];
@@ -540,23 +547,28 @@ export class StrategyService {
   /**
    * Links a position to a strategy
    *
-   * Validates that the position's quote token matches the strategy's quote token.
-   * If the strategy doesn't have a quote token yet (first position), it adopts
-   * the position's quote token.
+   * Validates that the position's quote token is linked to a basic currency,
+   * and that it matches the strategy's basic currency. If the strategy doesn't
+   * have a quoteTokenId yet (first position), it adopts the position's
+   * quote token's basic currency.
    *
    * @param strategyId - Strategy ID
    * @param positionId - Position ID
    * @returns The updated strategy with refreshed metrics
-   * @throws StrategyQuoteTokenMismatchError if quote tokens don't match
+   * @throws PositionNoBasicCurrencyError if quote token has no basic currency link
+   * @throws StrategyBasicCurrencyMismatchError if basic currencies don't match
    */
   async linkPosition(strategyId: string, positionId: string): Promise<Strategy> {
     log.methodEntry(this.logger, 'linkPosition', { strategyId, positionId });
 
     try {
-      // Fetch strategy and position with pool/tokens
+      // Fetch strategy (with quoteToken if set) and position with pool/tokens
       const [strategy, position] = await Promise.all([
         this.prisma.strategy.findUnique({
           where: { id: strategyId },
+          include: {
+            quoteToken: true,
+          },
         }),
         this.prisma.position.findUnique({
           where: { id: positionId },
@@ -579,23 +591,40 @@ export class StrategyService {
       }
 
       // Determine position's quote token
-      const positionQuoteToken = position.isToken0Quote
+      const positionQuoteTokenDb = position.isToken0Quote
         ? position.pool.token0
         : position.pool.token1;
-      const positionQuoteTokenId = positionQuoteToken.id;
+      const positionQuoteToken = this.mapDbTokenToAnyToken(positionQuoteTokenDb);
 
-      // Validate or set quote token
-      if (strategy.quoteTokenId) {
-        if (strategy.quoteTokenId !== positionQuoteTokenId) {
-          throw new StrategyQuoteTokenMismatchError(
+      // Resolve basic currency for position's quote token
+      const positionBasicCurrencyId = resolveBasicCurrencyId(positionQuoteToken);
+
+      if (!positionBasicCurrencyId) {
+        throw new PositionNoBasicCurrencyError(
+          positionId,
+          positionQuoteToken.id,
+          positionQuoteToken.symbol
+        );
+      }
+
+      // If strategy has a quoteTokenId, validate basic currency match
+      if (strategy.quoteTokenId && strategy.quoteToken) {
+        const strategyQuoteToken = this.mapDbTokenToAnyToken(strategy.quoteToken);
+        const strategyBasicCurrencyId = resolveBasicCurrencyId(strategyQuoteToken);
+
+        // Strategy's quoteToken should always have a basic currency link
+        // (it was validated when the first position was linked)
+        if (strategyBasicCurrencyId && strategyBasicCurrencyId !== positionBasicCurrencyId) {
+          throw new StrategyBasicCurrencyMismatchError(
             strategyId,
-            strategy.quoteTokenId,
-            positionQuoteTokenId
+            strategyBasicCurrencyId,
+            positionBasicCurrencyId
           );
         }
       }
 
       // Update position with strategy reference, and update strategy quote token if needed
+      // Note: We now set the strategy's quoteTokenId to the BASIC CURRENCY, not the platform token
       await this.prisma.$transaction([
         this.prisma.position.update({
           where: { id: positionId },
@@ -606,7 +635,7 @@ export class StrategyService {
           : [
               this.prisma.strategy.update({
                 where: { id: strategyId },
-                data: { quoteTokenId: positionQuoteTokenId },
+                data: { quoteTokenId: positionBasicCurrencyId },
               }),
             ]),
       ]);
@@ -615,7 +644,7 @@ export class StrategyService {
       const result = await this.refreshMetrics(strategyId);
 
       this.logger.info(
-        { strategyId, positionId },
+        { strategyId, positionId, basicCurrencyId: positionBasicCurrencyId },
         'Position linked to strategy'
       );
       log.methodExit(this.logger, 'linkPosition', { strategyId, positionId });
@@ -819,6 +848,10 @@ export class StrategyService {
   /**
    * Refreshes strategy metrics by aggregating from all linked positions
    *
+   * Uses basic currency normalization when the strategy has a quoteTokenId set
+   * (which points to a basic currency). Positions whose quote tokens are not
+   * linkable to the strategy's basic currency are skipped and their IDs stored.
+   *
    * Note: This method does NOT trigger refresh on the individual positions.
    * Call position refresh separately if needed before calling this method.
    *
@@ -829,40 +862,113 @@ export class StrategyService {
     log.methodEntry(this.logger, 'refreshMetrics', { id });
 
     try {
-      // Get all positions linked to this strategy
-      const positions = await this.getPositions(id);
+      // Get strategy to check if it has a quoteTokenId (basic currency)
+      const strategy = await this.prisma.strategy.findUnique({
+        where: { id },
+        select: { quoteTokenId: true },
+      });
 
-      // Aggregate metrics from positions
-      const metrics =
-        positions.length > 0
-          ? aggregatePositionMetrics(positions)
-          : createEmptyMetrics();
+      if (!strategy) {
+        throw new Error(`Strategy not found: ${id}`);
+      }
 
-      // Update strategy with new metrics
+      // Get all positions linked to this strategy with pool/tokens
+      const positionsWithQuoteTokens = await this.getPositionsWithQuoteTokens(id);
+
+      let metrics = createEmptyMetrics();
+      let skippedPositionIds: string[] = [];
+
+      if (positionsWithQuoteTokens.length > 0) {
+        if (strategy.quoteTokenId) {
+          // Use basic currency aggregation with decimal normalization
+          const aggregationResult = aggregatePositionMetricsWithBasicCurrency(
+            positionsWithQuoteTokens,
+            strategy.quoteTokenId
+          );
+          metrics = aggregationResult.metrics;
+          skippedPositionIds = aggregationResult.skippedPositionIds;
+
+          // Log skip reasons for debugging
+          if (aggregationResult.skippedPositionIds.length > 0) {
+            this.logger.warn(
+              {
+                strategyId: id,
+                skippedCount: aggregationResult.skippedPositionIds.length,
+                skipReasons: Object.fromEntries(aggregationResult.skipReasons),
+              },
+              'Some positions skipped during metrics aggregation'
+            );
+          }
+        } else {
+          // No basic currency set - use simple aggregation (legacy behavior)
+          // This shouldn't happen in normal flow since linkPosition sets quoteTokenId
+          const positions = positionsWithQuoteTokens.map((p) => p.position);
+          metrics = aggregatePositionMetrics(positions);
+        }
+      }
+
+      // Update strategy with new metrics and skipped position IDs
       const metricsDb = serializeMetricsToDb(metrics);
 
       const result = await this.prisma.strategy.update({
         where: { id },
-        data: metricsDb,
+        data: {
+          ...metricsDb,
+          skippedPositionIds,
+        },
         include: this.getIncludeOptions({}),
       });
 
-      const strategy = this.mapToStrategy(result as StrategyDbResult);
+      const updatedStrategy = this.mapToStrategy(result as StrategyDbResult);
 
       this.logger.info(
         {
-          id: strategy.id,
-          positionCount: positions.length,
-          currentValue: strategy.metrics.currentValue.toString(),
+          id: updatedStrategy.id,
+          positionCount: positionsWithQuoteTokens.length,
+          includedCount: positionsWithQuoteTokens.length - skippedPositionIds.length,
+          skippedCount: skippedPositionIds.length,
+          currentValue: updatedStrategy.metrics.currentValue.toString(),
         },
         'Strategy metrics refreshed'
       );
       log.methodExit(this.logger, 'refreshMetrics', { id });
-      return strategy;
+      return updatedStrategy;
     } catch (error) {
       log.methodError(this.logger, 'refreshMetrics', error as Error, { id });
       throw error;
     }
+  }
+
+  /**
+   * Gets all positions linked to a strategy with their resolved quote tokens
+   *
+   * This is used internally for metrics aggregation with basic currency normalization.
+   *
+   * @param strategyId - Strategy ID
+   * @returns Array of positions with their quote tokens
+   */
+  private async getPositionsWithQuoteTokens(
+    strategyId: string
+  ): Promise<PositionWithQuoteToken[]> {
+    const positions = await this.prisma.position.findMany({
+      where: { strategyId },
+      include: {
+        pool: {
+          include: {
+            token0: true,
+            token1: true,
+          },
+        },
+      },
+    });
+
+    return positions.map((p) => {
+      const position = this.mapDbPositionToAnyPosition(p);
+      const quoteTokenDb = p.isToken0Quote ? p.pool.token0 : p.pool.token1;
+      const quoteToken = this.mapDbTokenToAnyToken(quoteTokenDb);
+
+      return { position, quoteToken };
+    });
   }
 
   // ============================================================================
@@ -917,6 +1023,7 @@ export class StrategyService {
       chainId: dbResult.chainId,
       quoteTokenId: dbResult.quoteTokenId,
       metrics,
+      skippedPositionIds: dbResult.skippedPositionIds ?? [],
       config: dbResult.config as StrategyConfig,
     };
 

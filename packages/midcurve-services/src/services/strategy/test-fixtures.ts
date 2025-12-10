@@ -17,6 +17,8 @@ export const MOCK_POSITION_ID = 'test_position_789';
 export const MOCK_WALLET_ID = 'test_wallet_012';
 export const MOCK_TOKEN_ID = 'test_token_345';
 export const MOCK_POOL_ID = 'test_pool_678';
+export const MOCK_BASIC_CURRENCY_USD_ID = 'basic_currency_usd';
+export const MOCK_BASIC_CURRENCY_ETH_ID = 'basic_currency_eth';
 
 // ============================================================================
 // MOCK CONFIGS
@@ -83,6 +85,7 @@ export interface MockStrategyDbResult {
   unClaimedFees: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
+  skippedPositionIds: string[];
   config: unknown;
   quoteToken?: any;
   positions?: any[];
@@ -112,6 +115,7 @@ export function createMockStrategyDbResult(
     unClaimedFees: '0',
     realizedCashflow: '0',
     unrealizedCashflow: '0',
+    skippedPositionIds: [],
     config: mockDeltaNeutralConfig,
     ...overrides,
   };
@@ -140,7 +144,7 @@ export function createMockTokenDbResult(
     id: MOCK_TOKEN_ID,
     createdAt: now,
     updatedAt: now,
-    tokenType: 'evm-erc20',
+    tokenType: 'erc20',
     name: 'USD Coin',
     symbol: 'USDC',
     decimals: 6,
@@ -150,6 +154,7 @@ export function createMockTokenDbResult(
     config: {
       address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
       chainId: 1,
+      basicCurrencyId: MOCK_BASIC_CURRENCY_USD_ID,
     },
     ...overrides,
   };
@@ -163,7 +168,7 @@ export function createMockWethTokenDbResult(
     id: 'test_token_weth',
     createdAt: now,
     updatedAt: now,
-    tokenType: 'evm-erc20',
+    tokenType: 'erc20',
     name: 'Wrapped Ether',
     symbol: 'WETH',
     decimals: 18,
@@ -173,6 +178,7 @@ export function createMockWethTokenDbResult(
     config: {
       address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
       chainId: 1,
+      basicCurrencyId: MOCK_BASIC_CURRENCY_ETH_ID,
     },
     ...overrides,
   };
