@@ -1,7 +1,7 @@
 /**
- * GET /api/wallets/[userId] - Get User's Automation Wallets
+ * GET /api/wallets/evm/[userId] - Get User's EVM Automation Wallets
  *
- * Retrieves ALL automation wallets for a specific user (across all strategies).
+ * Retrieves ALL EVM automation wallets for a specific user (across all strategies).
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
@@ -14,14 +14,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { walletService } from '@/services/wallet-service';
+import { evmWalletService } from '@/services/evm-wallet-service';
 
 interface RouteContext {
   params: Promise<{ userId: string }>;
 }
 
 /**
- * GET /api/wallets/[userId]
+ * GET /api/wallets/evm/[userId]
  */
 export async function GET(
   request: NextRequest,
@@ -59,7 +59,7 @@ export async function GET(
   const { userId } = params;
 
   try {
-    const wallets = await walletService.getWalletsByUserId(userId);
+    const wallets = await evmWalletService.getWalletsByUserId(userId);
 
     return NextResponse.json({
       success: true,

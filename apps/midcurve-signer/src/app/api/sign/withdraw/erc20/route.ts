@@ -60,7 +60,7 @@ import {
   parseJsonBody,
   type AuthenticatedRequest,
 } from '@/middleware/internal-auth';
-import { walletService } from '@/services/wallet-service';
+import { evmWalletService } from '@/services/evm-wallet-service';
 import { getSigner } from '@/lib/kms';
 import { getStrategyOwner } from '@/lib/semsee';
 import { signerLogger, signerLog } from '@/lib/logger';
@@ -153,7 +153,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   });
 
   // 3. Get strategy's automation wallet
-  const wallet = await walletService.getWalletByStrategyAddress(strategyAddress as Address);
+  const wallet = await evmWalletService.getWalletByStrategyAddress(strategyAddress as Address);
 
   if (!wallet) {
     return NextResponse.json(
@@ -170,7 +170,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   const walletAddress = wallet.walletAddress;
 
   // 4. Get the KMS key ID for signing
-  const kmsKeyId = await walletService.getKmsKeyId(strategyAddress as Address);
+  const kmsKeyId = await evmWalletService.getKmsKeyId(strategyAddress as Address);
 
   if (!kmsKeyId) {
     return NextResponse.json(
@@ -214,7 +214,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   }
 
   // 6. Get and increment nonce for this chain
-  const nonce = await walletService.getAndIncrementNonce(strategyAddress as Address, chainId);
+  const nonce = await evmWalletService.getAndIncrementNonce(strategyAddress as Address, chainId);
 
   // 7. Build the transfer transaction
   const calldata = encodeFunctionData({
@@ -274,7 +274,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     });
 
     // Update last used timestamp
-    await walletService.updateLastUsed(strategyAddress as Address);
+    await evmWalletService.updateLastUsed(strategyAddress as Address);
 
     return NextResponse.json({
       success: true,

@@ -1,7 +1,7 @@
 /**
- * GET /api/wallets/strategy/[strategyAddress] - Get Strategy's Automation Wallet
+ * GET /api/wallets/evm/strategy/[strategyAddress] - Get Strategy's EVM Automation Wallet
  *
- * Retrieves the automation wallet for a specific strategy.
+ * Retrieves the EVM automation wallet for a specific strategy.
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
@@ -15,7 +15,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { walletService } from '@/services/wallet-service';
+import { evmWalletService } from '@/services/evm-wallet-service';
 import type { Address } from 'viem';
 
 interface RouteContext {
@@ -23,7 +23,7 @@ interface RouteContext {
 }
 
 /**
- * GET /api/wallets/strategy/[strategyAddress]
+ * GET /api/wallets/evm/strategy/[strategyAddress]
  */
 export async function GET(
   request: NextRequest,
@@ -73,7 +73,7 @@ export async function GET(
   }
 
   try {
-    const wallet = await walletService.getWalletByStrategyAddress(strategyAddress as Address);
+    const wallet = await evmWalletService.getWalletByStrategyAddress(strategyAddress as Address);
 
     if (!wallet) {
       return NextResponse.json(

@@ -1,5 +1,5 @@
 /**
- * POST /api/wallets - Create Automation Wallet
+ * POST /api/wallets/evm - Create EVM Automation Wallet
  *
  * Creates a new EVM automation wallet for a strategy.
  * The wallet is backed by AWS KMS (or local encryption in dev).
@@ -23,7 +23,7 @@ import {
   parseJsonBody,
   type AuthenticatedRequest,
 } from '@/middleware/internal-auth';
-import { walletService, WalletServiceError } from '@/services/wallet-service';
+import { evmWalletService, EvmWalletServiceError } from '@/services/evm-wallet-service';
 import type { Address } from 'viem';
 
 /**
@@ -38,7 +38,7 @@ const CreateWalletSchema = z.object({
 type CreateWalletRequest = z.infer<typeof CreateWalletSchema>;
 
 /**
- * POST /api/wallets
+ * POST /api/wallets/evm
  */
 export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   const { requestId, request } = ctx;
@@ -72,7 +72,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   }
 
   try {
-    const wallet = await walletService.createWallet({
+    const wallet = await evmWalletService.createWallet({
       strategyAddress: validation.data.strategyAddress as Address,
       userId: validation.data.userId,
       label: validation.data.label,
@@ -95,7 +95,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       { status: 201 }
     );
   } catch (error) {
-    if (error instanceof WalletServiceError) {
+    if (error instanceof EvmWalletServiceError) {
       return NextResponse.json(
         {
           success: false,
