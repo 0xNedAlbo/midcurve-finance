@@ -26,6 +26,7 @@ applications:
               RPC_URL_BSC=$RPC_URL_BSC
               RPC_URL_ETHEREUM=$RPC_URL_ETHEREUM
               RPC_URL_OPTIMISM=$RPC_URL_OPTIMISM
+              THE_GRAPH_API_KEY=$THE_GRAPH_API_KEY
               EOF
             - turbo run build --filter=@midcurve/ui...
             - cp -r apps/midcurve-ui/public apps/midcurve-ui/.next/standalone/apps/midcurve-ui/public || true
