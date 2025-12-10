@@ -96,6 +96,13 @@ export interface Position<P extends keyof PositionConfigMap> {
    */
   userId: string;
 
+  /**
+   * Optional strategy reference
+   * If set, this position is managed by an automated strategy.
+   * Null for manual/non-automated positions.
+   */
+  strategyId: string | null;
+
   // ============================================================================
   // PNL RELATED FIELDS
   // ============================================================================

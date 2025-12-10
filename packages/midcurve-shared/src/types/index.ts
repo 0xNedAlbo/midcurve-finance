@@ -101,3 +101,21 @@ export type {
   UniswapV3DecreaseLedgerEvent,
   UniswapV3CollectLedgerEvent,
 } from './uniswapv3/index.js';
+
+// Strategy types
+export type {
+  StrategyState,
+  StrategyConfig,
+  StrategyMetrics,
+  StrategyAutomationWallet,
+  Strategy,
+} from './strategy.js';
+
+// Strategy utility functions
+export {
+  createEmptyMetrics,
+  aggregatePositionMetrics,
+  getTotalStrategyPnl,
+  getTotalRealizedStrategyPnl,
+  getTotalUnrealizedStrategyPnl,
+} from './strategy.js';

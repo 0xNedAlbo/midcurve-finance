@@ -226,6 +226,7 @@ export class PositionListService {
 
       // Ownership
       userId: dbResult.userId,
+      strategyId: dbResult.strategyId,
 
       // Financial fields (string → bigint)
       currentValue: BigInt(dbResult.currentValue),

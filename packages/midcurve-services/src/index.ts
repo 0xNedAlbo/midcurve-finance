@@ -39,10 +39,12 @@ export * from './services/quote-token/index.js';
 export * from './services/pool-discovery/index.js';
 export * from './services/cache/index.js';
 export * from './services/block/index.js';
+export * from './services/strategy/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';
 export * from './services/types/block/index.js';
+export * from './services/types/strategy/index.js';
 
 // Export auth utilities (specific exports to avoid conflicts)
 export {
