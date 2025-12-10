@@ -41,6 +41,8 @@ export {
   isUniswapV3Position,
   assertUniswapV3Position,
   narrowPositionProtocol,
+  getTotalRealizedPnl,
+  getTotalUnrealizedPnl,
 } from './position.js';
 
 // Pool price types

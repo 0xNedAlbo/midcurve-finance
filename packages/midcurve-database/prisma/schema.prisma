@@ -239,7 +239,15 @@ model Position {
   realizedPnl      String // bigint as string
   unrealizedPnl    String // bigint as string
 
-  // Cash flow related fields (stored as string for bigint precision)
+  // General cash flow fields for non-AMM protocols (stored as string for bigint precision)
+  // For UniswapV3: always "0" (unused - fees tracked in collectedFees/unClaimedFees)
+  // For Hyperliquid: funding payments, interest, etc.
+  // Total Realized PnL = realizedPnl + realizedCashflow
+  // Total Unrealized PnL = unrealizedPnl + unrealizedCashflow
+  realizedCashflow   String @default("0") // bigint as string - locked-in cash flow
+  unrealizedCashflow String @default("0") // bigint as string - pending cash flow
+
+  // Cash flow related fields for AMM protocols (stored as string for bigint precision)
   collectedFees       String // bigint as string
   unClaimedFees       String // bigint as string
   lastFeesCollectedAt DateTime? // null = no fees collected yet

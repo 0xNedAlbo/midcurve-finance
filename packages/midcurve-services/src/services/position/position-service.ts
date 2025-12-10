@@ -46,6 +46,8 @@ interface PositionDbResult {
   currentCostBasis: string;
   realizedPnl: string;
   unrealizedPnl: string;
+  realizedCashflow: string; // bigint as string - cash flow for non-AMM protocols
+  unrealizedCashflow: string; // bigint as string - cash flow for non-AMM protocols
   collectedFees: string;
   unClaimedFees: string;
   lastFeesCollectedAt: Date;
@@ -329,6 +331,9 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
           currentCostBasis: zeroValue,
           realizedPnl: zeroValue,
           unrealizedPnl: zeroValue,
+          // Cash flow fields for non-AMM protocols (always 0 for UniswapV3)
+          realizedCashflow: zeroValue,
+          unrealizedCashflow: zeroValue,
           collectedFees: zeroValue,
           unClaimedFees: zeroValue,
           lastFeesCollectedAt: now,
@@ -574,6 +579,8 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
       currentCostBasis: BigInt(dbResult.currentCostBasis),
       realizedPnl: BigInt(dbResult.realizedPnl),
       unrealizedPnl: BigInt(dbResult.unrealizedPnl),
+      realizedCashflow: BigInt(dbResult.realizedCashflow),
+      unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
       collectedFees: BigInt(dbResult.collectedFees),
       unClaimedFees: BigInt(dbResult.unClaimedFees),
       lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
