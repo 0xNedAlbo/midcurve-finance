@@ -6,6 +6,7 @@ import {CoreControlled} from "../libraries/CoreControlled.sol";
 import {FundingLib} from "../libraries/FundingLib.sol";
 import {IBalanceStore} from "../interfaces/IBalanceStore.sol";
 import {ISystemRegistry} from "../interfaces/ISystemRegistry.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
  * @title FundingMixin
@@ -13,6 +14,12 @@ import {ISystemRegistry} from "../interfaces/ISystemRegistry.sol";
  * @dev This is a composable mixin that does NOT inherit from BaseStrategy.
  *      Strategies should inherit from both BaseStrategy and FundingMixin separately.
  *      This avoids diamond inheritance issues when combining multiple mixins.
+ *
+ * Authorization Model:
+ * All owner-initiated actions require EIP-712 signatures:
+ * - Users sign on Ethereum mainnet (chainId: 1), no network switch needed
+ * - Automation wallet submits signed transactions to SEMSEE chain
+ * - Contract verifies signature recovers to owner address
  *
  * Withdrawal Flow:
  * Withdrawals are initiated off-chain via signed requests to Core, not via contract calls.
@@ -60,10 +67,47 @@ abstract contract FundingMixin is CoreControlled, IFunding {
     /// @notice SystemRegistry address (well-known precompile)
     ISystemRegistry internal constant SYSTEM_REGISTRY = ISystemRegistry(0x0000000000000000000000000000000000001000);
 
+    // =========== EIP-712 Constants ===========
+
+    /// @notice EIP-712 domain separator (chainId = 1 for Ethereum mainnet signing)
+    /// @dev Users sign on mainnet, verification happens on SEMSEE chain
+    bytes32 public constant FUNDING_DOMAIN_SEPARATOR = keccak256(abi.encode(
+        keccak256("EIP712Domain(string name,string version,uint256 chainId)"),
+        keccak256("Semsee"),
+        keccak256("1"),
+        uint256(1)  // Ethereum mainnet
+    ));
+
+    /// @notice Type hash for UpdateEthBalance action
+    bytes32 public constant UPDATE_ETH_BALANCE_TYPEHASH = keccak256(
+        "UpdateEthBalance(address strategy,uint256 chainId,uint256 nonce,uint256 expiry)"
+    );
+
+    /// @notice Type hash for AddWatchedToken action
+    bytes32 public constant ADD_WATCHED_TOKEN_TYPEHASH = keccak256(
+        "AddWatchedToken(address strategy,uint256 chainId,address token,uint256 nonce,uint256 expiry)"
+    );
+
+    /// @notice Type hash for RemoveWatchedToken action
+    bytes32 public constant REMOVE_WATCHED_TOKEN_TYPEHASH = keccak256(
+        "RemoveWatchedToken(address strategy,uint256 chainId,address token,uint256 nonce,uint256 expiry)"
+    );
+
+    // =========== Nonce Tracking ===========
+
+    /// @notice Tracks used nonces for replay protection (per-strategy)
+    mapping(uint256 => bool) public fundingUsedNonces;
+
     // =========== Errors ===========
 
-    /// @notice Error when caller is not the owner
-    error FundingOnlyOwner();
+    /// @notice Error when signature has expired
+    error FundingSignatureExpired();
+
+    /// @notice Error when nonce has already been used
+    error FundingNonceAlreadyUsed();
+
+    /// @notice Error when signature is invalid (wrong signer)
+    error FundingInvalidSignature();
 
     /// @notice Error when strategy is not running
     error FundingNotRunning();
@@ -91,9 +135,33 @@ abstract contract FundingMixin is CoreControlled, IFunding {
 
     // =========== Internal Modifiers ===========
 
-    /// @dev Modifier to restrict to owner (uses abstract bridge)
-    modifier fundingOnlyOwner() {
-        if (msg.sender != _fundingOwner()) revert FundingOnlyOwner();
+    /**
+     * @notice Modifier that verifies owner signature for protected funding actions
+     * @dev Uses separate nonce tracking from BaseStrategy to avoid conflicts
+     * @param structHash Pre-computed EIP-712 struct hash (includes all action parameters)
+     * @param signature EIP-712 signature from the owner
+     * @param nonce Timestamp-based nonce for replay protection
+     * @param expiry Signature expiry timestamp
+     */
+    modifier withFundingOwnerSignature(
+        bytes32 structHash,
+        bytes calldata signature,
+        uint256 nonce,
+        uint256 expiry
+    ) {
+        if (block.timestamp > expiry) revert FundingSignatureExpired();
+        if (fundingUsedNonces[nonce]) revert FundingNonceAlreadyUsed();
+
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            FUNDING_DOMAIN_SEPARATOR,
+            structHash
+        ));
+
+        address recovered = ECDSA.recover(digest, signature);
+        if (recovered != _fundingOwner()) revert FundingInvalidSignature();
+
+        fundingUsedNonces[nonce] = true;
         _;
     }
 
@@ -103,17 +171,29 @@ abstract contract FundingMixin is CoreControlled, IFunding {
         _;
     }
 
-    // =========== IFunding: Balance Update Functions (Owner Only) ===========
+    // =========== IFunding: Balance Update Functions (Signature Required) ===========
 
     /**
      * @notice Request Core to poll and update ETH balance
      * @dev Use after sending ETH to automation wallet on external chain
      * @param chainId The chain to poll ETH balance from
+     * @param signature EIP-712 signature from owner
+     * @param nonce Timestamp-based nonce for replay protection
+     * @param expiry Signature expiry timestamp
      * @return requestId Unique identifier for tracking this request
      */
     function updateEthBalance(
-        uint256 chainId
-    ) external override fundingOnlyOwner fundingOnlyRunning returns (bytes32 requestId) {
+        uint256 chainId,
+        bytes calldata signature,
+        uint256 nonce,
+        uint256 expiry
+    ) external fundingOnlyRunning
+        withFundingOwnerSignature(
+            keccak256(abi.encode(UPDATE_ETH_BALANCE_TYPEHASH, address(this), chainId, nonce, expiry)),
+            signature, nonce, expiry
+        )
+        returns (bytes32 requestId)
+    {
         // Before hook
         _beforeEthBalanceUpdate(chainId);
 
@@ -124,7 +204,18 @@ abstract contract FundingMixin is CoreControlled, IFunding {
         FundingLib.emitEthBalanceUpdateRequested(requestId, chainId);
     }
 
-    // =========== Token Watchlist Management (Owner Only) ===========
+    // =========== IFunding: Legacy interface compatibility ===========
+
+    /**
+     * @notice Legacy function - reverts with guidance to use signature-based version
+     * @dev This function is kept for interface compatibility but should not be used.
+     *      Call updateEthBalance(chainId, signature, nonce, expiry) instead.
+     */
+    function updateEthBalance(uint256) external pure override returns (bytes32) {
+        revert("Use updateEthBalance(chainId, signature, nonce, expiry)");
+    }
+
+    // =========== Token Watchlist Management (Signature Required) ===========
 
     /**
      * @notice Add a token to the deposit watchlist
@@ -132,11 +223,22 @@ abstract contract FundingMixin is CoreControlled, IFunding {
      *      Call this after deploying/starting the strategy to enable deposit detection.
      * @param chainId The chain where the token is deployed (e.g., 1 for Ethereum, 42161 for Arbitrum)
      * @param token The ERC-20 token address to watch for deposits
+     * @param signature EIP-712 signature from owner
+     * @param nonce Timestamp-based nonce for replay protection
+     * @param expiry Signature expiry timestamp
      */
     function addWatchedToken(
         uint256 chainId,
-        address token
-    ) external fundingOnlyOwner {
+        address token,
+        bytes calldata signature,
+        uint256 nonce,
+        uint256 expiry
+    ) external
+        withFundingOwnerSignature(
+            keccak256(abi.encode(ADD_WATCHED_TOKEN_TYPEHASH, address(this), chainId, token, nonce, expiry)),
+            signature, nonce, expiry
+        )
+    {
         FundingLib.emitTokenWatchlistAdd(chainId, token);
     }
 
@@ -146,11 +248,22 @@ abstract contract FundingMixin is CoreControlled, IFunding {
      *      Use when you no longer want to receive deposits of this token.
      * @param chainId The chain where the token is deployed
      * @param token The ERC-20 token address to stop watching
+     * @param signature EIP-712 signature from owner
+     * @param nonce Timestamp-based nonce for replay protection
+     * @param expiry Signature expiry timestamp
      */
     function removeWatchedToken(
         uint256 chainId,
-        address token
-    ) external fundingOnlyOwner {
+        address token,
+        bytes calldata signature,
+        uint256 nonce,
+        uint256 expiry
+    ) external
+        withFundingOwnerSignature(
+            keccak256(abi.encode(REMOVE_WATCHED_TOKEN_TYPEHASH, address(this), chainId, token, nonce, expiry)),
+            signature, nonce, expiry
+        )
+    {
         FundingLib.emitTokenWatchlistRemove(chainId, token);
     }
 

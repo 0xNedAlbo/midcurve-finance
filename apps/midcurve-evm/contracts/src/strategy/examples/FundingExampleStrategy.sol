@@ -46,9 +46,10 @@ contract FundingExampleStrategy is BaseStrategy, FundingMixin {
     // =========== Constructor ===========
 
     /**
-     * @notice Deploy the strategy (owner = msg.sender)
+     * @notice Deploy the strategy with specified owner
+     * @param _owner The owner address (user's EOA)
      */
-    constructor() BaseStrategy() {
+    constructor(address _owner) BaseStrategy(_owner) {
         LoggingLib.logInfo("FundingExampleStrategy deployed (not started)");
     }
 

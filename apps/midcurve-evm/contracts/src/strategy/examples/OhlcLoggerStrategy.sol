@@ -35,10 +35,11 @@ contract OhlcLoggerStrategy is BaseStrategy, IOhlcConsumer {
     uint256 public candleCount;
 
     /**
-     * @notice Deploy the strategy (owner = msg.sender)
+     * @notice Deploy the strategy with specified owner
+     * @param _owner The owner address (user's EOA)
      * @dev Only configuration happens here, no subscriptions yet
      */
-    constructor() BaseStrategy() {
+    constructor(address _owner) BaseStrategy(_owner) {
         ETH_USD_MARKET = ResourceIds.marketId("ETH", "USD");
         LoggingLib.logInfo("OhlcLoggerStrategy deployed (not started)");
     }

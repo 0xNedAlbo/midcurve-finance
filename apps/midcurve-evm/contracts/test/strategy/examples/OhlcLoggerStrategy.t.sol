@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../../../src/strategy/examples/OhlcLoggerStrategy.sol";
+import "../../../src/strategy/BaseStrategy.sol";
 import "../../../src/interfaces/IStrategy.sol";
 import "../../../src/types/OhlcCandle.sol";
 import "../../../src/libraries/LoggingLib.sol";
@@ -11,6 +12,10 @@ import "../../../src/libraries/ResourceIds.sol";
 
 contract OhlcLoggerStrategyTest is Test {
     OhlcLoggerStrategy public strategy;
+
+    // Test accounts
+    uint256 constant OWNER_PRIVATE_KEY = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+    address public ownerAddress;
 
     bytes32 constant ETH_USD_MARKET = keccak256(abi.encodePacked("ETH", "/", "USD"));
     bytes32 constant BTC_USD_MARKET = keccak256(abi.encodePacked("BTC", "/", "USD"));
@@ -23,13 +28,90 @@ contract OhlcLoggerStrategyTest is Test {
     event StrategyShutdown();
 
     function setUp() public {
-        strategy = new OhlcLoggerStrategy();
+        ownerAddress = vm.addr(OWNER_PRIVATE_KEY);
+        strategy = new OhlcLoggerStrategy(ownerAddress);
+    }
+
+    // =========== Helper Functions ===========
+
+    /// @dev Return the domain separator (matches BaseStrategy.DOMAIN_SEPARATOR)
+    function _domainSeparator() internal pure returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId)"),
+            keccak256("Semsee"),
+            keccak256("1"),
+            uint256(1)  // Ethereum mainnet
+        ));
+    }
+
+    /// @dev Generate EIP-712 signature for Start action
+    function _signStart(
+        uint256 privateKey,
+        address strategyAddr,
+        uint256 nonce,
+        uint256 expiry
+    ) internal pure returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Start(address strategy,uint256 nonce,uint256 expiry)"),
+            strategyAddr,
+            nonce,
+            expiry
+        ));
+
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            _domainSeparator(),
+            structHash
+        ));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev Generate EIP-712 signature for Shutdown action
+    function _signShutdown(
+        uint256 privateKey,
+        address strategyAddr,
+        uint256 nonce,
+        uint256 expiry
+    ) internal pure returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Shutdown(address strategy,uint256 nonce,uint256 expiry)"),
+            strategyAddr,
+            nonce,
+            expiry
+        ));
+
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            _domainSeparator(),
+            structHash
+        ));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev Helper to start strategy with valid signature
+    function _startStrategy() internal {
+        uint256 nonce = block.timestamp;
+        uint256 expiry = block.timestamp + 300;
+        bytes memory signature = _signStart(OWNER_PRIVATE_KEY, address(strategy), nonce, expiry);
+        strategy.start(signature, nonce, expiry);
+    }
+
+    /// @dev Helper to shutdown strategy with valid signature
+    function _shutdownStrategy() internal {
+        uint256 nonce = block.timestamp + 1;
+        uint256 expiry = block.timestamp + 300;
+        bytes memory signature = _signShutdown(OWNER_PRIVATE_KEY, address(strategy), nonce, expiry);
+        strategy.shutdown(signature, nonce, expiry);
     }
 
     // =========== Constructor Tests ===========
 
-    function test_constructor_setsOwnerToDeployer() public view {
-        assertEq(strategy.owner(), address(this));
+    function test_constructor_setsOwnerCorrectly() public view {
+        assertEq(strategy.owner(), ownerAddress);
     }
 
     function test_constructor_setsEthUsdMarket() public view {
@@ -44,7 +126,7 @@ contract OhlcLoggerStrategyTest is Test {
         // Deploy new strategy to capture events - NO subscription event should be emitted
         // Only the log message should be emitted
         vm.recordLogs();
-        new OhlcLoggerStrategy();
+        new OhlcLoggerStrategy(ownerAddress);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         // Check that no SubscriptionRequested event was emitted
@@ -57,31 +139,43 @@ contract OhlcLoggerStrategyTest is Test {
     // =========== Start Tests ===========
 
     function test_start_subscribesToEthUsd1m() public {
+        uint256 nonce = block.timestamp;
+        uint256 expiry = block.timestamp + 300;
+        bytes memory signature = _signStart(OWNER_PRIVATE_KEY, address(strategy), nonce, expiry);
+
         vm.expectEmit(true, false, false, true);
         emit SubscriptionRequested(
             keccak256("Subscription:Ohlc:v1"),
             abi.encode(ETH_USD_MARKET, TIMEFRAME_1M)
         );
 
-        strategy.start();
+        strategy.start(signature, nonce, expiry);
     }
 
     function test_start_logsStartMessage() public {
+        uint256 nonce = block.timestamp;
+        uint256 expiry = block.timestamp + 300;
+        bytes memory signature = _signStart(OWNER_PRIVATE_KEY, address(strategy), nonce, expiry);
+
         vm.expectEmit(true, false, false, false);
         emit LogMessage(LoggingLib.LogLevel.Info, "OhlcLoggerStrategy started, subscribed to ETH/USD 1m", "");
 
-        strategy.start();
+        strategy.start(signature, nonce, expiry);
     }
 
     function test_start_changesStateToRunning() public {
-        strategy.start();
+        _startStrategy();
         assertEq(uint256(strategy.state()), uint256(IStrategy.StrategyState.Running));
     }
 
     // =========== Shutdown Tests ===========
 
     function test_shutdown_unsubscribesFromEthUsd1m() public {
-        strategy.start();
+        _startStrategy();
+
+        uint256 nonce = block.timestamp + 1;
+        uint256 expiry = block.timestamp + 300;
+        bytes memory signature = _signShutdown(OWNER_PRIVATE_KEY, address(strategy), nonce, expiry);
 
         vm.expectEmit(true, false, false, true);
         emit UnsubscriptionRequested(
@@ -89,28 +183,32 @@ contract OhlcLoggerStrategyTest is Test {
             abi.encode(ETH_USD_MARKET, TIMEFRAME_1M)
         );
 
-        strategy.shutdown();
+        strategy.shutdown(signature, nonce, expiry);
     }
 
     function test_shutdown_logsShutdownMessage() public {
-        strategy.start();
+        _startStrategy();
+
+        uint256 nonce = block.timestamp + 1;
+        uint256 expiry = block.timestamp + 300;
+        bytes memory signature = _signShutdown(OWNER_PRIVATE_KEY, address(strategy), nonce, expiry);
 
         vm.expectEmit(true, false, false, false);
         emit LogMessage(LoggingLib.LogLevel.Info, "OhlcLoggerStrategy shutdown, unsubscribed from ETH/USD 1m", "");
 
-        strategy.shutdown();
+        strategy.shutdown(signature, nonce, expiry);
     }
 
     function test_shutdown_changesStateToShutdown() public {
-        strategy.start();
-        strategy.shutdown();
+        _startStrategy();
+        _shutdownStrategy();
         assertEq(uint256(strategy.state()), uint256(IStrategy.StrategyState.Shutdown));
     }
 
     // =========== Callback Tests ===========
 
     function test_onOhlcCandle_logsCandle() public {
-        strategy.start();
+        _startStrategy();
 
         OhlcCandle memory candle = OhlcCandle({
             timestamp: 1700000000,
@@ -137,7 +235,7 @@ contract OhlcLoggerStrategyTest is Test {
     }
 
     function test_onOhlcCandle_incrementsCandleCount() public {
-        strategy.start();
+        _startStrategy();
         OhlcCandle memory candle = _createCandle();
 
         assertEq(strategy.candleCount(), 0);
@@ -153,7 +251,7 @@ contract OhlcLoggerStrategyTest is Test {
     }
 
     function test_onOhlcCandle_ignoresOtherMarkets() public {
-        strategy.start();
+        _startStrategy();
         OhlcCandle memory candle = _createCandle();
 
         // BTC/USD should be ignored
@@ -170,7 +268,7 @@ contract OhlcLoggerStrategyTest is Test {
     }
 
     function test_onOhlcCandle_ignoresOtherTimeframes() public {
-        strategy.start();
+        _startStrategy();
         OhlcCandle memory candle = _createCandle();
 
         // 5m should be ignored
@@ -190,11 +288,14 @@ contract OhlcLoggerStrategyTest is Test {
 
     function test_fullLifecycle() public {
         // Deploy - state is Created
-        OhlcLoggerStrategy strat = new OhlcLoggerStrategy();
+        OhlcLoggerStrategy strat = new OhlcLoggerStrategy(ownerAddress);
         assertEq(uint256(strat.state()), uint256(IStrategy.StrategyState.Created));
 
         // Start - state is Running, subscription created
-        strat.start();
+        uint256 nonce1 = block.timestamp;
+        uint256 expiry1 = block.timestamp + 300;
+        bytes memory signature1 = _signStart(OWNER_PRIVATE_KEY, address(strat), nonce1, expiry1);
+        strat.start(signature1, nonce1, expiry1);
         assertEq(uint256(strat.state()), uint256(IStrategy.StrategyState.Running));
 
         // Process candles
@@ -203,7 +304,10 @@ contract OhlcLoggerStrategyTest is Test {
         assertEq(strat.candleCount(), 1);
 
         // Shutdown - state is Shutdown, subscription removed
-        strat.shutdown();
+        uint256 nonce2 = block.timestamp + 1;
+        uint256 expiry2 = block.timestamp + 300;
+        bytes memory signature2 = _signShutdown(OWNER_PRIVATE_KEY, address(strat), nonce2, expiry2);
+        strat.shutdown(signature2, nonce2, expiry2);
         assertEq(uint256(strat.state()), uint256(IStrategy.StrategyState.Shutdown));
     }
 

@@ -19,21 +19,27 @@ import {
 // ============= EIP-712 Domain and Types =============
 
 /**
- * SEMSEE chain ID for EIP-712 domain
+ * Ethereum mainnet chain ID for EIP-712 domain
+ * Users sign on mainnet, verification happens on SEMSEE chain
+ * This allows users to sign without switching networks
  */
-const SEMSEE_CHAIN_ID = 1337;
+const ETHEREUM_MAINNET_CHAIN_ID = 1;
 
 /**
  * EIP-712 domain for withdrawal requests
+ * Uses Ethereum mainnet chainId so users don't need to switch networks
  */
 export const WITHDRAW_REQUEST_DOMAIN = {
   name: 'Semsee',
   version: '1',
-  chainId: SEMSEE_CHAIN_ID,
+  chainId: ETHEREUM_MAINNET_CHAIN_ID,
 } as const;
 
 /**
  * EIP-712 types for withdrawal requests
+ *
+ * Note: 'recipient' is NOT included - recipient is always the strategy owner.
+ * This simplifies security by preventing theft via custom recipient.
  */
 export const WITHDRAW_REQUEST_TYPES = {
   WithdrawRequest: [
@@ -41,7 +47,6 @@ export const WITHDRAW_REQUEST_TYPES = {
     { name: 'chainId', type: 'uint256' },
     { name: 'token', type: 'address' },
     { name: 'amount', type: 'uint256' },
-    { name: 'recipient', type: 'address' },
     { name: 'nonce', type: 'uint256' },
     { name: 'expiry', type: 'uint256' },
   ],
@@ -91,7 +96,9 @@ export type NotifyWithdrawCompleteCallback = (
  * WithdrawalApi handles signed withdrawal requests.
  *
  * Key Features:
- * - EIP-712 signature verification
+ * - EIP-712 signature verification on Ethereum mainnet (chainId: 1)
+ * - Users sign without switching networks
+ * - Recipient is always the strategy owner (no custom recipient)
  * - Replay protection via timestamp nonces
  * - Expiry validation
  * - Balance updates always performed
@@ -101,7 +108,7 @@ export type NotifyWithdrawCompleteCallback = (
  * 1. Verify signature recovers to strategy owner
  * 2. Check nonce not already used (replay protection)
  * 3. Check request not expired
- * 4. Execute withdrawal via FundingExecutor
+ * 4. Execute withdrawal to owner address
  * 5. Update BalanceStore (always)
  * 6. Notify strategy if Running
  */
@@ -165,7 +172,6 @@ export class WithdrawalApi {
         chainId: message.chainId.toString(),
         token: message.token,
         amount: message.amount.toString(),
-        recipient: message.recipient,
       },
       'Processing signed withdrawal request'
     );
@@ -177,7 +183,7 @@ export class WithdrawalApi {
       // Step 2: Mark nonce as used (replay protection)
       this.markNonceUsed(message.strategyAddress, message.nonce);
 
-      // Step 3: Execute the withdrawal
+      // Step 3: Execute the withdrawal (to owner address)
       const result = await this.executeWithdrawal(verified);
 
       // Step 4: Update BalanceStore (always)
@@ -227,7 +233,7 @@ export class WithdrawalApi {
       throw new Error(`Nonce ${message.nonce} already used for strategy ${message.strategyAddress}`);
     }
 
-    // 3. Recover signer from signature
+    // 3. Recover signer from signature (no recipient in message)
     const recoveredAddress = await recoverTypedDataAddress({
       domain: WITHDRAW_REQUEST_DOMAIN,
       types: WITHDRAW_REQUEST_TYPES,
@@ -237,7 +243,6 @@ export class WithdrawalApi {
         chainId: message.chainId,
         token: message.token,
         amount: message.amount,
-        recipient: message.recipient,
         nonce: message.nonce,
         expiry: message.expiry,
       },
@@ -272,9 +277,13 @@ export class WithdrawalApi {
 
   /**
    * Execute the withdrawal via FundingExecutor
+   * Recipient is always the strategy owner (verified.recoveredOwner)
    */
   private async executeWithdrawal(verified: VerifiedWithdrawRequest): Promise<FundingResult> {
-    const { message, requestId } = verified;
+    const { message, requestId, recoveredOwner } = verified;
+
+    // Recipient is ALWAYS the owner - no custom recipient allowed
+    const recipient = recoveredOwner;
 
     // Determine if ETH or ERC-20 withdrawal
     const isEth = message.token.toLowerCase() === ETH_ADDRESS.toLowerCase();
@@ -286,7 +295,7 @@ export class WithdrawalApi {
         amount: message.amount,
       };
 
-      return await this.executor.executeEthWithdraw(requestId, params, message.recipient);
+      return await this.executor.executeEthWithdraw(requestId, params, recipient);
     } else {
       const params: Erc20WithdrawParams = {
         type: 'erc20',
@@ -295,7 +304,7 @@ export class WithdrawalApi {
         amount: message.amount,
       };
 
-      return await this.executor.executeErc20Withdraw(requestId, params, message.recipient);
+      return await this.executor.executeErc20Withdraw(requestId, params, recipient);
     }
   }
 
@@ -425,7 +434,7 @@ export class WithdrawalApi {
    * Generate a unique request ID from message hash
    */
   private generateRequestId(message: WithdrawRequestMessage): Hex {
-    // Hash the message to create a unique request ID
+    // Hash the message to create a unique request ID (no recipient)
     return hashTypedData({
       domain: WITHDRAW_REQUEST_DOMAIN,
       types: WITHDRAW_REQUEST_TYPES,
@@ -435,7 +444,6 @@ export class WithdrawalApi {
         chainId: message.chainId,
         token: message.token,
         amount: message.amount,
-        recipient: message.recipient,
         nonce: message.nonce,
         expiry: message.expiry,
       },
@@ -516,7 +524,9 @@ export class WithdrawalApi {
 /**
  * Create a withdrawal request message with default expiry
  *
- * @param params Withdrawal parameters
+ * Note: No recipient parameter - recipient is always the strategy owner.
+ *
+ * @param params Withdrawal parameters (no recipient)
  * @param validityMs Validity window in milliseconds (default: 5 minutes)
  * @returns WithdrawRequestMessage ready for signing
  */
@@ -526,7 +536,6 @@ export function createWithdrawRequestMessage(
     chainId: bigint;
     token: Address;
     amount: bigint;
-    recipient: Address;
   },
   validityMs: number = DEFAULT_VALIDITY_MS
 ): WithdrawRequestMessage {

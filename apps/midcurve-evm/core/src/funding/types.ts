@@ -246,6 +246,10 @@ export function isEthBalanceUpdateRequest(
 
 /**
  * Message payload for signed withdrawal requests (EIP-712)
+ *
+ * Note: Recipient is NOT included in the signed message.
+ * Recipient is always the strategy owner for security.
+ * This is enforced by the Core when processing withdrawal requests.
  */
 export interface WithdrawRequestMessage {
   /** The strategy address requesting withdrawal */
@@ -256,8 +260,6 @@ export interface WithdrawRequestMessage {
   token: Address;
   /** The amount to withdraw */
   amount: bigint;
-  /** The recipient address */
-  recipient: Address;
   /** Timestamp nonce for replay protection (Date.now()) */
   nonce: bigint;
   /** Expiry timestamp (nonce + validity window) */
