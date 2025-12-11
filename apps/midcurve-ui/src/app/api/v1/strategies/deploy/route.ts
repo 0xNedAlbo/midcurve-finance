@@ -5,13 +5,11 @@
  *
  * Authentication: Required (session or API key)
  *
- * This endpoint initiates strategy deployment by:
+ * This endpoint orchestrates strategy deployment by:
  * 1. Validating the manifest and request parameters
  * 2. Creating a strategy record in 'pending' state
- * 3. Returning deployment information
- *
- * The actual contract deployment and wallet creation is handled
- * asynchronously by the signer service.
+ * 3. Calling the signer service to deploy the contract
+ * 4. Returning deployment information with contract address
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -33,6 +31,7 @@ import type {
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getStrategyManifestService, getStrategyService } from '@/lib/services';
+import { deployStrategyContract, SignerClientError } from '@/lib/signer-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -174,13 +173,20 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // 4. Create strategy record
-      // Note: Strategy is created in 'pending' state
-      // The signer service will pick it up and:
-      // - Create automation wallet
-      // - Deploy contract
-      // - Update strategy with contractAddress
-      // - Transition to awaiting start() signature
+      // 4. Get user's primary wallet address (for owner parameter)
+      const primaryWallet = user.wallets?.find((w) => w.isPrimary);
+      if (!primaryWallet) {
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.VALIDATION_ERROR,
+          'No primary wallet found for user. Please link a wallet before deploying.'
+        );
+        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+        return NextResponse.json(errorResponse, {
+          status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
+        });
+      }
+
+      // 5. Create strategy record in 'pending' state
       const strategy = await getStrategyService().create({
         userId: user.id,
         name,
@@ -194,23 +200,77 @@ export async function POST(request: NextRequest): Promise<Response> {
         manifestId: manifest.id,
       });
 
-      // 5. Serialize for response
+      apiLogger.info(
+        {
+          requestId,
+          strategyId: strategy.id,
+          manifestSlug,
+          userId: user.id,
+        },
+        'Strategy record created, calling signer service for deployment'
+      );
+
+      // 6. Call signer service to deploy the contract
+      // This creates the automation wallet and deploys the contract
+      const SEMSEE_CHAIN_ID = 1337; // SEMSEE local chain
+      let deploymentResult;
+
+      try {
+        deploymentResult = await deployStrategyContract({
+          strategyId: strategy.id,
+          chainId: SEMSEE_CHAIN_ID,
+          ownerAddress: primaryWallet.address,
+        });
+      } catch (error) {
+        // If signer fails, log but still return the strategy (it can be retried)
+        if (error instanceof SignerClientError) {
+          apiLogger.error(
+            {
+              requestId,
+              strategyId: strategy.id,
+              errorCode: error.code,
+              errorMessage: error.message,
+            },
+            'Signer service deployment failed'
+          );
+
+          // Return strategy with pending status - deployment can be retried
+          const serializedStrategy = serializeBigInt(
+            strategy
+          ) as unknown as SerializedStrategy;
+
+          const response: DeployStrategyResponse = {
+            strategy: serializedStrategy,
+            automationWallet: { id: 'failed', address: 'failed' },
+            deployment: {
+              status: 'failed',
+            },
+          };
+
+          apiLog.requestEnd(apiLogger, requestId, 201, Date.now() - startTime);
+          return NextResponse.json(createSuccessResponse(response), { status: 201 });
+        }
+        throw error;
+      }
+
+      // 7. Re-fetch strategy to get updated contract address
+      const updatedStrategy = await getStrategyService().findById(strategy.id);
       const serializedStrategy = serializeBigInt(
-        strategy
+        updatedStrategy ?? strategy
       ) as unknown as SerializedStrategy;
 
-      // 6. Build deployment info
-      // Automation wallet is pending creation by signer service
+      // 8. Build response with deployment result
       const automationWallet: DeployAutomationWalletInfo = {
-        id: 'pending',
-        address: 'pending',
+        id: deploymentResult.automationWallet.id,
+        address: deploymentResult.automationWallet.address,
       };
 
       const deployment: DeploymentInfo = {
-        status: 'pending',
+        status: 'confirmed',
+        transactionHash: deploymentResult.transactionHash,
+        contractAddress: deploymentResult.contractAddress,
       };
 
-      // 7. Create response
       const response: DeployStrategyResponse = {
         strategy: serializedStrategy,
         automationWallet,
@@ -221,10 +281,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         {
           requestId,
           strategyId: strategy.id,
+          contractAddress: deploymentResult.contractAddress,
+          transactionHash: deploymentResult.transactionHash,
           manifestSlug,
           userId: user.id,
         },
-        'Strategy deployment initiated'
+        'Strategy deployed successfully'
       );
 
       apiLog.requestEnd(apiLogger, requestId, 201, Date.now() - startTime);
