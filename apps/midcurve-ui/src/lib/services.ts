@@ -19,6 +19,8 @@ import {
   UniswapV3PositionLedgerService,
   PositionListService,
   PositionAprService,
+  StrategyManifestService,
+  StrategyService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -33,6 +35,8 @@ let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _uniswapV3PositionLedgerService: UniswapV3PositionLedgerService | null = null;
 let _positionListService: PositionListService | null = null;
 let _positionAprService: PositionAprService | null = null;
+let _strategyManifestService: StrategyManifestService | null = null;
+let _strategyService: StrategyService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -142,4 +146,24 @@ export function getPositionListService(): PositionListService {
     _positionListService = new PositionListService();
   }
   return _positionListService;
+}
+
+/**
+ * Get singleton instance of StrategyManifestService
+ */
+export function getStrategyManifestService(): StrategyManifestService {
+  if (!_strategyManifestService) {
+    _strategyManifestService = new StrategyManifestService();
+  }
+  return _strategyManifestService;
+}
+
+/**
+ * Get singleton instance of StrategyService
+ */
+export function getStrategyService(): StrategyService {
+  if (!_strategyService) {
+    _strategyService = new StrategyService();
+  }
+  return _strategyService;
 }

@@ -22,3 +22,6 @@ export * from './positions.js';
 
 // Wallet management
 export * from './wallets.js';
+
+// Manifest operations
+export * from './manifest.js';

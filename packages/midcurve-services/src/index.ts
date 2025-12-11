@@ -40,6 +40,7 @@ export * from './services/pool-discovery/index.js';
 export * from './services/cache/index.js';
 export * from './services/block/index.js';
 export * from './services/strategy/index.js';
+export * from './services/strategy-manifest/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';

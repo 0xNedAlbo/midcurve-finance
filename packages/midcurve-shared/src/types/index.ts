@@ -124,3 +124,26 @@ export {
   resolveBasicCurrencyId,
   aggregatePositionMetricsWithBasicCurrency,
 } from './strategy.js';
+
+// Strategy Manifest types
+export type {
+  ConstructorParamSource,
+  SolidityType,
+  ConstructorParamValidation,
+  ConstructorParam,
+  StrategyCapabilities,
+  UserParamType,
+  UserParamOption,
+  UserParamValidation,
+  UserParam,
+  StrategyManifest,
+} from './strategy-manifest.js';
+
+// Strategy Manifest utility functions
+export {
+  createEmptyCapabilities,
+  hasFundingCapability,
+  getUserInputParams,
+  hasUserInputParams,
+  hasUserParams,
+} from './strategy-manifest.js';

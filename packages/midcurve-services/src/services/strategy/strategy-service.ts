@@ -140,6 +140,7 @@ export class StrategyService {
           strategyType: input.strategyType,
           config: input.config as Prisma.InputJsonValue,
           quoteTokenId: input.quoteTokenId,
+          manifestId: input.manifestId,
           // State defaults to 'pending'
           // Metrics default to '0' in schema
         },

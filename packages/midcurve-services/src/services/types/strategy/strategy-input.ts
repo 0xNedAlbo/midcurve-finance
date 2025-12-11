@@ -38,6 +38,12 @@ export interface CreateStrategyInput {
    * If not provided, will be set when first position is linked.
    */
   quoteTokenId?: string;
+
+  /**
+   * Manifest ID if created from a manifest (optional)
+   * Links the strategy to the manifest used for deployment.
+   */
+  manifestId?: string;
 }
 
 /**
