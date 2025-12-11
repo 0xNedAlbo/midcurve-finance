@@ -113,4 +113,24 @@ export const queryKeys = {
     wallets: () => [...queryKeys.user.all, 'wallets'] as const,
     apiKeys: () => [...queryKeys.user.all, 'api-keys'] as const,
   },
+
+  // ============================================
+  // STRATEGIES
+  // ============================================
+  strategies: {
+    all: ['strategies'] as const,
+
+    // Strategy manifests (templates for deployment)
+    manifests: {
+      all: ['strategies', 'manifests'] as const,
+      lists: () => [...queryKeys.strategies.manifests.all, 'list'] as const,
+      list: (params?: { isActive?: boolean; tags?: string[] }) =>
+        [...queryKeys.strategies.manifests.lists(), params ?? {}] as const,
+    },
+
+    // Mutation keys
+    mutations: {
+      deploy: ['strategies', 'deploy'] as const,
+    },
+  },
 };

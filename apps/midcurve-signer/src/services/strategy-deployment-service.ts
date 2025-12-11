@@ -13,8 +13,10 @@
 
 import {
   createPublicClient,
+  createWalletClient,
   http,
   encodeDeployData,
+  parseEther,
   type Address,
   type Hex,
   type Abi,
@@ -22,10 +24,30 @@ import {
   keccak256,
   serializeTransaction,
 } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { prisma } from '../lib/prisma';
 import { evmWalletService, type CreateEvmWalletResult } from './evm-wallet-service';
 import { getSigner } from '../lib/kms';
 import { signerLogger, signerLog } from '../lib/logger';
+
+// =============================================================================
+// CORE Account (Treasury)
+// =============================================================================
+
+/**
+ * CORE private key - used to fund automation wallets
+ *
+ * Default: Foundry's default account 0 (funded with 1000 ETH at Docker startup via fund-core.sh)
+ * Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+ */
+const CORE_PRIVATE_KEY: Hex = (process.env.CORE_PRIVATE_KEY as Hex) ??
+  '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+
+/**
+ * Default funding amount for automation wallets (0.1 ETH)
+ * Sufficient for multiple contract deployments and transactions
+ */
+const DEFAULT_FUNDING_AMOUNT = parseEther('0.1');
 
 // =============================================================================
 // Types
@@ -74,6 +96,7 @@ export type DeploymentErrorCode =
   | 'MANIFEST_NOT_FOUND'
   | 'INVALID_STATE'
   | 'WALLET_CREATION_FAILED'
+  | 'WALLET_FUNDING_FAILED'
   | 'DEPLOYMENT_FAILED'
   | 'ALREADY_DEPLOYED'
   | 'INTERNAL_ERROR';
@@ -236,7 +259,32 @@ class StrategyDeploymentService {
       );
     }
 
-    // 6. Build constructor arguments
+    // 6. Fund automation wallet from CORE account
+    try {
+      await this.fundAutomationWallet(wallet.walletAddress, chainId);
+
+      this.logger.info({
+        strategyId,
+        walletAddress: wallet.walletAddress,
+        fundingAmount: DEFAULT_FUNDING_AMOUNT.toString(),
+        msg: 'Automation wallet funded',
+      });
+    } catch (error) {
+      this.logger.error({
+        strategyId,
+        walletAddress: wallet.walletAddress,
+        error: error instanceof Error ? error.message : String(error),
+        msg: 'Failed to fund automation wallet',
+      });
+      throw new StrategyDeploymentError(
+        'Failed to fund automation wallet',
+        'WALLET_FUNDING_FAILED',
+        500,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+
+    // 7. Build constructor arguments (previously step 6)
     const constructorParams = manifest.constructorParams as unknown as ConstructorParam[];
     const constructorValues = ((strategy.config as Record<string, unknown>)?._constructorValues ?? {}) as Record<string, string>;
 
@@ -253,7 +301,7 @@ class StrategyDeploymentService {
       msg: 'Constructor arguments built',
     });
 
-    // 7. Deploy contract
+    // 8. Deploy contract (previously step 7)
     let deployResult: { contractAddress: Address; transactionHash: Hex; blockNumber: number };
 
     try {
@@ -288,7 +336,7 @@ class StrategyDeploymentService {
       );
     }
 
-    // 8. Update strategy with contract address
+    // 9. Update strategy with contract address (previously step 8)
     await prisma.strategy.update({
       where: { id: strategyId },
       data: {
@@ -318,6 +366,83 @@ class StrategyDeploymentService {
       },
       blockNumber: deployResult.blockNumber,
     };
+  }
+
+  /**
+   * Fund automation wallet from CORE account
+   *
+   * Sends ETH from the CORE treasury account to the newly created automation wallet
+   * so it can pay gas for contract deployment and future transactions.
+   *
+   * @param targetAddress - The automation wallet address to fund
+   * @param chainId - The chain ID for the SEMSEE network
+   * @param amount - Amount of ETH to send (defaults to DEFAULT_FUNDING_AMOUNT)
+   * @returns Transaction hash of the funding transaction
+   */
+  private async fundAutomationWallet(
+    targetAddress: Address,
+    chainId: number,
+    amount: bigint = DEFAULT_FUNDING_AMOUNT
+  ): Promise<Hex> {
+    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
+    const publicClient = createSemseePublicClient(chainId);
+    const account = privateKeyToAccount(CORE_PRIVATE_KEY);
+
+    // Use legacy chain config (no EIP-1559) for SEMSEE/Geth dev chain
+    const legacyChain = {
+      ...getSemseeChain(chainId),
+      fees: undefined, // Disable EIP-1559 fee estimation
+    };
+
+    const walletClient = createWalletClient({
+      account,
+      chain: legacyChain,
+      transport: http(rpcUrl),
+    });
+
+    this.logger.info({
+      targetAddress,
+      amount: amount.toString(),
+      coreAddress: account.address,
+      msg: 'Funding automation wallet from CORE account',
+    });
+
+    // Get gas price for legacy transaction
+    const gasPrice = await publicClient.getGasPrice();
+
+    // Get nonce
+    const nonce = await publicClient.getTransactionCount({
+      address: account.address,
+    });
+
+    // Send ETH from CORE to automation wallet using legacy transaction
+    const hash = await walletClient.sendTransaction({
+      to: targetAddress,
+      value: amount,
+      type: 'legacy',
+      gasPrice,
+      nonce,
+      gas: 21000n, // Standard ETH transfer gas
+    });
+
+    // Wait for confirmation
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash,
+      timeout: 30_000, // 30 second timeout
+    });
+
+    if (receipt.status === 'reverted') {
+      throw new Error('Funding transaction reverted');
+    }
+
+    this.logger.info({
+      targetAddress,
+      transactionHash: hash,
+      blockNumber: Number(receipt.blockNumber),
+      msg: 'Automation wallet funding confirmed',
+    });
+
+    return hash;
   }
 
   /**
@@ -448,6 +573,7 @@ class StrategyDeploymentService {
     this.logger.info({
       walletAddress,
       nonce,
+      chainId,
       gasLimit: gasLimit.toString(),
       gasPrice: gasPrice.toString(),
       msg: 'Preparing deployment transaction',
@@ -468,20 +594,45 @@ class StrategyDeploymentService {
     const serializedUnsigned = serializeTransaction(tx);
     const txHash = keccak256(serializedUnsigned);
 
+    this.logger.info({
+      walletAddress,
+      chainId,
+      serializedUnsigned: serializedUnsigned.slice(0, 100) + '...', // First 100 chars
+      txHash,
+      msg: 'Transaction serialized, signing with KMS',
+    });
+
     // Sign with KMS
     const signer = getSigner();
     const signature = await signer.signTransaction(kmsKeyId, txHash);
 
-    // Serialize with signature
+    // Calculate EIP-155 v value: chainId * 2 + 35 + recovery_id
+    // Local dev signer returns v as 27 or 28 (standard signature format with offset)
+    // We need to extract recovery_id (0 or 1) then convert to EIP-155 format
+    const recoveryId = signature.v >= 27 ? signature.v - 27 : signature.v;
+    const eip155V = BigInt(chainId * 2 + 35 + recoveryId);
+
+    this.logger.info({
+      walletAddress,
+      signatureR: signature.r,
+      signatureS: signature.s,
+      signatureV: signature.v,
+      eip155V: eip155V.toString(),
+      chainId,
+      msg: 'KMS signature received, converting to EIP-155',
+    });
+
+    // Serialize with signature using EIP-155 v value
     const signedTx = serializeTransaction(tx, {
       r: signature.r,
       s: signature.s,
-      v: BigInt(signature.v + 27), // Add 27 for legacy transactions
+      v: eip155V,
     });
 
     this.logger.info({
       walletAddress,
       txHash,
+      signedTxPrefix: signedTx.slice(0, 100) + '...',
       msg: 'Transaction signed, broadcasting to SEMSEE',
     });
 

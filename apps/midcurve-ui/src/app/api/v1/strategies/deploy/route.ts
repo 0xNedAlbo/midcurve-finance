@@ -212,7 +212,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       // 6. Call signer service to deploy the contract
       // This creates the automation wallet and deploys the contract
-      const SEMSEE_CHAIN_ID = 1337; // SEMSEE local chain
+      const SEMSEE_CHAIN_ID = 31337; // SEMSEE local chain (matches genesis.json)
       let deploymentResult;
 
       try {
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           ownerAddress: primaryWallet.address,
         });
       } catch (error) {
-        // If signer fails, log but still return the strategy (it can be retried)
+        // If signer fails, return an error response
         if (error instanceof SignerClientError) {
           apiLogger.error(
             {
@@ -234,21 +234,18 @@ export async function POST(request: NextRequest): Promise<Response> {
             'Signer service deployment failed'
           );
 
-          // Return strategy with pending status - deployment can be retried
-          const serializedStrategy = serializeBigInt(
-            strategy
-          ) as unknown as SerializedStrategy;
+          // Return error response with strategy ID for potential retry
+          const errorResponse = createErrorResponse(
+            ApiErrorCode.INTERNAL_SERVER_ERROR,
+            `Deployment failed: ${error.message}`,
+            {
+              strategyId: strategy.id,
+              signerErrorCode: error.code,
+            }
+          );
 
-          const response: DeployStrategyResponse = {
-            strategy: serializedStrategy,
-            automationWallet: { id: 'failed', address: 'failed' },
-            deployment: {
-              status: 'failed',
-            },
-          };
-
-          apiLog.requestEnd(apiLogger, requestId, 201, Date.now() - startTime);
-          return NextResponse.json(createSuccessResponse(response), { status: 201 });
+          apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+          return NextResponse.json(errorResponse, { status: 500 });
         }
         throw error;
       }

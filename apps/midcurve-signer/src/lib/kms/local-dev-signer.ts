@@ -17,6 +17,7 @@ import {
   type LocalAccount,
 } from 'viem/accounts';
 import { type Address, type Hash, type Hex } from 'viem';
+import { secp256k1 } from '@noble/curves/secp256k1';
 import type { EvmSigner, LocalSignerConfig, KmsWalletCreationResult, SignatureResult } from './types';
 import { signerLogger, signerLog } from '../logger';
 
@@ -117,33 +118,53 @@ export class LocalDevSigner implements EvmSigner {
   }
 
   /**
-   * Sign a 32-byte hash
+   * Sign a 32-byte hash using raw secp256k1 ECDSA
+   *
+   * This method signs the hash directly WITHOUT any EIP-191 prefix.
+   * This is required for transaction signing where we need to recover
+   * the correct sender address from the signature.
    */
   async signHash(keyId: string, hash: Hash): Promise<SignatureResult> {
     const requestId = `sign-${Date.now()}`;
     const startTime = Date.now();
 
     try {
-      const account = await this.getAccount(keyId);
+      // Get the encrypted private key and decrypt it
+      const encryptedKey = localKeyStore.get(keyId);
+      if (!encryptedKey) {
+        throw new Error(`Key not found: ${keyId}`);
+      }
+      const privateKey = this.decryptKey(encryptedKey);
 
-      // Use viem's account to sign
-      const signature = await account.signMessage({
-        message: { raw: hash },
-      });
+      // Remove 0x prefix from hash and private key for noble-curves
+      const hashBytes = Buffer.from(hash.slice(2), 'hex');
+      const privateKeyBytes = Buffer.from(privateKey.slice(2), 'hex');
 
-      // Parse signature into components
-      const r = BigInt('0x' + signature.slice(2, 66));
-      const s = BigInt('0x' + signature.slice(66, 130));
-      const v = parseInt(signature.slice(130, 132), 16);
+      // Sign the hash directly using secp256k1 (no EIP-191 prefix!)
+      const sig = secp256k1.sign(hashBytes, privateKeyBytes);
+
+      // Extract r, s, and recovery (v)
+      const r = sig.r;
+      const s = sig.s;
+      const recovery = sig.recovery; // 0 or 1
+
+      // Convert to v value (27 or 28 for legacy transactions)
+      const v = recovery + 27;
 
       const durationMs = Date.now() - startTime;
       signerLog.kmsOperation(this.logger, requestId, 'sign', true, keyId, durationMs);
 
+      // Build the full signature hex (r + s + v)
+      const rHex = bigintToHex32(r);
+      const sHex = bigintToHex32(s);
+      const vHex = v.toString(16).padStart(2, '0');
+      const fullSignature = `${rHex}${sHex.slice(2)}${vHex}` as Hex;
+
       return {
-        r: bigintToHex32(r),
-        s: bigintToHex32(s),
+        r: rHex,
+        s: sHex,
         v,
-        signature: signature as Hex,
+        signature: fullSignature,
       };
     } catch (error) {
       signerLog.kmsOperation(

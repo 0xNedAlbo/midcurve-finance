@@ -9,7 +9,7 @@ import { defineChain } from 'viem';
  * - Pre-funded Core account (0x1)
  */
 export const semseeChain = defineChain({
-  id: 1337,
+  id: 31337,
   name: 'SEMSEE',
   nativeCurrency: {
     name: 'Ether',

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { UserDropdown } from "@/components/auth/user-dropdown";
 import { CreatePositionDropdown } from "@/components/positions/create-position-dropdown";
+import { CreateStrategyDropdown } from "@/components/strategies/create-strategy-dropdown";
 import { PositionList } from "@/components/positions/position-list";
 
 export default function Dashboard() {
@@ -59,8 +60,11 @@ export default function Dashboard() {
               </p>
             </div>
 
-            {/* Create Position Dropdown */}
-            <CreatePositionDropdown />
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3">
+              <CreateStrategyDropdown />
+              <CreatePositionDropdown />
+            </div>
           </div>
 
           {/* Position List */}

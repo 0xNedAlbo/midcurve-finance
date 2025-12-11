@@ -33,7 +33,7 @@ const STRATEGY_OWNER_ABI = [
  * SEMSEE is a custom Clique PoA chain with instant mining
  */
 const semseeChain = {
-  id: 1337, // Default Geth dev chain ID
+  id: 31337, // Foundry/Anvil chain ID (matches genesis.json)
   name: 'SEMSEE',
   nativeCurrency: {
     decimals: 18,
