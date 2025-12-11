@@ -10,9 +10,13 @@
  * - Contract artifacts must be compiled in midcurve-evm/contracts/out/
  */
 
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { PrismaClient, type Prisma } from '../../src/generated/prisma';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient();
 
