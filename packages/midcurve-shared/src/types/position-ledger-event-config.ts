@@ -9,9 +9,12 @@
  */
 
 import type { UniswapV3LedgerEventConfig } from './uniswapv3/position-ledger-event-config.js';
+import type { HodlLedgerEventConfig } from './hodl/position-ledger-event-config.js';
+import type { TokenConfigMap } from './token-config.js';
 
 // Re-export for convenience
 export type { UniswapV3LedgerEventConfig } from './uniswapv3/position-ledger-event-config.js';
+export type { HodlLedgerEventConfig } from './hodl/position-ledger-event-config.js';
 
 /**
  * Position Ledger Event Config Map
@@ -47,6 +50,28 @@ export interface PositionLedgerEventConfigMap {
      * Token type used by Uniswap V3 (ERC-20 tokens)
      */
     tokenType: 'erc20';
+  };
+  /**
+   * HODL position ledger events
+   *
+   * Events for multi-token basket positions.
+   * Supports any token type (ERC-20, SPL, future types).
+   */
+  hodl: {
+    /**
+     * Protocol identifier
+     */
+    protocol: 'hodl';
+
+    /**
+     * Configuration type for HODL ledger events
+     */
+    config: HodlLedgerEventConfig;
+
+    /**
+     * Token type - supports any token type
+     */
+    tokenType: keyof TokenConfigMap;
   };
   // Future protocols:
   // orca: {

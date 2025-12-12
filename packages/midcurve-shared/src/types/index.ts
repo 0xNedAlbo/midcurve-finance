@@ -22,7 +22,8 @@ export type {
 export type { Erc20TokenConfig, BasicCurrencyConfig } from './token-config.js';
 
 // Pool types
-export type { Pool, Protocol, PoolType, UniswapV3Pool, AnyPool } from './pool.js';
+export type { Pool, Protocol, PoolType, UniswapV3Pool, AnyPool, HodlPool } from './pool.js';
+export { isHodlPool, assertHodlPool } from './pool.js';
 export type { PoolConfigMap } from './pool-config.js';
 
 // Position types
@@ -32,6 +33,7 @@ export type {
   PositionType,
   PositionConfigMap,
   UniswapV3Position,
+  HodlPosition,
   AnyPosition,
 } from './position.js';
 
@@ -41,6 +43,8 @@ export {
   getQuoteToken,
   isUniswapV3Position,
   assertUniswapV3Position,
+  isHodlPosition,
+  assertHodlPosition,
   narrowPositionProtocol,
   getTotalRealizedPnl,
   getTotalUnrealizedPnl,
@@ -102,6 +106,27 @@ export type {
   UniswapV3DecreaseLedgerEvent,
   UniswapV3CollectLedgerEvent,
 } from './uniswapv3/index.js';
+
+// HODL types (protocol-specific)
+export type {
+  HodlPoolConfig,
+  HodlPoolState,
+  HodlPositionConfig,
+  HodlPositionState,
+  HodlPositionHolding,
+  HodlLedgerEventConfig,
+  HodlLedgerEventState,
+  HodlEventType,
+  HodlExternalDepositEvent,
+  HodlExternalWithdrawEvent,
+  HodlTradeInEvent,
+  HodlTradeOutEvent,
+  HodlTradeFeesEvent,
+  HodlInternalAllocationInflowEvent,
+  HodlInternalAllocationOutflowEvent,
+  HodlLedgerEvent,
+} from './hodl/index.js';
+export { isHodlLedgerEvent, assertHodlLedgerEvent } from './hodl/index.js';
 
 // Strategy types
 export type {

@@ -6,10 +6,15 @@
 
 import type { UniswapV3PoolConfig } from './uniswapv3/pool-config.js';
 import type { UniswapV3PoolState } from './uniswapv3/pool-state.js';
+import type { HodlPoolConfig } from './hodl/pool-config.js';
+import type { HodlPoolState } from './hodl/pool-state.js';
+import type { TokenConfigMap } from './token-config.js';
 
 // Re-export for convenience
 export type { UniswapV3PoolConfig } from './uniswapv3/pool-config.js';
 export type { UniswapV3PoolState } from './uniswapv3/pool-state.js';
+export type { HodlPoolConfig } from './hodl/pool-config.js';
+export type { HodlPoolState } from './hodl/pool-state.js';
 
 /**
  * Pool Config/State/Token Mapping
@@ -30,6 +35,19 @@ export interface PoolConfigMap {
     state: UniswapV3PoolState;
     token0Type: 'erc20';
     token1Type: 'erc20';
+  };
+  /**
+   * HODL virtual pool
+   *
+   * Used for HODL positions to reference the quote token.
+   * token0 and token1 both reference the same quote token (price = 1).
+   * Supports any token type (ERC-20, basic currency, or future types).
+   */
+  hodl: {
+    config: HodlPoolConfig;
+    state: HodlPoolState;
+    token0Type: keyof TokenConfigMap;
+    token1Type: keyof TokenConfigMap;
   };
   // Future protocols:
   // orca: {
