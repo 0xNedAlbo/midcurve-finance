@@ -10,6 +10,7 @@
 import type {
   Position,
   PositionConfigMap,
+  HodlWalletConfig,
 } from '@midcurve/shared';
 
 /**
@@ -54,6 +55,46 @@ export interface UniswapV3PositionDiscoverInput {
 }
 
 /**
+ * HODL Position Discovery Input
+ *
+ * Parameters for creating a HODL position (multi-token basket).
+ * Unlike Uniswap V3, HODL positions are manually managed, not discovered from on-chain.
+ */
+export interface HodlPositionDiscoverInput {
+  /**
+   * Quote token ID (database ID) for position valuation
+   * All holdings will be valued in this token's units.
+   */
+  quoteTokenId: string;
+
+  /**
+   * Strategy ID this position belongs to (optional)
+   * Used for associating the position with a strategy.
+   */
+  strategyId?: string;
+
+  /**
+   * Initial wallet configurations (optional)
+   * Can be empty - wallets can be added later via updateWallets()
+   */
+  wallets?: HodlWalletConfig[];
+
+  /**
+   * Initial holdings (optional)
+   * Map of tokenId → { tokenSymbol, balance, costBasis }
+   * Usually starts empty and populated via ledger events.
+   */
+  initialHoldings?: Record<
+    string,
+    {
+      tokenSymbol: string;
+      balance: bigint;
+      costBasis: bigint;
+    }
+  >;
+}
+
+/**
  * Position Discovery Input Map
  *
  * Maps protocol identifiers to their corresponding discovery input types.
@@ -65,6 +106,7 @@ export interface UniswapV3PositionDiscoverInput {
  */
 export interface PositionDiscoverInputMap {
   uniswapv3: UniswapV3PositionDiscoverInput;
+  hodl: HodlPositionDiscoverInput;
   // Future protocols:
   // orca: OrcaPositionDiscoverInput;
   // raydium: RaydiumPositionDiscoverInput;
@@ -126,6 +168,7 @@ export type CreatePositionInput<P extends keyof PositionConfigMap> = Pick<
  * Input type aliases for creating positions
  */
 export type CreateUniswapV3PositionInput = CreatePositionInput<'uniswapv3'>;
+export type CreateHodlPositionInput = CreatePositionInput<'hodl'>;
 export type CreateAnyPositionInput = CreatePositionInput<keyof PositionConfigMap>;
 
 /**
@@ -153,4 +196,5 @@ export type UpdatePositionInput<P extends keyof PositionConfigMap> = Partial<
  * Input type aliases for updating positions
  */
 export type UpdateUniswapV3PositionInput = UpdatePositionInput<'uniswapv3'>;
+export type UpdateHodlPositionInput = UpdatePositionInput<'hodl'>;
 export type UpdateAnyPositionInput = UpdatePositionInput<keyof PositionConfigMap>;

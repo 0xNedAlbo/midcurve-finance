@@ -11,7 +11,12 @@ export type { HodlPoolState } from './pool-state.js';
 export { type HodlPool, isHodlPool, assertHodlPool } from './pool.js';
 
 // Position types
-export type { HodlPositionConfig } from './position-config.js';
+export type {
+  HodlPositionConfig,
+  HodlWalletType,
+  HodlEvmOnchainWallet,
+  HodlWalletConfig,
+} from './position-config.js';
 export type { HodlPositionState, HodlPositionHolding } from './position-state.js';
 export { type HodlPosition, isHodlPosition, assertHodlPosition } from './position.js';
 

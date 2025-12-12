@@ -13,6 +13,16 @@ import type { PoolConfigMap } from '@midcurve/shared';
  */
 export interface QuoteTokenInputMap {
   uniswapv3: UniswapV3QuoteTokenInput;
+
+  /**
+   * HODL quote token determination (placeholder)
+   *
+   * HODL positions use user-provided quote token directly.
+   * They don't need quote token determination logic.
+   * This placeholder ensures type compatibility with PoolConfigMap.
+   */
+  hodl: never; // HODL uses direct quote token selection
+
   // Future protocols:
   // orca: OrcaQuoteTokenInput;
   // raydium: RaydiumQuoteTokenInput;
