@@ -22,8 +22,7 @@ export type {
 export type { Erc20TokenConfig, BasicCurrencyConfig } from './token-config.js';
 
 // Pool types
-export type { Pool, Protocol, PoolType, UniswapV3Pool, AnyPool, HodlPool } from './pool.js';
-export { isHodlPool, assertHodlPool } from './pool.js';
+export type { Pool, Protocol, PoolType, UniswapV3Pool, AnyPool } from './pool.js';
 export type { PoolConfigMap } from './pool-config.js';
 
 // Position types
@@ -33,7 +32,6 @@ export type {
   PositionType,
   PositionConfigMap,
   UniswapV3Position,
-  HodlPosition,
   AnyPosition,
 } from './position.js';
 
@@ -43,8 +41,6 @@ export {
   getQuoteToken,
   isUniswapV3Position,
   assertUniswapV3Position,
-  isHodlPosition,
-  assertHodlPosition,
   narrowPositionProtocol,
   getTotalRealizedPnl,
   getTotalUnrealizedPnl,
@@ -107,33 +103,10 @@ export type {
   UniswapV3CollectLedgerEvent,
 } from './uniswapv3/index.js';
 
-// HODL types (protocol-specific)
-export type {
-  HodlPoolConfig,
-  HodlPoolState,
-  HodlPositionConfig,
-  HodlWalletType,
-  HodlEvmOnchainWallet,
-  HodlWalletConfig,
-  HodlPositionState,
-  HodlPositionHolding,
-  HodlLedgerEventConfig,
-  HodlLedgerEventState,
-  HodlEventType,
-  HodlExternalDepositEvent,
-  HodlExternalWithdrawEvent,
-  HodlTradeInEvent,
-  HodlTradeOutEvent,
-  HodlTradeFeesEvent,
-  HodlInternalAllocationInflowEvent,
-  HodlInternalAllocationOutflowEvent,
-  HodlLedgerEvent,
-} from './hodl/index.js';
-export { isHodlLedgerEvent, assertHodlLedgerEvent } from './hodl/index.js';
-
 // Strategy types
 export type {
   StrategyState,
+  StrategyStatus,
   StrategyConfig,
   StrategyMetrics,
   StrategyAutomationWallet,
@@ -141,6 +114,65 @@ export type {
   AggregationResult,
   PositionWithQuoteToken,
 } from './strategy.js';
+
+// Strategy Position types (strategy-owned positions)
+export type {
+  StrategyPositionStatus,
+  StrategyPositionType,
+  StrategyPositionJSON,
+  BaseStrategyPositionParams,
+  StrategyPositionInterface,
+  StrategyPositionRow,
+  // HODL strategy position types
+  HodlPositionConfigData,
+  HodlPositionStateData,
+  HodlStrategyPositionParams,
+  HodlStrategyPositionRow,
+  HodlPositionHolding,
+  HodlPositionHoldingJSON,
+  HodlWalletType,
+  HodlEvmOnchainWallet,
+  HodlWalletConfig,
+} from './strategy-position/index.js';
+
+export {
+  BaseStrategyPosition,
+  StrategyPositionFactory,
+  // HODL strategy position classes
+  HodlPositionConfig,
+  HodlPositionState,
+  HodlStrategyPosition,
+  holdingToJSON,
+  holdingFromJSON,
+} from './strategy-position/index.js';
+
+// Strategy Ledger Event types (strategy-owned ledger events)
+export type {
+  StrategyLedgerEventType,
+  TokenHashComponents,
+  StrategyLedgerEvent,
+  StrategyLedgerEventJSON,
+  StrategyLedgerEventRow,
+} from './strategy-ledger-event/index.js';
+
+export {
+  EVENT_TYPE_CATEGORIES,
+  isFundingEvent,
+  isAssetMovementEvent,
+  isPositionLifecycleEvent,
+  isIncomeEvent,
+  isCostEvent,
+  isInternalEvent,
+  makeTokenHash,
+  parseTokenHash,
+  isValidTokenHash,
+  getChainIdFromTokenHash,
+  getAddressFromTokenHash,
+  getTokenTypeFromTokenHash,
+  strategyLedgerEventToJSON,
+  strategyLedgerEventFromJSON,
+  strategyLedgerEventFromRow,
+} from './strategy-ledger-event/index.js';
 
 // Strategy utility functions
 export {

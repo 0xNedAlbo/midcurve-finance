@@ -96,13 +96,6 @@ export interface Position<P extends keyof PositionConfigMap> {
    */
   userId: string;
 
-  /**
-   * Optional strategy reference
-   * If set, this position is managed by an automated strategy.
-   * Null for manual/non-automated positions.
-   */
-  strategyId: string | null;
-
   // ============================================================================
   // PNL RELATED FIELDS
   // ============================================================================
@@ -389,9 +382,8 @@ export type PositionProtocol = keyof PositionConfigMap;
  *
  * Specifies the liquidity model used by the position:
  * - 'CL_TICKS': Concentrated liquidity with tick-based ranges (Uniswap V3, Orca, etc.)
- * - 'SPOT': Multi-token basket (HODL positions for strategy unallocated assets)
  */
-export type PositionType = 'CL_TICKS' | 'SPOT';
+export type PositionType = 'CL_TICKS';
 
 // ============================================================================
 // TYPE ALIASES FOR SPECIFIC PROTOCOLS
@@ -404,15 +396,6 @@ export type PositionType = 'CL_TICKS' | 'SPOT';
  * Equivalent to Position<'uniswapv3'>.
  */
 export type UniswapV3Position = Position<'uniswapv3'>;
-
-/**
- * HODL Position
- *
- * Type-safe position for multi-token baskets.
- * Used by automated strategies to track unallocated assets.
- * Equivalent to Position<'hodl'>.
- */
-export type HodlPosition = Position<'hodl'>;
 
 /**
  * Union type for any position
@@ -521,57 +504,6 @@ export function assertUniswapV3Position(
   if (!isUniswapV3Position(position)) {
     throw new Error(
       `Expected Uniswap V3 position, got protocol: ${(position as AnyPosition).protocol}`
-    );
-  }
-}
-
-/**
- * Type guard for HODL positions
- *
- * Safely narrows AnyPosition to HodlPosition, allowing access to
- * HODL-specific config and state fields.
- *
- * @param position - Position to check
- * @returns True if position is a HODL position
- *
- * @example
- * ```typescript
- * const position: AnyPosition = await getPosition();
- *
- * if (isHodlPosition(position)) {
- *   // TypeScript knows position is HodlPosition here
- *   console.log(position.state.holdings);
- * }
- * ```
- */
-export function isHodlPosition(position: AnyPosition): position is HodlPosition {
-  return position.protocol === 'hodl';
-}
-
-/**
- * Assertion function for HODL positions
- *
- * Throws an error if position is not a HODL position.
- * After calling this function, TypeScript knows the position is HodlPosition.
- *
- * @param position - Position to check
- * @throws Error if position is not a HODL position
- *
- * @example
- * ```typescript
- * const position: AnyPosition = await getPosition();
- *
- * assertHodlPosition(position);
- * // TypeScript knows position is HodlPosition after this line
- * console.log(position.state.holdings);
- * ```
- */
-export function assertHodlPosition(
-  position: AnyPosition
-): asserts position is HodlPosition {
-  if (!isHodlPosition(position)) {
-    throw new Error(
-      `Expected HODL position, got protocol: ${(position as AnyPosition).protocol}`
     );
   }
 }

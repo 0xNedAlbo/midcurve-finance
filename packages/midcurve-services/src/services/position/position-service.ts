@@ -42,7 +42,6 @@ interface PositionDbResult {
   protocol: string;
   positionType: string;
   userId: string;
-  strategyId: string | null;
   currentValue: string; // bigint as string
   currentCostBasis: string;
   realizedPnl: string;
@@ -576,7 +575,6 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
       protocol: dbResult.protocol as P,
       positionType: dbResult.positionType as Position<P>['positionType'],
       userId: dbResult.userId,
-      strategyId: dbResult.strategyId,
       currentValue: BigInt(dbResult.currentValue),
       currentCostBasis: BigInt(dbResult.currentCostBasis),
       realizedPnl: BigInt(dbResult.realizedPnl),

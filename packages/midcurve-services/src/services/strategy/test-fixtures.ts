@@ -4,7 +4,7 @@
  * Provides mock data and helper functions for testing the StrategyService.
  */
 
-import type { StrategyConfig, StrategyState } from '@midcurve/shared';
+import type { StrategyConfig, StrategyStatus } from '@midcurve/shared';
 import type { CreateStrategyInput, ActivateStrategyInput } from '../types/strategy/index.js';
 
 // ============================================================================
@@ -300,8 +300,8 @@ export function createMockAutomationWalletDbResult(
 // ============================================================================
 
 export const VALID_TRANSITIONS: Array<{
-  from: StrategyState;
-  to: StrategyState;
+  from: StrategyStatus;
+  to: StrategyStatus;
   method: 'activate' | 'pause' | 'resume' | 'shutdown';
 }> = [
   { from: 'pending', to: 'active', method: 'activate' },
@@ -312,8 +312,8 @@ export const VALID_TRANSITIONS: Array<{
 ];
 
 export const INVALID_TRANSITIONS: Array<{
-  from: StrategyState;
-  to: StrategyState;
+  from: StrategyStatus;
+  to: StrategyStatus;
   method: 'activate' | 'pause' | 'resume' | 'shutdown';
 }> = [
   { from: 'active', to: 'active', method: 'activate' }, // Already active

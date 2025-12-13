@@ -9,7 +9,6 @@
  */
 
 import type { UniswapV3LedgerEventState } from './uniswapv3/position-ledger-event-state.js';
-import type { HodlLedgerEventState } from './hodl/position-ledger-event-state.js';
 
 // Re-export for convenience
 export type {
@@ -18,17 +17,6 @@ export type {
   UniswapV3DecreaseLiquidityEvent,
   UniswapV3CollectEvent,
 } from './uniswapv3/position-ledger-event-state.js';
-export type {
-  HodlLedgerEventState,
-  HodlEventType,
-  HodlExternalDepositEvent,
-  HodlExternalWithdrawEvent,
-  HodlTradeInEvent,
-  HodlTradeOutEvent,
-  HodlTradeFeesEvent,
-  HodlInternalAllocationInflowEvent,
-  HodlInternalAllocationOutflowEvent,
-} from './hodl/position-ledger-event-state.js';
 
 /**
  * Position Ledger Event State Map
@@ -54,17 +42,6 @@ export interface PositionLedgerEventStateMap {
      * State type for Uniswap V3 ledger events
      */
     state: UniswapV3LedgerEventState;
-  };
-  /**
-   * HODL position ledger event states
-   *
-   * Discriminated union of 7 event types for multi-token basket tracking.
-   */
-  hodl: {
-    /**
-     * State type for HODL ledger events
-     */
-    state: HodlLedgerEventState;
   };
   // Future protocols:
   // orca: {

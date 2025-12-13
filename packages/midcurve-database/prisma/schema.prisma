@@ -24,11 +24,23 @@ datasource db {
 // - active: Running on-chain
 // - paused: Soft pause (DB-only, for UI/API control)
 // - shutdown: Permanently stopped
-enum StrategyState {
+enum StrategyStatus {
   pending
   active
   paused
   shutdown
+}
+
+// Strategy position lifecycle states
+// - pending: Created in DB, not yet active
+// - active: Position is active
+// - paused: Position is temporarily paused
+// - closed: Position has been closed
+enum StrategyPositionStatus {
+  pending
+  active
+  paused
+  closed
 }
 
 // StrategyManifest - Deployable strategy contract definition
@@ -96,7 +108,7 @@ model Strategy {
   // Identification
   name         String // "ETH-USDC Delta Neutral"
   strategyType String // "delta-neutral", "yield-optimizer"
-  state        StrategyState @default(pending)
+  status       StrategyStatus @default(pending)
 
   // On-chain identification (nullable until deployed)
   // Contract address is the primary lookup field (strategies always have EVM addresses)
@@ -131,16 +143,104 @@ model Strategy {
   manifest   StrategyManifest? @relation(fields: [manifestId], references: [id])
 
   // Relations
-  positions         Position[]
-  automationWallets AutomationWallet[]
+  automationWallets    AutomationWallet[]
+  strategyPositions    StrategyPosition[]
+  strategyLedgerEvents StrategyLedgerEvent[]
 
   // Indexes
   @@index([userId])
-  @@index([state])
+  @@index([status])
   @@index([strategyType])
   @@index([quoteTokenId])
   @@index([manifestId])
   @@map("strategies")
+}
+
+// StrategyPosition - Position owned by a Strategy (not User)
+// Supports multiple position types: hodl, uniswapv3, hyperliquid, etc.
+model StrategyPosition {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Parent strategy
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  // Type discriminator
+  positionType String // 'hodl', 'uniswapv3', 'hyperliquid'
+
+  // Lifecycle
+  status   StrategyPositionStatus @default(pending)
+  openedAt DateTime?
+  closedAt DateTime?
+
+  // Type-specific data (JSON)
+  // Config: Immutable configuration (wallets, addresses, etc.)
+  // State: Mutable state (balances, holdings, etc.)
+  config Json
+  state  Json
+
+  // Relations
+  ledgerEvents StrategyLedgerEvent[]
+
+  // Indexes
+  @@index([strategyId])
+  @@index([positionType])
+  @@index([status])
+  @@map("strategy_positions")
+}
+
+// StrategyLedgerEvent - Financial events for Strategy positions
+// Unified event taxonomy for all strategy position types
+model StrategyLedgerEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Parent references
+  strategyId         String
+  strategy           Strategy         @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  strategyPositionId String
+  strategyPosition   StrategyPosition @relation(fields: [strategyPositionId], references: [id], onDelete: Cascade)
+
+  // Grouping & Ordering
+  // groupId: UUID that groups related events atomically (e.g., SWAP = BUY + SELL + FEE_PAID + GAS_PAID)
+  // sequenceNumber: Order within same timestamp (0, 1, 2...) - resets per timestamp
+  groupId        String
+  timestamp      DateTime
+  sequenceNumber Int
+
+  // Event identification
+  // Types: INVESTOR_DEPOSIT, INVESTOR_WITHDRAW, BUY, SELL, POSITION_ENTER, POSITION_INCREASE,
+  //        POSITION_DECREASE, POSITION_EXIT, FEE_EARNED, YIELD_EARNED, FUNDING_RECEIVED,
+  //        FUNDING_PAID, FEE_PAID, GAS_PAID, ALLOCATION_TO_POSITION, ALLOCATION_FROM_POSITION
+  eventType String
+
+  // Asset
+  tokenId      String
+  token        Token  @relation(fields: [tokenId], references: [id])
+  tokenHash    String // "erc20:chainId:address" for readability/logging
+  amount       String // bigint as string (+ inflow, - outflow)
+  valueInQuote String // bigint as string - Value in strategy's quote token
+
+  // Financial tracking (deltas only - aggregate for totals)
+  deltaCostBasis String // bigint as string - Capital movement
+  deltaIncome    String // bigint as string - Revenue (can be negative for FUNDING_PAID)
+  deltaExpense   String // bigint as string - Costs
+
+  // Protocol-specific data (JSON)
+  config Json // Immutable event metadata
+  state  Json // Event-specific data
+
+  // Indexes
+  @@index([strategyId])
+  @@index([strategyPositionId])
+  @@index([groupId])
+  @@index([timestamp, sequenceNumber])
+  @@index([tokenId])
+  @@index([eventType])
+  @@map("strategy_ledger_events")
 }
 
 // =============================================================================
@@ -296,10 +396,11 @@ model Token {
   config Json
 
   // Relations
-  poolsAsToken0     Pool[]             @relation("PoolToken0")
-  poolsAsToken1     Pool[]             @relation("PoolToken1")
-  strategies        Strategy[]
-  strategyManifests StrategyManifest[] @relation("ManifestBasicCurrency")
+  poolsAsToken0        Pool[]                @relation("PoolToken0")
+  poolsAsToken1        Pool[]                @relation("PoolToken1")
+  strategies           Strategy[]
+  strategyManifests    StrategyManifest[]    @relation("ManifestBasicCurrency")
+  strategyLedgerEvents StrategyLedgerEvent[]
 
   // Indexes for efficient queries
   @@index([tokenType])
@@ -358,10 +459,6 @@ model Position {
   userId String
   user   User   @relation(fields: [userId], references: [id])
 
-  // Optional strategy reference
-  strategyId String?
-  strategy   Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
-
   // Position hash for fast lookups
   // Human-readable composite key: protocol/chainId/nftId (for UniswapV3)
   // Format is protocol-specific, generated by createPositionHash() method
@@ -419,7 +516,6 @@ model Position {
   @@index([userId])
   @@index([poolId])
   @@index([isActive])
-  @@index([strategyId])
   @@index([userId, positionHash]) // Fast user-specific lookups by hash
   @@map("positions")
 }

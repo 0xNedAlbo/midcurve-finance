@@ -5,13 +5,13 @@
  * validation helpers.
  */
 
-import type { StrategyState } from '@midcurve/shared';
+import type { StrategyStatus } from '@midcurve/shared';
 
 /**
  * Type for state transition map
  */
 type StateTransitionMap = {
-  [K in StrategyState]: readonly StrategyState[];
+  [K in StrategyStatus]: readonly StrategyStatus[];
 };
 
 /**
@@ -34,7 +34,7 @@ export const VALID_STATE_TRANSITIONS: StateTransitionMap = {
  * @param to - Target state
  * @returns true if transition is valid
  */
-export function isValidTransition(from: StrategyState, to: StrategyState): boolean {
+export function isValidTransition(from: StrategyStatus, to: StrategyStatus): boolean {
   // Use non-null assertion since we know all states are covered
   const validNextStates = VALID_STATE_TRANSITIONS[from]!;
   return validNextStates.includes(to);
@@ -46,7 +46,7 @@ export function isValidTransition(from: StrategyState, to: StrategyState): boole
  * @param state - Current state
  * @returns Array of valid next states
  */
-export function getValidNextStates(state: StrategyState): readonly StrategyState[] {
+export function getValidNextStates(state: StrategyStatus): readonly StrategyStatus[] {
   // Use non-null assertion since we know all states are covered
   return VALID_STATE_TRANSITIONS[state]!;
 }
@@ -55,11 +55,11 @@ export function getValidNextStates(state: StrategyState): readonly StrategyState
  * Error thrown when an invalid state transition is attempted
  */
 export class StrategyInvalidStateError extends Error {
-  public readonly from: StrategyState;
-  public readonly to: StrategyState;
+  public readonly from: StrategyStatus;
+  public readonly to: StrategyStatus;
   public readonly strategyId: string;
 
-  constructor(strategyId: string, from: StrategyState, to: StrategyState) {
+  constructor(strategyId: string, from: StrategyStatus, to: StrategyStatus) {
     // Use non-null assertion since we know all states are covered
     const validStates = VALID_STATE_TRANSITIONS[from]!;
     const validStr = validStates.length > 0 ? validStates.join(', ') : 'none (terminal state)';
@@ -80,7 +80,7 @@ export class StrategyInvalidStateError extends Error {
  * @param state - Strategy state
  * @returns true if state is terminal (no further transitions allowed)
  */
-export function isTerminalState(state: StrategyState): boolean {
+export function isTerminalState(state: StrategyStatus): boolean {
   // Use non-null assertion since we know all states are covered
   return VALID_STATE_TRANSITIONS[state]!.length === 0;
 }
@@ -91,6 +91,6 @@ export function isTerminalState(state: StrategyState): boolean {
  * @param state - Strategy state
  * @returns true if strategy can be modified
  */
-export function canModify(state: StrategyState): boolean {
+export function canModify(state: StrategyStatus): boolean {
   return !isTerminalState(state);
 }

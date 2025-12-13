@@ -7,6 +7,7 @@
  */
 
 import type { AnyPosition } from './position.js';
+import type { StrategyPositionInterface } from './strategy-position/strategy-position.interface.js';
 import type { AnyToken, Erc20TokenConfig } from './token.js';
 import { normalizeToBasicCurrencyDecimals } from '../utils/decimals.js';
 
@@ -15,14 +16,19 @@ import { normalizeToBasicCurrencyDecimals } from '../utils/decimals.js';
 // =============================================================================
 
 /**
- * Strategy lifecycle states
+ * Strategy lifecycle status
  *
  * - pending: Created in DB, not yet deployed on-chain
  * - active: Running on-chain
  * - paused: Soft pause (DB-only, for UI/API control)
  * - shutdown: Permanently stopped
  */
-export type StrategyState = 'pending' | 'active' | 'paused' | 'shutdown';
+export type StrategyStatus = 'pending' | 'active' | 'paused' | 'shutdown';
+
+/**
+ * @deprecated Use StrategyStatus instead
+ */
+export type StrategyState = StrategyStatus;
 
 // =============================================================================
 // STRATEGY CONFIG
@@ -162,9 +168,9 @@ export interface Strategy {
   strategyType: string;
 
   /**
-   * Current lifecycle state
+   * Current lifecycle status
    */
-  state: StrategyState;
+  status: StrategyStatus;
 
   // ============================================================================
   // ON-CHAIN IDENTIFICATION
@@ -234,10 +240,11 @@ export interface Strategy {
   // ============================================================================
 
   /**
-   * Positions managed by this strategy
-   * Can include positions from any protocol (UniswapV3, Hyperliquid, etc.)
+   * Strategy-owned positions
+   * Positions directly owned by the strategy (not user positions).
+   * Includes HODL baskets, managed LP positions, etc.
    */
-  positions?: AnyPosition[];
+  strategyPositions?: StrategyPositionInterface[];
 
   /**
    * Automation wallets linked to this strategy

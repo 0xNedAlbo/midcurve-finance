@@ -41,6 +41,8 @@ export * from './services/cache/index.js';
 export * from './services/block/index.js';
 export * from './services/strategy/index.js';
 export * from './services/strategy-manifest/index.js';
+export * from './services/strategy-position/index.js';
+export * from './services/strategy-ledger/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';

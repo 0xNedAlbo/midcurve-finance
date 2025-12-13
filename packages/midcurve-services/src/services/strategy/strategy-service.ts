@@ -10,17 +10,10 @@ import { PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import type {
   Strategy,
-  StrategyState,
+  StrategyStatus,
   StrategyConfig,
-  AnyPosition,
   AnyToken,
   StrategyAutomationWallet,
-  PositionWithQuoteToken,
-} from '@midcurve/shared';
-import {
-  aggregatePositionMetrics,
-  aggregatePositionMetricsWithBasicCurrency,
-  resolveBasicCurrencyId,
 } from '@midcurve/shared';
 import type {
   CreateStrategyInput,
@@ -34,10 +27,6 @@ import {
   isValidTransition,
   StrategyInvalidStateError,
   parseMetricsFromDb,
-  serializeMetricsToDb,
-  createEmptyMetrics,
-  PositionNoBasicCurrencyError,
-  StrategyBasicCurrencyMismatchError,
 } from './helpers/index.js';
 
 /**
@@ -61,7 +50,7 @@ interface StrategyDbResult {
   userId: string;
   name: string;
   strategyType: string;
-  state: string;
+  status: string;
   contractAddress: string | null;
   chainId: number | null;
   quoteTokenId: string | null;
@@ -76,7 +65,6 @@ interface StrategyDbResult {
   skippedPositionIds: string[];
   config: unknown;
   quoteToken?: any;
-  positions?: any[];
   automationWallets?: any[];
 }
 
@@ -86,9 +74,11 @@ interface StrategyDbResult {
  * Handles all strategy-related database operations including:
  * - CRUD operations
  * - State transitions (activate, pause, resume, shutdown)
- * - Position linking/unlinking
  * - Wallet linking/unlinking
  * - Metrics aggregation
+ *
+ * Note: Strategy-owned positions are managed via StrategyPositionService,
+ * not through Position linking.
  */
 export class StrategyService {
   private readonly prisma: PrismaClient;
@@ -150,7 +140,7 @@ export class StrategyService {
       const strategy = this.mapToStrategy(result as StrategyDbResult);
 
       this.logger.info(
-        { id: strategy.id, name: strategy.name, state: strategy.state },
+        { id: strategy.id, name: strategy.name, state: strategy.status },
         'Strategy created'
       );
       log.methodExit(this.logger, 'create', { id: strategy.id });
@@ -249,11 +239,11 @@ export class StrategyService {
       const whereClause: Prisma.StrategyWhereInput = { userId };
 
       // Add state filter if provided
-      if (options.state) {
-        if (Array.isArray(options.state)) {
-          whereClause.state = { in: options.state };
+      if (options.status) {
+        if (Array.isArray(options.status)) {
+          whereClause.status = { in: options.status };
         } else {
-          whereClause.state = options.state;
+          whereClause.status = options.status;
         }
       }
 
@@ -371,23 +361,23 @@ export class StrategyService {
     try {
       const current = await this.prisma.strategy.findUnique({
         where: { id },
-        select: { state: true },
+        select: { status: true },
       });
 
       if (!current) {
         throw new Error(`Strategy not found: ${id}`);
       }
 
-      const currentState = current.state as StrategyState;
+      const currentStatus = current.status as StrategyStatus;
       // activate() only works from pending state
-      if (currentState !== 'pending') {
-        throw new StrategyInvalidStateError(id, currentState, 'active');
+      if (currentStatus !== 'pending') {
+        throw new StrategyInvalidStateError(id, currentStatus, 'active');
       }
 
       const result = await this.prisma.strategy.update({
         where: { id },
         data: {
-          state: 'active',
+          status: 'active',
           chainId: input.chainId,
           contractAddress: input.contractAddress,
         },
@@ -399,7 +389,7 @@ export class StrategyService {
       this.logger.info(
         {
           id: strategy.id,
-          state: strategy.state,
+          state: strategy.status,
           contractAddress: strategy.contractAddress,
         },
         'Strategy activated'
@@ -425,27 +415,27 @@ export class StrategyService {
     try {
       const current = await this.prisma.strategy.findUnique({
         where: { id },
-        select: { state: true },
+        select: { status: true },
       });
 
       if (!current) {
         throw new Error(`Strategy not found: ${id}`);
       }
 
-      const currentState = current.state as StrategyState;
-      if (!isValidTransition(currentState, 'paused')) {
-        throw new StrategyInvalidStateError(id, currentState, 'paused');
+      const currentStatus = current.status as StrategyStatus;
+      if (!isValidTransition(currentStatus, 'paused')) {
+        throw new StrategyInvalidStateError(id, currentStatus, 'paused');
       }
 
       const result = await this.prisma.strategy.update({
         where: { id },
-        data: { state: 'paused' },
+        data: { status: 'paused' },
         include: this.getIncludeOptions({}),
       });
 
       const strategy = this.mapToStrategy(result as StrategyDbResult);
 
-      this.logger.info({ id: strategy.id, state: strategy.state }, 'Strategy paused');
+      this.logger.info({ id: strategy.id, state: strategy.status }, 'Strategy paused');
       log.methodExit(this.logger, 'pause', { id });
       return strategy;
     } catch (error) {
@@ -467,28 +457,28 @@ export class StrategyService {
     try {
       const current = await this.prisma.strategy.findUnique({
         where: { id },
-        select: { state: true },
+        select: { status: true },
       });
 
       if (!current) {
         throw new Error(`Strategy not found: ${id}`);
       }
 
-      const currentState = current.state as StrategyState;
+      const currentStatus = current.status as StrategyStatus;
       // resume() only works from paused state
-      if (currentState !== 'paused') {
-        throw new StrategyInvalidStateError(id, currentState, 'active');
+      if (currentStatus !== 'paused') {
+        throw new StrategyInvalidStateError(id, currentStatus, 'active');
       }
 
       const result = await this.prisma.strategy.update({
         where: { id },
-        data: { state: 'active' },
+        data: { status: 'active' },
         include: this.getIncludeOptions({}),
       });
 
       const strategy = this.mapToStrategy(result as StrategyDbResult);
 
-      this.logger.info({ id: strategy.id, state: strategy.state }, 'Strategy resumed');
+      this.logger.info({ id: strategy.id, state: strategy.status }, 'Strategy resumed');
       log.methodExit(this.logger, 'resume', { id });
       return strategy;
     } catch (error) {
@@ -512,229 +502,31 @@ export class StrategyService {
     try {
       const current = await this.prisma.strategy.findUnique({
         where: { id },
-        select: { state: true },
+        select: { status: true },
       });
 
       if (!current) {
         throw new Error(`Strategy not found: ${id}`);
       }
 
-      const currentState = current.state as StrategyState;
-      if (!isValidTransition(currentState, 'shutdown')) {
-        throw new StrategyInvalidStateError(id, currentState, 'shutdown');
+      const currentStatus = current.status as StrategyStatus;
+      if (!isValidTransition(currentStatus, 'shutdown')) {
+        throw new StrategyInvalidStateError(id, currentStatus, 'shutdown');
       }
 
       const result = await this.prisma.strategy.update({
         where: { id },
-        data: { state: 'shutdown' },
+        data: { status: 'shutdown' },
         include: this.getIncludeOptions({}),
       });
 
       const strategy = this.mapToStrategy(result as StrategyDbResult);
 
-      this.logger.info({ id: strategy.id, state: strategy.state }, 'Strategy shutdown');
+      this.logger.info({ id: strategy.id, state: strategy.status }, 'Strategy shutdown');
       log.methodExit(this.logger, 'shutdown', { id });
       return strategy;
     } catch (error) {
       log.methodError(this.logger, 'shutdown', error as Error, { id });
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // POSITION MANAGEMENT
-  // ============================================================================
-
-  /**
-   * Links a position to a strategy
-   *
-   * Validates that the position's quote token is linked to a basic currency,
-   * and that it matches the strategy's basic currency. If the strategy doesn't
-   * have a quoteTokenId yet (first position), it adopts the position's
-   * quote token's basic currency.
-   *
-   * @param strategyId - Strategy ID
-   * @param positionId - Position ID
-   * @returns The updated strategy with refreshed metrics
-   * @throws PositionNoBasicCurrencyError if quote token has no basic currency link
-   * @throws StrategyBasicCurrencyMismatchError if basic currencies don't match
-   */
-  async linkPosition(strategyId: string, positionId: string): Promise<Strategy> {
-    log.methodEntry(this.logger, 'linkPosition', { strategyId, positionId });
-
-    try {
-      // Fetch strategy (with quoteToken if set) and position with pool/tokens
-      const [strategy, position] = await Promise.all([
-        this.prisma.strategy.findUnique({
-          where: { id: strategyId },
-          include: {
-            quoteToken: true,
-          },
-        }),
-        this.prisma.position.findUnique({
-          where: { id: positionId },
-          include: {
-            pool: {
-              include: {
-                token0: true,
-                token1: true,
-              },
-            },
-          },
-        }),
-      ]);
-
-      if (!strategy) {
-        throw new Error(`Strategy not found: ${strategyId}`);
-      }
-      if (!position) {
-        throw new Error(`Position not found: ${positionId}`);
-      }
-
-      // Determine position's quote token
-      const positionQuoteTokenDb = position.isToken0Quote
-        ? position.pool.token0
-        : position.pool.token1;
-      const positionQuoteToken = this.mapDbTokenToAnyToken(positionQuoteTokenDb);
-
-      // Resolve basic currency for position's quote token
-      const positionBasicCurrencyId = resolveBasicCurrencyId(positionQuoteToken);
-
-      if (!positionBasicCurrencyId) {
-        throw new PositionNoBasicCurrencyError(
-          positionId,
-          positionQuoteToken.id,
-          positionQuoteToken.symbol
-        );
-      }
-
-      // If strategy has a quoteTokenId, validate basic currency match
-      if (strategy.quoteTokenId && strategy.quoteToken) {
-        const strategyQuoteToken = this.mapDbTokenToAnyToken(strategy.quoteToken);
-        const strategyBasicCurrencyId = resolveBasicCurrencyId(strategyQuoteToken);
-
-        // Strategy's quoteToken should always have a basic currency link
-        // (it was validated when the first position was linked)
-        if (strategyBasicCurrencyId && strategyBasicCurrencyId !== positionBasicCurrencyId) {
-          throw new StrategyBasicCurrencyMismatchError(
-            strategyId,
-            strategyBasicCurrencyId,
-            positionBasicCurrencyId
-          );
-        }
-      }
-
-      // Update position with strategy reference, and update strategy quote token if needed
-      // Note: We now set the strategy's quoteTokenId to the BASIC CURRENCY, not the platform token
-      await this.prisma.$transaction([
-        this.prisma.position.update({
-          where: { id: positionId },
-          data: { strategyId },
-        }),
-        ...(strategy.quoteTokenId
-          ? []
-          : [
-              this.prisma.strategy.update({
-                where: { id: strategyId },
-                data: { quoteTokenId: positionBasicCurrencyId },
-              }),
-            ]),
-      ]);
-
-      // Refresh metrics after linking
-      const result = await this.refreshMetrics(strategyId);
-
-      this.logger.info(
-        { strategyId, positionId, basicCurrencyId: positionBasicCurrencyId },
-        'Position linked to strategy'
-      );
-      log.methodExit(this.logger, 'linkPosition', { strategyId, positionId });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'linkPosition', error as Error, {
-        strategyId,
-        positionId,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Unlinks a position from its strategy
-   *
-   * @param positionId - Position ID
-   */
-  async unlinkPosition(positionId: string): Promise<void> {
-    log.methodEntry(this.logger, 'unlinkPosition', { positionId });
-
-    try {
-      // Get position to find the strategy it belongs to
-      const position = await this.prisma.position.findUnique({
-        where: { id: positionId },
-        select: { strategyId: true },
-      });
-
-      if (!position) {
-        throw new Error(`Position not found: ${positionId}`);
-      }
-
-      const strategyId = position.strategyId;
-
-      // Unlink position
-      await this.prisma.position.update({
-        where: { id: positionId },
-        data: { strategyId: null },
-      });
-
-      // Refresh strategy metrics if it was linked
-      if (strategyId) {
-        await this.refreshMetrics(strategyId);
-      }
-
-      this.logger.info({ positionId, strategyId }, 'Position unlinked from strategy');
-      log.methodExit(this.logger, 'unlinkPosition', { positionId });
-    } catch (error) {
-      log.methodError(this.logger, 'unlinkPosition', error as Error, {
-        positionId,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Gets all positions linked to a strategy
-   *
-   * @param strategyId - Strategy ID
-   * @returns Array of positions
-   */
-  async getPositions(strategyId: string): Promise<AnyPosition[]> {
-    log.methodEntry(this.logger, 'getPositions', { strategyId });
-
-    try {
-      const positions = await this.prisma.position.findMany({
-        where: { strategyId },
-        include: {
-          pool: {
-            include: {
-              token0: true,
-              token1: true,
-            },
-          },
-        },
-      });
-
-      // Map to AnyPosition type
-      const result = positions.map((p) => this.mapDbPositionToAnyPosition(p));
-
-      log.methodExit(this.logger, 'getPositions', {
-        strategyId,
-        count: result.length,
-      });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'getPositions', error as Error, {
-        strategyId,
-      });
       throw error;
     }
   }
@@ -847,129 +639,45 @@ export class StrategyService {
   // ============================================================================
 
   /**
-   * Refreshes strategy metrics by aggregating from all linked positions
+   * Refreshes the strategy's aggregated metrics from strategy positions
    *
-   * Uses basic currency normalization when the strategy has a quoteTokenId set
-   * (which points to a basic currency). Positions whose quote tokens are not
-   * linkable to the strategy's basic currency are skipped and their IDs stored.
-   *
-   * Note: This method does NOT trigger refresh on the individual positions.
-   * Call position refresh separately if needed before calling this method.
+   * Note: This is a placeholder implementation. In the new architecture,
+   * metrics are aggregated from StrategyLedgerEvent records via
+   * StrategyLedgerService.getStrategyTotals().
    *
    * @param id - Strategy ID
-   * @returns The strategy with updated metrics
+   * @returns The strategy with current metrics
    */
   async refreshMetrics(id: string): Promise<Strategy> {
     log.methodEntry(this.logger, 'refreshMetrics', { id });
 
     try {
-      // Get strategy to check if it has a quoteTokenId (basic currency)
-      const strategy = await this.prisma.strategy.findUnique({
+      // For now, just return the strategy with its current stored metrics
+      // In the future, this will aggregate from StrategyLedgerEvent records
+      const result = await this.prisma.strategy.findUnique({
         where: { id },
-        select: { quoteTokenId: true },
-      });
-
-      if (!strategy) {
-        throw new Error(`Strategy not found: ${id}`);
-      }
-
-      // Get all positions linked to this strategy with pool/tokens
-      const positionsWithQuoteTokens = await this.getPositionsWithQuoteTokens(id);
-
-      let metrics = createEmptyMetrics();
-      let skippedPositionIds: string[] = [];
-
-      if (positionsWithQuoteTokens.length > 0) {
-        if (strategy.quoteTokenId) {
-          // Use basic currency aggregation with decimal normalization
-          const aggregationResult = aggregatePositionMetricsWithBasicCurrency(
-            positionsWithQuoteTokens,
-            strategy.quoteTokenId
-          );
-          metrics = aggregationResult.metrics;
-          skippedPositionIds = aggregationResult.skippedPositionIds;
-
-          // Log skip reasons for debugging
-          if (aggregationResult.skippedPositionIds.length > 0) {
-            this.logger.warn(
-              {
-                strategyId: id,
-                skippedCount: aggregationResult.skippedPositionIds.length,
-                skipReasons: Object.fromEntries(aggregationResult.skipReasons),
-              },
-              'Some positions skipped during metrics aggregation'
-            );
-          }
-        } else {
-          // No basic currency set - use simple aggregation (legacy behavior)
-          // This shouldn't happen in normal flow since linkPosition sets quoteTokenId
-          const positions = positionsWithQuoteTokens.map((p) => p.position);
-          metrics = aggregatePositionMetrics(positions);
-        }
-      }
-
-      // Update strategy with new metrics and skipped position IDs
-      const metricsDb = serializeMetricsToDb(metrics);
-
-      const result = await this.prisma.strategy.update({
-        where: { id },
-        data: {
-          ...metricsDb,
-          skippedPositionIds,
-        },
         include: this.getIncludeOptions({}),
       });
 
-      const updatedStrategy = this.mapToStrategy(result as StrategyDbResult);
+      if (!result) {
+        throw new Error(`Strategy not found: ${id}`);
+      }
+
+      const strategy = this.mapToStrategy(result as StrategyDbResult);
 
       this.logger.info(
         {
-          id: updatedStrategy.id,
-          positionCount: positionsWithQuoteTokens.length,
-          includedCount: positionsWithQuoteTokens.length - skippedPositionIds.length,
-          skippedCount: skippedPositionIds.length,
-          currentValue: updatedStrategy.metrics.currentValue.toString(),
+          id: strategy.id,
+          currentValue: strategy.metrics.currentValue.toString(),
         },
-        'Strategy metrics refreshed'
+        'Strategy metrics retrieved'
       );
       log.methodExit(this.logger, 'refreshMetrics', { id });
-      return updatedStrategy;
+      return strategy;
     } catch (error) {
       log.methodError(this.logger, 'refreshMetrics', error as Error, { id });
       throw error;
     }
-  }
-
-  /**
-   * Gets all positions linked to a strategy with their resolved quote tokens
-   *
-   * This is used internally for metrics aggregation with basic currency normalization.
-   *
-   * @param strategyId - Strategy ID
-   * @returns Array of positions with their quote tokens
-   */
-  private async getPositionsWithQuoteTokens(
-    strategyId: string
-  ): Promise<PositionWithQuoteToken[]> {
-    const positions = await this.prisma.position.findMany({
-      where: { strategyId },
-      include: {
-        pool: {
-          include: {
-            token0: true,
-            token1: true,
-          },
-        },
-      },
-    });
-
-    return positions.map((p) => {
-      const position = this.mapDbPositionToAnyPosition(p);
-      const quoteTokenDb = p.isToken0Quote ? p.pool.token0 : p.pool.token1;
-      const quoteToken = this.mapDbTokenToAnyToken(quoteTokenDb);
-
-      return { position, quoteToken };
-    });
   }
 
   // ============================================================================
@@ -984,19 +692,6 @@ export class StrategyService {
 
     if (options.includeQuoteToken) {
       include.quoteToken = true;
-    }
-
-    if (options.includePositions) {
-      include.positions = {
-        include: {
-          pool: {
-            include: {
-              token0: true,
-              token1: true,
-            },
-          },
-        },
-      };
     }
 
     if (options.includeWallets) {
@@ -1019,7 +714,7 @@ export class StrategyService {
       userId: dbResult.userId,
       name: dbResult.name,
       strategyType: dbResult.strategyType,
-      state: dbResult.state as StrategyState,
+      status: dbResult.status as StrategyStatus,
       contractAddress: dbResult.contractAddress,
       chainId: dbResult.chainId,
       quoteTokenId: dbResult.quoteTokenId,
@@ -1031,12 +726,6 @@ export class StrategyService {
     // Add optional relations if present
     if (dbResult.quoteToken) {
       strategy.quoteToken = this.mapDbTokenToAnyToken(dbResult.quoteToken);
-    }
-
-    if (dbResult.positions) {
-      strategy.positions = dbResult.positions.map((p) =>
-        this.mapDbPositionToAnyPosition(p)
-      );
     }
 
     if (dbResult.automationWallets) {
@@ -1070,41 +759,6 @@ export class StrategyService {
       coingeckoId: dbToken.coingeckoId,
       marketCap: dbToken.marketCap,
       config: dbToken.config,
-    };
-  }
-
-  /**
-   * Map database position to AnyPosition type
-   */
-  private mapDbPositionToAnyPosition(dbPosition: any): AnyPosition {
-    return {
-      id: dbPosition.id,
-      positionHash: dbPosition.positionHash ?? '',
-      createdAt: dbPosition.createdAt,
-      updatedAt: dbPosition.updatedAt,
-      protocol: dbPosition.protocol,
-      positionType: dbPosition.positionType,
-      userId: dbPosition.userId,
-      strategyId: dbPosition.strategyId,
-      currentValue: BigInt(dbPosition.currentValue),
-      currentCostBasis: BigInt(dbPosition.currentCostBasis),
-      realizedPnl: BigInt(dbPosition.realizedPnl),
-      unrealizedPnl: BigInt(dbPosition.unrealizedPnl),
-      realizedCashflow: BigInt(dbPosition.realizedCashflow),
-      unrealizedCashflow: BigInt(dbPosition.unrealizedCashflow),
-      collectedFees: BigInt(dbPosition.collectedFees),
-      unClaimedFees: BigInt(dbPosition.unClaimedFees),
-      lastFeesCollectedAt: dbPosition.lastFeesCollectedAt,
-      totalApr: dbPosition.totalApr,
-      priceRangeLower: BigInt(dbPosition.priceRangeLower),
-      priceRangeUpper: BigInt(dbPosition.priceRangeUpper),
-      pool: dbPosition.pool,
-      isToken0Quote: dbPosition.isToken0Quote,
-      positionOpenedAt: dbPosition.positionOpenedAt,
-      positionClosedAt: dbPosition.positionClosedAt,
-      isActive: dbPosition.isActive,
-      config: dbPosition.config,
-      state: dbPosition.state,
     };
   }
 }

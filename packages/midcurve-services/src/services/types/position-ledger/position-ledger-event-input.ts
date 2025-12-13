@@ -6,7 +6,6 @@
 import type {
   PositionLedgerEvent,
   PositionLedgerEventConfigMap,
-  HodlEventType,
 } from '@midcurve/shared';
 
 /**
@@ -24,8 +23,6 @@ export type CreatePositionLedgerEventInput<
  */
 export type CreateUniswapV3LedgerEventInput =
   CreatePositionLedgerEventInput<'uniswapv3'>;
-export type CreateHodlLedgerEventInput =
-  CreatePositionLedgerEventInput<'hodl'>;
 export type CreateAnyLedgerEventInput =
   CreatePositionLedgerEventInput<keyof PositionLedgerEventConfigMap>;
 
@@ -120,56 +117,6 @@ export interface UniswapV3LedgerEventDiscoverInput {
 }
 
 /**
- * Input for discovering a HODL position ledger event
- *
- * HODL events are manually managed (not discovered from on-chain).
- * This input represents a user-provided event to add to the ledger.
- */
-export interface HodlLedgerEventDiscoverInput {
-  /**
-   * Event type discriminator
-   * One of the 7 HODL event types
-   */
-  eventType: HodlEventType;
-
-  /**
-   * Timestamp when the event occurred
-   */
-  timestamp: Date;
-
-  /**
-   * Database token ID of the token involved
-   */
-  tokenId: string;
-
-  /**
-   * Amount in smallest token units
-   */
-  amount: bigint;
-
-  /**
-   * Quote-denominated value of the amount
-   * Used for cost basis and PnL calculations
-   */
-  quoteValue: bigint;
-
-  /**
-   * Optional: Transaction hash for on-chain events
-   */
-  txHash?: string;
-
-  /**
-   * Optional: Source/destination address (for deposits/withdrawals)
-   */
-  address?: string;
-
-  /**
-   * Optional: Source/destination position ID (for internal allocations)
-   */
-  relatedPositionId?: string;
-}
-
-/**
  * Mapped type for position ledger event discovery inputs
  * Maps each protocol to its discovery input type
  *
@@ -179,7 +126,6 @@ export interface HodlLedgerEventDiscoverInput {
  */
 export interface PositionLedgerEventDiscoverInputMap {
   uniswapv3: UniswapV3LedgerEventDiscoverInput;
-  hodl: HodlLedgerEventDiscoverInput;
 }
 
 /**
@@ -206,7 +152,5 @@ export type PositionLedgerEventDiscoverInput<
  */
 export type UniswapV3EventDiscoverInput =
   PositionLedgerEventDiscoverInput<'uniswapv3'>;
-export type HodlEventDiscoverInput =
-  PositionLedgerEventDiscoverInput<'hodl'>;
 export type AnyLedgerEventDiscoverInput =
   PositionLedgerEventDiscoverInput<keyof PositionLedgerEventConfigMap>;

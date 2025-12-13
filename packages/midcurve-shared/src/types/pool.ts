@@ -24,10 +24,9 @@ export type Protocol = keyof PoolConfigMap;
 /**
  * Pool type identifier
  * - 'CL_TICKS': Concentrated liquidity with tick-based pricing (Uniswap V3 style)
- * - 'SPOT': Virtual pool for HODL positions (price = 1, token0 = token1 = quoteToken)
  * Extensible for other pool types (constant product, stable pools, etc.)
  */
-export type PoolType = 'CL_TICKS' | 'SPOT';
+export type PoolType = 'CL_TICKS';
 
 /**
  * Pool interface with mapped type parameter
@@ -145,5 +144,3 @@ export interface Pool<P extends keyof PoolConfigMap> {
 
 // Re-export type aliases
 export type { UniswapV3Pool, AnyPool } from './uniswapv3/pool.js';
-export type { HodlPool } from './hodl/pool.js';
-export { isHodlPool, assertHodlPool } from './hodl/pool.js';

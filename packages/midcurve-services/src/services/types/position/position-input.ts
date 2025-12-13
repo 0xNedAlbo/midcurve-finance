@@ -168,7 +168,6 @@ export type CreatePositionInput<P extends keyof PositionConfigMap> = Pick<
  * Input type aliases for creating positions
  */
 export type CreateUniswapV3PositionInput = CreatePositionInput<'uniswapv3'>;
-export type CreateHodlPositionInput = CreatePositionInput<'hodl'>;
 export type CreateAnyPositionInput = CreatePositionInput<keyof PositionConfigMap>;
 
 /**
@@ -196,5 +195,4 @@ export type UpdatePositionInput<P extends keyof PositionConfigMap> = Partial<
  * Input type aliases for updating positions
  */
 export type UpdateUniswapV3PositionInput = UpdatePositionInput<'uniswapv3'>;
-export type UpdateHodlPositionInput = UpdatePositionInput<'hodl'>;
 export type UpdateAnyPositionInput = UpdatePositionInput<keyof PositionConfigMap>;

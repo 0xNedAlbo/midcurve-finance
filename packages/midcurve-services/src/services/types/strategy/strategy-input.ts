@@ -5,7 +5,7 @@
  * These types are NOT shared with UI/API - they're specific to the service layer.
  */
 
-import type { StrategyState, StrategyConfig } from '@midcurve/shared';
+import type { StrategyStatus, StrategyConfig } from '@midcurve/shared';
 
 /**
  * Input type for creating a new strategy
@@ -90,17 +90,12 @@ export interface FindStrategyOptions {
   /**
    * Filter by state(s)
    */
-  state?: StrategyState | StrategyState[];
+  status?: StrategyStatus | StrategyStatus[];
 
   /**
    * Filter by strategy type
    */
   strategyType?: string;
-
-  /**
-   * Include linked positions in result
-   */
-  includePositions?: boolean;
 
   /**
    * Include linked automation wallets in result

@@ -234,7 +234,7 @@ export const ACTIVE_ETH_USDC_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
-    strategyId: null,
+
     currentValue: 1500000000n,
     currentCostBasis: 1000000000n,
     realizedPnl: 0n,
@@ -326,7 +326,7 @@ export const CLOSED_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
-    strategyId: null,
+
     currentValue: 0n,
     currentCostBasis: 0n,
     realizedPnl: 100000000n,
@@ -432,7 +432,7 @@ export const BOB_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID_2,
-    strategyId: null,
+
     currentValue: 800000000n,
     currentCostBasis: 750000000n,
     realizedPnl: 0n,
@@ -540,7 +540,7 @@ export const ARBITRUM_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
-    strategyId: null,
+
     currentValue: 2000000000n,
     currentCostBasis: 1800000000n,
     realizedPnl: 0n,
@@ -639,7 +639,7 @@ export const BASE_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
-    strategyId: null,
+
     currentValue: 0n,
     currentCostBasis: 0n,
     realizedPnl: 75000000n,
