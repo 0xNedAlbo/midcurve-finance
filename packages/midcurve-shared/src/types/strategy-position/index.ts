@@ -11,6 +11,7 @@ export type {
   StrategyPositionType,
   StrategyPositionJSON,
   BaseStrategyPositionParams,
+  StrategyPositionMetrics,
 } from './strategy-position.types.js';
 
 // Interface

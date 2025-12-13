@@ -117,19 +117,13 @@ model Strategy {
 
   // Quote token reference (all positions must use same quote token)
   // Required for meaningful metrics aggregation
-  quoteTokenId String?
-  quoteToken   Token?  @relation(fields: [quoteTokenId], references: [id])
+  // All positions in this strategy must use the same quote token
+  quoteTokenId String
+  quoteToken   Token  @relation(fields: [quoteTokenId], references: [id])
 
-  // Aggregate metrics (same field names as Position for easy joins/views)
-  // All metrics are normalized to basic currency decimals (18)
-  currentValue       String @default("0") // bigint as string
-  currentCostBasis   String @default("0") // bigint as string
-  realizedPnl        String @default("0") // bigint as string
-  unrealizedPnl      String @default("0") // bigint as string
-  collectedFees      String @default("0") // bigint as string
-  unClaimedFees      String @default("0") // bigint as string
-  realizedCashflow   String @default("0") // bigint as string
-  unrealizedCashflow String @default("0") // bigint as string
+  // NOTE: Metrics are NOT stored - computed on-demand by StrategyMetricsService
+  // from StrategyLedgerEvent aggregations and position state
+  // See: StrategyMetrics, StrategyPositionMetrics types in midcurve-shared
 
   // Free-form config (JSON)
   config Json
@@ -221,9 +215,11 @@ model StrategyLedgerEvent {
   valueInQuote String // bigint as string - Value in strategy's quote token
 
   // Financial tracking (deltas only - aggregate for totals)
-  deltaCostBasis String // bigint as string - Capital movement
-  deltaIncome    String // bigint as string - Revenue (can be negative for FUNDING_PAID)
-  deltaExpense   String // bigint as string - Costs
+  // See StrategyMetrics in midcurve-shared for aggregation semantics
+  deltaCostBasis           String @default("0") // bigint as string - Change in cost basis
+  deltaRealizedCapitalGain String @default("0") // bigint as string - Capital gain/loss from sales
+  deltaRealizedIncome      String @default("0") // bigint as string - Realized income (fees, yield)
+  deltaExpense             String @default("0") // bigint as string - Expenses (gas, protocol fees)
 
   // Protocol-specific data (JSON)
   config Json // Immutable event metadata

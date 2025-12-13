@@ -113,30 +113,47 @@ export interface StrategyLedgerEvent {
   // ============================================================================
   // Financial Tracking
   // ============================================================================
+  // These delta fields aggregate up to StrategyPositionMetrics and StrategyMetrics
+  // See: StrategyMetrics in strategy.ts for aggregation semantics
 
   /**
    * Change in cost basis from this event
    *
-   * Positive: capital invested (deposits, buys)
-   * Negative: capital returned (withdrawals, sells)
+   * Positive: capital invested (deposits, buys, position enters)
+   * Negative: capital returned (proportional cost on sells/exits)
    *
    * Uses average cost basis methodology.
+   * Aggregates to: StrategyMetrics.currentCostBasis
    */
   deltaCostBasis: bigint;
 
   /**
-   * Change in income from this event
+   * Change in realized capital gain from this event
+   *
+   * Only set on SELL, POSITION_DECREASE, POSITION_EXIT events.
+   * Value: saleValue - proportionalCostBasis
+   *
+   * Aggregates to: StrategyMetrics.realizedCapitalGain
+   */
+  deltaRealizedCapitalGain: bigint;
+
+  /**
+   * Change in realized income from this event
    *
    * Positive: revenue earned (fees, yield, funding received)
    * Negative: revenue paid (funding paid in perpetuals)
+   *
+   * Aggregates to: StrategyMetrics.realizedIncome
    */
-  deltaIncome: bigint;
+  deltaRealizedIncome: bigint;
 
   /**
    * Change in expenses from this event
    *
    * Always positive (costs are expenses).
-   * Includes: transaction fees, gas costs, etc.
+   * Includes: transaction fees, gas costs, protocol fees, etc.
+   *
+   * Aggregates to: StrategyMetrics.expenses
    */
   deltaExpense: bigint;
 
@@ -191,7 +208,8 @@ export interface StrategyLedgerEventJSON {
   amount: string;
   valueInQuote: string;
   deltaCostBasis: string;
-  deltaIncome: string;
+  deltaRealizedCapitalGain: string;
+  deltaRealizedIncome: string;
   deltaExpense: string;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
@@ -216,7 +234,8 @@ export function strategyLedgerEventToJSON(event: StrategyLedgerEvent): StrategyL
     amount: event.amount.toString(),
     valueInQuote: event.valueInQuote.toString(),
     deltaCostBasis: event.deltaCostBasis.toString(),
-    deltaIncome: event.deltaIncome.toString(),
+    deltaRealizedCapitalGain: event.deltaRealizedCapitalGain.toString(),
+    deltaRealizedIncome: event.deltaRealizedIncome.toString(),
     deltaExpense: event.deltaExpense.toString(),
     config: event.config,
     state: event.state,
@@ -242,7 +261,8 @@ export function strategyLedgerEventFromJSON(json: StrategyLedgerEventJSON): Stra
     amount: BigInt(json.amount),
     valueInQuote: BigInt(json.valueInQuote),
     deltaCostBasis: BigInt(json.deltaCostBasis),
-    deltaIncome: BigInt(json.deltaIncome),
+    deltaRealizedCapitalGain: BigInt(json.deltaRealizedCapitalGain),
+    deltaRealizedIncome: BigInt(json.deltaRealizedIncome),
     deltaExpense: BigInt(json.deltaExpense),
     config: json.config,
     state: json.state,
@@ -269,7 +289,8 @@ export interface StrategyLedgerEventRow {
   amount: string;
   valueInQuote: string;
   deltaCostBasis: string;
-  deltaIncome: string;
+  deltaRealizedCapitalGain: string;
+  deltaRealizedIncome: string;
   deltaExpense: string;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
@@ -294,7 +315,8 @@ export function strategyLedgerEventFromRow(row: StrategyLedgerEventRow): Strateg
     amount: BigInt(row.amount),
     valueInQuote: BigInt(row.valueInQuote),
     deltaCostBasis: BigInt(row.deltaCostBasis),
-    deltaIncome: BigInt(row.deltaIncome),
+    deltaRealizedCapitalGain: BigInt(row.deltaRealizedCapitalGain),
+    deltaRealizedIncome: BigInt(row.deltaRealizedIncome),
     deltaExpense: BigInt(row.deltaExpense),
     config: row.config,
     state: row.state,

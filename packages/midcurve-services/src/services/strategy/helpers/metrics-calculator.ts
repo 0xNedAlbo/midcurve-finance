@@ -1,68 +1,13 @@
 /**
  * Strategy Metrics Calculator
  *
- * Utilities for calculating aggregated metrics from positions.
- * Re-exports shared functions and provides additional database-specific helpers.
- */
-
-import type { StrategyMetrics } from '@midcurve/shared';
-import { createEmptyMetrics, aggregatePositionMetrics } from '@midcurve/shared';
-
-// Re-export shared functions
-export { createEmptyMetrics, aggregatePositionMetrics };
-
-/**
- * Database result type for metrics fields
- * All bigint values are stored as strings in the database
- */
-interface MetricsDbResult {
-  currentValue: string;
-  currentCostBasis: string;
-  realizedPnl: string;
-  unrealizedPnl: string;
-  collectedFees: string;
-  unClaimedFees: string;
-  realizedCashflow: string;
-  unrealizedCashflow: string;
-}
-
-/**
- * Parse metrics from database string values to bigints
+ * Error classes for strategy metrics validation.
  *
- * @param dbResult - Database result with string values
- * @returns StrategyMetrics with bigint values
+ * NOTE: Strategy metrics are NOT stored in the database.
+ * They are computed on-demand by StrategyMetricsService from:
+ * - StrategyLedgerEvent records (realized metrics)
+ * - Position state calculations (unrealized metrics)
  */
-export function parseMetricsFromDb(dbResult: MetricsDbResult): StrategyMetrics {
-  return {
-    currentValue: BigInt(dbResult.currentValue),
-    currentCostBasis: BigInt(dbResult.currentCostBasis),
-    realizedPnl: BigInt(dbResult.realizedPnl),
-    unrealizedPnl: BigInt(dbResult.unrealizedPnl),
-    collectedFees: BigInt(dbResult.collectedFees),
-    unClaimedFees: BigInt(dbResult.unClaimedFees),
-    realizedCashflow: BigInt(dbResult.realizedCashflow),
-    unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
-  };
-}
-
-/**
- * Serialize metrics to database string values
- *
- * @param metrics - StrategyMetrics with bigint values
- * @returns Object with string values for database storage
- */
-export function serializeMetricsToDb(metrics: StrategyMetrics): MetricsDbResult {
-  return {
-    currentValue: metrics.currentValue.toString(),
-    currentCostBasis: metrics.currentCostBasis.toString(),
-    realizedPnl: metrics.realizedPnl.toString(),
-    unrealizedPnl: metrics.unrealizedPnl.toString(),
-    collectedFees: metrics.collectedFees.toString(),
-    unClaimedFees: metrics.unClaimedFees.toString(),
-    realizedCashflow: metrics.realizedCashflow.toString(),
-    unrealizedCashflow: metrics.unrealizedCashflow.toString(),
-  };
-}
 
 /**
  * Error thrown when quote tokens don't match

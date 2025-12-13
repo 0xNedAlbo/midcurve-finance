@@ -26,7 +26,6 @@ import type { ServiceLogger } from '../../logging/index.js';
 import {
   isValidTransition,
   StrategyInvalidStateError,
-  parseMetricsFromDb,
 } from './helpers/index.js';
 
 /**
@@ -42,6 +41,11 @@ export interface StrategyServiceDependencies {
 
 /**
  * Database result type for Strategy with optional relations
+ *
+ * NOTE: Metrics are NOT stored in the database.
+ * They are computed on-demand by StrategyMetricsService from:
+ * - StrategyLedgerEvent records (realized metrics)
+ * - Position state calculations (unrealized metrics)
  */
 interface StrategyDbResult {
   id: string;
@@ -53,15 +57,7 @@ interface StrategyDbResult {
   status: string;
   contractAddress: string | null;
   chainId: number | null;
-  quoteTokenId: string | null;
-  currentValue: string;
-  currentCostBasis: string;
-  realizedPnl: string;
-  unrealizedPnl: string;
-  collectedFees: string;
-  unClaimedFees: string;
-  realizedCashflow: string;
-  unrealizedCashflow: string;
+  quoteTokenId: string;
   config: unknown;
   quoteToken?: any;
   automationWallets?: any[];
@@ -130,8 +126,8 @@ export class StrategyService {
           config: input.config as Prisma.InputJsonValue,
           quoteTokenId: input.quoteTokenId,
           manifestId: input.manifestId,
-          // State defaults to 'pending'
-          // Metrics default to '0' in schema
+          // Status defaults to 'pending'
+          // NOTE: Metrics are not stored - computed on-demand by StrategyMetricsService
         },
         include: this.getIncludeOptions({}),
       });
@@ -634,25 +630,27 @@ export class StrategyService {
   }
 
   // ============================================================================
-  // METRICS
+  // DEPRECATED METHODS
   // ============================================================================
 
   /**
-   * Refreshes the strategy's aggregated metrics from strategy positions
+   * @deprecated Use StrategyMetricsService.getMetrics() instead.
    *
-   * Note: This is a placeholder implementation. In the new architecture,
-   * metrics are aggregated from StrategyLedgerEvent records via
-   * StrategyLedgerService.getStrategyTotals().
+   * Metrics are computed on-demand from StrategyLedgerEvent records,
+   * not stored on the Strategy model.
    *
    * @param id - Strategy ID
-   * @returns The strategy with current metrics
+   * @returns The strategy (without metrics - use StrategyMetricsService for metrics)
    */
   async refreshMetrics(id: string): Promise<Strategy> {
     log.methodEntry(this.logger, 'refreshMetrics', { id });
 
+    this.logger.warn(
+      { id },
+      'refreshMetrics is deprecated - use StrategyMetricsService.getMetrics() instead'
+    );
+
     try {
-      // For now, just return the strategy with its current stored metrics
-      // In the future, this will aggregate from StrategyLedgerEvent records
       const result = await this.prisma.strategy.findUnique({
         where: { id },
         include: this.getIncludeOptions({}),
@@ -664,13 +662,6 @@ export class StrategyService {
 
       const strategy = this.mapToStrategy(result as StrategyDbResult);
 
-      this.logger.info(
-        {
-          id: strategy.id,
-          currentValue: strategy.metrics.currentValue.toString(),
-        },
-        'Strategy metrics retrieved'
-      );
       log.methodExit(this.logger, 'refreshMetrics', { id });
       return strategy;
     } catch (error) {
@@ -702,10 +693,11 @@ export class StrategyService {
 
   /**
    * Map database result to Strategy type
+   *
+   * NOTE: Metrics are not included here - they are computed on-demand
+   * by StrategyMetricsService from StrategyLedgerEvent records.
    */
   private mapToStrategy(dbResult: StrategyDbResult): Strategy {
-    const metrics = parseMetricsFromDb(dbResult);
-
     const strategy: Strategy = {
       id: dbResult.id,
       createdAt: dbResult.createdAt,
@@ -717,7 +709,6 @@ export class StrategyService {
       contractAddress: dbResult.contractAddress,
       chainId: dbResult.chainId,
       quoteTokenId: dbResult.quoteTokenId,
-      metrics,
       config: dbResult.config as StrategyConfig,
     };
 

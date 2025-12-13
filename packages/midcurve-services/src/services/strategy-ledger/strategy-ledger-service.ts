@@ -89,9 +89,14 @@ export interface CreateStrategyLedgerEventInput {
   deltaCostBasis: bigint;
 
   /**
-   * Change in income from this event
+   * Change in realized capital gain from this event
    */
-  deltaIncome: bigint;
+  deltaRealizedCapitalGain: bigint;
+
+  /**
+   * Change in realized income from this event
+   */
+  deltaRealizedIncome: bigint;
 
   /**
    * Change in expenses from this event
@@ -169,11 +174,30 @@ export interface TokenCostBasisResult {
 
 /**
  * Aggregation result for totals
+ *
+ * These totals align with the delta fields on StrategyLedgerEvent and
+ * aggregate up to StrategyMetrics/StrategyPositionMetrics.
  */
 export interface FinancialTotalsResult {
+  /**
+   * Sum of deltaCostBasis (aggregates to currentCostBasis)
+   */
   totalCostBasis: bigint;
-  totalIncome: bigint;
-  totalExpense: bigint;
+
+  /**
+   * Sum of deltaRealizedCapitalGain (aggregates to realizedCapitalGain)
+   */
+  totalRealizedCapitalGain: bigint;
+
+  /**
+   * Sum of deltaRealizedIncome (aggregates to realizedIncome)
+   */
+  totalRealizedIncome: bigint;
+
+  /**
+   * Sum of deltaExpense (aggregates to expenses)
+   */
+  totalExpenses: bigint;
 }
 
 /**
@@ -216,7 +240,8 @@ export class StrategyLedgerService {
           amount: input.amount.toString(),
           valueInQuote: input.valueInQuote.toString(),
           deltaCostBasis: input.deltaCostBasis.toString(),
-          deltaIncome: input.deltaIncome.toString(),
+          deltaRealizedCapitalGain: input.deltaRealizedCapitalGain.toString(),
+          deltaRealizedIncome: input.deltaRealizedIncome.toString(),
           deltaExpense: input.deltaExpense.toString(),
           config: (input.config ?? {}) as Prisma.InputJsonValue,
           state: (input.state ?? {}) as Prisma.InputJsonValue,
@@ -260,7 +285,8 @@ export class StrategyLedgerService {
               amount: input.amount.toString(),
               valueInQuote: input.valueInQuote.toString(),
               deltaCostBasis: input.deltaCostBasis.toString(),
-              deltaIncome: input.deltaIncome.toString(),
+              deltaRealizedCapitalGain: input.deltaRealizedCapitalGain.toString(),
+              deltaRealizedIncome: input.deltaRealizedIncome.toString(),
               deltaExpense: input.deltaExpense.toString(),
               config: (input.config ?? {}) as Prisma.InputJsonValue,
               state: (input.state ?? {}) as Prisma.InputJsonValue,
@@ -474,7 +500,7 @@ export class StrategyLedgerService {
   /**
    * Get financial totals for a strategy position
    *
-   * Returns aggregated cost basis, income, and expenses.
+   * Returns aggregated totals that align with StrategyPositionMetrics fields.
    *
    * Note: Since bigint fields are stored as strings, we aggregate in JavaScript.
    * For high-volume use cases, consider raw SQL with CAST.
@@ -488,28 +514,37 @@ export class StrategyLedgerService {
         where: { strategyPositionId },
         select: {
           deltaCostBasis: true,
-          deltaIncome: true,
+          deltaRealizedCapitalGain: true,
+          deltaRealizedIncome: true,
           deltaExpense: true,
         },
       });
 
       // Aggregate in JavaScript
       let totalCostBasis = 0n;
-      let totalIncome = 0n;
-      let totalExpense = 0n;
+      let totalRealizedCapitalGain = 0n;
+      let totalRealizedIncome = 0n;
+      let totalExpenses = 0n;
 
       for (const event of events) {
         totalCostBasis += BigInt(event.deltaCostBasis);
-        totalIncome += BigInt(event.deltaIncome);
-        totalExpense += BigInt(event.deltaExpense);
+        totalRealizedCapitalGain += BigInt(event.deltaRealizedCapitalGain);
+        totalRealizedIncome += BigInt(event.deltaRealizedIncome);
+        totalExpenses += BigInt(event.deltaExpense);
       }
 
-      const totals = { totalCostBasis, totalIncome, totalExpense };
+      const totals: FinancialTotalsResult = {
+        totalCostBasis,
+        totalRealizedCapitalGain,
+        totalRealizedIncome,
+        totalExpenses,
+      };
 
       log.methodExit(this.logger, 'getPositionTotals', {
         totalCostBasis: totals.totalCostBasis.toString(),
-        totalIncome: totals.totalIncome.toString(),
-        totalExpense: totals.totalExpense.toString(),
+        totalRealizedCapitalGain: totals.totalRealizedCapitalGain.toString(),
+        totalRealizedIncome: totals.totalRealizedIncome.toString(),
+        totalExpenses: totals.totalExpenses.toString(),
       });
       return totals;
     } catch (error) {
@@ -521,7 +556,7 @@ export class StrategyLedgerService {
   /**
    * Get financial totals for a strategy
    *
-   * Returns aggregated cost basis, income, and expenses across all positions.
+   * Returns aggregated totals that align with StrategyMetrics fields.
    *
    * Note: Since bigint fields are stored as strings, we aggregate in JavaScript.
    * For high-volume use cases, consider raw SQL with CAST.
@@ -535,28 +570,37 @@ export class StrategyLedgerService {
         where: { strategyId },
         select: {
           deltaCostBasis: true,
-          deltaIncome: true,
+          deltaRealizedCapitalGain: true,
+          deltaRealizedIncome: true,
           deltaExpense: true,
         },
       });
 
       // Aggregate in JavaScript
       let totalCostBasis = 0n;
-      let totalIncome = 0n;
-      let totalExpense = 0n;
+      let totalRealizedCapitalGain = 0n;
+      let totalRealizedIncome = 0n;
+      let totalExpenses = 0n;
 
       for (const event of events) {
         totalCostBasis += BigInt(event.deltaCostBasis);
-        totalIncome += BigInt(event.deltaIncome);
-        totalExpense += BigInt(event.deltaExpense);
+        totalRealizedCapitalGain += BigInt(event.deltaRealizedCapitalGain);
+        totalRealizedIncome += BigInt(event.deltaRealizedIncome);
+        totalExpenses += BigInt(event.deltaExpense);
       }
 
-      const totals = { totalCostBasis, totalIncome, totalExpense };
+      const totals: FinancialTotalsResult = {
+        totalCostBasis,
+        totalRealizedCapitalGain,
+        totalRealizedIncome,
+        totalExpenses,
+      };
 
       log.methodExit(this.logger, 'getStrategyTotals', {
         totalCostBasis: totals.totalCostBasis.toString(),
-        totalIncome: totals.totalIncome.toString(),
-        totalExpense: totals.totalExpense.toString(),
+        totalRealizedCapitalGain: totals.totalRealizedCapitalGain.toString(),
+        totalRealizedIncome: totals.totalRealizedIncome.toString(),
+        totalExpenses: totals.totalExpenses.toString(),
       });
       return totals;
     } catch (error) {
@@ -566,22 +610,44 @@ export class StrategyLedgerService {
   }
 
   /**
-   * Calculate net PnL for a strategy position
+   * Calculate realized PnL for a strategy position
    *
-   * Net PnL = totalIncome - totalExpense
+   * Realized PnL = realizedCapitalGain + realizedIncome - expenses
    */
-  async getPositionNetPnL(strategyPositionId: string): Promise<bigint> {
+  async getPositionRealizedPnL(strategyPositionId: string): Promise<bigint> {
     const totals = await this.getPositionTotals(strategyPositionId);
-    return totals.totalIncome - totals.totalExpense;
+    return (
+      totals.totalRealizedCapitalGain +
+      totals.totalRealizedIncome -
+      totals.totalExpenses
+    );
   }
 
   /**
-   * Calculate net PnL for a strategy
+   * Calculate realized PnL for a strategy
    *
-   * Net PnL = totalIncome - totalExpense
+   * Realized PnL = realizedCapitalGain + realizedIncome - expenses
+   */
+  async getStrategyRealizedPnL(strategyId: string): Promise<bigint> {
+    const totals = await this.getStrategyTotals(strategyId);
+    return (
+      totals.totalRealizedCapitalGain +
+      totals.totalRealizedIncome -
+      totals.totalExpenses
+    );
+  }
+
+  /**
+   * @deprecated Use getPositionRealizedPnL instead
+   */
+  async getPositionNetPnL(strategyPositionId: string): Promise<bigint> {
+    return this.getPositionRealizedPnL(strategyPositionId);
+  }
+
+  /**
+   * @deprecated Use getStrategyRealizedPnL instead
    */
   async getStrategyNetPnL(strategyId: string): Promise<bigint> {
-    const totals = await this.getStrategyTotals(strategyId);
-    return totals.totalIncome - totals.totalExpense;
+    return this.getStrategyRealizedPnL(strategyId);
   }
 }

@@ -2,6 +2,10 @@
  * Strategy Service Index
  *
  * Re-exports all strategy service classes, types, and utilities.
+ *
+ * NOTE: Strategy metrics are NOT stored in the database.
+ * Use StrategyMetricsService to compute metrics on-demand from
+ * StrategyLedgerEvent records and position state.
  */
 
 // Main service
@@ -17,11 +21,7 @@ export {
   isTerminalState,
   canModify,
   StrategyInvalidStateError,
-  // Metrics
-  createEmptyMetrics,
-  aggregatePositionMetrics,
-  parseMetricsFromDb,
-  serializeMetricsToDb,
+  // Metrics validation error classes
   StrategyQuoteTokenMismatchError,
   PositionNoBasicCurrencyError,
   StrategyBasicCurrencyMismatchError,

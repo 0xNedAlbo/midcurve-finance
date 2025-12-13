@@ -119,6 +119,7 @@ export type {
   StrategyPositionType,
   StrategyPositionJSON,
   BaseStrategyPositionParams,
+  StrategyPositionMetrics,
   StrategyPositionInterface,
   StrategyPositionRow,
   // HODL strategy position types
@@ -174,8 +175,11 @@ export {
 
 // Strategy utility functions
 export {
-  createEmptyMetrics,
-  aggregatePositionMetrics,
+  getStrategyUnrealizedCapitalGain,
+  getStrategyTotalUnrealizedPnl,
+  getStrategyTotalRealizedPnl,
+  getStrategyTotalPnl,
+  // Deprecated aliases for backwards compatibility
   getTotalStrategyPnl,
   getTotalRealizedStrategyPnl,
   getTotalUnrealizedStrategyPnl,

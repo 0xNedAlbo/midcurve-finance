@@ -34,13 +34,14 @@ export interface CreateStrategyInput {
   config: StrategyConfig;
 
   /**
-   * Initial quote token ID (optional)
-   * If not provided, will be set when first position is linked.
+   * Quote token ID (required)
+   * All metrics for this strategy will be denominated in this token.
+   * Typically set from manifest.basicCurrencyId at creation time.
    */
-  quoteTokenId?: string;
+  quoteTokenId: string;
 
   /**
-   * Manifest ID if created from a manifest (optional)
+   * Manifest ID (optional)
    * Links the strategy to the manifest used for deployment.
    */
   manifestId?: string;

@@ -14,12 +14,10 @@ export {
   StrategyInvalidStateError,
 } from './state-transitions.js';
 
-// Metrics calculation helpers
+// Metrics validation error classes
+// NOTE: Strategy metrics are computed on-demand by StrategyMetricsService,
+// not stored in the database. These error classes are for validation.
 export {
-  createEmptyMetrics,
-  aggregatePositionMetrics,
-  parseMetricsFromDb,
-  serializeMetricsToDb,
   StrategyQuoteTokenMismatchError,
   PositionNoBasicCurrencyError,
   StrategyBasicCurrencyMismatchError,

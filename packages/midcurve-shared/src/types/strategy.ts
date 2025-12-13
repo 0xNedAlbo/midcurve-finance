@@ -6,7 +6,6 @@
  * positions across different protocols.
  */
 
-import type { AnyPosition } from './position.js';
 import type { StrategyPositionInterface } from './strategy-position/strategy-position.interface.js';
 import type { AnyToken } from './token.js';
 
@@ -48,51 +47,92 @@ export interface StrategyConfig {
 // =============================================================================
 
 /**
- * Aggregated metrics from all positions in a strategy
+ * Strategy Metrics - Unified financial tracking
  *
- * All values are in quote token units (smallest denomination).
- * Field names match Position model for easy joins/views.
+ * All bigint values are denominated in quoteToken units (smallest denomination).
+ * Computed on-demand by StrategyMetricsService from position metrics.
+ * NOT stored in database.
+ *
+ * ## Data Sources
+ *
+ * | Field                | Source                           |
+ * |----------------------|----------------------------------|
+ * | currentCostBasis     | SUM(ledger.deltaCostBasis)       |
+ * | currentValue         | Position state calculation       |
+ * | realizedCapitalGain  | SUM(ledger.deltaRealizedCapitalGain) |
+ * | unrealizedIncome     | Position state (unclaimed fees)  |
+ * | realizedIncome       | SUM(ledger.deltaRealizedIncome)  |
+ * | expenses             | SUM(ledger.deltaExpense)         |
+ *
+ * ## Derived Calculations
+ *
+ * ```typescript
+ * unrealizedCapitalGain = currentValue - currentCostBasis
+ * totalUnrealizedPnl = unrealizedCapitalGain + unrealizedIncome
+ * totalRealizedPnl = realizedCapitalGain + realizedIncome - expenses
+ * totalPnl = totalUnrealizedPnl + totalRealizedPnl
+ * ```
  */
 export interface StrategyMetrics {
   /**
-   * Sum of all position currentValue
+   * Quote token (reference currency for all values)
+   * All bigint fields are denominated in this token's smallest units
    */
-  currentValue: bigint;
+  quoteToken: AnyToken;
+
+  // ============================================================================
+  // CAPITAL (from current asset valuations)
+  // ============================================================================
 
   /**
-   * Sum of all position currentCostBasis
+   * Sum of what was paid to acquire current assets
+   * Source: SUM(deltaCostBasis) from ledger events
    */
   currentCostBasis: bigint;
 
   /**
-   * Sum of all position realizedPnl
+   * Current market value of all holdings
+   * Source: Calculated from position state by StrategyPositionMetricsService
    */
-  realizedPnl: bigint;
+  currentValue: bigint;
+
+  // Derived: unrealizedCapitalGain = currentValue - currentCostBasis
+
+  // ============================================================================
+  // CAPITAL GAINS (from ledger events)
+  // ============================================================================
 
   /**
-   * Sum of all position unrealizedPnl
+   * Realized capital gain/loss from asset sales
+   * Source: SUM(deltaRealizedCapitalGain) from ledger events
    */
-  unrealizedPnl: bigint;
+  realizedCapitalGain: bigint;
+
+  // ============================================================================
+  // INCOME (e.g., AMM fees, yield, funding)
+  // ============================================================================
 
   /**
-   * Sum of all position collectedFees
+   * Unrealized income (unclaimed fees, pending yield)
+   * Source: Calculated from position state (e.g., uncollected AMM fees)
    */
-  collectedFees: bigint;
+  unrealizedIncome: bigint;
 
   /**
-   * Sum of all position unClaimedFees
+   * Realized income (collected fees, received funding)
+   * Source: SUM(deltaRealizedIncome) from ledger events
    */
-  unClaimedFees: bigint;
+  realizedIncome: bigint;
+
+  // ============================================================================
+  // EXPENSES (always realized)
+  // ============================================================================
 
   /**
-   * Sum of all position realizedCashflow
+   * Total expenses (gas costs, protocol fees)
+   * Source: SUM(deltaExpense) from ledger events
    */
-  realizedCashflow: bigint;
-
-  /**
-   * Sum of all position unrealizedCashflow
-   */
-  unrealizedCashflow: bigint;
+  expenses: bigint;
 }
 
 // =============================================================================
@@ -193,11 +233,11 @@ export interface Strategy {
   // ============================================================================
 
   /**
-   * Quote token ID for metrics aggregation
+   * Quote token ID for metrics aggregation (required)
    * All positions in this strategy must use the same quote token.
-   * Set when first position is linked.
+   * Set from manifest.basicCurrencyId at creation time.
    */
-  quoteTokenId: string | null;
+  quoteTokenId: string;
 
   /**
    * Quote token reference (optional, populated when included)
@@ -206,14 +246,8 @@ export interface Strategy {
    */
   quoteToken?: AnyToken;
 
-  // ============================================================================
-  // METRICS
-  // ============================================================================
-
-  /**
-   * Aggregated metrics from all linked positions
-   */
-  metrics: StrategyMetrics;
+  // NOTE: Metrics are NOT stored on Strategy - computed on-demand by StrategyMetricsService
+  // See: StrategyMetrics interface for the computed metrics structure
 
   // ============================================================================
   // CONFIGURATION
@@ -244,94 +278,70 @@ export interface Strategy {
 }
 
 // =============================================================================
-// HELPER FUNCTIONS
+// METRICS HELPER FUNCTIONS
 // =============================================================================
 
 /**
- * Create empty metrics with all zeros
+ * Calculate unrealized capital gain from strategy metrics
  *
- * @returns StrategyMetrics with all fields set to 0n
+ * @param metrics - Strategy metrics to calculate from
+ * @returns Unrealized capital gain in quote token units (can be negative)
  */
-export function createEmptyMetrics(): StrategyMetrics {
-  return {
-    currentValue: 0n,
-    currentCostBasis: 0n,
-    realizedPnl: 0n,
-    unrealizedPnl: 0n,
-    collectedFees: 0n,
-    unClaimedFees: 0n,
-    realizedCashflow: 0n,
-    unrealizedCashflow: 0n,
-  };
+export function getStrategyUnrealizedCapitalGain(metrics: StrategyMetrics): bigint {
+  return metrics.currentValue - metrics.currentCostBasis;
 }
 
 /**
- * Aggregate metrics from multiple positions
+ * Calculate total unrealized PnL from strategy metrics
  *
- * Sums all position metrics fields. All positions must use the same
- * quote token for meaningful aggregation.
+ * Combines unrealized capital gain and unrealized income.
  *
- * @param positions - Array of positions to aggregate
- * @returns Aggregated StrategyMetrics
+ * @param metrics - Strategy metrics to calculate from
+ * @returns Total unrealized PnL in quote token units
  */
-export function aggregatePositionMetrics(
-  positions: AnyPosition[]
-): StrategyMetrics {
-  return positions.reduce(
-    (acc, pos) => ({
-      currentValue: acc.currentValue + pos.currentValue,
-      currentCostBasis: acc.currentCostBasis + pos.currentCostBasis,
-      realizedPnl: acc.realizedPnl + pos.realizedPnl,
-      unrealizedPnl: acc.unrealizedPnl + pos.unrealizedPnl,
-      collectedFees: acc.collectedFees + pos.collectedFees,
-      unClaimedFees: acc.unClaimedFees + pos.unClaimedFees,
-      realizedCashflow: acc.realizedCashflow + pos.realizedCashflow,
-      unrealizedCashflow: acc.unrealizedCashflow + pos.unrealizedCashflow,
-    }),
-    createEmptyMetrics()
+export function getStrategyTotalUnrealizedPnl(metrics: StrategyMetrics): bigint {
+  const unrealizedCapitalGain = getStrategyUnrealizedCapitalGain(metrics);
+  return unrealizedCapitalGain + metrics.unrealizedIncome;
+}
+
+/**
+ * Calculate total realized PnL from strategy metrics
+ *
+ * Combines realized capital gain, realized income, minus expenses.
+ *
+ * @param metrics - Strategy metrics to calculate from
+ * @returns Total realized PnL in quote token units
+ */
+export function getStrategyTotalRealizedPnl(metrics: StrategyMetrics): bigint {
+  return (
+    metrics.realizedCapitalGain + metrics.realizedIncome - metrics.expenses
   );
 }
 
 /**
  * Calculate total PnL from strategy metrics
  *
- * Combines realized and unrealized PnL including cashflows.
+ * Combines unrealized and realized PnL.
  *
  * @param metrics - Strategy metrics to calculate from
  * @returns Total PnL in quote token units
  */
-export function getTotalStrategyPnl(metrics: StrategyMetrics): bigint {
-  return (
-    metrics.realizedPnl +
-    metrics.unrealizedPnl +
-    metrics.realizedCashflow +
-    metrics.unrealizedCashflow
-  );
+export function getStrategyTotalPnl(metrics: StrategyMetrics): bigint {
+  return getStrategyTotalUnrealizedPnl(metrics) + getStrategyTotalRealizedPnl(metrics);
 }
 
 /**
- * Calculate total realized PnL from strategy metrics
- *
- * Combines realized PnL and realized cashflow.
- *
- * @param metrics - Strategy metrics to calculate from
- * @returns Total realized PnL in quote token units
+ * @deprecated Use getStrategyTotalPnl instead
  */
-export function getTotalRealizedStrategyPnl(metrics: StrategyMetrics): bigint {
-  return metrics.realizedPnl + metrics.realizedCashflow;
-}
+export const getTotalStrategyPnl = getStrategyTotalPnl;
 
 /**
- * Calculate total unrealized PnL from strategy metrics
- *
- * Combines unrealized PnL and unrealized cashflow.
- *
- * @param metrics - Strategy metrics to calculate from
- * @returns Total unrealized PnL in quote token units
+ * @deprecated Use getStrategyTotalRealizedPnl instead
  */
-export function getTotalUnrealizedStrategyPnl(
-  metrics: StrategyMetrics
-): bigint {
-  return metrics.unrealizedPnl + metrics.unrealizedCashflow;
-}
+export const getTotalRealizedStrategyPnl = getStrategyTotalRealizedPnl;
+
+/**
+ * @deprecated Use getStrategyTotalUnrealizedPnl instead
+ */
+export const getTotalUnrealizedStrategyPnl = getStrategyTotalUnrealizedPnl;
 
