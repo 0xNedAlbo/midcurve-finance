@@ -31,7 +31,7 @@ import type {
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getStrategyManifestService, getStrategyService } from '@/lib/services';
-import { deployStrategyContract, SignerClientError } from '@/lib/signer-client';
+import { SignerClient, SignerClientError } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -216,12 +216,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       let deploymentResult;
 
       try {
-        deploymentResult = await deployStrategyContract({
+        deploymentResult = await SignerClient.getInstance().deployStrategyContract({
           strategyId: strategy.id,
           chainId: SEMSEE_CHAIN_ID,
           ownerAddress: primaryWallet.address,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         // If signer fails, return an error response
         if (error instanceof SignerClientError) {
           apiLogger.error(
