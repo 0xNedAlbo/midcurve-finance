@@ -147,7 +147,7 @@ model Strategy {
 }
 
 // StrategyPosition - Position owned by a Strategy (not User)
-// Supports multiple position types: hodl, uniswapv3, hyperliquid, etc.
+// Supports multiple position types: treasury, uniswapv3, hyperliquid, etc.
 model StrategyPosition {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -158,7 +158,7 @@ model StrategyPosition {
   strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
   // Type discriminator
-  positionType String // 'hodl', 'uniswapv3', 'hyperliquid'
+  positionType String // 'treasury', 'uniswapv3', 'hyperliquid'
 
   // Lifecycle
   status   StrategyPositionStatus @default(pending)

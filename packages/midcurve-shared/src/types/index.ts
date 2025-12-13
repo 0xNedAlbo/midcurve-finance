@@ -122,25 +122,25 @@ export type {
   StrategyPositionMetrics,
   StrategyPositionInterface,
   StrategyPositionRow,
-  // HODL strategy position types
-  HodlPositionConfigData,
-  HodlPositionStateData,
-  HodlStrategyPositionParams,
-  HodlStrategyPositionRow,
-  HodlPositionHolding,
-  HodlPositionHoldingJSON,
-  HodlWalletType,
-  HodlEvmOnchainWallet,
-  HodlWalletConfig,
+  // Treasury strategy position types
+  TreasuryConfigData,
+  TreasuryStateData,
+  StrategyTreasuryParams,
+  StrategyTreasuryRow,
+  TreasuryHolding,
+  TreasuryHoldingJSON,
+  TreasuryWalletType,
+  TreasuryEvmOnchainWallet,
+  TreasuryWalletConfig,
 } from './strategy-position/index.js';
 
 export {
   BaseStrategyPosition,
   StrategyPositionFactory,
-  // HODL strategy position classes
-  HodlPositionConfig,
-  HodlPositionState,
-  HodlStrategyPosition,
+  // Treasury strategy position classes
+  TreasuryConfig,
+  TreasuryState,
+  StrategyTreasury,
   holdingToJSON,
   holdingFromJSON,
 } from './strategy-position/index.js';

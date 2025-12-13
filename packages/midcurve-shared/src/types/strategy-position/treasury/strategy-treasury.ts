@@ -1,30 +1,30 @@
 /**
- * HODL Strategy Position
+ * Strategy Treasury
  *
- * Represents a HODL (token basket) position within a strategy.
+ * Represents a Treasury (token basket) position within a strategy.
  * Tracks multiple tokens held across one or more wallets.
  */
 
 import { BaseStrategyPosition } from '../base-strategy-position.js';
 import type { BaseStrategyPositionParams, StrategyPositionType } from '../strategy-position.types.js';
-import { HodlPositionConfig } from './hodl-position-config.js';
-import { HodlPositionState } from './hodl-position-state.js';
+import { TreasuryConfig } from './treasury-config.js';
+import { TreasuryState } from './treasury-state.js';
 
 /**
- * Parameters for creating a HODL strategy position
+ * Parameters for creating a Strategy Treasury
  */
-export interface HodlStrategyPositionParams extends BaseStrategyPositionParams {
-  config: HodlPositionConfig;
-  state: HodlPositionState;
+export interface StrategyTreasuryParams extends BaseStrategyPositionParams {
+  config: TreasuryConfig;
+  state: TreasuryState;
 }
 
 /**
  * Database row representation for factory pattern
  */
-export interface HodlStrategyPositionRow {
+export interface StrategyTreasuryRow {
   id: string;
   strategyId: string;
-  positionType: 'hodl';
+  positionType: 'treasury';
   status: 'pending' | 'active' | 'paused' | 'closed';
   openedAt: Date | null;
   closedAt: Date | null;
@@ -35,18 +35,18 @@ export interface HodlStrategyPositionRow {
 }
 
 /**
- * HODL Strategy Position
+ * Strategy Treasury
  *
  * A position that tracks a basket of tokens (holdings) across wallets.
- * Inherits from BaseStrategyPosition and implements HODL-specific logic.
+ * Inherits from BaseStrategyPosition and implements Treasury-specific logic.
  */
-export class HodlStrategyPosition extends BaseStrategyPosition {
-  readonly positionType: StrategyPositionType = 'hodl';
+export class StrategyTreasury extends BaseStrategyPosition {
+  readonly positionType: StrategyPositionType = 'treasury';
 
-  private readonly _config: HodlPositionConfig;
-  private readonly _state: HodlPositionState;
+  private readonly _config: TreasuryConfig;
+  private readonly _state: TreasuryState;
 
-  constructor(params: HodlStrategyPositionParams) {
+  constructor(params: StrategyTreasuryParams) {
     super(params);
     this._config = params.config;
     this._state = params.state;
@@ -77,14 +77,14 @@ export class HodlStrategyPosition extends BaseStrategyPosition {
   /**
    * Get typed configuration object
    */
-  get typedConfig(): HodlPositionConfig {
+  get typedConfig(): TreasuryConfig {
     return this._config;
   }
 
   /**
    * Get typed state object
    */
-  get typedState(): HodlPositionState {
+  get typedState(): TreasuryState {
     return this._state;
   }
 
@@ -127,15 +127,15 @@ export class HodlStrategyPosition extends BaseStrategyPosition {
   /**
    * Create from database row
    */
-  static fromDB(row: HodlStrategyPositionRow): HodlStrategyPosition {
-    return new HodlStrategyPosition({
+  static fromDB(row: StrategyTreasuryRow): StrategyTreasury {
+    return new StrategyTreasury({
       id: row.id,
       strategyId: row.strategyId,
       status: row.status,
       openedAt: row.openedAt,
       closedAt: row.closedAt,
-      config: HodlPositionConfig.fromJSON(row.config),
-      state: HodlPositionState.fromJSON(row.state),
+      config: TreasuryConfig.fromJSON(row.config),
+      state: TreasuryState.fromJSON(row.state),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });

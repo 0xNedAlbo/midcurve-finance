@@ -37,7 +37,7 @@ export interface CreateStrategyPositionInput {
   strategyId: string;
 
   /**
-   * Position type (hodl, uniswapv3, hyperliquid)
+   * Position type (treasury, uniswapv3, hyperliquid)
    */
   positionType: StrategyPositionType;
 

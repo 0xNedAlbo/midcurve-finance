@@ -21,11 +21,11 @@ export type StrategyPositionStatus = 'pending' | 'active' | 'paused' | 'closed';
  * Strategy position type discriminator
  *
  * Extensible for future position types:
- * - 'hodl': Token basket holding position
+ * - 'treasury': Token basket holding position (strategy treasury)
  * - 'uniswapv3': Uniswap V3 concentrated liquidity position
  * - 'hyperliquid': Hyperliquid perpetuals position
  */
-export type StrategyPositionType = 'hodl' | 'uniswapv3' | 'hyperliquid';
+export type StrategyPositionType = 'treasury' | 'uniswapv3' | 'hyperliquid';
 
 /**
  * JSON-serializable representation of a strategy position

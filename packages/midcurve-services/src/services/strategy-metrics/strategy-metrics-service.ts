@@ -89,7 +89,7 @@ export class StrategyMetricsService {
    *
    * Delegates to the underlying StrategyPositionMetricsService.
    *
-   * @param positionType - Position type (e.g., 'hodl', 'uniswapv3')
+   * @param positionType - Position type (e.g., 'treasury', 'uniswapv3')
    * @param calculator - Calculator implementation
    */
   registerValueCalculator(

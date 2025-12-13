@@ -266,7 +266,7 @@ export interface Strategy {
   /**
    * Strategy-owned positions
    * Positions directly owned by the strategy (not user positions).
-   * Includes HODL baskets, managed LP positions, etc.
+   * Includes Treasury baskets, managed LP positions, etc.
    */
   strategyPositions?: StrategyPositionInterface[];
 

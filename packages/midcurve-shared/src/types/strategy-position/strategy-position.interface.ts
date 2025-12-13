@@ -2,7 +2,7 @@
  * Strategy Position Interface
  *
  * Defines the contract for all strategy position implementations.
- * Each position type (hodl, uniswapv3, hyperliquid) implements this interface.
+ * Each position type (treasury, uniswapv3, hyperliquid) implements this interface.
  */
 
 import type {

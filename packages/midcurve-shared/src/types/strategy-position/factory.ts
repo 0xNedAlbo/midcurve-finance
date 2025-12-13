@@ -7,7 +7,7 @@
 
 import type { StrategyPositionInterface } from './strategy-position.interface.js';
 import type { StrategyPositionType } from './strategy-position.types.js';
-import { HodlStrategyPosition } from './hodl/hodl-strategy-position.js';
+import { StrategyTreasury } from './treasury/strategy-treasury.js';
 
 /**
  * Generic database row for strategy positions
@@ -43,10 +43,10 @@ export class StrategyPositionFactory {
     const positionType = row.positionType as StrategyPositionType;
 
     switch (positionType) {
-      case 'hodl':
-        return HodlStrategyPosition.fromDB({
+      case 'treasury':
+        return StrategyTreasury.fromDB({
           ...row,
-          positionType: 'hodl',
+          positionType: 'treasury',
           status: row.status as 'pending' | 'active' | 'paused' | 'closed',
         });
 
@@ -67,6 +67,6 @@ export class StrategyPositionFactory {
    * Check if a position type is supported
    */
   static isSupported(positionType: string): positionType is StrategyPositionType {
-    return ['hodl', 'uniswapv3', 'hyperliquid'].includes(positionType);
+    return ['treasury', 'uniswapv3', 'hyperliquid'].includes(positionType);
   }
 }

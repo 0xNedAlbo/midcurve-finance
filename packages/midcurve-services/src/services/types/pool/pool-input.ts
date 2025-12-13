@@ -38,13 +38,13 @@ export interface PoolDiscoverInputMap {
   uniswapv3: UniswapV3PoolDiscoverInput;
 
   /**
-   * HODL pool discover input (placeholder)
+   * Treasury pool discover input (placeholder)
    *
-   * HODL pools are virtual and don't require on-chain discovery.
-   * They are created inline when a HODL position is created.
+   * Treasury pools are virtual and don't require on-chain discovery.
+   * They are created inline when a Treasury position is created.
    * This placeholder ensures type compatibility with PoolConfigMap.
    */
-  hodl: never; // HODL pools don't use pool discovery
+  treasury: never; // Treasury pools don't use pool discovery
 
   // Future protocols:
   // orca: OrcaPoolDiscoverInput;

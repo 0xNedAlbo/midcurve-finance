@@ -24,5 +24,5 @@ export { BaseStrategyPosition } from './base-strategy-position.js';
 export type { StrategyPositionRow } from './factory.js';
 export { StrategyPositionFactory } from './factory.js';
 
-// HODL position
-export * from './hodl/index.js';
+// Treasury position
+export * from './treasury/index.js';

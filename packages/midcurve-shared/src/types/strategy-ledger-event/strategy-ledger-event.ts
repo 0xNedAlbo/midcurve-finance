@@ -44,7 +44,7 @@ export interface StrategyLedgerEvent {
    * Example: A SWAP creates BUY + SELL + FEE_PAID + GAS_PAID events
    * all sharing the same groupId.
    *
-   * Cross-position flows (e.g., entering UniswapV3 from HODL) also
+   * Cross-position flows (e.g., entering UniswapV3 from Treasury) also
    * share a groupId to link the allocation and position entry events.
    */
   groupId: string;

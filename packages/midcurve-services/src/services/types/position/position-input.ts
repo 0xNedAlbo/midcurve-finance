@@ -10,7 +10,7 @@
 import type {
   Position,
   PositionConfigMap,
-  HodlWalletConfig,
+  TreasuryWalletConfig,
 } from '@midcurve/shared';
 
 /**
@@ -55,12 +55,12 @@ export interface UniswapV3PositionDiscoverInput {
 }
 
 /**
- * HODL Position Discovery Input
+ * Treasury Position Discovery Input
  *
- * Parameters for creating a HODL position (multi-token basket).
- * Unlike Uniswap V3, HODL positions are manually managed, not discovered from on-chain.
+ * Parameters for creating a Treasury position (multi-token basket).
+ * Unlike Uniswap V3, Treasury positions are manually managed, not discovered from on-chain.
  */
-export interface HodlPositionDiscoverInput {
+export interface TreasuryPositionDiscoverInput {
   /**
    * Quote token ID (database ID) for position valuation
    * All holdings will be valued in this token's units.
@@ -77,7 +77,7 @@ export interface HodlPositionDiscoverInput {
    * Initial wallet configurations (optional)
    * Can be empty - wallets can be added later via updateWallets()
    */
-  wallets?: HodlWalletConfig[];
+  wallets?: TreasuryWalletConfig[];
 
   /**
    * Initial holdings (optional)
@@ -106,7 +106,7 @@ export interface HodlPositionDiscoverInput {
  */
 export interface PositionDiscoverInputMap {
   uniswapv3: UniswapV3PositionDiscoverInput;
-  hodl: HodlPositionDiscoverInput;
+  treasury: TreasuryPositionDiscoverInput;
   // Future protocols:
   // orca: OrcaPositionDiscoverInput;
   // raydium: RaydiumPositionDiscoverInput;

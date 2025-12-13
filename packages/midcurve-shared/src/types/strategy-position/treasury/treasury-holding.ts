@@ -1,16 +1,16 @@
 /**
- * HODL Position Holding
+ * Treasury Holding
  *
- * Represents a single token holding within a HODL position basket.
+ * Represents a single token holding within a Treasury position basket.
  */
 
 /**
- * Individual token holding within a HODL position
+ * Individual token holding within a Treasury position
  *
  * Represents a single token's balance in the basket.
  * Cost basis is derived from ledger event aggregation, not stored here.
  */
-export interface HodlPositionHolding {
+export interface TreasuryHolding {
   /**
    * Token hash for readability/logging
    *
@@ -42,7 +42,7 @@ export interface HodlPositionHolding {
 /**
  * JSON-serializable representation of a holding
  */
-export interface HodlPositionHoldingJSON {
+export interface TreasuryHoldingJSON {
   tokenHash: string;
   tokenSymbol: string;
   balance: string; // bigint as string
@@ -51,7 +51,7 @@ export interface HodlPositionHoldingJSON {
 /**
  * Convert holding to JSON-safe representation
  */
-export function holdingToJSON(holding: HodlPositionHolding): HodlPositionHoldingJSON {
+export function holdingToJSON(holding: TreasuryHolding): TreasuryHoldingJSON {
   return {
     tokenHash: holding.tokenHash,
     tokenSymbol: holding.tokenSymbol,
@@ -62,7 +62,7 @@ export function holdingToJSON(holding: HodlPositionHolding): HodlPositionHolding
 /**
  * Parse holding from JSON representation
  */
-export function holdingFromJSON(json: HodlPositionHoldingJSON): HodlPositionHolding {
+export function holdingFromJSON(json: TreasuryHoldingJSON): TreasuryHolding {
   return {
     tokenHash: json.tokenHash,
     tokenSymbol: json.tokenSymbol,

@@ -2,7 +2,7 @@
  * Base Strategy Position
  *
  * Abstract base class implementing common functionality for all strategy positions.
- * Derived classes (HodlStrategyPosition, etc.) extend this class.
+ * Derived classes (StrategyTreasury, etc.) extend this class.
  */
 
 import type { StrategyPositionInterface } from './strategy-position.interface.js';

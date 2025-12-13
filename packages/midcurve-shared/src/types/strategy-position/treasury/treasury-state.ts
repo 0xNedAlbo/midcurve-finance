@@ -1,24 +1,24 @@
 /**
- * HODL Position State
+ * Treasury State
  *
- * Mutable state for HODL strategy positions.
+ * Mutable state for Treasury strategy positions.
  * Tracks the current token holdings in the basket.
  */
 
-import type { HodlPositionHolding, HodlPositionHoldingJSON } from './hodl-position-holding.js';
-import { holdingFromJSON, holdingToJSON } from './hodl-position-holding.js';
+import type { TreasuryHolding, TreasuryHoldingJSON } from './treasury-holding.js';
+import { holdingFromJSON, holdingToJSON } from './treasury-holding.js';
 
 /**
- * HODL Position State Interface
+ * Treasury State Interface
  *
  * Contains all token holdings in the basket.
  * Each holding is keyed by the token's database ID.
  */
-export interface HodlPositionStateData {
+export interface TreasuryStateData {
   /**
    * Token holdings in the basket
    *
-   * Map of tokenId → HodlPositionHolding.
+   * Map of tokenId → TreasuryHolding.
    * The tokenId is the database-generated token ID (cuid).
    *
    * @example
@@ -37,33 +37,33 @@ export interface HodlPositionStateData {
    * }
    * ```
    */
-  holdings: Map<string, HodlPositionHolding>;
+  holdings: Map<string, TreasuryHolding>;
 }
 
 /**
- * HODL Position State Class
+ * Treasury State Class
  *
  * Provides methods for serialization and state management.
  */
-export class HodlPositionState implements HodlPositionStateData {
-  readonly holdings: Map<string, HodlPositionHolding>;
+export class TreasuryState implements TreasuryStateData {
+  readonly holdings: Map<string, TreasuryHolding>;
 
-  constructor(holdings: Map<string, HodlPositionHolding>) {
+  constructor(holdings: Map<string, TreasuryHolding>) {
     this.holdings = holdings;
   }
 
   /**
    * Create an empty state with no holdings
    */
-  static empty(): HodlPositionState {
-    return new HodlPositionState(new Map());
+  static empty(): TreasuryState {
+    return new TreasuryState(new Map());
   }
 
   /**
    * Serialize to JSON-safe object for API/storage
    */
   toJSON(): Record<string, unknown> {
-    const holdingsObj: Record<string, HodlPositionHoldingJSON> = {};
+    const holdingsObj: Record<string, TreasuryHoldingJSON> = {};
     for (const [tokenId, holding] of this.holdings) {
       holdingsObj[tokenId] = holdingToJSON(holding);
     }
@@ -73,9 +73,9 @@ export class HodlPositionState implements HodlPositionStateData {
   /**
    * Create from JSON representation
    */
-  static fromJSON(json: Record<string, unknown>): HodlPositionState {
-    const holdings = new Map<string, HodlPositionHolding>();
-    const holdingsObj = json.holdings as Record<string, HodlPositionHoldingJSON>;
+  static fromJSON(json: Record<string, unknown>): TreasuryState {
+    const holdings = new Map<string, TreasuryHolding>();
+    const holdingsObj = json.holdings as Record<string, TreasuryHoldingJSON>;
 
     if (holdingsObj) {
       for (const [tokenId, holdingJson] of Object.entries(holdingsObj)) {
@@ -83,7 +83,7 @@ export class HodlPositionState implements HodlPositionStateData {
       }
     }
 
-    return new HodlPositionState(holdings);
+    return new TreasuryState(holdings);
   }
 
   /**
@@ -96,7 +96,7 @@ export class HodlPositionState implements HodlPositionStateData {
   /**
    * Get a specific holding by token ID
    */
-  getHolding(tokenId: string): HodlPositionHolding | undefined {
+  getHolding(tokenId: string): TreasuryHolding | undefined {
     return this.holdings.get(tokenId);
   }
 
@@ -117,7 +117,7 @@ export class HodlPositionState implements HodlPositionStateData {
   /**
    * Get all holdings as an array
    */
-  getHoldingsArray(): HodlPositionHolding[] {
+  getHoldingsArray(): TreasuryHolding[] {
     return Array.from(this.holdings.values());
   }
 }

@@ -42,7 +42,7 @@ export interface PositionValueCalculator {
    * Calculate unrealized income for a position
    *
    * For AMM positions: uncollected fees
-   * For HODL positions: 0 (no income until realized)
+   * For Treasury positions: 0 (no income until realized)
    *
    * @param position - The strategy position to calculate for
    * @param quoteToken - The quote token for value denomination
@@ -117,7 +117,7 @@ export class StrategyPositionMetricsService {
   /**
    * Register a value calculator for a position type
    *
-   * @param positionType - Position type (e.g., 'hodl', 'uniswapv3')
+   * @param positionType - Position type (e.g., 'treasury', 'uniswapv3')
    * @param calculator - Calculator implementation
    */
   registerValueCalculator(

@@ -1,7 +1,7 @@
 /**
- * HODL Wallet Configuration Types
+ * Treasury Wallet Configuration Types
  *
- * Defines wallet configurations for HODL positions.
+ * Defines wallet configurations for Treasury positions.
  * Supports multiple wallet types across different chains and platforms.
  */
 
@@ -12,7 +12,7 @@
  * - 'evm-onchain': Standard EVM wallet with on-chain balances
  * - Future: 'evm-hyperliquid', 'exchange-binance', 'solana-onchain', etc.
  */
-export type HodlWalletType = 'evm-onchain';
+export type TreasuryWalletType = 'evm-onchain';
 
 /**
  * EVM on-chain wallet configuration
@@ -20,7 +20,7 @@ export type HodlWalletType = 'evm-onchain';
  * Represents a wallet on a specific EVM chain.
  * One entry per chainId/address combination.
  */
-export interface HodlEvmOnchainWallet {
+export interface TreasuryEvmOnchainWallet {
   walletType: 'evm-onchain';
 
   /**
@@ -40,4 +40,4 @@ export interface HodlEvmOnchainWallet {
  * Discriminated by `walletType` for type-safe narrowing.
  * Add new wallet types here as they're implemented.
  */
-export type HodlWalletConfig = HodlEvmOnchainWallet;
+export type TreasuryWalletConfig = TreasuryEvmOnchainWallet;

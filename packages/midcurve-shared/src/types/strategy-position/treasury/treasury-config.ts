@@ -1,19 +1,19 @@
 /**
- * HODL Position Configuration
+ * Treasury Configuration
  *
- * Immutable configuration for HODL strategy positions.
+ * Immutable configuration for Treasury strategy positions.
  * Tracks which wallets are monitored for token balances.
  */
 
-import type { HodlWalletConfig } from './hodl-wallet-config.js';
+import type { TreasuryWalletConfig } from './treasury-wallet-config.js';
 
 /**
- * HODL Position Config Interface
+ * Treasury Config Interface
  *
- * Immutable configuration for a HODL position.
+ * Immutable configuration for a Treasury position.
  * Tracks which wallets are monitored for this position.
  */
-export interface HodlPositionConfigData {
+export interface TreasuryConfigData {
   /**
    * Wallet configurations for this position
    *
@@ -23,18 +23,18 @@ export interface HodlPositionConfigData {
    * Uniqueness (e.g., no duplicate chainId+address for EVM)
    * is enforced at runtime, not at type level.
    */
-  wallets: HodlWalletConfig[];
+  wallets: TreasuryWalletConfig[];
 }
 
 /**
- * HODL Position Config Class
+ * Treasury Config Class
  *
  * Provides methods for serialization and validation.
  */
-export class HodlPositionConfig implements HodlPositionConfigData {
-  readonly wallets: HodlWalletConfig[];
+export class TreasuryConfig implements TreasuryConfigData {
+  readonly wallets: TreasuryWalletConfig[];
 
-  constructor(data: HodlPositionConfigData) {
+  constructor(data: TreasuryConfigData) {
     this.wallets = data.wallets;
   }
 
@@ -50,9 +50,9 @@ export class HodlPositionConfig implements HodlPositionConfigData {
   /**
    * Create from JSON representation
    */
-  static fromJSON(json: Record<string, unknown>): HodlPositionConfig {
-    const wallets = json.wallets as HodlWalletConfig[];
-    return new HodlPositionConfig({ wallets });
+  static fromJSON(json: Record<string, unknown>): TreasuryConfig {
+    const wallets = json.wallets as TreasuryWalletConfig[];
+    return new TreasuryConfig({ wallets });
   }
 
   /**
