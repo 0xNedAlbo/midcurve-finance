@@ -131,10 +131,6 @@ model Strategy {
   realizedCashflow   String @default("0") // bigint as string
   unrealizedCashflow String @default("0") // bigint as string
 
-  // Position IDs skipped during metrics aggregation
-  // Positions are skipped when their quote token isn't linkable to strategy's basic currency
-  skippedPositionIds String[] @default([])
-
   // Free-form config (JSON)
   config Json
 

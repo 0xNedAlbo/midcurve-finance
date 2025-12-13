@@ -111,8 +111,6 @@ export type {
   StrategyMetrics,
   StrategyAutomationWallet,
   Strategy,
-  AggregationResult,
-  PositionWithQuoteToken,
 } from './strategy.js';
 
 // Strategy Position types (strategy-owned positions)
@@ -181,8 +179,6 @@ export {
   getTotalStrategyPnl,
   getTotalRealizedStrategyPnl,
   getTotalUnrealizedStrategyPnl,
-  resolveBasicCurrencyId,
-  aggregatePositionMetricsWithBasicCurrency,
 } from './strategy.js';
 
 // Strategy Manifest types

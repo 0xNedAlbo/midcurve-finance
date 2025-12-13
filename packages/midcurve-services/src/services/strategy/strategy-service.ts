@@ -62,7 +62,6 @@ interface StrategyDbResult {
   unClaimedFees: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
-  skippedPositionIds: string[];
   config: unknown;
   quoteToken?: any;
   automationWallets?: any[];
@@ -719,7 +718,6 @@ export class StrategyService {
       chainId: dbResult.chainId,
       quoteTokenId: dbResult.quoteTokenId,
       metrics,
-      skippedPositionIds: dbResult.skippedPositionIds ?? [],
       config: dbResult.config as StrategyConfig,
     };
 

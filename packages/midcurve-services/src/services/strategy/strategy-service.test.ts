@@ -697,71 +697,37 @@ describe('StrategyService', () => {
       expect(result.metrics.currentValue).toBe(1500000000000000000000n);
     });
 
-    it('should set zero metrics when no positions linked', async () => {
-      const updatedStrategy = createMockStrategyDbResult({
+    it('should return stored metrics (placeholder implementation)', async () => {
+      // Current implementation just returns stored metrics
+      // Future: will aggregate from StrategyLedgerEvent records
+      const strategyWithMetrics = createMockStrategyDbResult({
         quoteTokenId: MOCK_BASIC_CURRENCY_USD_ID,
-        currentValue: '0',
-        currentCostBasis: '0',
+        currentValue: '1000000',
+        currentCostBasis: '900000',
+        realizedPnl: '50000',
+        unrealizedPnl: '50000',
       });
 
-      // refreshMetrics first queries for strategy
-      mockPrisma.strategy.findUnique.mockResolvedValue({
-        quoteTokenId: MOCK_BASIC_CURRENCY_USD_ID,
-      } as any);
-      mockPrisma.position.findMany.mockResolvedValue([]);
-      mockPrisma.strategy.update.mockResolvedValue(updatedStrategy as any);
+      mockPrisma.strategy.findUnique.mockResolvedValue(strategyWithMetrics as any);
 
       const result = await service.refreshMetrics(MOCK_STRATEGY_ID);
 
-      expect(mockPrisma.strategy.update).toHaveBeenCalledWith({
+      expect(mockPrisma.strategy.findUnique).toHaveBeenCalledWith({
         where: { id: MOCK_STRATEGY_ID },
-        data: expect.objectContaining({
-          currentValue: '0',
-          currentCostBasis: '0',
-          skippedPositionIds: [],
-        }),
         include: {},
       });
-      expect(result.metrics.currentValue).toBe(0n);
+      expect(result.metrics.currentValue).toBe(1000000n);
+      expect(result.metrics.currentCostBasis).toBe(900000n);
+      expect(result.metrics.realizedPnl).toBe(50000n);
+      expect(result.metrics.unrealizedPnl).toBe(50000n);
     });
 
-    it('should skip positions without basic currency link and record their IDs', async () => {
-      // Position with token that has no basicCurrencyId
-      const tokenWithoutBasicCurrency = createMockTokenDbResult({
-        config: {
-          address: '0xUnlinkedToken',
-          chainId: 1,
-          // No basicCurrencyId!
-        },
-      });
-      const positionWithoutBasicCurrency = createMockPositionDbResult({
-        id: 'pos_no_basic_currency',
-        pool: createMockPoolDbResult({
-          token0: tokenWithoutBasicCurrency,
-        }),
-      });
+    it('should throw when strategy not found', async () => {
+      mockPrisma.strategy.findUnique.mockResolvedValue(null);
 
-      const updatedStrategy = createMockStrategyDbResult({
-        quoteTokenId: MOCK_BASIC_CURRENCY_USD_ID,
-        skippedPositionIds: ['pos_no_basic_currency'],
-      });
-
-      mockPrisma.strategy.findUnique.mockResolvedValue({
-        quoteTokenId: MOCK_BASIC_CURRENCY_USD_ID,
-      } as any);
-      mockPrisma.position.findMany.mockResolvedValue([positionWithoutBasicCurrency] as any);
-      mockPrisma.strategy.update.mockResolvedValue(updatedStrategy as any);
-
-      const result = await service.refreshMetrics(MOCK_STRATEGY_ID);
-
-      expect(mockPrisma.strategy.update).toHaveBeenCalledWith({
-        where: { id: MOCK_STRATEGY_ID },
-        data: expect.objectContaining({
-          skippedPositionIds: ['pos_no_basic_currency'],
-        }),
-        include: {},
-      });
-      expect(result.skippedPositionIds).toContain('pos_no_basic_currency');
+      await expect(service.refreshMetrics(MOCK_STRATEGY_ID)).rejects.toThrow(
+        'Strategy not found'
+      );
     });
   });
 

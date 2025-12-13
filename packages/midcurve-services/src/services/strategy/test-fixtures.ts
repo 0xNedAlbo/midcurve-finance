@@ -85,7 +85,6 @@ export interface MockStrategyDbResult {
   unClaimedFees: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
-  skippedPositionIds: string[];
   config: unknown;
   quoteToken?: any;
   positions?: any[];
@@ -115,7 +114,6 @@ export function createMockStrategyDbResult(
     unClaimedFees: '0',
     realizedCashflow: '0',
     unrealizedCashflow: '0',
-    skippedPositionIds: [],
     config: mockDeltaNeutralConfig,
     ...overrides,
   };
