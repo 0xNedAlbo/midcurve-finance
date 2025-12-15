@@ -1,231 +1,204 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IStrategy} from "../interfaces/IStrategy.sol";
-import {ISystemRegistry} from "../interfaces/ISystemRegistry.sol";
-import {LoggingLib} from "../libraries/LoggingLib.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import { IStrategy } from "../interfaces/IStrategy.sol";
 
-/**
- * @title BaseStrategy
- * @notice Minimal base contract for SEMSEE strategies with EIP-712 signature authorization
- * @dev Provides essential infrastructure:
- *      - Owner management (owner set at construction, immutable)
- *      - Lifecycle management (Created -> Running -> Shutdown)
- *      - EIP-712 signature verification for owner actions
- *      - Effect ID generation for tracking async actions
- *      - Access to SystemRegistry
- *      - Logging via LoggingLib
- *
- * Strategies extend this and implement module interfaces:
- * - IOhlcConsumer for price data
- * - IPoolConsumer for pool state
- * - IBalanceConsumer for balance updates
- * - IUniswapV3Actions for position management
- * - IFunding for deposits and withdrawals
- *
- * Authorization Model:
- * - Owner is set at deployment (immutable)
- * - All owner actions require EIP-712 signature verification
- * - Users sign on Ethereum mainnet (chainId: 1), no network switch needed
- * - Automation wallet submits signed transactions to SEMSEE chain
- *
- * Lifecycle:
- * 1. Deploy: Constructor runs with owner address, state = Created
- * 2. Start: Signed start() called, _onStart() hook runs, state = Running
- * 3. Shutdown: Signed shutdown() called, _onShutdown() hook runs, state = Shutdown
- */
-contract BaseStrategy is IStrategy {
-    using LoggingLib for *;
+/// @notice BaseStrategy for simulation-driven durable execution.
+///
+/// Protocol:
+/// - Operator calls `step(input)` via eth_call (simulation). If an external effect is missing,
+///   the call reverts with `EffectNeeded(epoch, key, effectType, payload)`.
+/// - Operator/Core executes the effect offchain and persists the result via `submitEffectResult(...)`.
+/// - Repeat simulation until `step()` returns normally, then send `step()` as a TX to commit.
+/// - On successful commit, BaseStrategy increments `epoch` as the last action.
+/// - Core can garbage-collect old epoch results via `gcEpoch(...)` in bounded batches.
+///
+/// StepEvent envelope:
+///   input = abi.encode(
+///     eventType,    // bytes32
+///     eventVersion, // uint32
+///     payload       // bytes
+///   )
+abstract contract BaseStrategy is IStrategy {
+  // =============================================================
+  // Auth
+  // =============================================================
 
-    // =========== System Constants ===========
+  address public operator;
+  address public core;
 
-    /// @notice The well-known address of the SystemRegistry
-    ISystemRegistry public constant REGISTRY = ISystemRegistry(0x0000000000000000000000000000000000001000);
+  error NotOperator();
+  error NotCore();
+  error ZeroAddress();
 
-    // =========== EIP-712 Constants ===========
+  modifier onlyOperator() {
+    if (msg.sender != operator) revert NotOperator();
+    _;
+  }
 
-    /// @notice EIP-712 domain separator (chainId = 1 for Ethereum mainnet signing)
-    /// @dev Users sign on mainnet, verification happens on SEMSEE chain
-    bytes32 public constant DOMAIN_SEPARATOR = keccak256(abi.encode(
-        keccak256("EIP712Domain(string name,string version,uint256 chainId)"),
-        keccak256("Semsee"),
-        keccak256("1"),
-        uint256(1)  // Ethereum mainnet
-    ));
+  modifier onlyCore() {
+    if (msg.sender != core) revert NotCore();
+    _;
+  }
 
-    /// @notice Type hash for Start action
-    bytes32 public constant START_TYPEHASH = keccak256(
-        "Start(address strategy,uint256 nonce,uint256 expiry)"
-    );
+  constructor(address operator_, address core_) {
+    if (operator_ == address(0) || core_ == address(0)) revert ZeroAddress();
+    operator = operator_;
+    core = core_;
+  }
 
-    /// @notice Type hash for Shutdown action
-    bytes32 public constant SHUTDOWN_TYPEHASH = keccak256(
-        "Shutdown(address strategy,uint256 nonce,uint256 expiry)"
-    );
+  // =============================================================
+  // StepEvent envelope decoding
+  // =============================================================
 
-    // =========== Owner ===========
+  error InvalidStepEvent();
 
-    /// @notice The owner address of this strategy (set at deployment)
-    address public immutable override owner;
+  function _decodeStepEvent(bytes calldata input)
+    internal
+    pure
+    returns (bytes32 eventType, uint32 eventVersion, bytes memory payload)
+  {
+    // Minimal sanity check: abi.encode(bytes32,uint32,bytes) will be at least 96 bytes.
+    if (input.length < 96) revert InvalidStepEvent();
+    (eventType, eventVersion, payload) = abi.decode(input, (bytes32, uint32, bytes));
+  }
 
-    // =========== Lifecycle State ===========
+  // =============================================================
+  // Effect result store (durable)
+  // =============================================================
 
-    /// @notice Current lifecycle state
-    StrategyState internal _state;
+  enum EffectStatus {
+    NONE,
+    SUCCESS,
+    FAILED
+  }
 
-    // =========== Effect Tracking ===========
+  struct EffectResult {
+    EffectStatus status; // NONE means "not present"
+    bytes data;          // ABI-encoded result or error payload
+  }
 
-    /// @dev Counter for generating unique effect IDs
-    uint256 private _effectCounter;
+  // epoch => idempotencyKey => result
+  mapping(uint64 => mapping(bytes32 => EffectResult)) internal _results;
 
-    // =========== Nonce Tracking ===========
+  // For GC: track which keys were written in each epoch (mappings are not iterable).
+  mapping(uint64 => bytes32[]) internal _keysByEpoch;
+  mapping(uint64 => uint256) internal _sweepCursor;
 
-    /// @notice Tracks used nonces for replay protection
-    mapping(uint256 => bool) public usedNonces;
+  uint64 internal _epoch;
 
-    // =========== Errors ===========
+  function epoch() public view override returns (uint64) {
+    return _epoch;
+  }
 
-    /// @notice Error when signature has expired
-    error SignatureExpired();
+  /// @notice Persist an effect result (operator).
+  function submitEffectResult(
+    uint64 epoch_,
+    bytes32 idempotencyKey,
+    bool ok,
+    bytes calldata data
+  ) external override onlyOperator {
+    require(epoch_ <= _epoch, "epoch too new");
 
-    /// @notice Error when nonce has already been used
-    error NonceAlreadyUsed();
+    EffectResult storage r = _results[epoch_][idempotencyKey];
 
-    /// @notice Error when signature is invalid (wrong signer)
-    error InvalidSignature();
-
-    /// @notice Error when operation not allowed in current state
-    error InvalidState(StrategyState current, StrategyState required);
-
-    /// @notice Error when owner address is zero
-    error OwnerCannotBeZero();
-
-    // =========== Constructor ===========
-
-    /**
-     * @notice Initialize the strategy with the specified owner
-     * @param _owner The owner address (user's EOA)
-     * @dev Owner is set by the automation wallet at deployment
-     */
-    constructor(address _owner) {
-        if (_owner == address(0)) revert OwnerCannotBeZero();
-        owner = _owner;
-        _state = StrategyState.Created;
+    // Idempotent: allow resubmitting the same status; disallow changing an existing entry.
+    if (r.status != EffectStatus.NONE) {
+      require((ok && r.status == EffectStatus.SUCCESS) || (!ok && r.status == EffectStatus.FAILED), "status mismatch");
+      return;
     }
 
-    // =========== EIP-712 Signature Verification ===========
+    r.status = ok ? EffectStatus.SUCCESS : EffectStatus.FAILED;
+    r.data = data;
 
-    /**
-     * @notice Modifier that verifies owner signature for protected actions
-     * @dev Accepts pre-computed structHash to support variable parameters (e.g., withdraw)
-     * @param structHash Pre-computed EIP-712 struct hash (includes all action parameters)
-     * @param signature EIP-712 signature from the owner
-     * @param nonce Timestamp-based nonce for replay protection
-     * @param expiry Signature expiry timestamp
-     */
-    modifier withOwnerSignature(
-        bytes32 structHash,
-        bytes calldata signature,
-        uint256 nonce,
-        uint256 expiry
-    ) {
-        if (block.timestamp > expiry) revert SignatureExpired();
-        if (usedNonces[nonce]) revert NonceAlreadyUsed();
+    _keysByEpoch[epoch_].push(idempotencyKey);
+  }
 
-        bytes32 digest = keccak256(abi.encodePacked(
-            "\x19\x01",
-            DOMAIN_SEPARATOR,
-            structHash
-        ));
+  // =============================================================
+  // Durable await primitive (revert only when missing)
+  // =============================================================
 
-        address recovered = ECDSA.recover(digest, signature);
-        if (recovered != owner) revert InvalidSignature();
+  enum AwaitStatus {
+    READY_OK,
+    READY_FAILED
+  }
 
-        usedNonces[nonce] = true;
-        _;
+  /// @notice Returns SUCCESS/FAILED without reverting. Reverts only when missing.
+  function _awaitEffect(
+    bytes32 idempotencyKey,
+    bytes32 effectType,
+    bytes memory payload
+  ) internal view returns (AwaitStatus status, bytes memory data) {
+    EffectResult storage r = _results[_epoch][idempotencyKey];
+
+    if (r.status == EffectStatus.SUCCESS) return (AwaitStatus.READY_OK, r.data);
+    if (r.status == EffectStatus.FAILED)  return (AwaitStatus.READY_FAILED, r.data);
+
+    revert EffectNeeded(_epoch, idempotencyKey, effectType, payload);
+  }
+
+  // =============================================================
+  // Step orchestration
+  // =============================================================
+
+  /// @notice Operator calls `step` via eth_call (simulate) and via TX (commit).
+  function step(bytes calldata input) external override onlyOperator {
+    (bytes32 eventType, uint32 eventVersion, bytes memory payload) = _decodeStepEvent(input);
+
+    _onStepEvent(eventType, eventVersion, payload);
+
+    // If we got here, the step completed without needing more effects.
+    // Last act: advance epoch to logically separate the next cycle's results.
+    unchecked {
+      _epoch += 1;
+    }
+  }
+
+  /// @notice StepEvent router hook. Mixins override this and call super to "rutsch durch".
+  /// Default implementation: do nothing (unknown event types are ignored).
+  function _onStepEvent(bytes32 eventType, uint32 eventVersion, bytes memory payload) internal virtual {
+    // silence unused variable warnings in base
+    eventType; eventVersion; payload;
+  }
+
+  // =============================================================
+  // GC (core-sponsored)
+  // =============================================================
+
+  /// @notice Sweep stored effect results for a completed epoch in bounded batches.
+  function gcEpoch(uint64 epochToSweep, uint256 maxItems)
+    external
+    override
+    onlyCore
+    returns (uint256 swept, bool done)
+  {
+    require(epochToSweep < _epoch, "active epoch");
+    require(maxItems > 0, "maxItems=0");
+
+    bytes32[] storage keys = _keysByEpoch[epochToSweep];
+    uint256 i = _sweepCursor[epochToSweep];
+    uint256 len = keys.length;
+
+    if (i >= len) {
+      return (0, true);
     }
 
-    // =========== Lifecycle ===========
+    uint256 end = i + maxItems;
+    if (end > len) end = len;
 
-    /// @notice Returns current state
-    function state() external view override returns (StrategyState) {
-        return _state;
+    for (; i < end; i++) {
+      delete _results[epochToSweep][keys[i]];
     }
 
-    /// @notice Modifier to restrict to Running state
-    modifier onlyRunning() {
-        if (_state != StrategyState.Running) {
-            revert InvalidState(_state, StrategyState.Running);
-        }
-        _;
+    swept = end - _sweepCursor[epochToSweep];
+    _sweepCursor[epochToSweep] = end;
+
+    if (end == len) {
+      delete _keysByEpoch[epochToSweep];
+      delete _sweepCursor[epochToSweep];
+      done = true;
+    } else {
+      done = false;
     }
-
-    /**
-     * @notice Start the strategy with owner signature
-     * @param signature EIP-712 signature from owner
-     * @param nonce Timestamp-based nonce for replay protection
-     * @param expiry Signature expiry timestamp
-     */
-    function start(
-        bytes calldata signature,
-        uint256 nonce,
-        uint256 expiry
-    ) external virtual override
-        withOwnerSignature(
-            keccak256(abi.encode(START_TYPEHASH, address(this), nonce, expiry)),
-            signature, nonce, expiry
-        )
-    {
-        if (_state != StrategyState.Created) {
-            revert InvalidState(_state, StrategyState.Created);
-        }
-
-        _state = StrategyState.Running;
-        _onStart(); // Hook for subclasses
-        emit StrategyStarted();
-    }
-
-    /**
-     * @notice Shutdown the strategy with owner signature
-     * @param signature EIP-712 signature from owner
-     * @param nonce Timestamp-based nonce for replay protection
-     * @param expiry Signature expiry timestamp
-     */
-    function shutdown(
-        bytes calldata signature,
-        uint256 nonce,
-        uint256 expiry
-    ) external virtual override
-        withOwnerSignature(
-            keccak256(abi.encode(SHUTDOWN_TYPEHASH, address(this), nonce, expiry)),
-            signature, nonce, expiry
-        )
-    {
-        if (_state != StrategyState.Running) {
-            revert InvalidState(_state, StrategyState.Running);
-        }
-
-        _onShutdown(); // Hook for subclasses - unsubscribe here
-        _state = StrategyState.Shutdown;
-        emit StrategyShutdown();
-    }
-
-    /// @notice Hook called when strategy starts - override to set up subscriptions
-    function _onStart() internal virtual {}
-
-    /// @notice Hook called before shutdown - override to remove subscriptions
-    function _onShutdown() internal virtual {}
-
-    // =========== Effect ID Generation ===========
-
-    /**
-     * @notice Generate a unique effect ID for tracking async actions
-     * @dev Effect IDs are used to correlate action requests with their results
-     * @return A unique bytes32 identifier for the effect
-     */
-    function _nextEffectId() internal returns (bytes32) {
-        _effectCounter++;
-        return keccak256(abi.encodePacked(address(this), _effectCounter));
-    }
+  }
 }

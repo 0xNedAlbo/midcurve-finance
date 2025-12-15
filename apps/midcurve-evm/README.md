@@ -1,45 +1,99 @@
-# @midcurve/evm
+# Midcurve EVM
 
-Local EVM development node with SEMSEE Store contracts pre-deployed.
+Local EVM development node for testing durable await strategy contracts.
 
-## Overview
+## Architecture
 
-This package provides a private Ethereum network running in Docker with:
-- **SystemRegistry** pre-deployed at `0x0000000000000000000000000000000000001000`
-- **Store contracts** (PoolStore, PositionStore, BalanceStore) automatically deployed on startup
-- **Foundry** for contract development and testing
+This package provides:
+- **Geth node** with Clique PoA consensus (instant mining)
+- **Strategy contracts** implementing the durable await pattern
+- **Core orchestrator** (planned: RabbitMQ-based event system)
 
-## Prerequisites
+### Durable Await Pattern
 
-- Docker and Docker Compose installed
-- [Foundry](https://getfoundry.sh/) installed (for contract development)
-- Port 8545 (HTTP RPC) and 8546 (WebSocket) available
+Strategies use a simulation-replay execution model:
+
+1. Core calls `step(input)` via `eth_call` (simulation)
+2. If an effect is needed, strategy reverts with `EffectNeeded(epoch, key, effectType, payload)`
+3. Core executes the effect off-chain (swap, log, subscribe, etc.)
+4. Core stores the result via `submitEffectResult(epoch, key, ok, data)`
+5. Core re-simulates `step()` - this time the effect result exists and execution continues
+6. Repeat until simulation completes without reverting
+7. Core sends `step()` as a real transaction to commit state
 
 ## Quick Start
 
 ```bash
-# Start the node (builds contracts, generates genesis, deploys stores)
+# Start the Geth node
 npm run up
 
-# Check deployment status
-npm run check:deployment
+# Check node health
+npm run health
 
 # View logs
 npm run logs
 
 # Stop the node
 npm run down
+
+# Reset (removes all data)
+npm run reset
 ```
 
-## Well-Known Addresses
+## Contracts
 
-| Contract | Address | Description |
+```
+contracts/src/
+├── interfaces/
+│   └── IStrategy.sol          # Strategy interface with EffectNeeded error
+├── strategy/
+│   ├── BaseStrategy.sol       # Core durable await implementation
+│   └── mixins/
+│       ├── ActionMixin.sol    # User action handling
+│       ├── LifecycleMixin.sol # START/SHUTDOWN lifecycle
+│       ├── LoggingMixin.sol   # Logging as effects
+│       └── OhlcMixin.sol      # OHLC data subscription
+└── examples/
+    └── (example strategies)
+```
+
+### Building Contracts
+
+```bash
+npm run build:contracts
+npm run test:contracts
+```
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
 |----------|---------|-------------|
-| Core | `0x0000...0001` | Caller identity for Core operations |
-| SystemRegistry | `0x0000...1000` | Central registry (pre-deployed via genesis) |
-| PoolStore | Dynamic | Registered in SystemRegistry |
-| PositionStore | Dynamic | Registered in SystemRegistry |
-| BalanceStore | Dynamic | Registered in SystemRegistry |
+| `CORE_ADDRESS` | Foundry account 0 | Operator address (without 0x prefix) |
+| `CORE_PRIVATE_KEY` | Foundry key 0 | Operator private key for signing |
+
+### Ports
+
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 8545 | HTTP | JSON-RPC endpoint |
+| 8546 | WebSocket | WebSocket RPC endpoint |
+
+## Development
+
+### Chain Configuration
+
+- **Chain ID:** 31337
+- **Consensus:** Clique PoA (period=0 for instant mining)
+- **Gas Limit:** 30,000,000
+
+### Pre-funded Accounts
+
+| Address | Balance | Purpose |
+|---------|---------|---------|
+| `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` | 1M ETH | Operator/Signer |
+| `0x0000...0001` | 1M ETH | Burn address |
 
 ## Available Scripts
 
@@ -49,7 +103,7 @@ npm run down
 |--------|-------------|
 | `npm run build:contracts` | Build Solidity contracts with Foundry |
 | `npm run test:contracts` | Run contract tests |
-| `npm run generate:genesis` | Generate genesis.json with SystemRegistry bytecode |
+| `npm run generate:genesis` | Generate genesis.json |
 
 ### Development (Ephemeral)
 
@@ -58,12 +112,9 @@ npm run down
 | `npm run up` | Start node with fresh deployment |
 | `npm run down` | Stop and remove containers |
 | `npm run logs` | Follow Geth logs |
-| `npm run logs:deploy` | View deployment logs |
 | `npm run status` | Show container status |
 | `npm run reset` | Restart with fresh state |
 | `npm run health` | Check RPC endpoint |
-| `npm run deploy:stores` | Manually deploy stores |
-| `npm run check:deployment` | Verify contract deployment |
 
 ### Production (Persistent)
 
@@ -73,124 +124,35 @@ npm run down
 | `npm run down:prod` | Stop (data preserved) |
 | `npm run reset:prod` | Remove data and restart fresh |
 
-## Endpoints
-
-- **HTTP RPC:** `http://localhost:8545`
-- **WebSocket:** `ws://localhost:8546`
-- **Chain ID:** `31337`
-
-## Architecture
-
-### How It Works
-
-1. **Genesis Generation** (`npm run generate:genesis`)
-   - Builds contracts with Foundry
-   - Extracts SystemRegistry runtime bytecode
-   - Generates `genesis.json` with SystemRegistry pre-deployed at `0x1000`
-
-2. **Node Startup** (`docker-compose up`)
-   - Builds custom Geth image with genesis initialization
-   - Starts private PoA network (Clique consensus)
-   - Pre-funds Core (`0x1`) and signer accounts
-
-3. **Store Deployment** (automatic)
-   - Waits for Geth to be healthy
-   - Deploys PoolStore, PositionStore, BalanceStore
-   - Registers store addresses in SystemRegistry (as Core)
-
-### Contract Structure
-
-```
-contracts/
-├── src/
-│   ├── libraries/
-│   │   └── CoreControlled.sol      # onlyCore modifier
-│   ├── interfaces/
-│   │   ├── ISystemRegistry.sol
-│   │   ├── IPoolStore.sol
-│   │   ├── IPositionStore.sol
-│   │   └── IBalanceStore.sol
-│   └── stores/
-│       ├── SystemRegistry.sol
-│       ├── PoolStore.sol
-│       ├── PositionStore.sol
-│       └── BalanceStore.sol
-├── script/
-│   └── DeployStores.s.sol
-└── test/
-    └── stores/                      # Unit tests
-```
-
 ## Usage with viem
 
 ```typescript
-import { createPublicClient, http, getContract } from 'viem';
+import { createPublicClient, createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { localhost } from 'viem/chains';
 
-// Create client
-const client = createPublicClient({
-  chain: { ...localhost, id: 31337 },
+// Create clients
+const chain = { ...localhost, id: 31337 };
+
+const publicClient = createPublicClient({
+  chain,
   transport: http('http://localhost:8545'),
 });
 
-// Read from SystemRegistry
-const SYSTEM_REGISTRY = '0x0000000000000000000000000000000000001000';
+const account = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
 
-const poolStoreAddress = await client.readContract({
-  address: SYSTEM_REGISTRY,
-  abi: [{ name: 'poolStore', type: 'function', inputs: [], outputs: [{ type: 'address' }] }],
-  functionName: 'poolStore',
+const walletClient = createWalletClient({
+  account,
+  chain,
+  transport: http('http://localhost:8545'),
 });
 
-console.log('PoolStore:', poolStoreAddress);
+// Deploy a strategy contract...
 ```
 
-## Data Persistence
+## Core Orchestrator
 
-**Development mode** (`npm run up`): Data is ephemeral - chain state and contracts are reset on each restart. Ideal for testing.
-
-**Production mode** (`npm run up:prod`): Data persists in Docker volume. Stores are only deployed once (deployment script is idempotent).
-
-## Verification
-
-Check deployment status:
-
-```bash
-# Using npm script
-npm run check:deployment
-
-# Using cast (Foundry)
-cast code 0x0000000000000000000000000000000000001000 --rpc-url http://localhost:8545
-cast call 0x1000 "poolStore()(address)" --rpc-url http://localhost:8545
-```
-
-## Troubleshooting
-
-### "SystemRegistry not deployed"
-
-Genesis may not be configured correctly. Regenerate:
-
-```bash
-npm run generate:genesis
-npm run reset
-```
-
-### "Stores not registered"
-
-Deployment may have failed. Check logs and redeploy:
-
-```bash
-npm run logs:deploy
-npm run deploy:stores
-```
-
-### Container won't start
-
-Check Docker logs:
-
-```bash
-docker logs midcurve-geth-dev
-```
+The Core orchestrator (in `core/`) will be rebuilt with RabbitMQ for event-driven strategy execution. This is planned for future development.
 
 ## Debian/Linux Production Setup
 
@@ -226,13 +188,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable midcurve-geth
 sudo systemctl start midcurve-geth
 sudo systemctl status midcurve-geth
-```
-
-### 3. Service Management
-
-```bash
-sudo systemctl start midcurve-geth
-sudo systemctl stop midcurve-geth
-sudo systemctl restart midcurve-geth
-sudo journalctl -u midcurve-geth -f
 ```

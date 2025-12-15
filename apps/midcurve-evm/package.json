@@ -1,8 +1,8 @@
 {
   "name": "@midcurve/evm",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Local EVM development node with SEMSEE Store contracts",
+  "description": "Local EVM development node for strategy testing",
   "scripts": {
     "build:contracts": "cd contracts && forge build",
     "test:contracts": "cd contracts && forge test -vvv",
@@ -13,26 +13,12 @@
     "start": "docker-compose start",
     "restart": "docker-compose restart",
     "logs": "docker-compose logs -f geth-dev",
-    "logs:deploy": "docker-compose logs deploy-stores",
     "status": "docker-compose ps",
     "reset": "docker-compose down -v && npm run up",
     "health": "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}'",
-    "deploy:stores": "./scripts/deploy-stores.sh",
-    "check:deployment": "./scripts/check-deployment.sh",
     "up:prod": "npm run generate:genesis && docker-compose -f docker-compose.yml -f docker-compose.prod.yml build && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
-    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod",
-    "up:core": "cd core && npm run start",
-    "dev:core": "cd core && npm run dev",
-    "cli": "SEMSEE_CWD=$PWD && cd core && SEMSEE_CWD=$SEMSEE_CWD tsx src/cli/index.ts",
-    "strategy:create": "pnpm run cli create",
-    "strategy:deploy": "pnpm run cli deploy",
-    "strategy:start": "pnpm run cli start",
-    "strategy:shutdown": "pnpm run cli shutdown",
-    "strategy:status": "pnpm run cli status",
-    "strategy:logs": "pnpm run cli logs",
-    "strategy:event": "pnpm run cli event",
-    "strategy:fund": "pnpm run cli fund"
+    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod"
   },
   "devDependencies": {
     "tsx": "^4.21.0"

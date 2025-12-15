@@ -1,13 +1,11 @@
-# SEMSEE Embedded EVM - Development Configuration
+# Midcurve EVM - Development Configuration
 #
-# Uses Geth with Clique PoA consensus and custom genesis.json.
-# SystemRegistry is pre-deployed at genesis address 0x1000.
+# Uses Geth with Clique PoA consensus for instant mining.
+# Strategies are deployed dynamically by Core.
 #
-# Startup flow:
-# 1. geth: Starts Geth with custom genesis (Clique PoA, period=0 for instant mining)
-#          - SystemRegistry pre-deployed at 0x0000000000000000000000000000000000001000
-#          - Core account pre-funded with 1,000,000 ETH
-# 2. deploy-stores: Deploys Store contracts and registers them in SystemRegistry
+# Ports:
+# - 8545: HTTP RPC
+# - 8546: WebSocket RPC
 
 services:
   geth:
@@ -27,32 +25,6 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
-
-  deploy-stores:
-    build:
-      context: .
-      dockerfile: Dockerfile.foundry
-    container_name: midcurve-deploy-stores
-    depends_on:
-      geth:
-        condition: service_healthy
-    working_dir: /app/contracts
-    environment:
-      - CORE_PRIVATE_KEY=${CORE_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
-    # Deploy Store contracts and register in genesis SystemRegistry
-    # Send a dummy transaction first to trigger indexing, wait for it, then deploy
-    command: >
-      sh -c "echo 'Triggering transaction indexing with dummy tx...' &&
-      cast send --private-key $$CORE_PRIVATE_KEY --rpc-url http://geth:8545 --value 0 0x0000000000000000000000000000000000000001 2>/dev/null || true &&
-      echo 'Waiting for indexing to complete...' &&
-      sleep 3 &&
-      forge script script/DeployStores.s.sol
-      --rpc-url http://geth:8545
-      --private-key $$CORE_PRIVATE_KEY
-      --broadcast
-      --slow
-      -vvvv"
-    restart: "no"
 
 volumes:
   geth-data:
