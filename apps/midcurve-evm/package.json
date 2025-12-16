@@ -21,6 +21,7 @@
     "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
     "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod",
     "poc:loop": "tsx core/src/poc/durable-await-loop.ts",
+    "poc:topology": "tsx core/src/poc/test-topology.ts",
     "rabbitmq:logs": "docker-compose logs -f rabbitmq",
     "rabbitmq:health": "curl -s -u midcurve:midcurve_dev http://localhost:15672/api/healthchecks/node | jq ."
   },
