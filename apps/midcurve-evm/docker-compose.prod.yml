@@ -1,21 +1,19 @@
-version: "3.8"
-
 # Production override - adds persistent storage
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # In production mode:
 # - Geth data persists across restarts
-# - Store deployment is idempotent (skips if already deployed)
+# - RabbitMQ data persists across restarts
 
 services:
-  geth-dev:
+  geth:
     volumes:
-      - geth-dev-data:/data
+      - geth-prod-data:/data
 
-  deploy-stores:
-    # In prod mode, the deployment script checks if stores are already registered
-    # and skips deployment if SystemRegistry.poolStore() != address(0)
-    restart: "no"
+  rabbitmq:
+    volumes:
+      - rabbitmq-prod-data:/var/lib/rabbitmq
 
 volumes:
-  geth-dev-data:
+  geth-prod-data:
+  rabbitmq-prod-data:
