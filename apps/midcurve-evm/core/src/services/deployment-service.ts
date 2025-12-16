@@ -20,6 +20,15 @@ import { getSignerClient } from '../clients/signer-client';
 import { setupStrategyTopology } from '../mq/topology';
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * SEMSEE chain ID - local EVM only
+ */
+const SEMSEE_CHAIN_ID = 31337;
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -44,7 +53,6 @@ export interface DeploymentState {
 
 export interface DeploymentInput {
   strategyId: string;
-  chainId: number;
   ownerAddress: Address;
 }
 
@@ -90,8 +98,8 @@ class DeploymentService {
     input: DeploymentInput,
     channel: Channel
   ): Promise<DeploymentState> {
-    const { strategyId, chainId, ownerAddress } = input;
-    evmLog.methodEntry(this.log, 'startDeployment', { strategyId, chainId });
+    const { strategyId, ownerAddress } = input;
+    evmLog.methodEntry(this.log, 'startDeployment', { strategyId });
 
     // Check if deployment already in progress
     const existing = this.deployments.get(strategyId);
@@ -130,7 +138,7 @@ class DeploymentService {
     input: DeploymentInput,
     channel: Channel
   ): Promise<void> {
-    const { strategyId, chainId, ownerAddress } = input;
+    const { strategyId, ownerAddress } = input;
     const state = this.deployments.get(strategyId)!;
 
     try {
@@ -170,7 +178,6 @@ class DeploymentService {
       const signerClient = getSignerClient();
       const signResult = await signerClient.signDeployment({
         strategyId,
-        chainId,
         ownerAddress,
       });
 
@@ -185,7 +192,7 @@ class DeploymentService {
         msg: 'Broadcasting transaction',
       });
 
-      const publicClient = this.createPublicClient(chainId);
+      const publicClient = this.createPublicClient();
 
       const txHash = await publicClient.sendRawTransaction({
         serializedTransaction: signResult.signedTransaction,
@@ -251,12 +258,12 @@ class DeploymentService {
   }
 
   /**
-   * Create a public client for the given chain
+   * Create a public client for SEMSEE chain
    */
-  private createPublicClient(chainId: number) {
+  private createPublicClient() {
     const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
     const chain = {
-      id: chainId,
+      id: SEMSEE_CHAIN_ID,
       name: 'SEMSEE',
       nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
       rpcUrls: {

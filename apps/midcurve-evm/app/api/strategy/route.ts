@@ -4,9 +4,10 @@
  * Request body:
  * {
  *   strategyId: string,
- *   chainId?: number,       // defaults to 31337
  *   ownerAddress: string    // 0x... address
  * }
+ *
+ * Note: chainId is not configurable - we only support local SEMSEE (31337)
  *
  * Returns 202 immediately. Poll GET /api/strategy/:addr for status.
  *
@@ -39,7 +40,6 @@ const log = logger.child({ route: 'PUT /api/strategy' });
 
 const DeployRequestSchema = z.object({
   strategyId: z.string().min(1),
-  chainId: z.number().int().positive().default(31337),
   ownerAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
 });
 
@@ -61,9 +61,9 @@ export async function PUT(request: Request) {
       );
     }
 
-    const { strategyId, chainId, ownerAddress } = parseResult.data;
+    const { strategyId, ownerAddress } = parseResult.data;
 
-    log.info({ strategyId, chainId, msg: 'Starting deployment' });
+    log.info({ strategyId, msg: 'Starting deployment' });
 
     // Get RabbitMQ channel
     const connectionManager = getRabbitMQConnection();
@@ -74,7 +74,6 @@ export async function PUT(request: Request) {
     const state = await deploymentService.startDeployment(
       {
         strategyId,
-        chainId,
         ownerAddress: ownerAddress as Address,
       },
       channel

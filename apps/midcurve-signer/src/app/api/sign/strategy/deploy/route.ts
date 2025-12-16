@@ -13,9 +13,10 @@
  * - Authorization: Bearer <internal-api-key>
  * - Body: {
  *     strategyId: string,     // ID of the deploying strategy
- *     chainId: number,        // Target chain for deployment
  *     ownerAddress: string    // User's wallet address (for _owner param)
  *   }
+ *
+ * Note: chainId is not a parameter - we only support local SEMSEE (31337)
  *
  * Response (Success):
  * - 200: {
@@ -52,10 +53,10 @@ const logger = signerLogger.child({ endpoint: 'sign-strategy-deploy' });
 
 /**
  * Request body schema
+ * Note: chainId is not required - we only support local SEMSEE (31337)
  */
 const SignDeployRequestSchema = z.object({
   strategyId: z.string().min(1, 'strategyId is required'),
-  chainId: z.number().int().positive('chainId must be a positive integer'),
   ownerAddress: z
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid owner address format'),
@@ -101,12 +102,11 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { strategyId, chainId, ownerAddress } = validation.data;
+  const { strategyId, ownerAddress } = validation.data;
 
   logger.info({
     requestId,
     strategyId,
-    chainId,
     ownerAddress,
     msg: 'Processing deployment signing request',
   });
@@ -115,7 +115,6 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     // 3. Sign deployment transaction
     const result = await strategySigningService.signDeployment({
       strategyId,
-      chainId,
       ownerAddress: ownerAddress as `0x${string}`,
     });
 

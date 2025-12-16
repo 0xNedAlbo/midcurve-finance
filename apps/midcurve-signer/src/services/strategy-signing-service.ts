@@ -53,10 +53,10 @@ export interface SignContractCallResult {
 
 /**
  * Input for signing a deployment transaction
+ * Note: chainId is not configurable - we only support local SEMSEE (31337)
  */
 export interface SignDeployInput {
   strategyId: string;
-  chainId: number;
   ownerAddress: Address;
 }
 
@@ -123,32 +123,35 @@ export class StrategySigningError extends Error {
 // =============================================================================
 
 /**
- * Get SEMSEE chain configuration
+ * SEMSEE chain ID - local EVM only
  */
-function getSemseeChain(chainId: number) {
-  return {
-    id: chainId,
-    name: 'SEMSEE',
-    nativeCurrency: {
-      decimals: 18,
-      name: 'Ether',
-      symbol: 'ETH',
+const SEMSEE_CHAIN_ID = 31337;
+
+/**
+ * SEMSEE chain configuration (local Geth/Anvil)
+ */
+const semseeChain = {
+  id: SEMSEE_CHAIN_ID,
+  name: 'SEMSEE',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Ether',
+    symbol: 'ETH',
+  },
+  rpcUrls: {
+    default: {
+      http: [process.env.SEMSEE_RPC_URL || 'http://localhost:8545'],
     },
-    rpcUrls: {
-      default: {
-        http: [process.env.SEMSEE_RPC_URL || 'http://localhost:8545'],
-      },
-    },
-  } as const;
-}
+  },
+} as const;
 
 /**
  * Create a public client for SEMSEE
  */
-function createSemseePublicClient(chainId: number) {
+function createSemseePublicClient() {
   const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
   return createPublicClient({
-    chain: getSemseeChain(chainId),
+    chain: semseeChain,
     transport: http(rpcUrl),
   });
 }
@@ -168,8 +171,8 @@ class StrategySigningService {
    * @throws StrategySigningError if strategy not found, invalid state, or signing fails
    */
   async signDeployment(input: SignDeployInput): Promise<SignDeployResult> {
-    const { strategyId, chainId, ownerAddress } = input;
-    signerLog.methodEntry(this.logger, 'signDeployment', { strategyId, chainId });
+    const { strategyId, ownerAddress } = input;
+    signerLog.methodEntry(this.logger, 'signDeployment', { strategyId });
 
     // 1. Fetch strategy with manifest and automation wallet
     const strategy = await prisma.strategy.findUnique({
@@ -225,7 +228,7 @@ class StrategySigningService {
     this.logger.info({
       strategyId,
       manifestSlug: manifest.slug,
-      chainId,
+      chainId: SEMSEE_CHAIN_ID,
       walletAddress: walletConfig.walletAddress,
       msg: 'Signing deployment transaction',
     });
@@ -242,7 +245,7 @@ class StrategySigningService {
     );
 
     // 6. Prepare and sign deployment transaction
-    const publicClient = createSemseePublicClient(chainId);
+    const publicClient = createSemseePublicClient();
 
     // Encode deployment data
     const deployData = encodeDeployData({
@@ -268,7 +271,7 @@ class StrategySigningService {
     const tx = {
       to: undefined, // Contract deployment
       data: deployData,
-      chainId,
+      chainId: SEMSEE_CHAIN_ID,
       nonce,
       gas: gasLimit,
       gasPrice,
@@ -276,7 +279,7 @@ class StrategySigningService {
     };
 
     // Sign transaction
-    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId, chainId);
+    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId);
 
     // Calculate predicted contract address
     const predictedAddress = getContractAddress({
@@ -320,7 +323,7 @@ class StrategySigningService {
       'active' // step() only allowed when active
     );
 
-    if (!strategy.contractAddress || !strategy.chainId) {
+    if (!strategy.contractAddress) {
       throw new StrategySigningError(
         `Strategy '${strategyId}' is not deployed`,
         'INVALID_STATE',
@@ -328,7 +331,7 @@ class StrategySigningService {
       );
     }
 
-    const publicClient = createSemseePublicClient(strategy.chainId);
+    const publicClient = createSemseePublicClient();
 
     // Encode step() call
     const callData = encodeFunctionData({
@@ -355,7 +358,7 @@ class StrategySigningService {
     const tx = {
       to: strategy.contractAddress as Address,
       data: callData,
-      chainId: strategy.chainId,
+      chainId: SEMSEE_CHAIN_ID,
       nonce,
       gas: gasLimit,
       gasPrice,
@@ -363,7 +366,7 @@ class StrategySigningService {
     };
 
     // Sign transaction
-    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId, strategy.chainId);
+    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId);
     const txHash = keccak256(signedTx);
 
     this.logger.info({
@@ -399,7 +402,7 @@ class StrategySigningService {
       'active' // submitEffectResult() only allowed when active
     );
 
-    if (!strategy.contractAddress || !strategy.chainId) {
+    if (!strategy.contractAddress) {
       throw new StrategySigningError(
         `Strategy '${strategyId}' is not deployed`,
         'INVALID_STATE',
@@ -407,7 +410,7 @@ class StrategySigningService {
       );
     }
 
-    const publicClient = createSemseePublicClient(strategy.chainId);
+    const publicClient = createSemseePublicClient();
 
     // Encode submitEffectResult() call
     const callData = encodeFunctionData({
@@ -434,7 +437,7 @@ class StrategySigningService {
     const tx = {
       to: strategy.contractAddress as Address,
       data: callData,
-      chainId: strategy.chainId,
+      chainId: SEMSEE_CHAIN_ID,
       nonce,
       gas: gasLimit,
       gasPrice,
@@ -442,7 +445,7 @@ class StrategySigningService {
     };
 
     // Sign transaction
-    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId, strategy.chainId);
+    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId);
     const txHash = keccak256(signedTx);
 
     this.logger.info({
@@ -529,6 +532,7 @@ class StrategySigningService {
 
   /**
    * Sign a transaction with KMS
+   * Uses hardcoded SEMSEE_CHAIN_ID for EIP-155 v calculation
    */
   private async signTransaction(
     tx: {
@@ -540,8 +544,7 @@ class StrategySigningService {
       gasPrice: bigint;
       type: 'legacy';
     },
-    kmsKeyId: string,
-    chainId: number
+    kmsKeyId: string
   ): Promise<Hex> {
     const serializedUnsigned = serializeTransaction(tx);
     const txHash = keccak256(serializedUnsigned);
@@ -549,9 +552,9 @@ class StrategySigningService {
     const signer = getSigner();
     const signature = await signer.signTransaction(kmsKeyId, txHash);
 
-    // Calculate EIP-155 v value
+    // Calculate EIP-155 v value using SEMSEE chain ID
     const recoveryId = signature.v >= 27 ? signature.v - 27 : signature.v;
-    const eip155V = BigInt(chainId * 2 + 35 + recoveryId);
+    const eip155V = BigInt(SEMSEE_CHAIN_ID * 2 + 35 + recoveryId);
 
     // Serialize with signature
     const signedTx = serializeTransaction(tx, {
