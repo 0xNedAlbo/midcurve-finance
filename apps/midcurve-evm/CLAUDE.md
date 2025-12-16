@@ -662,3 +662,102 @@ npm run down
 - **Accounting:** Clear fee attribution per strategy
 - **Security:** Compromise of one key affects only one strategy
 - **User ownership:** Each user's strategy has its own funding
+
+---
+
+## Strategy Development Guidelines
+
+### Non-Deterministic Inputs (Critical)
+
+**The durable await pattern requires idempotent execution.** Each simulation run must produce the same result given the same inputs. This breaks if strategies use non-deterministic data for branching decisions.
+
+#### Forbidden Patterns
+
+**DO NOT** use these as conditions for execution branches:
+
+| Input | Why It Breaks | Example |
+|-------|---------------|---------|
+| `block.timestamp` | Changes between simulation and commit | `if (block.timestamp % 60 == 0)` |
+| `block.number` | Changes between simulation and commit | `if (block.number > lastBlock + 10)` |
+| `block.prevrandao` | Different on each block | `if (block.prevrandao % 2 == 0)` |
+| `gasleft()` | Varies with execution context | `if (gasleft() > 100000)` |
+| `tx.gasprice` | Can change between runs | `if (tx.gasprice < 50 gwei)` |
+| `block.basefee` | Changes per block | `if (block.basefee < threshold)` |
+
+#### Why This Matters
+
+The simulation-replay loop works like this:
+
+```
+Simulation 1: block.timestamp = 1000 → takes branch A → needs effect X
+Effect X fulfilled
+Simulation 2: block.timestamp = 1005 → takes branch B → DIFFERENT PATH!
+```
+
+If simulation 2 takes a different branch, the effect result from X may be:
+- **Unused** (wasted work, wasted fees)
+- **Applied to wrong context** (corrupted state)
+- **Cause infinite loop** (keeps requesting different effects)
+
+#### Safe Patterns
+
+**DO** use these for decision making:
+
+| Input | Why It's Safe | Example |
+|-------|---------------|---------|
+| Event payload data | Immutable, passed via `step(input)` | `ohlcData.close > threshold` |
+| Contract storage | Same between simulation runs | `if (_state == State.RUNNING)` |
+| Effect results | Persisted before re-simulation | `if (priceResult.ok)` |
+| Constructor params | Immutable | `if (_targetApr > minApr)` |
+| Hardcoded constants | Immutable | `if (amount > MIN_POSITION)` |
+
+#### Correct Time Handling
+
+If you need time-based logic, use timestamps from **event payloads**, not `block.timestamp`:
+
+```solidity
+// ❌ WRONG - non-deterministic
+function _onOhlc(OhlcData memory ohlc) internal {
+    if (block.timestamp > _lastRebalance + 1 hours) {
+        _rebalance();
+    }
+}
+
+// ✅ CORRECT - deterministic
+function _onOhlc(OhlcData memory ohlc) internal {
+    if (ohlc.timestamp > _lastRebalance + 1 hours) {
+        _rebalance();
+        _lastRebalance = ohlc.timestamp;
+    }
+}
+```
+
+#### Correct Randomness Handling
+
+If you need randomness, request it as an **effect**:
+
+```solidity
+// ❌ WRONG - non-deterministic
+function _makeDecision() internal view returns (bool) {
+    return block.prevrandao % 2 == 0;
+}
+
+// ✅ CORRECT - deterministic (randomness from effect)
+function _makeDecision() internal returns (bool) {
+    (AwaitStatus status, bytes memory data) = _awaitEffect(
+        keccak256("random_decision"),
+        EFFECT_RANDOM,
+        abi.encode(1, 100)  // min, max
+    );
+    require(status == AwaitStatus.READY_OK, "Random failed");
+    uint256 value = abi.decode(data, (uint256));
+    return value > 50;
+}
+```
+
+### State Machine Best Practices
+
+1. **Always check state** before taking actions
+2. **Store timestamps from events**, not from blocks
+3. **Use effect results** for external data (prices, balances)
+4. **Test with multiple simulation runs** to verify idempotency
