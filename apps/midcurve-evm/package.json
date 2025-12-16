@@ -2,6 +2,7 @@
   "name": "@midcurve/evm",
   "version": "0.3.0",
   "private": true,
+  "type": "module",
   "description": "Local EVM development node for strategy testing",
   "scripts": {
     "build:contracts": "cd contracts && forge build",
@@ -18,10 +19,15 @@
     "health": "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}'",
     "up:prod": "npm run generate:genesis && docker-compose -f docker-compose.yml -f docker-compose.prod.yml build && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
-    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod"
+    "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod",
+    "poc:loop": "tsx core/src/poc/durable-await-loop.ts"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
   },
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": "20.19.x"
