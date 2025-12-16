@@ -5,7 +5,8 @@
  * Handles reconnection on connection loss.
  */
 
-import * as amqp from 'amqplib';
+import amqp from 'amqplib';
+import type { ChannelModel, Channel } from 'amqplib';
 
 export interface MQConfig {
   /** AMQP connection URL (e.g., amqp://user:pass@host:port) */
@@ -15,8 +16,8 @@ export interface MQConfig {
 }
 
 export class MQClient {
-  private connection: amqp.Connection | null = null;
-  private channel: amqp.Channel | null = null;
+  private connection: ChannelModel | null = null;
+  private channel: Channel | null = null;
   private reconnecting = false;
   private closed = false;
 
@@ -98,7 +99,7 @@ export class MQClient {
    * Get the current channel.
    * @throws Error if not connected
    */
-  getChannel(): amqp.Channel {
+  getChannel(): Channel {
     if (!this.channel) {
       throw new Error('MQ channel not available. Call connect() first.');
     }

@@ -14,14 +14,24 @@ import type { AnyToken } from './token.js';
 // =============================================================================
 
 /**
- * Strategy lifecycle status
+ * Strategy lifecycle status (aligned with on-chain LifecycleMixin)
  *
  * - pending: Created in DB, not yet deployed on-chain
- * - active: Running on-chain
- * - paused: Soft pause (DB-only, for UI/API control)
- * - shutdown: Permanently stopped
+ * - deploying: Deployment in progress (contract being deployed)
+ * - deployed: Contract deployed, not started (on-chain: DEPLOYED)
+ * - starting: START event sent, processing (on-chain: STARTING)
+ * - active: Fully running (on-chain: ACTIVE)
+ * - shutting_down: SHUTDOWN event sent, cleanup in progress (on-chain: SHUTTING_DOWN)
+ * - shutdown: Final state (on-chain: SHUTDOWN)
  */
-export type StrategyStatus = 'pending' | 'active' | 'paused' | 'shutdown';
+export type StrategyStatus =
+  | 'pending'
+  | 'deploying'
+  | 'deployed'
+  | 'starting'
+  | 'active'
+  | 'shutting_down'
+  | 'shutdown';
 
 /**
  * @deprecated Use StrategyStatus instead

@@ -3,6 +3,16 @@
  *
  * Defines valid state transitions for strategies and provides
  * validation helpers.
+ *
+ * State machine (aligned with on-chain LifecycleMixin):
+ *
+ *   pending ────► deploying ────► deployed ────► starting ────► active
+ *                     │                                           │
+ *                     │                                           ▼
+ *                     └────────────────────────────────────► shutting_down
+ *                                                                 │
+ *                                                                 ▼
+ *                                                             shutdown
  */
 
 import type { StrategyStatus } from '@midcurve/shared';
@@ -19,11 +29,23 @@ type StateTransitionMap = {
  *
  * Key: Current state
  * Value: Array of valid next states
+ *
+ * Note: Transitions are triggered by different actors:
+ * - pending -> deploying: Services layer (when user initiates deploy)
+ * - deploying -> deployed: EVM API (when deployment succeeds)
+ * - deployed -> starting: Services layer (when user initiates start)
+ * - starting -> active: EVM API (when onStart() completes)
+ * - active -> shutting_down: Services layer (when user initiates shutdown)
+ * - shutting_down -> shutdown: EVM API (when cleanup completes)
+ * - Any -> shutdown: Direct transition allowed on failure/abort
  */
 export const VALID_STATE_TRANSITIONS: StateTransitionMap = {
-  pending: ['active'], // Can only activate from pending
-  active: ['paused', 'shutdown'], // Can pause or shutdown from active
-  paused: ['active', 'shutdown'], // Can resume or shutdown from paused
+  pending: ['deploying'], // Start deployment
+  deploying: ['deployed', 'shutdown'], // Deployment completes or fails
+  deployed: ['starting', 'shutdown'], // Start strategy or shutdown without starting
+  starting: ['active', 'shutting_down'], // onStart completes or shutdown requested
+  active: ['shutting_down'], // Shutdown from active
+  shutting_down: ['shutdown'], // Cleanup completes
   shutdown: [], // Terminal state - no transitions allowed
 };
 

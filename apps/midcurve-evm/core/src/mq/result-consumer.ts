@@ -5,13 +5,13 @@
  * Used by the strategy loop to receive completed effect data.
  */
 
-import type { Channel, GetMessage } from 'amqplib';
-import { QUEUES } from './topology.js';
+import type { Channel, GetMessage, ConsumeMessage, Message } from 'amqplib';
+import { QUEUES } from './topology';
 import {
   type EffectResultMessage,
   deserializeMessage,
   isEffectResultMessage,
-} from './messages.js';
+} from './messages';
 
 /**
  * Result of consuming a message from the results queue.
@@ -129,7 +129,7 @@ export async function consumeResult(
  * @param deliveryTag - Delivery tag from ConsumedResult
  */
 export function ackResult(channel: Channel, deliveryTag: number): void {
-  channel.ack({ fields: { deliveryTag } } as GetMessage);
+  channel.ack({ fields: { deliveryTag } } as Message);
   console.log(`[ResultConsumer] ACK result: deliveryTag=${deliveryTag}`);
 }
 
@@ -145,7 +145,7 @@ export function nackResult(
   deliveryTag: number,
   requeue = true
 ): void {
-  channel.nack({ fields: { deliveryTag } } as GetMessage, false, requeue);
+  channel.nack({ fields: { deliveryTag } } as Message, false, requeue);
   console.log(
     `[ResultConsumer] NACK result: deliveryTag=${deliveryTag} requeue=${requeue}`
   );
@@ -153,9 +153,10 @@ export function nackResult(
 
 /**
  * Parse and validate a RabbitMQ message as an EffectResultMessage.
+ * Accepts both GetMessage (from channel.get) and ConsumeMessage (from channel.consume).
  */
 function parseResultMessage(
-  msg: GetMessage,
+  msg: GetMessage | ConsumeMessage,
   queue: string
 ): ConsumedResult {
   let parsed: unknown;

@@ -341,17 +341,23 @@ export class StrategyService {
   // ============================================================================
 
   /**
-   * Activates a strategy (pending -> active)
+   * Updates strategy status with validation
    *
-   * Requires on-chain deployment information (chainId and contractAddress).
+   * This is the core method for all state transitions. It validates that
+   * the transition is allowed before updating the database.
    *
    * @param id - Strategy ID
-   * @param input - Activation input with chainId and contractAddress
-   * @returns The activated strategy
-   * @throws StrategyInvalidStateError if not in pending state
+   * @param newStatus - Target status
+   * @param additionalData - Optional additional fields to update (e.g., contractAddress)
+   * @returns The updated strategy
+   * @throws StrategyInvalidStateError if transition is not valid
    */
-  async activate(id: string, input: ActivateStrategyInput): Promise<Strategy> {
-    log.methodEntry(this.logger, 'activate', { id, input });
+  async updateStatus(
+    id: string,
+    newStatus: StrategyStatus,
+    additionalData?: { chainId?: number; contractAddress?: string }
+  ): Promise<Strategy> {
+    log.methodEntry(this.logger, 'updateStatus', { id, newStatus, additionalData });
 
     try {
       const current = await this.prisma.strategy.findUnique({
@@ -364,18 +370,21 @@ export class StrategyService {
       }
 
       const currentStatus = current.status as StrategyStatus;
-      // activate() only works from pending state
-      if (currentStatus !== 'pending') {
-        throw new StrategyInvalidStateError(id, currentStatus, 'active');
+      if (!isValidTransition(currentStatus, newStatus)) {
+        throw new StrategyInvalidStateError(id, currentStatus, newStatus);
+      }
+
+      const updateData: Prisma.StrategyUpdateInput = { status: newStatus };
+      if (additionalData?.chainId !== undefined) {
+        updateData.chainId = additionalData.chainId;
+      }
+      if (additionalData?.contractAddress !== undefined) {
+        updateData.contractAddress = additionalData.contractAddress;
       }
 
       const result = await this.prisma.strategy.update({
         where: { id },
-        data: {
-          status: 'active',
-          chainId: input.chainId,
-          contractAddress: input.contractAddress,
-        },
+        data: updateData,
         include: this.getIncludeOptions({}),
       });
 
@@ -384,146 +393,196 @@ export class StrategyService {
       this.logger.info(
         {
           id: strategy.id,
-          state: strategy.status,
+          from: currentStatus,
+          to: strategy.status,
           contractAddress: strategy.contractAddress,
         },
-        'Strategy activated'
+        'Strategy status updated'
       );
-      log.methodExit(this.logger, 'activate', { id });
+      log.methodExit(this.logger, 'updateStatus', { id });
       return strategy;
     } catch (error) {
-      log.methodError(this.logger, 'activate', error as Error, { id, input });
+      log.methodError(this.logger, 'updateStatus', error as Error, { id, newStatus });
       throw error;
     }
   }
 
   /**
-   * Pauses a strategy (active -> paused)
+   * Marks strategy as deploying (pending -> deploying)
+   *
+   * Called by services layer when user initiates deployment.
+   * After this, EVM API handles the actual deployment.
    *
    * @param id - Strategy ID
-   * @returns The paused strategy
+   * @returns The updated strategy
+   * @throws StrategyInvalidStateError if not in pending state
+   */
+  async markDeploying(id: string): Promise<Strategy> {
+    return this.updateStatus(id, 'deploying');
+  }
+
+  /**
+   * Marks strategy as deployed (deploying -> deployed)
+   *
+   * Called by EVM API when deployment completes successfully.
+   * Sets the on-chain contract address and chain ID.
+   *
+   * @param id - Strategy ID
+   * @param input - Deployment info with chainId and contractAddress
+   * @returns The updated strategy
+   * @throws StrategyInvalidStateError if not in deploying state
+   */
+  async markDeployed(id: string, input: ActivateStrategyInput): Promise<Strategy> {
+    return this.updateStatus(id, 'deployed', {
+      chainId: input.chainId,
+      contractAddress: input.contractAddress,
+    });
+  }
+
+  /**
+   * Marks strategy as starting (deployed -> starting)
+   *
+   * Called by services layer when user initiates start.
+   * After this, EVM API handles the START lifecycle event.
+   *
+   * @param id - Strategy ID
+   * @returns The updated strategy
+   * @throws StrategyInvalidStateError if not in deployed state
+   */
+  async markStarting(id: string): Promise<Strategy> {
+    return this.updateStatus(id, 'starting');
+  }
+
+  /**
+   * Marks strategy as active (starting -> active)
+   *
+   * Called by EVM API when onStart() hook completes.
+   *
+   * @param id - Strategy ID
+   * @returns The updated strategy
+   * @throws StrategyInvalidStateError if not in starting state
+   */
+  async markActive(id: string): Promise<Strategy> {
+    return this.updateStatus(id, 'active');
+  }
+
+  /**
+   * Marks strategy as shutting down (active -> shutting_down)
+   *
+   * Called by services layer when user initiates shutdown.
+   * After this, EVM API handles the SHUTDOWN lifecycle event.
+   *
+   * @param id - Strategy ID
+   * @returns The updated strategy
    * @throws StrategyInvalidStateError if not in active state
    */
-  async pause(id: string): Promise<Strategy> {
-    log.methodEntry(this.logger, 'pause', { id });
-
-    try {
-      const current = await this.prisma.strategy.findUnique({
-        where: { id },
-        select: { status: true },
-      });
-
-      if (!current) {
-        throw new Error(`Strategy not found: ${id}`);
-      }
-
-      const currentStatus = current.status as StrategyStatus;
-      if (!isValidTransition(currentStatus, 'paused')) {
-        throw new StrategyInvalidStateError(id, currentStatus, 'paused');
-      }
-
-      const result = await this.prisma.strategy.update({
-        where: { id },
-        data: { status: 'paused' },
-        include: this.getIncludeOptions({}),
-      });
-
-      const strategy = this.mapToStrategy(result as StrategyDbResult);
-
-      this.logger.info({ id: strategy.id, state: strategy.status }, 'Strategy paused');
-      log.methodExit(this.logger, 'pause', { id });
-      return strategy;
-    } catch (error) {
-      log.methodError(this.logger, 'pause', error as Error, { id });
-      throw error;
-    }
+  async markShuttingDown(id: string): Promise<Strategy> {
+    return this.updateStatus(id, 'shutting_down');
   }
 
   /**
-   * Resumes a strategy (paused -> active)
+   * Marks strategy as shutdown (shutting_down -> shutdown)
    *
-   * @param id - Strategy ID
-   * @returns The resumed strategy
-   * @throws StrategyInvalidStateError if not in paused state
-   */
-  async resume(id: string): Promise<Strategy> {
-    log.methodEntry(this.logger, 'resume', { id });
-
-    try {
-      const current = await this.prisma.strategy.findUnique({
-        where: { id },
-        select: { status: true },
-      });
-
-      if (!current) {
-        throw new Error(`Strategy not found: ${id}`);
-      }
-
-      const currentStatus = current.status as StrategyStatus;
-      // resume() only works from paused state
-      if (currentStatus !== 'paused') {
-        throw new StrategyInvalidStateError(id, currentStatus, 'active');
-      }
-
-      const result = await this.prisma.strategy.update({
-        where: { id },
-        data: { status: 'active' },
-        include: this.getIncludeOptions({}),
-      });
-
-      const strategy = this.mapToStrategy(result as StrategyDbResult);
-
-      this.logger.info({ id: strategy.id, state: strategy.status }, 'Strategy resumed');
-      log.methodExit(this.logger, 'resume', { id });
-      return strategy;
-    } catch (error) {
-      log.methodError(this.logger, 'resume', error as Error, { id });
-      throw error;
-    }
-  }
-
-  /**
-   * Shuts down a strategy (active/paused -> shutdown)
-   *
+   * Called by EVM API when shutdown cleanup completes.
    * This is a terminal state - the strategy cannot be restarted.
    *
    * @param id - Strategy ID
-   * @returns The shutdown strategy
-   * @throws StrategyInvalidStateError if in pending or already shutdown state
+   * @returns The updated strategy
+   * @throws StrategyInvalidStateError if not in shutting_down state
+   */
+  async markShutdown(id: string): Promise<Strategy> {
+    return this.updateStatus(id, 'shutdown');
+  }
+
+  // ============================================================================
+  // DEPRECATED STATE TRANSITIONS (maintained for backward compatibility)
+  // ============================================================================
+
+  /**
+   * @deprecated Use markDeployed() instead.
+   * Activates a strategy - now handles pending -> deploying -> deployed flow
+   */
+  async activate(id: string, input: ActivateStrategyInput): Promise<Strategy> {
+    log.methodEntry(this.logger, 'activate', { id, input });
+    this.logger.warn({ id }, 'activate() is deprecated - use markDeployed() instead');
+
+    // For backward compatibility, handle the old flow
+    const current = await this.prisma.strategy.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+
+    if (!current) {
+      throw new Error(`Strategy not found: ${id}`);
+    }
+
+    const currentStatus = current.status as StrategyStatus;
+
+    // Handle old 'pending' -> 'active' flow by going through new states
+    if (currentStatus === 'pending') {
+      await this.markDeploying(id);
+      return this.markDeployed(id, input);
+    }
+
+    throw new StrategyInvalidStateError(id, currentStatus, 'deployed');
+  }
+
+  /**
+   * @deprecated Pause functionality removed - shutdown is the only way to stop a strategy
+   */
+  async pause(_id: string): Promise<Strategy> {
+    throw new Error(
+      'pause() has been removed. Use markShuttingDown() to initiate shutdown.'
+    );
+  }
+
+  /**
+   * @deprecated Resume functionality removed - shutdown is permanent
+   */
+  async resume(_id: string): Promise<Strategy> {
+    throw new Error(
+      'resume() has been removed. Strategies cannot be resumed after shutdown.'
+    );
+  }
+
+  /**
+   * @deprecated Use markShuttingDown() followed by markShutdown() instead.
+   * Direct shutdown is no longer supported - must go through proper lifecycle.
    */
   async shutdown(id: string): Promise<Strategy> {
     log.methodEntry(this.logger, 'shutdown', { id });
+    this.logger.warn(
+      { id },
+      'shutdown() is deprecated - use markShuttingDown() then markShutdown() instead'
+    );
 
-    try {
-      const current = await this.prisma.strategy.findUnique({
-        where: { id },
-        select: { status: true },
-      });
+    const current = await this.prisma.strategy.findUnique({
+      where: { id },
+      select: { status: true },
+    });
 
-      if (!current) {
-        throw new Error(`Strategy not found: ${id}`);
-      }
-
-      const currentStatus = current.status as StrategyStatus;
-      if (!isValidTransition(currentStatus, 'shutdown')) {
-        throw new StrategyInvalidStateError(id, currentStatus, 'shutdown');
-      }
-
-      const result = await this.prisma.strategy.update({
-        where: { id },
-        data: { status: 'shutdown' },
-        include: this.getIncludeOptions({}),
-      });
-
-      const strategy = this.mapToStrategy(result as StrategyDbResult);
-
-      this.logger.info({ id: strategy.id, state: strategy.status }, 'Strategy shutdown');
-      log.methodExit(this.logger, 'shutdown', { id });
-      return strategy;
-    } catch (error) {
-      log.methodError(this.logger, 'shutdown', error as Error, { id });
-      throw error;
+    if (!current) {
+      throw new Error(`Strategy not found: ${id}`);
     }
+
+    const currentStatus = current.status as StrategyStatus;
+
+    // Handle direct shutdown for backward compatibility
+    if (currentStatus === 'active') {
+      await this.markShuttingDown(id);
+      return this.markShutdown(id);
+    } else if (currentStatus === 'shutting_down') {
+      return this.markShutdown(id);
+    } else if (
+      currentStatus === 'deploying' ||
+      currentStatus === 'deployed' ||
+      currentStatus === 'starting'
+    ) {
+      // Allow direct shutdown from intermediate states (failure case)
+      return this.updateStatus(id, 'shutdown');
+    }
+
+    throw new StrategyInvalidStateError(id, currentStatus, 'shutdown');
   }
 
   // ============================================================================

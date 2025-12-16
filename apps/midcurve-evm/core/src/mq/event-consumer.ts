@@ -5,13 +5,13 @@
  * Used by the strategy loop to receive OHLC data, user actions, and lifecycle events.
  */
 
-import type { Channel, GetMessage } from 'amqplib';
-import { QUEUES } from './topology.js';
+import type { Channel, GetMessage, ConsumeMessage, Message } from 'amqplib';
+import { QUEUES } from './topology';
 import {
   type StepEventMessage,
   deserializeMessage,
   isStepEventMessage,
-} from './messages.js';
+} from './messages';
 
 /**
  * Result of consuming an event from the events queue.
@@ -128,7 +128,7 @@ export async function consumeEvent(
  * @param deliveryTag - Delivery tag from ConsumedEvent
  */
 export function ackEvent(channel: Channel, deliveryTag: number): void {
-  channel.ack({ fields: { deliveryTag } } as GetMessage);
+  channel.ack({ fields: { deliveryTag } } as Message);
   console.log(`[EventConsumer] ACK event: deliveryTag=${deliveryTag}`);
 }
 
@@ -144,7 +144,7 @@ export function nackEvent(
   deliveryTag: number,
   requeue = true
 ): void {
-  channel.nack({ fields: { deliveryTag } } as GetMessage, false, requeue);
+  channel.nack({ fields: { deliveryTag } } as Message, false, requeue);
   console.log(
     `[EventConsumer] NACK event: deliveryTag=${deliveryTag} requeue=${requeue}`
   );
@@ -152,8 +152,9 @@ export function nackEvent(
 
 /**
  * Parse and validate a RabbitMQ message as a StepEventMessage.
+ * Accepts both GetMessage (from channel.get) and ConsumeMessage (from channel.consume).
  */
-function parseEventMessage(msg: GetMessage, queue: string): ConsumedEvent {
+function parseEventMessage(msg: GetMessage | ConsumeMessage, queue: string): ConsumedEvent {
   let parsed: unknown;
   try {
     parsed = deserializeMessage(msg.content);

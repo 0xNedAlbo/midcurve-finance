@@ -252,6 +252,149 @@ function _awaitEffect(
 
 ---
 
+## Strategy Lifecycle
+
+### Overview
+
+Every strategy follows a strict lifecycle managed by the `LifecycleMixin`. The lifecycle ensures:
+- **Ordered startup:** Subscriptions are set up only after explicit START command
+- **Graceful shutdown:** Resources are cleaned up before strategy stops
+- **State persistence:** Lifecycle state is stored on-chain for recovery
+
+### Lifecycle States
+
+| State | On-Chain Value | Description |
+|-------|----------------|-------------|
+| **STOPPED** | 0 | Initial state after deployment. Strategy exists but is not processing events. |
+| **RUNNING** | 1 | Active state. Strategy processes OHLC and other subscribed events. |
+| **SHUTTING_DOWN** | 2 | Graceful shutdown in progress. Strategy is cleaning up resources. |
+| **SHUTDOWN** | 3 | Final state. All resources released. Can be restarted. |
+
+### State Machine
+
+```
+             DEPLOY
+                │
+                ▼
+          ┌─────────┐
+          │ STOPPED │◄─────────────────────────┐
+          │   (0)   │                          │
+          └────┬────┘                          │
+               │                               │
+               │ LIFECYCLE_START               │ (can restart)
+               ▼                               │
+          ┌─────────┐                          │
+          │ RUNNING │                          │
+          │   (1)   │                          │
+          └────┬────┘                          │
+               │                               │
+               │ LIFECYCLE_SHUTDOWN            │
+               ▼                               │
+       ┌──────────────┐                        │
+       │SHUTTING_DOWN │                        │
+       │     (2)      │                        │
+       └──────┬───────┘                        │
+              │                                │
+              │ onShutdownStep() → done=true   │
+              ▼                                │
+          ┌─────────┐                          │
+          │SHUTDOWN │──────────────────────────┘
+          │   (3)   │
+          └─────────┘
+```
+
+### Lifecycle Event Type
+
+Lifecycle commands use a dedicated event type (separate from user actions):
+
+```solidity
+bytes32 constant STEP_EVENT_LIFECYCLE = keccak256("STEP_EVENT_LIFECYCLE");
+uint32 constant LIFECYCLE_EVENT_VERSION = 1;
+
+bytes32 constant LIFECYCLE_START = keccak256("START");
+bytes32 constant LIFECYCLE_SHUTDOWN = keccak256("SHUTDOWN");
+```
+
+**Payload format:** `abi.encode(lifecycleCommand)`
+
+### Lifecycle Hooks
+
+Strategies can override these hooks to customize behavior:
+
+| Hook | When Called | Purpose |
+|------|-------------|---------|
+| `onStart()` | After START command processed | Set up subscriptions, initialize state |
+| `onShutdownRequested()` | When SHUTDOWN received | Begin cleanup, set flags |
+| `onShutdownStep()` | On every step while SHUTTING_DOWN | Continue cleanup, return `true` when done |
+| `onShutdownComplete()` | After transition to SHUTDOWN | Final cleanup, emit events |
+
+### Example Strategy Implementation
+
+```solidity
+contract MyStrategy is LifecycleMixin, OhlcMixin {
+    bool private _cleanupDone;
+
+    function onStart() internal override {
+        // Subscribe to market data
+        subscribeOhlc("ETH-USDC", 300);  // 5-minute candles
+        subscribeOhlc("BTC-USDC", 300);
+    }
+
+    function onShutdownRequested() internal override {
+        // Mark that we need to close positions
+        _cleanupDone = false;
+    }
+
+    function onShutdownStep() internal override returns (bool done) {
+        // Close any open positions (may take multiple steps)
+        if (!_cleanupDone) {
+            _closeAllPositions();  // May request effects
+            _cleanupDone = true;
+        }
+        return _cleanupDone;
+    }
+
+    function onShutdownComplete() internal override {
+        // Final cleanup
+        _logInfo("SHUTDOWN_COMPLETE", "");
+    }
+}
+```
+
+### Why Lifecycle is Separate from Actions
+
+| Lifecycle Events | Custom Actions |
+|------------------|----------------|
+| Mandatory for all strategies | Optional, user-defined |
+| Core-initiated (via API) | User-initiated (via UI/API) |
+| Fixed set: START, SHUTDOWN | Extensible: COMPOUND_FEES, REBALANCE, etc. |
+| State machine with strict transitions | Nonce-based replay protection |
+| `STEP_EVENT_LIFECYCLE` | `STEP_EVENT_CUSTOM_ACTION` (future) |
+
+### Core Enforcement
+
+After SHUTDOWN command is sent, Core:
+1. Stops routing market events (OHLC) to the strategy
+2. Forcefully removes any remaining RabbitMQ bindings
+3. Tears down strategy queues
+4. Marks strategy as SHUTDOWN in its registry
+
+This ensures resources are fully released even if the strategy fails to clean up properly.
+
+### API Integration
+
+The lifecycle is managed via the Core API:
+
+| Endpoint | Effect |
+|----------|--------|
+| `PUT /api/strategy` | Deploys contract, status = STOPPED |
+| `POST /api/strategy/:addr/start` | Sends LIFECYCLE_START, status → RUNNING |
+| `POST /api/strategy/:addr/shutdown` | Sends LIFECYCLE_SHUTDOWN, status → SHUTDOWN |
+
+All endpoints are non-blocking (return 202) and pollable until completion (return 200).
+
+---
+
 ## Core Orchestrator
 
 ### Overview

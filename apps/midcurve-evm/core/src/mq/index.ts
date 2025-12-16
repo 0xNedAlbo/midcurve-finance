@@ -6,7 +6,7 @@
  */
 
 // Connection management
-export { MQClient, createDefaultMQClient, type MQConfig } from './client.js';
+export { MQClient, createDefaultMQClient, type MQConfig } from './client';
 
 // Topology setup
 export {
@@ -24,7 +24,7 @@ export {
   // OHLC subscription management
   bindOhlcSubscription,
   unbindOhlcSubscription,
-} from './topology.js';
+} from './topology';
 
 // Message types and serialization
 export {
@@ -42,17 +42,23 @@ export {
   createEffectRequest,
   createEffectResult,
   createStepEvent,
+  // Lifecycle event constants and builder
+  STEP_EVENT_LIFECYCLE,
+  LIFECYCLE_EVENT_VERSION,
+  LIFECYCLE_START,
+  LIFECYCLE_SHUTDOWN,
+  createLifecycleEvent,
   // Type guards
   isEffectRequestMessage,
   isEffectResultMessage,
   isStepEventMessage,
-} from './messages.js';
+} from './messages';
 
 // Effect request publishing
 export {
   publishEffectRequest,
   publishEffectRequestWithRetry,
-} from './effect-publisher.js';
+} from './effect-publisher';
 
 // Effect result consumption
 export {
@@ -61,7 +67,7 @@ export {
   consumeResult,
   ackResult,
   nackResult,
-} from './result-consumer.js';
+} from './result-consumer';
 
 // Step event consumption
 export {
@@ -71,4 +77,10 @@ export {
   ackEvent,
   nackEvent,
   publishEvent,
-} from './event-consumer.js';
+} from './event-consumer';
+
+// Connection manager (for API routes)
+export {
+  getRabbitMQConnection,
+  type RabbitMQConnectionManager,
+} from './connection';

@@ -2,16 +2,45 @@
 pragma solidity ^0.8.20;
 
 import { BaseStrategy } from "../strategy/BaseStrategy.sol";
+import { LifecycleMixin } from "../strategy/mixins/LifecycleMixin.sol";
 import { LoggingMixin } from "../strategy/mixins/LoggingMixin.sol";
 
 /// @notice Minimal strategy for POC - logs multiple messages on every step event.
 /// This demonstrates the durable await pattern with multiple sequential effects.
-contract SimpleLoggingStrategy is LoggingMixin {
+///
+/// Inheritance order: LifecycleMixin, LoggingMixin
+/// - LifecycleMixin handles STEP_EVENT_LIFECYCLE (START/SHUTDOWN)
+/// - LoggingMixin provides _log* helpers
+/// - Both extend BaseStrategy
+contract SimpleLoggingStrategy is LifecycleMixin, LoggingMixin {
     /// @dev Counter to track how many events we've processed
     uint256 public eventsProcessed;
 
     constructor(address operator_, address core_)
         BaseStrategy(operator_, core_) {}
+
+    // =============================================================
+    // Lifecycle Hooks
+    // =============================================================
+
+    /// @dev Called when strategy receives START command.
+    function onStart() internal override {
+        _logInfo(keccak256("LIFECYCLE"), abi.encode("Strategy started"));
+    }
+
+    /// @dev Called when strategy receives SHUTDOWN command.
+    function onShutdownRequested() internal override {
+        _logInfo(keccak256("LIFECYCLE"), abi.encode("Shutdown requested"));
+    }
+
+    /// @dev Called when shutdown is complete.
+    function onShutdownComplete() internal override {
+        _logInfo(keccak256("LIFECYCLE"), abi.encode("Shutdown complete"));
+    }
+
+    // =============================================================
+    // Step Event Handler
+    // =============================================================
 
     /// @dev Override the step event handler to log multiple messages.
     /// Each _log* call triggers a separate EffectNeeded revert during simulation.
@@ -20,10 +49,20 @@ contract SimpleLoggingStrategy is LoggingMixin {
         bytes32 eventType,
         uint32 eventVersion,
         bytes memory payload
-    ) internal override {
-        // Silence unused variable warnings
-        eventVersion;
-        payload;
+    ) internal override(LifecycleMixin, BaseStrategy) {
+        // Check if this is a lifecycle event - LifecycleMixin will handle and return
+        if (eventType == STEP_EVENT_LIFECYCLE) {
+            LifecycleMixin._onStepEvent(eventType, eventVersion, payload);
+            return;
+        }
+
+        // For non-lifecycle events, call parent to handle shutdown progress
+        super._onStepEvent(eventType, eventVersion, payload);
+
+        // Only process events if strategy is active
+        if (!_isActive()) {
+            return;
+        }
 
         // Effect 1: Log that we received an event
         _logInfo(keccak256("STEP_START"), abi.encode(eventType));
@@ -39,8 +78,5 @@ contract SimpleLoggingStrategy is LoggingMixin {
 
         // Effect 4: Log completion
         _logInfo(keccak256("STEP_COMPLETE"), abi.encode(eventType));
-
-        // Forward to base (no-op but good practice for mixin chain)
-        super._onStepEvent(eventType, eventVersion, payload);
     }
 }

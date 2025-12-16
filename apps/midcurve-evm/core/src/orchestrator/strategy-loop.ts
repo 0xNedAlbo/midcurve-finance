@@ -8,6 +8,10 @@
  * 2. If no pending effects: consume from events queue (blocking)
  * 3. Process event via simulation-replay loop
  * 4. Publish effect requests, consume results, commit transaction
+ *
+ * Transaction Signing:
+ * - Uses signer API for production (KMS-backed signing)
+ * - Falls back to local private key for development/testing
  */
 
 import type { Channel } from 'amqplib';
@@ -20,6 +24,8 @@ import {
   type Address,
   type PublicClient,
   type WalletClient,
+  type Chain,
+  type Account,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -36,24 +42,29 @@ import {
   ackEvent,
   nackEvent,
   publishEffectRequest,
-} from '../mq/index.js';
+} from '../mq/index';
 
 import {
   parseEffectNeededFromError,
   type EffectRequest,
-} from '../poc/effect-parser.js';
+} from '../poc/effect-parser';
+
+import {
+  type SignerClient,
+} from '../clients/signer-client';
 
 // ============================================================
 // Types
 // ============================================================
 
-export interface StrategyLoopConfig {
+/**
+ * Base configuration for StrategyLoop
+ */
+interface StrategyLoopConfigBase {
   /** Strategy contract address */
   strategyAddress: Address;
   /** RabbitMQ channel */
   channel: Channel;
-  /** Operator private key for signing transactions */
-  operatorPrivateKey: Hex;
   /** RPC URL for the Geth node */
   rpcUrl: string;
   /** Chain ID */
@@ -65,6 +76,29 @@ export interface StrategyLoopConfig {
   /** Polling interval when waiting for results (ms) */
   resultPollIntervalMs?: number;
 }
+
+/**
+ * Configuration using signer API (production mode)
+ */
+interface StrategyLoopConfigWithSigner extends StrategyLoopConfigBase {
+  /** Strategy ID for signer API calls */
+  strategyId: string;
+  /** Signer client for signing transactions */
+  signerClient: SignerClient;
+  operatorPrivateKey?: never;
+}
+
+/**
+ * Configuration using local private key (development mode)
+ */
+interface StrategyLoopConfigWithPrivateKey extends StrategyLoopConfigBase {
+  /** Operator private key for signing transactions (dev only) */
+  operatorPrivateKey: Hex;
+  strategyId?: never;
+  signerClient?: never;
+}
+
+export type StrategyLoopConfig = StrategyLoopConfigWithSigner | StrategyLoopConfigWithPrivateKey;
 
 export interface StrategyLoopState {
   /** Number of pending effects waiting for results */
@@ -88,11 +122,22 @@ export interface StrategyLoopState {
 // ============================================================
 
 export class StrategyLoop {
-  private config: Required<StrategyLoopConfig>;
+  private config: StrategyLoopConfigBase & {
+    maxIterations: number;
+    resultPollIntervalMs: number;
+    strategyId?: string;
+    signerClient?: SignerClient;
+    operatorPrivateKey?: Hex;
+  };
   private state: StrategyLoopState;
+  private chain: Chain;
   private publicClient: PublicClient;
-  private walletClient: WalletClient;
+  private walletClient: WalletClient | null = null;
+  private account: Account | null = null;
   private abortController: AbortController | null = null;
+
+  /** True if using signer API, false if using local private key */
+  private readonly useSignerApi: boolean;
 
   constructor(config: StrategyLoopConfig) {
     this.config = {
@@ -111,28 +156,33 @@ export class StrategyLoop {
       effectsProcessed: 0,
     };
 
-    // Setup viem clients
-    const account = privateKeyToAccount(this.config.operatorPrivateKey);
+    // Determine signing mode
+    this.useSignerApi = 'signerClient' in config && !!config.signerClient;
 
-    const chain = {
+    this.chain = {
       id: this.config.chainId,
       name: 'Midcurve EVM',
       nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
       rpcUrls: {
         default: { http: [this.config.rpcUrl] },
       },
-    } as const;
+    } as Chain;
 
+    // Setup public client (always needed for reads and tx receipts)
     this.publicClient = createPublicClient({
-      chain,
+      chain: this.chain,
       transport: http(this.config.rpcUrl),
     });
 
-    this.walletClient = createWalletClient({
-      account,
-      chain,
-      transport: http(this.config.rpcUrl),
-    });
+    // Setup wallet client only if using local private key
+    if (!this.useSignerApi && this.config.operatorPrivateKey) {
+      this.account = privateKeyToAccount(this.config.operatorPrivateKey);
+      this.walletClient = createWalletClient({
+        account: this.account,
+        chain: this.chain,
+        transport: http(this.config.rpcUrl),
+      });
+    }
   }
 
   /**
@@ -445,22 +495,69 @@ export class StrategyLoop {
 
   /**
    * Simulate step() via eth_call.
+   * Uses an arbitrary account for simulation (doesn't need signing).
    */
   private async simulateStep(input: Hex): Promise<void> {
+    // For simulation, we can use any account address
+    // The actual signing happens in commitStep
+    const simulationAccount = this.walletClient?.account?.address
+      ?? '0x0000000000000000000000000000000000000001' as Address;
+
     await this.publicClient.simulateContract({
       address: this.config.strategyAddress,
       abi: this.config.abi,
       functionName: 'step',
       args: [input],
-      account: this.walletClient.account,
+      account: simulationAccount,
     });
   }
 
   /**
    * Commit step() as a real transaction.
+   * Uses signer API in production, local wallet in development.
    */
   private async commitStep(input: Hex): Promise<void> {
+    if (this.useSignerApi) {
+      await this.commitStepViaSigner(input);
+    } else {
+      await this.commitStepViaWallet(input);
+    }
+  }
+
+  /**
+   * Commit step() via signer API (production mode).
+   */
+  private async commitStepViaSigner(input: Hex): Promise<void> {
+    if (!this.config.signerClient || !this.config.strategyId) {
+      throw new Error('Signer client not configured');
+    }
+
+    // Sign the transaction via signer API
+    const signResult = await this.config.signerClient.signStep({
+      strategyId: this.config.strategyId,
+      stepInput: input,
+    });
+
+    // Broadcast the signed transaction
+    const txHash = await this.publicClient.sendRawTransaction({
+      serializedTransaction: signResult.signedTransaction,
+    });
+
+    // Wait for confirmation
+    await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+  }
+
+  /**
+   * Commit step() via local wallet (development mode).
+   */
+  private async commitStepViaWallet(input: Hex): Promise<void> {
+    if (!this.walletClient || !this.account) {
+      throw new Error('Wallet client not configured');
+    }
+
     const hash = await this.walletClient.writeContract({
+      account: this.account,
+      chain: this.chain,
       address: this.config.strategyAddress,
       abi: this.config.abi,
       functionName: 'step',
@@ -472,6 +569,7 @@ export class StrategyLoop {
 
   /**
    * Submit effect result to contract.
+   * Uses signer API in production, local wallet in development.
    */
   private async submitEffectResult(
     epoch: bigint,
@@ -479,7 +577,60 @@ export class StrategyLoop {
     ok: boolean,
     data: Hex
   ): Promise<void> {
+    if (this.useSignerApi) {
+      await this.submitEffectResultViaSigner(epoch, idempotencyKey, ok, data);
+    } else {
+      await this.submitEffectResultViaWallet(epoch, idempotencyKey, ok, data);
+    }
+  }
+
+  /**
+   * Submit effect result via signer API (production mode).
+   */
+  private async submitEffectResultViaSigner(
+    epoch: bigint,
+    idempotencyKey: Hex,
+    ok: boolean,
+    data: Hex
+  ): Promise<void> {
+    if (!this.config.signerClient || !this.config.strategyId) {
+      throw new Error('Signer client not configured');
+    }
+
+    // Sign the transaction via signer API
+    const signResult = await this.config.signerClient.signSubmitEffectResult({
+      strategyId: this.config.strategyId,
+      epoch: epoch.toString(),
+      idempotencyKey,
+      ok,
+      data,
+    });
+
+    // Broadcast the signed transaction
+    const txHash = await this.publicClient.sendRawTransaction({
+      serializedTransaction: signResult.signedTransaction,
+    });
+
+    // Wait for confirmation
+    await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+  }
+
+  /**
+   * Submit effect result via local wallet (development mode).
+   */
+  private async submitEffectResultViaWallet(
+    epoch: bigint,
+    idempotencyKey: Hex,
+    ok: boolean,
+    data: Hex
+  ): Promise<void> {
+    if (!this.walletClient || !this.account) {
+      throw new Error('Wallet client not configured');
+    }
+
     const hash = await this.walletClient.writeContract({
+      account: this.account,
+      chain: this.chain,
       address: this.config.strategyAddress,
       abi: this.config.abi,
       functionName: 'submitEffectResult',

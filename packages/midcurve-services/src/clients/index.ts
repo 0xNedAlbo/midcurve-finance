@@ -58,3 +58,15 @@ export {
   type SignerDeployStrategyResponse,
   type SignerErrorResponse,
 } from './signer/index.js';
+
+export {
+  EvmClient,
+  getEvmClient,
+  EvmClientError,
+  type EvmClientConfig,
+  type EvmStrategyStatus,
+  type DeployStrategyInput,
+  type DeployStrategyResponse,
+  type StrategyStatusResponse,
+  type LifecycleOperationResponse,
+} from './evm/index.js';

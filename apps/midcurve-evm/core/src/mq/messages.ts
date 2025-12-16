@@ -7,7 +7,7 @@
  * - External event sources (OHLC service, API)
  */
 
-import type { Hex } from 'viem';
+import { type Hex, keccak256, toHex, encodeAbiParameters } from 'viem';
 
 // ============================================================
 // Effect Request Message
@@ -222,6 +222,51 @@ export function createStepEvent(
     payload,
     timestamp: Date.now(),
     source,
+  };
+}
+
+// ============================================================
+// Lifecycle Event Constants
+// ============================================================
+
+/** Event type for lifecycle commands (must match Solidity STEP_EVENT_LIFECYCLE) */
+export const STEP_EVENT_LIFECYCLE = keccak256(toHex('STEP_EVENT_LIFECYCLE')) as Hex;
+
+/** Envelope version for lifecycle events */
+export const LIFECYCLE_EVENT_VERSION = 1;
+
+/** Lifecycle command: start the strategy */
+export const LIFECYCLE_START = keccak256(toHex('START')) as Hex;
+
+/** Lifecycle command: graceful shutdown */
+export const LIFECYCLE_SHUTDOWN = keccak256(toHex('SHUTDOWN')) as Hex;
+
+// ============================================================
+// Lifecycle Event Builder
+// ============================================================
+
+/**
+ * Create a lifecycle event message (START or SHUTDOWN).
+ *
+ * Lifecycle events use a simplified payload format: abi.encode(command)
+ * No nonce is needed because lifecycle commands are idempotent by state machine.
+ *
+ * @param command - LIFECYCLE_START or LIFECYCLE_SHUTDOWN
+ * @returns StepEventMessage ready to publish to strategy's events queue
+ */
+export function createLifecycleEvent(command: Hex): StepEventMessage {
+  // Encode payload: abi.encode(command)
+  const payload = encodeAbiParameters(
+    [{ type: 'bytes32', name: 'command' }],
+    [command]
+  );
+
+  return {
+    eventType: STEP_EVENT_LIFECYCLE,
+    eventVersion: LIFECYCLE_EVENT_VERSION,
+    payload,
+    timestamp: Date.now(),
+    source: 'lifecycle',
   };
 }
 

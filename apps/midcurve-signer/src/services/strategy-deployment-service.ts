@@ -190,9 +190,9 @@ class StrategyDeploymentService {
     }
 
     // 2. Validate strategy state
-    if (strategy.state !== 'pending') {
+    if (strategy.status !== 'pending') {
       throw new StrategyDeploymentError(
-        `Strategy is in '${strategy.state}' state, expected 'pending'`,
+        `Strategy is in '${strategy.status}' state, expected 'pending'`,
         'INVALID_STATE',
         400
       );

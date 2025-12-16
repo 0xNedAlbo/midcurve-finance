@@ -6,11 +6,11 @@
  */
 
 import type { Channel } from 'amqplib';
-import { EXCHANGES, ROUTING_KEYS } from './topology.js';
+import { EXCHANGES, ROUTING_KEYS } from './topology';
 import {
   type EffectRequestMessage,
   serializeMessage,
-} from './messages.js';
+} from './messages';
 
 /**
  * Publish an effect request to the effects exchange.
