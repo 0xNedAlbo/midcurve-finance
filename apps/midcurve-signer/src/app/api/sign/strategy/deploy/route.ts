@@ -8,15 +8,14 @@
  * - Strategy must exist and be in 'deploying' state
  * - Automation wallet must already be created
  * - Manifest must be attached to strategy
+ * - CORE_ADDRESS environment variable must be set
  *
  * Request:
  * - Authorization: Bearer <internal-api-key>
- * - Body: {
- *     strategyId: string,     // ID of the deploying strategy
- *     ownerAddress: string    // User's wallet address (for _owner param)
- *   }
+ * - Body: { strategyId: string }
  *
  * Note: chainId is not a parameter - we only support local SEMSEE (31337)
+ * Note: Constructor params are sourced from manifest (operator-address, core-address, user-input)
  *
  * Response (Success):
  * - 200: {
@@ -53,13 +52,10 @@ const logger = signerLogger.child({ endpoint: 'sign-strategy-deploy' });
 
 /**
  * Request body schema
- * Note: chainId is not required - we only support local SEMSEE (31337)
+ * Note: chainId and ownerAddress are not required - handled by service
  */
 const SignDeployRequestSchema = z.object({
   strategyId: z.string().min(1, 'strategyId is required'),
-  ownerAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid owner address format'),
 });
 
 type SignDeployRequest = z.infer<typeof SignDeployRequestSchema>;
@@ -102,12 +98,11 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { strategyId, ownerAddress } = validation.data;
+  const { strategyId } = validation.data;
 
   logger.info({
     requestId,
     strategyId,
-    ownerAddress,
     msg: 'Processing deployment signing request',
   });
 
@@ -115,7 +110,6 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     // 3. Sign deployment transaction
     const result = await strategySigningService.signDeployment({
       strategyId,
-      ownerAddress: ownerAddress as `0x${string}`,
     });
 
     logger.info({

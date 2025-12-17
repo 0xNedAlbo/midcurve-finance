@@ -14,16 +14,14 @@ import type { AnyToken } from './token.js';
 /**
  * Source of constructor parameter value
  *
- * - user-wallet: User's connected wallet address (typically the owner)
- * - automation-wallet: Newly generated automation wallet address
+ * - operator-address: Per-strategy automation wallet (KMS-backed, executes step())
+ * - core-address: Core orchestrator address (funds GC operations, from CORE_ADDRESS env)
  * - user-input: User provides value via form input
- * - derived: Computed from other values or context
  */
 export type ConstructorParamSource =
-  | 'user-wallet'
-  | 'automation-wallet'
-  | 'user-input'
-  | 'derived';
+  | 'operator-address'
+  | 'core-address'
+  | 'user-input';
 
 /**
  * Solidity types supported for constructor parameters

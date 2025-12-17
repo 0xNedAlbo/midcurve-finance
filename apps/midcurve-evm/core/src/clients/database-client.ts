@@ -73,7 +73,7 @@ export interface StrategyStatusData {
 interface ConstructorParam {
   name: string;
   type: string;
-  source: 'user-wallet' | 'automation-wallet' | 'user-input' | 'derived';
+  source: 'operator-address' | 'core-address' | 'user-input';
   label?: string;
   description?: string;
   required?: boolean;

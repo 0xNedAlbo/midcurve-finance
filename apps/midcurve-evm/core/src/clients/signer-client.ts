@@ -37,10 +37,10 @@ export interface SignContractCallResponse {
 /**
  * Input for signing a deployment transaction
  * Note: chainId is not configurable - signer only supports local SEMSEE (31337)
+ * Note: ownerAddress removed - constructor params sourced from manifest
  */
 export interface SignDeployInput {
   strategyId: string;
-  ownerAddress: Address;
 }
 
 /**

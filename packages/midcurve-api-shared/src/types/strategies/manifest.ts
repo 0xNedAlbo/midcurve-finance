@@ -29,12 +29,15 @@ export type SerializedStrategyManifest = BigIntToString<StrategyManifest>;
 
 /**
  * Zod schema for constructor parameter source
+ *
+ * - operator-address: Per-strategy automation wallet (KMS-backed, executes step())
+ * - core-address: Core orchestrator address (funds GC operations)
+ * - user-input: User provides value via form input
  */
 export const ConstructorParamSourceSchema = z.enum([
-  'user-wallet',
-  'automation-wallet',
+  'operator-address',
+  'core-address',
   'user-input',
-  'derived',
 ]);
 
 /**

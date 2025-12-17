@@ -3,11 +3,11 @@
  *
  * Request body:
  * {
- *   strategyId: string,
- *   ownerAddress: string    // 0x... address
+ *   strategyId: string
  * }
  *
  * Note: chainId is not configurable - we only support local SEMSEE (31337)
+ * Note: Constructor params are sourced from manifest (operator-address, core-address, user-input)
  *
  * Returns 202 immediately. Poll GET /api/strategy/:addr for status.
  *
@@ -27,7 +27,6 @@
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import type { Address } from 'viem';
 import { getDeploymentService } from '../../../core/src/services/deployment-service';
 import { getRabbitMQConnection } from '../../../core/src/mq/connection';
 import { logger } from '../../../lib/logger';
@@ -40,7 +39,6 @@ const log = logger.child({ route: 'PUT /api/strategy' });
 
 const DeployRequestSchema = z.object({
   strategyId: z.string().min(1),
-  ownerAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
 });
 
 // =============================================================================
@@ -61,7 +59,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const { strategyId, ownerAddress } = parseResult.data;
+    const { strategyId } = parseResult.data;
 
     log.info({ strategyId, msg: 'Starting deployment' });
 
@@ -72,10 +70,7 @@ export async function PUT(request: Request) {
     // Start deployment (non-blocking)
     const deploymentService = getDeploymentService();
     const state = await deploymentService.startDeployment(
-      {
-        strategyId,
-        ownerAddress: ownerAddress as Address,
-      },
+      { strategyId },
       channel
     );
 

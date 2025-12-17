@@ -53,7 +53,6 @@ export interface DeploymentState {
 
 export interface DeploymentInput {
   strategyId: string;
-  ownerAddress: Address;
 }
 
 // =============================================================================
@@ -98,7 +97,7 @@ class DeploymentService {
     input: DeploymentInput,
     channel: Channel
   ): Promise<DeploymentState> {
-    const { strategyId, ownerAddress } = input;
+    const { strategyId } = input;
     evmLog.methodEntry(this.log, 'startDeployment', { strategyId });
 
     // Check if deployment already in progress
@@ -138,7 +137,7 @@ class DeploymentService {
     input: DeploymentInput,
     channel: Channel
   ): Promise<void> {
-    const { strategyId, ownerAddress } = input;
+    const { strategyId } = input;
     const state = this.deployments.get(strategyId)!;
 
     try {
@@ -178,7 +177,6 @@ class DeploymentService {
       const signerClient = getSignerClient();
       const signResult = await signerClient.signDeployment({
         strategyId,
-        ownerAddress,
       });
 
       state.contractAddress = signResult.predictedAddress;

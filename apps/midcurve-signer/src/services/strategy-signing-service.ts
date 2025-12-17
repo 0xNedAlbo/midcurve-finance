@@ -54,10 +54,10 @@ export interface SignContractCallResult {
 /**
  * Input for signing a deployment transaction
  * Note: chainId is not configurable - we only support local SEMSEE (31337)
+ * Note: ownerAddress removed - constructor params use operator-address and core-address sources
  */
 export interface SignDeployInput {
   strategyId: string;
-  ownerAddress: Address;
 }
 
 /**
@@ -85,7 +85,7 @@ export interface SignSubmitEffectResultInput {
 interface ConstructorParam {
   name: string;
   type: string;
-  source: 'user-wallet' | 'automation-wallet' | 'user-input' | 'derived';
+  source: 'operator-address' | 'core-address' | 'user-input';
   label?: string;
   description?: string;
   required?: boolean;
@@ -171,8 +171,18 @@ class StrategySigningService {
    * @throws StrategySigningError if strategy not found, invalid state, or signing fails
    */
   async signDeployment(input: SignDeployInput): Promise<SignDeployResult> {
-    const { strategyId, ownerAddress } = input;
+    const { strategyId } = input;
     signerLog.methodEntry(this.logger, 'signDeployment', { strategyId });
+
+    // 0. Validate CORE_ADDRESS environment variable
+    const coreAddress = process.env.CORE_ADDRESS as Address | undefined;
+    if (!coreAddress) {
+      throw new StrategySigningError(
+        'CORE_ADDRESS environment variable is required for deployment',
+        'INTERNAL_ERROR',
+        500
+      );
+    }
 
     // 1. Fetch strategy with manifest and automation wallet
     const strategy = await prisma.strategy.findUnique({
@@ -229,7 +239,8 @@ class StrategySigningService {
       strategyId,
       manifestSlug: manifest.slug,
       chainId: SEMSEE_CHAIN_ID,
-      walletAddress: walletConfig.walletAddress,
+      operatorAddress: walletConfig.walletAddress,
+      coreAddress,
       msg: 'Signing deployment transaction',
     });
 
@@ -240,8 +251,8 @@ class StrategySigningService {
     const constructorArgs = this.buildConstructorArgs(
       constructorParams,
       constructorValues,
-      ownerAddress,
-      walletConfig.walletAddress
+      walletConfig.walletAddress,  // operator address
+      coreAddress                   // core address
     );
 
     // 6. Prepare and sign deployment transaction
@@ -568,23 +579,28 @@ class StrategySigningService {
 
   /**
    * Build constructor arguments from manifest params
+   *
+   * @param params - Constructor parameter definitions from manifest
+   * @param userValues - User-provided values for 'user-input' params
+   * @param operatorAddress - Per-strategy automation wallet (for 'operator-address' source)
+   * @param coreAddress - Core orchestrator address (for 'core-address' source)
    */
   private buildConstructorArgs(
     params: ConstructorParam[],
     userValues: Record<string, string>,
-    ownerAddress: string,
-    automationWalletAddress: string
+    operatorAddress: string,
+    coreAddress: string
   ): unknown[] {
     return params.map((param) => {
       let value: string;
 
       switch (param.source) {
-        case 'user-wallet':
-          value = ownerAddress;
+        case 'operator-address':
+          value = operatorAddress;
           break;
 
-        case 'automation-wallet':
-          value = automationWalletAddress;
+        case 'core-address':
+          value = coreAddress;
           break;
 
         case 'user-input':
@@ -600,13 +616,6 @@ class StrategySigningService {
             );
           }
           break;
-
-        case 'derived':
-          throw new StrategySigningError(
-            `Derived constructor parameters not yet supported: ${param.name}`,
-            'INTERNAL_ERROR',
-            400
-          );
 
         default:
           throw new StrategySigningError(
