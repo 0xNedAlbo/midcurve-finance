@@ -10,12 +10,15 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import { useState } from "react";
-import type { SerializedStrategyManifest, DeployStrategyResponse } from "@midcurve/api-shared";
+import { useState, useMemo } from "react";
+import type { StrategyManifest } from "@midcurve/shared";
+import { getUserInputParams } from "@midcurve/shared";
+import type { DeployStrategyResponse } from "@midcurve/api-shared";
 
 interface DeployReviewStepProps {
-  manifest: SerializedStrategyManifest;
+  manifest: StrategyManifest;
   strategyName: string;
+  constructorValues: Record<string, string>;
   deploymentResult: DeployStrategyResponse | null;
   deploymentError: string | null;
   isDeploying: boolean;
@@ -26,6 +29,7 @@ interface DeployReviewStepProps {
 export function DeployReviewStep({
   manifest,
   strategyName,
+  constructorValues,
   deploymentResult,
   deploymentError,
   isDeploying,
@@ -34,6 +38,12 @@ export function DeployReviewStep({
 }: DeployReviewStepProps) {
   const router = useRouter();
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Get user input params for display
+  const userInputParams = useMemo(
+    () => getUserInputParams(manifest),
+    [manifest]
+  );
 
   const copyToClipboard = async (value: string, field: string) => {
     await navigator.clipboard.writeText(value);
@@ -254,6 +264,28 @@ export function DeployReviewStep({
             <span className="text-white">SEMSEE (Internal)</span>
           </div>
         </div>
+
+        {/* Constructor Values (if any) */}
+        {userInputParams.length > 0 && (
+          <div className="p-4">
+            <p className="text-slate-400 text-sm mb-3">Constructor Parameters</p>
+            <div className="space-y-2">
+              {userInputParams.map((param) => (
+                <div
+                  key={param.name}
+                  className="flex justify-between items-center text-sm"
+                >
+                  <span className="text-slate-400">
+                    {param.ui?.label ?? param.name}
+                  </span>
+                  <span className="text-white font-mono">
+                    {constructorValues[param.name] || "-"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Warning */}

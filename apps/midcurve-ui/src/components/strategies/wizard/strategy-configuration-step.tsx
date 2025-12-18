@@ -1,29 +1,45 @@
 "use client";
 
-import { useEffect } from "react";
-import { Shield, Info } from "lucide-react";
-import type { SerializedStrategyManifest } from "@midcurve/api-shared";
+import { useEffect, useCallback } from "react";
+import { Info } from "lucide-react";
+import type { StrategyManifest } from "@midcurve/shared";
+
+import { ConstructorParamsForm } from "./constructor-params-form";
 
 interface StrategyConfigurationStepProps {
-  manifest: SerializedStrategyManifest;
+  manifest: StrategyManifest;
   strategyName: string;
   onNameChange: (name: string) => void;
+  constructorValues: Record<string, string>;
+  onConstructorValuesChange: (values: Record<string, string>) => void;
   onValidationChange: (isValid: boolean) => void;
+  hasUserParams: boolean;
 }
 
 export function StrategyConfigurationStep({
   manifest,
   strategyName,
   onNameChange,
+  constructorValues,
+  onConstructorValuesChange,
   onValidationChange,
+  hasUserParams,
 }: StrategyConfigurationStepProps) {
   // Validation: name is required and 1-100 chars
   const isNameValid = strategyName.trim().length >= 1 && strategyName.length <= 100;
 
-  // Report validation state to parent
-  useEffect(() => {
-    onValidationChange(isNameValid);
+  // Track constructor params validation separately
+  const handleParamsValidationChange = useCallback((isValid: boolean) => {
+    // Overall validation requires both name and params to be valid
+    onValidationChange(isNameValid && isValid);
   }, [isNameValid, onValidationChange]);
+
+  // If no user params, just check name validity
+  useEffect(() => {
+    if (!hasUserParams) {
+      onValidationChange(isNameValid);
+    }
+  }, [hasUserParams, isNameValid, onValidationChange]);
 
   return (
     <div className="space-y-6">
@@ -41,15 +57,6 @@ export function StrategyConfigurationStep({
                 <>
                   <span className="text-slate-600">•</span>
                   <span className="text-slate-400">by {manifest.author}</span>
-                </>
-              )}
-              {manifest.isAudited && (
-                <>
-                  <span className="text-slate-600">•</span>
-                  <span className="flex items-center gap-1 text-green-400">
-                    <Shield className="w-3 h-3" />
-                    Audited
-                  </span>
                 </>
               )}
             </div>
@@ -93,48 +100,30 @@ export function StrategyConfigurationStep({
         )}
       </div>
 
-      {/* Capabilities Summary */}
-      <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-4">
-        <h4 className="text-sm font-medium text-slate-300 mb-3">
-          What this strategy can do:
-        </h4>
-        <ul className="space-y-2 text-sm">
-          {manifest.capabilities.funding && (
-            <li className="flex items-start gap-2 text-slate-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 flex-shrink-0" />
-              <span>Accept deposits and process withdrawals</span>
-            </li>
-          )}
-          {manifest.capabilities.uniswapV3Actions && (
-            <li className="flex items-start gap-2 text-slate-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-2 flex-shrink-0" />
-              <span>Manage Uniswap V3 positions (mint, burn, collect)</span>
-            </li>
-          )}
-          {manifest.capabilities.ohlcConsumer && (
-            <li className="flex items-start gap-2 text-slate-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-2 flex-shrink-0" />
-              <span>Receive price feed updates (OHLC data)</span>
-            </li>
-          )}
-          {manifest.capabilities.poolConsumer && (
-            <li className="flex items-start gap-2 text-slate-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span>Receive pool state updates</span>
-            </li>
-          )}
-          {manifest.capabilities.balanceConsumer && (
-            <li className="flex items-start gap-2 text-slate-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-pink-400 mt-2 flex-shrink-0" />
-              <span>Track token balances</span>
-            </li>
-          )}
-        </ul>
-      </div>
+      {/* Constructor Parameters Form (if any) */}
+      {hasUserParams && (
+        <div>
+          <h4 className="text-sm font-medium text-slate-300 mb-4">
+            Strategy Parameters
+          </h4>
+          <ConstructorParamsForm
+            manifest={manifest}
+            values={constructorValues}
+            onChange={onConstructorValuesChange}
+            onValidationChange={handleParamsValidationChange}
+          />
+        </div>
+      )}
 
-      {/* Future: Dynamic parameter fields would go here */}
-      {/* When manifests have user-input constructor params or userParams,
-          we would render dynamic form fields based on param definitions */}
+      {/* Info box when no params */}
+      {!hasUserParams && (
+        <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-4">
+          <p className="text-slate-400 text-sm">
+            This strategy has no configurable parameters. System addresses will
+            be set automatically during deployment.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

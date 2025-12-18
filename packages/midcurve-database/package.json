@@ -18,7 +18,6 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed:manifests": "npx tsx prisma/seed/strategy-manifests.ts",
     "yalc:publish": "npm run db:generate && yalc publish --push"
   },
   "dependencies": {

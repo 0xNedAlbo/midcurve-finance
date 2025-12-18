@@ -5,7 +5,7 @@
  * These types are NOT shared with UI/API - they're specific to the service layer.
  */
 
-import type { StrategyStatus, StrategyConfig } from '@midcurve/shared';
+import type { StrategyStatus, StrategyConfig, StrategyManifest } from '@midcurve/shared';
 
 /**
  * Input type for creating a new strategy
@@ -36,15 +36,15 @@ export interface CreateStrategyInput {
   /**
    * Quote token ID (required)
    * All metrics for this strategy will be denominated in this token.
-   * Typically set from manifest.basicCurrencyId at creation time.
    */
   quoteTokenId: string;
 
   /**
-   * Manifest ID (optional)
-   * Links the strategy to the manifest used for deployment.
+   * Embedded manifest (optional)
+   * Contains ABI, bytecode, and constructor parameter definitions.
+   * Stored directly on the strategy record.
    */
-  manifestId?: string;
+  manifest?: StrategyManifest;
 }
 
 /**

@@ -1,15 +1,14 @@
 /**
  * Strategy Manifest API Types
  *
- * Types and schemas for strategy manifest endpoints:
- * - GET /api/v1/strategies/manifests - List available manifests
- * - GET /api/v1/strategies/manifests/:slug - Get specific manifest
+ * Types and schemas for strategy manifest operations:
+ * - POST /api/v1/strategies/verify-manifest - Validate uploaded manifest
  * - POST /api/v1/strategies/deploy - Deploy strategy from manifest
  */
 
 import type { ApiResponse, BigIntToString } from '../common/index.js';
 import type { SerializedStrategy } from './common.js';
-import type { StrategyManifest, StrategyCapabilities } from '@midcurve/shared';
+import type { StrategyManifest } from '@midcurve/shared';
 import { z } from 'zod';
 
 // =============================================================================
@@ -20,6 +19,8 @@ import { z } from 'zod';
  * Serialized strategy manifest for API responses
  *
  * All Date fields converted to strings for JSON serialization.
+ * Note: StrategyManifest no longer has Date fields, so this is mostly
+ * for type consistency.
  */
 export type SerializedStrategyManifest = BigIntToString<StrategyManifest>;
 
@@ -58,11 +59,36 @@ export const SolidityTypeSchema = z.enum([
 ]);
 
 /**
- * Zod schema for constructor parameter validation
+ * Zod schema for UI element types for constructor parameters
  */
-export const ConstructorParamValidationSchema = z.object({
+export const ParamUIElementSchema = z.enum([
+  'text',
+  'bigint',
+  'number',
+  'evm-address',
+  'boolean',
+  'hidden',
+]);
+
+/**
+ * Zod schema for layout UI element types
+ */
+export const LayoutUIElementSchema = z.enum(['section', 'separator']);
+
+/**
+ * Zod schema for constructor parameter UI configuration
+ */
+export const ConstructorParamUISchema = z.object({
+  element: ParamUIElementSchema,
+  label: z.string().min(1),
+  description: z.string().optional(),
+  placeholder: z.string().optional(),
+  default: z.string().optional(),
+  required: z.boolean().optional(),
   min: z.string().optional(),
   max: z.string().optional(),
+  step: z.string().optional(),
+  decimals: z.number().int().min(0).optional(),
   pattern: z.string().optional(),
 });
 
@@ -73,185 +99,142 @@ export const ConstructorParamSchema = z.object({
   name: z.string().min(1),
   type: SolidityTypeSchema,
   source: ConstructorParamSourceSchema,
-  label: z.string().optional(),
+  ui: ConstructorParamUISchema.optional(),
+});
+
+/**
+ * Zod schema for layout element
+ */
+export const LayoutElementSchema = z.object({
+  element: LayoutUIElementSchema,
+  title: z.string().optional(),
   description: z.string().optional(),
-  required: z.boolean().optional(),
-  default: z.string().optional(),
-  validation: ConstructorParamValidationSchema.optional(),
 });
 
-// =============================================================================
-// CAPABILITY SCHEMAS
-// =============================================================================
-
 /**
- * Zod schema for strategy capabilities
+ * Zod schema for form item (param or layout)
  */
-export const StrategyCapabilitiesSchema = z.object({
-  funding: z.boolean(),
-  ohlcConsumer: z.boolean(),
-  poolConsumer: z.boolean(),
-  balanceConsumer: z.boolean(),
-  uniswapV3Actions: z.boolean(),
-});
-
-// =============================================================================
-// USER PARAM SCHEMAS
-// =============================================================================
-
-/**
- * Zod schema for user parameter type
- */
-export const UserParamTypeSchema = z.enum([
-  'number',
-  'percentage',
-  'token',
-  'address',
-  'boolean',
-  'select',
+export const FormItemSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('param'),
+    param: ConstructorParamSchema,
+  }),
+  z.object({
+    type: z.literal('layout'),
+    layout: LayoutElementSchema,
+  }),
 ]);
 
-/**
- * Zod schema for user parameter option
- */
-export const UserParamOptionSchema = z.object({
-  value: z.string(),
-  label: z.string(),
-});
-
-/**
- * Zod schema for user parameter validation
- */
-export const UserParamValidationSchema = z.object({
-  min: z.number().optional(),
-  max: z.number().optional(),
-  step: z.number().optional(),
-  pattern: z.string().optional(),
-});
-
-/**
- * Zod schema for user parameter
- */
-export const UserParamSchema = z.object({
-  name: z.string().min(1),
-  type: UserParamTypeSchema,
-  label: z.string().min(1),
-  description: z.string(),
-  required: z.boolean(),
-  default: z.unknown().optional(),
-  options: z.array(UserParamOptionSchema).optional(),
-  validation: UserParamValidationSchema.optional(),
-});
-
 // =============================================================================
-// LIST MANIFESTS
+// MANIFEST SCHEMA
 // =============================================================================
 
 /**
- * Query parameters for listing manifests
+ * Zod schema for user-uploaded strategy manifest
  */
-export interface ListManifestsQuery {
-  /**
-   * Filter by active status (default: true)
-   */
-  isActive?: boolean;
+export const StrategyManifestSchema = z.object({
+  // Identification
+  name: z.string().min(1).max(200),
+  version: z.string().regex(/^\d+\.\d+\.\d+$/, 'Version must be semver format'),
+  description: z.string().optional(),
+  author: z.string().optional(),
 
-  /**
-   * Filter by basic currency ID
-   */
-  basicCurrencyId?: string;
-
-  /**
-   * Filter by tags (OR logic - matches if any tag present)
-   */
-  tags?: string[];
-
-  /**
-   * Include basic currency token in response
-   */
-  includeBasicCurrency?: boolean;
-}
-
-/**
- * Zod schema for list manifests query
- */
-export const ListManifestsQuerySchema = z.object({
-  isActive: z
+  // Contract artifacts
+  abi: z.array(z.unknown()).min(1),
+  bytecode: z
     .string()
-    .transform((v) => v === 'true')
-    .optional(),
-  basicCurrencyId: z.string().optional(),
-  tags: z
-    .string()
-    .transform((v) => v.split(',').filter(Boolean))
-    .optional(),
-  includeBasicCurrency: z
-    .string()
-    .transform((v) => v === 'true')
-    .optional(),
+    .regex(/^0x[a-fA-F0-9]+$/, 'Bytecode must be hex string'),
+
+  // Parameters
+  constructorParams: z.array(ConstructorParamSchema),
+  formLayout: z.array(FormItemSchema).optional(),
+
+  // Metadata
+  tags: z.array(z.string()).optional(),
 });
 
-/**
- * Response for list manifests endpoint
- */
-export interface ListManifestsResponse {
-  manifests: SerializedStrategyManifest[];
-}
-
-/**
- * API response wrapper for list manifests
- */
-export type ListManifestsApiResponse = ApiResponse<ListManifestsResponse>;
-
 // =============================================================================
-// GET MANIFEST
+// VERIFY MANIFEST
 // =============================================================================
 
 /**
- * Path parameters for get manifest endpoint
+ * Error/warning codes for manifest verification
  */
-export interface GetManifestParams {
-  slug: string;
+export type ManifestErrorCode =
+  | 'INVALID_JSON'
+  | 'SCHEMA_ERROR'
+  | 'INVALID_ABI'
+  | 'NO_CONSTRUCTOR'
+  | 'PARAM_COUNT_MISMATCH'
+  | 'PARAM_TYPE_MISMATCH'
+  | 'PARAM_ORDER_MISMATCH'
+  | 'MISSING_UI_CONFIG'
+  | 'INVALID_BYTECODE'
+  | 'MISSING_REQUIRED_FIELD'
+  | 'INVALID_FIELD_VALUE';
+
+/**
+ * Severity level for verification issues
+ */
+export type VerificationSeverity = 'error' | 'warning';
+
+/**
+ * A verification issue (error or warning)
+ */
+export interface ManifestIssue {
+  severity: VerificationSeverity;
+  code: ManifestErrorCode;
+  message: string;
+  path?: string;
+  details?: Record<string, unknown>;
 }
 
 /**
- * Zod schema for get manifest params
+ * Request body for verify manifest endpoint
  */
-export const GetManifestParamsSchema = z.object({
-  slug: z.string().min(1),
-});
-
-/**
- * Query parameters for get manifest endpoint
- */
-export interface GetManifestQuery {
+export interface VerifyManifestRequest {
   /**
-   * Include basic currency token in response
+   * The manifest JSON to verify
    */
-  includeBasicCurrency?: boolean;
+  manifest: unknown;
 }
 
 /**
- * Zod schema for get manifest query
+ * Zod schema for verify manifest request
  */
-export const GetManifestQuerySchema = z.object({
-  includeBasicCurrency: z
-    .string()
-    .transform((v) => v === 'true')
-    .optional(),
+export const VerifyManifestRequestSchema = z.object({
+  manifest: z.unknown(),
 });
 
 /**
- * Response for get manifest endpoint
+ * Response for verify manifest endpoint
  */
-export interface GetManifestResponse {
-  manifest: SerializedStrategyManifest;
+export interface VerifyManifestResponse {
+  /**
+   * Whether the manifest is valid for deployment
+   */
+  valid: boolean;
+
+  /**
+   * List of errors that prevent deployment
+   */
+  errors: ManifestIssue[];
+
+  /**
+   * List of warnings (non-blocking)
+   */
+  warnings: ManifestIssue[];
+
+  /**
+   * Parsed manifest (if valid)
+   */
+  parsedManifest?: SerializedStrategyManifest;
 }
 
 /**
- * API response wrapper for get manifest
+ * API response wrapper for verify manifest
  */
-export type GetManifestApiResponse = ApiResponse<GetManifestResponse>;
+export type VerifyManifestApiResponse = ApiResponse<VerifyManifestResponse>;
 
 // =============================================================================
 // DEPLOY STRATEGY
@@ -259,12 +242,15 @@ export type GetManifestApiResponse = ApiResponse<GetManifestResponse>;
 
 /**
  * Request body for deploy strategy endpoint
+ *
+ * Now takes a full manifest instead of manifestSlug, since manifests
+ * are user-uploaded rather than selected from a database catalogue.
  */
 export interface DeployStrategyRequest {
   /**
-   * Slug of the manifest to deploy
+   * The validated manifest to deploy
    */
-  manifestSlug: string;
+  manifest: StrategyManifest;
 
   /**
    * User-provided name for this strategy instance
@@ -275,23 +261,23 @@ export interface DeployStrategyRequest {
    * Values for user-input constructor parameters
    * Key is param name, value is string representation
    */
-  constructorValues?: Record<string, string>;
+  constructorValues: Record<string, string>;
 
   /**
-   * Initial strategy.config values
-   * Key is userParam name, value is the configured value
+   * Quote token ID for metrics denomination
+   * All position metrics will be in this token
    */
-  config?: Record<string, unknown>;
+  quoteTokenId: string;
 }
 
 /**
  * Zod schema for deploy strategy request
  */
 export const DeployStrategyRequestSchema = z.object({
-  manifestSlug: z.string().min(1),
+  manifest: StrategyManifestSchema,
   name: z.string().min(1).max(100),
-  constructorValues: z.record(z.string()).optional(),
-  config: z.record(z.unknown()).optional(),
+  constructorValues: z.record(z.string()),
+  quoteTokenId: z.string().min(1),
 });
 
 /**
@@ -363,65 +349,3 @@ export interface DeployStrategyResponse {
  * API response wrapper for deploy strategy
  */
 export type DeployStrategyApiResponse = ApiResponse<DeployStrategyResponse>;
-
-// =============================================================================
-// CREATE MANIFEST (Admin)
-// =============================================================================
-
-/**
- * Request body for creating a manifest (admin endpoint)
- */
-export interface CreateManifestRequest {
-  slug: string;
-  version: string;
-  name: string;
-  description: string;
-  abi: unknown[];
-  bytecode: string;
-  constructorParams: z.infer<typeof ConstructorParamSchema>[];
-  capabilities: StrategyCapabilities;
-  basicCurrencyId: string;
-  userParams: z.infer<typeof UserParamSchema>[];
-  isActive?: boolean;
-  isAudited?: boolean;
-  author?: string;
-  repository?: string;
-  tags?: string[];
-}
-
-/**
- * Zod schema for create manifest request
- */
-export const CreateManifestRequestSchema = z.object({
-  slug: z
-    .string()
-    .min(1)
-    .max(100)
-    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
-  version: z.string().regex(/^\d+\.\d+\.\d+$/, 'Version must be semver format'),
-  name: z.string().min(1).max(200),
-  description: z.string().min(1),
-  abi: z.array(z.unknown()).min(1),
-  bytecode: z.string().regex(/^0x[a-fA-F0-9]+$/, 'Bytecode must be hex string'),
-  constructorParams: z.array(ConstructorParamSchema),
-  capabilities: StrategyCapabilitiesSchema,
-  basicCurrencyId: z.string().min(1),
-  userParams: z.array(UserParamSchema),
-  isActive: z.boolean().optional().default(true),
-  isAudited: z.boolean().optional().default(false),
-  author: z.string().optional(),
-  repository: z.string().url().optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
-
-/**
- * Response for create manifest endpoint
- */
-export interface CreateManifestResponse {
-  manifest: SerializedStrategyManifest;
-}
-
-/**
- * API response wrapper for create manifest
- */
-export type CreateManifestApiResponse = ApiResponse<CreateManifestResponse>;

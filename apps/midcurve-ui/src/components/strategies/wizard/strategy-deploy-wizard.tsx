@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { X, ArrowLeft, ArrowRight } from "lucide-react";
-import type { SerializedStrategyManifest, DeployStrategyResponse } from "@midcurve/api-shared";
+import type { StrategyManifest } from "@midcurve/shared";
+import { hasUserInputParams } from "@midcurve/shared";
+import type { DeployStrategyResponse } from "@midcurve/api-shared";
 
-import { useStrategyManifests } from "@/hooks/strategies/useStrategyManifests";
+import { useVerifyManifest } from "@/hooks/strategies/useVerifyManifest";
 import { useDeployStrategy } from "@/hooks/strategies/useDeployStrategy";
 
-import { ManifestSelectionStep } from "./manifest-selection-step";
+import { ManifestUploadStep } from "./manifest-upload-step";
 import { StrategyConfigurationStep } from "./strategy-configuration-step";
 import { DeployReviewStep } from "./deploy-review-step";
 
@@ -17,6 +19,14 @@ interface StrategyDeployWizardProps {
   onStrategyDeployed?: (response: DeployStrategyResponse) => void;
 }
 
+/**
+ * Strategy deployment wizard with manifest upload flow
+ *
+ * Steps:
+ * 1. Upload Manifest - Upload and validate manifest JSON file
+ * 2. Configure - Set strategy name and fill in constructor values
+ * 3. Review & Deploy - Review settings and deploy
+ */
 export function StrategyDeployWizard({
   isOpen,
   onClose,
@@ -26,25 +36,24 @@ export function StrategyDeployWizard({
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<number>(0);
-  const [selectedManifest, setSelectedManifest] = useState<SerializedStrategyManifest | null>(null);
+  const [verifiedManifest, setVerifiedManifest] = useState<StrategyManifest | null>(null);
   const [strategyName, setStrategyName] = useState<string>("");
+  const [constructorValues, setConstructorValues] = useState<Record<string, string>>({});
 
   // Validation flags
-  const [isManifestSelected, setIsManifestSelected] = useState<boolean>(false);
+  const [isManifestValid, setIsManifestValid] = useState<boolean>(false);
   const [isConfigurationValid, setIsConfigurationValid] = useState<boolean>(false);
+
+  // Verification state
+  const [verificationErrors, setVerificationErrors] = useState<string[]>([]);
+  const [verificationWarnings, setVerificationWarnings] = useState<string[]>([]);
 
   // Deployment state
   const [deploymentResult, setDeploymentResult] = useState<DeployStrategyResponse | null>(null);
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
 
-  // Fetch manifests
-  const {
-    data: manifestsData,
-    isLoading: isLoadingManifests,
-    error: manifestsError,
-  } = useStrategyManifests({ isActive: true });
-
-  // Deploy mutation
+  // Mutations
+  const verifyMutation = useVerifyManifest();
   const deployMutation = useDeployStrategy();
 
   // Handle closing wizard with confirmation if progress made
@@ -58,33 +67,79 @@ export function StrategyDeployWizard({
 
     // Reset all state
     setCurrentStep(0);
-    setSelectedManifest(null);
+    setVerifiedManifest(null);
     setStrategyName("");
-    setIsManifestSelected(false);
+    setConstructorValues({});
+    setIsManifestValid(false);
     setIsConfigurationValid(false);
+    setVerificationErrors([]);
+    setVerificationWarnings([]);
     setDeploymentResult(null);
     setDeploymentError(null);
 
     onClose?.();
   }, [currentStep, deploymentResult, onClose]);
 
-  // Handle manifest selection
-  const handleManifestSelect = (manifest: SerializedStrategyManifest) => {
-    setSelectedManifest(manifest);
-    setIsManifestSelected(true);
-  };
+  // Handle manifest verification
+  const handleManifestVerify = useCallback(
+    (manifest: unknown) => {
+      setVerificationErrors([]);
+      setVerificationWarnings([]);
+
+      verifyMutation.mutate(
+        { manifest },
+        {
+          onSuccess: (response) => {
+            if (response.valid && response.parsedManifest) {
+              setVerifiedManifest(response.parsedManifest as unknown as StrategyManifest);
+              setIsManifestValid(true);
+              setVerificationWarnings(
+                response.warnings.map((w) => w.message)
+              );
+            } else {
+              setVerifiedManifest(null);
+              setIsManifestValid(false);
+              setVerificationErrors(
+                response.errors.map((e) => e.message)
+              );
+            }
+          },
+          onError: (error) => {
+            setVerifiedManifest(null);
+            setIsManifestValid(false);
+            setVerificationErrors([error.message || "Verification failed"]);
+          },
+        }
+      );
+    },
+    [verifyMutation]
+  );
+
+  // Handle manifest cleared
+  const handleManifestCleared = useCallback(() => {
+    setVerifiedManifest(null);
+    setIsManifestValid(false);
+    setVerificationErrors([]);
+    setVerificationWarnings([]);
+    setConstructorValues({});
+  }, []);
 
   // Handle deploy
   const handleDeploy = useCallback(() => {
-    if (!selectedManifest) return;
+    if (!verifiedManifest) return;
 
     setDeploymentError(null);
 
+    // TODO: Add quote token selection UI
+    // For now, use a placeholder quote token ID
+    const PLACEHOLDER_QUOTE_TOKEN_ID = "placeholder-quote-token";
+
     deployMutation.mutate(
       {
-        manifestSlug: selectedManifest.slug,
+        manifest: verifiedManifest,
         name: strategyName,
-        // constructorValues and config are empty for current simple manifest
+        constructorValues,
+        quoteTokenId: PLACEHOLDER_QUOTE_TOKEN_ID,
       },
       {
         onSuccess: (response) => {
@@ -96,7 +151,7 @@ export function StrategyDeployWizard({
         },
       }
     );
-  }, [selectedManifest, strategyName, deployMutation, onStrategyDeployed]);
+  }, [verifiedManifest, strategyName, constructorValues, deployMutation, onStrategyDeployed]);
 
   // Handle retry
   const handleRetry = useCallback(() => {
@@ -104,25 +159,31 @@ export function StrategyDeployWizard({
     handleDeploy();
   }, [handleDeploy]);
 
+  // Check if manifest has user-input params
+  const manifestHasUserParams = useMemo(() => {
+    if (!verifiedManifest) return false;
+    return hasUserInputParams(verifiedManifest);
+  }, [verifiedManifest]);
+
   // Validation logic for "Next" button
   const canGoNext = useCallback(() => {
-    // Step 0 (Manifest Selection): Need manifest selected
-    if (currentStep === 0) return isManifestSelected;
+    // Step 0 (Upload Manifest): Need valid manifest
+    if (currentStep === 0) return isManifestValid;
 
-    // Step 1 (Configuration): Need valid configuration
+    // Step 1 (Configuration): Need valid name and constructor values
     if (currentStep === 1) return isConfigurationValid;
 
-    // Step 2 (Review): No validation (deploy button handles action)
-    if (currentStep === 2) return false; // No "Next" on last step
+    // Step 2 (Review): No "Next" on last step
+    if (currentStep === 2) return false;
 
     return false;
-  }, [currentStep, isManifestSelected, isConfigurationValid]);
+  }, [currentStep, isManifestValid, isConfigurationValid]);
 
   // Get step title
   const getStepTitle = (step: number): string => {
     switch (step) {
       case 0:
-        return "Select Strategy Template";
+        return "Upload Strategy Manifest";
       case 1:
         return "Configure Your Strategy";
       case 2:
@@ -137,32 +198,37 @@ export function StrategyDeployWizard({
     switch (currentStep) {
       case 0:
         return (
-          <ManifestSelectionStep
-            manifests={manifestsData?.manifests ?? []}
-            isLoading={isLoadingManifests}
-            error={manifestsError}
-            selectedManifest={selectedManifest}
-            onManifestSelect={handleManifestSelect}
+          <ManifestUploadStep
+            verifiedManifest={verifiedManifest}
+            onManifestVerified={handleManifestVerify}
+            onManifestCleared={handleManifestCleared}
+            isVerifying={verifyMutation.isPending}
+            verificationErrors={verificationErrors}
+            verificationWarnings={verificationWarnings}
           />
         );
       case 1:
-        return selectedManifest ? (
+        return verifiedManifest ? (
           <StrategyConfigurationStep
-            manifest={selectedManifest}
+            manifest={verifiedManifest}
             strategyName={strategyName}
             onNameChange={setStrategyName}
+            constructorValues={constructorValues}
+            onConstructorValuesChange={setConstructorValues}
             onValidationChange={setIsConfigurationValid}
+            hasUserParams={manifestHasUserParams}
           />
         ) : (
           <div className="text-center text-slate-400">
-            Please select a strategy template first.
+            Please upload a manifest file first.
           </div>
         );
       case 2:
-        return selectedManifest ? (
+        return verifiedManifest ? (
           <DeployReviewStep
-            manifest={selectedManifest}
+            manifest={verifiedManifest}
             strategyName={strategyName}
+            constructorValues={constructorValues}
             deploymentResult={deploymentResult}
             deploymentError={deploymentError}
             isDeploying={deployMutation.isPending}

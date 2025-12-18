@@ -2,10 +2,9 @@
  * Strategy Manifest Type Definitions
  *
  * Manifests define deployable strategy contracts with their ABI, bytecode,
- * constructor parameters, capabilities, and user-configurable options.
+ * and constructor parameters. These are user-uploaded JSON files that
+ * contain everything needed to deploy a strategy contract.
  */
-
-import type { AnyToken } from './token.js';
 
 // =============================================================================
 // CONSTRUCTOR PARAMETER TYPES
@@ -39,22 +38,91 @@ export type SolidityType =
   | 'bytes32'
   | 'string';
 
+// =============================================================================
+// UI ELEMENT TYPES
+// =============================================================================
+
 /**
- * Validation rules for constructor parameters
+ * UI element types for constructor parameter inputs
+ * These map to actual constructor parameters
  */
-export interface ConstructorParamValidation {
+export type ParamUIElement =
+  | 'text' // Free-form text input (string, bytes32)
+  | 'bigint' // Large integer input for uint256/int256 (stored as string)
+  | 'number' // Decimal number input (percentages, fractional ETH)
+  | 'evm-address' // EVM address with EIP-55 checksum validation
+  | 'boolean' // Toggle switch
+  | 'hidden'; // Not shown in UI (operator/core addresses)
+
+/**
+ * UI layout element types (not mapped to constructor params)
+ * Used for visual organization of the form
+ */
+export type LayoutUIElement =
+  | 'section' // Section heading with optional description
+  | 'separator'; // Visual divider between groups
+
+/**
+ * UI configuration for a constructor parameter
+ * Required for user-input params, ignored for others
+ */
+export interface ConstructorParamUI {
   /**
-   * Minimum value (for uint/int types, as string for bigint compatibility)
+   * UI element type to render
+   */
+  element: ParamUIElement;
+
+  /**
+   * Display label for the field
+   * @example "Target APR (%)"
+   */
+  label: string;
+
+  /**
+   * Help text describing the parameter
+   */
+  description?: string;
+
+  /**
+   * Placeholder text shown in empty input
+   */
+  placeholder?: string;
+
+  /**
+   * Default value (as string for consistency)
+   */
+  default?: string;
+
+  /**
+   * Whether the parameter is required
+   * @default true
+   */
+  required?: boolean;
+
+  /**
+   * Minimum value (for bigint or number types, as string)
    */
   min?: string;
 
   /**
-   * Maximum value (for uint/int types, as string for bigint compatibility)
+   * Maximum value (for bigint or number types, as string)
    */
   max?: string;
 
   /**
-   * Regex pattern (for string/bytes types)
+   * Step value for number inputs (e.g., "0.01" for percentages)
+   */
+  step?: string;
+
+  /**
+   * Decimal places for number inputs
+   * Used to convert user decimal input to bigint on submit
+   * @example 2 means "5.5" → "550" (multiply by 100)
+   */
+  decimals?: number;
+
+  /**
+   * Regex pattern for text inputs
    */
   pattern?: string;
 }
@@ -81,167 +149,42 @@ export interface ConstructorParam {
   source: ConstructorParamSource;
 
   /**
-   * UI label (for user-input parameters)
-   * @example "Target APR (%)"
+   * UI configuration (required for user-input params)
    */
-  label?: string;
+  ui?: ConstructorParamUI;
+}
+
+// =============================================================================
+// LAYOUT ELEMENTS
+// =============================================================================
+
+/**
+ * Layout element for visual organization (not a constructor param)
+ */
+export interface LayoutElement {
+  /**
+   * Layout element type
+   */
+  element: LayoutUIElement;
 
   /**
-   * Help text describing the parameter
+   * Section title (for 'section' elements)
+   */
+  title?: string;
+
+  /**
+   * Section description (for 'section' elements)
    */
   description?: string;
-
-  /**
-   * Whether the parameter is required (default: true for user-input)
-   */
-  required?: boolean;
-
-  /**
-   * Default value (as string for consistency)
-   */
-  default?: string;
-
-  /**
-   * Validation rules
-   */
-  validation?: ConstructorParamValidation;
-}
-
-// =============================================================================
-// CAPABILITY TYPES
-// =============================================================================
-
-/**
- * Strategy capabilities (interfaces implemented by the contract)
- *
- * These flags indicate which interfaces the strategy contract implements,
- * enabling the UI to show relevant configuration options and features.
- */
-export interface StrategyCapabilities {
-  /**
-   * Implements IFunding - Can receive deposits and process withdrawals
-   */
-  funding: boolean;
-
-  /**
-   * Implements IOhlcConsumer - Can subscribe to OHLC price feeds
-   */
-  ohlcConsumer: boolean;
-
-  /**
-   * Implements IPoolConsumer - Can receive pool state updates
-   */
-  poolConsumer: boolean;
-
-  /**
-   * Implements IBalanceConsumer - Can receive balance updates
-   */
-  balanceConsumer: boolean;
-
-  /**
-   * Implements IUniswapV3Actions - Can manage Uniswap V3 positions
-   */
-  uniswapV3Actions: boolean;
-}
-
-// =============================================================================
-// USER PARAMETER TYPES (for strategy.config)
-// =============================================================================
-
-/**
- * Type of user-configurable parameter
- *
- * These parameters are stored in strategy.config after deployment
- * and can be modified without redeploying the contract.
- */
-export type UserParamType =
-  | 'number'
-  | 'percentage'
-  | 'token'
-  | 'address'
-  | 'boolean'
-  | 'select';
-
-/**
- * Option for select-type user parameters
- */
-export interface UserParamOption {
-  value: string;
-  label: string;
 }
 
 /**
- * Validation rules for user parameters
+ * Form item - either a constructor param or layout element
+ * Used in formLayout array for rich form organization
  */
-export interface UserParamValidation {
-  /**
-   * Minimum value (for number/percentage types)
-   */
-  min?: number;
-
-  /**
-   * Maximum value (for number/percentage types)
-   */
-  max?: number;
-
-  /**
-   * Step increment (for number/percentage types)
-   */
-  step?: number;
-
-  /**
-   * Regex pattern (for address/string types)
-   */
-  pattern?: string;
-}
-
-/**
- * User-configurable parameter definition
- *
- * Describes a parameter that users can configure when deploying
- * or modifying a strategy. Stored in strategy.config as JSON.
- */
-export interface UserParam {
-  /**
-   * Key in strategy.config where this value is stored
-   */
-  name: string;
-
-  /**
-   * Type of the parameter (determines UI input)
-   */
-  type: UserParamType;
-
-  /**
-   * Display label in the UI
-   */
-  label: string;
-
-  /**
-   * Help text describing the parameter
-   */
-  description: string;
-
-  /**
-   * Whether the parameter must be provided
-   */
-  required: boolean;
-
-  /**
-   * Default value
-   */
-  default?: unknown;
-
-  /**
-   * Available options (for 'select' type only)
-   */
-  options?: UserParamOption[];
-
-  /**
-   * Validation rules
-   */
-  validation?: UserParamValidation;
-}
+export type FormItem =
+  | { type: 'param'; param: ConstructorParam }
+  | { type: 'layout'; layout: LayoutElement };
 
 // =============================================================================
 // STRATEGY MANIFEST
@@ -250,48 +193,18 @@ export interface UserParam {
 /**
  * Strategy Manifest
  *
- * Complete definition for a deployable strategy contract, including:
- * - Contract artifacts (ABI, bytecode)
- * - Constructor parameters and their sources
- * - Capability flags for UI feature gating
- * - User-configurable parameters for strategy.config
- * - Metadata for display and organization
+ * User-uploaded JSON file containing everything needed to deploy a strategy contract.
+ * This is NOT a database model - it's the structure of uploaded manifest files.
+ *
+ * Key design:
+ * - No database fields (id, createdAt, etc.) - those are on Strategy model
+ * - Embedded in Strategy.manifest JSON field after upload
+ * - Validated by ManifestVerificationService before storage
  */
 export interface StrategyManifest {
   // ============================================================================
-  // DATABASE FIELDS
-  // ============================================================================
-
-  /**
-   * Unique identifier (database-generated cuid)
-   */
-  id: string;
-
-  /**
-   * Creation timestamp
-   */
-  createdAt: Date;
-
-  /**
-   * Last update timestamp
-   */
-  updatedAt: Date;
-
-  // ============================================================================
   // IDENTIFICATION
   // ============================================================================
-
-  /**
-   * URL-friendly unique identifier
-   * @example "funding-example-v1", "delta-neutral-v1"
-   */
-  slug: string;
-
-  /**
-   * Semantic version of the manifest/contract
-   * @example "1.0.0"
-   */
-  version: string;
 
   /**
    * Human-readable display name
@@ -300,9 +213,20 @@ export interface StrategyManifest {
   name: string;
 
   /**
+   * Semantic version of the manifest/contract
+   * @example "1.0.0"
+   */
+  version: string;
+
+  /**
    * Detailed description (supports markdown)
    */
-  description: string;
+  description?: string;
+
+  /**
+   * Author or organization name
+   */
+  author?: string;
 
   // ============================================================================
   // CONTRACT ARTIFACTS
@@ -318,7 +242,7 @@ export interface StrategyManifest {
    * Compiled bytecode (0x prefixed)
    * Used for contract deployment
    */
-  bytecode: string;
+  bytecode: `0x${string}`;
 
   // ============================================================================
   // PARAMETERS
@@ -331,69 +255,20 @@ export interface StrategyManifest {
   constructorParams: ConstructorParam[];
 
   /**
-   * User-configurable parameters
-   * Stored in strategy.config after deployment
+   * Optional form layout with sections and separators
+   * If not provided, params are rendered in order without grouping
    */
-  userParams: UserParam[];
-
-  // ============================================================================
-  // CAPABILITIES
-  // ============================================================================
-
-  /**
-   * Capability flags indicating implemented interfaces
-   */
-  capabilities: StrategyCapabilities;
-
-  // ============================================================================
-  // BASIC CURRENCY
-  // ============================================================================
-
-  /**
-   * Basic currency ID for metrics aggregation
-   * All positions in strategies using this manifest should use
-   * quote tokens linked to this basic currency.
-   */
-  basicCurrencyId: string;
-
-  /**
-   * Basic currency token (populated when included in query)
-   */
-  basicCurrency?: AnyToken;
-
-  // ============================================================================
-  // STATUS
-  // ============================================================================
-
-  /**
-   * Whether this manifest is available for new deployments
-   */
-  isActive: boolean;
-
-  /**
-   * Whether the contract has been audited
-   */
-  isAudited: boolean;
+  formLayout?: FormItem[];
 
   // ============================================================================
   // METADATA
   // ============================================================================
 
   /**
-   * Author or organization name
-   */
-  author?: string;
-
-  /**
-   * Link to source code repository
-   */
-  repository?: string;
-
-  /**
    * Tags for filtering and categorization
    * @example ["funding", "example", "beginner"]
    */
-  tags: string[];
+  tags?: string[];
 }
 
 // =============================================================================
@@ -401,29 +276,11 @@ export interface StrategyManifest {
 // =============================================================================
 
 /**
- * Creates empty/default capabilities object
- */
-export function createEmptyCapabilities(): StrategyCapabilities {
-  return {
-    funding: false,
-    ohlcConsumer: false,
-    poolConsumer: false,
-    balanceConsumer: false,
-    uniswapV3Actions: false,
-  };
-}
-
-/**
- * Checks if a manifest has funding capability
- */
-export function hasFundingCapability(manifest: StrategyManifest): boolean {
-  return manifest.capabilities.funding;
-}
-
-/**
  * Gets constructor params that require user input
  */
-export function getUserInputParams(manifest: StrategyManifest): ConstructorParam[] {
+export function getUserInputParams(
+  manifest: StrategyManifest
+): ConstructorParam[] {
   return manifest.constructorParams.filter((p) => p.source === 'user-input');
 }
 
@@ -435,8 +292,26 @@ export function hasUserInputParams(manifest: StrategyManifest): boolean {
 }
 
 /**
- * Checks if manifest has any user-configurable params
+ * Gets the default UI element for a Solidity type
  */
-export function hasUserParams(manifest: StrategyManifest): boolean {
-  return manifest.userParams.length > 0;
+export function getDefaultUIElement(solidityType: SolidityType): ParamUIElement {
+  switch (solidityType) {
+    case 'address':
+      return 'evm-address';
+    case 'bool':
+      return 'boolean';
+    case 'string':
+    case 'bytes32':
+      return 'text';
+    case 'uint256':
+    case 'uint128':
+    case 'uint64':
+    case 'uint32':
+    case 'uint16':
+    case 'uint8':
+    case 'int256':
+      return 'bigint';
+    default:
+      return 'text';
+  }
 }

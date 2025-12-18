@@ -189,21 +189,18 @@ export {
 export type {
   ConstructorParamSource,
   SolidityType,
-  ConstructorParamValidation,
+  ParamUIElement,
+  LayoutUIElement,
+  ConstructorParamUI,
   ConstructorParam,
-  StrategyCapabilities,
-  UserParamType,
-  UserParamOption,
-  UserParamValidation,
-  UserParam,
+  LayoutElement,
+  FormItem,
   StrategyManifest,
 } from './strategy-manifest.js';
 
 // Strategy Manifest utility functions
 export {
-  createEmptyCapabilities,
-  hasFundingCapability,
   getUserInputParams,
   hasUserInputParams,
-  hasUserParams,
+  getDefaultUIElement,
 } from './strategy-manifest.js';

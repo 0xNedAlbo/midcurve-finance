@@ -6,8 +6,8 @@
  * Authentication: Required (session or API key)
  *
  * This endpoint orchestrates strategy deployment by:
- * 1. Validating the manifest and request parameters
- * 2. Creating a strategy record in 'pending' state
+ * 1. Validating the manifest (re-verify for security)
+ * 2. Creating a strategy record in 'pending' state with embedded manifest
  * 3. Calling the signer service to deploy the contract
  * 4. Returning deployment information with contract address
  */
@@ -30,8 +30,12 @@ import type {
 } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getStrategyManifestService, getStrategyService } from '@/lib/services';
-import { SignerClient, SignerClientError } from '@midcurve/services';
+import { getStrategyService } from '@/lib/services';
+import {
+  SignerClient,
+  SignerClientError,
+  ManifestVerificationService,
+} from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,42 +43,28 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/v1/strategies/deploy
  *
- * Initiate deployment of a strategy from a manifest.
+ * Deploy a strategy from an uploaded manifest.
  *
  * Request body:
- * - manifestSlug: Slug of the manifest to deploy
+ * - manifest: Full strategy manifest (ABI, bytecode, constructorParams)
  * - name: User's name for this strategy instance
- * - constructorValues (optional): Values for user-input constructor parameters
- * - config (optional): Initial strategy.config values
+ * - constructorValues: Values for user-input constructor parameters
+ * - quoteTokenId: Quote token ID for metrics denomination
  *
  * Returns: Strategy record with deployment status
  *
  * Example request:
  * {
- *   "manifestSlug": "funding-example-v1",
- *   "name": "My Funding Strategy",
- *   "constructorValues": {},
- *   "config": {}
- * }
- *
- * Example response:
- * {
- *   "success": true,
- *   "data": {
- *     "strategy": {
- *       "id": "cuid",
- *       "name": "My Funding Strategy",
- *       "state": "pending",
- *       ...
- *     },
- *     "automationWallet": {
- *       "id": "pending",
- *       "address": "pending"
- *     },
- *     "deployment": {
- *       "status": "pending"
- *     }
- *   }
+ *   "manifest": {
+ *     "name": "Delta Neutral Strategy",
+ *     "version": "1.0.0",
+ *     "abi": [...],
+ *     "bytecode": "0x...",
+ *     "constructorParams": [...]
+ *   },
+ *   "name": "My Delta Neutral Strategy",
+ *   "constructorValues": { "_targetApr": "500" },
+ *   "quoteTokenId": "token-id-here"
  * }
  */
 export async function POST(request: NextRequest): Promise<Response> {
@@ -115,7 +105,8 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { manifestSlug, name, constructorValues, config } = validation.data;
+      const { manifest, name, constructorValues, quoteTokenId } =
+        validation.data;
 
       apiLog.businessOperation(
         apiLogger,
@@ -124,46 +115,31 @@ export async function POST(request: NextRequest): Promise<Response> {
         'strategy',
         user.id,
         {
-          manifestSlug,
+          manifestName: manifest.name,
+          manifestVersion: manifest.version,
           name,
-          hasConstructorValues: !!constructorValues,
-          hasConfig: !!config,
+          hasConstructorValues: Object.keys(constructorValues).length > 0,
         }
       );
 
-      // 2. Fetch the manifest
-      const manifest = await getStrategyManifestService().findBySlug(
-        manifestSlug,
-        { includeBasicCurrency: true }
-      );
+      // 2. Re-verify manifest for security (don't trust client-side validation)
+      const verificationService = new ManifestVerificationService();
+      const verificationResult = verificationService.verify(manifest);
 
-      if (!manifest) {
+      if (!verificationResult.valid) {
         apiLog.businessOperation(
           apiLogger,
           requestId,
-          'not-found',
-          'manifest',
+          'invalid-manifest',
+          'strategy',
           user.id,
-          { manifestSlug }
+          { errors: verificationResult.errors }
         );
 
-        const errorResponse = createErrorResponse(
-          ApiErrorCode.NOT_FOUND,
-          `Strategy manifest '${manifestSlug}' not found`
-        );
-
-        apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
-
-        return NextResponse.json(errorResponse, {
-          status: ErrorCodeToHttpStatus[ApiErrorCode.NOT_FOUND],
-        });
-      }
-
-      // 3. Verify manifest is active
-      if (!manifest.isActive) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.VALIDATION_ERROR,
-          `Strategy manifest '${manifestSlug}' is not active`
+          'Manifest validation failed',
+          verificationResult.errors
         );
 
         apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
@@ -173,7 +149,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // 4. Get user's primary wallet address (for owner parameter)
+      // 3. Get user's primary wallet address (for owner parameter)
       const primaryWallet = user.wallets?.find((w) => w.isPrimary);
       if (!primaryWallet) {
         const errorResponse = createErrorResponse(
@@ -186,31 +162,30 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // 5. Create strategy record in 'pending' state
+      // 4. Create strategy record in 'pending' state with embedded manifest
       const strategy = await getStrategyService().create({
         userId: user.id,
         name,
-        strategyType: manifest.slug, // Use manifest slug as strategy type
+        strategyType: manifest.name, // Use manifest name as strategy type
         config: {
-          ...config,
           // Store constructor values in config for deployment
-          _constructorValues: constructorValues ?? {},
+          _constructorValues: constructorValues,
         },
-        quoteTokenId: manifest.basicCurrencyId,
-        manifestId: manifest.id,
+        quoteTokenId,
+        manifest: verificationResult.parsedManifest!, // Use verified manifest
       });
 
       apiLogger.info(
         {
           requestId,
           strategyId: strategy.id,
-          manifestSlug,
+          manifestName: manifest.name,
           userId: user.id,
         },
         'Strategy record created, calling signer service for deployment'
       );
 
-      // 6. Call signer service to deploy the contract
+      // 5. Call signer service to deploy the contract
       // This creates the automation wallet and deploys the contract
       const SEMSEE_CHAIN_ID = 31337; // SEMSEE local chain (matches genesis.json)
       let deploymentResult;
@@ -250,13 +225,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         throw error;
       }
 
-      // 7. Re-fetch strategy to get updated contract address
+      // 6. Re-fetch strategy to get updated contract address
       const updatedStrategy = await getStrategyService().findById(strategy.id);
       const serializedStrategy = serializeBigInt(
         updatedStrategy ?? strategy
       ) as unknown as SerializedStrategy;
 
-      // 8. Build response with deployment result
+      // 7. Build response with deployment result
       const automationWallet: DeployAutomationWalletInfo = {
         id: deploymentResult.automationWallet.id,
         address: deploymentResult.automationWallet.address,
@@ -280,7 +255,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           strategyId: strategy.id,
           contractAddress: deploymentResult.contractAddress,
           transactionHash: deploymentResult.transactionHash,
-          manifestSlug,
+          manifestName: manifest.name,
           userId: user.id,
         },
         'Strategy deployed successfully'

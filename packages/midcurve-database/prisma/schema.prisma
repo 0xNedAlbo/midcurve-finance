@@ -49,57 +49,6 @@ enum StrategyPositionStatus {
   closed
 }
 
-// StrategyManifest - Deployable strategy contract definition
-// Contains ABI, bytecode, and parameter schemas for strategy deployment
-model StrategyManifest {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Identification
-  slug        String @unique // "funding-example-v1", "delta-neutral-v1"
-  version     String // "1.0.0"
-  name        String // "Funding Example Strategy"
-  description String // User-friendly description (supports markdown)
-
-  // Contract Artifacts
-  abi      Json // Full ABI array (viem-compatible)
-  bytecode String // Compiled bytecode (0x...)
-
-  // Constructor Parameters (JSON array of ConstructorParam objects)
-  // Each param: { name, type, source, label?, description?, required?, default?, validation? }
-  constructorParams Json
-
-  // Capabilities (JSON object)
-  // { funding: bool, ohlcConsumer: bool, poolConsumer: bool, balanceConsumer: bool, uniswapV3Actions: bool }
-  capabilities Json
-
-  // Basic Currency - strategy's quote token for metrics
-  basicCurrencyId String
-  basicCurrency   Token  @relation("ManifestBasicCurrency", fields: [basicCurrencyId], references: [id])
-
-  // User-Configurable Parameters (JSON array of UserParam objects)
-  // Stored in strategy.config at deployment
-  // Each param: { name, type, label, description, required, default?, options?, validation? }
-  userParams Json
-
-  // Status
-  isActive  Boolean @default(true) // Available for deployment
-  isAudited Boolean @default(false) // Has been audited
-
-  // Metadata
-  author     String?
-  repository String?
-  tags       String[] // ["yield", "funding", "example"]
-
-  // Relations
-  strategies Strategy[]
-
-  @@index([isActive])
-  @@index([basicCurrencyId])
-  @@map("strategy_manifests")
-}
-
 // Strategy - Automated trading/liquidity management unit
 // Can manage multiple positions across different protocols
 model Strategy {
@@ -134,9 +83,10 @@ model Strategy {
   // Free-form config (JSON)
   config Json
 
-  // Manifest used for deployment (nullable for manually created strategies)
-  manifestId String?
-  manifest   StrategyManifest? @relation(fields: [manifestId], references: [id])
+  // Embedded manifest used for deployment (nullable for manually created strategies)
+  // Contains: name, version, description, author, abi, bytecode, constructorParams, tags
+  // See StrategyManifest type in @midcurve/shared for structure
+  manifest Json?
 
   // Relations
   automationWallets    AutomationWallet[]
@@ -148,7 +98,6 @@ model Strategy {
   @@index([status])
   @@index([strategyType])
   @@index([quoteTokenId])
-  @@index([manifestId])
   @@map("strategies")
 }
 
@@ -397,7 +346,6 @@ model Token {
   poolsAsToken0        Pool[]                @relation("PoolToken0")
   poolsAsToken1        Pool[]                @relation("PoolToken1")
   strategies           Strategy[]
-  strategyManifests    StrategyManifest[]    @relation("ManifestBasicCurrency")
   strategyLedgerEvents StrategyLedgerEvent[]
 
   // Indexes for efficient queries

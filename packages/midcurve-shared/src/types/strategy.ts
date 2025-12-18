@@ -7,6 +7,7 @@
  */
 
 import type { StrategyPositionInterface } from './strategy-position/strategy-position.interface.js';
+import type { StrategyManifest } from './strategy-manifest.js';
 import type { AnyToken } from './token.js';
 
 // =============================================================================
@@ -268,6 +269,13 @@ export interface Strategy {
    * Contains parameters, thresholds, target allocations, etc.
    */
   config: StrategyConfig;
+
+  /**
+   * Embedded manifest used for deployment
+   * Contains ABI, bytecode, and constructor parameter definitions.
+   * Null for manually created strategies without manifest.
+   */
+  manifest?: StrategyManifest | null;
 
   // ============================================================================
   // RELATIONS (optional, populated when included)

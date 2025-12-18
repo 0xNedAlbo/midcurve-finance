@@ -294,14 +294,17 @@ export class EvmClient {
 
       clearTimeout(timeoutId);
 
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
 
       // 202 is a valid response for async operations
       if (!response.ok && response.status !== 202) {
         throw new EvmClientError(
-          data.error || `EVM API request failed: ${response.status}`,
+          (data.error as string) || `EVM API request failed: ${response.status}`,
           response.status,
-          data.code,
+          data.code as string | undefined,
           data
         );
       }

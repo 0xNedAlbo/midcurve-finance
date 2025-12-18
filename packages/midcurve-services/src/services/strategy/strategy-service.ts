@@ -12,6 +12,7 @@ import type {
   Strategy,
   StrategyStatus,
   StrategyConfig,
+  StrategyManifest,
   AnyToken,
   StrategyAutomationWallet,
 } from '@midcurve/shared';
@@ -59,6 +60,7 @@ interface StrategyDbResult {
   chainId: number | null;
   quoteTokenId: string;
   config: unknown;
+  manifest?: unknown;
   quoteToken?: any;
   automationWallets?: any[];
 }
@@ -125,7 +127,9 @@ export class StrategyService {
           strategyType: input.strategyType,
           config: input.config as Prisma.InputJsonValue,
           quoteTokenId: input.quoteTokenId,
-          manifestId: input.manifestId,
+          manifest: input.manifest
+            ? (input.manifest as unknown as Prisma.InputJsonValue)
+            : undefined,
           // Status defaults to 'pending'
           // NOTE: Metrics are not stored - computed on-demand by StrategyMetricsService
         },
@@ -769,6 +773,9 @@ export class StrategyService {
       chainId: dbResult.chainId,
       quoteTokenId: dbResult.quoteTokenId,
       config: dbResult.config as StrategyConfig,
+      manifest: dbResult.manifest
+        ? (dbResult.manifest as StrategyManifest)
+        : null,
     };
 
     // Add optional relations if present
