@@ -6,7 +6,6 @@
  * Works for all protocols (Uniswap V3, Orca, etc.)
  */
 
-import Image from "next/image";
 import { formatProtocolName } from "@/lib/format-helpers";
 
 interface Token {
@@ -58,14 +57,14 @@ export function PositionCardHeader({
       {/* Token Icons */}
       <div className="flex items-center">
         <div className="flex items-center -space-x-2">
-          <Image
+          <img
             src={baseLogo}
             alt={baseToken.symbol}
             width={28}
             height={28}
             className="rounded-full border-2 border-slate-700 bg-slate-800 relative z-10 md:w-8 md:h-8"
           />
-          <Image
+          <img
             src={quoteLogo}
             alt={quoteToken.symbol}
             width={28}

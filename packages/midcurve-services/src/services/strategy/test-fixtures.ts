@@ -48,6 +48,7 @@ export function createMockStrategyInput(
     name: 'Test Delta Neutral Strategy',
     strategyType: 'delta-neutral',
     config: mockDeltaNeutralConfig,
+    quoteTokenId: MOCK_TOKEN_ID,
     ...overrides,
   };
 }
@@ -297,31 +298,42 @@ export function createMockAutomationWalletDbResult(
 // STATE TRANSITION TEST DATA
 // ============================================================================
 
+/**
+ * Valid state transitions based on the LifecycleMixin:
+ * - pending -> deploying (deploy initiated)
+ * - deploying -> deployed (contract deployed)
+ * - deployed -> starting (start event sent)
+ * - starting -> active (strategy started)
+ * - active -> shutting_down (shutdown initiated)
+ * - shutting_down -> shutdown (shutdown complete)
+ */
 export const VALID_TRANSITIONS: Array<{
   from: StrategyStatus;
   to: StrategyStatus;
-  method: 'activate' | 'pause' | 'resume' | 'shutdown';
+  method: 'deploy' | 'confirmDeployment' | 'start' | 'confirmStart' | 'shutdown' | 'confirmShutdown';
 }> = [
-  { from: 'pending', to: 'active', method: 'activate' },
-  { from: 'active', to: 'paused', method: 'pause' },
-  { from: 'paused', to: 'active', method: 'resume' },
-  { from: 'active', to: 'shutdown', method: 'shutdown' },
-  { from: 'paused', to: 'shutdown', method: 'shutdown' },
+  { from: 'pending', to: 'deploying', method: 'deploy' },
+  { from: 'deploying', to: 'deployed', method: 'confirmDeployment' },
+  { from: 'deployed', to: 'starting', method: 'start' },
+  { from: 'starting', to: 'active', method: 'confirmStart' },
+  { from: 'active', to: 'shutting_down', method: 'shutdown' },
+  { from: 'shutting_down', to: 'shutdown', method: 'confirmShutdown' },
 ];
 
 export const INVALID_TRANSITIONS: Array<{
   from: StrategyStatus;
   to: StrategyStatus;
-  method: 'activate' | 'pause' | 'resume' | 'shutdown';
+  method: 'deploy' | 'confirmDeployment' | 'start' | 'confirmStart' | 'shutdown' | 'confirmShutdown';
 }> = [
-  { from: 'active', to: 'active', method: 'activate' }, // Already active
-  { from: 'paused', to: 'active', method: 'activate' }, // Should use resume
-  { from: 'shutdown', to: 'active', method: 'activate' }, // Terminal state
-  { from: 'pending', to: 'paused', method: 'pause' }, // Not active yet
-  { from: 'shutdown', to: 'paused', method: 'pause' }, // Terminal state
-  { from: 'pending', to: 'active', method: 'resume' }, // Not paused
-  { from: 'active', to: 'active', method: 'resume' }, // Not paused
-  { from: 'shutdown', to: 'active', method: 'resume' }, // Terminal state
-  { from: 'pending', to: 'shutdown', method: 'shutdown' }, // Not deployed yet
-  { from: 'shutdown', to: 'shutdown', method: 'shutdown' }, // Already shutdown
+  { from: 'active', to: 'deploying', method: 'deploy' }, // Already active, can't deploy
+  { from: 'deployed', to: 'deploying', method: 'deploy' }, // Already deployed
+  { from: 'shutdown', to: 'deploying', method: 'deploy' }, // Terminal state
+  { from: 'pending', to: 'deployed', method: 'confirmDeployment' }, // Not deploying
+  { from: 'active', to: 'deployed', method: 'confirmDeployment' }, // Already past deployed
+  { from: 'pending', to: 'starting', method: 'start' }, // Not deployed yet
+  { from: 'active', to: 'starting', method: 'start' }, // Already active
+  { from: 'shutdown', to: 'starting', method: 'start' }, // Terminal state
+  { from: 'pending', to: 'shutting_down', method: 'shutdown' }, // Not deployed yet
+  { from: 'deployed', to: 'shutting_down', method: 'shutdown' }, // Not active yet
+  { from: 'shutdown', to: 'shutdown', method: 'confirmShutdown' }, // Already shutdown
 ];

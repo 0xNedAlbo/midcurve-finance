@@ -39,7 +39,6 @@ describe('AuthUserService', () => {
       const userWithRelations = {
         ...ALICE.dbResult,
         walletAddresses: [ALICE_ETHEREUM_WALLET.dbResult],
-        apiKeys: [],
       };
       prismaMock.user.findUnique.mockResolvedValue(userWithRelations as any);
 
@@ -52,17 +51,6 @@ describe('AuthUserService', () => {
         where: { id: 'user_alice_001' },
         include: {
           walletAddresses: true,
-          apiKeys: {
-            select: {
-              id: true,
-              name: true,
-              keyPrefix: true,
-              lastUsed: true,
-              createdAt: true,
-              updatedAt: true,
-              userId: true,
-            },
-          },
         },
       });
     });

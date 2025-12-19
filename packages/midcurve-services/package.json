@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist",
-    "dev": "tsc --watch",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --watch",
     "clean": "rm -rf dist",
     "type-check": "tsc --noEmit",
     "test": "node --env-file=.env.test ./node_modules/.bin/vitest",

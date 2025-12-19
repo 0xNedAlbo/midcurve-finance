@@ -1,6 +1,4 @@
-"use client";
-
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import {
   Loader2,
   CheckCircle,
@@ -36,7 +34,7 @@ export function DeployReviewStep({
   onDeploy,
   onRetry,
 }: DeployReviewStepProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Get user input params for display
@@ -163,7 +161,7 @@ export function DeployReviewStep({
         {/* Navigation Button */}
         <div className="flex justify-center">
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => navigate("/dashboard")}
             className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium cursor-pointer"
           >
             View Dashboard

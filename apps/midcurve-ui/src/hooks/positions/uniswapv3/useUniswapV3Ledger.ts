@@ -7,7 +7,7 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { LedgerEventData } from '@midcurve/api-shared';
-import { apiClient } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 
 /**
  * Fetch ledger events for a Uniswap V3 position
@@ -27,7 +27,7 @@ export function useUniswapV3Ledger(
     queryKey: ['uniswapv3-ledger', chainId, nftId],
     queryFn: async () => {
       // apiClient extracts response.data automatically
-      return apiClient<LedgerEventData[]>(
+      return apiClientFn<LedgerEventData[]>(
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}/ledger`
       );
     },

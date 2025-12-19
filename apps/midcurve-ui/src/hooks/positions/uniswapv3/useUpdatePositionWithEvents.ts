@@ -13,7 +13,7 @@
 
 import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { apiClient, ApiError } from '@/lib/api-client';
+import { apiClientFn, ApiError } from '@/lib/api-client';
 import { updatePositionInListCache } from '@/lib/update-position-in-list-cache';
 import type {
   UpdateUniswapV3PositionRequest,
@@ -50,7 +50,7 @@ export function useUpdatePositionWithEvents(
         events: params.events,
       };
 
-      return apiClient<UpdateUniswapV3PositionData>(
+      return apiClientFn<UpdateUniswapV3PositionData>(
         `/api/v1/positions/uniswapv3/${params.chainId}/${params.nftId}`,
         {
           method: 'PATCH',

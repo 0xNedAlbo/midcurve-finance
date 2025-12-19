@@ -18,7 +18,7 @@ import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
 import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
-import { apiClient } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 
 interface UniswapV3WithdrawFormProps {
   position: ListPositionData;
@@ -102,7 +102,7 @@ export function UniswapV3WithdrawForm({
       const poolAddress = (position.pool.config as { address: string }).address;
 
       // Note: apiClient unwraps the 'data' field, so response = { pool: {...}, metrics?: {...} }
-      const response = await apiClient<{ pool: { state: { sqrtPriceX96: string } } }>(
+      const response = await apiClientFn<{ pool: { state: { sqrtPriceX96: string } } }>(
         `/api/v1/pools/uniswapv3/${config.chainId}/${poolAddress}`,
         { method: 'GET' }
       );

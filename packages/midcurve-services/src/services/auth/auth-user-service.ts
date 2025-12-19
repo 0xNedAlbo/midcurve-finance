@@ -31,25 +31,13 @@ export class AuthUserService {
    * Find user by ID with relations
    *
    * @param userId - User ID
-   * @returns User with wallet addresses and API keys, or null if not found
+   * @returns User with wallet addresses, or null if not found
    */
   async findUserById(userId: string): Promise<User | null> {
     return this.prisma.user.findUnique({
       where: { id: userId },
       include: {
         walletAddresses: true,
-        apiKeys: {
-          select: {
-            id: true,
-            name: true,
-            keyPrefix: true,
-            lastUsed: true,
-            createdAt: true,
-            updatedAt: true,
-            userId: true,
-            // Exclude keyHash for security
-          },
-        },
       },
     });
   }

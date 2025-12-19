@@ -22,7 +22,7 @@
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { apiClient } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
 
 export function useUniswapV3Position(
@@ -33,7 +33,7 @@ export function useUniswapV3Position(
   return useQuery({
     queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
     queryFn: async () => {
-      return apiClient<GetUniswapV3PositionResponse>(
+      return apiClientFn<GetUniswapV3PositionResponse>(
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}`
       );
     },

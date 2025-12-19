@@ -2,22 +2,16 @@
   "compilerOptions": {
     /* Language and Environment */
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "jsx": "preserve",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     /* Modules */
     "module": "ESNext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": false,
+    "allowImportingTsExtensions": true,
     /* Type Checking */
     "strict": true,
     "noImplicitAny": true,
-    // TODO: Enable noUncheckedIndexedAccess per Vercel recommendations
-    // "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
@@ -32,41 +26,24 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": true,
     /* Skip Checking */
     "skipLibCheck": true,
     /* Path Mapping */
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./src/*"]
     },
-    /* Next.js Specific */
-    "incremental": true,
-    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json",
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "allowJs": true
+    /* Vite types */
+    "types": ["vite/client"]
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts"
-  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": [
     "node_modules",
-    ".next",
-    "out",
     "dist",
     "build",
-    "vitest.config.ts",
     "playwright.config.ts",
     "tests",
+    "vite.config.ts",
     "**/*.test.ts",
     "**/*.e2e.test.ts"
   ]

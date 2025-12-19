@@ -7,7 +7,7 @@
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { apiClient } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 import type {
   ListPositionsParams,
   ListPositionsResponse,
@@ -45,7 +45,7 @@ export function usePositionsList(
         searchParams.toString() ? `?${searchParams}` : ''
       }`;
 
-      return apiClient<ListPositionsResponse>(url);
+      return apiClientFn<ListPositionsResponse>(url);
     },
     staleTime: 30_000, // 30 seconds (positions change frequently)
     ...options,

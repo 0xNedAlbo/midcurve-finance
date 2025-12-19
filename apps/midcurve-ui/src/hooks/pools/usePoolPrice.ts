@@ -15,7 +15,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { GetPoolPriceResponse } from '@midcurve/api-shared';
-import { apiClient } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 
 /**
  * Hook props
@@ -121,7 +121,7 @@ export function usePoolPrice({
       }
 
       // apiClient automatically unwraps the response and handles errors
-      return apiClient<GetPoolPriceResponse>(
+      return apiClientFn<GetPoolPriceResponse>(
         `/api/v1/pools/uniswapv3/${chainId}/${poolAddress}/pool-price`
       );
     },

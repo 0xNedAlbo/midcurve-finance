@@ -18,8 +18,14 @@ UPDATE "strategies" SET status = 'active' WHERE status = 'paused';
 -- Create new enum without 'paused'
 CREATE TYPE "StrategyStatus_new" AS ENUM ('pending', 'deploying', 'deployed', 'starting', 'active', 'shutting_down', 'shutdown');
 
+-- Drop the default before changing the type (required for enum changes)
+ALTER TABLE "strategies" ALTER COLUMN "status" DROP DEFAULT;
+
 -- Update the column to use the new enum
 ALTER TABLE "strategies" ALTER COLUMN "status" TYPE "StrategyStatus_new" USING ("status"::text::"StrategyStatus_new");
+
+-- Restore the default value with the new enum type
+ALTER TABLE "strategies" ALTER COLUMN "status" SET DEFAULT 'pending'::"StrategyStatus_new";
 
 -- Drop old enum and rename new one
 DROP TYPE "StrategyStatus";

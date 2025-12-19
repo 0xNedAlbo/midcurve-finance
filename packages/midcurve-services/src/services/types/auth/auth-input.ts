@@ -5,7 +5,7 @@
  * NOT shared with API/UI - those use types from @midcurve/shared.
  */
 
-import type { User, AuthWalletAddress, ApiKey } from '@midcurve/database';
+import type { User, AuthWalletAddress } from '@midcurve/database';
 
 // =============================================================================
 // User Input Types
@@ -43,34 +43,3 @@ export interface UpdateUserInput {
 export interface UserWithWallets extends User {
   walletAddresses: AuthWalletAddress[];
 }
-
-/**
- * User with API keys relation (without key hashes)
- */
-export interface UserWithApiKeys extends User {
-  apiKeys: Omit<ApiKey, 'keyHash'>[];
-}
-
-/**
- * User with all auth relations
- */
-export interface UserWithAuth extends User {
-  walletAddresses: AuthWalletAddress[];
-  apiKeys: Omit<ApiKey, 'keyHash'>[];
-}
-
-// =============================================================================
-// API Key Types
-// =============================================================================
-
-/**
- * Result of creating an API key
- * IMPORTANT: Full key is only returned here, cannot be recovered later
- */
-export interface ApiKeyCreationResult {
-  apiKey: ApiKey; // Database record
-  key: string; // Full plaintext key (mc_live_...)
-}
-
-// NOTE: ApiKeyDisplay is now in @midcurve/shared and re-exported from there
-// This allows it to be used by API, UI, and services without duplication

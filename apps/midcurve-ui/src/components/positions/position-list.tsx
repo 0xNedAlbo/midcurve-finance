@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "react-router-dom";
 import { RotateCcw, ArrowDownAZ, ArrowUpAZ } from "lucide-react";
 import { PositionCard } from "./position-card";
 import { EmptyStateActions } from "./empty-state-actions";
@@ -29,8 +27,7 @@ const VALID_CHAIN_VALUES = ["all", "ethereum", "arbitrum", "base"] as const;
 const VALID_SORT_VALUES = ["positionOpenedAt", "totalApr"] as const;
 
 export function PositionList({ className }: PositionListProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Read and validate filters from URL parameters with defaults
   const statusParam = searchParams.get("status");
@@ -145,8 +142,8 @@ export function PositionList({ className }: PositionListProps) {
       params.set("offset", String(updates.offset));
     }
 
-    // Navigate with shallow routing (no page reload)
-    router.push(`?${params.toString()}`, { scroll: false });
+    // Update URL params (React Router handles this without page reload)
+    setSearchParams(params);
   };
 
   // Handle filter changes
