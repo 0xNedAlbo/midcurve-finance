@@ -8,9 +8,8 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import { useState, useMemo } from "react";
-import type { StrategyManifest } from "@midcurve/shared";
-import { getUserInputParams } from "@midcurve/shared";
+import { useState } from "react";
+import type { StrategyManifest, ConstructorParam } from "@midcurve/shared";
 import type { DeployStrategyResponse } from "@midcurve/api-shared";
 
 interface DeployReviewStepProps {
@@ -37,11 +36,19 @@ export function DeployReviewStep({
   const navigate = useNavigate();
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // Get user input params for display
-  const userInputParams = useMemo(
-    () => getUserInputParams(manifest),
-    [manifest]
-  );
+  // Get display value for a constructor parameter based on its source
+  const getParamDisplayValue = (param: ConstructorParam): string => {
+    switch (param.source) {
+      case "operator-address":
+        return "Auto-generated wallet";
+      case "core-address":
+        return "System address";
+      case "user-input":
+        return constructorValues[param.name] || "-";
+      default:
+        return "-";
+    }
+  };
 
   const copyToClipboard = async (value: string, field: string) => {
     await navigator.clipboard.writeText(value);
@@ -263,12 +270,12 @@ export function DeployReviewStep({
           </div>
         </div>
 
-        {/* Constructor Values (if any) */}
-        {userInputParams.length > 0 && (
+        {/* Constructor Parameters (all params including auto-populated) */}
+        {manifest.constructorParams.length > 0 && (
           <div className="p-4">
             <p className="text-slate-400 text-sm mb-3">Constructor Parameters</p>
             <div className="space-y-2">
-              {userInputParams.map((param) => (
+              {manifest.constructorParams.map((param) => (
                 <div
                   key={param.name}
                   className="flex justify-between items-center text-sm"
@@ -277,21 +284,13 @@ export function DeployReviewStep({
                     {param.ui?.label ?? param.name}
                   </span>
                   <span className="text-white font-mono">
-                    {constructorValues[param.name] || "-"}
+                    {getParamDisplayValue(param)}
                   </span>
                 </div>
               ))}
             </div>
           </div>
         )}
-      </div>
-
-      {/* Warning */}
-      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
-        <p className="text-amber-400 text-sm">
-          <strong>Note:</strong> Deploying a strategy will create a new smart contract
-          and automation wallet. Make sure you have reviewed the strategy details above.
-        </p>
       </div>
 
       {/* Deploy Button */}
