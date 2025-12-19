@@ -7,7 +7,6 @@
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { apiClientFn } from '@/lib/api-client';
 import type {
   ListPositionsParams,
   ListPositionsResponse,
@@ -45,7 +44,20 @@ export function usePositionsList(
         searchParams.toString() ? `?${searchParams}` : ''
       }`;
 
-      return apiClientFn<ListPositionsResponse>(url);
+      // ListPositionsResponse is a PaginatedResponse which has its own structure:
+      // { success, data: T[], pagination, meta }
+      // We need to fetch the raw response, not use apiClient which unwraps .data
+      const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${API_BASE_URL}${url}`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error?.error?.message || 'Failed to fetch positions');
+      }
+
+      return response.json() as Promise<ListPositionsResponse>;
     },
     staleTime: 30_000, // 30 seconds (positions change frequently)
     ...options,

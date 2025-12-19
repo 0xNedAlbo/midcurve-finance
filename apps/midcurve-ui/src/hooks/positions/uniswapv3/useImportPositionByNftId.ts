@@ -62,7 +62,7 @@ export function useImportPositionByNftId(
       queryClient.setQueriesData<ListPositionsResponse>(
         { queryKey: queryKeys.positions.lists() },
         (oldData) => {
-          if (!oldData) return oldData;
+          if (!oldData?.data) return oldData;
 
           // Check if position already exists (import is idempotent)
           const exists = oldData.data.some(
