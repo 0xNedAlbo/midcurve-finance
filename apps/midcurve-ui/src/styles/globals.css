@@ -109,3 +109,10 @@ body {
   background-color: var(--background);
   color: var(--foreground);
 }
+
+/* Dark mode gradient background - matches original UI design */
+.dark body {
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}

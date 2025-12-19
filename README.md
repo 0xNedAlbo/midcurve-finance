@@ -97,16 +97,20 @@ midcurve-finance/
 
 ```bash
 # Development
-pnpm run dev             # Start all apps in development mode
+pnpm run dev             # Start both UI and API in parallel
+pnpm run dev:ui          # Start UI only (port 3000)
+pnpm run dev:api         # Start API only (port 3001)
+
+# Build
 pnpm run build           # Build all packages and apps
+pnpm run build:ui        # Build UI only
+pnpm run build:api       # Build API only
+
+# Type checking
 pnpm run typecheck       # Type check all packages
 
 # Testing
 pnpm run test            # Run all tests across packages
-
-# Individual apps
-cd apps/midcurve-api && pnpm run dev    # Start API only
-cd apps/midcurve-ui && pnpm run dev     # Start UI only
 ```
 
 ### Environment Variables

@@ -93,11 +93,13 @@ export function AuthModal() {
         message: messageBody,
       });
 
-      // 4. Submit to our auth system
+      // 4. Submit to our auth system - send JSON stringified params for API parsing
+      const messageJson = JSON.stringify(siweMessageParams);
+      const chainId = chain?.id || 1;
       if (modalType === "signup") {
-        await signUp(address, messageBody, signature);
+        await signUp(address, messageJson, signature, chainId);
       } else {
-        await signIn(address, messageBody, signature);
+        await signIn(address, messageJson, signature, chainId);
       }
 
       // Success - close modal and redirect
