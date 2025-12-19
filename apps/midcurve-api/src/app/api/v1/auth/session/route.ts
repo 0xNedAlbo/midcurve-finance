@@ -12,13 +12,14 @@
  * {
  *   "success": true,
  *   "data": {
- *     "user": { id, name, email, image, wallets }
+ *     "user": { id, primaryWalletAddress, wallets, createdAt, updatedAt }
  *   }
  * }
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createSuccessResponse } from '@midcurve/api-shared';
+import type { SessionUser } from '@midcurve/api-shared';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -31,9 +32,22 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 
 export async function GET(request: NextRequest): Promise<Response> {
   return withSessionAuth(request, async (user) => {
+    // Find primary wallet address from wallets array
+    const primaryWallet = user.wallets?.find((w) => w.isPrimary);
+    const primaryWalletAddress = primaryWallet?.address || user.wallets?.[0]?.address || '';
+
+    // Transform to SessionUser format expected by UI
+    const sessionUser: SessionUser = {
+      id: user.id,
+      primaryWalletAddress,
+      wallets: user.wallets || [],
+      createdAt: new Date().toISOString(), // TODO: Get from user record
+      updatedAt: new Date().toISOString(), // TODO: Get from user record
+    };
+
     return NextResponse.json(
       createSuccessResponse({
-        user,
+        user: sessionUser,
       }),
       { status: 200 }
     );

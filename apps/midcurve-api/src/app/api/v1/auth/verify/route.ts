@@ -33,6 +33,7 @@ import {
   createErrorResponse,
   ApiErrorCode,
   ErrorCodeToHttpStatus,
+  type SessionUser,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getAuthNonceService, getAuthUserService, getSessionService } from '@/lib/services';
@@ -158,13 +159,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     apiLog.authSuccess(apiLogger, requestId, user.id, 'session');
     apiLog.businessOperation(apiLogger, requestId, 'created', 'session', sessionId.slice(0, 10));
 
-    // 7. Create response with session cookie
+    // 7. Fetch user wallets for response
+    const wallets = await getAuthUserService().getUserWallets(user.id);
+    const primaryWallet = wallets.find((w) => w.isPrimary);
+    const primaryWalletAddress = primaryWallet?.address || wallets[0]?.address || address;
+
+    // Transform to SessionUser format expected by UI
+    const sessionUser: SessionUser = {
+      id: user.id,
+      primaryWalletAddress,
+      wallets: wallets.map((w) => ({
+        id: w.id,
+        userId: w.userId,
+        address: w.address,
+        chainId: w.chainId,
+        isPrimary: w.isPrimary,
+        createdAt: w.createdAt,
+        updatedAt: w.updatedAt,
+      })),
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    };
+
+    // 8. Create response with session cookie
     const responseData = createSuccessResponse({
-      user: {
-        id: user.id,
-        name: user.name,
-        address,
-      },
+      user: sessionUser,
       expiresAt: expiresAt.toISOString(),
     });
 
