@@ -26,6 +26,7 @@
     "poc:executor-pool": "tsx core/src/poc/test-executor-pool.ts",
     "rabbitmq:logs": "docker-compose logs -f rabbitmq",
     "rabbitmq:health": "curl -s -u midcurve:midcurve_dev http://localhost:15672/api/healthchecks/node | jq .",
+    "dev": "next dev -p 3002",
     "dev:api": "next dev -p 3002",
     "build:api": "next build",
     "start:api": "next start -p 3002"

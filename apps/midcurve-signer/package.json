@@ -5,10 +5,10 @@
   "type": "module",
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "dev": "next dev -p 3001",
-    "dev:pretty": "next dev -p 3001 | pino-pretty",
+    "dev": "next dev -p 3003",
+    "dev:pretty": "next dev -p 3003 | pino-pretty",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "next start -p 3003",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
