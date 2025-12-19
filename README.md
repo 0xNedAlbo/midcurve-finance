@@ -16,7 +16,6 @@ Midcurve Finance enables liquidity providers to monitor, analyze, and optimize t
 - 🔄 **Multi-Protocol Support** - Uniswap V3 with more protocols coming soon
 - ⛓️ **Multi-Chain** - Ethereum, Arbitrum, Base, BSC, Polygon, Optimism
 - 🔐 **SIWE Authentication** - Sign-in with Ethereum (EIP-4361)
-- 🔑 **API Key Management** - Programmatic access for external integrations
 
 ## Quick Start
 
@@ -24,7 +23,7 @@ Midcurve Finance enables liquidity providers to monitor, analyze, and optimize t
 
 - **Node.js** 18+ ([download](https://nodejs.org/))
 - **PostgreSQL** 14+ ([download](https://www.postgresql.org/download/))
-- **npm** 9+ (comes with Node.js)
+- **pnpm** 8+ (`npm install -g pnpm`)
 
 ### Installation
 
@@ -34,47 +33,62 @@ git clone https://github.com/0xNedAlbo/midcurve-finance.git
 cd midcurve-finance
 
 # Install dependencies
-npm install
+pnpm install
 
-# Set up environment variables
+# Set up environment variables for both apps
+cp apps/midcurve-api/.env.example apps/midcurve-api/.env
 cp apps/midcurve-ui/.env.example apps/midcurve-ui/.env
-# Edit apps/midcurve-ui/.env with your DATABASE_URL and RPC endpoints
+# Edit both .env files with your configuration
 
 # Run database migrations
-cd apps/midcurve-ui
+cd packages/midcurve-database
 npx prisma migrate deploy
 cd ../..
 
-# Start development server
-npm run dev
+# Build packages
+pnpm run build
+
+# Start development servers
+pnpm run dev
 ```
 
-The application will be available at [http://localhost:3000](http://localhost:3000)
+The applications will be available at:
+- **UI**: [http://localhost:3000](http://localhost:3000)
+- **API**: [http://localhost:3001](http://localhost:3001)
 
 ## Project Structure
 
-This is a **Turborepo monorepo** with all packages managed in a single repository:
+This is a **Turborepo monorepo** with separate UI and API applications:
 
 ```
 midcurve-finance/
 ├── apps/
-│   └── midcurve-ui/          # Unified Next.js app (UI + API)
+│   ├── midcurve-api/         # Next.js API server (REST endpoints)
+│   └── midcurve-ui/          # Vite + React SPA (frontend)
 ├── packages/
 │   ├── midcurve-shared/      # Domain types & utilities
 │   ├── midcurve-services/    # Business logic & database
+│   ├── midcurve-database/    # Prisma schema & migrations
 │   └── midcurve-api-shared/  # API types & schemas
 ├── turbo.json                # Turborepo configuration
 ├── package.json              # Workspace configuration
 └── README.md                 # This file
 ```
 
+### Applications
+
+| App | Description | Port | Tech Stack |
+|-----|-------------|------|------------|
+| **midcurve-api** | REST API server with session-based authentication | 3001 | Next.js 15, Prisma |
+| **midcurve-ui** | Frontend SPA with wallet connection | 3000 | Vite, React 19, React Router |
+
 ### Packages
 
 | Package | Description | Documentation |
 |---------|-------------|---------------|
-| **midcurve-ui** | Unified Next.js application (frontend + API routes) | [apps/midcurve-ui/CLAUDE.md](apps/midcurve-ui/CLAUDE.md) |
 | **@midcurve/shared** | Framework-agnostic types and utilities | [packages/midcurve-shared/README.md](packages/midcurve-shared/README.md) |
 | **@midcurve/services** | Business logic, database services, and external clients | [packages/midcurve-services/CLAUDE.md](packages/midcurve-services/CLAUDE.md) |
+| **@midcurve/database** | Prisma schema and database migrations | - |
 | **@midcurve/api-shared** | API types, validation schemas, and type-safe contracts | [packages/midcurve-api-shared/README.md](packages/midcurve-api-shared/README.md) |
 
 ## Development
@@ -83,34 +97,33 @@ midcurve-finance/
 
 ```bash
 # Development
-npm run dev              # Start all packages in development mode
-npm run build            # Build all packages
-npm run typecheck        # Type check all packages
+pnpm run dev             # Start all apps in development mode
+pnpm run build           # Build all packages and apps
+pnpm run typecheck       # Type check all packages
 
 # Testing
-npm run test             # Run all tests across packages
-npm run test:ui          # Run UI E2E tests with Playwright
-npm run test:api         # Run API E2E tests with Vitest
+pnpm run test            # Run all tests across packages
 
-# Linting & Formatting
-npm run lint             # Lint all packages
-npm run format           # Format code with Prettier
+# Individual apps
+cd apps/midcurve-api && pnpm run dev    # Start API only
+cd apps/midcurve-ui && pnpm run dev     # Start UI only
 ```
 
 ### Environment Variables
 
-Required environment variables for local development:
+#### API Server (`apps/midcurve-api/.env`)
 
 ```bash
-# Database
+# Database - Required
 DATABASE_URL="postgresql://user:password@localhost:5432/midcurve"
 
-# Authentication
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your-secret-here"  # Generate with: openssl rand -base64 32
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID="your-walletconnect-id"
+# CORS - Required for UI communication
+ALLOWED_ORIGINS="http://localhost:3000"
 
-# RPC Endpoints (configure chains you plan to use)
+# Cookie domain (production only)
+COOKIE_DOMAIN=".midcurve.finance"
+
+# RPC Endpoints - Required for blockchain operations
 RPC_URL_ETHEREUM="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
 RPC_URL_ARBITRUM="https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"
 RPC_URL_BASE="https://base-mainnet.g.alchemy.com/v2/YOUR_KEY"
@@ -120,7 +133,17 @@ RPC_URL_BASE="https://base-mainnet.g.alchemy.com/v2/YOUR_KEY"
 COINGECKO_API_KEY="your-coingecko-key"
 ```
 
-See [apps/midcurve-ui/.env.example](apps/midcurve-ui/.env.example) for complete list.
+#### UI Application (`apps/midcurve-ui/.env`)
+
+```bash
+# API URL (leave empty in dev to use Vite proxy)
+VITE_API_URL=
+
+# WalletConnect - Required
+VITE_WALLETCONNECT_PROJECT_ID="your-walletconnect-id"
+```
+
+See `.env.example` files in each app for complete configuration options.
 
 ## Supported Platforms
 
@@ -149,25 +172,39 @@ Midcurve Finance uses a **quote-token-denominated** approach to risk management:
 
 This framework provides clear, consistent risk metrics across all positions regardless of the underlying protocol or chain.
 
+### Authentication
+
+The platform uses **Sign-In with Ethereum (SIWE)** for authentication:
+- Users sign a message with their wallet to authenticate
+- Server-side sessions stored in PostgreSQL
+- Session ID stored in httpOnly cookies for security
+- Cross-origin support via CORS for separate UI/API deployment
+
 For detailed architecture documentation, see [CLAUDE.md](CLAUDE.md).
 
 ## Tech Stack
 
-- **Framework**: [Next.js 15](https://nextjs.org/) (App Router, React Server Components)
-- **Frontend**: [React 19](https://react.dev/), [TailwindCSS 4.0](https://tailwindcss.com/)
-- **Backend**: [Prisma 6](https://www.prisma.io/), [PostgreSQL](https://www.postgresql.org/)
+### API Server
+- **Framework**: [Next.js 15](https://nextjs.org/) (API Routes)
+- **Database**: [Prisma 6](https://www.prisma.io/), [PostgreSQL](https://www.postgresql.org/)
+- **Authentication**: Custom session-based auth with SIWE
+
+### UI Application
+- **Build Tool**: [Vite](https://vitejs.dev/)
+- **Framework**: [React 19](https://react.dev/), [React Router 7](https://reactrouter.com/)
+- **Styling**: [TailwindCSS 4.0](https://tailwindcss.com/)
 - **Web3**: [Wagmi](https://wagmi.sh/), [Viem](https://viem.sh/), [RainbowKit](https://www.rainbowkit.com/)
-- **Authentication**: [Auth.js v5](https://authjs.dev/) (NextAuth)
+
+### Shared
 - **Monorepo**: [Turborepo](https://turbo.build/)
-- **Testing**: [Vitest](https://vitest.dev/), [Playwright](https://playwright.dev/)
+- **Testing**: [Vitest](https://vitest.dev/)
 - **Type Safety**: [TypeScript 5.3+](https://www.typescriptlang.org/), [Zod](https://zod.dev/)
 
 ## Documentation
 
 - **[CLAUDE.md](CLAUDE.md)** - Complete architecture and implementation guide
-- **[apps/midcurve-ui/CLAUDE.md](apps/midcurve-ui/CLAUDE.md)** - UI application documentation
 - **[packages/midcurve-services/CLAUDE.md](packages/midcurve-services/CLAUDE.md)** - Services layer documentation
-- **[apps/midcurve-ui/TESTING.md](apps/midcurve-ui/TESTING.md)** - Testing guide
+- **[packages/midcurve-api-shared/README.md](packages/midcurve-api-shared/README.md)** - API types documentation
 
 ## Contributing
 
@@ -193,19 +230,21 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Deployment
 
-### Vercel (Recommended)
+### Production Architecture
 
-The application is optimized for deployment on Vercel:
+For production, deploy the API and UI separately:
 
-1. Connect your GitHub repository to Vercel
-2. Configure environment variables in Vercel dashboard
-3. Deploy automatically on push to `main`
-
-See [apps/midcurve-ui/vercel.json](apps/midcurve-ui/vercel.json) for deployment configuration.
+1. **API Server**: Deploy `apps/midcurve-api` to Vercel, Railway, or similar
+2. **UI Application**: Deploy `apps/midcurve-ui` to Vercel, Netlify, or any static host
+3. Configure CORS and cookie domain for cross-origin communication
 
 ### Database Migrations
 
-Migrations are automatically applied during Vercel deployment via `prisma migrate deploy` in the build process.
+Run migrations in production:
+```bash
+cd packages/midcurve-database
+npx prisma migrate deploy
+```
 
 ## License
 
@@ -220,7 +259,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Built with:
 - [Turborepo](https://turbo.build/) - High-performance build system
-- [Next.js](https://nextjs.org/) - React framework
+- [Next.js](https://nextjs.org/) - React framework (API)
+- [Vite](https://vitejs.dev/) - Frontend build tool
 - [Prisma](https://www.prisma.io/) - Next-generation ORM
 - [Uniswap](https://uniswap.org/) - Decentralized exchange protocol
 
