@@ -202,6 +202,23 @@ export function ManifestUploadStep({
             </div>
           )}
 
+          {/* Quote Currency */}
+          <div className="p-4">
+            <p className="text-slate-400 text-xs mb-2">Quote Currency</p>
+            <p className="text-slate-300 text-sm">
+              {verifiedManifest.quoteToken.type === "basic-currency" ? (
+                <span className="font-medium">{verifiedManifest.quoteToken.symbol}</span>
+              ) : (
+                <span className="font-medium">
+                  {verifiedManifest.quoteToken.symbol}{" "}
+                  <span className="text-slate-400 text-xs">
+                    (Chain {verifiedManifest.quoteToken.chainId})
+                  </span>
+                </span>
+              )}
+            </p>
+          </div>
+
           {/* Constructor Params Summary */}
           <div className="p-4">
             <p className="text-slate-400 text-xs mb-2">Constructor Parameters</p>

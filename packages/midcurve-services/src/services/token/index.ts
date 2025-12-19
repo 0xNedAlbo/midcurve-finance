@@ -10,11 +10,6 @@ export type { Erc20TokenServiceDependencies } from './erc20-token-service.js';
 
 export { BasicCurrencyTokenService } from './basic-currency-token-service.js';
 export type { BasicCurrencyTokenServiceDependencies } from './basic-currency-token-service.js';
-export {
-  BASIC_CURRENCIES,
-  BASIC_CURRENCY_CODES,
-  type BasicCurrencyCode,
-} from './basic-currency-token-service.js';
 
 export { UserTokenBalanceService } from './user-token-balance-service.js';
 export type {

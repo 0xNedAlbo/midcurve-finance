@@ -130,16 +130,13 @@ export function StrategyDeployWizard({
 
     setDeploymentError(null);
 
-    // TODO: Add quote token selection UI
-    // For now, use a placeholder quote token ID
-    const PLACEHOLDER_QUOTE_TOKEN_ID = "placeholder-quote-token";
-
+    // Quote token is now specified in the manifest and resolved server-side
+    // No need to pass quoteTokenId from the client
     deployMutation.mutate(
       {
         manifest: verifiedManifest,
         name: strategyName,
         constructorValues,
-        quoteTokenId: PLACEHOLDER_QUOTE_TOKEN_ID,
       },
       {
         onSuccess: (response) => {
@@ -156,8 +153,22 @@ export function StrategyDeployWizard({
   // Handle retry
   const handleRetry = useCallback(() => {
     setDeploymentError(null);
+    setDeploymentResult(null);
     handleDeploy();
   }, [handleDeploy]);
+
+  // Handle deployment status change (from polling)
+  const handleDeploymentStatusChange = useCallback(
+    (result: DeployStrategyResponse) => {
+      setDeploymentResult(result);
+
+      // If deployment completed, notify parent
+      if (result.deployment.status === "completed") {
+        onStrategyDeployed?.(result);
+      }
+    },
+    [onStrategyDeployed]
+  );
 
   // Check if manifest has user-input params
   const manifestHasUserParams = useMemo(() => {
@@ -234,6 +245,7 @@ export function StrategyDeployWizard({
             isDeploying={deployMutation.isPending}
             onDeploy={handleDeploy}
             onRetry={handleRetry}
+            onDeploymentStatusChange={handleDeploymentStatusChange}
           />
         ) : (
           <div className="text-center text-slate-400">
@@ -262,7 +274,7 @@ export function StrategyDeployWizard({
 
   // Check if we're on the final step and deployment succeeded
   const isDeploymentComplete =
-    deploymentResult?.deployment.status === "confirmed";
+    deploymentResult?.deployment.status === "completed";
 
   if (!isOpen) return null;
 

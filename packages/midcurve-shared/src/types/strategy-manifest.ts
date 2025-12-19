@@ -187,6 +187,65 @@ export type FormItem =
   | { type: 'layout'; layout: LayoutElement };
 
 // =============================================================================
+// QUOTE TOKEN TYPES
+// =============================================================================
+
+/**
+ * Quote token reference for basic currency (platform-agnostic)
+ *
+ * Used for strategies that measure value in abstract currencies like USD, ETH, or BTC.
+ * Symbol will be validated against CoinGecko supported_vs_currencies during verification.
+ */
+export interface ManifestQuoteTokenBasicCurrency {
+  type: 'basic-currency';
+
+  /**
+   * Currency symbol (will be normalized to uppercase)
+   * @example 'USD', 'ETH', 'BTC'
+   */
+  symbol: string;
+}
+
+/**
+ * Quote token reference for ERC-20 token (EVM chain-specific)
+ *
+ * Used for strategies that measure value in a specific on-chain token.
+ * Symbol will be validated against on-chain contract data during verification.
+ * Symbol matching is case-sensitive (e.g., "stETH" not "STETH").
+ */
+export interface ManifestQuoteTokenErc20 {
+  type: 'erc20';
+
+  /**
+   * Token symbol (case-sensitive, must match on-chain)
+   * @example 'USDC', 'stETH', 'WETH'
+   */
+  symbol: string;
+
+  /**
+   * EVM chain ID
+   * @example 1 (Ethereum), 42161 (Arbitrum), 8453 (Base)
+   */
+  chainId: number;
+
+  /**
+   * Token contract address (will be normalized to EIP-55)
+   * @example '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+   */
+  address: string;
+}
+
+/**
+ * Quote token reference in manifest (discriminated union)
+ *
+ * Specifies the token used for strategy metrics valuation.
+ * Both types include a symbol field for manifest readability.
+ */
+export type ManifestQuoteToken =
+  | ManifestQuoteTokenBasicCurrency
+  | ManifestQuoteTokenErc20;
+
+// =============================================================================
 // STRATEGY MANIFEST
 // =============================================================================
 
@@ -259,6 +318,21 @@ export interface StrategyManifest {
    * If not provided, params are rendered in order without grouping
    */
   formLayout?: FormItem[];
+
+  // ============================================================================
+  // QUOTE TOKEN
+  // ============================================================================
+
+  /**
+   * Quote token for strategy metrics valuation
+   *
+   * All position values, PnL, and fees will be denominated in this token.
+   * Can be either a basic currency (USD, ETH, BTC) or an ERC-20 token.
+   *
+   * @example { type: 'basic-currency', symbol: 'USD' }
+   * @example { type: 'erc20', symbol: 'USDC', chainId: 42161, address: '0x...' }
+   */
+  quoteToken: ManifestQuoteToken;
 
   // ============================================================================
   // METADATA

@@ -756,6 +756,12 @@ export class CoinGeckoClient {
   private readonly historicalCacheTimeout = 30 * 24 * 3600;
 
   /**
+   * Long cache timeout for supported vs_currencies (24 hours)
+   * This list changes rarely (new currencies added occasionally)
+   */
+  private readonly vsCurrenciesCacheTimeout = 24 * 3600;
+
+  /**
    * List of stablecoin CoinGecko IDs
    * Used to optimize price lookups (assume 1:1 with USD)
    */
@@ -1128,6 +1134,161 @@ export class CoinGeckoClient {
   async hasCachedData(): Promise<boolean> {
     const cached = await this.cacheService.get<CoinGeckoToken[]>('coingecko:tokens:all');
     return cached !== null;
+  }
+
+  // ============================================================================
+  // SUPPORTED VS CURRENCIES
+  // ============================================================================
+
+  /**
+   * Get supported vs_currencies from CoinGecko
+   *
+   * Returns the list of currencies that can be used as the 'vs_currencies' parameter
+   * in price queries. This is used to validate basic currency symbols in manifests.
+   *
+   * Results are cached for 24 hours since this list rarely changes.
+   *
+   * @returns Array of supported currency identifiers (lowercase, e.g., ['btc', 'eth', 'usd', 'eur', ...])
+   * @throws CoinGeckoApiError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   * const currencies = await client.getSupportedVsCurrencies();
+   * // ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'usd', 'aed', ...]
+   *
+   * // Check if a currency is supported
+   * const isUsdSupported = currencies.includes('usd'); // true
+   * const isInvalidSupported = currencies.includes('invalid'); // false
+   * ```
+   */
+  async getSupportedVsCurrencies(): Promise<string[]> {
+    log.methodEntry(this.logger, 'getSupportedVsCurrencies');
+
+    const cacheKey = 'coingecko:vs_currencies';
+
+    // Check distributed cache first
+    const cached = await this.cacheService.get<string[]>(cacheKey);
+    if (cached) {
+      log.cacheHit(this.logger, 'getSupportedVsCurrencies', cacheKey);
+      log.methodExit(this.logger, 'getSupportedVsCurrencies', {
+        count: cached.length,
+        fromCache: true,
+      });
+      return cached;
+    }
+
+    log.cacheMiss(this.logger, 'getSupportedVsCurrencies', cacheKey);
+
+    try {
+      log.externalApiCall(
+        this.logger,
+        'CoinGecko',
+        '/simple/supported_vs_currencies',
+        {}
+      );
+
+      const response = await this.scheduledFetch(
+        `${this.baseUrl}/simple/supported_vs_currencies`
+      );
+
+      if (!response.ok) {
+        const error = new CoinGeckoApiError(
+          `CoinGecko API error: ${response.status} ${response.statusText}`,
+          response.status
+        );
+        log.methodError(this.logger, 'getSupportedVsCurrencies', error, {
+          statusCode: response.status,
+        });
+        throw error;
+      }
+
+      const currencies = (await response.json()) as string[];
+
+      this.logger.info(
+        { count: currencies.length },
+        'Retrieved supported vs_currencies from CoinGecko'
+      );
+
+      // Store in distributed cache (24 hour TTL)
+      await this.cacheService.set(cacheKey, currencies, this.vsCurrenciesCacheTimeout);
+
+      log.methodExit(this.logger, 'getSupportedVsCurrencies', {
+        count: currencies.length,
+        fromCache: false,
+      });
+
+      return currencies;
+    } catch (error) {
+      // Re-throw CoinGeckoApiError
+      if (error instanceof CoinGeckoApiError) {
+        throw error;
+      }
+
+      // Wrap other errors
+      const wrappedError = new CoinGeckoApiError(
+        `Failed to fetch supported vs_currencies from CoinGecko: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      log.methodError(this.logger, 'getSupportedVsCurrencies', wrappedError);
+      throw wrappedError;
+    }
+  }
+
+  /**
+   * Validate if a currency symbol is supported by CoinGecko as a vs_currency
+   *
+   * This is a convenience method that checks if a given symbol (case-insensitive)
+   * is in the list of supported vs_currencies. Returns the lowercase version
+   * of the currency if valid, null otherwise.
+   *
+   * @param symbol - Currency symbol to validate (e.g., 'USD', 'usd', 'ETH')
+   * @returns Lowercase currency identifier if valid, null if not supported
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   *
+   * const usd = await client.validateVsCurrency('USD');
+   * // 'usd'
+   *
+   * const eth = await client.validateVsCurrency('ETH');
+   * // 'eth'
+   *
+   * const invalid = await client.validateVsCurrency('INVALID');
+   * // null
+   * ```
+   */
+  async validateVsCurrency(symbol: string): Promise<string | null> {
+    log.methodEntry(this.logger, 'validateVsCurrency', { symbol });
+
+    try {
+      const currencies = await this.getSupportedVsCurrencies();
+      const normalizedSymbol = symbol.toLowerCase();
+
+      const isValid = currencies.includes(normalizedSymbol);
+
+      this.logger.debug(
+        { symbol, normalizedSymbol, isValid },
+        'Validated vs_currency'
+      );
+
+      log.methodExit(this.logger, 'validateVsCurrency', {
+        symbol,
+        isValid,
+        result: isValid ? normalizedSymbol : null,
+      });
+
+      return isValid ? normalizedSymbol : null;
+    } catch (error) {
+      this.logger.warn(
+        { symbol, error: error instanceof Error ? error.message : 'Unknown error' },
+        'Failed to validate vs_currency, returning null'
+      );
+      log.methodExit(this.logger, 'validateVsCurrency', { symbol, error: true });
+      return null;
+    }
   }
 
   /**

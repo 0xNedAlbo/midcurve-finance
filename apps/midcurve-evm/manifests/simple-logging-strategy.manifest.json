@@ -138,5 +138,9 @@
       }
     }
   ],
-  "tags": ["example", "logging", "poc", "beginner"]
+  "tags": ["example", "logging", "poc", "beginner"],
+  "quoteToken": {
+    "type": "basic-currency",
+    "symbol": "USD"
+  }
 }

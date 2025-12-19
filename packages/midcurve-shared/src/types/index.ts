@@ -195,6 +195,9 @@ export type {
   ConstructorParam,
   LayoutElement,
   FormItem,
+  ManifestQuoteTokenBasicCurrency,
+  ManifestQuoteTokenErc20,
+  ManifestQuoteToken,
   StrategyManifest,
 } from './strategy-manifest.js';
 

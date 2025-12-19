@@ -10,6 +10,7 @@ import type {
   StrategyManifest,
   ConstructorParam,
   SolidityType,
+  ManifestQuoteToken,
 } from '@midcurve/shared';
 
 /**
@@ -50,7 +51,9 @@ export type ManifestErrorCode =
   | 'MISSING_UI_CONFIG'
   | 'INVALID_BYTECODE'
   | 'MISSING_REQUIRED_FIELD'
-  | 'INVALID_FIELD_VALUE';
+  | 'INVALID_FIELD_VALUE'
+  | 'INVALID_QUOTE_TOKEN'
+  | 'QUOTE_TOKEN_SYMBOL_MISMATCH';
 
 /**
  * A verification issue (error or warning)
@@ -105,6 +108,14 @@ export interface ManifestVerificationResult {
    * Parsed manifest (if valid)
    */
   parsedManifest?: StrategyManifest;
+
+  /**
+   * Database ID of the resolved quote token
+   *
+   * Only set when verification includes async token resolution
+   * (via verifyWithTokenResolution method)
+   */
+  resolvedQuoteTokenId?: string;
 }
 
 // =============================================================================
@@ -182,6 +193,12 @@ export class ManifestVerificationService {
       return { valid: false, errors, warnings };
     }
 
+    // Step 8: Quote token validation
+    const quoteToken = this.validateQuoteToken(obj.quoteToken, errors);
+    if (errors.length > 0) {
+      return { valid: false, errors, warnings };
+    }
+
     // Build the parsed manifest
     const parsedManifest: StrategyManifest = {
       name: obj.name as string,
@@ -192,6 +209,7 @@ export class ManifestVerificationService {
       bytecode: obj.bytecode as `0x${string}`,
       constructorParams: obj.constructorParams as ConstructorParam[],
       formLayout: obj.formLayout as StrategyManifest['formLayout'],
+      quoteToken: quoteToken!,
       tags: obj.tags as string[] | undefined,
     };
 
@@ -242,6 +260,7 @@ export class ManifestVerificationService {
       'abi',
       'bytecode',
       'constructorParams',
+      'quoteToken',
     ];
 
     for (const field of requiredFields) {
@@ -642,5 +661,101 @@ export class ManifestVerificationService {
         }
       }
     }
+  }
+
+  private validateQuoteToken(
+    quoteToken: unknown,
+    errors: ManifestIssue[]
+  ): ManifestQuoteToken | null {
+    if (!quoteToken || typeof quoteToken !== 'object') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: 'Field "quoteToken" must be an object',
+        path: 'quoteToken',
+      });
+      return null;
+    }
+
+    const qt = quoteToken as Record<string, unknown>;
+
+    // Validate type field
+    if (!qt.type || typeof qt.type !== 'string') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: 'Field "quoteToken.type" must be a string',
+        path: 'quoteToken.type',
+      });
+      return null;
+    }
+
+    if (qt.type !== 'basic-currency' && qt.type !== 'erc20') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: `Invalid quoteToken.type "${qt.type}". Must be "basic-currency" or "erc20"`,
+        path: 'quoteToken.type',
+      });
+      return null;
+    }
+
+    // Validate symbol (required for both types)
+    if (!qt.symbol || typeof qt.symbol !== 'string' || qt.symbol.trim() === '') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: 'Field "quoteToken.symbol" must be a non-empty string',
+        path: 'quoteToken.symbol',
+      });
+      return null;
+    }
+
+    if (qt.type === 'basic-currency') {
+      return {
+        type: 'basic-currency',
+        symbol: qt.symbol as string,
+      };
+    }
+
+    // ERC-20 type: validate chainId and address
+    if (typeof qt.chainId !== 'number' || qt.chainId <= 0 || !Number.isInteger(qt.chainId)) {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: 'Field "quoteToken.chainId" must be a positive integer for ERC-20 tokens',
+        path: 'quoteToken.chainId',
+      });
+      return null;
+    }
+
+    if (!qt.address || typeof qt.address !== 'string') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: 'Field "quoteToken.address" must be a string for ERC-20 tokens',
+        path: 'quoteToken.address',
+      });
+      return null;
+    }
+
+    // Validate address format (0x followed by 40 hex chars)
+    const addressRegex = /^0x[a-fA-F0-9]{40}$/;
+    if (!addressRegex.test(qt.address as string)) {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_QUOTE_TOKEN',
+        message: 'Field "quoteToken.address" must be a valid EVM address (0x followed by 40 hex characters)',
+        path: 'quoteToken.address',
+      });
+      return null;
+    }
+
+    return {
+      type: 'erc20',
+      symbol: qt.symbol as string,
+      chainId: qt.chainId as number,
+      address: qt.address as string,
+    };
   }
 }

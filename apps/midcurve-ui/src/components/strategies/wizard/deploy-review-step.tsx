@@ -7,10 +7,65 @@ import {
   ExternalLink,
   Copy,
   Check,
+  Pen,
+  Radio,
+  Clock,
+  Settings,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { StrategyManifest, ConstructorParam } from "@midcurve/shared";
-import type { DeployStrategyResponse } from "@midcurve/api-shared";
+import type { DeployStrategyResponse, DeploymentStatus } from "@midcurve/api-shared";
+
+// Status display configuration
+const DEPLOYMENT_STATUS_INFO: Record<
+  DeploymentStatus,
+  { label: string; description: string; icon: React.ReactNode }
+> = {
+  pending: {
+    label: "Preparing",
+    description: "Initializing deployment...",
+    icon: <Clock className="w-5 h-5" />,
+  },
+  signing: {
+    label: "Signing",
+    description: "Signing the deployment transaction...",
+    icon: <Pen className="w-5 h-5" />,
+  },
+  broadcasting: {
+    label: "Broadcasting",
+    description: "Sending transaction to the network...",
+    icon: <Radio className="w-5 h-5" />,
+  },
+  confirming: {
+    label: "Confirming",
+    description: "Waiting for transaction confirmation...",
+    icon: <Clock className="w-5 h-5" />,
+  },
+  setting_up_topology: {
+    label: "Setting Up",
+    description: "Configuring strategy automation...",
+    icon: <Settings className="w-5 h-5" />,
+  },
+  completed: {
+    label: "Complete",
+    description: "Strategy deployed successfully!",
+    icon: <CheckCircle className="w-5 h-5" />,
+  },
+  failed: {
+    label: "Failed",
+    description: "Deployment failed",
+    icon: <XCircle className="w-5 h-5" />,
+  },
+};
+
+// Statuses that indicate deployment is in progress
+const IN_PROGRESS_STATUSES: DeploymentStatus[] = [
+  "pending",
+  "signing",
+  "broadcasting",
+  "confirming",
+  "setting_up_topology",
+];
 
 interface DeployReviewStepProps {
   manifest: StrategyManifest;
@@ -21,6 +76,7 @@ interface DeployReviewStepProps {
   isDeploying: boolean;
   onDeploy: () => void;
   onRetry: () => void;
+  onDeploymentStatusChange?: (result: DeployStrategyResponse) => void;
 }
 
 export function DeployReviewStep({
@@ -32,9 +88,60 @@ export function DeployReviewStep({
   isDeploying,
   onDeploy,
   onRetry,
+  onDeploymentStatusChange,
 }: DeployReviewStepProps) {
   const navigate = useNavigate();
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [pollingError, setPollingError] = useState<string | null>(null);
+
+  // Poll for deployment status updates
+  const pollDeploymentStatus = useCallback(async () => {
+    if (!deploymentResult?.deployment.pollUrl) return;
+
+    const status = deploymentResult.deployment.status;
+    if (!IN_PROGRESS_STATUSES.includes(status)) return;
+
+    try {
+      const response = await fetch(deploymentResult.deployment.pollUrl);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Status check failed: ${response.status}`);
+      }
+
+      const statusResult = await response.json();
+
+      // Update deployment result with new status
+      const updatedResult: DeployStrategyResponse = {
+        ...deploymentResult,
+        deployment: {
+          ...deploymentResult.deployment,
+          status: statusResult.status,
+          transactionHash: statusResult.txHash || deploymentResult.deployment.transactionHash,
+          contractAddress: statusResult.contractAddress || deploymentResult.deployment.contractAddress,
+          error: statusResult.error,
+        },
+      };
+
+      onDeploymentStatusChange?.(updatedResult);
+      setPollingError(null);
+    } catch (error) {
+      console.error("Failed to poll deployment status:", error);
+      setPollingError(error instanceof Error ? error.message : "Failed to check status");
+    }
+  }, [deploymentResult, onDeploymentStatusChange]);
+
+  // Set up polling interval
+  useEffect(() => {
+    if (!deploymentResult?.deployment.pollUrl) return;
+
+    const status = deploymentResult.deployment.status;
+    if (!IN_PROGRESS_STATUSES.includes(status)) return;
+
+    // Poll every 2 seconds
+    const interval = setInterval(pollDeploymentStatus, 2000);
+
+    return () => clearInterval(interval);
+  }, [deploymentResult, pollDeploymentStatus]);
 
   // Get display value for a constructor parameter based on its source
   const getParamDisplayValue = (param: ConstructorParam): string => {
@@ -57,7 +164,7 @@ export function DeployReviewStep({
   };
 
   // Success state
-  if (deploymentResult && deploymentResult.deployment.status === "confirmed") {
+  if (deploymentResult && deploymentResult.deployment.status === "completed") {
     return (
       <div className="space-y-6">
         {/* Success Banner */}
@@ -103,36 +210,38 @@ export function DeployReviewStep({
             </div>
           )}
 
-          {/* Automation Wallet */}
-          <div className="p-4">
-            <label className="block text-xs text-slate-400 mb-1">
-              Automation Wallet
-            </label>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 text-sm text-white font-mono bg-slate-700/50 px-3 py-2 rounded truncate">
-                {deploymentResult.automationWallet.address}
-              </code>
-              <button
-                onClick={() =>
-                  copyToClipboard(
-                    deploymentResult.automationWallet.address,
-                    "wallet"
-                  )
-                }
-                className="p-2 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                title="Copy to clipboard"
-              >
-                {copiedField === "wallet" ? (
-                  <Check className="w-4 h-4 text-green-400" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-              </button>
+          {/* Automation Wallet (only shown if available) */}
+          {deploymentResult.automationWallet?.address && (
+            <div className="p-4">
+              <label className="block text-xs text-slate-400 mb-1">
+                Automation Wallet
+              </label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-sm text-white font-mono bg-slate-700/50 px-3 py-2 rounded truncate">
+                  {deploymentResult.automationWallet.address}
+                </code>
+                <button
+                  onClick={() =>
+                    copyToClipboard(
+                      deploymentResult.automationWallet!.address,
+                      "wallet"
+                    )
+                  }
+                  className="p-2 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  title="Copy to clipboard"
+                >
+                  {copiedField === "wallet" ? (
+                    <Check className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                This wallet will execute automated transactions on behalf of your strategy.
+              </p>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
-              This wallet will execute automated transactions on behalf of your strategy.
-            </p>
-          </div>
+          )}
 
           {/* Transaction Hash */}
           {deploymentResult.deployment.transactionHash && (
@@ -179,8 +288,14 @@ export function DeployReviewStep({
     );
   }
 
-  // Error state
-  if (deploymentError) {
+  // Error state (either from API error or async deployment failure)
+  const errorMessage =
+    deploymentError ||
+    (deploymentResult?.deployment.status === "failed"
+      ? deploymentResult.deployment.error || "Deployment failed"
+      : null);
+
+  if (errorMessage) {
     return (
       <div className="space-y-6">
         {/* Error Banner */}
@@ -189,7 +304,7 @@ export function DeployReviewStep({
           <h3 className="text-xl font-semibold text-white mb-2">
             Deployment Failed
           </h3>
-          <p className="text-slate-300 mb-4">{deploymentError}</p>
+          <p className="text-slate-300 mb-4">{errorMessage}</p>
           <button
             onClick={onRetry}
             className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium cursor-pointer"
@@ -201,8 +316,26 @@ export function DeployReviewStep({
     );
   }
 
-  // Deploying state
-  if (isDeploying) {
+  // Deploying state - either initial API call or async polling
+  const isDeployingAsync =
+    deploymentResult && IN_PROGRESS_STATUSES.includes(deploymentResult.deployment.status);
+
+  if (isDeploying || isDeployingAsync) {
+    const currentStatus = deploymentResult?.deployment.status || "pending";
+    const statusInfo = DEPLOYMENT_STATUS_INFO[currentStatus];
+
+    // Calculate progress based on status
+    const statusOrder: DeploymentStatus[] = [
+      "pending",
+      "signing",
+      "broadcasting",
+      "confirming",
+      "setting_up_topology",
+      "completed",
+    ];
+    const currentIndex = statusOrder.indexOf(currentStatus);
+    const progressPercent = ((currentIndex + 1) / statusOrder.length) * 100;
+
     return (
       <div className="space-y-6">
         {/* Deploying Banner */}
@@ -212,9 +345,63 @@ export function DeployReviewStep({
             Deploying Strategy...
           </h3>
           <p className="text-slate-300">
-            Creating your automation wallet and deploying the contract.
-            This may take a moment.
+            {statusInfo.description}
           </p>
+        </div>
+
+        {/* Deployment Progress */}
+        <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
+          <h4 className="text-sm font-medium text-slate-300 mb-3">Deployment Progress</h4>
+
+          {/* Progress Bar */}
+          <div className="mb-4">
+            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 transition-all duration-500 ease-out"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Status Steps */}
+          <div className="space-y-2">
+            {statusOrder.slice(0, -1).map((status, index) => {
+              const info = DEPLOYMENT_STATUS_INFO[status];
+              const isComplete = currentIndex > index;
+              const isCurrent = currentIndex === index;
+
+              return (
+                <div
+                  key={status}
+                  className={`flex items-center gap-3 text-sm ${
+                    isComplete
+                      ? "text-green-400"
+                      : isCurrent
+                        ? "text-blue-400"
+                        : "text-slate-500"
+                  }`}
+                >
+                  <div className="w-5 h-5 flex items-center justify-center">
+                    {isComplete ? (
+                      <CheckCircle className="w-4 h-4" />
+                    ) : isCurrent ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <div className="w-2 h-2 bg-slate-600 rounded-full" />
+                    )}
+                  </div>
+                  <span>{info.label}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Polling error notice */}
+          {pollingError && (
+            <div className="mt-3 text-xs text-yellow-400">
+              Status check failed: {pollingError}. Retrying...
+            </div>
+          )}
         </div>
 
         {/* Summary */}
@@ -229,6 +416,22 @@ export function DeployReviewStep({
               <span className="text-slate-400">Strategy Name</span>
               <span className="text-white">{strategyName}</span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Quote Currency</span>
+              <span className="text-white">
+                {manifest.quoteToken.type === "basic-currency"
+                  ? manifest.quoteToken.symbol
+                  : `${manifest.quoteToken.symbol} (Chain ${manifest.quoteToken.chainId})`}
+              </span>
+            </div>
+            {deploymentResult?.deployment.transactionHash && (
+              <div className="flex justify-between">
+                <span className="text-slate-400">Transaction</span>
+                <code className="text-white font-mono text-xs truncate max-w-[200px]">
+                  {deploymentResult.deployment.transactionHash}
+                </code>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -267,6 +470,23 @@ export function DeployReviewStep({
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Network</span>
             <span className="text-white">SEMSEE (Internal)</span>
+          </div>
+        </div>
+        <div className="p-4">
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400">Quote Currency</span>
+            <span className="text-white font-medium">
+              {manifest.quoteToken.type === "basic-currency" ? (
+                manifest.quoteToken.symbol
+              ) : (
+                <>
+                  {manifest.quoteToken.symbol}{" "}
+                  <span className="text-slate-400 text-xs font-normal">
+                    (Chain {manifest.quoteToken.chainId})
+                  </span>
+                </>
+              )}
+            </span>
           </div>
         </div>
 

@@ -57,10 +57,21 @@ export interface Erc20TokenConfig {
  */
 export interface BasicCurrencyConfig {
   /**
-   * Currency code identifier
+   * Currency code identifier (uppercase)
    * Examples: 'USD', 'ETH', 'BTC'
    */
   currencyCode: string;
+
+  /**
+   * CoinGecko vs_currency identifier (lowercase)
+   *
+   * Used for price queries: GET /simple/price?vs_currencies={coingeckoCurrency}
+   * Examples: 'usd', 'eth', 'btc'
+   *
+   * Obtained from: GET /simple/supported_vs_currencies
+   * This field enables price conversion for valuation in the quote currency.
+   */
+  coingeckoCurrency: string;
 }
 
 // =============================================================================

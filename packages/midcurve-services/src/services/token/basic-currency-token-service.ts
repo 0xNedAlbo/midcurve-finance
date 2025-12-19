@@ -2,13 +2,18 @@
  * BasicCurrencyTokenService
  *
  * Specialized service for basic currency token management.
- * Basic currencies are platform-agnostic units (USD, ETH, BTC) used for
- * cross-platform metrics aggregation.
+ * Basic currencies are CoinGecko-validated units used for cross-platform
+ * metrics aggregation.
  *
  * Basic currencies:
- * - Are pre-defined (not discovered on-chain)
+ * - Are validated against CoinGecko's supported vs_currencies
  * - Use 18 decimals for consistent precision
  * - Serve as normalization targets for platform-specific tokens
+ *
+ * Key features:
+ * - All currencies validated against CoinGecko's vs_currencies API
+ * - All use 18 decimals for precision
+ * - findOrCreateBySymbol() for idempotent creation with CoinGecko validation
  */
 
 import { PrismaClient } from '@midcurve/database';
@@ -22,47 +27,7 @@ import type {
   BasicCurrencySearchCandidate,
 } from '../types/token/token-input.js';
 import { log } from '../../logging/index.js';
-
-// =============================================================================
-// PRE-DEFINED BASIC CURRENCIES
-// =============================================================================
-
-/**
- * Pre-defined basic currency definitions
- *
- * These are the canonical units for cross-platform metrics aggregation.
- * Each basic currency represents a stable value unit that platform-specific
- * tokens can link to.
- */
-export const BASIC_CURRENCIES = {
-  USD: {
-    currencyCode: 'USD',
-    name: 'US Dollar',
-    symbol: 'USD',
-  },
-  ETH: {
-    currencyCode: 'ETH',
-    name: 'Ethereum',
-    symbol: 'ETH',
-  },
-  BTC: {
-    currencyCode: 'BTC',
-    name: 'Bitcoin',
-    symbol: 'BTC',
-  },
-} as const;
-
-/**
- * Type for valid basic currency codes
- */
-export type BasicCurrencyCode = keyof typeof BASIC_CURRENCIES;
-
-/**
- * Array of all basic currency codes
- */
-export const BASIC_CURRENCY_CODES = Object.keys(
-  BASIC_CURRENCIES
-) as BasicCurrencyCode[];
+import { CoinGeckoClient } from '../../clients/coingecko/index.js';
 
 // =============================================================================
 // SERVICE DEPENDENCIES
@@ -78,6 +43,12 @@ export interface BasicCurrencyTokenServiceDependencies
    * If not provided, a new PrismaClient instance will be created
    */
   prisma?: PrismaClient;
+
+  /**
+   * CoinGecko client for currency validation
+   * If not provided, the singleton instance will be used
+   */
+  coinGeckoClient?: CoinGeckoClient;
 }
 
 // =============================================================================
@@ -87,19 +58,20 @@ export interface BasicCurrencyTokenServiceDependencies
 /**
  * BasicCurrencyTokenService
  *
- * Manages basic currency tokens. Basic currencies are pre-defined and not
- * discovered on-chain. They serve as normalization targets for platform-specific
- * tokens during cross-platform metrics aggregation.
+ * Manages basic currency tokens. Basic currencies are CoinGecko-validated
+ * currencies used for cross-platform metrics aggregation.
  *
  * Key features:
- * - Pre-defined currencies (USD, ETH, BTC)
+ * - All currencies validated against CoinGecko's vs_currencies API
  * - All use 18 decimals for precision
- * - ensureBasicCurrency() for idempotent creation
- * - seed() for seeding all pre-defined currencies
+ * - findOrCreateBySymbol() for idempotent creation with CoinGecko validation
  */
 export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
+  private readonly coinGeckoClient: CoinGeckoClient;
+
   constructor(dependencies: BasicCurrencyTokenServiceDependencies = {}) {
     super(dependencies);
+    this.coinGeckoClient = dependencies.coinGeckoClient ?? CoinGeckoClient.getInstance();
   }
 
   // ============================================================================
@@ -110,9 +82,10 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
    * Parse config from database JSON to application type
    */
   parseConfig(configDB: unknown): BasicCurrencyConfig {
-    const db = configDB as { currencyCode: string };
+    const db = configDB as { currencyCode: string; coingeckoCurrency: string };
     return {
       currencyCode: db.currencyCode,
+      coingeckoCurrency: db.coingeckoCurrency,
     };
   }
 
@@ -122,30 +95,31 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
   serializeConfig(config: BasicCurrencyConfig): unknown {
     return {
       currencyCode: config.currencyCode,
+      coingeckoCurrency: config.coingeckoCurrency,
     };
   }
 
   /**
    * Discover a basic currency token
    *
-   * Basic currencies are not discovered on-chain. Use ensureBasicCurrency()
-   * or seed() instead.
+   * Basic currencies are not discovered on-chain. Use findOrCreateBySymbol()
+   * instead.
    *
-   * @throws Error - Basic currencies are pre-defined, not discoverable
+   * @throws Error - Basic currencies are not discoverable on-chain
    */
   async discover(
     _params: BasicCurrencyDiscoverInput
   ): Promise<BasicCurrencyToken> {
     throw new Error(
       'Basic currencies are not discoverable on-chain. ' +
-        'Use ensureBasicCurrency() to get or create a basic currency.'
+        'Use findOrCreateBySymbol() to get or create a basic currency.'
     );
   }
 
   /**
    * Search for basic currency tokens
    *
-   * Returns pre-defined basic currency candidates matching the filter.
+   * Returns existing basic currency candidates from the database matching the filter.
    *
    * @param input - Search filter (optional currencyCode)
    * @returns Array of matching basic currency candidates
@@ -155,22 +129,18 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
   ): Promise<BasicCurrencySearchCandidate[]> {
     log.methodEntry(this.logger, 'searchTokens', { input });
 
-    const candidates: BasicCurrencySearchCandidate[] = [];
+    // Query database for existing basic currencies
+    const tokens = await this.findAll();
 
-    for (const code of BASIC_CURRENCY_CODES) {
-      const def = BASIC_CURRENCIES[code];
-
-      // Filter by currency code if provided
-      if (input.currencyCode && input.currencyCode !== code) {
-        continue;
-      }
-
-      candidates.push({
-        currencyCode: def.currencyCode,
-        name: def.name,
-        symbol: def.symbol,
-      });
-    }
+    const candidates = tokens
+      .filter(
+        (t) => !input.currencyCode || t.config.currencyCode === input.currencyCode
+      )
+      .map((t) => ({
+        currencyCode: t.config.currencyCode,
+        name: t.name,
+        symbol: t.symbol,
+      }));
 
     log.methodExit(this.logger, 'searchTokens', { count: candidates.length });
     return candidates;
@@ -235,73 +205,6 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
   }
 
   /**
-   * Ensure a basic currency exists, creating it if necessary.
-   *
-   * This is the primary method for getting basic currency tokens.
-   * Safe to call multiple times (idempotent).
-   *
-   * @param currencyCode - Currency code from BASIC_CURRENCIES
-   * @returns The existing or newly created basic currency token
-   * @throws Error if currencyCode is not a valid basic currency
-   */
-  async ensureBasicCurrency(
-    currencyCode: BasicCurrencyCode
-  ): Promise<BasicCurrencyToken> {
-    log.methodEntry(this.logger, 'ensureBasicCurrency', { currencyCode });
-
-    try {
-      // Validate currency code
-      if (!BASIC_CURRENCY_CODES.includes(currencyCode)) {
-        throw new Error(
-          `Invalid basic currency code: ${currencyCode}. ` +
-            `Valid codes are: ${BASIC_CURRENCY_CODES.join(', ')}`
-        );
-      }
-
-      // Check if already exists
-      const existing = await this.findByCurrencyCode(currencyCode);
-      if (existing) {
-        this.logger.debug(
-          { id: existing.id, currencyCode },
-          'Basic currency already exists'
-        );
-        log.methodExit(this.logger, 'ensureBasicCurrency', {
-          id: existing.id,
-          existed: true,
-        });
-        return existing;
-      }
-
-      // Create new basic currency
-      const currencyDef = BASIC_CURRENCIES[currencyCode];
-      const token = await this.create({
-        tokenType: 'basic-currency',
-        name: currencyDef.name,
-        symbol: currencyDef.symbol,
-        decimals: BASIC_CURRENCY_DECIMALS, // Always 18
-        config: {
-          currencyCode: currencyDef.currencyCode,
-        },
-      });
-
-      this.logger.info(
-        { id: token.id, currencyCode },
-        'Basic currency created'
-      );
-      log.methodExit(this.logger, 'ensureBasicCurrency', {
-        id: token.id,
-        created: true,
-      });
-      return token;
-    } catch (error) {
-      log.methodError(this.logger, 'ensureBasicCurrency', error as Error, {
-        currencyCode,
-      });
-      throw error;
-    }
-  }
-
-  /**
    * Get all existing basic currencies from the database.
    *
    * @returns Array of basic currency tokens currently in the database
@@ -327,6 +230,85 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
       return tokens;
     } catch (error) {
       log.methodError(this.logger, 'findAll', error as Error, {});
+      throw error;
+    }
+  }
+
+  /**
+   * Find or create a basic currency by symbol with CoinGecko validation.
+   *
+   * This is the primary method for getting basic currency tokens.
+   * Safe to call multiple times (idempotent).
+   *
+   * 1. First checks the database for an existing token with matching currencyCode
+   * 2. If not found, validates the symbol against CoinGecko's supported_vs_currencies
+   * 3. If valid, creates a new basic currency token with the CoinGecko currency ID
+   *
+   * This enables manifest authors to use any CoinGecko-supported currency as a quote token.
+   *
+   * @param symbol - Currency symbol (e.g., 'USD', 'EUR', 'JPY', 'ETH', 'BTC')
+   * @returns The existing or newly created basic currency token
+   * @throws Error if the symbol is not supported by CoinGecko
+   */
+  async findOrCreateBySymbol(symbol: string): Promise<BasicCurrencyToken> {
+    log.methodEntry(this.logger, 'findOrCreateBySymbol', { symbol });
+
+    try {
+      const normalizedSymbol = symbol.toUpperCase();
+
+      // 1. Check if already exists in database
+      const existing = await this.findByCurrencyCode(normalizedSymbol);
+      if (existing) {
+        this.logger.debug(
+          { id: existing.id, symbol: normalizedSymbol },
+          'Basic currency already exists in database'
+        );
+        log.methodExit(this.logger, 'findOrCreateBySymbol', {
+          id: existing.id,
+          existed: true,
+        });
+        return existing;
+      }
+
+      // 2. Validate against CoinGecko supported_vs_currencies
+      const coingeckoCurrency = await this.coinGeckoClient.validateVsCurrency(symbol);
+      if (!coingeckoCurrency) {
+        throw new Error(
+          `Currency symbol "${symbol}" is not supported by CoinGecko. ` +
+          `Use a supported currency from CoinGecko's vs_currencies list.`
+        );
+      }
+
+      // 3. Create new basic currency with CoinGecko data
+      const token = await this.create({
+        tokenType: 'basic-currency',
+        name: normalizedSymbol,
+        symbol: normalizedSymbol,
+        decimals: BASIC_CURRENCY_DECIMALS, // Always 18
+        config: {
+          currencyCode: normalizedSymbol,
+          coingeckoCurrency: coingeckoCurrency,
+        },
+      });
+
+      this.logger.info(
+        {
+          id: token.id,
+          symbol: normalizedSymbol,
+          coingeckoCurrency,
+        },
+        'Created new basic currency from CoinGecko validation'
+      );
+
+      log.methodExit(this.logger, 'findOrCreateBySymbol', {
+        id: token.id,
+        created: true,
+      });
+      return token;
+    } catch (error) {
+      log.methodError(this.logger, 'findOrCreateBySymbol', error as Error, {
+        symbol,
+      });
       throw error;
     }
   }

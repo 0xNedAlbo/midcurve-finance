@@ -126,6 +126,41 @@ export const FormItemSchema = z.discriminatedUnion('type', [
 ]);
 
 // =============================================================================
+// QUOTE TOKEN SCHEMA
+// =============================================================================
+
+/**
+ * Zod schema for basic currency quote token
+ */
+export const ManifestQuoteTokenBasicCurrencySchema = z.object({
+  type: z.literal('basic-currency'),
+  symbol: z.string().min(1).max(10),
+});
+
+/**
+ * Zod schema for ERC-20 quote token
+ */
+export const ManifestQuoteTokenErc20Schema = z.object({
+  type: z.literal('erc20'),
+  symbol: z.string().min(1).max(20),
+  chainId: z.number().int().positive(),
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid EVM address format'),
+});
+
+/**
+ * Zod schema for manifest quote token (discriminated union)
+ *
+ * Supports both basic currencies (USD, ETH, BTC) and ERC-20 tokens.
+ * Both types require a symbol for manifest readability.
+ * - basic-currency: Symbol will be validated against CoinGecko supported currencies
+ * - erc20: Symbol will be validated against on-chain token symbol (case-sensitive!)
+ */
+export const ManifestQuoteTokenSchema = z.discriminatedUnion('type', [
+  ManifestQuoteTokenBasicCurrencySchema,
+  ManifestQuoteTokenErc20Schema,
+]);
+
+// =============================================================================
 // MANIFEST SCHEMA
 // =============================================================================
 
@@ -149,6 +184,9 @@ export const StrategyManifestSchema = z.object({
   constructorParams: z.array(ConstructorParamSchema),
   formLayout: z.array(FormItemSchema).optional(),
 
+  // Quote token for strategy metrics valuation
+  quoteToken: ManifestQuoteTokenSchema,
+
   // Metadata
   tags: z.array(z.string()).optional(),
 });
@@ -171,7 +209,9 @@ export type ManifestErrorCode =
   | 'MISSING_UI_CONFIG'
   | 'INVALID_BYTECODE'
   | 'MISSING_REQUIRED_FIELD'
-  | 'INVALID_FIELD_VALUE';
+  | 'INVALID_FIELD_VALUE'
+  | 'INVALID_QUOTE_TOKEN'
+  | 'QUOTE_TOKEN_SYMBOL_MISMATCH';
 
 /**
  * Severity level for verification issues
@@ -229,6 +269,14 @@ export interface VerifyManifestResponse {
    * Parsed manifest (if valid)
    */
   parsedManifest?: SerializedStrategyManifest;
+
+  /**
+   * Database ID of the resolved quote token (if valid)
+   *
+   * The verification process finds or creates the quote token in the database
+   * based on the manifest's quoteToken field. This ID is used during deployment.
+   */
+  resolvedQuoteTokenId?: string;
 }
 
 /**
@@ -245,6 +293,11 @@ export type VerifyManifestApiResponse = ApiResponse<VerifyManifestResponse>;
  *
  * Now takes a full manifest instead of manifestSlug, since manifests
  * are user-uploaded rather than selected from a database catalogue.
+ *
+ * Note: quoteTokenId is NOT included in the request. The quote token is
+ * resolved during manifest verification (from manifest.quoteToken) and
+ * stored in the VerifyManifestResponse. The deploy endpoint re-verifies
+ * the manifest and resolves the quote token server-side.
  */
 export interface DeployStrategyRequest {
   /**
@@ -262,12 +315,6 @@ export interface DeployStrategyRequest {
    * Key is param name, value is string representation
    */
   constructorValues: Record<string, string>;
-
-  /**
-   * Quote token ID for metrics denomination
-   * All position metrics will be in this token
-   */
-  quoteTokenId: string;
 }
 
 /**
@@ -277,13 +324,28 @@ export const DeployStrategyRequestSchema = z.object({
   manifest: StrategyManifestSchema,
   name: z.string().min(1).max(100),
   constructorValues: z.record(z.string()),
-  quoteTokenId: z.string().min(1),
 });
 
 /**
  * Deployment status
+ *
+ * Extended to support async deployment flow from EVM service:
+ * - pending: Deployment initiated
+ * - signing: Signer service is signing the transaction
+ * - broadcasting: Transaction is being broadcast to the network
+ * - confirming: Waiting for transaction confirmation
+ * - setting_up_topology: Setting up RabbitMQ topology for the strategy
+ * - completed: Deployment finished successfully
+ * - failed: Deployment failed
  */
-export type DeploymentStatus = 'pending' | 'submitted' | 'confirmed' | 'failed';
+export type DeploymentStatus =
+  | 'pending'
+  | 'signing'
+  | 'broadcasting'
+  | 'confirming'
+  | 'setting_up_topology'
+  | 'completed'
+  | 'failed';
 
 /**
  * Deployment information in response
@@ -295,14 +357,20 @@ export interface DeploymentInfo {
   status: DeploymentStatus;
 
   /**
-   * Transaction hash (after submission)
+   * Transaction hash (after signing/broadcasting)
    */
   transactionHash?: string;
 
   /**
-   * Contract address (after confirmation)
+   * Contract address (predicted during signing, confirmed after completion)
    */
   contractAddress?: string;
+
+  /**
+   * URL to poll for deployment status updates
+   * Returned for async deployments (status 202)
+   */
+  pollUrl?: string;
 
   /**
    * Error message (if failed)
@@ -327,6 +395,9 @@ export interface DeployAutomationWalletInfo {
 
 /**
  * Response for deploy strategy endpoint
+ *
+ * Note: With async deployment (202 Accepted), the automation wallet
+ * may not be available immediately. It will be populated once deployment completes.
  */
 export interface DeployStrategyResponse {
   /**
@@ -336,8 +407,9 @@ export interface DeployStrategyResponse {
 
   /**
    * Newly created automation wallet
+   * Optional: Not available immediately for async deployments (status 202)
    */
-  automationWallet: DeployAutomationWalletInfo;
+  automationWallet?: DeployAutomationWalletInfo;
 
   /**
    * Deployment status and info
