@@ -108,6 +108,22 @@ interface ConstructorParam {
   default?: string;
 }
 
+/**
+ * Data for creating a strategy log entry
+ */
+export interface CreateStrategyLogData {
+  strategyId: string;
+  contractAddress: string;
+  epoch: bigint;
+  correlationId: string;
+  level: number;
+  topic: string;
+  topicName?: string;
+  data: string;
+  dataDecoded?: string;
+  timestamp: Date;
+}
+
 // =============================================================================
 // Error
 // =============================================================================
@@ -449,6 +465,49 @@ class DatabaseClient {
     });
 
     return result;
+  }
+
+  /**
+   * Create a strategy log entry
+   *
+   * This is a fire-and-forget operation - errors are logged but not thrown.
+   * Log persistence should not block strategy execution.
+   *
+   * @param data - Log entry data
+   */
+  async createStrategyLog(data: CreateStrategyLogData): Promise<void> {
+    evmLog.methodEntry(this.log, 'createStrategyLog', {
+      strategyId: data.strategyId,
+      level: data.level,
+      topic: data.topic,
+    });
+
+    try {
+      await prisma.strategyLog.create({
+        data: {
+          strategyId: data.strategyId,
+          contractAddress: data.contractAddress,
+          epoch: data.epoch,
+          correlationId: data.correlationId,
+          level: data.level,
+          topic: data.topic,
+          topicName: data.topicName,
+          data: data.data,
+          dataDecoded: data.dataDecoded,
+          timestamp: data.timestamp,
+        },
+      });
+
+      evmLog.methodExit(this.log, 'createStrategyLog', { success: true });
+    } catch (error) {
+      // Log but don't throw - log persistence is non-critical
+      this.log.error({
+        strategyId: data.strategyId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        msg: 'Failed to persist strategy log (non-fatal)',
+      });
+      evmLog.methodExit(this.log, 'createStrategyLog', { success: false });
+    }
   }
 }
 

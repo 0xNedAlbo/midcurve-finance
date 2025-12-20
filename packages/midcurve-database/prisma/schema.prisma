@@ -102,6 +102,7 @@ model Strategy {
   automationWallets    AutomationWallet[]
   strategyPositions    StrategyPosition[]
   strategyLedgerEvents StrategyLedgerEvent[]
+  logs                 StrategyLog[]
 
   // Indexes
   @@index([userId])
@@ -199,6 +200,40 @@ model StrategyLedgerEvent {
   @@index([tokenId])
   @@index([eventType])
   @@map("strategy_ledger_events")
+}
+
+// StrategyLog - Durable log messages from strategy execution
+// Logs are emitted via LoggingMixin and persisted by the LogEffectHandler
+model StrategyLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Strategy reference
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  // Denormalized for display (avoids join for simple log viewing)
+  contractAddress String // 0x... checksummed address
+
+  // Execution context
+  epoch         BigInt // Strategy epoch when log was emitted
+  correlationId String // Distributed tracing ID
+
+  // Log content
+  level       Int // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+  topic       String // bytes32 hash (hex string)
+  topicName   String? // Human-readable topic name (if known)
+  data        String // bytes hex string (raw encoded data)
+  dataDecoded String? // Human-readable decoded data (if possible)
+
+  // Timing
+  timestamp DateTime // When the log was created (from requestedAt)
+
+  // Indexes for efficient querying
+  @@index([strategyId, timestamp])
+  @@index([strategyId, level, timestamp])
+  @@index([timestamp])
+  @@map("strategy_logs")
 }
 
 // =============================================================================
