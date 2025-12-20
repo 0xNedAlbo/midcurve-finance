@@ -1,5 +1,5 @@
 /**
- * POST /api/strategy/:id/vault - Register a user-deployed vault
+ * POST /api/strategy/:addr/vault - Register a user-deployed vault
  *
  * After a user deploys their SimpleTokenVault on a public chain,
  * they call this endpoint to register it with the strategy.
@@ -45,7 +45,7 @@ import type { StrategyManifest, FundingTokenSpec } from '../../../../../core/src
 // Constants
 // =============================================================================
 
-const log = logger.child({ route: 'POST /api/strategy/:id/vault' });
+const log = logger.child({ route: 'POST /api/strategy/:addr/vault' });
 
 /** Map of chain IDs to RPC URL environment variable names */
 const RPC_URL_ENV_MAP: Record<number, string> = {
@@ -125,10 +125,10 @@ function normalizeAddress(address: string): string {
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ addr: string }> }
 ) {
   try {
-    const { id: strategyId } = await params;
+    const { addr: strategyId } = await params;
 
     // 1. Parse and validate request body
     let body: unknown;
