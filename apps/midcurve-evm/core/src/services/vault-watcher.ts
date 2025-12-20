@@ -28,7 +28,7 @@ import {
 } from 'viem';
 import { logger } from '../../../lib/logger.js';
 import { prisma } from '../../../lib/prisma.js';
-import { parseVaultConfig, isEvmVaultConfig } from '../types/vault-config.js';
+import { parseVaultConfig, isEvmVaultConfig } from '../types/vault-config';
 import {
   type StepEventMessage,
   serializeMessage,

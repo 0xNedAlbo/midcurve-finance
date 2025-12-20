@@ -11,7 +11,7 @@
 import { prisma } from '../../../lib/prisma';
 import { logger, evmLog } from '../../../lib/logger';
 import type { Address, Hex, Abi } from 'viem';
-import { parseVaultConfig, type VaultConfig } from '../types/vault-config.js';
+import { parseVaultConfig, type VaultConfig } from '../types/vault-config';
 
 // =============================================================================
 // Types

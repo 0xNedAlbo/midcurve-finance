@@ -26,6 +26,7 @@ import {
   LIFECYCLE_SHUTDOWN,
   serializeMessage,
 } from '../mq/messages';
+import type { StrategyManifest } from '../types/manifest';
 
 // =============================================================================
 // Types
@@ -226,6 +227,12 @@ class LifecycleService {
           'NO_MANIFEST',
           400
         );
+      }
+
+      // Validate vault if strategy requires funding
+      const manifest = strategy.manifest as unknown as StrategyManifest;
+      if (manifest.fundingToken) {
+        await this.validateVaultBeforeStart(strategy.id, manifest);
       }
 
       // Create and register loop
@@ -475,6 +482,165 @@ class LifecycleService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Validate vault configuration before starting a strategy that requires funding
+   *
+   * Checks:
+   * 1. Vault is registered (vaultConfig exists)
+   * 2. Vault has funds (tokenBalance > 0)
+   * 3. Vault has gas pool (gasPool > MIN_GAS_POOL)
+   */
+  private async validateVaultBeforeStart(
+    strategyId: string,
+    manifest: StrategyManifest
+  ): Promise<void> {
+    const dbClient = getDatabaseClient();
+    const vaultInfo = await dbClient.getStrategyVaultInfo(strategyId);
+
+    // 1. Check vault is registered
+    if (!vaultInfo) {
+      throw new LifecycleError(
+        'Strategy requires vault funding but no vault is registered. ' +
+        'Deploy a SimpleTokenVault and call POST /api/strategy/:id/vault to register it.',
+        'VAULT_NOT_DEPLOYED',
+        400
+      );
+    }
+
+    // 2. Validate vault config type (currently only EVM supported)
+    const vaultConfig = vaultInfo.vaultConfig;
+    if (vaultConfig.type !== 'evm') {
+      // Future-proofing: when other vault types are added, this will be a compile error
+      // reminding us to handle them
+      throw new LifecycleError(
+        `Unsupported vault type: ${(vaultConfig as { type: string }).type}`,
+        'UNSUPPORTED_VAULT_TYPE',
+        400
+      );
+    }
+
+    // 3. Validate chain matches manifest
+    if (vaultConfig.chainId !== manifest.fundingToken!.chainId) {
+      throw new LifecycleError(
+        `Vault chain (${vaultConfig.chainId}) does not match manifest fundingToken chain (${manifest.fundingToken!.chainId})`,
+        'VAULT_CHAIN_MISMATCH',
+        400
+      );
+    }
+
+    // 4. Read vault balance and gas pool from chain
+    const RPC_URL_ENV_MAP: Record<number, string> = {
+      1: 'RPC_URL_ETHEREUM',
+      42161: 'RPC_URL_ARBITRUM',
+      8453: 'RPC_URL_BASE',
+      56: 'RPC_URL_BSC',
+      137: 'RPC_URL_POLYGON',
+      10: 'RPC_URL_OPTIMISM',
+    };
+
+    const envVar = RPC_URL_ENV_MAP[vaultConfig.chainId];
+    if (!envVar) {
+      throw new LifecycleError(
+        `Unsupported vault chain: ${vaultConfig.chainId}`,
+        'UNSUPPORTED_CHAIN',
+        400
+      );
+    }
+
+    const rpcUrl = process.env[envVar];
+    if (!rpcUrl) {
+      // Skip on-chain validation if RPC not configured (development)
+      this.log.warn({
+        strategyId,
+        chainId: vaultConfig.chainId,
+        envVar,
+        msg: 'Skipping vault balance check - RPC URL not configured',
+      });
+      return;
+    }
+
+    const client = createPublicClient({
+      transport: http(rpcUrl),
+    });
+
+    const VAULT_ABI = [
+      { type: 'function', name: 'tokenBalance', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
+      { type: 'function', name: 'gasPool', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
+      { type: 'function', name: 'isShutdown', inputs: [], outputs: [{ type: 'bool' }], stateMutability: 'view' },
+    ] as const;
+
+    try {
+      const [tokenBalance, gasPool, isShutdown] = await Promise.all([
+        client.readContract({
+          address: vaultConfig.vaultAddress as Address,
+          abi: VAULT_ABI,
+          functionName: 'tokenBalance',
+        }),
+        client.readContract({
+          address: vaultConfig.vaultAddress as Address,
+          abi: VAULT_ABI,
+          functionName: 'gasPool',
+        }),
+        client.readContract({
+          address: vaultConfig.vaultAddress as Address,
+          abi: VAULT_ABI,
+          functionName: 'isShutdown',
+        }),
+      ]);
+
+      // Check vault not shutdown
+      if (isShutdown) {
+        throw new LifecycleError(
+          'Vault is shutdown',
+          'VAULT_SHUTDOWN',
+          400
+        );
+      }
+
+      // Check vault has funds
+      if (tokenBalance === 0n) {
+        throw new LifecycleError(
+          'Vault is empty. Deposit tokens before starting the strategy.',
+          'VAULT_EMPTY',
+          400
+        );
+      }
+
+      // Check gas pool (minimum 0.01 ETH)
+      const MIN_GAS_POOL = BigInt(10 ** 16); // 0.01 ETH
+      if (gasPool < MIN_GAS_POOL) {
+        throw new LifecycleError(
+          `Vault gas pool too low (${gasPool} wei). Minimum 0.01 ETH required.`,
+          'GAS_POOL_INSUFFICIENT',
+          400
+        );
+      }
+
+      this.log.info({
+        strategyId,
+        vaultAddress: vaultConfig.vaultAddress,
+        tokenBalance: tokenBalance.toString(),
+        gasPool: gasPool.toString(),
+        msg: 'Vault validation passed',
+      });
+    } catch (error) {
+      if (error instanceof LifecycleError) {
+        throw error;
+      }
+      this.log.error({
+        strategyId,
+        vaultAddress: vaultConfig.vaultAddress,
+        error,
+        msg: 'Failed to read vault state',
+      });
+      throw new LifecycleError(
+        `Failed to read vault state: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'VAULT_READ_FAILED',
+        500
+      );
+    }
   }
 
   /**
