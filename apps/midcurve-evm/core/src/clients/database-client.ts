@@ -11,6 +11,7 @@
 import { prisma } from '../../../lib/prisma';
 import { logger, evmLog } from '../../../lib/logger';
 import type { Address, Hex, Abi } from 'viem';
+import { parseVaultConfig, type VaultConfig } from '../types/vault-config.js';
 
 // =============================================================================
 // Types
@@ -68,6 +69,33 @@ export interface StrategyStatusData {
 }
 
 /**
+ * Vault info for a strategy
+ *
+ * Contains all information needed to interact with the strategy's vault
+ * on the public chain.
+ */
+export interface StrategyVaultInfo {
+  /** Strategy ID */
+  strategyId: string;
+  /** Vault configuration (parsed from JSON) */
+  vaultConfig: VaultConfig;
+  /** Vault token ID (reference to Token record) */
+  vaultTokenId: string;
+  /** Vault token details */
+  vaultToken: {
+    id: string;
+    symbol: string;
+    decimals: number;
+    /** Token address (from config.address for ERC20) */
+    address: Address;
+  };
+  /** When vault was deployed/registered */
+  vaultDeployedAt: Date;
+  /** Operator wallet address (for vault operations) */
+  operatorAddress: Address;
+}
+
+/**
  * Constructor parameter definition from manifest
  */
 interface ConstructorParam {
@@ -116,7 +144,6 @@ class DatabaseClient {
     const strategy = await prisma.strategy.findUnique({
       where: { id: strategyId },
       include: {
-        manifest: true,
         automationWallets: {
           where: { isActive: true },
           take: 1,
@@ -132,16 +159,25 @@ class DatabaseClient {
     const wallet = strategy.automationWallets[0];
     const walletConfig = wallet?.config as { walletAddress: string; kmsKeyId: string } | undefined;
 
+    // Parse manifest from JSON field
+    const manifestJson = strategy.manifest as {
+      id?: string;
+      slug?: string;
+      bytecode?: string;
+      abi?: unknown;
+      constructorParams?: unknown[];
+    } | null;
+
     const result: StrategyDeploymentData = {
       id: strategy.id,
       status: strategy.status,
-      manifest: strategy.manifest
+      manifest: manifestJson
         ? {
-            id: strategy.manifest.id,
-            slug: strategy.manifest.slug,
-            bytecode: strategy.manifest.bytecode as Hex,
-            abi: strategy.manifest.abi as unknown as Abi,
-            constructorParams: strategy.manifest.constructorParams as unknown as ConstructorParam[],
+            id: manifestJson.id ?? strategy.id,
+            slug: manifestJson.slug ?? 'unknown',
+            bytecode: manifestJson.bytecode as Hex,
+            abi: manifestJson.abi as unknown as Abi,
+            constructorParams: manifestJson.constructorParams as unknown as ConstructorParam[],
           }
         : (null as unknown as StrategyDeploymentData['manifest']),
       config: (strategy.config as Record<string, unknown>) ?? {},
@@ -177,7 +213,6 @@ class DatabaseClient {
     const strategy = await prisma.strategy.findFirst({
       where: { contractAddress: contractAddress.toLowerCase() },
       include: {
-        manifest: true,
         automationWallets: {
           where: { isActive: true },
           take: 1,
@@ -193,16 +228,23 @@ class DatabaseClient {
     const wallet = strategy.automationWallets[0];
     const walletConfig = wallet?.config as { walletAddress: string } | undefined;
 
+    // Parse manifest from JSON field
+    const manifestJson = strategy.manifest as {
+      id?: string;
+      slug?: string;
+      abi?: unknown;
+    } | null;
+
     const result: StrategyLifecycleData = {
       id: strategy.id,
       status: strategy.status,
       contractAddress: strategy.contractAddress as Address | null,
       chainId: strategy.chainId,
-      manifest: strategy.manifest
+      manifest: manifestJson
         ? {
-            id: strategy.manifest.id,
-            slug: strategy.manifest.slug,
-            abi: strategy.manifest.abi as unknown as Abi,
+            id: manifestJson.id ?? strategy.id,
+            slug: manifestJson.slug ?? 'unknown',
+            abi: manifestJson.abi as unknown as Abi,
           }
         : (null as unknown as StrategyLifecycleData['manifest']),
       automationWallet: walletConfig
@@ -299,6 +341,111 @@ class DatabaseClient {
     evmLog.methodExit(this.log, 'getStrategyById', {
       found: true,
       status: result.status,
+    });
+
+    return result;
+  }
+
+  /**
+   * Get vault info for a strategy
+   *
+   * Returns vault configuration and token details needed for vault operations.
+   * Returns null if strategy not found or vault not configured.
+   *
+   * @param strategyId - Strategy ID
+   * @returns Vault info or null if not found/configured
+   */
+  async getStrategyVaultInfo(strategyId: string): Promise<StrategyVaultInfo | null> {
+    evmLog.methodEntry(this.log, 'getStrategyVaultInfo', { strategyId });
+
+    const strategy = await prisma.strategy.findUnique({
+      where: { id: strategyId },
+      select: {
+        id: true,
+        vaultConfig: true,
+        vaultTokenId: true,
+        vaultDeployedAt: true,
+        vaultToken: {
+          select: {
+            id: true,
+            symbol: true,
+            decimals: true,
+            config: true,
+          },
+        },
+        automationWallets: {
+          where: { isActive: true },
+          take: 1,
+          select: {
+            config: true,
+          },
+        },
+      },
+    });
+
+    if (!strategy) {
+      evmLog.methodExit(this.log, 'getStrategyVaultInfo', { found: false, reason: 'strategy_not_found' });
+      return null;
+    }
+
+    // Check if vault is configured
+    if (!strategy.vaultConfig || !strategy.vaultTokenId || !strategy.vaultDeployedAt) {
+      evmLog.methodExit(this.log, 'getStrategyVaultInfo', { found: false, reason: 'vault_not_configured' });
+      return null;
+    }
+
+    // Check if vault token exists
+    if (!strategy.vaultToken) {
+      this.log.error({ strategyId, vaultTokenId: strategy.vaultTokenId, msg: 'Vault token not found in database' });
+      evmLog.methodExit(this.log, 'getStrategyVaultInfo', { found: false, reason: 'vault_token_not_found' });
+      return null;
+    }
+
+    // Check if operator wallet exists
+    const wallet = strategy.automationWallets[0];
+    const walletConfig = wallet?.config as { walletAddress: string } | undefined;
+    if (!walletConfig?.walletAddress) {
+      this.log.error({ strategyId, msg: 'No active automation wallet found' });
+      evmLog.methodExit(this.log, 'getStrategyVaultInfo', { found: false, reason: 'no_operator_wallet' });
+      return null;
+    }
+
+    // Parse vault config
+    let vaultConfig: VaultConfig;
+    try {
+      vaultConfig = parseVaultConfig(strategy.vaultConfig);
+    } catch (error) {
+      this.log.error({ strategyId, vaultConfig: strategy.vaultConfig, error, msg: 'Invalid vault config' });
+      evmLog.methodExit(this.log, 'getStrategyVaultInfo', { found: false, reason: 'invalid_vault_config' });
+      return null;
+    }
+
+    // Extract token address from config
+    const tokenConfig = strategy.vaultToken.config as { address?: string } | undefined;
+    if (!tokenConfig?.address) {
+      this.log.error({ strategyId, tokenConfig, msg: 'Token config missing address' });
+      evmLog.methodExit(this.log, 'getStrategyVaultInfo', { found: false, reason: 'token_missing_address' });
+      return null;
+    }
+
+    const result: StrategyVaultInfo = {
+      strategyId: strategy.id,
+      vaultConfig,
+      vaultTokenId: strategy.vaultTokenId,
+      vaultToken: {
+        id: strategy.vaultToken.id,
+        symbol: strategy.vaultToken.symbol,
+        decimals: strategy.vaultToken.decimals,
+        address: tokenConfig.address as Address,
+      },
+      vaultDeployedAt: strategy.vaultDeployedAt,
+      operatorAddress: walletConfig.walletAddress as Address,
+    };
+
+    evmLog.methodExit(this.log, 'getStrategyVaultInfo', {
+      found: true,
+      vaultType: vaultConfig.type,
+      chainId: vaultConfig.type === 'evm' ? vaultConfig.chainId : undefined,
     });
 
     return result;

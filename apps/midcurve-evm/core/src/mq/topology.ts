@@ -39,6 +39,8 @@ export const ROUTING_KEYS = {
   action: (addr: string) => `action.${addr.toLowerCase()}`,
   /** Lifecycle event routing key pattern */
   lifecycle: (addr: string) => `lifecycle.${addr.toLowerCase()}`,
+  /** Funding event routing key pattern (from vault watcher) */
+  funding: (addr: string) => `funding.${addr.toLowerCase()}`,
   /** OHLC data routing key pattern */
   ohlc: (symbol: string, timeframe: string) =>
     `ohlc.${symbol.toUpperCase()}.${timeframe}`,
@@ -151,6 +153,13 @@ export async function setupStrategyTopology(
   await channel.bindQueue(eventsQueue, EXCHANGES.EVENTS, lifecycleKey);
   console.log(
     `[Topology] Binding: ${EXCHANGES.EVENTS} -> ${eventsQueue} (key: ${lifecycleKey})`
+  );
+
+  // Bind events queue to events exchange for funding messages
+  const fundingKey = ROUTING_KEYS.funding(addr);
+  await channel.bindQueue(eventsQueue, EXCHANGES.EVENTS, fundingKey);
+  console.log(
+    `[Topology] Binding: ${EXCHANGES.EVENTS} -> ${eventsQueue} (key: ${fundingKey})`
   );
 
   // Bind results queue to results exchange

@@ -88,6 +88,16 @@ model Strategy {
   // See StrategyManifest type in @midcurve/shared for structure
   manifest Json?
 
+  // Vault deployment info (nullable until vault deployed)
+  // Platform-independent config stored as JSON: { type: 'evm', chainId: number, vaultAddress: string }
+  // See VaultConfig type in midcurve-evm for structure
+  vaultConfig     Json?
+  vaultTokenId    String? // Reference to Token record for funding token (separate for easy lookup)
+  vaultDeployedAt DateTime?
+
+  // Vault token relation
+  vaultToken Token? @relation("StrategyVaultToken", fields: [vaultTokenId], references: [id])
+
   // Relations
   automationWallets    AutomationWallet[]
   strategyPositions    StrategyPosition[]
@@ -98,6 +108,7 @@ model Strategy {
   @@index([status])
   @@index([strategyType])
   @@index([quoteTokenId])
+  @@index([vaultTokenId])
   @@map("strategies")
 }
 
@@ -301,10 +312,11 @@ model Token {
   config Json
 
   // Relations
-  poolsAsToken0        Pool[]                @relation("PoolToken0")
-  poolsAsToken1        Pool[]                @relation("PoolToken1")
-  strategies           Strategy[]
-  strategyLedgerEvents StrategyLedgerEvent[]
+  poolsAsToken0          Pool[]                @relation("PoolToken0")
+  poolsAsToken1          Pool[]                @relation("PoolToken1")
+  strategies             Strategy[]
+  strategiesAsVaultToken Strategy[]            @relation("StrategyVaultToken")
+  strategyLedgerEvents   StrategyLedgerEvent[]
 
   // Indexes for efficient queries
   @@index([tokenType])

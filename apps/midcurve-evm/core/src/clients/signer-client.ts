@@ -62,6 +62,46 @@ export interface SignSubmitEffectResultInput {
   data: Hex;
 }
 
+// =============================================================================
+// Vault Signing Types
+// =============================================================================
+
+/**
+ * Input for signing a vault useFunds() transaction
+ *
+ * Transfers tokens from vault to operator wallet on public chain.
+ * Used by USE_FUNDS effect handler.
+ */
+export interface SignVaultUseFundsInput {
+  strategyId: string;
+  /** Amount of tokens to transfer (bigint as string) */
+  amount: string;
+}
+
+/**
+ * Input for signing a vault returnFunds() transaction
+ *
+ * Returns tokens from operator wallet to vault on public chain.
+ * Used by RETURN_FUNDS effect handler.
+ */
+export interface SignVaultReturnFundsInput {
+  strategyId: string;
+  /** Amount of tokens to return (bigint as string) */
+  amount: string;
+}
+
+/**
+ * Input for signing a vault reimburseGas() transaction
+ *
+ * Reimburses operator for gas costs from vault's ETH pool.
+ * Called by orchestrator ONLY (not by effect handlers).
+ */
+export interface SignVaultReimburseGasInput {
+  strategyId: string;
+  /** Amount of ETH to reimburse in wei (bigint as string) */
+  amountWei: string;
+}
+
 /**
  * API error response
  */
@@ -172,6 +212,91 @@ export class SignerClient {
     );
 
     evmLog.methodExit(this.log, 'signSubmitEffectResult', { nonce: response.nonce });
+
+    return response;
+  }
+
+  // =============================================================================
+  // Vault Signing Methods
+  // =============================================================================
+
+  /**
+   * Sign a vault useFunds() transaction
+   *
+   * Transfers tokens from vault to operator wallet on public chain.
+   * Called by the USE_FUNDS effect handler.
+   *
+   * @param input - Use funds signing input
+   * @returns Signed transaction for public chain
+   */
+  async signVaultUseFunds(
+    input: SignVaultUseFundsInput
+  ): Promise<SignContractCallResponse> {
+    evmLog.methodEntry(this.log, 'signVaultUseFunds', {
+      strategyId: input.strategyId,
+      amount: input.amount,
+    });
+
+    const response = await this.post<SignContractCallResponse>(
+      '/api/sign/vault/use-funds',
+      input
+    );
+
+    evmLog.methodExit(this.log, 'signVaultUseFunds', { nonce: response.nonce });
+
+    return response;
+  }
+
+  /**
+   * Sign a vault returnFunds() transaction
+   *
+   * Returns tokens from operator wallet to vault on public chain.
+   * Called by the RETURN_FUNDS effect handler.
+   *
+   * @param input - Return funds signing input
+   * @returns Signed transaction for public chain
+   */
+  async signVaultReturnFunds(
+    input: SignVaultReturnFundsInput
+  ): Promise<SignContractCallResponse> {
+    evmLog.methodEntry(this.log, 'signVaultReturnFunds', {
+      strategyId: input.strategyId,
+      amount: input.amount,
+    });
+
+    const response = await this.post<SignContractCallResponse>(
+      '/api/sign/vault/return-funds',
+      input
+    );
+
+    evmLog.methodExit(this.log, 'signVaultReturnFunds', { nonce: response.nonce });
+
+    return response;
+  }
+
+  /**
+   * Sign a vault reimburseGas() transaction
+   *
+   * Reimburses operator for gas costs from vault's ETH pool.
+   * Called by the orchestrator ONLY after executing vault operations.
+   *
+   * @param input - Reimburse gas signing input
+   * @returns Signed transaction for public chain
+   */
+  async signVaultReimburseGas(
+    input: SignVaultReimburseGasInput
+  ): Promise<SignContractCallResponse> {
+    evmLog.methodEntry(this.log, 'signVaultReimburseGas', {
+      strategyId: input.strategyId,
+      amountWei: input.amountWei,
+    });
+
+    const response = await this.post<SignContractCallResponse>(
+      '/api/sign/vault/reimburse-gas',
+      input
+    );
+
+    evmLog.methodExit(this.log, 'signVaultReimburseGas', { nonce: response.nonce });
 
     return response;
   }

@@ -9,6 +9,7 @@ import type { Hex } from 'viem';
 import type { EffectHandler } from './types.js';
 import { LogEffectHandler } from './log-handler.js';
 import { OhlcSubscribeHandler, OhlcUnsubscribeHandler } from './ohlc-handler.js';
+import { UseFundsHandler, ReturnFundsHandler } from './funding-handler.js';
 
 /**
  * Registry for effect handlers.
@@ -24,6 +25,10 @@ export class EffectHandlerRegistry {
     this.register(new LogEffectHandler());
     this.register(new OhlcSubscribeHandler());
     this.register(new OhlcUnsubscribeHandler());
+
+    // Register funding handlers
+    this.register(new UseFundsHandler());
+    this.register(new ReturnFundsHandler());
   }
 
   /**
