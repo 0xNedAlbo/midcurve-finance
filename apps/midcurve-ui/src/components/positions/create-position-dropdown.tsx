@@ -52,12 +52,6 @@ export function CreatePositionDropdown() {
     setIsDropdownOpen(false);
   };
 
-  const handleImportWallet = () => {
-    console.log("Import From Wallet clicked");
-    setIsDropdownOpen(false);
-    // TODO: Open import wallet modal
-  };
-
   const handleToggleNftForm = () => {
     setShowNftForm(!showNftForm);
     setImportError(null);
@@ -128,20 +122,7 @@ export function CreatePositionDropdown() {
               </div>
             </button>
 
-            {/* Option 2: Import From Wallet */}
-            <button
-              onClick={handleImportWallet}
-              className="w-full px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
-            >
-              <div className="text-left">
-                <div className="font-medium">Import From Wallet</div>
-                <div className="text-xs text-slate-400">
-                  Scan connected wallet for existing positions
-                </div>
-              </div>
-            </button>
-
-            {/* Option 3: Import NFT by ID */}
+            {/* Option 2: Import NFT by ID */}
             <button
               onClick={handleToggleNftForm}
               className="w-full px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
