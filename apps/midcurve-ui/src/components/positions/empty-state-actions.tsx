@@ -1,16 +1,15 @@
 "use client";
 
-import { Wand2, Wallet, FileText, ArrowRight, Loader2 } from "lucide-react";
+import { Wand2, Zap, FileText, ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
+import { StrategyDeployWizard } from "../strategies/wizard/strategy-deploy-wizard";
 
 interface EmptyStateActionsProps {
-  onWalletImportClick: () => void;
   onImportSuccess?: (position: any) => void;
 }
 
 export function EmptyStateActions({
-  onWalletImportClick,
   onImportSuccess,
 }: EmptyStateActionsProps) {
   const [showNftForm, setShowNftForm] = useState(false);
@@ -25,6 +24,7 @@ export function EmptyStateActions({
 
   // Wizard state
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [isStrategyWizardOpen, setIsStrategyWizardOpen] = useState(false);
 
   // Helper function to format chain name for display
   const formatChainName = (chain: string): string => {
@@ -116,36 +116,6 @@ export function EmptyStateActions({
               className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
             >
               Start Wizard
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Wallet Import Card */}
-        <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:border-blue-500/50 transition-all hover:shadow-lg hover:shadow-blue-500/10">
-          <div className="flex flex-col h-full">
-            {/* Icon */}
-            <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center mb-4">
-              <Wallet className="w-6 h-6 text-blue-400" />
-            </div>
-
-            {/* Content */}
-            <div className="flex-grow">
-              <h3 className="text-xl font-semibold text-white mb-2">
-                Import from Wallet
-              </h3>
-              <p className="text-sm text-slate-400 mb-6">
-                Connect your wallet to automatically discover and import all
-                your existing positions
-              </p>
-            </div>
-
-            {/* Action Button */}
-            <button
-              onClick={onWalletImportClick}
-              className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
-            >
-              Connect Wallet
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -254,6 +224,36 @@ export function EmptyStateActions({
             )}
           </div>
         </div>
+
+        {/* Deploy Strategy Card */}
+        <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:border-green-500/50 transition-all hover:shadow-lg hover:shadow-green-500/10">
+          <div className="flex flex-col h-full">
+            {/* Icon */}
+            <div className="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center mb-4">
+              <Zap className="w-6 h-6 text-green-400" />
+            </div>
+
+            {/* Content */}
+            <div className="flex-grow">
+              <h3 className="text-xl font-semibold text-white mb-2">
+                Deploy Strategy
+              </h3>
+              <p className="text-sm text-slate-400 mb-6">
+                Deploy an automated liquidity management strategy to optimize
+                your positions
+              </p>
+            </div>
+
+            {/* Action Button */}
+            <button
+              onClick={() => setIsStrategyWizardOpen(true)}
+              className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Deploy Strategy
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Wizard Modal */}
@@ -263,6 +263,15 @@ export function EmptyStateActions({
         onPositionCreated={(position) => {
           // Don't auto-close - let user click "Finish" button
           onImportSuccess?.(position);
+        }}
+      />
+
+      {/* Strategy Deploy Wizard Modal */}
+      <StrategyDeployWizard
+        isOpen={isStrategyWizardOpen}
+        onClose={() => setIsStrategyWizardOpen(false)}
+        onStrategyDeployed={(response) => {
+          console.log("Strategy deployed:", response.strategy.id);
         }}
       />
     </div>

@@ -271,9 +271,6 @@ export function PositionList({ className }: PositionListProps) {
       {/* Empty State */}
       {!error && !isLoading && filteredPositions.length === 0 && (
         <EmptyStateActions
-          onWalletImportClick={() =>
-            console.log("Wallet import modal - not implemented yet")
-          }
           onImportSuccess={async (position) => {
             console.log("Position imported:", position);
             // Refetch positions to show the newly imported position
