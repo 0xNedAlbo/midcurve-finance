@@ -4,6 +4,18 @@ import { Wand2, Zap, FileText, ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
 import { StrategyDeployWizard } from "../strategies/wizard/strategy-deploy-wizard";
+import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
+
+const CHAIN_IDS = {
+  ethereum: 1,
+  arbitrum: 42161,
+  base: 8453,
+  bsc: 56,
+  polygon: 137,
+  optimism: 10,
+} as const;
+
+type ChainKey = keyof typeof CHAIN_IDS;
 
 interface EmptyStateActionsProps {
   onImportSuccess?: (position: any) => void;
@@ -20,7 +32,9 @@ export function EmptyStateActions({
     chainName: string;
     nftId: string;
   } | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
+
+  // Import mutation hook
+  const importMutation = useImportPositionByNftId();
 
   // Wizard state
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -35,46 +49,49 @@ export function EmptyStateActions({
         return "Arbitrum";
       case "base":
         return "Base";
+      case "bsc":
+        return "BNB Smart Chain";
+      case "polygon":
+        return "Polygon";
+      case "optimism":
+        return "Optimism";
       default:
         return chain.charAt(0).toUpperCase() + chain.slice(1);
     }
   };
 
-  // Placeholder import handler
+  // Real import handler using API
   const handleImportNft = () => {
     if (!nftId.trim()) return;
 
-    setIsImporting(true);
     setImportError(null);
     setImportSuccess(null);
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsImporting(false);
+    const chainId = CHAIN_IDS[selectedChain as ChainKey];
 
-      // Simulate success (80% chance) or error (20% chance)
-      if (Math.random() > 0.2) {
-        const displayData = {
-          chainName: formatChainName(selectedChain),
-          nftId: nftId.trim(),
-        };
-        setImportSuccess(displayData);
-        setImportError(null);
+    importMutation.mutate(
+      { chainId, nftId: nftId.trim() },
+      {
+        onSuccess: (position) => {
+          const config = position.config as { chainId: number; nftId: number };
+          setImportSuccess({
+            chainName: formatChainName(selectedChain),
+            nftId: String(config.nftId),
+          });
+          onImportSuccess?.(position);
 
-        console.log(`Imported NFT ${nftId} on ${selectedChain} (simulated)`);
-        onImportSuccess?.({ nftId, chain: selectedChain });
-
-        // Reset form after 2 seconds
-        setTimeout(() => {
-          setShowNftForm(false);
-          setNftId("");
-          setImportSuccess(null);
-        }, 2000);
-      } else {
-        setImportError("Position not found. Please check the NFT ID and try again.");
-        setImportSuccess(null);
+          // Reset form after 2 seconds
+          setTimeout(() => {
+            setShowNftForm(false);
+            setNftId("");
+            setImportSuccess(null);
+          }, 2000);
+        },
+        onError: (error) => {
+          setImportError(error.message || "Failed to import position");
+        },
       }
-    }, 1500);
+    );
   };
 
   return (
@@ -163,6 +180,9 @@ export function EmptyStateActions({
                     <option value="ethereum">Ethereum</option>
                     <option value="arbitrum">Arbitrum</option>
                     <option value="base">Base</option>
+                    <option value="bsc">BNB Smart Chain</option>
+                    <option value="polygon">Polygon</option>
+                    <option value="optimism">Optimism</option>
                   </select>
                 </div>
 
@@ -194,11 +214,11 @@ export function EmptyStateActions({
                   </button>
                   <button
                     onClick={handleImportNft}
-                    disabled={!nftId.trim() || isImporting}
+                    disabled={!nftId.trim() || importMutation.isPending}
                     className="flex-1 px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:text-slate-400 text-white rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                   >
-                    {isImporting && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {isImporting ? "Importing..." : "Import"}
+                    {importMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {importMutation.isPending ? "Importing..." : "Import"}
                   </button>
                 </div>
 
