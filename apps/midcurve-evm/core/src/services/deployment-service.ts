@@ -117,11 +117,25 @@ class DeploymentService {
 
     // Run deployment in background
     this.runDeployment(input, channel).catch((error) => {
-      this.log.error({ strategyId, error, msg: 'Deployment failed' });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      const errorCode = (error as any)?.code;
+      const errorCause = error instanceof Error && error.cause
+        ? (error.cause instanceof Error ? error.cause.message : String(error.cause))
+        : undefined;
+
+      this.log.error({
+        strategyId,
+        error: errorMessage,
+        errorCode,
+        errorCause,
+        errorStack,
+        msg: 'Deployment failed'
+      });
       const currentState = this.deployments.get(strategyId);
       if (currentState) {
         currentState.status = 'failed';
-        currentState.error = error instanceof Error ? error.message : 'Unknown error';
+        currentState.error = errorMessage;
         currentState.completedAt = new Date();
       }
     });

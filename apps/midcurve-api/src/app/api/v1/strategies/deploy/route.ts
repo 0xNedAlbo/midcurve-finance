@@ -281,7 +281,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         'Strategy record created, calling EVM service for deployment'
       );
 
-      // 6. Call EVM service to start deployment
+      // 6. Transition strategy to 'deploying' state before calling EVM service
+      await getStrategyService().markDeploying(strategy.id);
+
+      // 7. Call EVM service to start deployment
       // The EVM service handles signing, broadcasting, and RabbitMQ topology setup
       const evmServiceUrl = process.env.EVM_SERVICE_URL || 'http://localhost:3002';
 
@@ -347,14 +350,17 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 500 });
       }
 
-      // 7. Build response with async deployment info
+      // 8. Build response with async deployment info
       const serializedStrategy = serializeBigInt(strategy) as unknown as SerializedStrategy;
+
+      // Use API's status endpoint for polling (not EVM's internal URL)
+      const pollUrl = `/api/v1/strategies/deploy/status?strategyId=${strategy.id}`;
 
       const deployment: DeploymentInfo = {
         status: evmResult.status as DeploymentInfo['status'],
         transactionHash: evmResult.txHash,
         contractAddress: evmResult.contractAddress,
-        pollUrl: evmResult.pollUrl,
+        pollUrl,
       };
 
       const response: DeployStrategyResponse = {
@@ -367,7 +373,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           requestId,
           strategyId: strategy.id,
           deploymentStatus: evmResult.status,
-          pollUrl: evmResult.pollUrl,
+          pollUrl,
           manifestName: manifest.name,
           userId: user.id,
         },

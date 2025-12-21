@@ -2,21 +2,17 @@
  * Logger for midcurve-evm
  *
  * Uses pino for structured JSON logging.
+ *
+ * Note: pino-pretty transport is disabled because it uses worker threads
+ * which don't work correctly with Next.js's bundler. For pretty logging
+ * in development, pipe output to pino-pretty:
+ *   npm run dev | npx pino-pretty
  */
 
 import pino from 'pino';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  transport:
-    process.env.NODE_ENV === 'development'
-      ? {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-          },
-        }
-      : undefined,
 });
 
 /**
