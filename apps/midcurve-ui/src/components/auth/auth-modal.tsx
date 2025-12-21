@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAccount, useSignMessage } from "wagmi";
+import { useAccount, useSignMessage, useDisconnect } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { SiweMessage } from "siwe";
 import { X } from "lucide-react";
@@ -19,6 +19,7 @@ export function AuthModal() {
 
   const { address, isConnected, chain } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const { disconnect } = useDisconnect();
 
   // Open modal when modal param is present
   useEffect(() => {
@@ -109,7 +110,11 @@ export function AuthModal() {
       console.error("SIWE authentication error:", err);
 
       if (err instanceof Error) {
-        if (err.message.includes("User rejected")) {
+        if (err.message.includes("getChainId is not a function")) {
+          // Wallet is locked - disconnect and let user reconnect
+          disconnect();
+          setError(""); // Clear error since we're handling it by disconnecting
+        } else if (err.message.includes("User rejected")) {
           setError("Signature request was cancelled.");
         } else if (err.message.includes("nonce")) {
           setError("Failed to generate authentication nonce. Please try again.");
