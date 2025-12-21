@@ -103,9 +103,29 @@ export function DeployReviewStep({
 
     try {
       const response = await fetch(deploymentResult.deployment.pollUrl);
+
+      // Handle non-OK responses
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || errorData.error || `Status check failed: ${response.status}`);
+        const errorMessage = errorData.error?.message || errorData.error || `Status check failed: ${response.status}`;
+
+        // 500 errors indicate deployment failure - mark as failed and stop polling
+        if (response.status === 500) {
+          const failedResult: DeployStrategyResponse = {
+            ...deploymentResult,
+            deployment: {
+              ...deploymentResult.deployment,
+              status: "failed",
+              error: errorMessage,
+            },
+          };
+          onDeploymentStatusChange?.(failedResult);
+          setPollingError(null);
+          return;
+        }
+
+        // Other errors (network issues, etc.) - show warning but keep retrying
+        throw new Error(errorMessage);
       }
 
       const apiResponse = await response.json();
