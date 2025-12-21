@@ -105,20 +105,27 @@ export function DeployReviewStep({
       const response = await fetch(deploymentResult.deployment.pollUrl);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Status check failed: ${response.status}`);
+        throw new Error(errorData.error?.message || errorData.error || `Status check failed: ${response.status}`);
       }
 
-      const statusResult = await response.json();
+      const apiResponse = await response.json();
+
+      // API returns { success: true, data: { status, contractAddress, txHash, ... } }
+      if (!apiResponse.success || !apiResponse.data) {
+        throw new Error(apiResponse.error?.message || "Invalid API response");
+      }
+
+      const statusData = apiResponse.data;
 
       // Update deployment result with new status
       const updatedResult: DeployStrategyResponse = {
         ...deploymentResult,
         deployment: {
           ...deploymentResult.deployment,
-          status: statusResult.status,
-          transactionHash: statusResult.txHash || deploymentResult.deployment.transactionHash,
-          contractAddress: statusResult.contractAddress || deploymentResult.deployment.contractAddress,
-          error: statusResult.error,
+          status: statusData.status,
+          transactionHash: statusData.txHash || deploymentResult.deployment.transactionHash,
+          contractAddress: statusData.contractAddress || deploymentResult.deployment.contractAddress,
+          error: statusData.error,
         },
       };
 
