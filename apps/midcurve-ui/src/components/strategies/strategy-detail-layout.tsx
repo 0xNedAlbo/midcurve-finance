@@ -35,7 +35,7 @@ export function StrategyDetailLayout({
   const renderTabContent = () => {
     switch (activeTab) {
       case "logs":
-        return <StrategyLogsTab />;
+        return <StrategyLogsTab strategyId={strategy.id} />;
       case "funding":
       default:
         return <StrategyFundingTab />;

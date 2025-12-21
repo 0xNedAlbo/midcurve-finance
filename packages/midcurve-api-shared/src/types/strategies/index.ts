@@ -25,3 +25,6 @@ export * from './wallets.js';
 
 // Manifest operations
 export * from './manifest.js';
+
+// Logs
+export * from './logs.js';

@@ -130,6 +130,12 @@ export const queryKeys = {
     detail: (strategyId: string) =>
       [...queryKeys.strategies.details(), strategyId] as const,
 
+    // Strategy logs
+    logs: (strategyId: string) =>
+      [...queryKeys.strategies.all, 'logs', strategyId] as const,
+    logsWithParams: (strategyId: string, params?: { level?: number; cursor?: string }) =>
+      [...queryKeys.strategies.logs(strategyId), params ?? {}] as const,
+
     // Strategy manifests (templates for deployment)
     manifests: {
       all: ['strategies', 'manifests'] as const,
