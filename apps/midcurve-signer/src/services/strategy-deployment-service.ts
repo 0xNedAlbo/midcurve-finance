@@ -89,6 +89,21 @@ interface ConstructorParam {
 }
 
 /**
+ * Strategy manifest structure (stored as JSON in strategy.manifest column)
+ */
+interface StrategyManifest {
+  slug: string;
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+  abi: unknown[];
+  bytecode: string;
+  constructorParams: ConstructorParam[];
+  tags?: string[];
+}
+
+/**
  * Service error codes
  */
 export type DeploymentErrorCode =
@@ -173,12 +188,9 @@ class StrategyDeploymentService {
     const { strategyId, chainId, ownerAddress } = input;
     signerLog.methodEntry(this.logger, 'deployStrategy', { strategyId, chainId, ownerAddress });
 
-    // 1. Fetch strategy with manifest
+    // 1. Fetch strategy (manifest is a JSON column, not a relation - no include needed)
     const strategy = await prisma.strategy.findUnique({
       where: { id: strategyId },
-      include: {
-        manifest: true,
-      },
     });
 
     if (!strategy) {
@@ -189,10 +201,10 @@ class StrategyDeploymentService {
       );
     }
 
-    // 2. Validate strategy state
-    if (strategy.status !== 'pending') {
+    // 2. Validate strategy state (API transitions to 'deploying' before calling EVM/signer)
+    if (strategy.status !== 'deploying') {
       throw new StrategyDeploymentError(
-        `Strategy is in '${strategy.status}' state, expected 'pending'`,
+        `Strategy is in '${strategy.status}' state, expected 'deploying'`,
         'INVALID_STATE',
         400
       );
@@ -216,7 +228,8 @@ class StrategyDeploymentService {
       );
     }
 
-    const manifest = strategy.manifest;
+    // Cast JSON manifest to typed structure
+    const manifest = strategy.manifest as unknown as StrategyManifest;
 
     this.logger.info({
       strategyId,
@@ -285,7 +298,7 @@ class StrategyDeploymentService {
     }
 
     // 7. Build constructor arguments (previously step 6)
-    const constructorParams = manifest.constructorParams as unknown as ConstructorParam[];
+    const constructorParams = manifest.constructorParams;
     const constructorValues = ((strategy.config as Record<string, unknown>)?._constructorValues ?? {}) as Record<string, string>;
 
     const constructorArgs = this.buildConstructorArgs(

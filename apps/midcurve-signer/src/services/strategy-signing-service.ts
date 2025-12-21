@@ -93,6 +93,21 @@ interface ConstructorParam {
 }
 
 /**
+ * Strategy manifest structure (stored as JSON in strategy.manifest column)
+ */
+interface StrategyManifest {
+  slug: string;
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+  abi: unknown[];
+  bytecode: string;
+  constructorParams: ConstructorParam[];
+  tags?: string[];
+}
+
+/**
  * Service error codes
  */
 export type SigningErrorCode =
@@ -184,11 +199,10 @@ class StrategySigningService {
       );
     }
 
-    // 1. Fetch strategy with manifest and automation wallet
+    // 1. Fetch strategy with automation wallet (manifest is JSON column, not relation)
     const strategy = await prisma.strategy.findUnique({
       where: { id: strategyId },
       include: {
-        manifest: true,
         automationWallets: {
           where: { isActive: true },
           take: 1,
@@ -233,7 +247,8 @@ class StrategySigningService {
     }
 
     const walletConfig = wallet.config as { walletAddress: Address; kmsKeyId: string };
-    const manifest = strategy.manifest;
+    // Cast JSON manifest to typed structure
+    const manifest = strategy.manifest as unknown as StrategyManifest;
 
     this.logger.info({
       strategyId,
@@ -245,7 +260,7 @@ class StrategySigningService {
     });
 
     // 5. Build constructor arguments
-    const constructorParams = manifest.constructorParams as unknown as ConstructorParam[];
+    const constructorParams = manifest.constructorParams;
     const constructorValues = ((strategy.config as Record<string, unknown>)?._constructorValues ?? {}) as Record<string, string>;
 
     const constructorArgs = this.buildConstructorArgs(
@@ -490,12 +505,11 @@ class StrategySigningService {
     strategy: any;
     wallet: any;
     walletConfig: { walletAddress: Address; kmsKeyId: string };
-    manifest: any;
+    manifest: StrategyManifest;
   }> {
     const strategy = await prisma.strategy.findUnique({
       where: { id: strategyId },
       include: {
-        manifest: true,
         automationWallets: {
           where: { isActive: true },
           take: 1,
@@ -537,8 +551,10 @@ class StrategySigningService {
     }
 
     const walletConfig = wallet.config as { walletAddress: Address; kmsKeyId: string };
+    // Cast JSON manifest to typed structure
+    const manifest = strategy.manifest as unknown as StrategyManifest;
 
-    return { strategy, wallet, walletConfig, manifest: strategy.manifest };
+    return { strategy, wallet, walletConfig, manifest };
   }
 
   /**
