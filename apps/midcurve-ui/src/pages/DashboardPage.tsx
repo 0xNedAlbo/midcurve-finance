@@ -1,14 +1,31 @@
 import { useAuth } from '../providers/AuthProvider';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { UserDropdown } from '../components/auth/user-dropdown';
 import { CreatePositionDropdown } from '../components/positions/create-position-dropdown';
 import { CreateStrategyDropdown } from '../components/strategies/create-strategy-dropdown';
 import { PositionList } from '../components/positions/position-list';
+import { StrategyList } from '../components/strategies/strategy-list';
+import { DashboardTabs } from '../components/common/dashboard-tabs';
 
 export function DashboardPage() {
   const { user, status } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Read tab from URL, default to 'positions'
+  const activeTab = (
+    searchParams.get('tab') === 'strategies' ? 'strategies' : 'positions'
+  ) as 'positions' | 'strategies';
+
+  const handleTabChange = (tab: 'positions' | 'strategies') => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', tab);
+    // Reset offset when switching tabs
+    params.set('offset', '0');
+    params.set('strategyOffset', '0');
+    setSearchParams(params);
+  };
 
   // Handle authentication redirect
   useEffect(() => {
@@ -47,26 +64,31 @@ export function DashboardPage() {
 
         {/* Main Content */}
         <div className="space-y-8">
-          {/* Section Header with Add Position Button */}
+          {/* Section Header */}
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold text-white mb-2">
-                Your Positions
+                {activeTab === 'positions' ? 'Your Positions' : 'Your Strategies'}
               </h2>
               <p className="text-slate-300">
-                Manage and analyze your Uniswap V3 liquidity positions
+                {activeTab === 'positions'
+                  ? 'Manage and analyze your Uniswap V3 liquidity positions'
+                  : 'Manage your automated liquidity strategies'}
               </p>
             </div>
 
-            {/* Action Buttons */}
+            {/* Action Buttons - show different buttons based on tab */}
             <div className="flex items-center gap-3">
               <CreateStrategyDropdown />
-              <CreatePositionDropdown />
+              {activeTab === 'positions' && <CreatePositionDropdown />}
             </div>
           </div>
 
-          {/* Position List */}
-          <PositionList />
+          {/* Tab Navigation */}
+          <DashboardTabs activeTab={activeTab} onTabChange={handleTabChange} />
+
+          {/* Content based on active tab */}
+          {activeTab === 'positions' ? <PositionList /> : <StrategyList />}
         </div>
       </div>
     </div>

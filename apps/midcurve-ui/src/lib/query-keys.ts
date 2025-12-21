@@ -9,7 +9,7 @@
  * fine-grained cache invalidation and updates.
  */
 
-import type { ListPositionsParams } from '@midcurve/api-shared';
+import type { ListPositionsParams, ListStrategiesParams } from '@midcurve/api-shared';
 
 export const queryKeys = {
   // ============================================
@@ -119,6 +119,16 @@ export const queryKeys = {
   // ============================================
   strategies: {
     all: ['strategies'] as const,
+
+    // Strategy list (deployed strategies for current user)
+    lists: () => [...queryKeys.strategies.all, 'list'] as const,
+    list: (params?: ListStrategiesParams) =>
+      [...queryKeys.strategies.lists(), params ?? {}] as const,
+
+    // Single strategy detail
+    details: () => [...queryKeys.strategies.all, 'detail'] as const,
+    detail: (strategyId: string) =>
+      [...queryKeys.strategies.details(), strategyId] as const,
 
     // Strategy manifests (templates for deployment)
     manifests: {

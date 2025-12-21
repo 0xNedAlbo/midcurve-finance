@@ -4,9 +4,11 @@
  * Types for listing user's strategies with pagination, filtering, and sorting.
  */
 
+import type { StrategyPositionJSON } from '@midcurve/shared';
 import type { PaginatedResponse } from '../common/index.js';
 import type {
   SerializedStrategy,
+  SerializedStrategyMetrics,
   StrategyState,
   StrategySortBy,
   StrategySortDirection,
@@ -127,13 +129,49 @@ export const ListStrategiesQuerySchema = PaginationParamsSchema.extend({
 export type ListStrategiesQuery = z.infer<typeof ListStrategiesQuerySchema>;
 
 // =============================================================================
+// RESPONSE DATA
+// =============================================================================
+
+/**
+ * Strategy data for list response (with computed metrics)
+ *
+ * Extends SerializedStrategy with:
+ * - Computed metrics (aggregated from positions)
+ * - Position count
+ * - Optionally full position data (when includePositions=true)
+ *
+ * Note: We use Omit to exclude strategyPositions from SerializedStrategy
+ * because the parent type has StrategyPositionInterface[] which includes
+ * runtime methods. We explicitly override it with the JSON-serializable type.
+ */
+export interface ListStrategyData
+  extends Omit<SerializedStrategy, 'strategyPositions'> {
+  /**
+   * Computed metrics (aggregated from all positions)
+   * Always present in list responses
+   */
+  metrics: SerializedStrategyMetrics;
+
+  /**
+   * Number of positions in this strategy
+   */
+  positionCount: number;
+
+  /**
+   * Full position data (only present when includePositions=true)
+   * Uses JSON-serializable type instead of interface with methods
+   */
+  strategyPositions?: StrategyPositionJSON[];
+}
+
+// =============================================================================
 // RESPONSE
 // =============================================================================
 
 /**
- * GET /api/v1/strategies - Response
+ * GET /api/v1/strategies/list - Response
  */
-export type ListStrategiesResponse = PaginatedResponse<SerializedStrategy> & {
+export type ListStrategiesResponse = PaginatedResponse<ListStrategyData> & {
   meta: {
     timestamp: string;
     filters: {
