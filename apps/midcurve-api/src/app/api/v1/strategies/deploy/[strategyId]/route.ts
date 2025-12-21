@@ -253,6 +253,30 @@ export async function GET(
             },
             'Strategy and automation wallet created successfully after deployment'
           );
+
+          // Log deployment completion to strategy logs
+          try {
+            await prisma.strategyLog.create({
+              data: {
+                strategyId: strategy.id,
+                contractAddress: evmData.contractAddress,
+                epoch: 0n,
+                correlationId: requestId,
+                level: 1, // INFO
+                topic: '0x' + Buffer.from('DEPLOYMENT_COMPLETE').toString('hex').padEnd(64, '0'),
+                topicName: 'DEPLOYMENT_COMPLETE',
+                data: '0x',
+                dataDecoded: `Strategy "${evmData.name}" deployed to ${evmData.contractAddress}`,
+                timestamp: new Date(),
+              },
+            });
+          } catch (logError) {
+            // Non-fatal - don't fail deployment if log creation fails
+            apiLogger.warn(
+              { requestId, strategyId: strategy.id, error: logError },
+              'Failed to create deployment log entry'
+            );
+          }
         } catch (createError) {
           apiLogger.error(
             {

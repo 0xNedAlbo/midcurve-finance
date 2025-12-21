@@ -354,7 +354,9 @@ export class SignerClient {
         );
       }
 
-      return (await response.json()) as T;
+      // Signer API wraps responses in { success: true, data: {...} }
+      const responseData = (await response.json()) as { success: boolean; data: T };
+      return responseData.data;
     } catch (error) {
       clearTimeout(timeoutId);
 
