@@ -28,7 +28,7 @@ export function CreateStrategyDropdown() {
         onClose={() => setIsWizardOpen(false)}
         onStrategyDeployed={(response) => {
           // Strategy deployed - wizard handles navigation to dashboard
-          console.log("Strategy deployed:", response.strategy.id);
+          console.log("Strategy deployed:", response.deployment.contractAddress);
         }}
       />
     </>

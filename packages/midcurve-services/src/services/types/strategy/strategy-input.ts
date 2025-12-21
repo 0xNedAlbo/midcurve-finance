@@ -45,6 +45,16 @@ export interface CreateStrategyInput {
    * Stored directly on the strategy record.
    */
   manifest?: StrategyManifest;
+
+  /**
+   * Automation wallet info (optional)
+   * If provided, creates an AutomationWallet record linked to this strategy.
+   * Created by the signer service during deployment.
+   */
+  automationWallet?: {
+    walletAddress: string;
+    kmsKeyId: string;
+  };
 }
 
 /**

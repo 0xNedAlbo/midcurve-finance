@@ -286,7 +286,7 @@ export function createMockAutomationWalletDbResult(
     strategyId: null,
     walletType: 'evm',
     label: 'Test EVM Wallet',
-    walletHash: 'evm/1/0x1111111111111111111111111111111111111111',
+    walletHash: 'evm/0x1111111111111111111111111111111111111111',
     isActive: true,
     lastUsedAt: null,
     encryptedPrivateKey: 'encrypted_key_data',

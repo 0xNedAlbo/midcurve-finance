@@ -291,7 +291,7 @@ export function EmptyStateActions({
         isOpen={isStrategyWizardOpen}
         onClose={() => setIsStrategyWizardOpen(false)}
         onStrategyDeployed={(response) => {
-          console.log("Strategy deployed:", response.strategy.id);
+          console.log("Strategy deployed:", response.deployment.contractAddress);
         }}
       />
     </div>

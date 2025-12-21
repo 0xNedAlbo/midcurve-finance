@@ -95,6 +95,7 @@ export function DeployReviewStep({
   const [pollingError, setPollingError] = useState<string | null>(null);
 
   // Poll for deployment status updates
+  // REST Standard: GET always returns 200 if resource exists, status is in body
   const pollDeploymentStatus = useCallback(async () => {
     if (!deploymentResult?.deployment.pollUrl) return;
 
@@ -104,33 +105,21 @@ export function DeployReviewStep({
     try {
       const response = await fetch(deploymentResult.deployment.pollUrl);
 
-      // Handle non-OK responses
+      // 404 = deployment not found (shouldn't happen if we just started it)
+      if (response.status === 404) {
+        throw new Error("Deployment not found");
+      }
+
+      // 5xx = actual server error (bug), not deployment failure
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.error?.message || errorData.error || `Status check failed: ${response.status}`;
-
-        // 500 errors indicate deployment failure - mark as failed and stop polling
-        if (response.status === 500) {
-          const failedResult: DeployStrategyResponse = {
-            ...deploymentResult,
-            deployment: {
-              ...deploymentResult.deployment,
-              status: "failed",
-              error: errorMessage,
-            },
-          };
-          onDeploymentStatusChange?.(failedResult);
-          setPollingError(null);
-          return;
-        }
-
-        // Other errors (network issues, etc.) - show warning but keep retrying
         throw new Error(errorMessage);
       }
 
       const apiResponse = await response.json();
 
-      // API returns { success: true, data: { status, contractAddress, txHash, ... } }
+      // API returns { success: true, data: { status, contractAddress, txHash, error, ... } }
       if (!apiResponse.success || !apiResponse.data) {
         throw new Error(apiResponse.error?.message || "Invalid API response");
       }
@@ -138,6 +127,7 @@ export function DeployReviewStep({
       const statusData = apiResponse.data;
 
       // Update deployment result with new status
+      // REST standard: status is always in body, even for "failed" (which returns 200)
       const updatedResult: DeployStrategyResponse = {
         ...deploymentResult,
         deployment: {

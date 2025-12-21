@@ -7,12 +7,17 @@
  *
  * This endpoint orchestrates strategy deployment by:
  * 1. Validating the manifest (re-verify for security)
- * 2. Creating a strategy record in 'deploying' state with embedded manifest
- * 3. Calling the EVM service to initiate deployment (async)
- * 4. Returning 202 Accepted with deployment status and poll URL
+ * 2. Resolving the quote token
+ * 3. Storing deployment request in CACHE (not database - Strategy created on success)
+ * 4. Calling the EVM service to initiate deployment (async)
+ * 5. Returning 202 Accepted with deployment status and poll URL
+ *
+ * NOTE: Strategy record is NOT created until deployment succeeds.
+ * This prevents orphan "deploying" strategies from failed deployments.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { nanoid } from 'nanoid';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -25,20 +30,50 @@ import {
 } from '@midcurve/api-shared';
 import type {
   DeployStrategyResponse,
-  SerializedStrategy,
   DeploymentInfo,
 } from '@midcurve/api-shared';
-import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getStrategyService } from '@/lib/services';
 import {
   ManifestVerificationService,
   BasicCurrencyTokenService,
   Erc20TokenService,
+  CacheService,
 } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/**
+ * Deployment state stored in cache
+ * This data is used by EVM service and to create Strategy on success
+ */
+interface DeploymentCacheData {
+  deploymentId: string;
+  status: 'pending';
+  startedAt: string;
+  // Data needed to create Strategy after successful deployment
+  manifest: unknown;
+  name: string;
+  userId: string;
+  quoteTokenId: string;
+  constructorValues: Record<string, string>;
+  ownerAddress: string;
+  // Chain config (fetched from EVM service)
+  coreAddress: string;
+}
+
+/**
+ * EVM config response type
+ */
+interface EvmConfigResponse {
+  coreAddress: string;
+  chainId: number;
+}
+
+/**
+ * TTL for deployment cache entries: 24 hours
+ */
+const DEPLOYMENT_TTL_SECONDS = 24 * 60 * 60;
 
 /**
  * OPTIONS /api/v1/strategies/deploy
@@ -63,21 +98,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - basic-currency: Validated against CoinGecko and created if not exists
  * - erc20: Discovered from chain and symbol validated (case-sensitive)
  *
- * Returns: Strategy record with deployment status
- *
- * Example request:
- * {
- *   "manifest": {
- *     "name": "Delta Neutral Strategy",
- *     "version": "1.0.0",
- *     "abi": [...],
- *     "bytecode": "0x...",
- *     "constructorParams": [...],
- *     "quoteToken": { "type": "basic-currency", "symbol": "USD" }
- *   },
- *   "name": "My Delta Neutral Strategy",
- *   "constructorValues": { "_targetApr": "500" }
- * }
+ * Returns: Deployment info with poll URL (Strategy created after success)
  */
 export async function POST(request: NextRequest): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
@@ -117,8 +138,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { manifest, name, constructorValues } =
-        validation.data;
+      const { manifest, name, constructorValues } = validation.data;
 
       apiLog.businessOperation(
         apiLogger,
@@ -163,14 +183,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       // 3. Resolve quote token from manifest
-      // The manifest contains the quote token specification, we need to find or create
-      // the actual Token record in the database
       const quoteToken = verificationResult.parsedManifest!.quoteToken;
       let resolvedQuoteTokenId: string;
 
       try {
         if (quoteToken.type === 'basic-currency') {
-          // Basic currency: find or create from symbol (validates against CoinGecko)
           const basicCurrencyService = new BasicCurrencyTokenService();
           const token = await basicCurrencyService.findOrCreateBySymbol(quoteToken.symbol);
           resolvedQuoteTokenId = token.id;
@@ -185,14 +202,12 @@ export async function POST(request: NextRequest): Promise<Response> {
             'Resolved basic currency quote token'
           );
         } else {
-          // ERC-20 token: find or discover from chain
           const erc20Service = new Erc20TokenService();
           const token = await erc20Service.discover({
             chainId: quoteToken.chainId,
             address: quoteToken.address,
           });
 
-          // Validate manifest symbol matches on-chain symbol (case-sensitive)
           if (token.symbol !== quoteToken.symbol) {
             const errorResponse = createErrorResponse(
               ApiErrorCode.VALIDATION_ERROR,
@@ -258,50 +273,93 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // 5. Create strategy record in 'pending' state with embedded manifest
-      const strategy = await getStrategyService().create({
-        userId: user.id,
+      // 5. Fetch EVM chain config (coreAddress is needed for deployment)
+      const evmServiceUrl = process.env.EVM_SERVICE_URL || 'http://localhost:3002';
+
+      let evmConfig: EvmConfigResponse;
+      try {
+        const configResponse = await fetch(`${evmServiceUrl}/api/config`);
+        if (!configResponse.ok) {
+          throw new Error(`EVM config request failed: ${configResponse.status}`);
+        }
+        evmConfig = await configResponse.json();
+
+        apiLogger.info(
+          {
+            requestId,
+            coreAddress: evmConfig.coreAddress,
+            chainId: evmConfig.chainId,
+          },
+          'Fetched EVM chain config'
+        );
+      } catch (error) {
+        apiLogger.error(
+          {
+            requestId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'Failed to fetch EVM chain config'
+        );
+
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.INTERNAL_SERVER_ERROR,
+          'Failed to fetch EVM chain config',
+          error instanceof Error ? error.message : String(error)
+        );
+        apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+        return NextResponse.json(errorResponse, { status: 500 });
+      }
+
+      // 6. Generate deployment ID and store in cache
+      // NOTE: We do NOT create a Strategy record yet - that happens after successful deployment
+      const deploymentId = nanoid();
+      const cache = CacheService.getInstance();
+
+      const deploymentData: DeploymentCacheData = {
+        deploymentId,
+        status: 'pending',
+        startedAt: new Date().toISOString(),
+        manifest: verificationResult.parsedManifest!,
         name,
-        strategyType: manifest.name, // Use manifest name as strategy type
-        config: {
-          // Store constructor values in config for deployment
-          _constructorValues: constructorValues,
-        },
+        userId: user.id,
         quoteTokenId: resolvedQuoteTokenId,
-        manifest: verificationResult.parsedManifest!, // Use verified manifest
-      });
+        constructorValues,
+        ownerAddress: primaryWallet.address,
+        coreAddress: evmConfig.coreAddress,
+      };
+
+      await cache.set(
+        `deployment:${deploymentId}`,
+        deploymentData,
+        DEPLOYMENT_TTL_SECONDS
+      );
 
       apiLogger.info(
         {
           requestId,
-          strategyId: strategy.id,
+          deploymentId,
           manifestName: manifest.name,
           userId: user.id,
+          coreAddress: evmConfig.coreAddress,
         },
-        'Strategy record created, calling EVM service for deployment'
+        'Deployment data stored in cache, calling EVM service'
       );
 
-      // 6. Transition strategy to 'deploying' state before calling EVM service
-      await getStrategyService().markDeploying(strategy.id);
-
       // 7. Call EVM service to start deployment
-      // The EVM service handles signing, broadcasting, and RabbitMQ topology setup
-      const evmServiceUrl = process.env.EVM_SERVICE_URL || 'http://localhost:3002';
 
       let evmResult: {
-        strategyId: string;
+        deploymentId: string;
         status: string;
-        contractAddress?: string;
-        txHash?: string;
-        pollUrl: string;
+        createdAt: string;
         error?: string;
       };
 
       try {
-        const evmResponse = await fetch(`${evmServiceUrl}/api/strategy`, {
-          method: 'PUT',
+        // Call EVM with deploymentId (which is the cache key)
+        const evmResponse = await fetch(`${evmServiceUrl}/api/deployments`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strategyId: strategy.id }),
+          body: JSON.stringify({ strategyId: deploymentId }),
         });
 
         if (!evmResponse.ok) {
@@ -309,7 +367,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           apiLogger.error(
             {
               requestId,
-              strategyId: strategy.id,
+              deploymentId,
               evmStatus: evmResponse.status,
               evmError: errorData,
             },
@@ -320,7 +378,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             ApiErrorCode.INTERNAL_SERVER_ERROR,
             `Deployment failed: ${errorData.error || 'EVM service error'}`,
             {
-              strategyId: strategy.id,
+              deploymentId,
               evmError: errorData,
             }
           );
@@ -334,7 +392,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         apiLogger.error(
           {
             requestId,
-            strategyId: strategy.id,
+            deploymentId,
             error: error instanceof Error ? error.message : String(error),
           },
           'Failed to connect to EVM service'
@@ -343,47 +401,52 @@ export async function POST(request: NextRequest): Promise<Response> {
         const errorResponse = createErrorResponse(
           ApiErrorCode.INTERNAL_SERVER_ERROR,
           `Failed to connect to EVM service: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          { strategyId: strategy.id }
+          { deploymentId }
         );
 
         apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
         return NextResponse.json(errorResponse, { status: 500 });
       }
 
-      // 8. Build response with async deployment info
-      const serializedStrategy = serializeBigInt(strategy) as unknown as SerializedStrategy;
-
-      // Use API's status endpoint for polling (not EVM's internal URL)
-      const pollUrl = `/api/v1/strategies/deploy/status?strategyId=${strategy.id}`;
+      // 8. Build response with deployment info
+      // NOTE: No strategy in response - it will be created after successful deployment
+      const pollUrl = `/api/v1/strategies/deploy/${deploymentId}`;
 
       const deployment: DeploymentInfo = {
         status: evmResult.status as DeploymentInfo['status'],
-        transactionHash: evmResult.txHash,
-        contractAddress: evmResult.contractAddress,
         pollUrl,
       };
 
+      // Response without strategy (strategy created after deployment succeeds)
       const response: DeployStrategyResponse = {
-        strategy: serializedStrategy,
         deployment,
       };
 
       apiLogger.info(
         {
           requestId,
-          strategyId: strategy.id,
+          deploymentId,
           deploymentStatus: evmResult.status,
           pollUrl,
           manifestName: manifest.name,
           userId: user.id,
         },
-        'Strategy deployment initiated'
+        'Deployment initiated (strategy will be created on success)'
       );
 
-      // Return 202 Accepted for async deployment
+      // Return 202 Accepted with Location header
       apiLog.requestEnd(apiLogger, requestId, 202, Date.now() - startTime);
 
-      return NextResponse.json(createSuccessResponse(response), { status: 202 });
+      return new NextResponse(
+        JSON.stringify(createSuccessResponse(response)),
+        {
+          status: 202,
+          headers: {
+            'Content-Type': 'application/json',
+            'Location': `/api/v1/strategies/deploy/${deploymentId}`,
+          },
+        }
+      );
     } catch (error) {
       apiLog.methodError(
         apiLogger,

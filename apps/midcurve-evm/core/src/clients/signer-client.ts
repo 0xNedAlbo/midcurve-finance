@@ -17,12 +17,19 @@ import { logger, evmLog } from '../../../lib/logger';
 
 /**
  * Response from signing a deployment transaction
+ *
+ * If needsFunding is true, the wallet needs ETH before deployment can proceed.
+ * The deployment service should fund the wallet and call signDeployment again.
  */
 export interface SignDeployResponse {
   signedTransaction: Hex;
   predictedAddress: Address;
   nonce: number;
   txHash: Hash;
+  /** True if wallet has zero balance and needs funding before deployment */
+  needsFunding?: boolean;
+  /** The automation wallet address (always returned for funding purposes) */
+  walletAddress?: string;
 }
 
 /**
@@ -103,12 +110,17 @@ export interface SignVaultReimburseGasInput {
 }
 
 /**
- * API error response
+ * API error response from signer service
+ * Format: { success: false, error: { code, message, details? }, requestId }
  */
 interface SignerErrorResponse {
-  error: string;
-  code?: string;
-  statusCode?: number;
+  success: boolean;
+  error?: {
+    code?: string;
+    message?: string;
+    details?: unknown;
+  };
+  requestId?: string;
 }
 
 /**
@@ -331,11 +343,14 @@ export class SignerClient {
 
       if (!response.ok) {
         const errorData = (await response.json().catch(() => ({}))) as SignerErrorResponse;
+        // Extract message from nested error object (signer returns { error: { code, message } })
+        const errorMessage = errorData.error?.message || `Signer request failed: ${response.status}`;
+        const errorCode = errorData.error?.code;
         throw new SignerClientError(
-          errorData.error || `Signer request failed: ${response.status}`,
+          errorMessage,
           response.status,
-          errorData.code,
-          errorData
+          errorCode,
+          errorData.error?.details || errorData
         );
       }
 

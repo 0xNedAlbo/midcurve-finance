@@ -2,20 +2,26 @@
  * Deployment Service
  *
  * Orchestrates strategy contract deployment:
- * 1. Fetch strategy data from database
+ * 1. Fetch deployment data from cache (stored by API)
  * 2. Request signed deployment tx from signer
  * 3. Broadcast transaction to network
  * 4. Wait for confirmation
  * 5. Setup RabbitMQ topology
+ * 6. Update cache with final state
  *
  * This service runs operations in the background.
  * API routes return 202 immediately and poll for status.
+ *
+ * STATE PERSISTENCE: Uses PostgreSQL cache table instead of in-memory Map.
+ * This ensures state survives serverless function restarts and is shared
+ * across all workers/processes.
  */
 
 import type { Channel } from 'amqplib';
-import { createPublicClient, http, type Address, type Hex, type Hash } from 'viem';
+import { createPublicClient, http, type Address, type Hash } from 'viem';
+import { CacheService } from '@midcurve/services';
 import { logger, evmLog } from '../../../lib/logger';
-import { getDatabaseClient, type StrategyDeploymentData } from '../clients/database-client';
+import { getDatabaseClient } from '../clients/database-client';
 import { getSignerClient } from '../clients/signer-client';
 import { setupStrategyTopology } from '../mq/topology';
 
@@ -28,6 +34,17 @@ import { setupStrategyTopology } from '../mq/topology';
  */
 const SEMSEE_CHAIN_ID = 31337;
 
+/**
+ * Deployment state TTL: 24 hours
+ * Stale deployments auto-expire after this time
+ */
+const DEPLOYMENT_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * Cache key prefix for deployment states
+ */
+const DEPLOYMENT_CACHE_PREFIX = 'deployment:';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -35,24 +52,43 @@ const SEMSEE_CHAIN_ID = 31337;
 export type DeploymentStatus =
   | 'pending'
   | 'signing'
+  | 'funding'  // CORE is funding the automation wallet with ETH
   | 'broadcasting'
   | 'confirming'
   | 'setting_up_topology'
   | 'completed'
   | 'failed';
 
+/**
+ * Deployment state stored in cache
+ * Uses ISO strings for dates (JSON serializable)
+ */
 export interface DeploymentState {
-  strategyId: string;
+  deploymentId: string;
   status: DeploymentStatus;
-  startedAt: Date;
-  completedAt?: Date;
-  contractAddress?: Address;
-  txHash?: Hash;
+  startedAt: string; // ISO string
+  completedAt?: string; // ISO string
+  contractAddress?: string;
+  txHash?: string;
   error?: string;
+  // Deployment request data (stored by API, used for strategy creation)
+  manifest?: unknown;
+  name?: string;
+  userId?: string;
+  quoteTokenId?: string;
+  constructorValues?: Record<string, string>;
+  // Automation wallet info (added by signer during signing)
+  automationWallet?: {
+    walletAddress: string;
+    kmsKeyId: string;
+  };
+  // Set to true when Strategy record has been created
+  strategyCreated?: boolean;
+  strategyId?: string;
 }
 
 export interface DeploymentInput {
-  strategyId: string;
+  deploymentId: string;
 }
 
 // =============================================================================
@@ -76,130 +112,177 @@ export class DeploymentError extends Error {
 
 class DeploymentService {
   private readonly log = logger.child({ service: 'DeploymentService' });
-
-  /** Active deployments by strategyId */
-  private readonly deployments = new Map<string, DeploymentState>();
+  private readonly cache = CacheService.getInstance();
 
   /**
-   * Get the current state of a deployment
+   * Get the cache key for a deployment
    */
-  getDeploymentState(strategyId: string): DeploymentState | undefined {
-    return this.deployments.get(strategyId);
+  private getCacheKey(deploymentId: string): string {
+    return `${DEPLOYMENT_CACHE_PREFIX}${deploymentId}`;
+  }
+
+  /**
+   * Get the current state of a deployment from cache
+   */
+  async getDeploymentState(deploymentId: string): Promise<DeploymentState | null> {
+    return this.cache.get<DeploymentState>(this.getCacheKey(deploymentId));
+  }
+
+  /**
+   * Update deployment state in cache
+   */
+  private async updateState(
+    deploymentId: string,
+    updates: Partial<DeploymentState>
+  ): Promise<void> {
+    const current = await this.cache.get<DeploymentState>(this.getCacheKey(deploymentId));
+    if (current) {
+      await this.cache.set(
+        this.getCacheKey(deploymentId),
+        { ...current, ...updates },
+        DEPLOYMENT_TTL_SECONDS
+      );
+    }
   }
 
   /**
    * Start a deployment (non-blocking)
    *
-   * Returns immediately with initial state.
+   * PREREQUISITE: Deployment state must already exist in cache (created by API).
+   * This method reads the state and starts the deployment process.
+   *
+   * Returns immediately with current state.
    * Use getDeploymentState() to poll for progress.
    */
   async startDeployment(
     input: DeploymentInput,
     channel: Channel
   ): Promise<DeploymentState> {
-    const { strategyId } = input;
-    evmLog.methodEntry(this.log, 'startDeployment', { strategyId });
+    const { deploymentId } = input;
+    evmLog.methodEntry(this.log, 'startDeployment', { deploymentId });
 
-    // Check if deployment already in progress
-    const existing = this.deployments.get(strategyId);
-    if (existing && !['completed', 'failed'].includes(existing.status)) {
-      this.log.warn({ strategyId, status: existing.status, msg: 'Deployment already in progress' });
+    // Get existing deployment state from cache
+    const existing = await this.cache.get<DeploymentState>(this.getCacheKey(deploymentId));
+
+    if (!existing) {
+      throw new DeploymentError(
+        `Deployment '${deploymentId}' not found in cache`,
+        'DEPLOYMENT_NOT_FOUND',
+        404
+      );
+    }
+
+    // Check if deployment already in progress or completed
+    if (!['pending', 'completed', 'failed'].includes(existing.status)) {
+      this.log.warn({ deploymentId, status: existing.status, msg: 'Deployment already in progress' });
       return existing;
     }
 
-    // Create initial state
-    const state: DeploymentState = {
-      strategyId,
-      status: 'pending',
-      startedAt: new Date(),
-    };
-    this.deployments.set(strategyId, state);
+    // If already completed/failed, just return the state
+    if (['completed', 'failed'].includes(existing.status)) {
+      this.log.info({ deploymentId, status: existing.status, msg: 'Deployment already finished' });
+      return existing;
+    }
 
-    // Run deployment in background
-    this.runDeployment(input, channel).catch((error) => {
+    // Run deployment in background (don't await)
+    this.runDeployment(deploymentId, channel).catch((error) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
-      const errorCode = (error as any)?.code;
+      const errorCode = (error as { code?: string })?.code;
       const errorCause = error instanceof Error && error.cause
         ? (error.cause instanceof Error ? error.cause.message : String(error.cause))
         : undefined;
 
       this.log.error({
-        strategyId,
+        deploymentId,
         error: errorMessage,
         errorCode,
         errorCause,
         errorStack,
         msg: 'Deployment failed'
       });
-      const currentState = this.deployments.get(strategyId);
-      if (currentState) {
-        currentState.status = 'failed';
-        currentState.error = errorMessage;
-        currentState.completedAt = new Date();
-      }
+
+      // Update cache with failed state
+      this.updateState(deploymentId, {
+        status: 'failed',
+        error: errorMessage,
+        completedAt: new Date().toISOString(),
+      }).catch((cacheError) => {
+        this.log.error({ deploymentId, error: cacheError, msg: 'Failed to update cache with error state' });
+      });
     });
 
-    evmLog.methodExit(this.log, 'startDeployment', { status: state.status });
-    return state;
+    evmLog.methodExit(this.log, 'startDeployment', { status: existing.status });
+    return existing;
   }
 
   /**
    * Run the deployment process
    */
   private async runDeployment(
-    input: DeploymentInput,
+    deploymentId: string,
     channel: Channel
   ): Promise<void> {
-    const { strategyId } = input;
-    const state = this.deployments.get(strategyId)!;
-
     try {
-      // Step 1: Fetch strategy data
-      this.log.info({ strategyId, msg: 'Fetching strategy data' });
-      const dbClient = getDatabaseClient();
-      const strategy = await dbClient.getStrategyForDeployment(strategyId);
+      // Step 1: Fetch deployment data from cache
+      this.log.info({ deploymentId, msg: 'Fetching deployment data from cache' });
+      const deployment = await this.cache.get<DeploymentState>(this.getCacheKey(deploymentId));
 
-      if (!strategy) {
+      if (!deployment) {
         throw new DeploymentError(
-          `Strategy '${strategyId}' not found`,
-          'STRATEGY_NOT_FOUND',
+          `Deployment '${deploymentId}' not found`,
+          'DEPLOYMENT_NOT_FOUND',
           404
         );
       }
 
-      if (strategy.status !== 'deploying') {
+      if (!deployment.manifest) {
         throw new DeploymentError(
-          `Strategy is in '${strategy.status}' state, expected 'deploying'`,
-          'INVALID_STATE',
-          400
-        );
-      }
-
-      if (!strategy.manifest) {
-        throw new DeploymentError(
-          `Strategy '${strategyId}' has no manifest`,
+          `Deployment '${deploymentId}' has no manifest`,
           'NO_MANIFEST',
           400
         );
       }
 
-      // Step 2: Sign deployment transaction
-      state.status = 'signing';
-      this.log.info({ strategyId, msg: 'Signing deployment transaction' });
+      // Step 2: Sign deployment transaction (may return needsFunding)
+      await this.updateState(deploymentId, { status: 'signing' });
+      this.log.info({ deploymentId, msg: 'Signing deployment transaction' });
 
       const signerClient = getSignerClient();
-      const signResult = await signerClient.signDeployment({
-        strategyId,
+      let signResult = await signerClient.signDeployment({
+        strategyId: deploymentId,
       });
 
-      state.contractAddress = signResult.predictedAddress;
-      state.txHash = signResult.txHash;
+      // Step 2.5: Fund automation wallet if needed
+      if (signResult.needsFunding && signResult.walletAddress) {
+        await this.updateState(deploymentId, { status: 'funding' });
+        await this.fundWallet(signResult.walletAddress, '1'); // 1 ETH
+
+        // Retry signing now that wallet is funded
+        this.log.info({ deploymentId, msg: 'Retrying signing after funding' });
+        signResult = await signerClient.signDeployment({
+          strategyId: deploymentId,
+        });
+
+        // If still needs funding, something went wrong
+        if (signResult.needsFunding) {
+          throw new DeploymentError(
+            'Wallet still needs funding after funding attempt',
+            'FUNDING_FAILED',
+            500
+          );
+        }
+      }
+
+      await this.updateState(deploymentId, {
+        contractAddress: signResult.predictedAddress,
+        txHash: signResult.txHash,
+      });
 
       // Step 3: Broadcast transaction
-      state.status = 'broadcasting';
+      await this.updateState(deploymentId, { status: 'broadcasting' });
       this.log.info({
-        strategyId,
+        deploymentId,
         predictedAddress: signResult.predictedAddress,
         msg: 'Broadcasting transaction',
       });
@@ -211,8 +294,8 @@ class DeploymentService {
       });
 
       // Step 4: Wait for confirmation
-      state.status = 'confirming';
-      this.log.info({ strategyId, txHash, msg: 'Waiting for confirmation' });
+      await this.updateState(deploymentId, { status: 'confirming' });
+      this.log.info({ deploymentId, txHash, msg: 'Waiting for confirmation' });
 
       const receipt = await publicClient.waitForTransactionReceipt({
         hash: txHash,
@@ -228,43 +311,51 @@ class DeploymentService {
       }
 
       // Verify contract address matches prediction
+      let contractAddress = signResult.predictedAddress;
       if (
         receipt.contractAddress?.toLowerCase() !==
         signResult.predictedAddress.toLowerCase()
       ) {
         this.log.warn({
-          strategyId,
+          deploymentId,
           predicted: signResult.predictedAddress,
           actual: receipt.contractAddress,
           msg: 'Contract address mismatch',
         });
-        state.contractAddress = receipt.contractAddress as Address;
+        contractAddress = receipt.contractAddress as Address;
+        await this.updateState(deploymentId, { contractAddress });
       }
 
       // Step 5: Setup RabbitMQ topology
-      state.status = 'setting_up_topology';
+      await this.updateState(deploymentId, { status: 'setting_up_topology' });
       this.log.info({
-        strategyId,
-        contractAddress: state.contractAddress,
+        deploymentId,
+        contractAddress,
         msg: 'Setting up RabbitMQ topology',
       });
 
-      await setupStrategyTopology(channel, state.contractAddress!);
+      await setupStrategyTopology(channel, contractAddress);
 
       // Complete
-      state.status = 'completed';
-      state.completedAt = new Date();
+      await this.updateState(deploymentId, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        contractAddress,
+        txHash,
+      });
 
       this.log.info({
-        strategyId,
-        contractAddress: state.contractAddress,
+        deploymentId,
+        contractAddress,
         txHash,
         msg: 'Deployment completed',
       });
     } catch (error) {
-      state.status = 'failed';
-      state.error = error instanceof Error ? error.message : 'Unknown error';
-      state.completedAt = new Date();
+      await this.updateState(deploymentId, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        completedAt: new Date().toISOString(),
+      });
       throw error;
     }
   }
@@ -290,18 +381,48 @@ class DeploymentService {
   }
 
   /**
-   * Clear completed/failed deployments from memory
+   * Fund a wallet via the /api/wallets/fund endpoint
+   *
+   * This endpoint uses CORE_PRIVATE_KEY to send ETH from the CORE account
+   * (which has unlimited ETH on SEMSEE) to the specified wallet address.
+   *
+   * @param walletAddress - The wallet address to fund
+   * @param amountEth - Amount of ETH to send (default: 1)
    */
-  cleanup(): void {
-    for (const [id, state] of this.deployments) {
-      if (['completed', 'failed'].includes(state.status)) {
-        // Keep for 1 hour after completion
-        const completedAt = state.completedAt?.getTime() ?? 0;
-        if (Date.now() - completedAt > 3600000) {
-          this.deployments.delete(id);
-        }
-      }
+  private async fundWallet(walletAddress: string, amountEth: string): Promise<void> {
+    this.log.info({ walletAddress, amountEth, msg: 'Funding automation wallet' });
+
+    // Call the internal API endpoint (same service)
+    const evmServiceUrl = process.env.EVM_SERVICE_URL || 'http://localhost:3002';
+    const response = await fetch(`${evmServiceUrl}/api/wallets/fund`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress, amountEth }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new DeploymentError(
+        `Failed to fund wallet: ${errorData.error || response.statusText}`,
+        'FUNDING_FAILED',
+        500
+      );
     }
+
+    const result = await response.json();
+    this.log.info({
+      walletAddress,
+      amountEth,
+      txHash: result.txHash,
+      msg: 'Automation wallet funded',
+    });
+  }
+
+  /**
+   * Clear deployment states by pattern (for cleanup)
+   */
+  async clearDeployments(pattern?: string): Promise<number> {
+    return this.cache.clear(pattern || DEPLOYMENT_CACHE_PREFIX);
   }
 }
 

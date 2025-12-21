@@ -27,6 +27,7 @@ import {
 import { prisma } from '../lib/prisma';
 import { getSigner } from '../lib/kms';
 import { signerLogger, signerLog } from '../lib/logger';
+import { CacheService } from '@midcurve/services';
 
 // =============================================================================
 // Types
@@ -34,12 +35,19 @@ import { signerLogger, signerLog } from '../lib/logger';
 
 /**
  * Result from signing a deployment transaction
+ *
+ * If needsFunding is true, the wallet needs ETH before deployment can proceed.
+ * The EVM service should fund the wallet and call signDeployment again.
  */
 export interface SignDeployResult {
   signedTransaction: Hex;
   predictedAddress: Address;
   nonce: number;
   txHash: Hash;
+  /** True if wallet has zero balance and needs funding before deployment */
+  needsFunding?: boolean;
+  /** The automation wallet address (always returned for funding purposes) */
+  walletAddress?: string;
 }
 
 /**
@@ -105,6 +113,29 @@ interface StrategyManifest {
   bytecode: string;
   constructorParams: ConstructorParam[];
   tags?: string[];
+}
+
+/**
+ * Deployment cache data structure (stored by API before calling EVM)
+ * This is the source of truth for deployment signing - NOT the database.
+ */
+interface DeploymentCacheData {
+  deploymentId: string;
+  status: string;
+  startedAt: string;
+  manifest: StrategyManifest;
+  name: string;
+  userId: string;
+  quoteTokenId: string;
+  constructorValues: Record<string, string>;
+  ownerAddress: string;
+  // Chain config (fetched by API from EVM service)
+  coreAddress: string;
+  // Automation wallet info (added by signer during first signing request)
+  automationWallet?: {
+    walletAddress: string;
+    kmsKeyId: string;
+  };
 }
 
 /**
@@ -181,97 +212,141 @@ class StrategySigningService {
   /**
    * Sign a deployment transaction
    *
-   * @param input - Deployment signing input
+   * NEW FLOW (cache-based):
+   * 1. Read deployment data from CACHE (not database) - API stores this before calling EVM
+   * 2. Create automation wallet on-demand if not exists
+   * 3. Sign deployment transaction
+   * 4. Update cache with wallet info
+   *
+   * @param input - Deployment signing input (strategyId is actually deploymentId)
    * @returns Signed transaction and predicted contract address
-   * @throws StrategySigningError if strategy not found, invalid state, or signing fails
+   * @throws StrategySigningError if deployment not found or signing fails
    */
   async signDeployment(input: SignDeployInput): Promise<SignDeployResult> {
-    const { strategyId } = input;
-    signerLog.methodEntry(this.logger, 'signDeployment', { strategyId });
+    const { strategyId: deploymentId } = input; // Note: strategyId is actually deploymentId in new flow
+    signerLog.methodEntry(this.logger, 'signDeployment', { deploymentId });
 
-    // 0. Validate CORE_ADDRESS environment variable
-    const coreAddress = process.env.CORE_ADDRESS as Address | undefined;
-    if (!coreAddress) {
+    // 1. Fetch deployment data from CACHE (not database!)
+    const cache = CacheService.getInstance();
+    const deploymentData = await cache.get<DeploymentCacheData>(`deployment:${deploymentId}`);
+
+    if (!deploymentData) {
       throw new StrategySigningError(
-        'CORE_ADDRESS environment variable is required for deployment',
-        'INTERNAL_ERROR',
-        500
-      );
-    }
-
-    // 1. Fetch strategy with automation wallet (manifest is JSON column, not relation)
-    const strategy = await prisma.strategy.findUnique({
-      where: { id: strategyId },
-      include: {
-        automationWallets: {
-          where: { isActive: true },
-          take: 1,
-        },
-      },
-    });
-
-    if (!strategy) {
-      throw new StrategySigningError(
-        `Strategy '${strategyId}' not found`,
+        `Deployment '${deploymentId}' not found in cache`,
         'STRATEGY_NOT_FOUND',
         404
       );
     }
 
-    // 2. Validate strategy state
-    if (strategy.status !== 'deploying') {
+    // 2. Validate manifest exists
+    if (!deploymentData.manifest) {
       throw new StrategySigningError(
-        `Strategy is in '${strategy.status}' state, expected 'deploying'`,
-        'INVALID_STATE',
-        400
-      );
-    }
-
-    // 3. Validate manifest exists
-    if (!strategy.manifest) {
-      throw new StrategySigningError(
-        `Strategy '${strategyId}' has no manifest`,
+        `Deployment '${deploymentId}' has no manifest`,
         'MANIFEST_NOT_FOUND',
         404
       );
     }
 
-    // 4. Validate automation wallet exists
-    const wallet = strategy.automationWallets[0];
-    if (!wallet) {
+    const manifest = deploymentData.manifest;
+
+    // 3. Validate coreAddress exists (from cache, fetched by API from EVM config)
+    const coreAddress = deploymentData.coreAddress as Address | undefined;
+    if (!coreAddress) {
       throw new StrategySigningError(
-        `Strategy '${strategyId}' has no automation wallet`,
-        'WALLET_NOT_FOUND',
-        404
+        'coreAddress not found in deployment data',
+        'INTERNAL_ERROR',
+        400
       );
     }
 
-    const walletConfig = wallet.config as { walletAddress: Address; kmsKeyId: string };
-    // Cast JSON manifest to typed structure
-    const manifest = strategy.manifest as unknown as StrategyManifest;
+    // 4. Get or create automation wallet
+    let walletAddress: Address;
+    let kmsKeyId: string;
+
+    if (deploymentData.automationWallet) {
+      // Wallet already created (from previous attempt or stored in cache)
+      walletAddress = deploymentData.automationWallet.walletAddress as Address;
+      kmsKeyId = deploymentData.automationWallet.kmsKeyId;
+      this.logger.info({
+        deploymentId,
+        walletAddress,
+        msg: 'Using existing automation wallet from cache',
+      });
+    } else {
+      // Create new automation wallet on-demand
+      this.logger.info({
+        deploymentId,
+        userId: deploymentData.userId,
+        msg: 'Creating automation wallet for deployment',
+      });
+
+      const signer = getSigner();
+      const kmsResult = await signer.createKey(`deployment:${deploymentId}:operator`);
+
+      walletAddress = kmsResult.walletAddress as Address;
+      kmsKeyId = kmsResult.keyId;
+
+      // Update cache with wallet info (for retries and later use)
+      const updatedDeployment: DeploymentCacheData = {
+        ...deploymentData,
+        automationWallet: {
+          walletAddress: kmsResult.walletAddress,
+          kmsKeyId: kmsResult.keyId,
+        },
+      };
+      await cache.set(`deployment:${deploymentId}`, updatedDeployment, 24 * 60 * 60);
+
+      this.logger.info({
+        deploymentId,
+        walletAddress,
+        msg: 'Automation wallet created and cached',
+      });
+    }
 
     this.logger.info({
-      strategyId,
+      deploymentId,
       manifestSlug: manifest.slug,
       chainId: SEMSEE_CHAIN_ID,
-      operatorAddress: walletConfig.walletAddress,
+      operatorAddress: walletAddress,
       coreAddress,
       msg: 'Signing deployment transaction',
     });
 
-    // 5. Build constructor arguments
+    // 5. Check wallet balance - if zero, return early for funding
+    const publicClient = createSemseePublicClient();
+    const balance = await publicClient.getBalance({ address: walletAddress });
+
+    if (balance === 0n) {
+      this.logger.info({
+        deploymentId,
+        walletAddress,
+        msg: 'Wallet needs funding before deployment can proceed',
+      });
+
+      // Return early - wallet needs funding first
+      return {
+        needsFunding: true,
+        walletAddress,
+        signedTransaction: '0x' as Hex,
+        predictedAddress: '0x0000000000000000000000000000000000000000' as Address,
+        nonce: 0,
+        txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hash,
+      };
+    }
+
+    // 6. Build constructor arguments
     const constructorParams = manifest.constructorParams;
-    const constructorValues = ((strategy.config as Record<string, unknown>)?._constructorValues ?? {}) as Record<string, string>;
+    const constructorValues = deploymentData.constructorValues || {};
 
     const constructorArgs = this.buildConstructorArgs(
       constructorParams,
       constructorValues,
-      walletConfig.walletAddress,  // operator address
-      coreAddress                   // core address
+      walletAddress,  // operator address
+      coreAddress     // core address
     );
 
-    // 6. Prepare and sign deployment transaction
-    const publicClient = createSemseePublicClient();
+    // 7. Prepare and sign deployment transaction
+    // (publicClient already created for balance check above)
 
     // Encode deployment data
     const deployData = encodeDeployData({
@@ -283,15 +358,28 @@ class StrategySigningService {
     // Get gas price and nonce
     const gasPrice = await publicClient.getGasPrice();
     const nonce = await publicClient.getTransactionCount({
-      address: walletConfig.walletAddress,
+      address: walletAddress,
     });
 
-    // Estimate gas
-    const gasEstimate = await publicClient.estimateGas({
-      account: walletConfig.walletAddress,
-      data: deployData,
-    });
-    const gasLimit = (gasEstimate * 120n) / 100n; // 20% buffer
+    // Estimate gas (with fallback for Geth Clique PoA bug)
+    // Geth Clique has a known bug where estimateGas crashes with "method handler crashed"
+    // Use a generous default gas limit as fallback
+    let gasLimit: bigint;
+    try {
+      const gasEstimate = await publicClient.estimateGas({
+        account: walletAddress,
+        data: deployData,
+      });
+      gasLimit = (gasEstimate * 120n) / 100n; // 20% buffer
+    } catch (error) {
+      // Fallback: Use 2M gas for contract deployment (typical range: 500k-1.5M)
+      this.logger.warn({
+        deploymentId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        msg: 'Gas estimation failed, using fallback gas limit of 2M',
+      });
+      gasLimit = 2_000_000n;
+    }
 
     // Build transaction
     const tx = {
@@ -305,18 +393,18 @@ class StrategySigningService {
     };
 
     // Sign transaction
-    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId);
+    const signedTx = await this.signTransaction(tx, kmsKeyId);
 
     // Calculate predicted contract address
     const predictedAddress = getContractAddress({
-      from: walletConfig.walletAddress,
+      from: walletAddress,
       nonce: BigInt(nonce),
     });
 
     const txHash = keccak256(signedTx);
 
     this.logger.info({
-      strategyId,
+      deploymentId,
       predictedAddress,
       nonce,
       msg: 'Deployment transaction signed',
@@ -329,6 +417,7 @@ class StrategySigningService {
       predictedAddress,
       nonce,
       txHash,
+      walletAddress,
     };
   }
 
@@ -372,13 +461,24 @@ class StrategySigningService {
       address: walletConfig.walletAddress,
     });
 
-    // Estimate gas
-    const gasEstimate = await publicClient.estimateGas({
-      account: walletConfig.walletAddress,
-      to: strategy.contractAddress as Address,
-      data: callData,
-    });
-    const gasLimit = (gasEstimate * 120n) / 100n;
+    // Estimate gas (with fallback for Geth Clique PoA bug)
+    let gasLimit: bigint;
+    try {
+      const gasEstimate = await publicClient.estimateGas({
+        account: walletConfig.walletAddress,
+        to: strategy.contractAddress as Address,
+        data: callData,
+      });
+      gasLimit = (gasEstimate * 120n) / 100n;
+    } catch (error) {
+      // Fallback: Use 500k gas for step() call (typical range: 100k-300k)
+      this.logger.warn({
+        strategyId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        msg: 'Gas estimation failed for step(), using fallback gas limit of 500k',
+      });
+      gasLimit = 500_000n;
+    }
 
     // Build transaction
     const tx = {
@@ -451,13 +551,24 @@ class StrategySigningService {
       address: walletConfig.walletAddress,
     });
 
-    // Estimate gas
-    const gasEstimate = await publicClient.estimateGas({
-      account: walletConfig.walletAddress,
-      to: strategy.contractAddress as Address,
-      data: callData,
-    });
-    const gasLimit = (gasEstimate * 120n) / 100n;
+    // Estimate gas (with fallback for Geth Clique PoA bug)
+    let gasLimit: bigint;
+    try {
+      const gasEstimate = await publicClient.estimateGas({
+        account: walletConfig.walletAddress,
+        to: strategy.contractAddress as Address,
+        data: callData,
+      });
+      gasLimit = (gasEstimate * 120n) / 100n;
+    } catch (error) {
+      // Fallback: Use 500k gas for submitEffectResult() (typical range: 100k-300k)
+      this.logger.warn({
+        strategyId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        msg: 'Gas estimation failed for submitEffectResult(), using fallback gas limit of 500k',
+      });
+      gasLimit = 500_000n;
+    }
 
     // Build transaction
     const tx = {

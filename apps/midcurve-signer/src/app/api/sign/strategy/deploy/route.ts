@@ -112,6 +112,29 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       strategyId,
     });
 
+    // Check if wallet needs funding
+    if (result.needsFunding) {
+      logger.info({
+        requestId,
+        strategyId,
+        walletAddress: result.walletAddress,
+        msg: 'Wallet needs funding before deployment can proceed',
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          needsFunding: true,
+          walletAddress: result.walletAddress,
+          signedTransaction: result.signedTransaction,
+          predictedAddress: result.predictedAddress,
+          nonce: result.nonce,
+          txHash: result.txHash,
+        },
+        requestId,
+      });
+    }
+
     logger.info({
       requestId,
       strategyId,
@@ -127,6 +150,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
         predictedAddress: result.predictedAddress,
         nonce: result.nonce,
         txHash: result.txHash,
+        walletAddress: result.walletAddress,
       },
       requestId,
     });

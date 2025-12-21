@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@midcurve/database": "workspace:*",
+    "@midcurve/services": "workspace:*",
     "amqplib": "^0.10.9",
     "nanoid": "^5.0.9",
     "next": "^15.1.3",

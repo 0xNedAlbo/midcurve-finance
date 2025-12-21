@@ -102,10 +102,13 @@ export class EvmWalletServiceError extends Error {
 
 /**
  * Generate walletHash for EVM wallets
- * Format: "evm/{strategyAddress}"
+ * Format: "evm/{walletAddress}" - uses the actual signing wallet address
+ *
+ * Note: For lookups by strategyAddress (contract address), use the Strategy table:
+ *   Strategy.contractAddress → strategyId → AutomationWallet.strategyId
  */
-function createEvmWalletHash(strategyAddress: string): string {
-  return `evm/${strategyAddress.toLowerCase()}`;
+function createEvmWalletHash(walletAddress: string): string {
+  return `evm/${walletAddress.toLowerCase()}`;
 }
 
 /**
@@ -158,15 +161,15 @@ class EvmWalletService {
     const { strategyAddress, userId, label } = input;
     signerLog.methodEntry(this.logger, 'createWallet', { strategyAddress, userId, label });
 
-    const walletHash = createEvmWalletHash(strategyAddress);
-
     try {
-      // Check if strategy already has a wallet
-      const existingWallet = await prisma.automationWallet.findFirst({
-        where: { walletHash, walletType: WALLET_TYPE, isActive: true },
+      // Check if strategy already has a wallet via the Strategy table relation
+      // This is more reliable than walletHash for strategy-bound wallets
+      const existingStrategy = await prisma.strategy.findFirst({
+        where: { contractAddress: strategyAddress },
+        include: { automationWallets: { where: { walletType: WALLET_TYPE, isActive: true } } },
       });
 
-      if (existingWallet) {
+      if (existingStrategy?.automationWallets.length) {
         throw new EvmWalletServiceError(
           'Strategy already has an automation wallet',
           'WALLET_EXISTS',
@@ -193,7 +196,11 @@ class EvmWalletService {
         keyProvider: keyProvider as 'aws-kms' | 'local-encrypted',
       };
 
+      // walletHash uses the actual wallet address (not strategy address)
+      const walletHash = createEvmWalletHash(kmsResult.walletAddress);
+
       // Create database record
+      // Note: strategyId is set later when the strategy is created in the API
       const wallet = await prisma.automationWallet.create({
         data: {
           walletType: WALLET_TYPE,
@@ -254,16 +261,26 @@ class EvmWalletService {
   }
 
   /**
-   * Get wallet by strategy address
+   * Get wallet by strategy address (contract address)
+   *
+   * Uses the Strategy table relation for lookup:
+   *   Strategy.contractAddress → strategyId → AutomationWallet.strategyId
    */
   async getWalletByStrategyAddress(strategyAddress: Address): Promise<EvmWalletInfo | null> {
     signerLog.methodEntry(this.logger, 'getWalletByStrategyAddress', { strategyAddress });
 
-    const walletHash = createEvmWalletHash(strategyAddress);
-
-    const wallet = await prisma.automationWallet.findFirst({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          take: 1,
+        },
+      },
     });
+
+    const wallet = strategy?.automationWallets[0];
 
     if (!wallet) {
       return null;
@@ -351,14 +368,23 @@ class EvmWalletService {
 
   /**
    * Get the KMS key ID for a strategy's wallet (internal use only)
+   *
+   * Uses the Strategy table relation for lookup.
    */
   async getKmsKeyId(strategyAddress: Address): Promise<string | null> {
-    const walletHash = createEvmWalletHash(strategyAddress);
-
-    const wallet = await prisma.automationWallet.findFirst({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
-      select: { config: true },
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          select: { config: true },
+          take: 1,
+        },
+      },
     });
+
+    const wallet = strategy?.automationWallets[0];
 
     if (!wallet) {
       return null;
@@ -370,38 +396,66 @@ class EvmWalletService {
 
   /**
    * Update last used timestamp for a strategy's wallet
+   *
+   * Uses the Strategy table relation for lookup.
    */
   async updateLastUsed(strategyAddress: Address): Promise<void> {
-    const walletHash = createEvmWalletHash(strategyAddress);
-
-    await prisma.automationWallet.updateMany({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
-      data: { lastUsedAt: new Date() },
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
+
+    const wallet = strategy?.automationWallets[0];
+    if (wallet) {
+      await prisma.automationWallet.update({
+        where: { id: wallet.id },
+        data: { lastUsedAt: new Date() },
+      });
+    }
   }
 
   /**
    * Deactivate a strategy's wallet (soft delete)
+   *
+   * Uses the Strategy table relation for lookup.
    */
   async deactivateWallet(strategyAddress: Address): Promise<boolean> {
     signerLog.methodEntry(this.logger, 'deactivateWallet', { strategyAddress });
 
-    const walletHash = createEvmWalletHash(strategyAddress);
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
 
-    const result = await prisma.automationWallet.updateMany({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
+    const wallet = strategy?.automationWallets[0];
+    if (!wallet) {
+      return false;
+    }
+
+    await prisma.automationWallet.update({
+      where: { id: wallet.id },
       data: { isActive: false },
     });
 
-    if (result.count > 0) {
-      this.logger.info({
-        strategyAddress,
-        msg: 'Automation wallet deactivated',
-      });
-      return true;
-    }
-
-    return false;
+    this.logger.info({
+      strategyAddress,
+      msg: 'Automation wallet deactivated',
+    });
+    return true;
   }
 
   /**
@@ -412,19 +466,27 @@ class EvmWalletService {
    * 2. Returns the current nonce value
    * 3. Increments the nonce for the next transaction
    *
+   * Uses the Strategy table relation for lookup.
+   *
    * @returns The nonce to use for the current transaction
    * @throws EvmWalletServiceError if wallet not found or operation fails
    */
   async getAndIncrementNonce(strategyAddress: Address, chainId: number): Promise<number> {
     signerLog.methodEntry(this.logger, 'getAndIncrementNonce', { strategyAddress, chainId });
 
-    const walletHash = createEvmWalletHash(strategyAddress);
-
-    // First, get the wallet
-    const wallet = await prisma.automationWallet.findFirst({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
-      select: { id: true },
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
+
+    const wallet = strategy?.automationWallets[0];
 
     if (!wallet) {
       throw new EvmWalletServiceError(
@@ -489,17 +551,26 @@ class EvmWalletService {
   /**
    * Get current nonce without incrementing (for read-only queries)
    *
+   * Uses the Strategy table relation for lookup.
+   *
    * @returns Current nonce value, or 0 if no transactions have been made on this chain
    */
   async getCurrentNonce(strategyAddress: Address, chainId: number): Promise<number> {
     signerLog.methodEntry(this.logger, 'getCurrentNonce', { strategyAddress, chainId });
 
-    const walletHash = createEvmWalletHash(strategyAddress);
-
-    const wallet = await prisma.automationWallet.findFirst({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
-      select: { id: true },
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
+
+    const wallet = strategy?.automationWallets[0];
 
     if (!wallet) {
       throw new EvmWalletServiceError(
@@ -529,17 +600,26 @@ class EvmWalletService {
    * Use this when the on-chain nonce gets out of sync with the database,
    * for example after a failed transaction that was never broadcast.
    *
+   * Uses the Strategy table relation for lookup.
+   *
    * @param nonce The nonce value to set (typically from eth_getTransactionCount)
    */
   async resetNonce(strategyAddress: Address, chainId: number, nonce: number): Promise<void> {
     signerLog.methodEntry(this.logger, 'resetNonce', { strategyAddress, chainId, nonce });
 
-    const walletHash = createEvmWalletHash(strategyAddress);
-
-    const wallet = await prisma.automationWallet.findFirst({
-      where: { walletHash, walletType: WALLET_TYPE, isActive: true },
-      select: { id: true },
+    // Look up via Strategy table relation
+    const strategy = await prisma.strategy.findFirst({
+      where: { contractAddress: strategyAddress.toLowerCase() },
+      include: {
+        automationWallets: {
+          where: { walletType: WALLET_TYPE, isActive: true },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
+
+    const wallet = strategy?.automationWallets[0];
 
     if (!wallet) {
       throw new EvmWalletServiceError(

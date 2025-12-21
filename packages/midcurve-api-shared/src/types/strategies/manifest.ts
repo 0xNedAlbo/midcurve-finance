@@ -396,18 +396,24 @@ export interface DeployAutomationWalletInfo {
 /**
  * Response for deploy strategy endpoint
  *
- * Note: With async deployment (202 Accepted), the automation wallet
- * may not be available immediately. It will be populated once deployment completes.
+ * With async deployment (202 Accepted):
+ * - Strategy is NOT created upfront - only after deployment succeeds
+ * - Poll the pollUrl to check deployment status
+ * - Strategy will be returned when deployment completes
+ *
+ * This prevents orphan "deploying" strategies from failed deployments.
  */
 export interface DeployStrategyResponse {
   /**
-   * Created strategy record
+   * Strategy record
+   * Optional: Not available until deployment completes successfully
+   * Poll the deployment.pollUrl to check status
    */
-  strategy: SerializedStrategy;
+  strategy?: SerializedStrategy;
 
   /**
    * Newly created automation wallet
-   * Optional: Not available immediately for async deployments (status 202)
+   * Optional: Not available until deployment completes
    */
   automationWallet?: DeployAutomationWalletInfo;
 

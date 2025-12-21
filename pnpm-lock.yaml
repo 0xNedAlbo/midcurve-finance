@@ -96,6 +96,9 @@ importers:
       '@midcurve/database':
         specifier: workspace:*
         version: link:../../packages/midcurve-database
+      '@midcurve/services':
+        specifier: workspace:*
+        version: link:../../packages/midcurve-services
       amqplib:
         specifier: ^0.10.9
         version: 0.10.9
@@ -191,6 +194,9 @@ importers:
         specifier: ^3.22.0
         version: 3.25.76
     devDependencies:
+      '@prisma/nextjs-monorepo-workaround-plugin':
+        specifier: ^6.19.0
+        version: 6.19.0
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3

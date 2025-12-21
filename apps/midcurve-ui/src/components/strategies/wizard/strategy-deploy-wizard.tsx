@@ -141,14 +141,16 @@ export function StrategyDeployWizard({
       {
         onSuccess: (response) => {
           setDeploymentResult(response);
-          onStrategyDeployed?.(response);
+          // NOTE: Don't call onStrategyDeployed here!
+          // The deployment is just initiated (status: "pending"), not complete.
+          // onStrategyDeployed is called by handleDeploymentStatusChange when status === "completed"
         },
         onError: (error) => {
           setDeploymentError(error.message || "Deployment failed");
         },
       }
     );
-  }, [verifiedManifest, strategyName, constructorValues, deployMutation, onStrategyDeployed]);
+  }, [verifiedManifest, strategyName, constructorValues, deployMutation]);
 
   // Handle retry
   const handleRetry = useCallback(() => {
