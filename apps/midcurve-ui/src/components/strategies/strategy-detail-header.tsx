@@ -9,6 +9,7 @@
  * - Summary metrics cards
  * - Back navigation
  * - Refresh button
+ * - Start/Shutdown lifecycle buttons
  */
 
 import { useState } from "react";
@@ -24,10 +25,13 @@ import {
   Wallet,
   BarChart3,
   Layers,
+  Play,
+  Power,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { getDashboardUrl } from "@/lib/dashboard-referrer";
 import type { ListStrategyData } from "@midcurve/api-shared";
+import { StrategyLifecycleModal } from "./strategy-lifecycle-modal";
 
 // Chain metadata for display
 const CHAIN_METADATA: Record<number, { name: string; explorer: string }> = {
@@ -62,6 +66,7 @@ export function StrategyDetailHeader({
   isRefreshing,
 }: StrategyDetailHeaderProps) {
   const [copied, setCopied] = useState(false);
+  const [lifecycleModal, setLifecycleModal] = useState<"start" | "shutdown" | null>(null);
 
   const chainMeta = strategy.chainId ? CHAIN_METADATA[strategy.chainId] : null;
   const statusColor = STATUS_COLORS[strategy.status] || STATUS_COLORS.pending;
@@ -226,6 +231,27 @@ export function StrategyDetailHeader({
 
           {/* Right Side - Actions */}
           <div className="flex items-center gap-3">
+            {/* Lifecycle Actions */}
+            {strategy.status === "deployed" && strategy.contractAddress && (
+              <button
+                onClick={() => setLifecycleModal("start")}
+                className="px-4 py-2 text-sm font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <Play className="w-4 h-4" />
+                Start
+              </button>
+            )}
+
+            {strategy.status === "active" && strategy.contractAddress && (
+              <button
+                onClick={() => setLifecycleModal("shutdown")}
+                className="px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <Power className="w-4 h-4" />
+                Shutdown
+              </button>
+            )}
+
             {/* Last Updated */}
             {strategy.updatedAt && (
               <div className="text-right text-sm text-slate-400">
@@ -313,6 +339,20 @@ export function StrategyDetailHeader({
           </div>
         </div>
       </div>
+
+      {/* Lifecycle Modal */}
+      {lifecycleModal && (
+        <StrategyLifecycleModal
+          isOpen={!!lifecycleModal}
+          onClose={() => setLifecycleModal(null)}
+          strategy={strategy}
+          action={lifecycleModal}
+          onSuccess={async () => {
+            setLifecycleModal(null);
+            await onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }
