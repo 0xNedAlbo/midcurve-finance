@@ -571,7 +571,7 @@ class LifecycleService {
         };
       }
 
-      // Check for loop error
+      // Check for loop registry error (loop crashed)
       if (entry.status === 'error') {
         return {
           success: false,
@@ -579,8 +579,16 @@ class LifecycleService {
         };
       }
 
-      // Check if loop has processed at least one event
+      // Check if loop has a processing error (e.g., signer rejection)
       const loopState = entry.loop.getState();
+      if (loopState.lastError) {
+        return {
+          success: false,
+          error: `Event processing failed: ${loopState.lastError}`,
+        };
+      }
+
+      // Check if loop has processed at least one event
       if (loopState.eventsProcessed > 0) {
         this.log.info({
           contractAddress,

@@ -117,6 +117,10 @@ export interface StrategyLoopState {
   eventsProcessed: number;
   /** Total effects processed */
   effectsProcessed: number;
+  /** Last error encountered during event processing */
+  lastError?: string;
+  /** Timestamp of last error */
+  lastErrorAt?: Date;
 }
 
 // ============================================================
@@ -332,8 +336,11 @@ export class StrategyLoop {
       );
     } catch (error) {
       console.error('[StrategyLoop] Failed to process event:', error);
-      // NACK to requeue for retry
-      nackEvent(this.config.channel, consumed.deliveryTag, true);
+      // Record error for external monitoring (e.g., waitForActivation)
+      this.state.lastError = error instanceof Error ? error.message : 'Unknown error';
+      this.state.lastErrorAt = new Date();
+      // ACK to remove from queue - retrying won't help for signer/config errors
+      ackEvent(this.config.channel, consumed.deliveryTag);
     } finally {
       this.state.currentEvent = null;
       this.state.currentDeliveryTag = null;

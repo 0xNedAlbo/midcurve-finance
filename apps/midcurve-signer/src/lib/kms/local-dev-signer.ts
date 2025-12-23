@@ -47,22 +47,24 @@ export class LocalDevSigner implements EvmSigner {
   constructor(config: LocalSignerConfig = {}) {
     const keyHex = config.masterKey ?? process.env[MASTER_KEY_ENV_VAR];
 
+    // FAIL FAST: Don't accept requests without proper configuration
+    // A random key would make all encrypted private keys unrecoverable after restart
     if (!keyHex) {
-      // Generate a warning but create a random key for convenience in dev
-      this.logger.warn({
-        msg: `${MASTER_KEY_ENV_VAR} not set, generating random key. Keys will not persist across restarts!`,
-      });
-      this.masterKey = randomBytes(32);
-    } else {
-      if (!/^[a-fA-F0-9]{64}$/.test(keyHex)) {
-        throw new Error(
-          `${MASTER_KEY_ENV_VAR} must be exactly 64 hex characters (32 bytes). ` +
-            'Generate with: openssl rand -hex 32'
-        );
-      }
-      this.masterKey = Buffer.from(keyHex, 'hex');
+      throw new Error(
+        `${MASTER_KEY_ENV_VAR} environment variable is required for LocalDevSigner. ` +
+          'Generate a key with: openssl rand -hex 32'
+      );
     }
 
+    // Validate 64 hex chars (32 bytes)
+    if (!/^[a-fA-F0-9]{64}$/.test(keyHex)) {
+      throw new Error(
+        `${MASTER_KEY_ENV_VAR} must be exactly 64 hex characters (32 bytes). ` +
+          'Generate with: openssl rand -hex 32'
+      );
+    }
+
+    this.masterKey = Buffer.from(keyHex, 'hex');
     this.logger.info({ msg: 'LocalDevSigner initialized (DEVELOPMENT ONLY)' });
   }
 

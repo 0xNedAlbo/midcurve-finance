@@ -433,9 +433,10 @@ class StrategySigningService {
     signerLog.methodEntry(this.logger, 'signStep', { strategyId });
 
     // 1. Fetch strategy with manifest and wallet
+    // Allow 'deployed' state during start transition (strategy activates after first event processed)
     const { strategy, walletConfig, manifest } = await this.fetchStrategyWithWallet(
       strategyId,
-      'active' // step() only allowed when active
+      ['active', 'deployed']
     );
 
     if (!strategy.contractAddress) {
@@ -523,9 +524,10 @@ class StrategySigningService {
     signerLog.methodEntry(this.logger, 'signSubmitEffectResult', { strategyId, epoch });
 
     // 1. Fetch strategy with manifest and wallet
+    // Allow 'deployed' state during start transition (strategy activates after first event processed)
     const { strategy, walletConfig, manifest } = await this.fetchStrategyWithWallet(
       strategyId,
-      'active' // submitEffectResult() only allowed when active
+      ['active', 'deployed']
     );
 
     if (!strategy.contractAddress) {
@@ -608,10 +610,12 @@ class StrategySigningService {
 
   /**
    * Fetch strategy with wallet and manifest
+   * @param strategyId - Strategy ID
+   * @param expectedStatuses - Array of valid statuses (allows 'deployed' during start transition)
    */
   private async fetchStrategyWithWallet(
     strategyId: string,
-    expectedStatus: string
+    expectedStatuses: string[]
   ): Promise<{
     strategy: any;
     wallet: any;
@@ -636,9 +640,9 @@ class StrategySigningService {
       );
     }
 
-    if (strategy.status !== expectedStatus) {
+    if (!expectedStatuses.includes(strategy.status)) {
       throw new StrategySigningError(
-        `Strategy is in '${strategy.status}' state, expected '${expectedStatus}'`,
+        `Strategy is in '${strategy.status}' state, expected one of: ${expectedStatuses.join(', ')}`,
         'INVALID_STATE',
         400
       );
