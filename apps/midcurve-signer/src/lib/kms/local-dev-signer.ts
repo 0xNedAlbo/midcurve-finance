@@ -96,6 +96,7 @@ export class LocalDevSigner implements EvmSigner {
       return {
         keyId,
         walletAddress: account.address,
+        encryptedPrivateKey: encryptedKey,
       };
     } catch (error) {
       signerLog.kmsOperation(

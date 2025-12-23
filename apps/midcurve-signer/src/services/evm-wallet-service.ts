@@ -27,6 +27,11 @@ export interface EvmWalletConfig {
   walletAddress: string; // EVM address (EIP-55)
   kmsKeyId: string;
   keyProvider: 'aws-kms' | 'local-encrypted';
+  /**
+   * Encrypted private key (LocalDevSigner only)
+   * For AWS KMS, this is undefined as keys never leave the HSM.
+   */
+  encryptedPrivateKey?: string;
 }
 
 /**
@@ -129,6 +134,7 @@ function parseEvmWalletConfig(config: unknown): EvmWalletConfig {
     walletAddress: c.walletAddress,
     kmsKeyId: c.kmsKeyId,
     keyProvider: c.keyProvider,
+    encryptedPrivateKey: c.encryptedPrivateKey,
   };
 }
 
@@ -183,17 +189,14 @@ class EvmWalletService {
         `${strategyAddress}:${label}`
       );
 
-      // Get provider type from signer
-      const keyProvider = process.env.SIGNER_USE_LOCAL_KEYS === 'true'
-        ? 'local-encrypted'
-        : 'aws-kms';
-
       // Build EVM-specific config
       const config: EvmWalletConfig = {
         strategyAddress,
         walletAddress: kmsResult.walletAddress,
         kmsKeyId: kmsResult.keyId,
-        keyProvider: keyProvider as 'aws-kms' | 'local-encrypted',
+        keyProvider: kmsResult.encryptedPrivateKey ? 'local-encrypted' : 'aws-kms',
+        // Store encrypted key for local dev (undefined for AWS KMS)
+        encryptedPrivateKey: kmsResult.encryptedPrivateKey,
       };
 
       // walletHash uses the actual wallet address (not strategy address)

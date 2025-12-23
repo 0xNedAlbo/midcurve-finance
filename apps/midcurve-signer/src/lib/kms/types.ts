@@ -14,6 +14,12 @@ export interface KmsWalletCreationResult {
   keyId: string;
   /** Derived Ethereum address from the KMS public key */
   walletAddress: Address;
+  /**
+   * Encrypted private key (LocalDevSigner only)
+   * Must be stored in database for persistence across restarts.
+   * For AWS KMS, this is undefined as keys never leave the HSM.
+   */
+  encryptedPrivateKey?: string;
 }
 
 /**

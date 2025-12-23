@@ -25,7 +25,7 @@ import {
   getContractAddress,
 } from 'viem';
 import { prisma } from '../lib/prisma';
-import { getSigner } from '../lib/kms';
+import { getSigner, shouldUseLocalKeys, LocalDevSigner } from '../lib/kms';
 import { signerLogger, signerLog } from '../lib/logger';
 import { CacheService } from '@midcurve/services';
 
@@ -135,6 +135,10 @@ interface DeploymentCacheData {
   automationWallet?: {
     walletAddress: string;
     kmsKeyId: string;
+    /** Encrypted private key for LocalDevSigner persistence */
+    encryptedPrivateKey?: string;
+    /** Key provider type (aws-kms or local-encrypted) */
+    keyProvider: 'aws-kms' | 'local-encrypted';
   };
 }
 
@@ -262,11 +266,13 @@ class StrategySigningService {
     // 4. Get or create automation wallet
     let walletAddress: Address;
     let kmsKeyId: string;
+    let encryptedPrivateKey: string | undefined;
 
     if (deploymentData.automationWallet) {
       // Wallet already created (from previous attempt or stored in cache)
       walletAddress = deploymentData.automationWallet.walletAddress as Address;
       kmsKeyId = deploymentData.automationWallet.kmsKeyId;
+      encryptedPrivateKey = deploymentData.automationWallet.encryptedPrivateKey;
       this.logger.info({
         deploymentId,
         walletAddress,
@@ -285,6 +291,7 @@ class StrategySigningService {
 
       walletAddress = kmsResult.walletAddress as Address;
       kmsKeyId = kmsResult.keyId;
+      encryptedPrivateKey = kmsResult.encryptedPrivateKey;
 
       // Update cache with wallet info (for retries and later use)
       const updatedDeployment: DeploymentCacheData = {
@@ -292,6 +299,8 @@ class StrategySigningService {
         automationWallet: {
           walletAddress: kmsResult.walletAddress,
           kmsKeyId: kmsResult.keyId,
+          encryptedPrivateKey: kmsResult.encryptedPrivateKey,
+          keyProvider: shouldUseLocalKeys() ? 'local-encrypted' : 'aws-kms',
         },
       };
       await cache.set(`deployment:${deploymentId}`, updatedDeployment, 24 * 60 * 60);
@@ -392,8 +401,8 @@ class StrategySigningService {
       type: 'legacy' as const,
     };
 
-    // Sign transaction
-    const signedTx = await this.signTransaction(tx, kmsKeyId);
+    // Sign transaction (pass encrypted key for LocalDevSigner persistence)
+    const signedTx = await this.signTransaction(tx, kmsKeyId, encryptedPrivateKey);
 
     // Calculate predicted contract address
     const predictedAddress = getContractAddress({
@@ -492,8 +501,8 @@ class StrategySigningService {
       type: 'legacy' as const,
     };
 
-    // Sign transaction
-    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId);
+    // Sign transaction (pass encrypted key for LocalDevSigner persistence)
+    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId, walletConfig.encryptedPrivateKey);
     const txHash = keccak256(signedTx);
 
     this.logger.info({
@@ -583,8 +592,8 @@ class StrategySigningService {
       type: 'legacy' as const,
     };
 
-    // Sign transaction
-    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId);
+    // Sign transaction (pass encrypted key for LocalDevSigner persistence)
+    const signedTx = await this.signTransaction(tx, walletConfig.kmsKeyId, walletConfig.encryptedPrivateKey);
     const txHash = keccak256(signedTx);
 
     this.logger.info({
@@ -619,7 +628,7 @@ class StrategySigningService {
   ): Promise<{
     strategy: any;
     wallet: any;
-    walletConfig: { walletAddress: Address; kmsKeyId: string };
+    walletConfig: { walletAddress: Address; kmsKeyId: string; encryptedPrivateKey?: string };
     manifest: StrategyManifest;
   }> {
     const strategy = await prisma.strategy.findUnique({
@@ -665,7 +674,7 @@ class StrategySigningService {
       );
     }
 
-    const walletConfig = wallet.config as { walletAddress: Address; kmsKeyId: string };
+    const walletConfig = wallet.config as { walletAddress: Address; kmsKeyId: string; encryptedPrivateKey?: string };
     // Cast JSON manifest to typed structure
     const manifest = strategy.manifest as unknown as StrategyManifest;
 
@@ -675,6 +684,10 @@ class StrategySigningService {
   /**
    * Sign a transaction with KMS
    * Uses hardcoded SEMSEE_CHAIN_ID for EIP-155 v calculation
+   *
+   * @param tx - Transaction to sign
+   * @param kmsKeyId - KMS key ID
+   * @param encryptedPrivateKey - Optional encrypted private key (for LocalDevSigner persistence)
    */
   private async signTransaction(
     tx: {
@@ -686,12 +699,20 @@ class StrategySigningService {
       gasPrice: bigint;
       type: 'legacy';
     },
-    kmsKeyId: string
+    kmsKeyId: string,
+    encryptedPrivateKey?: string
   ): Promise<Hex> {
     const serializedUnsigned = serializeTransaction(tx);
     const txHash = keccak256(serializedUnsigned);
 
     const signer = getSigner();
+
+    // For LocalDevSigner: Load the encrypted key from database into memory before signing
+    // This is necessary because the in-memory key store is cleared on server restart
+    if (shouldUseLocalKeys() && encryptedPrivateKey && signer instanceof LocalDevSigner) {
+      signer.loadKey(kmsKeyId, encryptedPrivateKey);
+    }
+
     const signature = await signer.signTransaction(kmsKeyId, txHash);
 
     // Calculate EIP-155 v value using SEMSEE chain ID

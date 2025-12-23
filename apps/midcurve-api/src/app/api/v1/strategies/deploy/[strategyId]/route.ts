@@ -58,6 +58,10 @@ interface EvmDeploymentStatus {
   automationWallet: {
     walletAddress: string;
     kmsKeyId: string;
+    /** Encrypted private key for LocalDevSigner persistence */
+    encryptedPrivateKey?: string;
+    /** Key provider type (aws-kms or local-encrypted) */
+    keyProvider: 'aws-kms' | 'local-encrypted';
   } | null;
   strategyCreated: boolean;
   strategyId: string | null;
@@ -208,9 +212,6 @@ export async function GET(
           // walletHash format: "evm/{walletAddress}" - uses the actual signing wallet address
           // Lookup by contract address should use: Strategy.contractAddress → strategyId → AutomationWallet
           const walletHash = `evm/${evmData.automationWallet.walletAddress.toLowerCase()}`;
-          const keyProvider = process.env.SIGNER_USE_LOCAL_KEYS === 'true'
-            ? 'local-encrypted'
-            : 'aws-kms';
 
           await prisma.automationWallet.create({
             data: {
@@ -223,7 +224,9 @@ export async function GET(
                 strategyAddress: evmData.contractAddress,
                 walletAddress: evmData.automationWallet.walletAddress,
                 kmsKeyId: evmData.automationWallet.kmsKeyId,
-                keyProvider,
+                keyProvider: evmData.automationWallet.keyProvider,
+                // Store encrypted key for LocalDevSigner persistence across restarts
+                encryptedPrivateKey: evmData.automationWallet.encryptedPrivateKey,
               },
               isActive: true,
             },
