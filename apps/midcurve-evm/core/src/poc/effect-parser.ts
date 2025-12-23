@@ -48,11 +48,16 @@ export const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const;
 // Known topic hashes (for human-readable output)
 // These match keccak256("TOPIC_NAME") used in the strategy
 export const KNOWN_TOPICS: Record<string, string> = {
+  // Execution topics
   [keccak256(toHex('STEP_START'))]: 'STEP_START',
   [keccak256(toHex('EPOCH_INFO'))]: 'EPOCH_INFO',
   [keccak256(toHex('EVENTS_COUNT'))]: 'EVENTS_COUNT',
   [keccak256(toHex('STEP_COMPLETE'))]: 'STEP_COMPLETE',
   [keccak256(toHex('EVENT_RECEIVED'))]: 'EVENT_RECEIVED',
+  // Lifecycle topics (used by LifecycleLoggingStrategy)
+  [keccak256(toHex('LIFECYCLE'))]: 'LIFECYCLE',
+  [keccak256(toHex('STARTUP'))]: 'STARTUP',
+  [keccak256(toHex('SHUTDOWN_PROGRESS'))]: 'SHUTDOWN_PROGRESS',
 };
 
 // Known event type hashes (for human-readable output)
@@ -222,8 +227,9 @@ function formatBytes32(value: Hex, knownNames: Record<string, string>): string {
 
 /**
  * Try to decode log data and format it nicely.
+ * Exported for use by log persistence handlers.
  */
-function formatLogData(data: Hex): string {
+export function formatLogData(data: Hex): string {
   if (data === '0x' || data.length <= 2) {
     return '(empty)';
   }

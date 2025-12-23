@@ -12,6 +12,7 @@ import {
   EFFECT_LOG,
   decodeLogPayload,
   executeLogEffect,
+  formatLogData,
   KNOWN_TOPICS,
 } from '../../poc/effect-parser';
 import type { EffectHandler, EffectHandlerResult } from './types';
@@ -87,6 +88,9 @@ export class LogEffectHandler implements EffectHandler {
     // Resolve topic name if known
     const topicName = KNOWN_TOPICS[logPayload.topic];
 
+    // Decode log data for human-readable display
+    const dataDecoded = formatLogData(logPayload.data);
+
     await dbClient.createStrategyLog({
       strategyId: strategy.id,
       contractAddress: request.strategyAddress,
@@ -96,7 +100,7 @@ export class LogEffectHandler implements EffectHandler {
       topic: logPayload.topic,
       topicName,
       data: logPayload.data,
-      dataDecoded: undefined, // Could add decoding logic later
+      dataDecoded,
       timestamp: new Date(request.requestedAt),
     });
   }
