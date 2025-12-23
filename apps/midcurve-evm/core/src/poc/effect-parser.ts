@@ -235,20 +235,42 @@ export function formatLogData(data: Hex): string {
   }
 
   try {
-    // Most of our log data is abi.encode(bytes32) or abi.encode(uint256)
-    // abi.encode produces 32-byte aligned data with offset prefix
-    // So abi.encode(bytes32) or abi.encode(uint256) = 32 bytes = 66 hex chars (with 0x)
+    // abi.encode produces different layouts for static vs dynamic types:
+    // - abi.encode(uint256) = 32 bytes (the value)
+    // - abi.encode(bytes32) = 32 bytes (the value)
+    // - abi.encode(string)  = 32 bytes offset (0x20) + 32 bytes length + data
 
     if (data.length >= 66) {
-      // First, try as uint256/uint64 (for epoch, counters, etc.)
+      // First, check if this looks like an encoded string (starts with offset 0x20 = 32)
+      // abi.encode(string) starts with the offset to the string data, which is always 0x20
+      // for a single dynamic parameter
+      const firstWord = data.slice(0, 66); // 0x + 64 hex chars
+      if (firstWord === '0x0000000000000000000000000000000000000000000000000000000000000020') {
+        // Likely abi.encode(string) - try to decode it
+        try {
+          const [decoded] = decodeAbiParameters(
+            [{ type: 'string', name: 'value' }],
+            data
+          );
+          if (typeof decoded === 'string' && decoded.length > 0) {
+            // Truncate very long strings
+            return decoded.length > 100 ? decoded.slice(0, 100) + '...' : decoded;
+          }
+        } catch {
+          // Not a valid string encoding
+        }
+      }
+
+      // Try as uint256/uint64 (for epoch, counters, etc.)
       // These are small numbers that would look like 0x00000...000X
+      // Only accept if it's NOT the offset pattern (0x20 = 32)
       try {
         const [decoded] = decodeAbiParameters(
           [{ type: 'uint256', name: 'value' }],
           data
         );
-        // If it's a small number, show as decimal
-        if (decoded < 1000000n) {
+        // If it's a small number (but not 32 which is the string offset), show as decimal
+        if (decoded < 1000000n && decoded !== 32n) {
           return decoded.toString();
         }
       } catch {
