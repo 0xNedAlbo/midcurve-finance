@@ -101,6 +101,16 @@ export interface StrategyManifest {
   quoteToken: QuoteTokenSpec;
   /** Funding token for vault (optional - only if strategy uses FundingMixin) */
   fundingToken?: FundingTokenSpec;
+  /**
+   * Custom log topics defined by the strategy
+   *
+   * Maps topic names to descriptions. Keccak256 hashes are computed at runtime.
+   * Strategy developers use these topics in _log*() calls:
+   *   _logInfo(keccak256("POSITION_OPENED"), "Opened new position");
+   *
+   * @example { "POSITION_OPENED": "Logged when a position is opened" }
+   */
+  logTopics?: Record<string, string>;
 }
 
 // =============================================================================

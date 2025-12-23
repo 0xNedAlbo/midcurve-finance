@@ -211,6 +211,7 @@ export class ManifestVerificationService {
       formLayout: obj.formLayout as StrategyManifest['formLayout'],
       quoteToken: quoteToken!,
       tags: obj.tags as string[] | undefined,
+      logTopics: obj.logTopics as Record<string, string> | undefined,
     };
 
     return {
@@ -354,6 +355,41 @@ export class ManifestVerificationService {
         message: 'Field "tags" must be an array',
         path: 'tags',
       });
+    }
+
+    // Optional logTopics
+    if (obj.logTopics !== undefined) {
+      if (typeof obj.logTopics !== 'object' || obj.logTopics === null || Array.isArray(obj.logTopics)) {
+        errors.push({
+          severity: 'error',
+          code: 'INVALID_FIELD_VALUE',
+          message: 'Field "logTopics" must be an object mapping topic names to descriptions',
+          path: 'logTopics',
+        });
+      } else {
+        // Validate each topic entry
+        const topics = obj.logTopics as Record<string, unknown>;
+        for (const [topicName, description] of Object.entries(topics)) {
+          // Topic names must be uppercase identifiers
+          if (!/^[A-Z][A-Z0-9_]*$/.test(topicName)) {
+            errors.push({
+              severity: 'error',
+              code: 'INVALID_FIELD_VALUE',
+              message: `Log topic name "${topicName}" must be an uppercase identifier (e.g., "POSITION_OPENED")`,
+              path: `logTopics.${topicName}`,
+            });
+          }
+          // Descriptions must be strings
+          if (typeof description !== 'string') {
+            errors.push({
+              severity: 'error',
+              code: 'INVALID_FIELD_VALUE',
+              message: `Log topic "${topicName}" description must be a string`,
+              path: `logTopics.${topicName}`,
+            });
+          }
+        }
+      }
     }
   }
 

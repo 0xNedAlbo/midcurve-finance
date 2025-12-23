@@ -9,8 +9,8 @@ import { LoggingMixin } from "../strategy/mixins/LoggingMixin.sol";
 /// @notice Example strategy demonstrating lifecycle events with logging.
 ///
 /// This strategy is designed to test the start/shutdown lifecycle functionality:
-/// - Logs when the strategy is started (with timestamp)
-/// - Logs when shutdown is requested (with uptime statistics)
+/// - Logs when the strategy is started
+/// - Logs when shutdown is requested
 /// - Logs cleanup progress during shutdown
 /// - Logs when shutdown is complete
 ///
@@ -24,6 +24,12 @@ import { LoggingMixin } from "../strategy/mixins/LoggingMixin.sol";
 /// - LifecycleMixin handles STEP_EVENT_LIFECYCLE (START/SHUTDOWN)
 /// - LoggingMixin provides _log* helpers
 /// - Both extend BaseStrategy
+///
+/// Log topics used (define in manifest's logTopics):
+/// - LIFECYCLE: Lifecycle state transitions
+/// - STARTUP: Strategy startup events
+/// - SHUTDOWN_PROGRESS: Shutdown cleanup progress
+/// - EVENT_RECEIVED: Step event received
 contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
     // =============================================================
     // Constants
@@ -62,39 +68,21 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
     // =============================================================
 
     /// @notice Called when the strategy receives the START command.
-    /// @dev Logs the startup with a timestamp for tracking uptime.
+    /// @dev Logs the startup for tracking uptime.
     function onStart() internal override {
         startedAt = block.timestamp;
 
-        // Log startup with timestamp
-        _logInfo(
-            TOPIC_STARTUP,
-            abi.encode("Strategy started", startedAt)
-        );
+        // Log startup
+        _logInfo(TOPIC_STARTUP, "Strategy started successfully");
 
         // Log the lifecycle state transition
-        _logInfo(
-            TOPIC_LIFECYCLE,
-            abi.encode("Transitioned to ACTIVE state")
-        );
+        _logInfo(TOPIC_LIFECYCLE, "Transitioned to ACTIVE state");
     }
 
     /// @notice Called when the strategy receives the SHUTDOWN command.
-    /// @dev Logs the shutdown request with uptime statistics.
+    /// @dev Logs the shutdown request.
     function onShutdownRequested() internal override {
-        uint256 uptime = block.timestamp - startedAt;
-
-        // Log shutdown request with statistics
-        _logInfo(
-            TOPIC_LIFECYCLE,
-            abi.encode(
-                "Shutdown requested",
-                "uptime_seconds",
-                uptime,
-                "events_processed",
-                eventsProcessed
-            )
-        );
+        _logInfo(TOPIC_LIFECYCLE, "Shutdown requested - beginning graceful shutdown");
     }
 
     /// @notice Called on every step while in SHUTTING_DOWN state.
@@ -104,10 +92,7 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
     /// @return done True when cleanup is complete
     function onShutdownStep() internal override returns (bool done) {
         // Log cleanup progress
-        _logDebug(
-            TOPIC_SHUTDOWN_PROGRESS,
-            abi.encode("Cleanup step executing")
-        );
+        _logDebug(TOPIC_SHUTDOWN_PROGRESS, "Cleanup step executing");
 
         // For this example, we complete immediately
         // Real strategies would track cleanup state and return false
@@ -116,20 +101,9 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
     }
 
     /// @notice Called exactly once when shutdown completes.
-    /// @dev Logs final statistics before the strategy enters SHUTDOWN state.
+    /// @dev Logs final message before the strategy enters SHUTDOWN state.
     function onShutdownComplete() internal override {
-        uint256 finalUptime = block.timestamp - startedAt;
-
-        _logInfo(
-            TOPIC_LIFECYCLE,
-            abi.encode(
-                "Shutdown complete",
-                "final_uptime_seconds",
-                finalUptime,
-                "total_events_processed",
-                eventsProcessed
-            )
-        );
+        _logInfo(TOPIC_LIFECYCLE, "Shutdown complete - strategy is now inactive");
     }
 
     // =============================================================
@@ -162,10 +136,7 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
         }
 
         // Log that we received an event
-        _logDebug(
-            keccak256("EVENT_RECEIVED"),
-            abi.encode(eventType, eventsProcessed + 1)
-        );
+        _logDebug(keccak256("EVENT_RECEIVED"), "Step event received and processed");
 
         // Increment event counter
         eventsProcessed++;

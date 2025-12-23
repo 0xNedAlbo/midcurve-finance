@@ -12,6 +12,13 @@ import { LoggingMixin } from "../strategy/mixins/LoggingMixin.sol";
 /// - LifecycleMixin handles STEP_EVENT_LIFECYCLE (START/SHUTDOWN)
 /// - LoggingMixin provides _log* helpers
 /// - Both extend BaseStrategy
+///
+/// Log topics used (define in manifest's logTopics):
+/// - LIFECYCLE: Lifecycle state changes
+/// - STEP_START: Step event started processing
+/// - EPOCH_INFO: Current epoch information
+/// - EVENTS_COUNT: Events processed counter
+/// - STEP_COMPLETE: Step event processing complete
 contract SimpleLoggingStrategy is LifecycleMixin, LoggingMixin {
     /// @dev Counter to track how many events we've processed
     uint256 public eventsProcessed;
@@ -25,17 +32,17 @@ contract SimpleLoggingStrategy is LifecycleMixin, LoggingMixin {
 
     /// @dev Called when strategy receives START command.
     function onStart() internal override {
-        _logInfo(keccak256("LIFECYCLE"), abi.encode("Strategy started"));
+        _logInfo(keccak256("LIFECYCLE"), "Strategy started");
     }
 
     /// @dev Called when strategy receives SHUTDOWN command.
     function onShutdownRequested() internal override {
-        _logInfo(keccak256("LIFECYCLE"), abi.encode("Shutdown requested"));
+        _logInfo(keccak256("LIFECYCLE"), "Shutdown requested");
     }
 
     /// @dev Called when shutdown is complete.
     function onShutdownComplete() internal override {
-        _logInfo(keccak256("LIFECYCLE"), abi.encode("Shutdown complete"));
+        _logInfo(keccak256("LIFECYCLE"), "Shutdown complete");
     }
 
     // =============================================================
@@ -65,18 +72,18 @@ contract SimpleLoggingStrategy is LifecycleMixin, LoggingMixin {
         }
 
         // Effect 1: Log that we received an event
-        _logInfo(keccak256("STEP_START"), abi.encode(eventType));
+        _logInfo(keccak256("STEP_START"), "Processing step event");
 
         // Effect 2: Log the current epoch
-        _logDebug(keccak256("EPOCH_INFO"), abi.encode(epoch()));
+        _logDebug(keccak256("EPOCH_INFO"), "Epoch check completed");
 
         // Effect 3: Log the events processed count (before incrementing)
-        _logInfo(keccak256("EVENTS_COUNT"), abi.encode(eventsProcessed));
+        _logInfo(keccak256("EVENTS_COUNT"), "Incrementing events counter");
 
         // Increment counter (this state change only persists on final commit)
         eventsProcessed++;
 
         // Effect 4: Log completion
-        _logInfo(keccak256("STEP_COMPLETE"), abi.encode(eventType));
+        _logInfo(keccak256("STEP_COMPLETE"), "Step event processing complete");
     }
 }

@@ -343,6 +343,30 @@ export interface StrategyManifest {
    * @example ["funding", "example", "beginner"]
    */
   tags?: string[];
+
+  // ============================================================================
+  // LOGGING
+  // ============================================================================
+
+  /**
+   * Custom log topics defined by the strategy
+   *
+   * Maps topic names to human-readable descriptions. The keccak256 hash
+   * of each topic name is computed at runtime for log decoding.
+   *
+   * Strategy developers can use these topics in their _log*() calls:
+   * ```solidity
+   * _logInfo(keccak256("POSITION_OPENED"), "Opened new position at tick -100");
+   * ```
+   *
+   * @example
+   * {
+   *   "POSITION_OPENED": "Logged when a new liquidity position is opened",
+   *   "REBALANCE_TRIGGERED": "Logged when price crosses rebalance threshold",
+   *   "FEE_COLLECTED": "Logged when fees are collected from the position"
+   * }
+   */
+  logTopics?: Record<string, string>;
 }
 
 // =============================================================================

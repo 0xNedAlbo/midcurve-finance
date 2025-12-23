@@ -165,6 +165,17 @@ export const ManifestQuoteTokenSchema = z.discriminatedUnion('type', [
 // =============================================================================
 
 /**
+ * Zod schema for log topics
+ *
+ * Maps topic names to human-readable descriptions.
+ * Topic names should be uppercase identifiers (e.g., "POSITION_OPENED").
+ */
+export const LogTopicsSchema = z.record(
+  z.string().min(1).max(50).regex(/^[A-Z][A-Z0-9_]*$/, 'Topic name must be uppercase identifier'),
+  z.string().min(1).max(500)
+);
+
+/**
  * Zod schema for user-uploaded strategy manifest
  */
 export const StrategyManifestSchema = z.object({
@@ -189,6 +200,9 @@ export const StrategyManifestSchema = z.object({
 
   // Metadata
   tags: z.array(z.string()).optional(),
+
+  // Logging
+  logTopics: LogTopicsSchema.optional(),
 });
 
 // =============================================================================

@@ -226,100 +226,107 @@ function formatBytes32(value: Hex, knownNames: Record<string, string>): string {
 }
 
 /**
- * Try to decode log data and format it nicely.
- * Exported for use by log persistence handlers.
+ * Decode log message from the data field.
+ *
+ * The data field is always abi.encode(string) - a plain UTF-8 message.
+ * This is the new simplified format where all log data is a string.
+ *
+ * @param data - The encoded data bytes from the log payload
+ * @returns The decoded message string
  */
-export function formatLogData(data: Hex): string {
+export function decodeLogMessage(data: Hex): string {
   if (data === '0x' || data.length <= 2) {
     return '(empty)';
   }
 
   try {
-    // abi.encode produces different layouts for static vs dynamic types:
-    // - abi.encode(uint256) = 32 bytes (the value)
-    // - abi.encode(bytes32) = 32 bytes (the value)
-    // - abi.encode(string)  = 32 bytes offset (0x20) + 32 bytes length + data
-
-    if (data.length >= 66) {
-      // First, check if this looks like an encoded string (starts with offset 0x20 = 32)
-      // abi.encode(string) starts with the offset to the string data, which is always 0x20
-      // for a single dynamic parameter
-      const firstWord = data.slice(0, 66); // 0x + 64 hex chars
-      if (firstWord === '0x0000000000000000000000000000000000000000000000000000000000000020') {
-        // Likely abi.encode(string) - try to decode it
-        try {
-          const [decoded] = decodeAbiParameters(
-            [{ type: 'string', name: 'value' }],
-            data
-          );
-          if (typeof decoded === 'string' && decoded.length > 0) {
-            // Truncate very long strings
-            return decoded.length > 100 ? decoded.slice(0, 100) + '...' : decoded;
-          }
-        } catch {
-          // Not a valid string encoding
-        }
-      }
-
-      // Try as uint256/uint64 (for epoch, counters, etc.)
-      // These are small numbers that would look like 0x00000...000X
-      // Only accept if it's NOT the offset pattern (0x20 = 32)
-      try {
-        const [decoded] = decodeAbiParameters(
-          [{ type: 'uint256', name: 'value' }],
-          data
-        );
-        // If it's a small number (but not 32 which is the string offset), show as decimal
-        if (decoded < 1000000n && decoded !== 32n) {
-          return decoded.toString();
-        }
-      } catch {
-        // Not a uint256
-      }
-
-      // Try as bytes32 (for event types, etc.)
-      try {
-        const [decoded] = decodeAbiParameters(
-          [{ type: 'bytes32', name: 'value' }],
-          data
-        );
-        const known = KNOWN_EVENT_TYPES[decoded as string];
-        if (known) return known;
-        // If it looks like a hash (non-zero), show truncated
-        if (decoded !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
-          return (decoded as string).slice(0, 18) + '...';
-        }
-        // Zero bytes32 - show as 0
-        return '0';
-      } catch {
-        // Not a bytes32
-      }
-    }
-
-    // Raw bytes32 (66 chars = 0x + 64 hex)
-    if (data.length === 66) {
-      const known = KNOWN_EVENT_TYPES[data];
-      if (known) return known;
-      return data.slice(0, 18) + '...';
-    }
-
-    // Fallback: just show truncated hex
-    return data.slice(0, 18) + '...';
+    const [message] = decodeAbiParameters(
+      [{ type: 'string', name: 'message' }],
+      data
+    );
+    return message;
   } catch {
-    return data.slice(0, 18) + '...';
+    // Fallback for malformed data - show truncated hex
+    return `(decode error: ${data.slice(0, 18)}...)`;
   }
+}
+
+/**
+ * Resolve a topic hash to its human-readable name.
+ *
+ * Uses the provided topic registry (which may include custom topics from manifest)
+ * or falls back to the base KNOWN_TOPICS registry.
+ *
+ * @param topicHash - The keccak256 topic hash
+ * @param topicRegistry - Optional custom topic registry (from strategy manifest)
+ * @returns The topic name or truncated hex if unknown
+ */
+export function resolveTopicName(
+  topicHash: Hex,
+  topicRegistry?: Map<Hex, string>
+): string {
+  // Check custom registry first
+  if (topicRegistry?.has(topicHash)) {
+    return topicRegistry.get(topicHash)!;
+  }
+  // Fall back to known base topics
+  const known = KNOWN_TOPICS[topicHash];
+  if (known) return known;
+  // Unknown topic - show truncated hash
+  return topicHash.slice(0, 10) + '...';
+}
+
+/**
+ * Build a topic registry from a strategy manifest's logTopics field.
+ *
+ * @param logTopics - The logTopics field from StrategyManifest (topicName → description)
+ * @returns A Map of topic hash → topic name
+ */
+export function buildTopicRegistry(
+  logTopics?: Record<string, string>
+): Map<Hex, string> {
+  const registry = new Map<Hex, string>();
+
+  // Add base KNOWN_TOPICS
+  for (const [hash, name] of Object.entries(KNOWN_TOPICS)) {
+    registry.set(hash as Hex, name);
+  }
+
+  // Add custom topics from manifest
+  if (logTopics) {
+    for (const topicName of Object.keys(logTopics)) {
+      const hash = keccak256(toHex(topicName)) as Hex;
+      registry.set(hash, topicName);
+    }
+  }
+
+  return registry;
+}
+
+/**
+ * @deprecated Use decodeLogMessage instead. This function is kept for backward compatibility.
+ * Try to decode log data and format it nicely.
+ * Exported for use by log persistence handlers.
+ */
+export function formatLogData(data: Hex): string {
+  // New format: always abi.encode(string)
+  return decodeLogMessage(data);
 }
 
 /**
  * Execute a LOG effect by printing to console.
  *
  * @param payload - Decoded log payload
+ * @param topicRegistry - Optional topic registry for custom topics (from manifest)
  * @returns Empty result (logs don't return data)
  */
-export function executeLogEffect(payload: LogEffectPayload): void {
+export function executeLogEffect(
+  payload: LogEffectPayload,
+  topicRegistry?: Map<Hex, string>
+): void {
   const levelName = LOG_LEVELS[payload.level] ?? 'UNKNOWN';
-  const topicName = formatBytes32(payload.topic, KNOWN_TOPICS);
-  const dataStr = formatLogData(payload.data);
+  const topicName = resolveTopicName(payload.topic, topicRegistry);
+  const message = decodeLogMessage(payload.data);
 
   // Color-code by level (using ANSI codes)
   const levelColors: Record<string, string> = {
@@ -331,7 +338,7 @@ export function executeLogEffect(payload: LogEffectPayload): void {
   const reset = '\x1b[0m';
   const color = levelColors[levelName] ?? '';
 
-  console.log(`  ${color}[${levelName}]${reset} ${topicName}: ${dataStr}`);
+  console.log(`  ${color}[${levelName}]${reset} ${topicName}: ${message}`);
 }
 
 /**
