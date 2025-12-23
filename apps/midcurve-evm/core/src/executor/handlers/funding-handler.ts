@@ -20,11 +20,11 @@
  */
 
 import { type Hex, type Address, keccak256, toHex, decodeAbiParameters, encodeAbiParameters, createPublicClient, http } from 'viem';
-import { logger } from '../../../../lib/logger.js';
-import { getDatabaseClient } from '../../clients/database-client.js';
-import { getSignerClient } from '../../clients/signer-client.js';
-import type { EffectHandler, EffectHandlerResult } from './types.js';
-import type { EffectRequestMessage } from '../../mq/messages.js';
+import { logger } from '../../../../lib/logger';
+import { getDatabaseClient } from '../../clients/database-client';
+import { getSignerClient } from '../../clients/signer-client';
+import type { EffectHandler, EffectHandlerResult } from './types';
+import type { EffectRequestMessage } from '../../mq/messages';
 
 // =============================================================================
 // Effect Type Constants

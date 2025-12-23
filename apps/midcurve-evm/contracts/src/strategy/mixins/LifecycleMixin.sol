@@ -139,6 +139,15 @@ abstract contract LifecycleMixin is BaseStrategy {
       // Allow shutdown from ACTIVE or DEPLOYED. If DEPLOYED, it becomes a no-op cleanup path.
       lifecycleStatus = LifecycleStatus.SHUTTING_DOWN;
       onShutdownRequested();
+
+      // Check if we can immediately complete shutdown (for strategies with no async cleanup).
+      // This allows strategies with default onShutdownStep() { return true; } to complete
+      // the shutdown transition in a single step, without needing a "tick" event.
+      bool done = onShutdownStep();
+      if (done) {
+        lifecycleStatus = LifecycleStatus.SHUTDOWN;
+        onShutdownComplete();
+      }
       return;
     }
 

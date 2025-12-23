@@ -9,6 +9,7 @@
  */
 
 import { prisma } from '../../../lib/prisma';
+import { StrategyStatus } from '@midcurve/database';
 import { logger, evmLog } from '../../../lib/logger';
 import type { Address, Hex, Abi } from 'viem';
 import { parseVaultConfig, type VaultConfig } from '../types/vault-config';
@@ -227,7 +228,12 @@ class DatabaseClient {
     evmLog.methodEntry(this.log, 'getStrategyByAddress', { contractAddress });
 
     const strategy = await prisma.strategy.findFirst({
-      where: { contractAddress: contractAddress.toLowerCase() },
+      where: {
+        contractAddress: {
+          equals: contractAddress,
+          mode: 'insensitive', // Case-insensitive matching for EIP-55 addresses
+        },
+      },
       include: {
         automationWallets: {
           where: { isActive: true },
@@ -290,7 +296,12 @@ class DatabaseClient {
     evmLog.methodEntry(this.log, 'getStrategyStatus', { contractAddress });
 
     const strategy = await prisma.strategy.findFirst({
-      where: { contractAddress: contractAddress.toLowerCase() },
+      where: {
+        contractAddress: {
+          equals: contractAddress,
+          mode: 'insensitive', // Case-insensitive matching for EIP-55 addresses
+        },
+      },
       select: {
         id: true,
         status: true,
@@ -468,6 +479,49 @@ class DatabaseClient {
   }
 
   /**
+   * Update strategy status in the database
+   *
+   * Used by lifecycle service to update status after operations complete:
+   * - start → 'active'
+   * - shutdown → 'shutdown'
+   *
+   * @param contractAddress - Deployed contract address
+   * @param status - New status to set
+   */
+  async updateStrategyStatus(
+    contractAddress: Address,
+    status: StrategyStatus
+  ): Promise<void> {
+    evmLog.methodEntry(this.log, 'updateStrategyStatus', { contractAddress, status });
+
+    const result = await prisma.strategy.updateMany({
+      where: {
+        contractAddress: {
+          equals: contractAddress,
+          mode: 'insensitive',
+        },
+      },
+      data: {
+        status,
+        updatedAt: new Date(),
+      },
+    });
+
+    if (result.count === 0) {
+      this.log.warn({
+        contractAddress,
+        status,
+        msg: 'No strategy found to update',
+      });
+    }
+
+    evmLog.methodExit(this.log, 'updateStrategyStatus', {
+      updated: result.count > 0,
+      status,
+    });
+  }
+
+  /**
    * Create a strategy log entry
    *
    * This is a fire-and-forget operation - errors are logged but not thrown.
@@ -512,19 +566,22 @@ class DatabaseClient {
 }
 
 // =============================================================================
-// Singleton
+// Singleton (survives Next.js HMR in development)
 // =============================================================================
 
-let databaseClientInstance: DatabaseClient | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+const globalForDatabaseClient = globalThis as unknown as {
+  databaseClient: DatabaseClient | undefined;
+};
 
 /**
  * Get the singleton database client instance
  */
 export function getDatabaseClient(): DatabaseClient {
-  if (!databaseClientInstance) {
-    databaseClientInstance = new DatabaseClient();
+  if (!globalForDatabaseClient.databaseClient) {
+    globalForDatabaseClient.databaseClient = new DatabaseClient();
   }
-  return databaseClientInstance;
+  return globalForDatabaseClient.databaseClient;
 }
 
 export { DatabaseClient };

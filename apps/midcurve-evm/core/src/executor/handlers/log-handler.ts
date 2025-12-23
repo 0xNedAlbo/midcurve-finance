@@ -13,11 +13,11 @@ import {
   decodeLogPayload,
   executeLogEffect,
   KNOWN_TOPICS,
-} from '../../poc/effect-parser.js';
-import type { EffectHandler, EffectHandlerResult } from './types.js';
-import type { EffectRequestMessage } from '../../mq/messages.js';
-import { getDatabaseClient } from '../../clients/database-client.js';
-import { logger } from '../../../../lib/logger.js';
+} from '../../poc/effect-parser';
+import type { EffectHandler, EffectHandlerResult } from './types';
+import type { EffectRequestMessage } from '../../mq/messages';
+import { getDatabaseClient } from '../../clients/database-client';
+import { logger } from '../../../../lib/logger';
 
 const log = logger.child({ handler: 'LogEffectHandler' });
 

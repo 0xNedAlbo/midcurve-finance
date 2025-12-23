@@ -489,27 +489,30 @@ export class VaultWatcher {
 }
 
 // =============================================================================
-// Singleton
+// Singleton (survives Next.js HMR in development)
 // =============================================================================
 
-let vaultWatcherInstance: VaultWatcher | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+const globalForVaultWatcher = globalThis as unknown as {
+  vaultWatcher: VaultWatcher | undefined;
+};
 
 /**
  * Get the singleton vault watcher instance.
  * Must call initialize() first.
  */
 export function getVaultWatcher(): VaultWatcher | null {
-  return vaultWatcherInstance;
+  return globalForVaultWatcher.vaultWatcher ?? null;
 }
 
 /**
  * Initialize the vault watcher with a RabbitMQ channel.
  */
 export function initializeVaultWatcher(channel: Channel): VaultWatcher {
-  if (vaultWatcherInstance) {
-    return vaultWatcherInstance;
+  if (globalForVaultWatcher.vaultWatcher) {
+    return globalForVaultWatcher.vaultWatcher;
   }
 
-  vaultWatcherInstance = new VaultWatcher(channel);
-  return vaultWatcherInstance;
+  globalForVaultWatcher.vaultWatcher = new VaultWatcher(channel);
+  return globalForVaultWatcher.vaultWatcher;
 }

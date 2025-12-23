@@ -85,6 +85,8 @@ interface StrategyLoopConfigWithSigner extends StrategyLoopConfigBase {
   strategyId: string;
   /** Signer client for signing transactions */
   signerClient: SignerClient;
+  /** Operator address for simulation (required when using signer API) */
+  operatorAddress: Address;
   operatorPrivateKey?: never;
 }
 
@@ -127,6 +129,7 @@ export class StrategyLoop {
     resultPollIntervalMs: number;
     strategyId?: string;
     signerClient?: SignerClient;
+    operatorAddress?: Address;
     operatorPrivateKey?: Hex;
   };
   private state: StrategyLoopState;
@@ -495,12 +498,13 @@ export class StrategyLoop {
 
   /**
    * Simulate step() via eth_call.
-   * Uses an arbitrary account for simulation (doesn't need signing).
+   * Uses the operator account for simulation (contract checks msg.sender == operator).
    */
   private async simulateStep(input: Hex): Promise<void> {
-    // For simulation, we can use any account address
-    // The actual signing happens in commitStep
+    // Use the operator address for simulation
+    // Priority: wallet client account (dev) > config operatorAddress (prod) > fallback
     const simulationAccount = this.walletClient?.account?.address
+      ?? this.config.operatorAddress
       ?? '0x0000000000000000000000000000000000000001' as Address;
 
     await this.publicClient.simulateContract({

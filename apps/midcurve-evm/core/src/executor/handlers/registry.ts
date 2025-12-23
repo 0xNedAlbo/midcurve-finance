@@ -6,10 +6,10 @@
  */
 
 import type { Hex } from 'viem';
-import type { EffectHandler } from './types.js';
-import { LogEffectHandler } from './log-handler.js';
-import { OhlcSubscribeHandler, OhlcUnsubscribeHandler } from './ohlc-handler.js';
-import { UseFundsHandler, ReturnFundsHandler } from './funding-handler.js';
+import type { EffectHandler } from './types';
+import { LogEffectHandler } from './log-handler';
+import { OhlcSubscribeHandler, OhlcUnsubscribeHandler } from './ohlc-handler';
+import { UseFundsHandler, ReturnFundsHandler } from './funding-handler';
 
 /**
  * Registry for effect handlers.

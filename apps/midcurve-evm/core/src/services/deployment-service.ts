@@ -427,16 +427,19 @@ class DeploymentService {
 }
 
 // =============================================================================
-// Singleton
+// Singleton (survives Next.js HMR in development)
 // =============================================================================
 
-let deploymentServiceInstance: DeploymentService | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+const globalForDeploymentService = globalThis as unknown as {
+  deploymentService: DeploymentService | undefined;
+};
 
 export function getDeploymentService(): DeploymentService {
-  if (!deploymentServiceInstance) {
-    deploymentServiceInstance = new DeploymentService();
+  if (!globalForDeploymentService.deploymentService) {
+    globalForDeploymentService.deploymentService = new DeploymentService();
   }
-  return deploymentServiceInstance;
+  return globalForDeploymentService.deploymentService;
 }
 
 export { DeploymentService };

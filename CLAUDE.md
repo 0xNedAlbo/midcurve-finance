@@ -583,6 +583,154 @@ User → SIWE Sign-In → NextAuth creates session cookie
      → ✅ Authenticated
 ```
 
+### 7. REST Async Operation Pattern (Polling)
+
+For long-running operations (e.g., strategy start/shutdown, deployments), the API uses the standard REST async pattern with polling.
+
+**Pattern Overview:**
+
+```
+┌─────────┐     POST /resource/action     ┌─────────┐
+│  Client │ ─────────────────────────────▶│  Server │
+│         │◀───────────────────────────── │         │
+│         │     202 Accepted              │         │
+│         │     Location: /resource/status│         │
+│         │     Body: { pollUrl, status } │         │
+│         │                               │         │
+│         │     GET /resource/status      │         │
+│         │ ─────────────────────────────▶│         │
+│         │◀───────────────────────────── │         │
+│         │     200 OK                    │         │
+│         │     Body: { operationStatus } │         │
+│         │          (repeat until done)  │         │
+└─────────┘                               └─────────┘
+```
+
+**1. Initiate Operation (POST):**
+
+```typescript
+// POST /api/v1/strategies/lifecycle/start
+// Request:
+{ "contractAddress": "0x..." }
+
+// Response: 202 Accepted
+// Headers:
+//   Location: /api/v1/strategies/status/0x...
+// Body:
+{
+  "success": true,
+  "data": {
+    "contractAddress": "0x...",
+    "operation": "start",
+    "operationStatus": "pending",
+    "pollUrl": "/api/v1/strategies/status/0x..."
+  }
+}
+```
+
+**2. Poll for Status (GET):**
+
+```typescript
+// GET /api/v1/strategies/status/0x...
+// Response: 200 OK (ALWAYS 200, check body for status)
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "contractAddress": "0x...",
+    "status": "deployed",              // Database status
+    "operation": "start",              // Current operation type
+    "operationStatus": "starting_loop", // Operation progress
+    "operationStartedAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+**3. Completion States:**
+
+```typescript
+// Success - operationStatus: "completed"
+{
+  "operationStatus": "completed",
+  "operationCompletedAt": "2024-01-15T10:30:05Z"
+}
+
+// Failure - operationStatus: "failed"
+{
+  "operationStatus": "failed",
+  "operationError": "STRATEGY_NOT_FOUND: Strategy does not exist",
+  "operationCompletedAt": "2024-01-15T10:30:02Z"
+}
+```
+
+**Key Rules:**
+
+1. **POST returns 202 Accepted** - Operation started, not completed
+2. **POST includes Location header** - Points to status endpoint
+3. **POST includes pollUrl in body** - Convenience for clients
+4. **GET always returns 200** - Unless network/server error
+5. **Check operationStatus field** - Not HTTP status code
+6. **Poll until terminal state** - `completed` or `failed`
+
+**Operation Status Values:**
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Operation queued, not started |
+| `starting_loop` | Starting strategy execution loop |
+| `publishing_event` | Publishing lifecycle event to queue |
+| `waiting_for_transition` | Waiting for on-chain state change |
+| `stopping_loop` | Stopping strategy execution loop |
+| `teardown_topology` | Cleaning up message queue topology |
+| `completed` | ✅ Operation finished successfully |
+| `failed` | ❌ Operation failed (check `operationError`) |
+
+**Frontend Polling Implementation:**
+
+```typescript
+async function pollForCompletion(
+  pollUrl: string,
+  maxAttempts = 60,
+  intervalMs = 1000
+): Promise<OperationResult> {
+  for (let i = 0; i < maxAttempts; i++) {
+    await sleep(intervalMs);
+
+    const response = await apiClient.get(pollUrl);
+
+    // Check operation status in response body (NOT HTTP status)
+    if (response.operationStatus === 'completed') {
+      return response;
+    }
+
+    if (response.operationStatus === 'failed') {
+      throw new Error(response.operationError || 'Operation failed');
+    }
+
+    // Fallback: check database status if operation cleared
+    if (!response.operationStatus && response.status === 'active') {
+      return response; // Completed, operation state was cleared
+    }
+  }
+
+  throw new Error('Operation timed out');
+}
+```
+
+**Why This Pattern?**
+
+- ✅ **Non-blocking** - Client doesn't wait for long operations
+- ✅ **Resilient** - Client can reconnect and resume polling
+- ✅ **Transparent** - Progress visible during operation
+- ✅ **Error handling** - Errors surfaced through polling, not lost
+- ✅ **RESTful** - Standard HTTP semantics (202 for async)
+
+**Endpoints Using This Pattern:**
+
+- `POST /api/v1/strategies/lifecycle/start` - Start a strategy
+- `POST /api/v1/strategies/lifecycle/shutdown` - Shutdown a strategy
+- `POST /api/v1/strategies/deploy` - Deploy a new strategy (future)
+
 ---
 
 ## Project Philosophy & Risk Management Approach

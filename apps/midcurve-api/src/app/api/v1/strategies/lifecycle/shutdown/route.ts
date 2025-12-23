@@ -107,11 +107,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       let evmResult: {
         contractAddress: string;
         operation: string;
-        status: string;
-        startedAt: string;
-        completedAt?: string;
-        error?: string;
-        pollUrl: string;
+        operationStatus: string;
       };
 
       try {
@@ -166,12 +162,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 500 });
       }
 
-      // 3. Return success response
+      // 3. Build status URL for Location header (dedicated operation polling endpoint)
+      const statusUrl = `/api/v1/strategies/${normalizedAddress}/shutdown`;
+
+      // 4. Return 202 Accepted with Location header and pollUrl in body
       apiLogger.info(
         {
           requestId,
           contractAddress: normalizedAddress,
-          status: evmResult.status,
+          operationStatus: evmResult.operationStatus,
           userId: user.id,
         },
         'Strategy shutdown initiated'
@@ -179,7 +178,20 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       apiLog.requestEnd(apiLogger, requestId, 202, Date.now() - startTime);
 
-      return NextResponse.json(createSuccessResponse(evmResult), { status: 202 });
+      return NextResponse.json(
+        createSuccessResponse({
+          contractAddress: normalizedAddress,
+          operation: 'shutdown',
+          operationStatus: evmResult.operationStatus,
+          pollUrl: statusUrl,
+        }),
+        {
+          status: 202,
+          headers: {
+            Location: statusUrl,
+          },
+        }
+      );
     } catch (error) {
       apiLog.methodError(
         apiLogger,

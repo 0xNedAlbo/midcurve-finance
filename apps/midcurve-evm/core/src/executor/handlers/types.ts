@@ -7,7 +7,7 @@
 
 import type { Channel } from 'amqplib';
 import type { Hex } from 'viem';
-import type { EffectRequestMessage } from '../../mq/messages.js';
+import type { EffectRequestMessage } from '../../mq/messages';
 
 /**
  * Result returned by an effect handler.

@@ -16,8 +16,8 @@ import {
   isEffectRequestMessage,
   createEffectResult,
   type EffectRequestMessage,
-} from '../mq/index.js';
-import { EffectHandlerRegistry } from './handlers/registry.js';
+} from '../mq/index';
+import { EffectHandlerRegistry } from './handlers/registry';
 
 // ============================================================
 // Types

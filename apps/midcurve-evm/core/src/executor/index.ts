@@ -6,24 +6,24 @@
  */
 
 // Executor classes
-export { Executor, type ExecutorConfig, type ExecutorStats } from './executor.js';
+export { Executor, type ExecutorConfig, type ExecutorStats } from './executor';
 export {
   ExecutorPool,
   type ExecutorPoolConfig,
   type ExecutorPoolStats,
-} from './pool.js';
+} from './pool';
 
 // Handler registry
-export { EffectHandlerRegistry } from './handlers/registry.js';
+export { EffectHandlerRegistry } from './handlers/registry';
 
 // Handler types
-export type { EffectHandler, EffectHandlerResult } from './handlers/types.js';
+export type { EffectHandler, EffectHandlerResult } from './handlers/types';
 
 // Built-in handlers
-export { LogEffectHandler } from './handlers/log-handler.js';
+export { LogEffectHandler } from './handlers/log-handler';
 export {
   OhlcSubscribeHandler,
   OhlcUnsubscribeHandler,
   EFFECT_SUBSCRIBE_OHLC,
   EFFECT_UNSUBSCRIBE_OHLC,
-} from './handlers/ohlc-handler.js';
+} from './handlers/ohlc-handler';

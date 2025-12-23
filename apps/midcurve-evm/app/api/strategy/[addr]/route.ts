@@ -4,31 +4,30 @@
  * Returns the current status of a deployed strategy including:
  * - Database status
  * - Loop status (if running)
- * - Deployment/lifecycle operation status (if in progress)
+ * - Lifecycle operation status (if in progress)
  *
- * Response (200 - stable state):
+ * Following REST async pattern: GET always returns 200 with status in body.
+ * The operationStatus field indicates if an operation is running/completed/failed.
+ *
+ * Response (200):
  * {
- *   id: string,
+ *   id?: string,
  *   contractAddress: string,
  *   status: "deployed" | "active" | "shutdown",
- *   chainId: number,
- *   loopRunning: boolean,
- *   epoch?: number,
- *   eventsProcessed?: number,
- *   effectsProcessed?: number
+ *   chainId?: number,
+ *   loopRunning?: boolean,
+ *   // If lifecycle operation in progress or recently completed:
+ *   operation?: "start" | "shutdown",
+ *   operationStatus?: "pending" | "running" | "completed" | "failed",
+ *   operationStartedAt?: string,
+ *   operationCompletedAt?: string,
+ *   operationError?: string
  * }
  *
- * Response (202 - operation in progress):
- * {
- *   contractAddress: string,
- *   status: "deploying" | "starting" | "shutting_down",
- *   operation?: { status: string, startedAt: string }
- * }
- *
- * Response (4xx/5xx):
+ * Response (404):
  * {
  *   error: string,
- *   code?: string
+ *   code: "STRATEGY_NOT_FOUND"
  * }
  */
 
@@ -55,56 +54,48 @@ export async function GET(
 
     log.info({ contractAddress, msg: 'Getting strategy status' });
 
-    // Check for active lifecycle operation first
-    const lifecycleService = getLifecycleService();
-    const lifecycleOp = lifecycleService.getOperationState(contractAddress);
-
-    if (lifecycleOp && !['completed', 'failed'].includes(lifecycleOp.status)) {
-      // Operation in progress
-      return NextResponse.json(
-        {
-          contractAddress,
-          operation: lifecycleOp.operation,
-          operationStatus: lifecycleOp.status,
-          startedAt: lifecycleOp.startedAt.toISOString(),
-          error: lifecycleOp.error,
-        },
-        { status: 202 }
-      );
-    }
-
-    // Check database for strategy status
+    // Check database for strategy status first
     const dbClient = getDatabaseClient();
     const strategy = await dbClient.getStrategyStatus(contractAddress);
 
     if (!strategy) {
-      // Check if there's a deployment in progress for this address
-      // (would need to search by contract address in deployment states)
       return NextResponse.json(
         { error: 'Strategy not found', code: 'STRATEGY_NOT_FOUND' },
         { status: 404 }
       );
     }
 
+    // Check for active or recent lifecycle operation
+    const lifecycleService = getLifecycleService();
+    const lifecycleOp = lifecycleService.getOperationState(contractAddress);
+
     // Get loop info if active
     const loopInfo = lifecycleService.getLoopInfo(contractAddress);
 
-    // Determine response status code
-    // 200 for stable states, 202 for transitional states
-    const isStableState = ['deployed', 'active', 'shutdown'].includes(strategy.status);
-    const statusCode = isStableState ? 200 : 202;
+    // Build response - always 200 OK with status in body
+    const response: Record<string, unknown> = {
+      id: strategy.id,
+      contractAddress: strategy.contractAddress,
+      status: strategy.status,
+      chainId: strategy.chainId,
+      createdAt: strategy.createdAt.toISOString(),
+      ...loopInfo,
+    };
 
-    return NextResponse.json(
-      {
-        id: strategy.id,
-        contractAddress: strategy.contractAddress,
-        status: strategy.status,
-        chainId: strategy.chainId,
-        createdAt: strategy.createdAt.toISOString(),
-        ...loopInfo,
-      },
-      { status: statusCode }
-    );
+    // Include lifecycle operation info if present
+    if (lifecycleOp) {
+      response.operation = lifecycleOp.operation;
+      response.operationStatus = lifecycleOp.status;
+      response.operationStartedAt = lifecycleOp.startedAt.toISOString();
+      if (lifecycleOp.completedAt) {
+        response.operationCompletedAt = lifecycleOp.completedAt.toISOString();
+      }
+      if (lifecycleOp.error) {
+        response.operationError = lifecycleOp.error;
+      }
+    }
+
+    return NextResponse.json(response, { status: 200 });
   } catch (error) {
     log.error({ error, msg: 'Error getting strategy status' });
 

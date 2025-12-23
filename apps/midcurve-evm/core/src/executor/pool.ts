@@ -6,7 +6,7 @@
  */
 
 import type { Channel } from 'amqplib';
-import { Executor, type ExecutorStats } from './executor.js';
+import { Executor, type ExecutorStats } from './executor';
 
 // ============================================================
 // Types

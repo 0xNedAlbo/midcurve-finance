@@ -273,19 +273,22 @@ class LoopRegistry {
 }
 
 // =============================================================================
-// Singleton
+// Singleton (survives Next.js HMR in development)
 // =============================================================================
 
-let loopRegistryInstance: LoopRegistry | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+const globalForLoopRegistry = globalThis as unknown as {
+  loopRegistry: LoopRegistry | undefined;
+};
 
 /**
  * Get the singleton loop registry instance
  */
 export function getLoopRegistry(): LoopRegistry {
-  if (!loopRegistryInstance) {
-    loopRegistryInstance = new LoopRegistry();
+  if (!globalForLoopRegistry.loopRegistry) {
+    globalForLoopRegistry.loopRegistry = new LoopRegistry();
   }
-  return loopRegistryInstance;
+  return globalForLoopRegistry.loopRegistry;
 }
 
 export { LoopRegistry };

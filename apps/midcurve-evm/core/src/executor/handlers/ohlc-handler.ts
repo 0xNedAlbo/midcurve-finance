@@ -11,9 +11,9 @@ import { decodeAbiParameters, keccak256, toHex } from 'viem';
 import {
   bindOhlcSubscription,
   unbindOhlcSubscription,
-} from '../../mq/topology.js';
-import type { EffectHandler, EffectHandlerResult } from './types.js';
-import type { EffectRequestMessage } from '../../mq/messages.js';
+} from '../../mq/topology';
+import type { EffectHandler, EffectHandlerResult } from './types';
+import type { EffectRequestMessage } from '../../mq/messages';
 
 // Effect type constants (must match Solidity definitions)
 export const EFFECT_SUBSCRIBE_OHLC = keccak256(toHex('SUBSCRIBE_OHLC')) as Hex;

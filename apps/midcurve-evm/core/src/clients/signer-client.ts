@@ -379,27 +379,30 @@ export class SignerClient {
 }
 
 // =============================================================================
-// Factory
+// Factory (survives Next.js HMR in development)
 // =============================================================================
 
-let signerClientInstance: SignerClient | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+const globalForSignerClient = globalThis as unknown as {
+  signerClient: SignerClient | undefined;
+};
 
 /**
  * Get the singleton signer client instance
  */
 export function getSignerClient(): SignerClient {
-  if (!signerClientInstance) {
+  if (!globalForSignerClient.signerClient) {
     const baseUrl = process.env.SIGNER_SERVICE_URL;
     if (!baseUrl) {
       throw new Error('SIGNER_SERVICE_URL environment variable is required');
     }
 
-    signerClientInstance = new SignerClient({
+    globalForSignerClient.signerClient = new SignerClient({
       baseUrl,
       apiKey: process.env.SIGNER_INTERNAL_API_KEY,
       timeout: 30000,
     });
   }
 
-  return signerClientInstance;
+  return globalForSignerClient.signerClient;
 }

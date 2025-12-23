@@ -7,6 +7,7 @@
 import amqplib, { type ChannelModel, type Channel } from 'amqplib';
 import { logger, evmLog } from '../../../lib/logger';
 import { setupCoreTopology } from './topology';
+import { Executor } from '../executor/executor';
 
 // =============================================================================
 // Types
@@ -29,6 +30,7 @@ class RabbitMQConnectionManager {
   private connection: ChannelModel | null = null;
   private channel: Channel | null = null;
   private connecting: Promise<Channel> | null = null;
+  private executor: Executor | null = null;
 
   /**
    * Get the RabbitMQ channel, connecting if necessary.
@@ -92,7 +94,10 @@ class RabbitMQConnectionManager {
     // Setup core topology
     await setupCoreTopology(this.channel);
 
-    this.log.info({ msg: 'RabbitMQ connected and core topology ready' });
+    // Start effect executor to process effects.pending queue
+    await this.startExecutor();
+
+    this.log.info({ msg: 'RabbitMQ connected, core topology ready, executor started' });
     evmLog.methodExit(this.log, 'connect');
 
     return this.channel;
@@ -112,9 +117,51 @@ class RabbitMQConnectionManager {
   }
 
   /**
+   * Start the effect executor.
+   * The executor consumes from effects.pending queue and processes all effect types.
+   */
+  private async startExecutor(): Promise<void> {
+    if (this.executor) {
+      this.log.warn({ msg: 'Executor already running' });
+      return;
+    }
+
+    if (!this.channel) {
+      throw new Error('Cannot start executor without channel');
+    }
+
+    this.executor = new Executor({
+      channel: this.channel,
+      executorId: 'core-executor',
+      prefetch: 1,
+    });
+
+    await this.executor.start();
+    this.log.info({ msg: 'Effect executor started' });
+  }
+
+  /**
+   * Stop the effect executor.
+   */
+  private async stopExecutor(): Promise<void> {
+    if (this.executor) {
+      await this.executor.stop();
+      this.executor = null;
+      this.log.info({ msg: 'Effect executor stopped' });
+    }
+  }
+
+  /**
    * Cleanup connection and channel.
    */
   private cleanup(): void {
+    // Stop executor synchronously (fire-and-forget)
+    if (this.executor) {
+      this.executor.stop().catch((err) => {
+        this.log.warn({ error: err, msg: 'Error stopping executor during cleanup' });
+      });
+      this.executor = null;
+    }
     this.channel = null;
     this.connection = null;
   }
@@ -124,6 +171,9 @@ class RabbitMQConnectionManager {
    */
   async close(): Promise<void> {
     evmLog.methodEntry(this.log, 'close');
+
+    // Stop executor first
+    await this.stopExecutor();
 
     if (this.channel) {
       try {
@@ -148,16 +198,19 @@ class RabbitMQConnectionManager {
 }
 
 // =============================================================================
-// Singleton
+// Singleton (survives Next.js HMR in development)
 // =============================================================================
 
-let connectionManagerInstance: RabbitMQConnectionManager | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+const globalForRabbitMQ = globalThis as unknown as {
+  rabbitMQConnection: RabbitMQConnectionManager | undefined;
+};
 
 export function getRabbitMQConnection(): RabbitMQConnectionManager {
-  if (!connectionManagerInstance) {
-    connectionManagerInstance = new RabbitMQConnectionManager();
+  if (!globalForRabbitMQ.rabbitMQConnection) {
+    globalForRabbitMQ.rabbitMQConnection = new RabbitMQConnectionManager();
   }
-  return connectionManagerInstance;
+  return globalForRabbitMQ.rabbitMQConnection;
 }
 
 export { RabbitMQConnectionManager };

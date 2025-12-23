@@ -12,6 +12,7 @@ import type { Channel } from 'amqplib';
 import { createPublicClient, http, type Address, type Abi } from 'viem';
 import { logger, evmLog } from '../../../lib/logger';
 import { getDatabaseClient } from '../clients/database-client';
+import { StrategyStatus } from '@midcurve/database';
 import { getSignerClient } from '../clients/signer-client';
 import { getLoopRegistry, type LoopStatus } from '../registry/loop-registry';
 import { StrategyLoop } from '../orchestrator/strategy-loop';
@@ -36,6 +37,7 @@ export type LifecycleOperationStatus =
   | 'pending'
   | 'publishing_event'
   | 'waiting_for_transition'
+  | 'waiting_for_activation'
   | 'starting_loop'
   | 'stopping_loop'
   | 'teardown_topology'
@@ -267,17 +269,29 @@ class LifecycleService {
 
       if (signerServiceUrl) {
         // Production mode: use signer API
+        if (!strategy.automationWallet) {
+          throw new LifecycleError(
+            'Strategy has no automation wallet configured',
+            'NO_AUTOMATION_WALLET',
+            400
+          );
+        }
         const signerClient = getSignerClient();
         loop = new StrategyLoop({
           strategyAddress: contractAddress,
           channel,
           strategyId: strategy.id,
           signerClient,
+          operatorAddress: strategy.automationWallet.walletAddress,
           rpcUrl,
           chainId,
           abi: strategy.manifest.abi as readonly unknown[],
         });
-        this.log.info({ contractAddress, msg: 'Using signer API for transaction signing' });
+        this.log.info({
+          contractAddress,
+          operatorAddress: strategy.automationWallet.walletAddress,
+          msg: 'Using signer API for transaction signing',
+        });
       } else if (operatorPrivateKey) {
         // Development mode: use local private key
         loop = new StrategyLoop({
@@ -327,11 +341,46 @@ class LifecycleService {
         { persistent: true }
       );
 
+      // Wait for the LIFECYCLE_START event to be processed successfully
+      // This validates that the loop can actually process events (signer works, etc.)
+      state.status = 'waiting_for_activation';
+      this.log.info({ contractAddress, msg: 'Waiting for initial event to be processed' });
+
+      const activationResult = await this.waitForActivation(contractAddress, registry, 30000);
+
+      if (!activationResult.success) {
+        // Activation failed - stop the loop and clean up
+        this.log.error({
+          contractAddress,
+          error: activationResult.error,
+          msg: 'Strategy activation failed',
+        });
+
+        const entry = registry.get(contractAddress);
+        if (entry) {
+          try {
+            await entry.loop.stop();
+          } catch (stopError) {
+            this.log.warn({ contractAddress, error: stopError, msg: 'Failed to stop loop after activation failure' });
+          }
+          registry.unregister(contractAddress);
+        }
+
+        throw new LifecycleError(
+          activationResult.error || 'Failed to activate strategy',
+          'ACTIVATION_FAILED',
+          500
+        );
+      }
+
+      // Update database status to 'active'
+      await dbClient.updateStrategyStatus(contractAddress, StrategyStatus.active);
+
       // Complete
       state.status = 'completed';
       state.completedAt = new Date();
 
-      this.log.info({ contractAddress, msg: 'Strategy started' });
+      this.log.info({ contractAddress, msg: 'Strategy started and activated successfully' });
     } catch (error) {
       state.status = 'failed';
       state.error = error instanceof Error ? error.message : 'Unknown error';
@@ -411,11 +460,14 @@ class LifecycleService {
 
       await teardownStrategyTopology(channel, contractAddress);
 
+      // Update database status to 'shutdown'
+      await dbClient.updateStrategyStatus(contractAddress, StrategyStatus.shutdown);
+
       // Complete
       state.status = 'completed';
       state.completedAt = new Date();
 
-      this.log.info({ contractAddress, msg: 'Strategy shutdown complete' });
+      this.log.info({ contractAddress, msg: 'Strategy shutdown complete, status updated to shutdown' });
     } catch (error) {
       state.status = 'failed';
       state.error = error instanceof Error ? error.message : 'Unknown error';
@@ -482,6 +534,88 @@ class LifecycleService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Wait for strategy activation by polling the loop state.
+   *
+   * Success criteria:
+   * - Loop has processed at least one event (eventsProcessed > 0)
+   * - OR contract epoch > 0 (indicating successful transaction)
+   *
+   * Failure criteria:
+   * - Loop registry shows 'error' status
+   * - Timeout reached without success
+   */
+  private async waitForActivation(
+    contractAddress: Address,
+    registry: ReturnType<typeof getLoopRegistry>,
+    timeoutMs: number = 30000
+  ): Promise<{ success: boolean; error?: string }> {
+    const startTime = Date.now();
+    const pollInterval = 500; // Poll every 500ms
+
+    this.log.debug({
+      contractAddress,
+      timeoutMs,
+      msg: 'Starting activation wait',
+    });
+
+    while (Date.now() - startTime < timeoutMs) {
+      // Check if loop is still registered
+      const entry = registry.get(contractAddress);
+      if (!entry) {
+        return {
+          success: false,
+          error: 'Strategy loop was unregistered during activation',
+        };
+      }
+
+      // Check for loop error
+      if (entry.status === 'error') {
+        return {
+          success: false,
+          error: entry.error || 'Strategy loop encountered an error during activation',
+        };
+      }
+
+      // Check if loop has processed at least one event
+      const loopState = entry.loop.getState();
+      if (loopState.eventsProcessed > 0) {
+        this.log.info({
+          contractAddress,
+          eventsProcessed: loopState.eventsProcessed,
+          epoch: loopState.epoch.toString(),
+          msg: 'Strategy activation confirmed - first event processed',
+        });
+        return { success: true };
+      }
+
+      // Also check epoch (in case eventsProcessed isn't reliable)
+      if (loopState.epoch > 0n) {
+        this.log.info({
+          contractAddress,
+          epoch: loopState.epoch.toString(),
+          msg: 'Strategy activation confirmed - epoch advanced',
+        });
+        return { success: true };
+      }
+
+      await this.sleep(pollInterval);
+    }
+
+    // Timeout reached
+    const entry = registry.get(contractAddress);
+    const loopState = entry?.loop.getState();
+
+    return {
+      success: false,
+      error: `Timeout waiting for strategy activation. ` +
+        `Loop status: ${entry?.status || 'unknown'}, ` +
+        `Events processed: ${loopState?.eventsProcessed ?? 0}, ` +
+        `Epoch: ${loopState?.epoch?.toString() ?? 'unknown'}. ` +
+        `This may indicate a signer configuration issue or RPC connectivity problem.`,
+    };
   }
 
   /**
@@ -688,16 +822,20 @@ class LifecycleService {
 }
 
 // =============================================================================
-// Singleton
+// Singleton (survives Next.js HMR in development)
 // =============================================================================
 
-let lifecycleServiceInstance: LifecycleService | null = null;
+// Use globalThis to prevent singleton from being reset during Hot Module Reloading
+// This is the same pattern used for Prisma client in Next.js
+const globalForLifecycle = globalThis as unknown as {
+  lifecycleService: LifecycleService | undefined;
+};
 
 export function getLifecycleService(): LifecycleService {
-  if (!lifecycleServiceInstance) {
-    lifecycleServiceInstance = new LifecycleService();
+  if (!globalForLifecycle.lifecycleService) {
+    globalForLifecycle.lifecycleService = new LifecycleService();
   }
-  return lifecycleServiceInstance;
+  return globalForLifecycle.lifecycleService;
 }
 
 export { LifecycleService };
