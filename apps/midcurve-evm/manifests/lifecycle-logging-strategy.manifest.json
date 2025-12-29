@@ -296,9 +296,6 @@
     "symbol": "USD"
   },
   "logTopics": {
-    "LIFECYCLE": "Lifecycle state transitions (start, shutdown)",
-    "STARTUP": "Strategy startup events with timestamp",
-    "SHUTDOWN_PROGRESS": "Shutdown cleanup progress updates",
-    "EVENT_RECEIVED": "Step event received and processed"
+    "CUSTOM_EVENT_RECEIVED": "Step event received and processed"
   }
 }

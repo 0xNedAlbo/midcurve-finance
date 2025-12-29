@@ -13,12 +13,12 @@ import { LoggingMixin } from "../strategy/mixins/LoggingMixin.sol";
 /// - LoggingMixin provides _log* helpers
 /// - Both extend BaseStrategy
 ///
-/// Log topics used (define in manifest's logTopics):
-/// - LIFECYCLE: Lifecycle state changes
-/// - STEP_START: Step event started processing
-/// - EPOCH_INFO: Current epoch information
-/// - EVENTS_COUNT: Events processed counter
-/// - STEP_COMPLETE: Step event processing complete
+/// Log topics used:
+/// - LIFECYCLE: Lifecycle state changes (canonical - no manifest declaration needed)
+/// - CUSTOM_STEP_START: Step event started processing (custom - must declare in manifest)
+/// - CUSTOM_EPOCH_INFO: Current epoch information (custom - must declare in manifest)
+/// - CUSTOM_EVENTS_COUNT: Events processed counter (custom - must declare in manifest)
+/// - CUSTOM_STEP_COMPLETE: Step event processing complete (custom - must declare in manifest)
 contract SimpleLoggingStrategy is LifecycleMixin, LoggingMixin {
     /// @dev Counter to track how many events we've processed
     uint256 public eventsProcessed;
@@ -72,18 +72,18 @@ contract SimpleLoggingStrategy is LifecycleMixin, LoggingMixin {
         }
 
         // Effect 1: Log that we received an event
-        _logInfo(keccak256("STEP_START"), "Processing step event");
+        _logInfo(keccak256("CUSTOM_STEP_START"), "Processing step event");
 
         // Effect 2: Log the current epoch
-        _logDebug(keccak256("EPOCH_INFO"), "Epoch check completed");
+        _logDebug(keccak256("CUSTOM_EPOCH_INFO"), "Epoch check completed");
 
         // Effect 3: Log the events processed count (before incrementing)
-        _logInfo(keccak256("EVENTS_COUNT"), "Incrementing events counter");
+        _logInfo(keccak256("CUSTOM_EVENTS_COUNT"), "Incrementing events counter");
 
         // Increment counter (this state change only persists on final commit)
         eventsProcessed++;
 
         // Effect 4: Log completion
-        _logInfo(keccak256("STEP_COMPLETE"), "Step event processing complete");
+        _logInfo(keccak256("CUSTOM_STEP_COMPLETE"), "Step event processing complete");
     }
 }

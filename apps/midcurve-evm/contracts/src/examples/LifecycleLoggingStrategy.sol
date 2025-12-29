@@ -25,24 +25,16 @@ import { LoggingMixin } from "../strategy/mixins/LoggingMixin.sol";
 /// - LoggingMixin provides _log* helpers
 /// - Both extend BaseStrategy
 ///
-/// Log topics used (define in manifest's logTopics):
-/// - LIFECYCLE: Lifecycle state transitions
-/// - STARTUP: Strategy startup events
-/// - SHUTDOWN_PROGRESS: Shutdown cleanup progress
-/// - EVENT_RECEIVED: Step event received
+/// Log topics used:
+/// - LIFECYCLE: All lifecycle-related events (canonical - no manifest declaration needed)
+/// - CUSTOM_EVENT_RECEIVED: Step event received (custom - must declare in manifest)
 contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
     // =============================================================
     // Constants
     // =============================================================
 
-    /// @dev Topic constant for lifecycle-related log entries
+    /// @dev Topic constant for all lifecycle-related log entries
     bytes32 private constant TOPIC_LIFECYCLE = keccak256("LIFECYCLE");
-
-    /// @dev Topic constant for startup-related log entries
-    bytes32 private constant TOPIC_STARTUP = keccak256("STARTUP");
-
-    /// @dev Topic constant for shutdown progress entries
-    bytes32 private constant TOPIC_SHUTDOWN_PROGRESS = keccak256("SHUTDOWN_PROGRESS");
 
     // =============================================================
     // State
@@ -73,7 +65,7 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
         startedAt = block.timestamp;
 
         // Log startup
-        _logInfo(TOPIC_STARTUP, "Strategy started successfully");
+        _logInfo(TOPIC_LIFECYCLE, "Strategy started successfully");
 
         // Log the lifecycle state transition
         _logInfo(TOPIC_LIFECYCLE, "Transitioned to ACTIVE state");
@@ -92,7 +84,7 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
     /// @return done True when cleanup is complete
     function onShutdownStep() internal override returns (bool done) {
         // Log cleanup progress
-        _logDebug(TOPIC_SHUTDOWN_PROGRESS, "Cleanup step executing");
+        _logDebug(TOPIC_LIFECYCLE, "Cleanup step executing");
 
         // For this example, we complete immediately
         // Real strategies would track cleanup state and return false
@@ -135,8 +127,8 @@ contract LifecycleLoggingStrategy is LifecycleMixin, LoggingMixin {
             return;
         }
 
-        // Log that we received an event
-        _logDebug(keccak256("EVENT_RECEIVED"), "Step event received and processed");
+        // Log that we received an event (custom topic - must be declared in manifest)
+        _logDebug(keccak256("CUSTOM_EVENT_RECEIVED"), "Step event received and processed");
 
         // Increment event counter
         eventsProcessed++;

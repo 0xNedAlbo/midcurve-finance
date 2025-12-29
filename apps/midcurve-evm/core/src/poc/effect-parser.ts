@@ -45,26 +45,19 @@ export const EFFECT_LOG = keccak256(toHex('LOG')) as Hex;
 // Log levels
 export const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const;
 
-// Known topic hashes (for human-readable output)
-// These match keccak256("TOPIC_NAME") used in the strategy
-export const KNOWN_TOPICS: Record<string, string> = {
-  // Execution topics
-  [keccak256(toHex('STEP_START'))]: 'STEP_START',
-  [keccak256(toHex('EPOCH_INFO'))]: 'EPOCH_INFO',
-  [keccak256(toHex('EVENTS_COUNT'))]: 'EVENTS_COUNT',
-  [keccak256(toHex('STEP_COMPLETE'))]: 'STEP_COMPLETE',
-  [keccak256(toHex('EVENT_RECEIVED'))]: 'EVENT_RECEIVED',
-  // Lifecycle topics (used by LifecycleLoggingStrategy)
+// Canonical log topics - predefined by the system
+// These do NOT need to be declared in strategy manifests
+// Strategy developers can use these topics directly in their contracts
+export const CANONICAL_TOPICS: Record<string, string> = {
   [keccak256(toHex('LIFECYCLE'))]: 'LIFECYCLE',
-  [keccak256(toHex('STARTUP'))]: 'STARTUP',
-  [keccak256(toHex('SHUTDOWN_PROGRESS'))]: 'SHUTDOWN_PROGRESS',
+  // Future canonical topics can be added here:
+  // [keccak256(toHex('ERROR'))]: 'ERROR',
+  // [keccak256(toHex('METRICS'))]: 'METRICS',
 };
 
-// Known event type hashes (for human-readable output)
-export const KNOWN_EVENT_TYPES: Record<string, string> = {
-  [keccak256(toHex('PING'))]: 'PING',
-  [keccak256(toHex('PONG'))]: 'PONG',
-};
+// Prefix required for custom topics defined by strategy developers
+// Custom topics MUST be declared in the manifest's logTopics field for hash→name translation
+export const CUSTOM_TOPIC_PREFIX = 'CUSTOM_';
 
 // ============================================================
 // Parsing Functions
@@ -255,7 +248,7 @@ export function decodeLogMessage(data: Hex): string {
  * Resolve a topic hash to its human-readable name.
  *
  * Uses the provided topic registry (which may include custom topics from manifest)
- * or falls back to the base KNOWN_TOPICS registry.
+ * or falls back to the canonical topics registry.
  *
  * @param topicHash - The keccak256 topic hash
  * @param topicRegistry - Optional custom topic registry (from strategy manifest)
@@ -265,19 +258,22 @@ export function resolveTopicName(
   topicHash: Hex,
   topicRegistry?: Map<Hex, string>
 ): string {
-  // Check custom registry first
+  // Check custom registry first (includes both canonical and custom topics)
   if (topicRegistry?.has(topicHash)) {
     return topicRegistry.get(topicHash)!;
   }
-  // Fall back to known base topics
-  const known = KNOWN_TOPICS[topicHash];
-  if (known) return known;
+  // Fall back to canonical topics
+  const canonical = CANONICAL_TOPICS[topicHash];
+  if (canonical) return canonical;
   // Unknown topic - show truncated hash
   return topicHash.slice(0, 10) + '...';
 }
 
 /**
  * Build a topic registry from a strategy manifest's logTopics field.
+ *
+ * Combines canonical system topics with custom topics from the manifest.
+ * Custom topics MUST have the CUSTOM_ prefix to be included.
  *
  * @param logTopics - The logTopics field from StrategyManifest (topicName → description)
  * @returns A Map of topic hash → topic name
@@ -287,14 +283,19 @@ export function buildTopicRegistry(
 ): Map<Hex, string> {
   const registry = new Map<Hex, string>();
 
-  // Add base KNOWN_TOPICS
-  for (const [hash, name] of Object.entries(KNOWN_TOPICS)) {
+  // Add canonical system topics (always available)
+  for (const [hash, name] of Object.entries(CANONICAL_TOPICS)) {
     registry.set(hash as Hex, name);
   }
 
-  // Add custom topics from manifest
+  // Add custom topics from manifest (must have CUSTOM_ prefix)
   if (logTopics) {
     for (const topicName of Object.keys(logTopics)) {
+      if (!topicName.startsWith(CUSTOM_TOPIC_PREFIX)) {
+        // Skip non-custom topics - they should use canonical topics instead
+        // Silently skip to avoid breaking existing strategies during migration
+        continue;
+      }
       const hash = keccak256(toHex(topicName)) as Hex;
       registry.set(hash, topicName);
     }

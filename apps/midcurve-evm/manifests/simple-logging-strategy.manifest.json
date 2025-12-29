@@ -283,10 +283,9 @@
     "symbol": "USD"
   },
   "logTopics": {
-    "LIFECYCLE": "Lifecycle state changes (start, shutdown)",
-    "STEP_START": "Step event started processing",
-    "EPOCH_INFO": "Current epoch information",
-    "EVENTS_COUNT": "Events processed counter",
-    "STEP_COMPLETE": "Step event processing complete"
+    "CUSTOM_STEP_START": "Step event started processing",
+    "CUSTOM_EPOCH_INFO": "Current epoch information",
+    "CUSTOM_EVENTS_COUNT": "Events processed counter",
+    "CUSTOM_STEP_COMPLETE": "Step event processing complete"
   }
 }
