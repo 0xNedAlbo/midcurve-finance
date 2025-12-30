@@ -5,13 +5,15 @@
  * Performs schema validation, ABI parsing, and constructor parameter matching.
  */
 
-import { parseAbi } from 'viem';
+import { parseAbi, getAddress } from 'viem';
 import type {
   StrategyManifest,
   ConstructorParam,
   SolidityType,
   ManifestQuoteToken,
+  ManifestFundingToken,
 } from '@midcurve/shared';
+import type { Erc20TokenService } from '../token/erc20-token-service.js';
 
 /**
  * ABI constructor type from viem's Abi type
@@ -53,7 +55,9 @@ export type ManifestErrorCode =
   | 'MISSING_REQUIRED_FIELD'
   | 'INVALID_FIELD_VALUE'
   | 'INVALID_QUOTE_TOKEN'
-  | 'QUOTE_TOKEN_SYMBOL_MISMATCH';
+  | 'QUOTE_TOKEN_SYMBOL_MISMATCH'
+  | 'INVALID_FUNDING_TOKEN'
+  | 'FUNDING_TOKEN_NOT_FOUND';
 
 /**
  * A verification issue (error or warning)
@@ -83,6 +87,36 @@ export interface ManifestIssue {
    * Additional details
    */
   details?: Record<string, unknown>;
+}
+
+/**
+ * Resolved funding token metadata from on-chain discovery
+ */
+export interface ResolvedFundingToken {
+  /**
+   * Token symbol (e.g., "USDC")
+   */
+  symbol: string;
+
+  /**
+   * Token name (e.g., "USD Coin")
+   */
+  name: string;
+
+  /**
+   * Token decimals (e.g., 6 for USDC)
+   */
+  decimals: number;
+
+  /**
+   * Chain ID where the token exists
+   */
+  chainId: number;
+
+  /**
+   * Token contract address (EIP-55 checksummed)
+   */
+  address: string;
 }
 
 /**
@@ -116,6 +150,23 @@ export interface ManifestVerificationResult {
    * (via verifyWithTokenResolution method)
    */
   resolvedQuoteTokenId?: string;
+
+  /**
+   * Database ID of the resolved funding token
+   *
+   * Only set when verification includes async token resolution
+   * (via verifyWithTokenResolution method)
+   */
+  resolvedFundingTokenId?: string;
+
+  /**
+   * Resolved funding token metadata from on-chain discovery
+   *
+   * Contains the token symbol, name, decimals, chain ID, and address
+   * discovered from the blockchain. Used by the UI to display user-friendly
+   * information like "USDC on Arbitrum" instead of raw chain IDs.
+   */
+  resolvedFundingToken?: ResolvedFundingToken;
 }
 
 // =============================================================================
@@ -199,6 +250,12 @@ export class ManifestVerificationService {
       return { valid: false, errors, warnings };
     }
 
+    // Step 9: Funding token validation
+    const fundingToken = this.validateFundingToken(obj.fundingToken, errors);
+    if (errors.length > 0) {
+      return { valid: false, errors, warnings };
+    }
+
     // Build the parsed manifest
     const parsedManifest: StrategyManifest = {
       name: obj.name as string,
@@ -210,6 +267,7 @@ export class ManifestVerificationService {
       constructorParams: obj.constructorParams as ConstructorParam[],
       formLayout: obj.formLayout as StrategyManifest['formLayout'],
       quoteToken: quoteToken!,
+      fundingToken: fundingToken!,
       tags: obj.tags as string[] | undefined,
       logTopics: obj.logTopics as Record<string, string> | undefined,
     };
@@ -247,6 +305,61 @@ export class ManifestVerificationService {
     return this.verify(parsed);
   }
 
+  /**
+   * Validates a manifest with async token resolution
+   *
+   * Performs synchronous validation first, then discovers the funding token
+   * on-chain to validate it exists and fetch its metadata (symbol, name, decimals).
+   *
+   * This method should be used when the verification result will be returned
+   * to the frontend, as it provides the resolved token info needed for
+   * user-friendly display (e.g., "USDC on Arbitrum" instead of raw chain IDs).
+   *
+   * @param manifest - The manifest JSON to verify
+   * @param erc20Service - Service for on-chain token discovery
+   * @returns Verification result with resolved funding token info
+   */
+  async verifyWithTokenResolution(
+    manifest: unknown,
+    erc20Service: Erc20TokenService
+  ): Promise<ManifestVerificationResult> {
+    // Step 1: Run synchronous validation
+    const result = this.verify(manifest);
+    if (!result.valid || !result.parsedManifest) {
+      return result;
+    }
+
+    // Step 2: Discover funding token on-chain
+    const fundingToken = result.parsedManifest.fundingToken;
+    try {
+      const discoveredToken = await erc20Service.discover({
+        address: fundingToken.address,
+        chainId: fundingToken.chainId,
+      });
+
+      // Store resolved token info in result
+      result.resolvedFundingTokenId = discoveredToken.id;
+      result.resolvedFundingToken = {
+        symbol: discoveredToken.symbol,
+        name: discoveredToken.name,
+        decimals: discoveredToken.decimals,
+        chainId: fundingToken.chainId,
+        address: getAddress(fundingToken.address), // Normalize to EIP-55
+      };
+    } catch (error) {
+      result.valid = false;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      result.errors.push({
+        severity: 'error',
+        code: 'FUNDING_TOKEN_NOT_FOUND',
+        message: `Failed to discover funding token at ${fundingToken.address} on chain ${fundingToken.chainId}: ${errorMessage}`,
+        path: 'fundingToken',
+      });
+    }
+
+    return result;
+  }
+
   // ===========================================================================
   // PRIVATE VALIDATION METHODS
   // ===========================================================================
@@ -262,6 +375,7 @@ export class ManifestVerificationService {
       'bytecode',
       'constructorParams',
       'quoteToken',
+      'fundingToken',
     ];
 
     for (const field of requiredFields) {
@@ -792,6 +906,84 @@ export class ManifestVerificationService {
       symbol: qt.symbol as string,
       chainId: qt.chainId as number,
       address: qt.address as string,
+    };
+  }
+
+  private validateFundingToken(
+    fundingToken: unknown,
+    errors: ManifestIssue[]
+  ): ManifestFundingToken | null {
+    if (!fundingToken || typeof fundingToken !== 'object') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_FUNDING_TOKEN',
+        message: 'Field "fundingToken" must be an object',
+        path: 'fundingToken',
+      });
+      return null;
+    }
+
+    const ft = fundingToken as Record<string, unknown>;
+
+    // Validate type field - must be 'erc20'
+    if (ft.type !== 'erc20') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_FUNDING_TOKEN',
+        message: `Field "fundingToken.type" must be 'erc20'. Got: ${ft.type}`,
+        path: 'fundingToken.type',
+      });
+      return null;
+    }
+
+    // Validate chainId - must be positive integer
+    if (typeof ft.chainId !== 'number' || !Number.isInteger(ft.chainId) || ft.chainId <= 0) {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_FUNDING_TOKEN',
+        message: 'Field "fundingToken.chainId" must be a positive integer',
+        path: 'fundingToken.chainId',
+      });
+      return null;
+    }
+
+    // Reject SEMSEE chain - funding token must be on public chain
+    if (ft.chainId === 31337) {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_FUNDING_TOKEN',
+        message: 'Field "fundingToken.chainId" cannot be 31337 (SEMSEE). Use a public chain (e.g., 1 for Ethereum, 42161 for Arbitrum)',
+        path: 'fundingToken.chainId',
+      });
+      return null;
+    }
+
+    // Validate address - must be valid EVM address format
+    if (!ft.address || typeof ft.address !== 'string') {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_FUNDING_TOKEN',
+        message: 'Field "fundingToken.address" must be a string',
+        path: 'fundingToken.address',
+      });
+      return null;
+    }
+
+    const addressRegex = /^0x[a-fA-F0-9]{40}$/;
+    if (!addressRegex.test(ft.address)) {
+      errors.push({
+        severity: 'error',
+        code: 'INVALID_FUNDING_TOKEN',
+        message: 'Field "fundingToken.address" must be a valid EVM address (0x followed by 40 hex characters)',
+        path: 'fundingToken.address',
+      });
+      return null;
+    }
+
+    return {
+      type: 'erc20',
+      chainId: ft.chainId,
+      address: ft.address,
     };
   }
 }

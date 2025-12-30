@@ -198,6 +198,7 @@ export type {
   ManifestQuoteTokenBasicCurrency,
   ManifestQuoteTokenErc20,
   ManifestQuoteToken,
+  ManifestFundingToken,
   StrategyManifest,
 } from './strategy-manifest.js';
 

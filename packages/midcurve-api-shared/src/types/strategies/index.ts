@@ -28,3 +28,6 @@ export * from './manifest.js';
 
 // Logs
 export * from './logs.js';
+
+// Vault operations
+export * from './vault.js';

@@ -246,6 +246,37 @@ export type ManifestQuoteToken =
   | ManifestQuoteTokenErc20;
 
 // =============================================================================
+// FUNDING TOKEN TYPES
+// =============================================================================
+
+/**
+ * Funding token specification for vault deployment
+ *
+ * Defines the ERC-20 token that the strategy's vault will hold.
+ * The vault is deployed on a public chain (not SEMSEE) and holds this token.
+ */
+export interface ManifestFundingToken {
+  /**
+   * Token type - currently only 'erc20' is supported
+   */
+  type: 'erc20';
+
+  /**
+   * Public chain ID where the vault will be deployed
+   * Must be a public chain (1 = Ethereum, 42161 = Arbitrum, etc.)
+   * Cannot be 31337 (SEMSEE internal chain)
+   * @example 42161 (Arbitrum)
+   */
+  chainId: number;
+
+  /**
+   * ERC-20 token contract address (EIP-55 checksummed)
+   * @example '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' (USDC on Arbitrum)
+   */
+  address: string;
+}
+
+// =============================================================================
 // STRATEGY MANIFEST
 // =============================================================================
 
@@ -333,6 +364,20 @@ export interface StrategyManifest {
    * @example { type: 'erc20', symbol: 'USDC', chainId: 42161, address: '0x...' }
    */
   quoteToken: ManifestQuoteToken;
+
+  // ============================================================================
+  // FUNDING TOKEN
+  // ============================================================================
+
+  /**
+   * Funding token for vault deployment (REQUIRED)
+   *
+   * Specifies the ERC-20 token that the strategy's vault will hold on a public chain.
+   * The vault is deployed by the user's wallet and is used to fund strategy operations.
+   *
+   * @example { type: 'erc20', chainId: 42161, address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' }
+   */
+  fundingToken: ManifestFundingToken;
 
   // ============================================================================
   // METADATA

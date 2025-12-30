@@ -125,10 +125,15 @@ export const queryKeys = {
     list: (params?: ListStrategiesParams) =>
       [...queryKeys.strategies.lists(), params ?? {}] as const,
 
-    // Single strategy detail
+    // Single strategy detail (by ID)
     details: () => [...queryKeys.strategies.all, 'detail'] as const,
     detail: (strategyId: string) =>
       [...queryKeys.strategies.details(), strategyId] as const,
+
+    // Single strategy by contract address
+    byAddresses: () => [...queryKeys.strategies.all, 'byAddress'] as const,
+    byAddress: (contractAddress: string) =>
+      [...queryKeys.strategies.byAddresses(), contractAddress] as const,
 
     // Strategy logs
     logs: (strategyId: string) =>
@@ -147,6 +152,12 @@ export const queryKeys = {
     // Mutation keys
     mutations: {
       deploy: ['strategies', 'deploy'] as const,
+    },
+
+    // Vault operations
+    vault: {
+      prepare: (strategyId: string) =>
+        [...queryKeys.strategies.all, 'vault', 'prepare', strategyId] as const,
     },
   },
 };

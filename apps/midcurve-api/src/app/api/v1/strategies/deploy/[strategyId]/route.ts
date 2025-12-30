@@ -304,6 +304,12 @@ export async function GET(
         startedAt: evmData.startedAt,
         completedAt: evmData.completedAt,
         error: evmData.error,
+        // Include automation wallet address for frontend to detect wallet creation
+        automationWallet: evmData.automationWallet
+          ? { address: evmData.automationWallet.walletAddress }
+          : null,
+        // Include strategy object for frontend to detect strategy creation
+        strategy: strategyId ? { id: strategyId } : null,
       });
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

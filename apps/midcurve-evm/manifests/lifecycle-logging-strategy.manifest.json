@@ -295,6 +295,11 @@
     "type": "basic-currency",
     "symbol": "USD"
   },
+  "fundingToken": {
+    "type": "erc20",
+    "chainId": 42161,
+    "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+  },
   "logTopics": {
     "CUSTOM_EVENT_RECEIVED": "Step event received and processed"
   }

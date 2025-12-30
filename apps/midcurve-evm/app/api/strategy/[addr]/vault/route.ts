@@ -81,6 +81,10 @@ const RegisterVaultSchema = z.object({
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid vault address format'),
   chainId: z.number().int().positive('Chain ID must be a positive integer'),
+  deployTxHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash format')
+    .optional(),
 });
 
 // =============================================================================
@@ -149,10 +153,10 @@ export async function POST(
       );
     }
 
-    const { vaultAddress: rawVaultAddress, chainId } = parseResult.data;
+    const { vaultAddress: rawVaultAddress, chainId, deployTxHash } = parseResult.data;
     const vaultAddress = normalizeAddress(rawVaultAddress) as Address;
 
-    log.info({ strategyId, vaultAddress, chainId, msg: 'Registering vault' });
+    log.info({ strategyId, vaultAddress, chainId, deployTxHash, msg: 'Registering vault' });
 
     // 2. Lookup strategy with manifest and automation wallet
     const strategy = await prisma.strategy.findUnique({
@@ -356,6 +360,7 @@ export async function POST(
           type: 'evm',
           chainId,
           vaultAddress,
+          ...(deployTxHash && { deployTxHash }),
         },
         vaultTokenId: token.id,
         vaultDeployedAt: now,
@@ -379,6 +384,7 @@ export async function POST(
       },
       operatorAddress: getAddress(operatorAddress),
       registeredAt: now.toISOString(),
+      ...(deployTxHash && { deployTxHash }),
     });
   } catch (error) {
     log.error({ error, msg: 'Vault registration error' });

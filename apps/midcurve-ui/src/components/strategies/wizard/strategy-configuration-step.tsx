@@ -14,6 +14,9 @@ interface StrategyConfigurationStepProps {
   onConstructorValuesChange: (values: Record<string, string>) => void;
   onValidationChange: (isValid: boolean) => void;
   hasUserParams: boolean;
+  /** ETH amount to fund vault for gas (e.g., "0.1") */
+  ethFundingAmount: string;
+  onEthFundingAmountChange: (amount: string) => void;
 }
 
 export function StrategyConfigurationStep({
@@ -24,22 +27,28 @@ export function StrategyConfigurationStep({
   onConstructorValuesChange,
   onValidationChange,
   hasUserParams,
+  ethFundingAmount,
+  onEthFundingAmountChange,
 }: StrategyConfigurationStepProps) {
   // Validation: name is required and 1-100 chars
   const isNameValid = strategyName.trim().length >= 1 && strategyName.length <= 100;
 
+  // Validation: ETH amount must be a positive number
+  const ethAmountNum = parseFloat(ethFundingAmount);
+  const isEthAmountValid = !isNaN(ethAmountNum) && ethAmountNum > 0;
+
   // Track constructor params validation separately
   const handleParamsValidationChange = useCallback((isValid: boolean) => {
-    // Overall validation requires both name and params to be valid
-    onValidationChange(isNameValid && isValid);
-  }, [isNameValid, onValidationChange]);
+    // Overall validation requires name, ETH amount, and params to be valid
+    onValidationChange(isNameValid && isEthAmountValid && isValid);
+  }, [isNameValid, isEthAmountValid, onValidationChange]);
 
-  // If no user params, just check name validity
+  // If no user params, check name and ETH amount validity
   useEffect(() => {
     if (!hasUserParams) {
-      onValidationChange(isNameValid);
+      onValidationChange(isNameValid && isEthAmountValid);
     }
-  }, [hasUserParams, isNameValid, onValidationChange]);
+  }, [hasUserParams, isNameValid, isEthAmountValid, onValidationChange]);
 
   return (
     <div className="space-y-6">
@@ -96,6 +105,49 @@ export function StrategyConfigurationStep({
         {strategyName.length > 0 && !isNameValid && (
           <p className="text-red-400 text-xs mt-1">
             Name must be between 1 and 100 characters
+          </p>
+        )}
+      </div>
+
+      {/* ETH Gas Funding Input */}
+      <div>
+        <label
+          htmlFor="eth-funding"
+          className="block text-sm font-medium text-slate-300 mb-2"
+        >
+          Vault Gas Funding (ETH) <span className="text-red-400">*</span>
+        </label>
+        <div className="relative">
+          <input
+            id="eth-funding"
+            type="number"
+            step="0.01"
+            min="0"
+            value={ethFundingAmount}
+            onChange={(e) => onEthFundingAmountChange(e.target.value)}
+            placeholder="0.1"
+            className={`w-full px-4 py-3 bg-slate-700 border rounded-lg text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-colors pr-14 ${
+              ethFundingAmount.length > 0 && !isEthAmountValid
+                ? "border-red-500/50 focus:ring-red-500/50"
+                : "border-slate-600 focus:ring-blue-500/50"
+            }`}
+          />
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
+            ETH
+          </span>
+        </div>
+        <p className="text-slate-400 text-xs mt-1.5">
+          ETH deposited to the vault for automation gas costs. The automation wallet will
+          use this to pay for on-chain transactions.
+        </p>
+        {ethFundingAmount.length > 0 && !isEthAmountValid && (
+          <p className="text-red-400 text-xs mt-1">
+            ETH amount must be greater than 0
+          </p>
+        )}
+        {isEthAmountValid && (
+          <p className="text-slate-500 text-xs mt-1">
+            Estimated ~{Math.floor(ethAmountNum / 0.001)} transactions at 0.001 ETH average gas
           </p>
         )}
       </div>

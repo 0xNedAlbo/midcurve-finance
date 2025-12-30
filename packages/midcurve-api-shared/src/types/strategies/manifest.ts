@@ -161,6 +161,22 @@ export const ManifestQuoteTokenSchema = z.discriminatedUnion('type', [
 ]);
 
 // =============================================================================
+// FUNDING TOKEN SCHEMA
+// =============================================================================
+
+/**
+ * Zod schema for funding token specification
+ *
+ * Defines the ERC-20 token that the strategy's vault will hold.
+ * The vault is deployed on a public chain (not SEMSEE) and holds this token.
+ */
+export const ManifestFundingTokenSchema = z.object({
+  type: z.literal('erc20'),
+  chainId: z.number().int().positive(),
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid EVM address format'),
+});
+
+// =============================================================================
 // MANIFEST SCHEMA
 // =============================================================================
 
@@ -198,6 +214,9 @@ export const StrategyManifestSchema = z.object({
   // Quote token for strategy metrics valuation
   quoteToken: ManifestQuoteTokenSchema,
 
+  // Funding token for vault deployment (REQUIRED)
+  fundingToken: ManifestFundingTokenSchema,
+
   // Metadata
   tags: z.array(z.string()).optional(),
 
@@ -225,7 +244,9 @@ export type ManifestErrorCode =
   | 'MISSING_REQUIRED_FIELD'
   | 'INVALID_FIELD_VALUE'
   | 'INVALID_QUOTE_TOKEN'
-  | 'QUOTE_TOKEN_SYMBOL_MISMATCH';
+  | 'QUOTE_TOKEN_SYMBOL_MISMATCH'
+  | 'INVALID_FUNDING_TOKEN'
+  | 'FUNDING_TOKEN_NOT_FOUND';
 
 /**
  * Severity level for verification issues
@@ -261,6 +282,36 @@ export const VerifyManifestRequestSchema = z.object({
 });
 
 /**
+ * Resolved funding token metadata from on-chain discovery
+ */
+export interface ResolvedFundingToken {
+  /**
+   * Token symbol (e.g., "USDC")
+   */
+  symbol: string;
+
+  /**
+   * Token name (e.g., "USD Coin")
+   */
+  name: string;
+
+  /**
+   * Token decimals (e.g., 6 for USDC)
+   */
+  decimals: number;
+
+  /**
+   * Chain ID where the token exists
+   */
+  chainId: number;
+
+  /**
+   * Token contract address (EIP-55 checksummed)
+   */
+  address: string;
+}
+
+/**
  * Response for verify manifest endpoint
  */
 export interface VerifyManifestResponse {
@@ -291,6 +342,23 @@ export interface VerifyManifestResponse {
    * based on the manifest's quoteToken field. This ID is used during deployment.
    */
   resolvedQuoteTokenId?: string;
+
+  /**
+   * Database ID of the resolved funding token (if valid)
+   *
+   * The verification process discovers the funding token on-chain to validate
+   * it exists and stores its database ID for deployment.
+   */
+  resolvedFundingTokenId?: string;
+
+  /**
+   * Resolved funding token metadata from on-chain discovery
+   *
+   * Contains the token symbol, name, decimals, chain ID, and address
+   * discovered from the blockchain. Used by the UI to display user-friendly
+   * information like "USDC on Arbitrum" instead of raw chain IDs.
+   */
+  resolvedFundingToken?: ResolvedFundingToken;
 }
 
 /**

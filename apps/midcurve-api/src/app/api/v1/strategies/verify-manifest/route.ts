@@ -7,12 +7,14 @@
  *
  * Validates an uploaded strategy manifest file before deployment.
  * Performs schema validation, ABI parsing, and constructor parameter matching.
+ * Also performs on-chain token discovery for the funding token.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import { ManifestVerificationService } from '@midcurve/services';
+import { getErc20TokenService } from '@/lib/services';
 import type {
   VerifyManifestRequest,
   VerifyManifestResponse,
@@ -93,9 +95,15 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       const { manifest } = parseResult.data as VerifyManifestRequest;
 
-      // Verify the manifest using the service
+      // Verify the manifest with async token resolution
+      // This discovers the funding token on-chain to validate it exists
+      // and fetch its metadata (symbol, name, decimals)
       const verificationService = new ManifestVerificationService();
-      const result = verificationService.verify(manifest);
+      const erc20Service = getErc20TokenService();
+      const result = await verificationService.verifyWithTokenResolution(
+        manifest,
+        erc20Service
+      );
 
       apiLogger.info(
         {
@@ -104,6 +112,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           valid: result.valid,
           errorCount: result.errors.length,
           warningCount: result.warnings.length,
+          resolvedFundingTokenId: result.resolvedFundingTokenId,
         },
         'Manifest verification complete'
       );
@@ -113,21 +122,25 @@ export async function POST(request: NextRequest): Promise<Response> {
         errors: result.errors,
         warnings: result.warnings,
         parsedManifest: result.parsedManifest,
+        resolvedFundingTokenId: result.resolvedFundingTokenId,
+        resolvedFundingToken: result.resolvedFundingToken,
       };
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
       return NextResponse.json(createSuccessResponse(responseData));
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
       apiLog.methodError(
         apiLogger,
         'POST /api/v1/strategies/verify-manifest',
         error,
-        { requestId }
+        { requestId, errorMessage }
       );
 
       const errorResponse = createErrorResponse(
         ApiErrorCode.INTERNAL_SERVER_ERROR,
-        'Failed to verify manifest'
+        `Failed to verify manifest: ${errorMessage}`
       );
       apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
       return NextResponse.json(errorResponse, {

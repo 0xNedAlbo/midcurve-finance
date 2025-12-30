@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo } from "react";
 import { X, ArrowLeft, ArrowRight } from "lucide-react";
 import type { StrategyManifest } from "@midcurve/shared";
 import { hasUserInputParams } from "@midcurve/shared";
-import type { DeployStrategyResponse } from "@midcurve/api-shared";
+import type { DeployStrategyResponse, ResolvedFundingToken } from "@midcurve/api-shared";
 
 import { useVerifyManifest } from "@/hooks/strategies/useVerifyManifest";
 import { useDeployStrategy } from "@/hooks/strategies/useDeployStrategy";
@@ -12,6 +12,10 @@ import { useDeployStrategy } from "@/hooks/strategies/useDeployStrategy";
 import { ManifestUploadStep } from "./manifest-upload-step";
 import { StrategyConfigurationStep } from "./strategy-configuration-step";
 import { DeployReviewStep } from "./deploy-review-step";
+import { AutoWalletStep } from "./auto-wallet-step";
+import { StrategyDeployStep } from "./strategy-deploy-step";
+import { VaultDeployStep } from "./vault-deploy-step";
+import { VaultFundStep } from "./vault-fund-step";
 
 interface StrategyDeployWizardProps {
   isOpen: boolean;
@@ -23,22 +27,28 @@ interface StrategyDeployWizardProps {
  * Strategy deployment wizard with manifest upload flow
  *
  * Steps:
- * 1. Upload Manifest - Upload and validate manifest JSON file
- * 2. Configure - Set strategy name and fill in constructor values
- * 3. Review & Deploy - Review settings and deploy
+ * 0. Upload Manifest - Upload and validate manifest JSON file
+ * 1. Configure - Set strategy name, constructor values, and ETH funding amount
+ * 2. Review - Review all settings before deployment
+ * 3. Auto Wallet - Create automation wallet (automatic)
+ * 4. Strategy Deploy - Deploy strategy contract (automatic)
+ * 5. Vault Deploy - Deploy funding vault (user signs tx)
+ * 6. Vault Fund - Fund vault with ETH (user signs tx)
  */
 export function StrategyDeployWizard({
   isOpen,
   onClose,
   onStrategyDeployed,
 }: StrategyDeployWizardProps) {
-  const TOTAL_STEPS = 3;
+  const TOTAL_STEPS = 7;
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [verifiedManifest, setVerifiedManifest] = useState<StrategyManifest | null>(null);
+  const [resolvedFundingToken, setResolvedFundingToken] = useState<ResolvedFundingToken | null>(null);
   const [strategyName, setStrategyName] = useState<string>("");
   const [constructorValues, setConstructorValues] = useState<Record<string, string>>({});
+  const [ethFundingAmount, setEthFundingAmount] = useState<string>("0.1");
 
   // Validation flags
   const [isManifestValid, setIsManifestValid] = useState<boolean>(false);
@@ -52,13 +62,27 @@ export function StrategyDeployWizard({
   const [deploymentResult, setDeploymentResult] = useState<DeployStrategyResponse | null>(null);
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
 
+  // Vault state
+  const [vaultAddress, setVaultAddress] = useState<string | null>(null);
+
   // Mutations
   const verifyMutation = useVerifyManifest();
   const deployMutation = useDeployStrategy();
 
+  // Check if we're in auto-advancing steps (3 and 4)
+  const isAutoAdvancingStep = currentStep === 3 || currentStep === 4;
+
+  // Check if setup is complete (vault funded)
+  const isSetupComplete = currentStep === 6 && vaultAddress !== null;
+
   // Handle closing wizard with confirmation if progress made
   const handleClose = useCallback(() => {
-    if (currentStep > 0 && !deploymentResult) {
+    // Don't allow close during auto-advancing steps
+    if (isAutoAdvancingStep) {
+      return;
+    }
+
+    if (currentStep > 0 && !isSetupComplete) {
       const confirmed = window.confirm(
         "Close wizard? Your progress will be lost."
       );
@@ -68,17 +92,20 @@ export function StrategyDeployWizard({
     // Reset all state
     setCurrentStep(0);
     setVerifiedManifest(null);
+    setResolvedFundingToken(null);
     setStrategyName("");
     setConstructorValues({});
+    setEthFundingAmount("0.1");
     setIsManifestValid(false);
     setIsConfigurationValid(false);
     setVerificationErrors([]);
     setVerificationWarnings([]);
     setDeploymentResult(null);
     setDeploymentError(null);
+    setVaultAddress(null);
 
     onClose?.();
-  }, [currentStep, deploymentResult, onClose]);
+  }, [currentStep, isAutoAdvancingStep, isSetupComplete, onClose]);
 
   // Handle manifest verification
   const handleManifestVerify = useCallback(
@@ -92,12 +119,14 @@ export function StrategyDeployWizard({
           onSuccess: (response) => {
             if (response.valid && response.parsedManifest) {
               setVerifiedManifest(response.parsedManifest as unknown as StrategyManifest);
+              setResolvedFundingToken(response.resolvedFundingToken ?? null);
               setIsManifestValid(true);
               setVerificationWarnings(
                 response.warnings.map((w) => w.message)
               );
             } else {
               setVerifiedManifest(null);
+              setResolvedFundingToken(null);
               setIsManifestValid(false);
               setVerificationErrors(
                 response.errors.map((e) => e.message)
@@ -106,6 +135,7 @@ export function StrategyDeployWizard({
           },
           onError: (error) => {
             setVerifiedManifest(null);
+            setResolvedFundingToken(null);
             setIsManifestValid(false);
             setVerificationErrors([error.message || "Verification failed"]);
           },
@@ -118,20 +148,19 @@ export function StrategyDeployWizard({
   // Handle manifest cleared
   const handleManifestCleared = useCallback(() => {
     setVerifiedManifest(null);
+    setResolvedFundingToken(null);
     setIsManifestValid(false);
     setVerificationErrors([]);
     setVerificationWarnings([]);
     setConstructorValues({});
   }, []);
 
-  // Handle deploy
+  // Handle deploy (initiates deployment in step 3)
   const handleDeploy = useCallback(() => {
     if (!verifiedManifest) return;
 
     setDeploymentError(null);
 
-    // Quote token is now specified in the manifest and resolved server-side
-    // No need to pass quoteTokenId from the client
     deployMutation.mutate(
       {
         manifest: verifiedManifest,
@@ -141,9 +170,6 @@ export function StrategyDeployWizard({
       {
         onSuccess: (response) => {
           setDeploymentResult(response);
-          // NOTE: Don't call onStrategyDeployed here!
-          // The deployment is just initiated (status: "pending"), not complete.
-          // onStrategyDeployed is called by handleDeploymentStatusChange when status === "completed"
         },
         onError: (error) => {
           setDeploymentError(error.message || "Deployment failed");
@@ -152,7 +178,7 @@ export function StrategyDeployWizard({
     );
   }, [verifiedManifest, strategyName, constructorValues, deployMutation]);
 
-  // Handle retry
+  // Handle retry deployment
   const handleRetry = useCallback(() => {
     setDeploymentError(null);
     setDeploymentResult(null);
@@ -163,14 +189,35 @@ export function StrategyDeployWizard({
   const handleDeploymentStatusChange = useCallback(
     (result: DeployStrategyResponse) => {
       setDeploymentResult(result);
-
-      // If deployment completed, notify parent
-      if (result.deployment.status === "completed") {
-        onStrategyDeployed?.(result);
-      }
     },
-    [onStrategyDeployed]
+    []
   );
+
+  // Handle auto-wallet ready (advance to step 4)
+  const handleWalletReady = useCallback(() => {
+    setCurrentStep(4);
+  }, []);
+
+  // Handle strategy deployed (advance to step 5)
+  const handleStrategyDeployed = useCallback(() => {
+    setCurrentStep(5);
+
+    // Also notify parent that strategy is deployed (but vault isn't set up yet)
+    if (deploymentResult) {
+      onStrategyDeployed?.(deploymentResult);
+    }
+  }, [deploymentResult, onStrategyDeployed]);
+
+  // Handle vault deployed (advance to step 6)
+  const handleVaultDeployed = useCallback((address: string) => {
+    setVaultAddress(address);
+    setCurrentStep(6);
+  }, []);
+
+  // Handle funding complete
+  const handleFundingComplete = useCallback(() => {
+    // Setup is complete - user can close or navigate from VaultFundStep
+  }, []);
 
   // Check if manifest has user-input params
   const manifestHasUserParams = useMemo(() => {
@@ -183,12 +230,13 @@ export function StrategyDeployWizard({
     // Step 0 (Upload Manifest): Need valid manifest
     if (currentStep === 0) return isManifestValid;
 
-    // Step 1 (Configuration): Need valid name and constructor values
+    // Step 1 (Configuration): Need valid name, ETH amount, and constructor values
     if (currentStep === 1) return isConfigurationValid;
 
-    // Step 2 (Review): No "Next" on last step
-    if (currentStep === 2) return false;
+    // Step 2 (Review): Always can go next (starts deployment)
+    if (currentStep === 2) return true;
 
+    // Steps 3-6: No "Next" button (auto-advance or handled within step)
     return false;
   }, [currentStep, isManifestValid, isConfigurationValid]);
 
@@ -200,11 +248,24 @@ export function StrategyDeployWizard({
       case 1:
         return "Configure Your Strategy";
       case 2:
-        return "Review & Deploy";
+        return "Review Configuration";
+      case 3:
+        return "Creating Automation Wallet";
+      case 4:
+        return "Deploying Strategy Contract";
+      case 5:
+        return "Deploy Funding Vault";
+      case 6:
+        return "Fund Vault with ETH";
       default:
         return "";
     }
   };
+
+  // Get strategy ID and contract address from deployment result
+  const strategyId = deploymentResult?.strategy?.id;
+  const strategyAddress = deploymentResult?.deployment.contractAddress;
+  const vaultChainId = verifiedManifest?.fundingToken?.chainId;
 
   // Render current step content
   const renderCurrentStep = () => {
@@ -230,6 +291,8 @@ export function StrategyDeployWizard({
             onConstructorValuesChange={setConstructorValues}
             onValidationChange={setIsConfigurationValid}
             hasUserParams={manifestHasUserParams}
+            ethFundingAmount={ethFundingAmount}
+            onEthFundingAmountChange={setEthFundingAmount}
           />
         ) : (
           <div className="text-center text-slate-400">
@@ -242,16 +305,58 @@ export function StrategyDeployWizard({
             manifest={verifiedManifest}
             strategyName={strategyName}
             constructorValues={constructorValues}
+            ethFundingAmount={ethFundingAmount}
+            resolvedFundingToken={resolvedFundingToken ?? undefined}
+          />
+        ) : (
+          <div className="text-center text-slate-400">
+            Please complete the previous steps first.
+          </div>
+        );
+      case 3:
+        return (
+          <AutoWalletStep
             deploymentResult={deploymentResult}
             deploymentError={deploymentError}
             isDeploying={deployMutation.isPending}
             onDeploy={handleDeploy}
             onRetry={handleRetry}
             onDeploymentStatusChange={handleDeploymentStatusChange}
+            onWalletReady={handleWalletReady}
+          />
+        );
+      case 4:
+        return (
+          <StrategyDeployStep
+            deploymentResult={deploymentResult}
+            onDeploymentStatusChange={handleDeploymentStatusChange}
+            onStrategyDeployed={handleStrategyDeployed}
+            onRetry={handleRetry}
+          />
+        );
+      case 5:
+        return strategyId && strategyAddress ? (
+          <VaultDeployStep
+            strategyId={strategyId}
+            strategyAddress={strategyAddress}
+            onVaultDeployed={handleVaultDeployed}
           />
         ) : (
           <div className="text-center text-slate-400">
-            Please complete the previous steps first.
+            Waiting for strategy deployment...
+          </div>
+        );
+      case 6:
+        return vaultAddress && vaultChainId ? (
+          <VaultFundStep
+            vaultAddress={vaultAddress}
+            vaultChainId={vaultChainId}
+            ethFundingAmount={ethFundingAmount}
+            onFundingComplete={handleFundingComplete}
+          />
+        ) : (
+          <div className="text-center text-slate-400">
+            Waiting for vault deployment...
           </div>
         );
       default:
@@ -271,12 +376,20 @@ export function StrategyDeployWizard({
 
   const goBack = () => {
     if (currentStep === 0) return;
+    // Can't go back once deployment has started (step 3+)
+    if (currentStep >= 3) return;
     setCurrentStep((prev) => prev - 1);
   };
 
-  // Check if we're on the final step and deployment succeeded
-  const isDeploymentComplete =
-    deploymentResult?.deployment.status === "completed";
+  // Check if back button should be shown
+  const showBackButton =
+    currentStep > 0 &&
+    currentStep < 3 && // Can only go back in steps 1 and 2
+    !deployMutation.isPending;
+
+  // Check if next button should be shown
+  const showNextButton =
+    currentStep < 3; // Only steps 0, 1, 2 have Next button
 
   if (!isOpen) return null;
 
@@ -293,24 +406,31 @@ export function StrategyDeployWizard({
             <h2 className="text-2xl font-bold text-white">Deploy Strategy</h2>
 
             {/* Progress Indicator */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {Array.from({ length: TOTAL_STEPS }, (_, i) => (
                 <div
                   key={i}
                   className={`w-2 h-2 rounded-full transition-colors ${
-                    i <= currentStep ? "bg-blue-500" : "bg-slate-600"
+                    i < currentStep
+                      ? "bg-green-500"
+                      : i === currentStep
+                        ? "bg-blue-500"
+                        : "bg-slate-600"
                   }`}
                 />
               ))}
             </div>
           </div>
 
-          <button
-            onClick={handleClose}
-            className="p-2 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          {/* Close button (hidden during auto-advancing steps) */}
+          {!isAutoAdvancingStep && (
+            <button
+              onClick={handleClose}
+              className="p-2 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          )}
         </div>
 
         {/* Step Title */}
@@ -332,8 +452,8 @@ export function StrategyDeployWizard({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Back button (not shown on first step or when deploying/deployed) */}
-            {currentStep > 0 && !deployMutation.isPending && !isDeploymentComplete && (
+            {/* Back button */}
+            {showBackButton && (
               <button
                 onClick={goBack}
                 className="flex items-center gap-2 px-4 py-2 text-slate-300 hover:text-white transition-colors cursor-pointer"
@@ -343,8 +463,8 @@ export function StrategyDeployWizard({
               </button>
             )}
 
-            {/* Next button (not shown on last step) */}
-            {currentStep < TOTAL_STEPS - 1 && (
+            {/* Next button */}
+            {showNextButton && (
               <button
                 onClick={goNext}
                 disabled={!canGoNext()}
@@ -352,16 +472,6 @@ export function StrategyDeployWizard({
               >
                 Next
                 <ArrowRight className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Close button (shown when deployment is complete) */}
-            {currentStep === TOTAL_STEPS - 1 && isDeploymentComplete && (
-              <button
-                onClick={handleClose}
-                className="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors cursor-pointer"
-              >
-                Close
               </button>
             )}
           </div>
