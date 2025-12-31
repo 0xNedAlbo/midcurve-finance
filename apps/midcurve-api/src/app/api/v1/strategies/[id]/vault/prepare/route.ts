@@ -194,7 +194,7 @@ export async function GET(
         });
       }
 
-      const walletConfig = strategy.automationWallets[0].config as EvmWalletConfig;
+      const walletConfig = strategy.automationWallets[0].config as unknown as EvmWalletConfig;
       const operatorAddress = walletConfig.walletAddress;
 
       if (!operatorAddress) {
