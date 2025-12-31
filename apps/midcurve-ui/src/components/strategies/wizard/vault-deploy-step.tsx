@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Loader2,
-  CheckCircle,
   XCircle,
   Vault,
   AlertCircle,
-  ExternalLink,
 } from "lucide-react";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import type { Address } from "viem";
@@ -60,7 +58,6 @@ export function VaultDeployStep({
     error: deployError,
     result: deployResult,
     isPending: isDeployPending,
-    isSuccess: isDeploySuccess,
   } = useDeployVault();
 
   // Vault registration mutation

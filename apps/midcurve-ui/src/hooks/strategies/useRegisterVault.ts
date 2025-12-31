@@ -30,7 +30,7 @@ export function useRegisterVault() {
         }
       );
     },
-    onSuccess: (data, variables) => {
+    onSuccess: (_data, variables) => {
       // Invalidate strategy queries to refresh vault status
       queryClient.invalidateQueries({
         queryKey: queryKeys.strategies.all,

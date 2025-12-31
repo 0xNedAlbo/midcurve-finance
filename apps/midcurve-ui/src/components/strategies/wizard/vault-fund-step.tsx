@@ -26,15 +26,12 @@ interface VaultFundStepProps {
   vaultChainId: number;
   /** ETH amount to deposit (from configuration) */
   ethFundingAmount: string;
-  /** Callback when funding is complete */
-  onFundingComplete: () => void;
 }
 
 export function VaultFundStep({
   vaultAddress,
   vaultChainId,
   ethFundingAmount,
-  onFundingComplete,
 }: VaultFundStepProps) {
   const navigate = useNavigate();
   const { address: userAddress, isConnected } = useAccount();

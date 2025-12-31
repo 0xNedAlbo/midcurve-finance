@@ -17,8 +17,10 @@
     "test:trace": "playwright show-trace"
   },
   "dependencies": {
+    "@cowprotocol/widget-react": "^0.11.0",
     "@midcurve/api-shared": "workspace:^",
     "@midcurve/shared": "workspace:^",
+    "date-fns": "^3.6.0",
     "@rainbow-me/rainbowkit": "^2.2.9",
     "@tanstack/react-query": "^5.87.1",
     "@tanstack/react-query-devtools": "^5.87.3",
@@ -36,6 +38,7 @@
     "siwe": "^3.0.0",
     "tailwind-merge": "^3.3.1",
     "use-debounce": "^10.0.6",
+    "nanoid": "^5.0.9",
     "viem": "^2.37.3",
     "wagmi": "^2.16.9",
     "zod": "^3.22.0"

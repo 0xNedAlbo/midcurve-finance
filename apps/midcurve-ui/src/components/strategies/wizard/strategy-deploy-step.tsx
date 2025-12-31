@@ -5,10 +5,6 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
-  Clock,
-  Pen,
-  Radio,
-  Settings,
   FileCode,
 } from "lucide-react";
 import type { DeployStrategyResponse, DeploymentStatus } from "@midcurve/api-shared";
