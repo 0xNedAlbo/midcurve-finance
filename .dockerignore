@@ -1,0 +1,69 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs
+.next
+**/dist
+**/.next
+
+# Development files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment files (use docker-compose env instead)
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Testing
+coverage
+**/coverage
+.nyc_output
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker
+
+# Documentation
+*.md
+!README.md
+docs
+
+# Misc
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# Turbo
+.turbo
+
+# Cache
+.cache
+.parcel-cache
+
+# Prisma
+**/prisma/migrations/.snapshot.json
+
+# Test databases
+*.db
+*.sqlite
+
+# Foundry (EVM contracts - compiled separately)
+apps/midcurve-evm/contracts/cache
+apps/midcurve-evm/contracts/out

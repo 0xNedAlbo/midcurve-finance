@@ -1,0 +1,89 @@
+# Midcurve Finance - Caddy Configuration
+#
+# This configuration provides:
+# - Automatic HTTPS with Let's Encrypt
+# - Reverse proxy to UI and API services
+# - Security headers
+# - Gzip compression
+#
+# Update the domain names below before deploying.
+
+{
+	# Email for Let's Encrypt notifications
+	email admin@midcurve.finance
+
+	# Enable automatic HTTPS
+	# Remove this block for local development
+	# auto_https off
+}
+
+# Frontend Application
+app.midcurve.finance {
+	# Reverse proxy to UI container
+	reverse_proxy ui:3000
+
+	# Security headers
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Remove server header
+		-Server
+	}
+
+	# Enable compression
+	encode gzip
+
+	# Logging
+	log {
+		output stdout
+		format json
+	}
+}
+
+# API Server
+api.midcurve.finance {
+	# Reverse proxy to API container
+	reverse_proxy api:3001
+
+	# Security headers
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# CORS headers (adjust origins as needed)
+		Access-Control-Allow-Origin "https://app.midcurve.finance"
+		Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization"
+		Access-Control-Allow-Credentials "true"
+		# Remove server header
+		-Server
+	}
+
+	# Enable compression
+	encode gzip
+
+	# Logging
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Local Development Configuration
+# Uncomment this block and comment the above for local testing
+#
+# :80 {
+# 	@ui host localhost
+# 	@api host api.localhost
+#
+# 	handle @ui {
+# 		reverse_proxy ui:3000
+# 	}
+#
+# 	handle @api {
+# 		reverse_proxy api:3001
+# 	}
+# }

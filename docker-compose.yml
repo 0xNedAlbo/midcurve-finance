@@ -1,0 +1,215 @@
+# Midcurve Finance - Production Docker Compose
+#
+# This configuration runs the full stack:
+# - Caddy (reverse proxy with auto SSL)
+# - UI (Vite SPA served via nginx)
+# - API (Next.js backend)
+# - EVM (Strategy orchestrator)
+# - Signer (Private signing service)
+# - Geth (Private EVM node)
+# - RabbitMQ (Message broker)
+#
+# Database: External PostgreSQL (AWS RDS recommended)
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose logs -f            # Follow logs
+#   docker compose down               # Stop all services
+#   docker compose exec api npx prisma migrate deploy  # Run migrations
+
+services:
+  # ============================================
+  # REVERSE PROXY
+  # ============================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: midcurve-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      ui:
+        condition: service_started
+      api:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - frontend
+      - backend
+
+  # ============================================
+  # FRONTEND
+  # ============================================
+  ui:
+    build:
+      context: .
+      dockerfile: apps/midcurve-ui/Dockerfile
+    container_name: midcurve-ui
+    expose:
+      - "3000"
+    restart: unless-stopped
+    networks:
+      - frontend
+
+  # ============================================
+  # API SERVER
+  # ============================================
+  api:
+    build:
+      context: .
+      dockerfile: apps/midcurve-api/Dockerfile
+    container_name: midcurve-api
+    expose:
+      - "3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=${DATABASE_URL}
+      - NEXTAUTH_URL=${API_URL}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      # RPC URLs
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      - RPC_URL_BSC=${RPC_URL_BSC}
+      - RPC_URL_POLYGON=${RPC_URL_POLYGON}
+      - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
+      # Internal services
+      - SIGNER_SERVICE_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+      - EVM_SERVICE_URL=http://evm:3002
+      # External APIs
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+    depends_on:
+      signer:
+        condition: service_started
+      evm:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - frontend
+      - backend
+
+  # ============================================
+  # EVM STRATEGY ENGINE
+  # ============================================
+  evm:
+    build:
+      context: .
+      dockerfile: apps/midcurve-evm/Dockerfile
+    container_name: midcurve-evm
+    expose:
+      - "3002"
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - DATABASE_URL=${DATABASE_URL}
+      - GETH_HTTP_URL=http://geth:8545
+      - GETH_WS_URL=ws://geth:8546
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
+      - SIGNER_SERVICE_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+    depends_on:
+      geth:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ============================================
+  # PRIVATE GETH NODE
+  # ============================================
+  geth:
+    build:
+      context: ./apps/midcurve-evm
+      dockerfile: Dockerfile.geth
+    container_name: midcurve-geth
+    expose:
+      - "8545"
+      - "8546"
+    volumes:
+      - geth-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ============================================
+  # MESSAGE BROKER
+  # ============================================
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: midcurve-rabbitmq
+    expose:
+      - "5672"
+      - "15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-midcurve}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ============================================
+  # SIGNING SERVICE (INTERNAL ONLY)
+  # ============================================
+  signer:
+    build:
+      context: .
+      dockerfile: apps/midcurve-signer/Dockerfile
+    container_name: midcurve-signer
+    expose:
+      - "3003"
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - DATABASE_URL=${DATABASE_URL}
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+      - SIGNER_USE_LOCAL_KEYS=${SIGNER_USE_LOCAL_KEYS:-true}
+      - SIGNER_KEY_ENCRYPTION_PASSWORD=${SIGNER_KEY_ENCRYPTION_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - backend
+
+# ============================================
+# NETWORKS
+# ============================================
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true  # No external access to backend network
+
+# ============================================
+# VOLUMES
+# ============================================
+volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+  geth-data:
+    driver: local
+  rabbitmq-data:
+    driver: local
