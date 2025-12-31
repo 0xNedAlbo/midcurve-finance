@@ -22,6 +22,10 @@ RUN pnpm install --frozen-lockfile
 # Generate Prisma client
 RUN pnpm --filter @midcurve/database db:generate
 
+# Build dependent packages first
+RUN pnpm --filter @midcurve/shared build
+RUN pnpm --filter @midcurve/services build
+
 # Build the EVM API
 RUN pnpm --filter @midcurve/evm build:api
 
