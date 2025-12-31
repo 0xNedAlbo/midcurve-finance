@@ -18,6 +18,10 @@ COPY apps/midcurve-ui/ apps/midcurve-ui/
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
+# Build dependent packages first
+RUN pnpm --filter @midcurve/shared build
+RUN pnpm --filter @midcurve/api-shared build
+
 # Build the UI
 RUN pnpm --filter @midcurve/ui build
 
