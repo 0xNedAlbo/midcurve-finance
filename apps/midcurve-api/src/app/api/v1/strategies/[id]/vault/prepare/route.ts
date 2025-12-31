@@ -155,7 +155,7 @@ export async function GET(
         });
       }
 
-      // 4. Validate manifest has fundingToken
+      // 4. Validate manifest has fundingToken with required fields
       const manifest = strategy.manifest as { fundingToken?: FundingTokenSpec } | null;
       if (!manifest?.fundingToken) {
         const errorResponse = createErrorResponse(
@@ -169,6 +169,18 @@ export async function GET(
       }
 
       const { fundingToken } = manifest;
+
+      // Validate fundingToken has required address field
+      if (!fundingToken.address || !fundingToken.chainId) {
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.VALIDATION_ERROR,
+          'Strategy manifest fundingToken is missing required fields (address or chainId). Please redeploy with an updated manifest.'
+        );
+        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+        return NextResponse.json(errorResponse, {
+          status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
+        });
+      }
 
       // 5. Check strategy is deployed (has automation wallet)
       if (strategy.automationWallets.length === 0) {

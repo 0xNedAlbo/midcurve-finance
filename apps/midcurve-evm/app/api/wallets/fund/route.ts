@@ -63,13 +63,28 @@ export async function POST(request: Request) {
 
     const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
 
+    const account = privateKeyToAccount(corePrivateKey as `0x${string}`);
+
     const walletClient = createWalletClient({
-      account: privateKeyToAccount(corePrivateKey as `0x${string}`),
+      account,
       chain: semseeChain,
       transport: http(rpcUrl),
     });
 
-    log.info({ walletAddress, amountEth, msg: 'Funding wallet from CORE' });
+    // Create publicClient first - needed for nonce lookup and receipt confirmation
+    const publicClient = createPublicClient({
+      chain: semseeChain,
+      transport: http(rpcUrl),
+    });
+
+    // Get pending nonce explicitly to prevent "replacement transaction underpriced" errors
+    // Using 'pending' blockTag includes transactions in the mempool
+    const nonce = await publicClient.getTransactionCount({
+      address: account.address,
+      blockTag: 'pending',
+    });
+
+    log.info({ walletAddress, amountEth, nonce, msg: 'Funding wallet from CORE' });
 
     // Use fixed gas limit to avoid eth_estimateGas call
     // (Geth Clique PoA has a bug that crashes on estimateGas)
@@ -77,13 +92,10 @@ export async function POST(request: Request) {
       to: walletAddress as Address,
       value: parseEther(amountEth),
       gas: 21000n, // Standard ETH transfer gas
+      nonce, // Explicit nonce prevents race conditions on retry
     });
 
-    // Wait for confirmation
-    const publicClient = createPublicClient({
-      chain: semseeChain,
-      transport: http(rpcUrl),
-    });
+    // Wait for confirmation before returning
     await publicClient.waitForTransactionReceipt({ hash: txHash, confirmations: 1 });
 
     log.info({ walletAddress, amountEth, txHash, msg: 'Wallet funded successfully' });
