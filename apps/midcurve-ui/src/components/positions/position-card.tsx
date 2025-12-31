@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import { RefreshCw, Search } from "lucide-react";
 import type { ListPositionData } from "@midcurve/api-shared";
 import { PositionCardHeader } from "./position-card-header";
@@ -152,15 +150,13 @@ export function PositionCard({ initialData, listIndex }: PositionCardProps) {
         {/* RIGHT: Common Actions - pushed to the right with ml-auto */}
         <div className="flex items-center gap-1 md:gap-2 ml-auto">
           <Link
-            href={`/positions/${position.protocol}/${getPositionPath(position)}`}
+            to={`/positions/${position.protocol}/${getPositionPath(position)}`}
             onClick={() => {
               // Store current dashboard URL for back navigation
-              if (typeof window !== "undefined") {
-                const currentUrl = window.location.pathname + window.location.search;
-                import("@/lib/dashboard-referrer").then(({ storeDashboardUrl }) => {
-                  storeDashboardUrl(currentUrl);
-                });
-              }
+              const currentUrl = window.location.pathname + window.location.search;
+              import("@/lib/dashboard-referrer").then(({ storeDashboardUrl }) => {
+                storeDashboardUrl(currentUrl);
+              });
             }}
             className="p-1.5 md:p-2 hover:bg-slate-700/50 rounded-lg transition-colors cursor-pointer"
             title="View Details"

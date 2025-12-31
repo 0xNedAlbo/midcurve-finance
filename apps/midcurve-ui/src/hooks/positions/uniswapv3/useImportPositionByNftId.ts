@@ -7,7 +7,7 @@
 
 import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { apiClient, ApiError } from '@/lib/api-client';
+import { apiClientFn, ApiError } from '@/lib/api-client';
 import type {
   ImportUniswapV3PositionData,
   ListPositionsResponse,
@@ -42,7 +42,7 @@ export function useImportPositionByNftId(
       };
 
       // Note: apiClient unwraps { success, data } and returns just the data field
-      return apiClient<ImportUniswapV3PositionData>(
+      return apiClientFn<ImportUniswapV3PositionData>(
         '/api/v1/positions/uniswapv3/import',
         {
           method: 'POST',
@@ -62,7 +62,7 @@ export function useImportPositionByNftId(
       queryClient.setQueriesData<ListPositionsResponse>(
         { queryKey: queryKeys.positions.lists() },
         (oldData) => {
-          if (!oldData) return oldData;
+          if (!oldData?.data) return oldData;
 
           // Check if position already exists (import is idempotent)
           const exists = oldData.data.some(

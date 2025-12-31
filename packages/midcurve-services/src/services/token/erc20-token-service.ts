@@ -95,8 +95,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
     /**
      * Parse config from database JSON to application type
      *
-     * For ERC-20, config contains only primitive types (address, chainId),
-     * so this is essentially a pass-through with type casting.
+     * For ERC-20, config contains address, chainId, and optional basicCurrencyId.
      *
      * @param configDB - Config object from database (JSON)
      * @returns Parsed ERC-20 config
@@ -105,28 +104,42 @@ export class Erc20TokenService extends TokenService<"erc20"> {
         const db = configDB as {
             address: string;
             chainId: number;
+            basicCurrencyId?: string;
         };
 
-        return {
+        const config: Erc20TokenConfig = {
             address: db.address,
             chainId: db.chainId,
         };
+
+        // Only include basicCurrencyId if it exists
+        if (db.basicCurrencyId) {
+            config.basicCurrencyId = db.basicCurrencyId;
+        }
+
+        return config;
     }
 
     /**
      * Serialize config from application type to database JSON
      *
-     * For ERC-20, config contains only primitive types (address, chainId),
-     * so this is essentially a pass-through.
+     * For ERC-20, config contains address, chainId, and optional basicCurrencyId.
      *
      * @param config - Application config
      * @returns Serialized config for database storage (JSON-serializable)
      */
     serializeConfig(config: Erc20TokenConfig): unknown {
-        return {
+        const serialized: Record<string, unknown> = {
             address: config.address,
             chainId: config.chainId,
         };
+
+        // Only include basicCurrencyId if it exists
+        if (config.basicCurrencyId) {
+            serialized.basicCurrencyId = config.basicCurrencyId;
+        }
+
+        return serialized;
     }
 
     // ============================================================================
@@ -271,7 +284,25 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 "CoinGecko enrichment data fetched"
             );
 
-            // 7. Create token with all data
+            // 7. Check for auto-linking to basic currency
+            const basicCurrencyCode = Erc20TokenService.getAutoLinkBasicCurrency(metadata.symbol);
+            let basicCurrencyId: string | undefined;
+
+            if (basicCurrencyCode) {
+                // Look up or create the basic currency
+                const basicCurrency = await this.ensureBasicCurrency(basicCurrencyCode);
+                basicCurrencyId = basicCurrency.id;
+                this.logger.info(
+                    {
+                        symbol: metadata.symbol,
+                        basicCurrencyCode,
+                        basicCurrencyId,
+                    },
+                    "Auto-linking token to basic currency"
+                );
+            }
+
+            // 8. Create token with all data
             const token = await this.create({
                 tokenType: "erc20",
                 name: metadata.name,
@@ -283,11 +314,18 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 config: {
                     address: normalizedAddress,
                     chainId,
+                    ...(basicCurrencyId && { basicCurrencyId }),
                 },
             });
 
             this.logger.info(
-                { id: token.id, address: normalizedAddress, chainId, symbol: token.symbol },
+                {
+                    id: token.id,
+                    address: normalizedAddress,
+                    chainId,
+                    symbol: token.symbol,
+                    basicCurrencyId: basicCurrencyId ?? null,
+                },
                 "Token discovered and created successfully"
             );
             log.methodExit(this.logger, "discover", { id: token.id, fromBlockchain: true });
@@ -1135,4 +1173,255 @@ export class Erc20TokenService extends TokenService<"erc20"> {
         };
         return mapping[chainId] || null;
     }
+
+    /**
+     * Ensure a basic currency exists, creating it if necessary.
+     *
+     * This is used during auto-linking to lazily create basic currencies
+     * when tokens are discovered.
+     *
+     * @param currencyCode - Currency code ('USD', 'ETH', or 'BTC')
+     * @returns The basic currency token record
+     */
+    private async ensureBasicCurrency(
+        currencyCode: "USD" | "ETH" | "BTC"
+    ): Promise<{ id: string }> {
+        // Check if already exists
+        const existing = await this.prisma.token.findFirst({
+            where: {
+                tokenType: "basic-currency",
+                config: {
+                    path: ["currencyCode"],
+                    equals: currencyCode,
+                },
+            },
+        });
+
+        if (existing) {
+            return { id: existing.id };
+        }
+
+        // Create new basic currency
+        const currencyDefs: Record<"USD" | "ETH" | "BTC", { name: string; symbol: string }> = {
+            USD: { name: "US Dollar", symbol: "USD" },
+            ETH: { name: "Ethereum", symbol: "ETH" },
+            BTC: { name: "Bitcoin", symbol: "BTC" },
+        };
+
+        const currencyDef = currencyDefs[currencyCode];
+
+        this.logger.info(
+            { currencyCode },
+            "Auto-creating basic currency"
+        );
+
+        const created = await this.prisma.token.create({
+            data: {
+                tokenType: "basic-currency",
+                name: currencyDef.name,
+                symbol: currencyDef.symbol,
+                decimals: 18, // All basic currencies use 18 decimals
+                config: {
+                    currencyCode,
+                },
+            },
+        });
+
+        return { id: created.id };
+    }
+
+    // ============================================================================
+    // BASIC CURRENCY LINKING
+    // ============================================================================
+
+    /**
+     * Link an ERC-20 token to a basic currency.
+     *
+     * This enables the token to be used in cross-platform aggregations.
+     * The link represents a 1:1 value relationship (e.g., 1 USDC = 1 USD).
+     *
+     * Common mappings:
+     * - USDC, USDT, DAI → USD
+     * - WETH → ETH
+     * - WBTC, cbBTC → BTC
+     *
+     * Note: Value-accruing tokens (stETH, rETH, wstETH) should NOT be linked
+     * since they don't have a 1:1 relationship with their underlying asset.
+     *
+     * @param tokenId - ERC-20 token database ID
+     * @param basicCurrencyId - Basic currency token ID to link to
+     * @returns The updated token with basicCurrencyId in config
+     * @throws Error if token not found or not ERC-20
+     * @throws Error if basicCurrencyId doesn't reference a basic currency token
+     */
+    async linkToBasicCurrency(
+        tokenId: string,
+        basicCurrencyId: string
+    ): Promise<Token<"erc20">> {
+        log.methodEntry(this.logger, "linkToBasicCurrency", {
+            tokenId,
+            basicCurrencyId,
+        });
+
+        try {
+            // Verify token exists and is ERC-20
+            const existing = await this.findById(tokenId);
+            if (!existing) {
+                const error = new Error(`Token with id ${tokenId} not found`);
+                log.methodError(this.logger, "linkToBasicCurrency", error, { tokenId });
+                throw error;
+            }
+
+            // Verify basic currency exists and is correct type
+            log.dbOperation(this.logger, "findUnique", "Token", { id: basicCurrencyId });
+
+            const basicCurrency = await this.prisma.token.findUnique({
+                where: { id: basicCurrencyId },
+            });
+
+            if (!basicCurrency) {
+                const error = new Error(
+                    `Basic currency with id ${basicCurrencyId} not found`
+                );
+                log.methodError(this.logger, "linkToBasicCurrency", error, {
+                    tokenId,
+                    basicCurrencyId,
+                });
+                throw error;
+            }
+
+            if (basicCurrency.tokenType !== "basic-currency") {
+                const error = new Error(
+                    `Token ${basicCurrencyId} is not a basic currency (type: ${basicCurrency.tokenType})`
+                );
+                log.methodError(this.logger, "linkToBasicCurrency", error, {
+                    tokenId,
+                    basicCurrencyId,
+                    actualType: basicCurrency.tokenType,
+                });
+                throw error;
+            }
+
+            // Update config with basicCurrencyId
+            const updatedConfig: Erc20TokenConfig = {
+                ...existing.config,
+                basicCurrencyId,
+            };
+
+            const updated = await this.update(tokenId, {
+                config: updatedConfig,
+            });
+
+            this.logger.info(
+                {
+                    tokenId,
+                    symbol: updated.symbol,
+                    basicCurrencyId,
+                    basicCurrencySymbol: basicCurrency.symbol,
+                },
+                "ERC-20 token linked to basic currency"
+            );
+            log.methodExit(this.logger, "linkToBasicCurrency", { tokenId });
+            return updated;
+        } catch (error) {
+            // Only log if not already logged
+            if (
+                !(
+                    error instanceof Error &&
+                    (error.message.includes("not found") ||
+                        error.message.includes("not a basic currency"))
+                )
+            ) {
+                log.methodError(this.logger, "linkToBasicCurrency", error as Error, {
+                    tokenId,
+                    basicCurrencyId,
+                });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Unlink an ERC-20 token from its basic currency.
+     *
+     * @param tokenId - ERC-20 token database ID
+     * @returns The updated token without basicCurrencyId
+     * @throws Error if token not found or not ERC-20
+     */
+    async unlinkFromBasicCurrency(tokenId: string): Promise<Token<"erc20">> {
+        log.methodEntry(this.logger, "unlinkFromBasicCurrency", { tokenId });
+
+        try {
+            const existing = await this.findById(tokenId);
+            if (!existing) {
+                const error = new Error(`Token with id ${tokenId} not found`);
+                log.methodError(this.logger, "unlinkFromBasicCurrency", error, { tokenId });
+                throw error;
+            }
+
+            // Remove basicCurrencyId from config
+            const { basicCurrencyId: _, ...restConfig } = existing.config;
+
+            const updated = await this.update(tokenId, {
+                config: restConfig as Erc20TokenConfig,
+            });
+
+            this.logger.info(
+                { tokenId, symbol: updated.symbol },
+                "ERC-20 token unlinked from basic currency"
+            );
+            log.methodExit(this.logger, "unlinkFromBasicCurrency", { tokenId });
+            return updated;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "unlinkFromBasicCurrency", error as Error, {
+                    tokenId,
+                });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Check if a token symbol should be auto-linked to a basic currency.
+     *
+     * Only 1:1 wrapped tokens are auto-linked. Value-accruing tokens
+     * (stETH, rETH, wstETH, cbETH) are excluded.
+     *
+     * @param symbol - Token symbol (case-insensitive)
+     * @returns Basic currency code ('USD' | 'ETH' | 'BTC') or null if not auto-linkable
+     */
+    static getAutoLinkBasicCurrency(symbol: string): "USD" | "ETH" | "BTC" | null {
+        const normalizedSymbol = symbol.toUpperCase();
+        return SYMBOL_TO_BASIC_CURRENCY[normalizedSymbol] ?? null;
+    }
 }
+
+// =============================================================================
+// AUTO-LINK SYMBOL MAPPING
+// =============================================================================
+
+/**
+ * Mapping of token symbols to basic currency codes.
+ *
+ * Only includes 1:1 wrapped/pegged tokens.
+ * Value-accruing tokens (stETH, rETH, wstETH, cbETH) are explicitly excluded.
+ */
+const SYMBOL_TO_BASIC_CURRENCY: Record<string, "USD" | "ETH" | "BTC"> = {
+    // USD stablecoins (1:1 pegged)
+    USDC: "USD",
+    USDT: "USD",
+    DAI: "USD",
+    BUSD: "USD",
+    FRAX: "USD",
+    TUSD: "USD",
+    USDP: "USD",
+    LUSD: "USD",
+    // ETH wrapped (1:1 only)
+    WETH: "ETH",
+    // BTC wrapped (1:1 only)
+    WBTC: "BTC",
+    CBBTC: "BTC",
+    RENBTC: "BTC",
+    TBTC: "BTC",
+};

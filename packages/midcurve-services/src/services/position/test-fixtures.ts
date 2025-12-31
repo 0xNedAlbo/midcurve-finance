@@ -30,6 +30,8 @@ interface PositionFixture {
     currentCostBasis: string;
     realizedPnl: string;
     unrealizedPnl: string;
+    realizedCashflow: string; // Cash flow for non-AMM protocols (always '0' for UniswapV3)
+    unrealizedCashflow: string; // Cash flow for non-AMM protocols (always '0' for UniswapV3)
     collectedFees: string;
     unClaimedFees: string;
     lastFeesCollectedAt: Date;
@@ -195,6 +197,8 @@ export const ACTIVE_ETH_USDC_POSITION: PositionFixture = {
     currentCostBasis: '1000000000', // 1000 USDC
     realizedPnl: '0',
     unrealizedPnl: '500000000', // 500 USDC profit
+    realizedCashflow: '0', // Always 0 for UniswapV3
+    unrealizedCashflow: '0', // Always 0 for UniswapV3
     collectedFees: '25000000', // 25 USDC collected
     unClaimedFees: '5000000', // 5 USDC unclaimed
     lastFeesCollectedAt: new Date('2024-06-01T00:00:00Z'),
@@ -230,10 +234,13 @@ export const ACTIVE_ETH_USDC_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
+
     currentValue: 1500000000n,
     currentCostBasis: 1000000000n,
     realizedPnl: 0n,
     unrealizedPnl: 500000000n,
+    realizedCashflow: 0n, // Always 0 for UniswapV3
+    unrealizedCashflow: 0n, // Always 0 for UniswapV3
     collectedFees: 25000000n,
     unClaimedFees: 5000000n,
     lastFeesCollectedAt: new Date('2024-06-01T00:00:00Z'),
@@ -282,6 +289,8 @@ export const CLOSED_POSITION: PositionFixture = {
     currentCostBasis: '0',
     realizedPnl: '100000000', // 100 USDC profit
     unrealizedPnl: '0',
+    realizedCashflow: '0', // Always 0 for UniswapV3
+    unrealizedCashflow: '0', // Always 0 for UniswapV3
     collectedFees: '50000000', // 50 USDC collected
     unClaimedFees: '0',
     lastFeesCollectedAt: new Date('2024-05-01T00:00:00Z'),
@@ -317,10 +326,13 @@ export const CLOSED_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
+
     currentValue: 0n,
     currentCostBasis: 0n,
     realizedPnl: 100000000n,
     unrealizedPnl: 0n,
+    realizedCashflow: 0n, // Always 0 for UniswapV3
+    unrealizedCashflow: 0n, // Always 0 for UniswapV3
     collectedFees: 50000000n,
     unClaimedFees: 0n,
     lastFeesCollectedAt: new Date('2024-05-01T00:00:00Z'),
@@ -383,6 +395,8 @@ export const BOB_POSITION: PositionFixture = {
     currentCostBasis: '750000000',
     realizedPnl: '0',
     unrealizedPnl: '50000000',
+    realizedCashflow: '0', // Always 0 for UniswapV3
+    unrealizedCashflow: '0', // Always 0 for UniswapV3
     collectedFees: '10000000',
     unClaimedFees: '2000000',
     lastFeesCollectedAt: new Date('2024-06-15T00:00:00Z'),
@@ -418,10 +432,13 @@ export const BOB_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID_2,
+
     currentValue: 800000000n,
     currentCostBasis: 750000000n,
     realizedPnl: 0n,
     unrealizedPnl: 50000000n,
+    realizedCashflow: 0n, // Always 0 for UniswapV3
+    unrealizedCashflow: 0n, // Always 0 for UniswapV3
     collectedFees: 10000000n,
     unClaimedFees: 2000000n,
     lastFeesCollectedAt: new Date('2024-06-15T00:00:00Z'),
@@ -486,6 +503,8 @@ export const ARBITRUM_POSITION: PositionFixture = {
     currentCostBasis: '1800000000', // 1800 USDC
     realizedPnl: '0',
     unrealizedPnl: '200000000', // 200 USDC profit
+    realizedCashflow: '0', // Always 0 for UniswapV3
+    unrealizedCashflow: '0', // Always 0 for UniswapV3
     collectedFees: '15000000', // 15 USDC collected
     unClaimedFees: '3000000', // 3 USDC unclaimed
     lastFeesCollectedAt: new Date('2024-06-20T00:00:00Z'),
@@ -521,10 +540,13 @@ export const ARBITRUM_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
+
     currentValue: 2000000000n,
     currentCostBasis: 1800000000n,
     realizedPnl: 0n,
     unrealizedPnl: 200000000n,
+    realizedCashflow: 0n, // Always 0 for UniswapV3
+    unrealizedCashflow: 0n, // Always 0 for UniswapV3
     collectedFees: 15000000n,
     unClaimedFees: 3000000n,
     lastFeesCollectedAt: new Date('2024-06-20T00:00:00Z'),
@@ -580,6 +602,8 @@ export const BASE_POSITION: PositionFixture = {
     currentCostBasis: '0',
     realizedPnl: '75000000', // 75 USDC profit
     unrealizedPnl: '0',
+    realizedCashflow: '0', // Always 0 for UniswapV3
+    unrealizedCashflow: '0', // Always 0 for UniswapV3
     collectedFees: '30000000', // 30 USDC collected
     unClaimedFees: '0',
     lastFeesCollectedAt: new Date('2024-06-01T00:00:00Z'),
@@ -615,10 +639,13 @@ export const BASE_POSITION: PositionFixture = {
     protocol: 'uniswapv3',
     positionType: 'CL_TICKS',
     userId: TEST_USER_ID,
+
     currentValue: 0n,
     currentCostBasis: 0n,
     realizedPnl: 75000000n,
     unrealizedPnl: 0n,
+    realizedCashflow: 0n, // Always 0 for UniswapV3
+    unrealizedCashflow: 0n, // Always 0 for UniswapV3
     collectedFees: 30000000n,
     unClaimedFees: 0n,
     lastFeesCollectedAt: new Date('2024-06-01T00:00:00Z'),

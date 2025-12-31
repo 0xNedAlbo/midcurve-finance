@@ -1,0 +1,53 @@
+# Midcurve EVM - Development Configuration
+#
+# Uses Geth with Clique PoA consensus for instant mining.
+# Strategies are deployed dynamically by Core.
+#
+# Ports:
+# - 8545: HTTP RPC (Geth)
+# - 8546: WebSocket RPC (Geth)
+# - 5672: AMQP (RabbitMQ)
+# - 15672: Management UI (RabbitMQ)
+
+services:
+  geth:
+    build:
+      context: .
+      dockerfile: Dockerfile.geth
+    container_name: midcurve-geth
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+    volumes:
+      - geth-data:/data  # Persistent state
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: midcurve-rabbitmq
+    ports:
+      - "5672:5672"      # AMQP protocol
+      - "15672:15672"    # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-midcurve}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-midcurve_dev}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  geth-data:
+  rabbitmq-data:

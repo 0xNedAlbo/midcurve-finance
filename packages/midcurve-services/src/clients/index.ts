@@ -48,3 +48,25 @@ export {
   POOL_HISTORICAL_DATA_QUERY,
   POOL_CREATION_QUERY,
 } from './subgraph/uniswapv3/index.js';
+
+export {
+  SignerClient,
+  SignerClientError,
+  type SignerConfig,
+  type SignerClientDependencies,
+  type SignerDeployStrategyRequest,
+  type SignerDeployStrategyResponse,
+  type SignerErrorResponse,
+} from './signer/index.js';
+
+export {
+  EvmClient,
+  getEvmClient,
+  EvmClientError,
+  type EvmClientConfig,
+  type EvmStrategyStatus,
+  type DeployStrategyInput,
+  type DeployStrategyResponse,
+  type StrategyStatusResponse,
+  type LifecycleOperationResponse,
+} from './evm/index.js';

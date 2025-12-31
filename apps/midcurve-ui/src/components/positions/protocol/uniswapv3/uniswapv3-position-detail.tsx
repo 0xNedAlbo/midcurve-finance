@@ -1,6 +1,4 @@
-"use client";
-
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "react-router-dom";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
 import { PositionDetailHeader } from "../../position-detail-header";
 import { PositionDetailTabs } from "../../position-detail-tabs";
@@ -20,7 +18,7 @@ interface UniswapV3PositionDetailProps {
 export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "technical";
 
 export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: UniswapV3PositionDetailProps) {
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   // Get tab from URL query params, default to 'overview'
   // Read directly from URL params (no state) so it updates when URL changes

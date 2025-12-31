@@ -74,6 +74,34 @@ export interface CoinGeckoMarketData {
 }
 
 /**
+ * Response from /simple/price endpoint
+ */
+export interface CoinGeckoSimplePrices {
+  [coinId: string]: {
+    usd: number;
+    usd_24h_change?: number;
+  };
+}
+
+/**
+ * Response from /coins/{id}/history endpoint
+ */
+export interface CoinGeckoHistoricalData {
+  /** CoinGecko coin ID */
+  id: string;
+  /** Token symbol */
+  symbol: string;
+  /** Token name */
+  name: string;
+  /** Market data at the historical date */
+  market_data?: {
+    current_price?: { usd?: number };
+    market_cap?: { usd?: number };
+    total_volume?: { usd?: number };
+  };
+}
+
+/**
  * Enrichment data extracted from CoinGecko
  */
 export interface EnrichmentData {
@@ -711,6 +739,384 @@ export class CoinGeckoClient {
     }
   }
 
+  // ============================================================================
+  // PRICE DISCOVERY METHODS
+  // ============================================================================
+
+  /**
+   * Short cache timeout for current prices (60 seconds)
+   * Current prices are volatile and change frequently
+   */
+  private readonly priceCacheTimeout = 60;
+
+  /**
+   * Long cache timeout for historical prices (30 days)
+   * Historical data is immutable - once recorded, it doesn't change
+   */
+  private readonly historicalCacheTimeout = 30 * 24 * 3600;
+
+  /**
+   * Long cache timeout for supported vs_currencies (24 hours)
+   * This list changes rarely (new currencies added occasionally)
+   */
+  private readonly vsCurrenciesCacheTimeout = 24 * 3600;
+
+  /**
+   * List of stablecoin CoinGecko IDs
+   * Used to optimize price lookups (assume 1:1 with USD)
+   */
+  private readonly stablecoinIds = [
+    'tether',
+    'usd-coin',
+    'dai',
+    'binance-usd',
+    'true-usd',
+    'frax',
+    'usdd',
+    'pax-dollar',
+    'gemini-dollar',
+  ];
+
+  /**
+   * Get current prices for multiple tokens in USD
+   *
+   * Uses the /simple/price endpoint which is efficient for batch price lookups.
+   * Results are cached for 60 seconds as prices are volatile.
+   *
+   * @param coinIds - Array of CoinGecko coin IDs (e.g., ['bitcoin', 'ethereum'])
+   * @returns Object mapping coin IDs to their USD prices
+   * @throws CoinGeckoApiError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   * const prices = await client.getSimplePrices(['bitcoin', 'ethereum']);
+   * // { bitcoin: { usd: 50000 }, ethereum: { usd: 3000 } }
+   * ```
+   */
+  async getSimplePrices(coinIds: string[]): Promise<CoinGeckoSimplePrices> {
+    log.methodEntry(this.logger, 'getSimplePrices', { coinIds, count: coinIds.length });
+
+    if (coinIds.length === 0) {
+      log.methodExit(this.logger, 'getSimplePrices', { count: 0 });
+      return {};
+    }
+
+    // Cache key: sorted IDs for consistency
+    const sortedIds = [...coinIds].sort();
+    const cacheKey = `coingecko:prices:${sortedIds.join(',')}`;
+
+    // Check distributed cache first
+    const cached = await this.cacheService.get<CoinGeckoSimplePrices>(cacheKey);
+    if (cached) {
+      log.cacheHit(this.logger, 'getSimplePrices', cacheKey);
+      log.methodExit(this.logger, 'getSimplePrices', {
+        count: Object.keys(cached).length,
+        fromCache: true,
+      });
+      return cached;
+    }
+
+    log.cacheMiss(this.logger, 'getSimplePrices', cacheKey);
+
+    try {
+      const idsParam = coinIds.join(',');
+
+      log.externalApiCall(this.logger, 'CoinGecko', '/simple/price', {
+        ids: idsParam,
+        vs_currencies: 'usd',
+      });
+
+      const response = await this.scheduledFetch(
+        `${this.baseUrl}/simple/price?ids=${encodeURIComponent(idsParam)}&vs_currencies=usd&include_24hr_change=true`
+      );
+
+      if (!response.ok) {
+        const error = new CoinGeckoApiError(
+          `CoinGecko API error: ${response.status} ${response.statusText}`,
+          response.status
+        );
+        log.methodError(this.logger, 'getSimplePrices', error, {
+          coinIds,
+          statusCode: response.status,
+        });
+        throw error;
+      }
+
+      const prices = (await response.json()) as CoinGeckoSimplePrices;
+
+      this.logger.debug(
+        { requestedCount: coinIds.length, receivedCount: Object.keys(prices).length },
+        'Retrieved prices from CoinGecko API'
+      );
+
+      // Store in distributed cache (short TTL for current prices)
+      await this.cacheService.set(cacheKey, prices, this.priceCacheTimeout);
+
+      log.methodExit(this.logger, 'getSimplePrices', {
+        count: Object.keys(prices).length,
+        fromCache: false,
+      });
+
+      return prices;
+    } catch (error) {
+      if (error instanceof CoinGeckoApiError) {
+        throw error;
+      }
+
+      const wrappedError = new CoinGeckoApiError(
+        `Failed to fetch prices from CoinGecko: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      log.methodError(this.logger, 'getSimplePrices', wrappedError, { coinIds });
+      throw wrappedError;
+    }
+  }
+
+  /**
+   * Get historical price at a specific date (00:00 UTC)
+   *
+   * Uses the /coins/{id}/history endpoint which returns the price at 00:00 UTC
+   * for the specified date. Results are cached for 30 days since historical
+   * data is immutable.
+   *
+   * Note: Data is available ~35 minutes after midnight UTC for each day.
+   *
+   * @param coinId - CoinGecko coin ID (e.g., 'bitcoin')
+   * @param date - Date to get price for (will use 00:00 UTC of that day)
+   * @returns Object with USD price at that date
+   * @throws CoinGeckoApiError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   * const price = await client.getHistoricalPrice('bitcoin', new Date('2023-01-15'));
+   * // { usd: 21000 }
+   * ```
+   */
+  async getHistoricalPrice(coinId: string, date: Date): Promise<{ usd: number }> {
+    // Format date as DD-MM-YYYY (CoinGecko's required format)
+    const day = date.getUTCDate().toString().padStart(2, '0');
+    const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+    const year = date.getUTCFullYear();
+    const dateStr = `${day}-${month}-${year}`;
+
+    log.methodEntry(this.logger, 'getHistoricalPrice', { coinId, date: dateStr });
+
+    // Cache key: includes coin and date
+    const cacheKey = `coingecko:history:${coinId}:${dateStr}`;
+
+    // Check distributed cache first
+    const cached = await this.cacheService.get<{ usd: number }>(cacheKey);
+    if (cached) {
+      log.cacheHit(this.logger, 'getHistoricalPrice', cacheKey);
+      log.methodExit(this.logger, 'getHistoricalPrice', {
+        coinId,
+        date: dateStr,
+        usd: cached.usd,
+        fromCache: true,
+      });
+      return cached;
+    }
+
+    log.cacheMiss(this.logger, 'getHistoricalPrice', cacheKey);
+
+    try {
+      log.externalApiCall(this.logger, 'CoinGecko', `/coins/${coinId}/history`, {
+        date: dateStr,
+      });
+
+      const response = await this.scheduledFetch(
+        `${this.baseUrl}/coins/${coinId}/history?date=${dateStr}&localization=false`
+      );
+
+      if (!response.ok) {
+        const error = new CoinGeckoApiError(
+          `CoinGecko API error: ${response.status} ${response.statusText}`,
+          response.status
+        );
+        log.methodError(this.logger, 'getHistoricalPrice', error, {
+          coinId,
+          date: dateStr,
+          statusCode: response.status,
+        });
+        throw error;
+      }
+
+      const data = (await response.json()) as CoinGeckoHistoricalData;
+
+      // Extract price, default to 0 if not available
+      const price = {
+        usd: data.market_data?.current_price?.usd ?? 0,
+      };
+
+      if (price.usd === 0) {
+        this.logger.warn(
+          { coinId, date: dateStr },
+          'Historical price data not available from CoinGecko'
+        );
+      } else {
+        this.logger.debug(
+          { coinId, date: dateStr, usd: price.usd },
+          'Retrieved historical price from CoinGecko API'
+        );
+      }
+
+      // Store in distributed cache (long TTL for historical data)
+      await this.cacheService.set(cacheKey, price, this.historicalCacheTimeout);
+
+      log.methodExit(this.logger, 'getHistoricalPrice', {
+        coinId,
+        date: dateStr,
+        usd: price.usd,
+        fromCache: false,
+      });
+
+      return price;
+    } catch (error) {
+      if (error instanceof CoinGeckoApiError) {
+        throw error;
+      }
+
+      const wrappedError = new CoinGeckoApiError(
+        `Failed to fetch historical price for ${coinId}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      log.methodError(this.logger, 'getHistoricalPrice', wrappedError, {
+        coinId,
+        date: dateStr,
+      });
+      throw wrappedError;
+    }
+  }
+
+  /**
+   * Get token price in quote token units
+   *
+   * Calculates the cross-rate between two tokens using USD as the intermediary.
+   * For stablecoins (USDC, USDT, DAI, etc.), assumes 1:1 with USD for efficiency.
+   *
+   * @param tokenCoinGeckoId - CoinGecko ID of the token to price
+   * @param quoteCoinGeckoId - CoinGecko ID of the quote token (unit of account)
+   * @param date - Optional date for historical price (omit for current price)
+   * @returns Price of token in quote token units (floating point)
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   *
+   * // Current ETH price in USDC (stablecoin optimization)
+   * const ethInUsdc = await client.getTokenPriceInQuote('ethereum', 'usd-coin');
+   * // 3000.50
+   *
+   * // ETH price in BTC (cross-rate calculation)
+   * const ethInBtc = await client.getTokenPriceInQuote('ethereum', 'bitcoin');
+   * // 0.06
+   *
+   * // Historical ETH price in USDC
+   * const historicalEth = await client.getTokenPriceInQuote(
+   *   'ethereum',
+   *   'usd-coin',
+   *   new Date('2023-01-15')
+   * );
+   * // 1500.25
+   * ```
+   */
+  async getTokenPriceInQuote(
+    tokenCoinGeckoId: string,
+    quoteCoinGeckoId: string,
+    date?: Date
+  ): Promise<number> {
+    log.methodEntry(this.logger, 'getTokenPriceInQuote', {
+      tokenCoinGeckoId,
+      quoteCoinGeckoId,
+      date: date?.toISOString(),
+    });
+
+    try {
+      // If same token, price is 1
+      if (tokenCoinGeckoId === quoteCoinGeckoId) {
+        log.methodExit(this.logger, 'getTokenPriceInQuote', { price: 1 });
+        return 1;
+      }
+
+      // Optimization: If quote token is a stablecoin, just get token price in USD
+      if (this.stablecoinIds.includes(quoteCoinGeckoId)) {
+        if (date) {
+          const historical = await this.getHistoricalPrice(tokenCoinGeckoId, date);
+          log.methodExit(this.logger, 'getTokenPriceInQuote', {
+            price: historical.usd,
+            method: 'stablecoin-historical',
+          });
+          return historical.usd;
+        }
+
+        const prices = await this.getSimplePrices([tokenCoinGeckoId]);
+        const price = prices[tokenCoinGeckoId]?.usd ?? 0;
+        log.methodExit(this.logger, 'getTokenPriceInQuote', {
+          price,
+          method: 'stablecoin-current',
+        });
+        return price;
+      }
+
+      // Get both prices and calculate cross-rate
+      if (date) {
+        const [tokenPrice, quotePrice] = await Promise.all([
+          this.getHistoricalPrice(tokenCoinGeckoId, date),
+          this.getHistoricalPrice(quoteCoinGeckoId, date),
+        ]);
+
+        if (quotePrice.usd === 0) {
+          this.logger.warn(
+            { quoteCoinGeckoId, date: date.toISOString() },
+            'Quote token price is 0, cannot calculate cross-rate'
+          );
+          log.methodExit(this.logger, 'getTokenPriceInQuote', { price: 0 });
+          return 0;
+        }
+
+        const price = tokenPrice.usd / quotePrice.usd;
+        log.methodExit(this.logger, 'getTokenPriceInQuote', {
+          price,
+          method: 'cross-rate-historical',
+        });
+        return price;
+      }
+
+      // Current prices
+      const prices = await this.getSimplePrices([tokenCoinGeckoId, quoteCoinGeckoId]);
+      const tokenUsd = prices[tokenCoinGeckoId]?.usd ?? 0;
+      const quoteUsd = prices[quoteCoinGeckoId]?.usd ?? 0;
+
+      if (quoteUsd === 0) {
+        this.logger.warn(
+          { quoteCoinGeckoId },
+          'Quote token price is 0, cannot calculate cross-rate'
+        );
+        log.methodExit(this.logger, 'getTokenPriceInQuote', { price: 0 });
+        return 0;
+      }
+
+      const price = tokenUsd / quoteUsd;
+      log.methodExit(this.logger, 'getTokenPriceInQuote', {
+        price,
+        method: 'cross-rate-current',
+      });
+      return price;
+    } catch (error) {
+      this.logger.warn(
+        {
+          tokenCoinGeckoId,
+          quoteCoinGeckoId,
+          date: date?.toISOString(),
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        'Failed to get token price in quote'
+      );
+      log.methodExit(this.logger, 'getTokenPriceInQuote', { price: 0, error: true });
+      return 0;
+    }
+  }
+
   /**
    * Clear all CoinGecko caches (useful for testing or manual refresh)
    *
@@ -728,6 +1134,161 @@ export class CoinGeckoClient {
   async hasCachedData(): Promise<boolean> {
     const cached = await this.cacheService.get<CoinGeckoToken[]>('coingecko:tokens:all');
     return cached !== null;
+  }
+
+  // ============================================================================
+  // SUPPORTED VS CURRENCIES
+  // ============================================================================
+
+  /**
+   * Get supported vs_currencies from CoinGecko
+   *
+   * Returns the list of currencies that can be used as the 'vs_currencies' parameter
+   * in price queries. This is used to validate basic currency symbols in manifests.
+   *
+   * Results are cached for 24 hours since this list rarely changes.
+   *
+   * @returns Array of supported currency identifiers (lowercase, e.g., ['btc', 'eth', 'usd', 'eur', ...])
+   * @throws CoinGeckoApiError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   * const currencies = await client.getSupportedVsCurrencies();
+   * // ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'usd', 'aed', ...]
+   *
+   * // Check if a currency is supported
+   * const isUsdSupported = currencies.includes('usd'); // true
+   * const isInvalidSupported = currencies.includes('invalid'); // false
+   * ```
+   */
+  async getSupportedVsCurrencies(): Promise<string[]> {
+    log.methodEntry(this.logger, 'getSupportedVsCurrencies');
+
+    const cacheKey = 'coingecko:vs_currencies';
+
+    // Check distributed cache first
+    const cached = await this.cacheService.get<string[]>(cacheKey);
+    if (cached) {
+      log.cacheHit(this.logger, 'getSupportedVsCurrencies', cacheKey);
+      log.methodExit(this.logger, 'getSupportedVsCurrencies', {
+        count: cached.length,
+        fromCache: true,
+      });
+      return cached;
+    }
+
+    log.cacheMiss(this.logger, 'getSupportedVsCurrencies', cacheKey);
+
+    try {
+      log.externalApiCall(
+        this.logger,
+        'CoinGecko',
+        '/simple/supported_vs_currencies',
+        {}
+      );
+
+      const response = await this.scheduledFetch(
+        `${this.baseUrl}/simple/supported_vs_currencies`
+      );
+
+      if (!response.ok) {
+        const error = new CoinGeckoApiError(
+          `CoinGecko API error: ${response.status} ${response.statusText}`,
+          response.status
+        );
+        log.methodError(this.logger, 'getSupportedVsCurrencies', error, {
+          statusCode: response.status,
+        });
+        throw error;
+      }
+
+      const currencies = (await response.json()) as string[];
+
+      this.logger.info(
+        { count: currencies.length },
+        'Retrieved supported vs_currencies from CoinGecko'
+      );
+
+      // Store in distributed cache (24 hour TTL)
+      await this.cacheService.set(cacheKey, currencies, this.vsCurrenciesCacheTimeout);
+
+      log.methodExit(this.logger, 'getSupportedVsCurrencies', {
+        count: currencies.length,
+        fromCache: false,
+      });
+
+      return currencies;
+    } catch (error) {
+      // Re-throw CoinGeckoApiError
+      if (error instanceof CoinGeckoApiError) {
+        throw error;
+      }
+
+      // Wrap other errors
+      const wrappedError = new CoinGeckoApiError(
+        `Failed to fetch supported vs_currencies from CoinGecko: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+      log.methodError(this.logger, 'getSupportedVsCurrencies', wrappedError);
+      throw wrappedError;
+    }
+  }
+
+  /**
+   * Validate if a currency symbol is supported by CoinGecko as a vs_currency
+   *
+   * This is a convenience method that checks if a given symbol (case-insensitive)
+   * is in the list of supported vs_currencies. Returns the lowercase version
+   * of the currency if valid, null otherwise.
+   *
+   * @param symbol - Currency symbol to validate (e.g., 'USD', 'usd', 'ETH')
+   * @returns Lowercase currency identifier if valid, null if not supported
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   *
+   * const usd = await client.validateVsCurrency('USD');
+   * // 'usd'
+   *
+   * const eth = await client.validateVsCurrency('ETH');
+   * // 'eth'
+   *
+   * const invalid = await client.validateVsCurrency('INVALID');
+   * // null
+   * ```
+   */
+  async validateVsCurrency(symbol: string): Promise<string | null> {
+    log.methodEntry(this.logger, 'validateVsCurrency', { symbol });
+
+    try {
+      const currencies = await this.getSupportedVsCurrencies();
+      const normalizedSymbol = symbol.toLowerCase();
+
+      const isValid = currencies.includes(normalizedSymbol);
+
+      this.logger.debug(
+        { symbol, normalizedSymbol, isValid },
+        'Validated vs_currency'
+      );
+
+      log.methodExit(this.logger, 'validateVsCurrency', {
+        symbol,
+        isValid,
+        result: isValid ? normalizedSymbol : null,
+      });
+
+      return isValid ? normalizedSymbol : null;
+    } catch (error) {
+      this.logger.warn(
+        { symbol, error: error instanceof Error ? error.message : 'Unknown error' },
+        'Failed to validate vs_currency, returning null'
+      );
+      log.methodExit(this.logger, 'validateVsCurrency', { symbol, error: true });
+      return null;
+    }
   }
 
   /**

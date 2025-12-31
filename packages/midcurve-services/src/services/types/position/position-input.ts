@@ -10,6 +10,7 @@
 import type {
   Position,
   PositionConfigMap,
+  TreasuryWalletConfig,
 } from '@midcurve/shared';
 
 /**
@@ -54,6 +55,46 @@ export interface UniswapV3PositionDiscoverInput {
 }
 
 /**
+ * Treasury Position Discovery Input
+ *
+ * Parameters for creating a Treasury position (multi-token basket).
+ * Unlike Uniswap V3, Treasury positions are manually managed, not discovered from on-chain.
+ */
+export interface TreasuryPositionDiscoverInput {
+  /**
+   * Quote token ID (database ID) for position valuation
+   * All holdings will be valued in this token's units.
+   */
+  quoteTokenId: string;
+
+  /**
+   * Strategy ID this position belongs to (optional)
+   * Used for associating the position with a strategy.
+   */
+  strategyId?: string;
+
+  /**
+   * Initial wallet configurations (optional)
+   * Can be empty - wallets can be added later via updateWallets()
+   */
+  wallets?: TreasuryWalletConfig[];
+
+  /**
+   * Initial holdings (optional)
+   * Map of tokenId → { tokenSymbol, balance, costBasis }
+   * Usually starts empty and populated via ledger events.
+   */
+  initialHoldings?: Record<
+    string,
+    {
+      tokenSymbol: string;
+      balance: bigint;
+      costBasis: bigint;
+    }
+  >;
+}
+
+/**
  * Position Discovery Input Map
  *
  * Maps protocol identifiers to their corresponding discovery input types.
@@ -65,6 +106,7 @@ export interface UniswapV3PositionDiscoverInput {
  */
 export interface PositionDiscoverInputMap {
   uniswapv3: UniswapV3PositionDiscoverInput;
+  treasury: TreasuryPositionDiscoverInput;
   // Future protocols:
   // orca: OrcaPositionDiscoverInput;
   // raydium: RaydiumPositionDiscoverInput;

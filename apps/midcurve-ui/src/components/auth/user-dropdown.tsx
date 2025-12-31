@@ -1,15 +1,13 @@
-"use client";
-
 import { useState, useRef, useEffect } from "react";
-import { useSession, signOut } from "next-auth/react";
-import { User, LogOut, ChevronDown, Key } from "lucide-react";
+import { useAuth } from "@/providers/AuthProvider";
+import { User, LogOut, ChevronDown } from "lucide-react";
 
 interface UserDropdownProps {
   mode?: "loading" | "unauthenticated" | "authenticated";
 }
 
 export function UserDropdown({ mode }: UserDropdownProps) {
-  const { data: session, status } = useSession();
+  const { user, status, signOut } = useAuth();
 
   // Dropdown state
   const [isOpen, setIsOpen] = useState(false);
@@ -28,17 +26,17 @@ export function UserDropdown({ mode }: UserDropdownProps) {
   }, []);
 
   // Determine mode from session if not explicitly provided
-  const effectiveMode = mode || (status === "loading" ? "loading" : !session ? "unauthenticated" : "authenticated");
+  const effectiveMode = mode || (status === "loading" ? "loading" : !user ? "unauthenticated" : "authenticated");
 
   // Get user data from session
-  const userAddress = (session?.user as any)?.address || "";
-  const displayName = session?.user?.name || (userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : "");
+  const userAddress = user?.primaryWalletAddress || "";
+  const displayName = userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : "";
   const userInitial = displayName.charAt(0).toUpperCase();
   const fullAddress = userAddress;
 
   // Handle sign out
-  const handleSignOut = () => {
-    signOut({ callbackUrl: "/" });
+  const handleSignOut = async () => {
+    await signOut();
     setIsOpen(false);
   };
 
@@ -103,14 +101,6 @@ export function UserDropdown({ mode }: UserDropdownProps) {
             >
               <User className="w-4 h-4" />
               Profile
-            </button>
-
-            <button
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
-            >
-              <Key className="w-4 h-4" />
-              API Keys
             </button>
 
             <hr className="my-1 border-slate-700/50" />

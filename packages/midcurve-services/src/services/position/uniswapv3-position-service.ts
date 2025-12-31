@@ -3336,6 +3336,9 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 currentCostBasis: fields.currentCostBasis.toString(),
                 realizedPnl: fields.realizedPnl.toString(),
                 unrealizedPnl: fields.unrealizedPnl.toString(),
+                // Cash flow fields always 0 for UniswapV3 (fees tracked separately)
+                realizedCashflow: "0",
+                unrealizedCashflow: "0",
                 collectedFees: fields.collectedFees.toString(),
                 unClaimedFees: fields.unClaimedFees.toString(),
                 lastFeesCollectedAt: fields.lastFeesCollectedAt,

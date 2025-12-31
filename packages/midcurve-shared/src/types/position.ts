@@ -149,7 +149,48 @@ export interface Position<P extends keyof PositionConfigMap> {
   unrealizedPnl: bigint;
 
   // ============================================================================
-  // CASH FLOW RELATED FIELDS
+  // GENERAL CASH FLOW FIELDS (for non-AMM protocols)
+  // ============================================================================
+
+  /**
+   * Realized cash flow in quote token units (smallest denomination)
+   *
+   * Cash flow additions/reductions that have been locked in (collected/paid).
+   * For perpetual protocols (Hyperliquid): funding payments received/paid
+   * For lending protocols: interest earned/paid
+   *
+   * For AMM protocols (UniswapV3): Always 0n (fees tracked separately in collectedFees)
+   *
+   * Total Realized PnL = realizedPnl + realizedCashflow
+   *
+   * @example
+   * // Received 50 USDC in funding payments (6 decimals)
+   * realizedCashflow = 50_000000n
+   *
+   * // Paid 25 USDC in funding (negative)
+   * realizedCashflow = -25_000000n
+   */
+  realizedCashflow: bigint;
+
+  /**
+   * Unrealized cash flow in quote token units (smallest denomination)
+   *
+   * Cash flow additions/reductions that are pending (accrued but not collected).
+   * For perpetual protocols (Hyperliquid): accrued funding payments
+   * For lending protocols: accrued interest
+   *
+   * For AMM protocols (UniswapV3): Always 0n (fees tracked separately in unClaimedFees)
+   *
+   * Total Unrealized PnL = unrealizedPnl + unrealizedCashflow
+   *
+   * @example
+   * // 10 USDC in accrued funding payments (6 decimals)
+   * unrealizedCashflow = 10_000000n
+   */
+  unrealizedCashflow: bigint;
+
+  // ============================================================================
+  // CASH FLOW RELATED FIELDS (AMM fees)
   // ============================================================================
 
   /**
@@ -339,7 +380,8 @@ export type PositionProtocol = keyof PositionConfigMap;
 /**
  * Position type identifiers
  *
- * Specifies the liquidity model used by the position.
+ * Specifies the liquidity model used by the position:
+ * - 'CL_TICKS': Concentrated liquidity with tick-based ranges (Uniswap V3, Orca, etc.)
  */
 export type PositionType = 'CL_TICKS';
 
@@ -497,4 +539,66 @@ export function narrowPositionProtocol<P extends keyof PositionConfigMap>(
     );
   }
   return position as Position<P>;
+}
+
+// ============================================================================
+// TOTAL PNL CALCULATION HELPERS
+// ============================================================================
+
+/**
+ * Calculate total realized PnL including cash flows
+ *
+ * For complete realized returns, add position PnL and cash flow:
+ * - realizedPnl: From DECREASE_LIQUIDITY events (price movement gains/losses)
+ * - realizedCashflow: From funding payments, interest, etc. (for non-AMM protocols)
+ *
+ * For UniswapV3 positions, realizedCashflow is always 0n, so this returns realizedPnl.
+ *
+ * @param position - Position to calculate total realized PnL for
+ * @returns Total realized PnL in quote token units
+ *
+ * @example
+ * ```typescript
+ * const position: UniswapV3Position = ...;
+ * const totalRealized = getTotalRealizedPnl(position);
+ * // For UniswapV3: totalRealized === position.realizedPnl
+ *
+ * const hyperliquidPosition: HyperliquidPosition = ...;
+ * const totalRealized = getTotalRealizedPnl(hyperliquidPosition);
+ * // Includes funding payments: realizedPnl + realizedCashflow
+ * ```
+ */
+export function getTotalRealizedPnl<P extends keyof PositionConfigMap>(
+  position: Position<P>
+): bigint {
+  return position.realizedPnl + position.realizedCashflow;
+}
+
+/**
+ * Calculate total unrealized PnL including cash flows
+ *
+ * For complete unrealized returns, add position PnL and cash flow:
+ * - unrealizedPnl: From current position value vs cost basis
+ * - unrealizedCashflow: From accrued funding/interest (for non-AMM protocols)
+ *
+ * For UniswapV3 positions, unrealizedCashflow is always 0n, so this returns unrealizedPnl.
+ *
+ * @param position - Position to calculate total unrealized PnL for
+ * @returns Total unrealized PnL in quote token units
+ *
+ * @example
+ * ```typescript
+ * const position: UniswapV3Position = ...;
+ * const totalUnrealized = getTotalUnrealizedPnl(position);
+ * // For UniswapV3: totalUnrealized === position.unrealizedPnl
+ *
+ * const hyperliquidPosition: HyperliquidPosition = ...;
+ * const totalUnrealized = getTotalUnrealizedPnl(hyperliquidPosition);
+ * // Includes accrued funding: unrealizedPnl + unrealizedCashflow
+ * ```
+ */
+export function getTotalUnrealizedPnl<P extends keyof PositionConfigMap>(
+  position: Position<P>
+): bigint {
+  return position.unrealizedPnl + position.unrealizedCashflow;
 }

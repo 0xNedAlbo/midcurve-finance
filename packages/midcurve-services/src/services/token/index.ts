@@ -8,6 +8,9 @@ export type { TokenServiceDependencies } from './token-service.js';
 export { Erc20TokenService } from './erc20-token-service.js';
 export type { Erc20TokenServiceDependencies } from './erc20-token-service.js';
 
+export { BasicCurrencyTokenService } from './basic-currency-token-service.js';
+export type { BasicCurrencyTokenServiceDependencies } from './basic-currency-token-service.js';
+
 export { UserTokenBalanceService } from './user-token-balance-service.js';
 export type {
   UserTokenBalanceServiceDependencies,
@@ -18,4 +21,6 @@ export type {
 export type {
   Erc20TokenSearchInput,
   Erc20TokenSearchCandidate,
+  BasicCurrencySearchInput,
+  BasicCurrencySearchCandidate,
 } from '../types/token/token-input.js';

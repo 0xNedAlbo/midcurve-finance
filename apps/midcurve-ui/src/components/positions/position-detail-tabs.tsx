@@ -5,9 +5,7 @@
  * Manages active tab state via URL query parameters.
  */
 
-"use client";
-
-import { useRouter, useSearchParams } from "next/navigation";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart3, Clock, TrendingUp, Settings } from "lucide-react";
 
 interface PositionDetailTabsProps {
@@ -42,8 +40,8 @@ export function PositionDetailTabs({
   activeTab,
   basePath,
 }: PositionDetailTabsProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const handleTabChange = (tabId: string) => {
     const params = new URLSearchParams(searchParams);
@@ -55,7 +53,7 @@ export function PositionDetailTabs({
 
     const queryString = params.toString();
     const url = `${basePath}${queryString ? `?${queryString}` : ""}`;
-    router.push(url);
+    navigate(url);
   };
 
   return (

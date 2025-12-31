@@ -8,7 +8,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Image from "next/image";
+
 import { formatCompactValue } from "@/lib/fraction-format";
 import { SlidersHorizontal } from "lucide-react";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
@@ -272,7 +272,7 @@ export function UniswapV3PositionSimulator({
             <span className="text-slate-400">Base Token:</span>
             <div className="flex items-center gap-2 text-white">
               {baseToken.logoUrl && (
-                <Image
+                <img
                   src={baseToken.logoUrl}
                   alt={baseToken.symbol}
                   width={16}
@@ -293,7 +293,7 @@ export function UniswapV3PositionSimulator({
             <span className="text-slate-400">Quote Token:</span>
             <div className="flex items-center gap-2 text-white">
               {quoteToken.logoUrl && (
-                <Image
+                <img
                   src={quoteToken.logoUrl}
                   alt={quoteToken.symbol}
                   width={16}

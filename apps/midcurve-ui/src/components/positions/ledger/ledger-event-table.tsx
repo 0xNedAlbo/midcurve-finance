@@ -6,7 +6,7 @@ import { buildTxUrl, formatBlockNumber, truncateTxHash } from "@/lib/explorer-ut
 import { getEventTypeInfo, isCollectEvent, type EventType } from "@/lib/event-type-utils";
 import { formatEventDateTime } from "@/lib/date-utils";
 import { ExternalLink, Clock } from "lucide-react";
-import Image from "next/image";
+
 
 // Token type from position response (already serialized)
 interface TokenInfo {
@@ -79,7 +79,7 @@ export function LedgerEventTable({
     return (
       <div className="flex items-center gap-2">
         {token.logoUrl && (
-          <Image
+          <img
             src={token.logoUrl}
             alt={token.symbol}
             width={16}
@@ -104,7 +104,7 @@ export function LedgerEventTable({
     return (
       <div className="flex items-center gap-2 text-orange-400">
         {token.logoUrl && (
-          <Image
+          <img
             src={token.logoUrl}
             alt={token.symbol}
             width={16}
@@ -129,7 +129,7 @@ export function LedgerEventTable({
     return (
       <div className="flex items-center gap-2 text-purple-400">
         {token.logoUrl && (
-          <Image
+          <img
             src={token.logoUrl}
             alt={token.symbol}
             width={16}

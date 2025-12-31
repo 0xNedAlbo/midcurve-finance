@@ -27,9 +27,9 @@
   ],
   "scripts": {
     "build-old": "tsc",
-    "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist",
+    "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --no-splitting",
     "prepare": "npm run build",
-    "dev": "tsc --watch",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --no-splitting --watch",
     "clean": "rm -rf dist",
     "type-check": "tsc --noEmit",
     "test": "vitest",

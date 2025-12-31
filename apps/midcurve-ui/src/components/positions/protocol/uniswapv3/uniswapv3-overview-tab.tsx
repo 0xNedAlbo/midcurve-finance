@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
+
 import { formatCompactValue } from "@/lib/fraction-format";
 import { calculatePositionStates, calculateBreakEvenPrice } from "@/lib/position-states";
 import { usePnLDisplayValues } from "@/hooks/positions/usePnLDisplayValues";
@@ -266,7 +266,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-slate-400">Base Token:</span>
                   <div className="flex items-center gap-2 text-white">
                     {baseToken.logoUrl && (
-                      <Image
+                      <img
                         src={baseToken.logoUrl}
                         alt={baseToken.symbol}
                         width={16}
@@ -287,7 +287,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-slate-400">Quote Token:</span>
                   <div className="flex items-center gap-2 text-white">
                     {quoteToken.logoUrl && (
-                      <Image
+                      <img
                         src={quoteToken.logoUrl}
                         alt={quoteToken.symbol}
                         width={16}
@@ -372,7 +372,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-slate-400">Base Token:</span>
                   <div className="flex items-center gap-2 text-white">
                     {baseToken.logoUrl && (
-                      <Image
+                      <img
                         src={baseToken.logoUrl}
                         alt={baseToken.symbol}
                         width={16}
@@ -393,7 +393,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-slate-400">Quote Token:</span>
                   <div className="flex items-center gap-2 text-white">
                     {quoteToken.logoUrl && (
-                      <Image
+                      <img
                         src={quoteToken.logoUrl}
                         alt={quoteToken.symbol}
                         width={16}
@@ -478,7 +478,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-slate-400">Base Token:</span>
                   <div className="flex items-center gap-2 text-white">
                     {baseToken.logoUrl && (
-                      <Image
+                      <img
                         src={baseToken.logoUrl}
                         alt={baseToken.symbol}
                         width={16}
@@ -499,7 +499,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   <span className="text-slate-400">Quote Token:</span>
                   <div className="flex items-center gap-2 text-white">
                     {quoteToken.logoUrl && (
-                      <Image
+                      <img
                         src={quoteToken.logoUrl}
                         alt={quoteToken.symbol}
                         width={16}

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
-import { apiClient } from "@/lib/api-client";
+import { apiClientFn } from "@/lib/api-client";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
 
 interface RefreshPositionParams {
@@ -47,8 +47,8 @@ export function useRefreshPosition() {
           throw new Error(`Unsupported protocol: ${protocol}`);
       }
 
-      // Use apiClient to handle response structure correctly
-      return await apiClient<GetUniswapV3PositionResponse>(endpoint);
+      // Use apiClientFn to handle response structure correctly
+      return await apiClientFn<GetUniswapV3PositionResponse>(endpoint);
     },
     onSuccess: async (data, variables) => {
       // Update the individual position cache if it exists

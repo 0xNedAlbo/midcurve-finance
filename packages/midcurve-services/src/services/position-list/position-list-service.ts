@@ -232,6 +232,8 @@ export class PositionListService {
       currentCostBasis: BigInt(dbResult.currentCostBasis),
       realizedPnl: BigInt(dbResult.realizedPnl),
       unrealizedPnl: BigInt(dbResult.unrealizedPnl),
+      realizedCashflow: BigInt(dbResult.realizedCashflow),
+      unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
       collectedFees: BigInt(dbResult.collectedFees),
       unClaimedFees: BigInt(dbResult.unClaimedFees),
       lastFeesCollectedAt: dbResult.lastFeesCollectedAt,

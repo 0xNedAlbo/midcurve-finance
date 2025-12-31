@@ -13,15 +13,28 @@
     "node": "20.19.x"
   },
   "scripts": {
-    "build": "turbo run build --filter=@midcurve/ui...",
-    "dev": "turbo run dev --filter=@midcurve/ui...",
-    "typecheck": "turbo run typecheck --filter=@midcurve/ui..."
+    "build": "turbo run build",
+    "build:ui": "turbo run build --filter=@midcurve/ui...",
+    "build:api": "turbo run build --filter=@midcurve/api...",
+    "dev": "turbo run dev --filter=@midcurve/ui --filter=@midcurve/api --filter=@midcurve/evm --filter=@midcurve/signer",
+    "dev:ui": "turbo run dev --filter=@midcurve/ui",
+    "dev:api": "turbo run dev --filter=@midcurve/api",
+    "dev:evm": "turbo run dev --filter=@midcurve/evm",
+    "dev:signer": "turbo run dev --filter=@midcurve/signer",
+    "up:evm": "pnpm --filter @midcurve/evm run up",
+    "down:evm": "pnpm --filter @midcurve/evm run down",
+    "typecheck": "turbo run typecheck"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@prisma/nextjs-monorepo-workaround-plugin": "^6.19.0",
     "tsup": "^8.5.0",
-    "turbo": "^2.6.1"
+    "turbo": "^2.6.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "commander": "^12.1.0"
+    }
   }
 }

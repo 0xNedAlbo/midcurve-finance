@@ -13,6 +13,16 @@ import type { PoolConfigMap } from '@midcurve/shared';
  */
 export interface QuoteTokenInputMap {
   uniswapv3: UniswapV3QuoteTokenInput;
+
+  /**
+   * Treasury quote token determination (placeholder)
+   *
+   * Treasury positions use user-provided quote token directly.
+   * They don't need quote token determination logic.
+   * This placeholder ensures type compatibility with PoolConfigMap.
+   */
+  treasury: never; // Treasury uses direct quote token selection
+
   // Future protocols:
   // orca: OrcaQuoteTokenInput;
   // raydium: RaydiumQuoteTokenInput;

@@ -50,7 +50,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist",
-    "dev": "tsc --watch",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --watch",
     "clean": "rm -rf dist",
     "type-check": "tsc --noEmit",
     "yalc:link": "yalc link @midcurve/shared && npm install",

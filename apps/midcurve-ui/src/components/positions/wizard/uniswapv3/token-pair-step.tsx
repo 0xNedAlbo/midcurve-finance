@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import Image from "next/image";
+
 import {
   Search,
   Loader2,
@@ -87,7 +87,7 @@ function TokenInput({
       {selection.token && (
         <div className="mt-2 flex items-center gap-2 p-2 bg-slate-800 rounded border border-slate-700">
           {selection.token.logoUrl && (
-            <Image
+            <img
               src={selection.token.logoUrl}
               alt={selection.token.symbol}
               width={24}
@@ -195,7 +195,7 @@ function TokenInput({
             >
               <div className="flex items-center gap-3">
                 {token.logoUrl && (
-                  <Image
+                  <img
                     src={token.logoUrl}
                     alt={token.symbol}
                     width={24}

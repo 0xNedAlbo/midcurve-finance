@@ -126,7 +126,6 @@ export interface UniswapV3LedgerEventDiscoverInput {
  */
 export interface PositionLedgerEventDiscoverInputMap {
   uniswapv3: UniswapV3LedgerEventDiscoverInput;
-  // Future: orca: OrcaLedgerEventDiscoverInput, etc.
 }
 
 /**

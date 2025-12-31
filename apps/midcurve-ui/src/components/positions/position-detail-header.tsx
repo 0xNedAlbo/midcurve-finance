@@ -10,11 +10,8 @@
  * - Action buttons
  */
 
-"use client";
-
 import { useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
+import { Link } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Copy, ExternalLink } from "lucide-react";
 import { formatProtocolName } from "@/lib/format-helpers";
 import { getDashboardUrl } from "@/lib/dashboard-referrer";
@@ -126,7 +123,7 @@ export function PositionDetailHeader({
       {/* Back Navigation */}
       <div className="mb-6">
         <Link
-          href={getDashboardUrl()}
+          to={getDashboardUrl()}
           className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -141,14 +138,14 @@ export function PositionDetailHeader({
           <div className="flex items-center gap-6">
             {/* Token Logos */}
             <div className="flex items-center -space-x-3">
-              <Image
+              <img
                 src={token0LogoUrl || "/images/tokens/default.png"}
                 alt={token0Symbol}
                 width={48}
                 height={48}
                 className="w-12 h-12 rounded-full border-3 border-slate-800 bg-slate-700 z-10"
               />
-              <Image
+              <img
                 src={token1LogoUrl || "/images/tokens/default.png"}
                 alt={token1Symbol}
                 width={48}

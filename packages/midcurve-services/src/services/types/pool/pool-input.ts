@@ -36,6 +36,16 @@ export interface UniswapV3PoolDiscoverInput {
  */
 export interface PoolDiscoverInputMap {
   uniswapv3: UniswapV3PoolDiscoverInput;
+
+  /**
+   * Treasury pool discover input (placeholder)
+   *
+   * Treasury pools are virtual and don't require on-chain discovery.
+   * They are created inline when a Treasury position is created.
+   * This placeholder ensures type compatibility with PoolConfigMap.
+   */
+  treasury: never; // Treasury pools don't use pool discovery
+
   // Future protocols:
   // orca: OrcaPoolDiscoverInput;
   // raydium: RaydiumPoolDiscoverInput;

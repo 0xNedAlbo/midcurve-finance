@@ -24,8 +24,14 @@ const nextConfig: NextConfig = {
     '/api/**/*': ['../../packages/midcurve-database/src/generated/prisma/**/*'],
   },
 
-  /* Transpile Packages */
-  transpilePackages: ['@midcurve/shared', '@midcurve/services', '@midcurve/api-shared', '@midcurve/database'],
+  /* Server External Packages - Exclude from webpack bundling on server side */
+  /* These packages are pre-bundled with tsup and should not be re-processed */
+  serverExternalPackages: [
+    '@midcurve/database',
+    '@midcurve/shared',
+    '@midcurve/services',
+    '@midcurve/api-shared',
+  ],
 
   /* Image Configuration */
   images: {
@@ -77,14 +83,9 @@ const nextConfig: NextConfig = {
       '@react-native-async-storage/async-storage': false,
     };
 
-    // Include Prisma query engine binaries in the build
+    // Externalize Prisma client for server-side to avoid bundling issues
     if (isServer) {
       config.externals.push('_http_common');
-
-      // Use Prisma monorepo workaround plugin
-      // This ensures binary files are copied to the Next.js output
-      const { PrismaPlugin } = require('@prisma/nextjs-monorepo-workaround-plugin');
-      config.plugins = [...config.plugins, new PrismaPlugin()];
     }
 
     return config;

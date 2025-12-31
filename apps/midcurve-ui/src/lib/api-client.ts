@@ -1,22 +1,21 @@
 /**
- * API Client - Type-safe HTTP wrapper with authentication
+ * API Client - Type-safe HTTP wrapper with session authentication
  *
  * Centralized fetch wrapper that:
- * - Automatically includes session cookies (same origin)
+ * - Automatically includes session cookies (cross-origin with credentials)
  * - Handles API errors with structured error types
  * - Provides type-safe request/response handling
- * - Calls API routes co-located in this Next.js app
  *
  * Architecture:
- * - UI and API run in same Next.js app (port 3000)
- * - Session cookies automatically included (same origin)
- * - API routes use withAuth middleware to verify session
- * - No manual token passing needed
+ * - UI runs as Vite SPA on a different origin from API
+ * - Session cookies sent with credentials: 'include'
+ * - API validates session via custom session middleware
  */
 
-import { getSession } from 'next-auth/react';
+import type { ApiResponse, ApiError as ApiErrorType } from '@midcurve/api-shared';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+// Get API URL from environment - empty string means same origin (proxied in dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 /**
  * Structured API error with status code and error details
@@ -33,69 +32,53 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Type-safe API client wrapper
- *
- * @example
- * ```typescript
- * const response = await apiClient<ListPositionsResponse>(
- *   '/api/v1/positions/list?status=active'
- * );
- * console.log(response.data); // Type-safe access
- * ```
- */
-export async function apiClient<TResponse>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<TResponse> {
-  // Get NextAuth session to verify user is authenticated on frontend
-  const session = await getSession();
+interface RequestOptions {
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
 
-  if (!session?.user) {
-    throw new ApiError(
-      'Not authenticated. Please sign in first.',
-      401,
-      'UNAUTHENTICATED',
-      { hint: 'NextAuth session not found' }
-    );
+/**
+ * Internal request handler
+ */
+async function request<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  body?: unknown,
+  options?: RequestOptions
+): Promise<ApiResponse<T>> {
+  const url = `${API_BASE_URL}${path}`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options?.headers,
+  };
+
+  const fetchOptions: RequestInit = {
+    method,
+    headers,
+    credentials: 'include', // Important: include cookies for session auth
+    signal: options?.signal,
+  };
+
+  if (body !== undefined) {
+    fetchOptions.body = JSON.stringify(body);
   }
 
-  const url = `${API_BASE_URL}${endpoint}`;
-
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-      credentials: 'include', // Include cookies (NextAuth session)
-    });
-
-    const data = await response.json();
+    const response = await fetch(url, fetchOptions);
+    const json = await response.json();
 
     if (!response.ok) {
-      // API returned structured error
+      const error = json as ApiErrorType;
       throw new ApiError(
-        data.error?.message || data.message || 'Request failed',
+        error.error?.message || 'An error occurred',
         response.status,
-        data.error?.code || data.error,
-        data.error?.details || data.details
+        error.error?.code || 'UNKNOWN_ERROR',
+        error.error?.details
       );
     }
 
-    // Handle different response patterns:
-    // 1. Paginated responses: { success, data: [...], pagination, meta }
-    //    → Return entire response (already in correct shape)
-    // 2. Single resource: { success, data: {...} }
-    //    → Extract data field
-    if ('pagination' in data) {
-      // Paginated response - return as-is
-      return data as TResponse;
-    }
-
-    // Single resource response - extract data field
-    return data.data as TResponse;
+    return json as ApiResponse<T>;
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -109,4 +92,72 @@ export async function apiClient<TResponse>(
       error
     );
   }
+}
+
+/**
+ * API client with typed methods
+ */
+export const apiClient = {
+  get<T>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> {
+    return request<T>('GET', path, undefined, options);
+  },
+
+  post<T>(path: string, body: unknown, options?: RequestOptions): Promise<ApiResponse<T>> {
+    return request<T>('POST', path, body, options);
+  },
+
+  put<T>(path: string, body: unknown, options?: RequestOptions): Promise<ApiResponse<T>> {
+    return request<T>('PUT', path, body, options);
+  },
+
+  patch<T>(path: string, body: unknown, options?: RequestOptions): Promise<ApiResponse<T>> {
+    return request<T>('PATCH', path, body, options);
+  },
+
+  delete<T>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> {
+    return request<T>('DELETE', path, undefined, options);
+  },
+};
+
+/**
+ * Get a nonce for SIWE authentication
+ */
+export async function getNonce(): Promise<string> {
+  const response = await apiClient.get<{ nonce: string }>('/api/v1/auth/nonce');
+  return response.data.nonce;
+}
+
+/**
+ * Legacy API client function for backward compatibility
+ *
+ * This function matches the old signature: apiClient<T>(endpoint, options?)
+ * Returns the data directly (unwrapped from ApiResponse).
+ *
+ * Usage:
+ * ```typescript
+ * const data = await apiClientFn<MyType>('/api/v1/endpoint');
+ * ```
+ */
+export async function apiClientFn<TResponse>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<TResponse> {
+  const method = (options?.method || 'GET') as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+  let body: unknown = undefined;
+  if (options?.body && typeof options.body === 'string') {
+    try {
+      body = JSON.parse(options.body);
+    } catch {
+      body = options.body;
+    }
+  }
+
+  const response = await request<TResponse>(method, endpoint, body, {
+    headers: options?.headers as Record<string, string>,
+    signal: options?.signal ?? undefined,
+  });
+
+  // Return just the data for backward compatibility
+  return response.data;
 }

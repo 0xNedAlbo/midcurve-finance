@@ -16,9 +16,10 @@ export type {
   TokenType,
   TokenConfigMap,
   Erc20Token,
+  BasicCurrencyToken,
   AnyToken,
 } from './token.js';
-export type { Erc20TokenConfig } from './token-config.js';
+export type { Erc20TokenConfig, BasicCurrencyConfig } from './token-config.js';
 
 // Pool types
 export type { Pool, Protocol, PoolType, UniswapV3Pool, AnyPool } from './pool.js';
@@ -41,6 +42,8 @@ export {
   isUniswapV3Position,
   assertUniswapV3Position,
   narrowPositionProtocol,
+  getTotalRealizedPnl,
+  getTotalUnrealizedPnl,
 } from './position.js';
 
 // Pool price types
@@ -99,3 +102,109 @@ export type {
   UniswapV3DecreaseLedgerEvent,
   UniswapV3CollectLedgerEvent,
 } from './uniswapv3/index.js';
+
+// Strategy types
+export type {
+  StrategyState,
+  StrategyStatus,
+  StrategyConfig,
+  StrategyMetrics,
+  StrategyAutomationWallet,
+  Strategy,
+} from './strategy.js';
+
+// Strategy Position types (strategy-owned positions)
+export type {
+  StrategyPositionStatus,
+  StrategyPositionType,
+  StrategyPositionJSON,
+  BaseStrategyPositionParams,
+  StrategyPositionMetrics,
+  StrategyPositionInterface,
+  StrategyPositionRow,
+  // Treasury strategy position types
+  TreasuryConfigData,
+  TreasuryStateData,
+  StrategyTreasuryParams,
+  StrategyTreasuryRow,
+  TreasuryHolding,
+  TreasuryHoldingJSON,
+  TreasuryWalletType,
+  TreasuryEvmOnchainWallet,
+  TreasuryWalletConfig,
+} from './strategy-position/index.js';
+
+export {
+  BaseStrategyPosition,
+  StrategyPositionFactory,
+  // Treasury strategy position classes
+  TreasuryConfig,
+  TreasuryState,
+  StrategyTreasury,
+  holdingToJSON,
+  holdingFromJSON,
+} from './strategy-position/index.js';
+
+// Strategy Ledger Event types (strategy-owned ledger events)
+export type {
+  StrategyLedgerEventType,
+  TokenHashComponents,
+  StrategyLedgerEvent,
+  StrategyLedgerEventJSON,
+  StrategyLedgerEventRow,
+} from './strategy-ledger-event/index.js';
+
+export {
+  EVENT_TYPE_CATEGORIES,
+  isFundingEvent,
+  isAssetMovementEvent,
+  isPositionLifecycleEvent,
+  isIncomeEvent,
+  isCostEvent,
+  isInternalEvent,
+  makeTokenHash,
+  parseTokenHash,
+  isValidTokenHash,
+  getChainIdFromTokenHash,
+  getAddressFromTokenHash,
+  getTokenTypeFromTokenHash,
+  strategyLedgerEventToJSON,
+  strategyLedgerEventFromJSON,
+  strategyLedgerEventFromRow,
+} from './strategy-ledger-event/index.js';
+
+// Strategy utility functions
+export {
+  getStrategyUnrealizedCapitalGain,
+  getStrategyTotalUnrealizedPnl,
+  getStrategyTotalRealizedPnl,
+  getStrategyTotalPnl,
+  // Deprecated aliases for backwards compatibility
+  getTotalStrategyPnl,
+  getTotalRealizedStrategyPnl,
+  getTotalUnrealizedStrategyPnl,
+} from './strategy.js';
+
+// Strategy Manifest types
+export type {
+  ConstructorParamSource,
+  SolidityType,
+  ParamUIElement,
+  LayoutUIElement,
+  ConstructorParamUI,
+  ConstructorParam,
+  LayoutElement,
+  FormItem,
+  ManifestQuoteTokenBasicCurrency,
+  ManifestQuoteTokenErc20,
+  ManifestQuoteToken,
+  ManifestFundingToken,
+  StrategyManifest,
+} from './strategy-manifest.js';
+
+// Strategy Manifest utility functions
+export {
+  getUserInputParams,
+  hasUserInputParams,
+  getDefaultUIElement,
+} from './strategy-manifest.js';
