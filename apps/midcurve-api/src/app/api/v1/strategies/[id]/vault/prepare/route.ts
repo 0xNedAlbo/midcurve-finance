@@ -257,10 +257,10 @@ export async function GET(
       try {
         const tokenService = new Erc20TokenService();
         // Use discover() instead of findByAddress() to auto-create token if not in DB
-        const token = await tokenService.discover(
-          fundingToken.chainId,
-          fundingToken.address
-        );
+        const token = await tokenService.discover({
+          chainId: fundingToken.chainId,
+          address: fundingToken.address,
+        });
         if (token) {
           tokenSymbol = token.symbol;
           tokenDecimals = token.decimals;
