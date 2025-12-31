@@ -22,8 +22,8 @@ RUN pnpm install --frozen-lockfile
 # Generate Prisma client
 RUN pnpm --filter @midcurve/database db:generate
 
-# Build the API
-RUN pnpm --filter @midcurve/api build
+# Build the API (skip migrations - they run at deploy time)
+RUN cd apps/midcurve-api && npx next build
 
 # Production stage
 FROM node:20-alpine AS runner
