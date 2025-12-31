@@ -214,11 +214,6 @@ export function StrategyDeployWizard({
     setCurrentStep(6);
   }, []);
 
-  // Handle funding complete
-  const handleFundingComplete = useCallback(() => {
-    // Setup is complete - user can close or navigate from VaultFundStep
-  }, []);
-
   // Check if manifest has user-input params
   const manifestHasUserParams = useMemo(() => {
     if (!verifiedManifest) return false;
@@ -352,7 +347,6 @@ export function StrategyDeployWizard({
             vaultAddress={vaultAddress}
             vaultChainId={vaultChainId}
             ethFundingAmount={ethFundingAmount}
-            onFundingComplete={handleFundingComplete}
           />
         ) : (
           <div className="text-center text-slate-400">
