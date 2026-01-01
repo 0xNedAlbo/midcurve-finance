@@ -102,7 +102,7 @@ start_services() {
 
 run_migrations() {
     log_info "Running database migrations..."
-    docker compose --env-file "$ENV_FILE" exec -T api npx prisma migrate deploy
+    docker compose --env-file "$ENV_FILE" exec -T api prisma migrate deploy --schema ./packages/midcurve-database/prisma/schema.prisma
 }
 
 health_check() {

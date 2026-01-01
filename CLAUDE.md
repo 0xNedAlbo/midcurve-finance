@@ -11,52 +11,92 @@ The platform enables liquidity providers to:
 - **Track** impermanent loss and fee collection
 - **Optimize** gas costs and execution strategies
 
-## Monorepo Architecture
+## Production Architecture
+
+The platform runs as a **multi-service Docker Compose stack** with separate frontend and backend applications:
 
 ```
-┌──────────────────────────────────────────────────────┐
-│            Midcurve Finance Ecosystem                │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  ┌─────────────────────────────────────────────┐    │
-│  │   Unified Next.js Application (port 3000)   │    │
-│  │   ┌─────────────────┐   ┌────────────────┐  │    │
-│  │   │  UI/Frontend    │   │  API Routes    │  │    │
-│  │   │  (React/Next)   │   │  /api/v1/*     │  │    │
-│  │   └─────────────────┘   └────────────────┘  │    │
-│  │   (Single NextAuth instance - shared auth)  │    │
-│  └──────────────────────┬───────────────────────┘    │
-│                         │                            │
-│                ┌────────▼─────────┐                  │
-│                │ @midcurve/shared │                  │
-│                │ Types + Utils    │                  │
-│                └────────┬─────────┘                  │
-│                         │                            │
-│                ┌────────▼──────────┐                 │
-│                │@midcurve/services │                 │
-│                │  Business Logic   │                 │
-│                └────────┬──────────┘                 │
-│                         │                            │
-│                ┌────────▼─────────┐                  │
-│                │    PostgreSQL     │                  │
-│                │   (Prisma ORM)    │                  │
-│                └──────────────────┘                  │
-│                                                      │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Midcurve Finance - Production Stack               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  INTERNET                                                            │
+│     │                                                                │
+│     ▼                                                                │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                    Caddy (Reverse Proxy)                      │   │
+│  │                    Ports 80/443 - Auto SSL                    │   │
+│  │  ┌─────────────────────────┐  ┌────────────────────────────┐ │   │
+│  │  │ app.midcurve.finance    │  │ api.midcurve.finance       │ │   │
+│  │  │         ↓               │  │         ↓                  │ │   │
+│  │  │     ui:3000             │  │     api:3001               │ │   │
+│  │  └─────────────────────────┘  └────────────────────────────┘ │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+│  FRONTEND NETWORK ──────────────────────────────────────────────    │
+│  │                                                                   │
+│  │  ┌─────────────────────────┐                                     │
+│  │  │   midcurve-ui           │  Vite SPA + nginx                   │
+│  │  │   Port 3000             │  React 19, TailwindCSS              │
+│  │  └─────────────────────────┘  RainbowKit, Wagmi                  │
+│  │                                                                   │
+│  BACKEND NETWORK (internal, isolated) ──────────────────────────    │
+│  │                                                                   │
+│  │  ┌─────────────────────────┐  ┌─────────────────────────┐       │
+│  │  │   midcurve-api          │  │   midcurve-evm          │       │
+│  │  │   Port 3001             │  │   Port 3002             │       │
+│  │  │   Next.js REST API      │  │   Strategy Orchestrator │       │
+│  │  │   SIWE Auth, Sessions   │  │   RabbitMQ Consumer     │       │
+│  │  └───────────┬─────────────┘  └───────────┬─────────────┘       │
+│  │              │                            │                       │
+│  │  ┌───────────▼─────────────┐  ┌───────────▼─────────────┐       │
+│  │  │   midcurve-signer       │  │   geth                  │       │
+│  │  │   Port 3003             │  │   Ports 8545/8546       │       │
+│  │  │   Transaction Signing   │  │   Private EVM Node      │       │
+│  │  │   Key Management        │  │   Clique PoA            │       │
+│  │  └─────────────────────────┘  └─────────────────────────┘       │
+│  │                                                                   │
+│  │  ┌─────────────────────────┐                                     │
+│  │  │   rabbitmq              │  Message broker for                 │
+│  │  │   Port 5672             │  strategy orchestration             │
+│  │  └─────────────────────────┘                                     │
+│  │                                                                   │
+│  EXTERNAL ──────────────────────────────────────────────────────    │
+│  │                                                                   │
+│  │  ┌─────────────────────────┐                                     │
+│  │  │   PostgreSQL (AWS RDS)  │  Shared database                    │
+│  │  │   @midcurve/database    │  Prisma ORM                         │
+│  │  └─────────────────────────┘                                     │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+**Key Architecture Decisions:**
+- **Separate UI and API** - Cross-origin architecture with CORS
+- **Network isolation** - Backend services not exposed to internet
+- **Auto SSL** - Caddy handles Let's Encrypt certificates
+- **Private EVM node** - Geth for strategy contract execution
+- **Message queue** - RabbitMQ for async strategy orchestration
 
 ## Repository Structure
 
 ```
 midcurve-finance/
 ├── apps/
-│   └── midcurve-ui/          # Unified Next.js app (UI + API)
+│   ├── midcurve-ui/          # Vite SPA - React frontend
+│   ├── midcurve-api/         # Next.js REST API backend
+│   ├── midcurve-evm/         # Strategy orchestrator + Geth node
+│   └── midcurve-signer/      # Transaction signing service
 ├── packages/
 │   ├── midcurve-shared/      # @midcurve/shared - Domain types & utilities
 │   ├── midcurve-services/    # @midcurve/services - Business logic
-│   └── midcurve-api-shared/  # @midcurve/api-shared - API types & schemas
+│   ├── midcurve-api-shared/  # @midcurve/api-shared - API types & schemas
+│   └── midcurve-database/    # @midcurve/database - Prisma schema & ORM
+├── infra/
+│   └── Caddyfile             # Reverse proxy configuration
+├── docker-compose.yml        # Production orchestration
 ├── turbo.json                # Turborepo configuration
-├── package.json              # Workspace configuration
+├── package.json              # Workspace configuration (pnpm)
 └── CLAUDE.md                 # This file
 ```
 
@@ -217,71 +257,211 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 
 ---
 
-### @midcurve/ui - Unified Next.js Application
+### @midcurve/database - Prisma Schema & ORM
+
+**Location:** `packages/midcurve-database/`
+
+**Purpose:** Centralized database schema definition and Prisma client generation.
+
+**Consumed by:**
+- API (midcurve-api)
+- EVM service (midcurve-evm)
+- Signer service (midcurve-signer)
+
+**Contains:**
+- **Prisma Schema:**
+  - `prisma/schema.prisma` - Single source of truth for database models
+  - All migrations in `prisma/migrations/`
+
+- **Generated Client:**
+  - `@midcurve/database` exports the generated Prisma client
+  - Type-safe database queries
+
+- **Models:**
+  - User, Session, AuthWalletAddress
+  - Token, Pool, Position
+  - Strategy, AutomationWallet
+  - PositionLedgerEvent, AprPeriod
+  - Cache (for distributed caching)
+
+**Key Characteristics:**
+- ✅ **Single source of truth** - All services use the same schema
+- ✅ **Centralized migrations** - Run once, applied everywhere
+- ✅ **Type-safe queries** - Generated TypeScript types
+- ✅ **PostgreSQL** - JSON columns for flexible config storage
+
+**Usage:**
+```typescript
+import { prisma } from '@midcurve/database';
+
+const user = await prisma.user.findUnique({
+  where: { id: userId }
+});
+```
+
+---
+
+## Applications
+
+### @midcurve/ui - React Frontend (Vite SPA)
 
 **Location:** `apps/midcurve-ui/`
 
-**Purpose:** Unified full-stack Next.js application containing both frontend UI and backend API routes.
+**Purpose:** Static React single-page application served by nginx. Pure client-side rendering with no server-side code.
+
+**Technology:**
+- **Vite** - Build tool and dev server
+- **React 19** - UI framework
+- **TailwindCSS 4.0** - Styling
+- **RainbowKit + Wagmi** - Wallet connection
+- **TanStack React Query** - Server state management
+- **nginx** - Static file serving in production
 
 **Contains:**
-
-- **Frontend (UI):**
-  - React 19 components with TypeScript
-  - TailwindCSS styling with Tailwind 4.0
-  - RainbowKit wallet connection
-  - React Query for server state management
-  - Dashboard, position management, analytics
-
-- **Backend (API Routes):**
-  - Health check endpoint (`GET /api/health`)
-  - Authentication endpoints (`/api/v1/auth/*` - SIWE + API keys)
-  - User management endpoints (`/api/v1/user/*`)
-  - Token endpoints (`/api/v1/tokens/erc20/*`)
-  - Pool endpoints (`/api/v1/pools/uniswapv3/*`)
-  - Position endpoints (`/api/v1/positions/*`)
-
-- **Infrastructure:**
-  - Single NextAuth instance (shared between UI and API)
-  - `withAuth` middleware - Dual authentication (session + API keys)
-  - Prisma client for database access
-  - Logging with structured logger
-  - E2E testing with Playwright
-  - API E2E testing with Vitest
+- Dashboard with position overview
+- Position management (import, view, analyze)
+- SIWE authentication flow
+- Strategy deployment wizard
+- Risk analytics visualizations
 
 **Key Characteristics:**
-- ✅ **Co-located architecture** - UI and API in same app (same origin)
-- ✅ **Unified authentication** - Session cookies work automatically
+- ✅ **Pure SPA** - No server-side rendering
+- ✅ **Cross-origin API calls** - Uses `apiClient` with `credentials: 'include'`
 - ✅ **Type safety** - Imports types from @midcurve/api-shared
-- ✅ **Thin API layer** - Delegates to services, no business logic duplication
-- ✅ **Zod validation** - Runtime type checking with automatic type inference
-- ✅ **Serverless-friendly** - Each request independent, stateless design
+- ✅ **Wallet integration** - RainbowKit for connection, Wagmi for transactions
+- ✅ **Build-time env vars** - `VITE_API_URL`, `VITE_WALLETCONNECT_PROJECT_ID`
 
 **Directory Structure:**
 ```
 midcurve-ui/
 ├── src/
-│   ├── app/
-│   │   ├── api/              # API routes (co-located with UI)
-│   │   │   ├── v1/           # Versioned REST API
-│   │   │   │   ├── auth/     # Authentication endpoints
-│   │   │   │   ├── user/     # User management
-│   │   │   │   ├── tokens/   # Token discovery
-│   │   │   │   ├── pools/    # Pool data
-│   │   │   │   └── positions/ # Position management
-│   │   │   └── health/       # Health check
-│   │   ├── dashboard/        # Dashboard page
-│   │   └── ...               # Other UI pages
 │   ├── components/           # React components
 │   ├── hooks/                # React Query hooks
-│   ├── lib/                  # Utilities (auth, api-client, logger, prisma)
-│   ├── middleware/           # API middleware (withAuth)
+│   ├── lib/                  # api-client, wagmi-config
+│   ├── pages/                # Route components
 │   └── utils/                # Helper functions
-├── tests/                    # Playwright E2E tests
-├── prisma/                   # Prisma schema (synced from services)
-└── vitest.config.ts          # Vitest config for API tests
+├── public/                   # Static assets
+├── nginx.conf                # Production server config
+├── Dockerfile                # Multi-stage build
+└── vite.config.ts            # Vite configuration
 ```
 
-**Documentation:** Project is self-contained; see inline documentation in code
+**Build & Serve:**
+```bash
+# Development
+npm run dev           # Vite dev server on port 5173
+
+# Production (Docker)
+docker build -t midcurve-ui .
+# Builds with Vite, serves with nginx on port 3000
+```
+
+---
+
+### @midcurve/api - REST API Backend
+
+**Location:** `apps/midcurve-api/`
+
+**Purpose:** Next.js REST API providing all backend endpoints. Handles authentication, data fetching, and business logic orchestration.
+
+**Technology:**
+- **Next.js 15** - App Router with standalone output
+- **Prisma** - Database access via @midcurve/database
+- **viem** - EVM interactions
+- **Zod** - Request validation
+
+**API Routes:**
+- `GET /api/health` - Health check
+- `/api/v1/auth/*` - SIWE authentication (nonce, verify, logout)
+- `/api/v1/user/*` - User profile, wallets, API keys
+- `/api/v1/tokens/erc20/*` - Token discovery and enrichment
+- `/api/v1/pools/uniswapv3/*` - Pool data and pricing
+- `/api/v1/positions/*` - Position CRUD, history, APR
+- `/api/v1/strategies/*` - Strategy deployment and lifecycle
+
+**Key Characteristics:**
+- ✅ **Session-based auth** - Custom session middleware with cookies
+- ✅ **API key support** - Bearer token authentication for programmatic access
+- ✅ **CORS handling** - Via Next.js middleware
+- ✅ **Structured logging** - Pino with request IDs
+- ✅ **Standalone output** - Optimized for Docker deployment
+
+**Directory Structure:**
+```
+midcurve-api/
+├── src/
+│   ├── app/api/              # Next.js API routes
+│   │   ├── v1/
+│   │   │   ├── auth/
+│   │   │   ├── positions/
+│   │   │   ├── strategies/
+│   │   │   └── ...
+│   │   └── health/
+│   ├── lib/                  # Utilities (cors, logger, session)
+│   └── middleware/           # Auth middleware (withAuth, withSessionAuth)
+├── middleware.ts             # Next.js edge middleware for CORS
+├── Dockerfile                # Multi-stage build
+└── next.config.ts            # Next.js configuration
+```
+
+---
+
+### @midcurve/evm - Strategy Orchestrator
+
+**Location:** `apps/midcurve-evm/`
+
+**Purpose:** Executes automated trading strategies on EVM chains. Coordinates between private Geth node, RabbitMQ, and the signer service.
+
+**Components:**
+- **Next.js API** (port 3002) - Internal endpoints for strategy control
+- **Core Orchestrator** - TypeScript strategy execution engine
+- **Geth Node** - Private EVM for strategy contract execution
+- **RabbitMQ Consumer** - Processes strategy events
+
+**Key Characteristics:**
+- ✅ **Private EVM** - Clique PoA for instant transactions
+- ✅ **Event-driven** - RabbitMQ for async orchestration
+- ✅ **Internal only** - Not exposed to internet
+
+**Directory Structure:**
+```
+midcurve-evm/
+├── src/
+│   ├── app/api/              # Internal API endpoints
+│   └── core/                 # Strategy orchestrator
+├── genesis/                  # Geth genesis configuration
+├── Dockerfile                # EVM service
+├── Dockerfile.geth           # Private Geth node
+└── start-geth.sh             # Geth initialization script
+```
+
+---
+
+### @midcurve/signer - Transaction Signing Service
+
+**Location:** `apps/midcurve-signer/`
+
+**Purpose:** Secure transaction signing service. Manages private keys and signs transactions for automated strategies.
+
+**Key Features:**
+- **Local encrypted keys** - For development
+- **AWS KMS integration** - For production
+- **Internal API key auth** - Only accessible from backend network
+
+**Key Characteristics:**
+- ✅ **Network isolated** - Only accessible on backend network
+- ✅ **Key encryption** - Never stores plaintext keys
+- ✅ **Audit logging** - All signing operations logged
+
+**Directory Structure:**
+```
+midcurve-signer/
+├── src/
+│   ├── app/api/              # Signing endpoints
+│   └── lib/                  # Key management
+├── Dockerfile
+└── next.config.ts
+```
 
 ---
 
@@ -289,35 +469,42 @@ midcurve-ui/
 
 ### Languages & Runtimes
 - **TypeScript 5.3+** - Strict mode, ESM modules
-- **Node.js 18+** - Server-side runtime
+- **Node.js 20+** - Server-side runtime
+- **Solidity** - Smart contracts (strategy vaults)
 
-### Frameworks
-- **Next.js 15+** - Full-stack framework (App Router, React Server Components)
+### Build Tools
+- **Vite** - Frontend build tool (midcurve-ui)
+- **Next.js 15** - Backend API framework (api, evm, signer)
+- **Turborepo** - Monorepo build orchestration
+- **pnpm 9.12+** - Package manager
+
+### Frontend
 - **React 19** - UI framework
-- **Prisma 6.17.1** - ORM and schema management
-
-### Testing
-- **Vitest 3.2+** - API E2E test framework
-- **Playwright 1.56+** - UI E2E test framework with visual debugging
-- **vitest-mock-extended** - Type-safe mocking for Prisma (services package)
-
-### Frontend Libraries
-- **TailwindCSS 4.0** - Utility-first CSS framework
+- **TailwindCSS 4.0** - Utility-first CSS
 - **RainbowKit** - Wallet connection UI
 - **Wagmi** - React hooks for Ethereum
 - **TanStack React Query** - Server state management
 - **Recharts** - Data visualization
 
-### Backend Libraries
+### Backend
+- **Prisma 6.x** - ORM and schema management
 - **viem 2.38+** - Ethereum utilities, EIP-55 checksumming
-- **Zod 3.22+** - Runtime validation and type inference
-- **Auth.js v5** - Authentication framework (NextAuth)
+- **Zod 3.22+** - Runtime validation
+- **Pino** - Structured logging
 - **nanoid** - Request ID generation
 
 ### Infrastructure
-- **PostgreSQL** - Primary database with JSON columns for flexibility
-- **Vercel** - Serverless deployment platform
-- **npm workspaces** - Monorepo package linking
+- **Docker + Docker Compose** - Container orchestration
+- **Caddy** - Reverse proxy with auto SSL
+- **nginx** - Static file serving (UI)
+- **PostgreSQL** - Primary database (AWS RDS)
+- **RabbitMQ** - Message broker for strategy orchestration
+- **Geth** - Private EVM node (Clique PoA)
+
+### Testing
+- **Vitest 3.2+** - Unit and API testing
+- **Playwright 1.56+** - UI E2E testing
+- **vitest-mock-extended** - Type-safe Prisma mocking
 
 ---
 
@@ -350,44 +537,50 @@ midcurve-ui/
 - ✅ **Shared types are portable** - Work in browsers, Node.js, edge runtimes
 - ✅ **Prisma types are internal** - Used only within services layer
 - ✅ **Services converts** between shared types and Prisma types when necessary
-- ✅ **UI and API share auth** - Single NextAuth instance, session cookies work automatically
+- ✅ **Cross-origin auth** - Custom session middleware with CORS support
 
-### 2. Prisma Schema Management & Peer Dependencies
+### 2. Prisma Schema Management with @midcurve/database
 
-**Single Source of Truth:** Prisma schema AND migrations are maintained ONLY in `midcurve-services/prisma/`
+**Single Source of Truth:** Prisma schema AND migrations are maintained in `packages/midcurve-database/prisma/`
 
-**Consumer Pattern:**
-1. Services declares `@prisma/client` as **peer dependency**
-2. Consuming projects (UI app) install `@prisma/client` directly
-3. Consuming projects **copy schema and migrations** locally via postinstall hook
-4. Services uses the consumer's Prisma client instance
+**Centralized Package Pattern:**
+1. `@midcurve/database` package contains Prisma schema and migrations
+2. Package generates Prisma client locally in `src/generated/prisma/`
+3. Package exports the Prisma client instance for all consumers
+4. All backend apps (api, evm, signer) import from `@midcurve/database`
 
 **Benefits:**
-- ✅ Single Prisma client instance (no duplication)
-- ✅ Schema AND migration changes propagate to all consumers
-- ✅ No database duplication or version conflicts
-- ✅ Migrations automatically applied during deployment
+- ✅ Single Prisma client instance across all services
+- ✅ Schema changes propagate via workspace linking
+- ✅ Migrations centralized in one location
+- ✅ Type safety with generated TypeScript types
 
 **Workflow:**
 ```bash
 # From monorepo root: Update schema and create migration
-cd packages/midcurve-services
+cd packages/midcurve-database
 # Edit prisma/schema.prisma
-npx prisma migrate dev --name your_migration_name
+pnpm db:migrate:dev --name your_migration_name
 
-# Changes automatically available to all packages via npm workspaces
-# UI app postinstall hook syncs schema + migrations + generates client
-cd ../../apps/midcurve-ui
-npm install  # Triggers postinstall → schema + migrations sync → prisma generate
+# Changes immediately available via workspace linking
+# All apps automatically use the updated client
 
-# During Vercel deployment: Migrations automatically applied
-# Vercel runs: npm install → npm run build
-#              → prisma migrate deploy → next build
+# Run Prisma Studio to inspect database
+pnpm db:studio
+```
+
+**Docker Deployment:**
+```bash
+# In Dockerfile - run migrations before starting app
+RUN pnpm --filter @midcurve/database db:migrate:deploy
+
+# Or in entrypoint script:
+npx prisma migrate deploy --schema=./packages/midcurve-database/prisma/schema.prisma
 ```
 
 **Migration Application:**
-- **Development:** Migrations applied manually in services package with `prisma migrate dev`
-- **Production/Vercel:** Migrations applied automatically during build via `prisma migrate deploy`
+- **Development:** `pnpm db:migrate:dev` in midcurve-database package
+- **Production/Docker:** `prisma migrate deploy` in Dockerfile or entrypoint
 - **Safety:** `prisma migrate deploy` is idempotent (safe to run on every deployment)
 
 ### 3. Workspace Protocol for Package Linking
@@ -542,45 +735,90 @@ type AnyToken = Erc20Token | SolanaToken;
 - Sub-millisecond latency critical (it's not for API caching)
 - Ephemeral cache desired (we want persistent)
 
-### 6. Unified Authentication Architecture
+### 6. Cross-Origin Authentication Architecture
 
-**Why Unified Architecture?**
-- UI and API routes run in same Next.js app (same origin)
-- Session cookies automatically included in API requests
-- No JWT passing or auth bridges needed
-- Single NextAuth instance shared between UI and API
+**Why Cross-Origin Architecture?**
+- UI (app.midcurve.finance) and API (api.midcurve.finance) are separate applications
+- Cross-origin requests require explicit CORS configuration
+- Session cookies sent with `credentials: 'include'`
+- Cookie `SameSite=None; Secure` for cross-origin cookie sharing
 
-**Dual Authentication Strategy:**
-1. **Session-based (JWT)** - For UI users (automatically works via cookies)
-2. **API keys** - For programmatic access (external clients)
+**Authentication Stack:**
+1. **Custom Session Middleware** - PostgreSQL-backed session validation
+2. **Session Cookies** - HTTPOnly, Secure, SameSite=None (for cross-origin)
+3. **CORS Headers** - Via Caddy reverse proxy + Next.js middleware
 
 **Sign-In with Ethereum (SIWE):**
 - EIP-4361 standard for wallet-based authentication
-- Auth.js v5 with custom CredentialsProvider
+- Custom implementation (no NextAuth)
 - Nonce generation and signature verification (prevents replay attacks)
 - Primary + secondary wallet linking
-- JWT session tokens (30-day expiration)
-- Prisma adapter for session storage in PostgreSQL
+- Session tokens stored in PostgreSQL with expiration
 
-**API Key Management:**
-- SHA-256 hashed keys (stored securely)
-- User-scoped keys (one user → many keys)
-- Last used tracking
-- Revocation support via API endpoints
+**Session Management:**
+- Sessions stored in PostgreSQL (`Session` table)
+- Session cookie: `midcurve_session`
+- Cookie attributes: `HTTPOnly`, `Secure`, `SameSite=None`
+- Validated on each API request via `withSessionAuth` middleware
 
-**Middleware (`withAuth`):**
-- Single middleware handles both auth methods
-- **Step 1:** Checks for API key in `Authorization: Bearer mc_xxx` header
-- **Step 2:** Checks for session cookie (automatically sent by browser)
-- Returns 401 if both fail
-- Injects authenticated user object into route handler
+**CORS Configuration (Cross-Origin):**
 
-**Flow:**
+Caddy handles CORS preflight at the edge:
 ```
-User → SIWE Sign-In → NextAuth creates session cookie
-     → UI calls /api/v1/* → Cookie automatically included
-     → withAuth() calls auth() → Validates session
-     → ✅ Authenticated
+# infra/Caddyfile - OPTIONS handled by Caddy
+@options method OPTIONS
+handle @options {
+    header Access-Control-Allow-Origin "https://app.midcurve.finance"
+    header Access-Control-Allow-Credentials "true"
+    respond 204
+}
+```
+
+API adds CORS headers to all responses:
+```typescript
+// apps/midcurve-api/src/lib/cors.ts
+{
+  'Access-Control-Allow-Origin': 'https://app.midcurve.finance',
+  'Access-Control-Allow-Credentials': 'true', // Required for cookies
+}
+```
+
+**Middleware (`withSessionAuth`):**
+- Extracts session cookie from request
+- Validates session against PostgreSQL
+- Fetches user with linked wallets
+- Injects `AuthenticatedUser` into route handler
+- Adds CORS headers to response
+
+**Authentication Flow:**
+```
+┌─────────────────────┐        ┌─────────────────────┐
+│  UI (Vite SPA)      │        │  API (Next.js)      │
+│  app.midcurve.fin.  │        │  api.midcurve.fin.  │
+└─────────┬───────────┘        └──────────┬──────────┘
+          │                               │
+          │ 1. POST /api/v1/auth/nonce    │
+          │ ─────────────────────────────▶│
+          │◀───────────────────────────── │
+          │    { nonce: "..." }           │
+          │                               │
+          │ 2. User signs with wallet     │
+          │                               │
+          │ 3. POST /api/v1/auth/verify   │
+          │    { message, signature }     │
+          │ ─────────────────────────────▶│
+          │◀───────────────────────────── │
+          │    Set-Cookie: midcurve_session=xxx
+          │    (SameSite=None; Secure)    │
+          │                               │
+          │ 4. GET /api/v1/positions      │
+          │    Cookie: midcurve_session=xxx
+          │    credentials: 'include'     │
+          │ ─────────────────────────────▶│
+          │◀───────────────────────────── │
+          │    { data: [...positions] }   │
+          │                               │
+└─────────┴───────────────────────────────┘
 ```
 
 ### 7. REST Async Operation Pattern (Polling)
@@ -957,11 +1195,11 @@ Jump to package-specific implementation documentation:
 - BigInt serialization utilities
 - Framework-agnostic, works in browsers and Node.js
 
-**🌐 [midcurve-ui](apps/midcurve-ui/CLAUDE.md)** - Unified Next.js Application (UI + API)
-- Project structure and routing (Next.js App Router)
-- Adding new endpoints (step-by-step guide)
-- Authentication (SIWE + API keys)
-- Deployment to Vercel
+**🌐 [midcurve-ui](apps/midcurve-ui/CLAUDE.md)** - Vite SPA Frontend
+- React 19 + TailwindCSS 4.0
+- RainbowKit wallet connection
+- React Query for server state
+- Docker deployment with nginx
 
 ---
 
@@ -1003,10 +1241,11 @@ Extensible to:
 
 ### Prerequisites
 
-1. **Node.js 18+** installed
-2. **PostgreSQL** database running
-3. **Git** for version control
-4. **npm** or **pnpm** or **yarn**
+1. **Node.js 20+** installed
+2. **pnpm 9+** installed (`corepack enable && corepack prepare pnpm@9 --activate`)
+3. **PostgreSQL 15+** database running
+4. **Docker & Docker Compose** (for production-like local development)
+5. **Git** for version control
 
 ### Initial Setup
 
@@ -1016,108 +1255,111 @@ git clone https://github.com/0xNedAlbo/midcurve-finance.git
 cd midcurve-finance
 
 # Install all dependencies at once (from root)
-npm install
+pnpm install
 
-# Set up environment variables for UI app
-cd apps/midcurve-ui
+# Set up environment variables
 cp .env.example .env
 # Edit .env with DATABASE_URL, RPC URLs, and other config
 
-# Build all packages in dependency order
-cd ../..
-npm run build
+# Generate Prisma client
+pnpm --filter @midcurve/database db:generate
 
-# Start development server
-cd apps/midcurve-ui
-npm run dev  # Runs unified app on port 3000
+# Build all packages in dependency order
+pnpm build
+
+# Start development servers
+pnpm dev  # Runs all services in parallel
 ```
 
-**What Happens During `npm install`:**
+**What Happens During `pnpm install`:**
 1. Installs dependencies for all packages (apps/*, packages/*)
 2. Creates workspace symlinks (automatic package linking)
 3. Turborepo sets up build cache
-4. UI postinstall hook syncs Prisma schema and generates client
+4. Prisma client generated via prepare script
 
 ### Environment Variables
 
-**Required (all projects):**
+**Required (all services):**
 ```bash
-DATABASE_URL="postgresql://user:password@localhost:5432/midcurve"
+DATABASE_URL="postgresql://devuser:devpass@localhost:5432/midcurve_dev"
 NODE_ENV="development"
 ```
 
-**Required (UI only):**
+**UI (Vite - build-time variables):**
 ```bash
-NEXT_PUBLIC_API_URL="http://localhost:3000"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your-secret-here"  # Generate with: openssl rand -base64 32
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID="your-walletconnect-project-id"
+VITE_API_URL="http://localhost:3001"
+VITE_WALLETCONNECT_PROJECT_ID="your-walletconnect-project-id"
 ```
 
-**Optional (services + UI):**
+**API (Next.js - runtime variables):**
 ```bash
-# EVM Chain RPCs (configure chains you plan to use)
-RPC_URL_ETHEREUM="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
-RPC_URL_ARBITRUM="https://arb-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
-RPC_URL_BASE="https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
-RPC_URL_BSC="https://bsc-dataseed1.binance.org"
-RPC_URL_POLYGON="https://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
-RPC_URL_OPTIMISM="https://opt-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+SESSION_SECRET="your-32-char-secret"  # openssl rand -base64 32
+ALLOWED_ORIGINS="http://localhost:3000,http://localhost:5173"
+RPC_URL_ETHEREUM="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+RPC_URL_ARBITRUM="https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"
+ETHERSCAN_API_KEY="your-etherscan-key"
+THE_GRAPH_API_KEY="your-graph-key"
+COINGECKO_API_KEY="your-coingecko-key"
+```
 
-# Token Enrichment
-COINGECKO_API_KEY="your-coingecko-key"  # Optional, but recommended
+**Signer Service:**
+```bash
+SIGNER_INTERNAL_API_KEY="your-internal-key"
+SIGNER_USE_LOCAL_KEYS="true"
+SIGNER_KEY_ENCRYPTION_PASSWORD="your-encryption-password"
+```
+
+**EVM Orchestrator:**
+```bash
+CORE_PRIVATE_KEY="your-deployer-private-key"
+CORE_ADDRESS="your-deployer-address"
+GETH_HTTP_URL="http://localhost:8545"
+GETH_WS_URL="ws://localhost:8546"
+RABBITMQ_URL="amqp://guest:guest@localhost:5672"
 ```
 
 ### Development Workflow
 
-**Working on shared types/utilities:**
+**Working on packages (shared, services, api-shared, database):**
 ```bash
 cd packages/midcurve-shared
 # Make changes to src/
-npm run build  # Dependent packages pick up changes via workspace
-npm test       # Run tests
+pnpm build  # Dependent packages pick up changes via workspace
+pnpm test   # Run tests
 ```
 
-**Working on services:**
-```bash
-cd packages/midcurve-services
-# Make changes to src/
-npm run build  # UI automatically uses latest via workspace
-npm test       # Run 121+ tests
-```
-
-**Working on api-shared (API types):**
-```bash
-cd packages/midcurve-api-shared
-# Make changes to src/types/
-npm run build  # UI automatically uses latest via workspace
-npm test       # Run tests (when implemented)
-```
-
-**Working on UI (contains frontend + API):**
+**Working on UI (Vite SPA):**
 ```bash
 cd apps/midcurve-ui
-npm run dev  # Start dev server
-# UI + API run at http://localhost:3000
-# Changes to packages/* automatically available via workspace symlinks
+pnpm dev  # Vite dev server on http://localhost:3000
+# Hot module replacement enabled
+```
+
+**Working on API:**
+```bash
+cd apps/midcurve-api
+pnpm dev  # Next.js dev server on http://localhost:3001
+```
+
+**Working on EVM Orchestrator:**
+```bash
+cd apps/midcurve-evm
+pnpm dev  # Development server on http://localhost:3002
 ```
 
 **Database migrations:**
 ```bash
-cd packages/midcurve-services
+cd packages/midcurve-database
 # Edit prisma/schema.prisma
-npx prisma migrate dev --name your_migration_name
+pnpm db:migrate:dev --name your_migration_name
 
-# Schema changes automatically available via workspace
-# Run postinstall in UI to sync schema + generate client
-cd ../../apps/midcurve-ui
-npm install
+# Schema changes immediately available via workspace linking
 ```
 
 **Building All Packages:**
 ```bash
 # From monorepo root - builds in dependency order
-npm run build
+pnpm build
 
 # Turborepo parallelizes where possible and caches builds
 # Only rebuilds changed packages
@@ -1125,113 +1367,178 @@ npm run build
 
 ### Testing
 
-**Shared:**
+**Packages:**
 ```bash
-cd packages/midcurve-shared
-npm test              # Watch mode
-npm run test:run      # Single run
-npm run test:coverage # With coverage
+# From any package directory
+pnpm test              # Watch mode
+pnpm test:run          # Single run
+pnpm test:coverage     # With coverage
 ```
 
-**Services:**
-```bash
-cd packages/midcurve-services
-npm test              # Watch mode (121+ tests)
-npm run test:run      # Single run
-npm run test:coverage # With coverage
-```
-
-**API-Shared:**
-```bash
-cd packages/midcurve-api-shared
-npm test              # Watch mode (when implemented)
-npm run test:run      # Single run (when implemented)
-npm run type-check    # Type checking only
-```
-
-**UI (Frontend + API):**
-```bash
-cd apps/midcurve-ui
-npm run typecheck     # Type checking
-npm run test:api      # API E2E tests (vitest)
-npm run test:e2e      # UI E2E tests (playwright)
-npm run test:e2e:ui   # Interactive UI test mode
-```
-
-**Run Tests for All Packages:**
+**Run All Tests:**
 ```bash
 # From monorepo root - runs tests in parallel
-npm test
+pnpm test
 ```
 
 ---
 
 ## Deployment
 
-### Vercel (Unified App)
+### Docker Compose (Production)
 
-**Automatic Deployment:**
-1. Connect GitHub repository to Vercel
-2. Configure environment variables in Vercel dashboard
-3. Push to `main` branch → automatic deploy
+The primary deployment method is Docker Compose with a multi-service architecture.
 
-**Deployment Process:**
+**Prerequisites:**
+- Docker & Docker Compose v2
+- External PostgreSQL database (AWS RDS recommended)
+- Domain names configured (app.midcurve.finance, api.midcurve.finance)
+- Environment variables in `.env.production`
+
+**Service Overview:**
 ```
-1. npm install (triggers postinstall)
-   → Syncs schema + migrations from services
-   → Generates Prisma client
-
-2. npm run build
-   → Runs prisma migrate deploy (applies pending migrations)
-   → Runs next build (builds application)
-```
-
-**Environment Variables (Vercel):**
-```
-DATABASE_URL          (PostgreSQL connection string)
-NEXTAUTH_URL          (Production URL, e.g., https://app.midcurve.finance)
-NEXTAUTH_SECRET       (Generate new for production)
-NEXT_PUBLIC_API_URL   (Same as NEXTAUTH_URL for same-origin)
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID  (WalletConnect project ID)
-RPC_URL_*             (All required RPC endpoints)
-COINGECKO_API_KEY     (Optional)
-ETHERSCAN_API_KEY     (Optional)
-THE_GRAPH_API_KEY     (Optional)
+┌─────────────────────────────────────────────────────────────┐
+│                    docker-compose.yml                        │
+├─────────────────────────────────────────────────────────────┤
+│  caddy         │ Reverse proxy, SSL termination (80/443)    │
+│  ui            │ Vite SPA + nginx (3000)                    │
+│  api           │ Next.js REST API (3001)                    │
+│  evm           │ Strategy orchestrator (3002)               │
+│  signer        │ Transaction signing (3003)                 │
+│  geth          │ Private EVM node (8545/8546)               │
+│  rabbitmq      │ Message broker (5672/15672)                │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Serverless Configuration:**
-- Region: `iad1` (US East)
-- Max Duration: 10 seconds
-- Memory: 1024 MB
-- See `midcurve-ui/vercel.json`
+**Deployment Steps:**
 
-**Migration Troubleshooting:**
+```bash
+# 1. Clone repository
+git clone https://github.com/0xNedAlbo/midcurve-finance.git
+cd midcurve-finance
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Build fails: "No migration files found" | Migrations not synced to UI | Run `npm install` locally to verify sync script works |
-| Build fails: "Migration already applied" | Migration history out of sync | Check `_prisma_migrations` table in database |
-| Build fails: "Cannot find module '@prisma/client'" | Prisma client not generated | Check postinstall script runs successfully |
-| Runtime error: "Table does not exist" | Migrations not applied in production | Check Vercel build logs for migration errors |
+# 2. Create production environment
+cp .env.example .env.production
+# Edit .env.production with all required values
 
-**Safety Features:**
-- ✅ `prisma migrate deploy` is idempotent (safe to run multiple times)
-- ✅ Migration lock prevents concurrent migrations
-- ✅ Failed migrations cause deployment to fail (prevents incomplete deploys)
-- ✅ Vercel automatically rolls back on build failure
+# 3. Build and start services
+docker compose --env-file .env.production up -d --build
+
+# 4. Apply database migrations
+docker compose exec api npx prisma migrate deploy
+
+# 5. Verify health
+curl https://api.midcurve.finance/api/health
+```
+
+**Environment Variables (.env.production):**
+
+```bash
+# Database (AWS RDS)
+DATABASE_URL="postgresql://user:pass@your-rds.amazonaws.com:5432/midcurve"
+
+# UI (build-time - passed as ARG in docker-compose)
+VITE_API_URL="https://api.midcurve.finance"
+VITE_WALLETCONNECT_PROJECT_ID="your-project-id"
+
+# API
+SESSION_SECRET="your-production-secret"
+ALLOWED_ORIGINS="https://app.midcurve.finance"
+RPC_URL_ETHEREUM="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+RPC_URL_ARBITRUM="https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"
+ETHERSCAN_API_KEY="your-etherscan-key"
+THE_GRAPH_API_KEY="your-graph-key"
+COINGECKO_API_KEY="your-coingecko-key"
+
+# Signer (internal service)
+SIGNER_INTERNAL_API_KEY="your-32-char-hex-key"
+SIGNER_USE_LOCAL_KEYS="true"
+SIGNER_KEY_ENCRYPTION_PASSWORD="your-encryption-password"
+
+# EVM Orchestrator
+CORE_PRIVATE_KEY="your-deployer-private-key"
+CORE_ADDRESS="your-deployer-address"
+GETH_HTTP_URL="http://geth:8545"
+GETH_WS_URL="ws://geth:8546"
+RABBITMQ_URL="amqp://midcurve:password@rabbitmq:5672"
+
+# RabbitMQ
+RABBITMQ_USER="midcurve"
+RABBITMQ_PASS="your-rabbitmq-password"
+```
+
+**Caddy Configuration (infra/Caddyfile):**
+
+```
+# Auto-HTTPS with Let's Encrypt
+app.midcurve.finance {
+    reverse_proxy ui:3000
+}
+
+api.midcurve.finance {
+    # CORS preflight
+    @options method OPTIONS
+    handle @options {
+        header Access-Control-Allow-Origin "https://app.midcurve.finance"
+        header Access-Control-Allow-Credentials "true"
+        respond 204
+    }
+
+    reverse_proxy api:3001
+}
+```
+
+**Service Dependencies:**
+- `api` depends on: PostgreSQL (external)
+- `evm` depends on: api, geth, rabbitmq, signer
+- `signer` depends on: (standalone)
+- `ui` depends on: (standalone, calls api via Caddy)
+
+**Useful Commands:**
+
+```bash
+# View logs
+docker compose logs -f api
+docker compose logs -f evm
+
+# Restart a service
+docker compose restart api
+
+# Rebuild and restart
+docker compose up -d --build api
+
+# Apply migrations
+docker compose exec api npx prisma migrate deploy
+
+# Access Prisma Studio
+docker compose exec api npx prisma studio
+
+# Shell into container
+docker compose exec api sh
+```
 
 ### PostgreSQL (Database)
 
 **Production Recommendations:**
-- Managed PostgreSQL (AWS RDS, Google Cloud SQL, Neon, Supabase)
-- Connection pooling (PgBouncer or Prisma Data Proxy)
-- Regular backups
-- Monitoring (disk space, connections, slow queries)
+- Managed PostgreSQL (AWS RDS recommended)
+- Connection pooling via RDS Proxy or PgBouncer
+- Automated backups enabled
+- Monitoring (CloudWatch for RDS)
 
-**Cache Table Growth:**
+**Cache Table Maintenance:**
 - Cache table grows over time
 - Run periodic cleanup: `CacheService.getInstance().cleanup()`
-- Or set up automatic cleanup cron job
+- Consider scheduled Lambda or cron job
+
+### Troubleshooting
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| 502 Bad Gateway | Next.js binding to localhost | Add `HOSTNAME=0.0.0.0` to service |
+| CORS errors | Preflight not handled | Check Caddyfile OPTIONS handler |
+| 500 on API calls | Missing env var | Check `docker compose logs api` |
+| Session not persisting | SameSite cookie issue | Ensure HTTPS and `Secure` cookie |
+| Migrations fail | DB connection | Verify DATABASE_URL is correct |
 
 ---
 
@@ -1276,8 +1583,8 @@ THE_GRAPH_API_KEY     (Optional)
 - ✅ NFT import functionality
 - ✅ Position list UI with wallet integration
 - ✅ Migrated to use @midcurve/api-shared
-- ✅ Vercel deployment configuration
-- ✅ npm workspaces integration
+- ✅ Docker Compose deployment configuration
+- ✅ pnpm workspaces integration
 - ✅ Playwright E2E tests (33 tests)
 - ✅ Vitest API E2E tests
 
@@ -1295,7 +1602,7 @@ THE_GRAPH_API_KEY     (Optional)
 
 **Infrastructure:**
 - Logging middleware (Pino)
-- Rate limiting (Vercel KV)
+- Rate limiting (Redis or PostgreSQL)
 - Error tracking (Sentry)
 
 ### 🔮 Phase 3: Advanced Features (Future)
@@ -1422,34 +1729,47 @@ THE_GRAPH_API_KEY     (Optional)
 - Clear boundaries between generic and specialized functionality
 - Future-proof architecture for multi-protocol support
 
-### 7. Why Merge API into UI (Unified Architecture)?
+### 7. Why Separate UI and API (Multi-Service Architecture)?
 
-**Problem:** Originally separate `midcurve-api` and `midcurve-ui` repos with different NextAuth instances caused authentication failures.
+**Problem:** A unified Next.js app combining UI and API became difficult to scale and deploy independently. Different concerns (static assets vs dynamic API) benefited from different technologies.
+
+**Current Architecture:**
+- **UI** - Vite SPA served by nginx (fast static hosting)
+- **API** - Next.js standalone server (serverless-friendly, but deployed as container)
+- **Cross-origin** - UI at `app.midcurve.finance`, API at `api.midcurve.finance`
 
 **Rationale:**
-- **Single NextAuth instance** - Session cookies work seamlessly (same origin)
-- **No JWT bridging** - Eliminated complex token passing between apps
-- **Simpler deployment** - One Vercel project instead of two
-- **Better DX** - Single dev server, no CORS issues, easier debugging
-- **Type safety** - UI imports API types directly, guaranteed compatibility
-- **Faster iteration** - Change API and UI in same commit
-- **Session sharing** - No need to sync sessions between separate apps
+- **Independent scaling** - UI and API have different resource needs
+- **Technology fit** - Vite for fast builds, Next.js for API routing
+- **Deployment flexibility** - Static CDN for UI, container for API
+- **Clear boundaries** - Frontend team vs backend team (future)
+- **Better caching** - Static assets cached at edge (nginx/CDN)
 
-**Before (Broken):**
+**Cross-Origin Authentication Solution:**
 ```
-UI (port 3000) → API (port 3001)
-❌ Different NextAuth instances
-❌ Session cookies don't work cross-origin
-❌ JWT passing required (complex, error-prone)
+┌──────────────────┐        ┌──────────────────┐
+│  app.midcurve.   │        │  api.midcurve.   │
+│  (Vite SPA)      │        │  (Next.js API)   │
+└────────┬─────────┘        └────────┬─────────┘
+         │                           │
+         │  1. Request with          │
+         │     credentials: 'include'│
+         ├──────────────────────────▶│
+         │                           │
+         │  2. Response with:        │
+         │     Set-Cookie (SameSite=None; Secure)
+         │     Access-Control-Allow-Credentials: true
+         │◀──────────────────────────┤
+         │                           │
 ```
 
-**After (Working):**
-```
-UI + API (port 3000, unified app)
-✅ Single NextAuth instance
-✅ Session cookies work (same origin)
-✅ No JWT bridging needed
-```
+**Key Requirements for Cross-Origin Cookies:**
+- ✅ HTTPS required (cookies with `Secure` flag)
+- ✅ `SameSite=None` on cookies (allows cross-origin)
+- ✅ `credentials: 'include'` in fetch requests
+- ✅ `Access-Control-Allow-Credentials: true` header
+- ✅ Explicit `Access-Control-Allow-Origin` (not `*`)
+- ✅ Caddy handles CORS preflight (OPTIONS) at edge
 
 ---
 
@@ -1498,31 +1818,28 @@ function Component() {
 
 **Architecture:**
 ```
-┌─────────────────────────────────────────────────────────┐
-│              midcurve-ui (Unified Next.js App)           │
-│                                                          │
-│  ┌────────────────┐                ┌──────────────────┐ │
-│  │   Frontend     │   Same-Origin  │   API Routes     │ │
-│  │   (React)      │───────────────▶│   (/api/v1/*)    │ │────▶ Blockchain
-│  │                │   Session      │                  │ │      (Ethereum)
-│  │ ❌ No RPC URLs │   Cookies      │ ✅ Has RPC URLs  │ │
-│  │ ❌ No API Keys │                │ ✅ Has API Keys  │ │
-│  └────────────────┘                └──────────────────┘ │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────┐         ┌───────────────────────┐
+│   midcurve-ui        │         │   midcurve-api        │
+│   (Vite SPA)         │         │   (Next.js API)       │
+│   app.midcurve.fin.  │         │   api.midcurve.fin.   │
+│                      │ HTTPS   │                       │
+│ ❌ No RPC URLs       │────────▶│ ✅ Has RPC URLs       │───▶ Blockchain
+│ ❌ No API Keys       │ cross-  │ ✅ Has API Keys       │     (Ethereum)
+│ ✅ VITE_API_URL      │ origin  │ ✅ Database access    │
+└──────────────────────┘         └───────────────────────┘
 ```
 
 **Migration Pattern:**
 
-**Frontend Code (src/app, src/components, src/hooks):**
+**Frontend Code (src/components, src/hooks, src/pages):**
 - ❌ **No** chain RPC configuration
 - ❌ **No** direct viem/wagmi reads from blockchain
 - ❌ **No** `RPC_URL_*` environment variables in frontend code
-- ✅ **Only** HTTP calls to `/api/v1/*` routes (same origin)
-- ✅ **Only** `NEXT_PUBLIC_API_URL` environment variable
+- ✅ **Only** HTTP calls via `apiClient` to API (cross-origin)
+- ✅ **Only** `VITE_API_URL` environment variable (build-time)
 - ✅ **Wagmi/RainbowKit** for wallet connection and transaction signing only
 
-**Backend Code (src/app/api):**
+**Backend Code (midcurve-api/src/app/api):**
 - ✅ **Has** all RPC URLs and API keys
 - ✅ **Handles** all blockchain reads
 - ✅ **Exposes** data via REST endpoints
@@ -1530,13 +1847,16 @@ function Component() {
 **Environment Variables:**
 
 ```bash
-# Unified .env - Backend secrets + frontend public vars
-NEXT_PUBLIC_API_URL=http://localhost:3000  # Same origin
+# UI (.env) - Build-time only
+VITE_API_URL=https://api.midcurve.finance
+VITE_WALLETCONNECT_PROJECT_ID=...
+
+# API (.env) - Runtime secrets
 DATABASE_URL=postgresql://...
 RPC_URL_ETHEREUM=https://...
 RPC_URL_ARBITRUM=https://...
 COINGECKO_API_KEY=...
-NEXTAUTH_SECRET=...
+SESSION_SECRET=...
 ```
 
 **Read vs Write Operations:**
