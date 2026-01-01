@@ -88,6 +88,8 @@ services:
       - EVM_SERVICE_URL=http://evm:3002
       # External APIs
       - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY:-}
     depends_on:
       signer:
         condition: service_started
