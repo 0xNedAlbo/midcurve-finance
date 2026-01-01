@@ -23,7 +23,7 @@ import {
   type UseMutationOptions,
 } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { ApiError } from '@/lib/api-client';
+import { apiClient, ApiError } from '@/lib/api-client';
 import type { UniswapV3Position } from '@midcurve/shared';
 import type { BigIntToString } from '@midcurve/api-shared';
 
@@ -51,34 +51,8 @@ export function useReloadPositionHistory(
     mutationKey: ['positions', 'reload-history'] as const,
 
     mutationFn: async ({ endpoint }: ReloadPositionHistoryParams) => {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        credentials: 'include', // Include session cookies
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new ApiError(
-          data.error?.message || data.message || 'Failed to reload position history',
-          response.status,
-          data.error?.code || 'RELOAD_HISTORY_FAILED',
-          data.error?.details
-        );
-      }
-
-      // Parse response body - should contain refreshed position
-      const result = await response.json();
-
-      if (!result.data) {
-        throw new ApiError(
-          'Invalid response format: missing data field',
-          500,
-          'INVALID_RESPONSE',
-          result
-        );
-      }
-
-      return result.data as SerializedPosition;
+      const result = await apiClient.post<SerializedPosition>(endpoint, {});
+      return result.data;
     },
 
     onSuccess: async () => {
