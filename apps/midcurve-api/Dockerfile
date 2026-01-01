@@ -40,6 +40,9 @@ ENV PORT=3001
 # Install required system packages for Prisma
 RUN apk add --no-cache openssl
 
+# Install prisma CLI for migrations (pinned to 6.x)
+RUN npm install -g prisma@6.19.0
+
 # Copy standalone build
 COPY --from=builder /app/apps/midcurve-api/.next/standalone ./
 COPY --from=builder /app/apps/midcurve-api/.next/static ./apps/midcurve-api/.next/static
