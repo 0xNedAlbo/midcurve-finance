@@ -384,10 +384,11 @@ model Pool {
   // Relations to Token model
   // Note: In TypeScript, Pool.token0 and Pool.token1 are full Token objects
   // In database, we use foreign keys for efficient storage and queries
-  token0     Token       @relation("PoolToken0", fields: [token0Id], references: [id])
-  token1     Token       @relation("PoolToken1", fields: [token1Id], references: [id])
-  positions  Position[]
-  poolPrices PoolPrice[]
+  token0            Token                  @relation("PoolToken0", fields: [token0Id], references: [id])
+  token1            Token                  @relation("PoolToken1", fields: [token1Id], references: [id])
+  positions         Position[]
+  poolPrices        PoolPrice[]
+  priceSubscription PoolPriceSubscription? // 1:1 relation for automation price monitoring
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -457,9 +458,10 @@ model Position {
   state  Json // Mutable: ownerAddress, liquidity, feeGrowth, tokensOwed, etc.
 
   // Relations
-  ledgerEvents PositionLedgerEvent[]
-  aprPeriods   PositionAprPeriod[]
-  syncState    PositionSyncState? // 1:1 relation, optional for backward compatibility
+  ledgerEvents     PositionLedgerEvent[]
+  aprPeriods       PositionAprPeriod[]
+  syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
+  automationOrders AutomationCloseOrder[] // Close orders linked to this position
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -649,10 +651,16 @@ model AutomationWallet {
   // Wallet type discriminator
   walletType String // 'evm', 'solana', 'hyperliquid'
 
+  // Wallet purpose discriminator
+  // - 'strategy': Wallet linked to a specific strategy (has strategyId)
+  // - 'automation': Standalone automation wallet (shared across positions)
+  walletPurpose String @default("strategy") // 'strategy' | 'automation'
+
   // Owner reference (for authorization, NOT unique - one user can have many wallets)
   userId String
 
   // Optional strategy reference (one strategy can have multiple wallets)
+  // Required when walletPurpose='strategy', null when walletPurpose='automation'
   strategyId String?
   strategy   Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
 
@@ -684,6 +692,7 @@ model AutomationWallet {
 
   // Indexes
   @@index([walletType])
+  @@index([walletPurpose])
   @@index([userId])
   @@index([strategyId])
   @@index([isActive])
@@ -721,4 +730,112 @@ model AutomationWalletNonce {
   // Indexes
   @@index([walletId])
   @@map("automation_wallet_nonces")
+}
+
+// =============================================================================
+// Position Automation Models
+// =============================================================================
+
+// AutomationContract - User's deployed automation contracts (e.g., UniswapV3PositionCloser)
+// One contract per user per protocol per chain
+model AutomationContract {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Type discriminator (protocol-specific)
+  contractType String // 'uniswapv3' (future: 'orca', 'raydium')
+
+  // Owner reference
+  userId String
+
+  // Status
+  isActive Boolean @default(true)
+
+  // Platform-specific configuration (JSON) - Immutable after deployment
+  // UniswapV3: { chainId, contractAddress, nfpmAddress, operatorAddress }
+  config Json
+
+  // Deployment state (JSON) - Mutable
+  // UniswapV3: { deploymentTxHash, deployedAt, lastCloseId }
+  state Json
+
+  // Relations
+  closeOrders AutomationCloseOrder[]
+
+  // Constraints
+  // One contract per user per protocol per chain (chainId is in config JSON)
+  // Uniqueness enforced at application level since chainId is in JSON
+  @@index([userId])
+  @@index([contractType])
+  @@index([isActive])
+  @@index([userId, contractType]) // Fast lookup for user's contracts by type
+  @@map("automation_contracts")
+}
+
+// AutomationCloseOrder - Registered close triggers for positions
+// Links a Position to an AutomationContract with price trigger conditions
+model AutomationCloseOrder {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Type discriminator
+  orderType String // 'uniswapv3' (future: 'orca', 'raydium')
+
+  // Parent contract reference
+  contractId String
+  contract   AutomationContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  // Required position link (automation is always for a specific position)
+  positionId String
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  // Lifecycle status
+  // pending -> registering -> active -> triggering -> executed/cancelled/expired/failed
+  status String @default("pending")
+
+  // Protocol-specific config (JSON) - Immutable after registration
+  // UniswapV3: { closeId, nftId, poolAddress, triggerMode, sqrtPriceX96Lower, sqrtPriceX96Upper,
+  //              payoutAddress, operatorAddress, validUntil, slippageBps }
+  config Json
+
+  // Protocol-specific state (JSON) - Mutable
+  // UniswapV3: { registrationTxHash, registeredAt, triggeredAt, triggerSqrtPriceX96,
+  //              executionTxHash, executedAt, executionFeeBps, executionError, retryCount,
+  //              amount0Out, amount1Out }
+  state Json
+
+  // Indexes
+  @@index([contractId])
+  @@index([orderType])
+  @@index([status])
+  @@index([positionId])
+  @@index([contractId, status]) // Fast lookup for active orders by contract
+  @@map("automation_close_orders")
+}
+
+// PoolPriceSubscription - Pools being monitored for price changes
+// Used by the automation service to track which pools need WebSocket subscriptions
+model PoolPriceSubscription {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Direct link to Pool entity (1:1 relation)
+  poolId String @unique
+  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  // Subscription state
+  isActive         Boolean @default(true)
+  activeOrderCount Int     @default(0) // Number of active orders watching this pool
+
+  // Last known price state (JSON) - Mutable
+  // { lastSqrtPriceX96: string, lastTick: number, lastUpdatedAt: string }
+  state Json
+
+  // Indexes
+  @@index([isActive])
+  @@index([activeOrderCount]) // Find pools with active orders
+  @@map("pool_price_subscriptions")
 }

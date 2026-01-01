@@ -45,11 +45,13 @@ export * from './services/strategy-position/index.js';
 export * from './services/strategy-ledger/index.js';
 export * from './services/strategy-metrics/index.js';
 export * from './services/strategy-position-metrics/index.js';
+export * from './services/automation/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';
 export * from './services/types/block/index.js';
 export * from './services/types/strategy/index.js';
+export * from './services/types/automation/index.js';
 
 // Export auth utilities (specific exports to avoid conflicts)
 export {

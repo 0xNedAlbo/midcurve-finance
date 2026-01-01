@@ -334,8 +334,8 @@ importers:
   packages/midcurve-api-shared:
     dependencies:
       '@midcurve/shared':
-        specifier: file:../midcurve-shared
-        version: file:packages/midcurve-shared(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(zod@3.25.76)
+        specifier: workspace:*
+        version: link:../midcurve-shared
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
@@ -375,11 +375,11 @@ importers:
   packages/midcurve-services:
     dependencies:
       '@midcurve/database':
-        specifier: file:../midcurve-database
+        specifier: workspace:*
         version: link:../midcurve-database
       '@midcurve/shared':
-        specifier: file:../midcurve-shared
-        version: file:packages/midcurve-shared(bufferutil@4.0.9)(hardhat@2.27.0(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
+        specifier: workspace:*
+        version: link:../midcurve-shared
       '@uniswap/sdk-core':
         specifier: ^7.8.0
         version: 7.9.0
@@ -1576,10 +1576,6 @@ packages:
   '@metamask/utils@9.3.0':
     resolution: {integrity: sha512-w8CVbdkDrVXFJbfBSlDfafDR6BAkpDmv1bC1UJVCoVny5tW2RKAdn9i68Xf7asYT4TnUhl/hN4zfUiKQq9II4g==}
     engines: {node: '>=16.0.0'}
-
-  '@midcurve/shared@file:packages/midcurve-shared':
-    resolution: {directory: packages/midcurve-shared, type: directory}
-    engines: {node: '>=18.0.0'}
 
   '@napi-rs/wasm-runtime@0.2.12':
     resolution: {integrity: sha512-ZVWUcfwY4E/yPitQJl481FjFo3K22D6qF0DuFH6Y/nbnE11GY5uguDxZMGXPQ8WQ0128MXQD7TnfHyK4oWoIJQ==}
@@ -8009,48 +8005,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@midcurve/shared@file:packages/midcurve-shared(bufferutil@4.0.9)(hardhat@2.27.0(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)':
-    dependencies:
-      '@uniswap/sdk-core': 7.9.0
-      '@uniswap/v3-sdk': 3.26.0(hardhat@2.27.0(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10))
-      jsbi: 4.3.2
-      tsup: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)
-      viem: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.1.12)
-    transitivePeerDependencies:
-      - '@microsoft/api-extractor'
-      - '@swc/core'
-      - bufferutil
-      - hardhat
-      - jiti
-      - postcss
-      - supports-color
-      - tsx
-      - typescript
-      - utf-8-validate
-      - yaml
-      - zod
-
-  '@midcurve/shared@file:packages/midcurve-shared(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(zod@3.25.76)':
-    dependencies:
-      '@uniswap/sdk-core': 7.9.0
-      '@uniswap/v3-sdk': 3.26.0(hardhat@2.27.0(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10))
-      jsbi: 4.3.2
-      tsup: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
-      viem: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
-    transitivePeerDependencies:
-      - '@microsoft/api-extractor'
-      - '@swc/core'
-      - bufferutil
-      - hardhat
-      - jiti
-      - postcss
-      - supports-color
-      - tsx
-      - typescript
-      - utf-8-validate
-      - yaml
-      - zod
-
   '@napi-rs/wasm-runtime@0.2.12':
     dependencies:
       '@emnapi/core': 1.7.1
@@ -12303,7 +12257,7 @@ snapshots:
     dependencies:
       ws: 8.18.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
 
-  isows@1.0.7(ws@8.18.3):
+  isows@1.0.7(ws@8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)):
     dependencies:
       ws: 8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
 
@@ -14130,7 +14084,7 @@ snapshots:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
       abitype: 1.1.0(typescript@5.9.3)(zod@3.22.4)
-      isows: 1.0.7(ws@8.18.3)
+      isows: 1.0.7(ws@8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10))
       ox: 0.9.6(typescript@5.9.3)(zod@3.22.4)
       ws: 8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     optionalDependencies:
@@ -14147,7 +14101,7 @@ snapshots:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
       abitype: 1.1.0(typescript@5.9.3)(zod@3.25.76)
-      isows: 1.0.7(ws@8.18.3)
+      isows: 1.0.7(ws@8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10))
       ox: 0.9.6(typescript@5.9.3)(zod@3.25.76)
       ws: 8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     optionalDependencies:
@@ -14164,7 +14118,7 @@ snapshots:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
       abitype: 1.1.0(typescript@5.9.3)(zod@4.1.12)
-      isows: 1.0.7(ws@8.18.3)
+      isows: 1.0.7(ws@8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10))
       ox: 0.9.6(typescript@5.9.3)(zod@4.1.12)
       ws: 8.18.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     optionalDependencies:

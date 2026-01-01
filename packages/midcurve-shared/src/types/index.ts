@@ -208,3 +208,78 @@ export {
   hasUserInputParams,
   getDefaultUIElement,
 } from './strategy-manifest.js';
+
+// ============================================================================
+// Automation Types (position automation features)
+// ============================================================================
+
+// Close Order types
+export type {
+  CloseOrderType,
+  CloseOrderStatus,
+  CloseOrderJSON,
+  BaseCloseOrderParams,
+  CloseOrderInterface,
+} from './automation/index.js';
+
+export { BaseCloseOrder } from './automation/index.js';
+
+// Automation Contract types
+export type {
+  AutomationContractType,
+  AutomationContractJSON,
+  BaseAutomationContractParams,
+  AutomationContractInterface,
+} from './automation/index.js';
+
+export { BaseAutomationContract } from './automation/index.js';
+
+// Pool Subscription types
+export type {
+  PoolPriceSubscriptionState,
+  PoolPriceSubscriptionData,
+  PoolPriceSubscriptionJSON,
+} from './automation/index.js';
+
+export {
+  poolSubscriptionToJSON,
+  poolSubscriptionFromJSON,
+  emptySubscriptionState,
+} from './automation/index.js';
+
+// Automation Factory types
+export type {
+  AutomationContractRow,
+  CloseOrderRow,
+} from './automation/index.js';
+
+export {
+  AutomationContractFactory,
+  CloseOrderFactory,
+} from './automation/index.js';
+
+// UniswapV3 Automation types
+export type {
+  TriggerMode,
+  UniswapV3CloseOrderConfigData,
+  UniswapV3CloseOrderConfigJSON,
+  UniswapV3CloseOrderStateData,
+  UniswapV3CloseOrderStateJSON,
+  UniswapV3CloseOrderParams,
+  UniswapV3CloseOrderRow,
+  UniswapV3ContractConfigData,
+  UniswapV3ContractConfigJSON,
+  UniswapV3ContractStateData,
+  UniswapV3ContractStateJSON,
+  UniswapV3AutomationContractParams,
+  UniswapV3AutomationContractRow,
+} from './automation/index.js';
+
+export {
+  UniswapV3CloseOrderConfig,
+  UniswapV3CloseOrderState,
+  UniswapV3CloseOrder,
+  UniswapV3ContractConfig,
+  UniswapV3ContractState,
+  UniswapV3AutomationContract,
+} from './automation/index.js';

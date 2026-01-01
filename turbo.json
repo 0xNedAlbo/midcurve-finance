@@ -38,7 +38,8 @@
         },
         "dev": {
             "dependsOn": [
-                "^db:generate"
+                "^db:generate",
+                "^build"
             ],
             "persistent": true,
             "cache": false,

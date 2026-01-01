@@ -71,7 +71,7 @@
   "author": "Midcurve Finance",
   "license": "MIT",
   "dependencies": {
-    "@midcurve/shared": "file:../midcurve-shared",
+    "@midcurve/shared": "workspace:*",
     "tsup": "^8.5.0",
     "zod": "^3.22.0"
   },
