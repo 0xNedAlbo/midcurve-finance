@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { PoolDiscoveryResult } from '@midcurve/shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { getChainId } from '@/config/chains';
+import { apiClient } from '@/lib/api-client';
 
 export interface UsePoolDiscoveryOptions {
   /**
@@ -111,22 +112,11 @@ export function usePoolDiscovery(
       tokenB,
     });
 
-    const response = await fetch(
+    const response = await apiClient.get<PoolDiscoveryResult<'uniswapv3'>[]>(
       `/api/v1/pools/uniswapv3/discover?${params.toString()}`
     );
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      throw new Error(
-        errorData?.error || `HTTP ${response.status}: ${response.statusText}`
-      );
-    }
-
-    const data = await response.json();
-
-    // API returns ApiResponse<PoolDiscoveryResult[]>
-    // Extract the data field
-    return data.data || [];
+    return response.data || [];
   };
 
   const query = useQuery({

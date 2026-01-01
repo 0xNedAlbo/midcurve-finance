@@ -22,7 +22,7 @@ import {
   type UseMutationOptions,
 } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
-import { ApiError } from '@/lib/api-client';
+import { apiClient, ApiError } from '@/lib/api-client';
 
 interface DeletePositionParams {
   endpoint: string; // Protocol-specific DELETE endpoint
@@ -44,23 +44,7 @@ export function useDeletePosition(
     mutationKey: ['positions', 'delete'] as const,
 
     mutationFn: async ({ endpoint }: DeletePositionParams) => {
-      const response = await fetch(endpoint, {
-        method: 'DELETE',
-        credentials: 'include', // Include session cookies
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new ApiError(
-          data.error?.message || data.message || 'Failed to delete position',
-          response.status,
-          data.error?.code || 'DELETE_FAILED',
-          data.error?.details
-        );
-      }
-
-      // Success - no response body expected
-      return;
+      await apiClient.delete(endpoint);
     },
 
     onSuccess: async () => {

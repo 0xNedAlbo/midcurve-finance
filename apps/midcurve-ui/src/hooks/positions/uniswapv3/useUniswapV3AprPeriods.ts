@@ -7,6 +7,7 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { AprPeriodsResponse } from '@midcurve/api-shared';
+import { apiClient } from '@/lib/api-client';
 
 /**
  * Fetch APR periods and summary for a Uniswap V3 position
@@ -28,18 +29,13 @@ export function useUniswapV3AprPeriods(
     queryKey: ['uniswapv3-apr-periods', chainId, nftId],
     queryFn: async () => {
       // Fetch full response (not just data array)
-      const response = await fetch(
+      const response = await apiClient.get<AprPeriodsResponse>(
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}/apr`
       );
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({
-          message: 'Failed to fetch APR periods',
-        }));
-        throw new Error(error.message || 'Failed to fetch APR periods');
-      }
-
-      return response.json();
+      // apiClient returns { success, data, ... } - we need the full response
+      // which includes summary and meta alongside data
+      return response as unknown as AprPeriodsResponse;
     },
     staleTime: 60 * 1000, // 1 minute
     gcTime: 60 * 1000, // 1 minute (renamed from cacheTime in React Query v5)

@@ -43,6 +43,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { TokenBalanceData } from '@midcurve/api-shared';
 import { useErc20TransferWatch } from '@/lib/events/use-erc20-transfer-watch';
+import { apiClient } from '@/lib/api-client';
 
 /**
  * Options for useErc20TokenBalance hook
@@ -160,24 +161,11 @@ export function useErc20TokenBalance(
       chainId: chainId.toString(),
     });
 
-    const response = await fetch(
+    const response = await apiClient.get<TokenBalanceData>(
       `/api/v1/tokens/erc20/balance?${params.toString()}`
     );
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      const errorMessage =
-        errorData?.error?.message ||
-        errorData?.error ||
-        `HTTP ${response.status}: ${response.statusText}`;
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-
-    // API returns ApiResponse<TokenBalanceData>
-    // Extract the data field
-    return data.data;
+    return response.data;
   };
 
   // Set up TanStack Query

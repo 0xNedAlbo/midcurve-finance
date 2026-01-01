@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { PoolMetricsData } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { getChainId } from '@/config/chains';
+import { apiClient, ApiError } from '@/lib/api-client';
 
 export interface UsePoolMetricsOptions {
   /**
@@ -98,34 +99,22 @@ export function usePoolMetrics(
       throw new Error('Pool address is required');
     }
 
-    const response = await fetch(
-      `/api/v1/pools/uniswapv3/${chainId}/${poolAddress}/metrics`
-    );
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      const errorMessage =
-        errorData?.error?.message ||
-        errorData?.error ||
-        `HTTP ${response.status}: ${response.statusText}`;
-
+    try {
+      const response = await apiClient.get<PoolMetricsData>(
+        `/api/v1/pools/uniswapv3/${chainId}/${poolAddress}/metrics`
+      );
+      return response.data;
+    } catch (err) {
       // Mark 404 as "not discovered" error
-      if (response.status === 404) {
-        const error = new Error(errorMessage) as Error & {
+      if (err instanceof ApiError && err.statusCode === 404) {
+        const error = new Error(err.message) as Error & {
           isNotDiscovered: boolean;
         };
         error.isNotDiscovered = true;
         throw error;
       }
-
-      throw new Error(errorMessage);
+      throw err;
     }
-
-    const data = await response.json();
-
-    // API returns ApiResponse<PoolMetricsData>
-    // Extract the data field
-    return data.data;
   };
 
   const query = useQuery({

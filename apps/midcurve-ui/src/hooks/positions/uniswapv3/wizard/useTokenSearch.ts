@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDebounce } from 'use-debounce';
 import type { EvmChainSlug } from '@/config/chains';
 import { getChainId } from '@/config/chains';
+import { apiClient } from '@/lib/api-client';
 
 /**
  * Token search result
@@ -103,20 +104,13 @@ export function useTokenSearch({
           params.append('type', type);
         }
 
-        const response = await fetch(
+        const response = await apiClient.get<any[]>(
           `/api/v1/tokens/erc20/search?${params.toString()}`
         );
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Search failed');
-        }
-
-        const data = await response.json();
-
         // API returns { data: TokenSearchCandidate[] }
         // TokenSearchCandidate has: coingeckoId, symbol, name, address, chainId, logoUrl, marketCap
-        const tokens = data.data || [];
+        const tokens = response.data || [];
 
         // Map to TokenSearchResult format
         const mappedTokens: TokenSearchResult[] = tokens.map((token: any) => ({

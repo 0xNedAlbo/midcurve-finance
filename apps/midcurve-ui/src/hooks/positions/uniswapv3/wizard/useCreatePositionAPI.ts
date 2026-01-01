@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { decodeEventLog, type Address, type TransactionReceipt } from "viem";
 import type { EvmChainSlug } from "@/config/chains";
 import { getChainId } from "@/config/chains";
+import { apiClient } from "@/lib/api-client";
 
 // IncreaseLiquidity event ABI from Uniswap V3 NonfungiblePositionManager
 const INCREASE_LIQUIDITY_EVENT_ABI = {
@@ -101,32 +102,19 @@ export function useCreatePositionAPI() {
             // Convert chain slug to numeric chain ID for API
             const numericChainId = getChainId(data.chainId);
 
-            const response = await fetch(
+            const response = await apiClient.put(
                 `/api/v1/positions/uniswapv3/${numericChainId}/${data.nftId}`,
                 {
-                    method: "PUT",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        poolAddress: data.poolAddress,
-                        tickUpper: data.tickUpper,
-                        tickLower: data.tickLower,
-                        ownerAddress: data.ownerAddress,
-                        quoteTokenAddress: data.quoteTokenAddress,
-                        increaseEvent,
-                    }),
+                    poolAddress: data.poolAddress,
+                    tickUpper: data.tickUpper,
+                    tickLower: data.tickLower,
+                    ownerAddress: data.ownerAddress,
+                    quoteTokenAddress: data.quoteTokenAddress,
+                    increaseEvent,
                 }
             );
 
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({
-                    error: "Failed to create position in database",
-                }));
-                throw new Error(error.error || "Failed to create position");
-            }
-
-            return response.json();
+            return response;
         },
         onSuccess: () => {
             // Invalidate positions list to trigger refetch
