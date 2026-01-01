@@ -6,6 +6,10 @@ WORKDIR /app
 ARG VITE_WALLETCONNECT_PROJECT_ID
 ARG VITE_API_URL
 
+# Convert ARG to ENV so Vite can access them during build
+ENV VITE_WALLETCONNECT_PROJECT_ID=$VITE_WALLETCONNECT_PROJECT_ID
+ENV VITE_API_URL=$VITE_API_URL
+
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
