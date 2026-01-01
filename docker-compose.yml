@@ -48,6 +48,9 @@ services:
     build:
       context: .
       dockerfile: apps/midcurve-ui/Dockerfile
+      args:
+        - VITE_WALLETCONNECT_PROJECT_ID=${VITE_WALLETCONNECT_PROJECT_ID}
+        - VITE_API_URL=${VITE_API_URL}
     container_name: midcurve-ui
     expose:
       - "3000"

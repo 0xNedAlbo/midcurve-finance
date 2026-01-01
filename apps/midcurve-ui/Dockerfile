@@ -2,6 +2,10 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Build args for Vite (must be available at build time)
+ARG VITE_WALLETCONNECT_PROJECT_ID
+ARG VITE_API_URL
+
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
