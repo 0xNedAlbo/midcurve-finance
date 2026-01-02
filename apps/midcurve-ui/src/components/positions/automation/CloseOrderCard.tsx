@@ -1,0 +1,194 @@
+/**
+ * Close Order Card
+ *
+ * Displays a single close order with:
+ * - Trigger type (Lower/Upper/Both)
+ * - Trigger price(s)
+ * - Status badge
+ * - Expiration date
+ * - Cancel button (if cancellable)
+ */
+
+import { X, AlertTriangle, TrendingDown, TrendingUp, ArrowLeftRight } from 'lucide-react';
+import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
+import { CloseOrderStatusBadge, canCancelCloseOrder } from './CloseOrderStatusBadge';
+import { formatCompactValue } from '@/lib/fraction-format';
+
+interface CloseOrderCardProps {
+  /**
+   * The close order data
+   */
+  order: SerializedCloseOrder;
+
+  /**
+   * Quote token symbol for display
+   */
+  quoteTokenSymbol: string;
+
+  /**
+   * Quote token decimals for formatting
+   */
+  quoteTokenDecimals: number;
+
+  /**
+   * Base token symbol for display
+   */
+  baseTokenSymbol: string;
+
+  /**
+   * Base token decimals for formatting
+   */
+  baseTokenDecimals: number;
+
+  /**
+   * Callback when cancel is clicked
+   */
+  onCancel?: (orderId: string) => void;
+
+  /**
+   * Whether cancel is in progress
+   */
+  isCancelling?: boolean;
+}
+
+/**
+ * Get icon for trigger mode
+ */
+function getTriggerIcon(mode: TriggerMode) {
+  switch (mode) {
+    case 'LOWER':
+      return <TrendingDown className="w-4 h-4 text-red-400" />;
+    case 'UPPER':
+      return <TrendingUp className="w-4 h-4 text-green-400" />;
+    case 'BOTH':
+      return <ArrowLeftRight className="w-4 h-4 text-blue-400" />;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Get label for trigger mode
+ */
+function getTriggerLabel(mode: TriggerMode): string {
+  switch (mode) {
+    case 'LOWER':
+      return 'Stop-Loss';
+    case 'UPPER':
+      return 'Take-Profit';
+    case 'BOTH':
+      return 'Range Exit';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
+ * Format sqrtPriceX96 to human-readable price
+ * This is a simplified display - real conversion needs token order context
+ */
+function formatTriggerPrice(
+  sqrtPriceX96: string | undefined,
+  quoteDecimals: number
+): string {
+  if (!sqrtPriceX96 || sqrtPriceX96 === '0') return '-';
+
+  try {
+    // sqrtPriceX96 to price conversion
+    // price = (sqrtPriceX96 / 2^96)^2
+    const sqrtPrice = BigInt(sqrtPriceX96);
+    const Q96 = BigInt(2) ** BigInt(96);
+
+    // Calculate price with high precision
+    // Using shifted arithmetic: (sqrtPrice^2 * 10^decimals) / Q96^2
+    const priceNumerator = sqrtPrice * sqrtPrice * (BigInt(10) ** BigInt(quoteDecimals));
+    const priceDenominator = Q96 * Q96;
+    const price = priceNumerator / priceDenominator;
+
+    return formatCompactValue(price, quoteDecimals);
+  } catch {
+    return '-';
+  }
+}
+
+export function CloseOrderCard({
+  order,
+  quoteTokenSymbol,
+  quoteTokenDecimals,
+  baseTokenSymbol: _baseTokenSymbol, // Reserved for future price formatting with token order
+  onCancel,
+  isCancelling = false,
+}: CloseOrderCardProps) {
+  const config = order.config as {
+    triggerMode?: TriggerMode;
+    sqrtPriceX96Lower?: string;
+    sqrtPriceX96Upper?: string;
+    validUntil?: string;
+    slippageBps?: number;
+  };
+
+  const triggerMode = config.triggerMode ?? 'LOWER';
+  const canCancel = canCancelCloseOrder(order.status);
+
+  // Format expiration
+  const expiresAt = config.validUntil ? new Date(config.validUntil) : null;
+  const isExpiringSoon = expiresAt && expiresAt.getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  return (
+    <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
+      {/* Header Row */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          {getTriggerIcon(triggerMode)}
+          <span className="font-medium text-slate-200">{getTriggerLabel(triggerMode)}</span>
+        </div>
+        <CloseOrderStatusBadge status={order.status} size="sm" />
+      </div>
+
+      {/* Trigger Prices */}
+      <div className="space-y-2 mb-3">
+        {(triggerMode === 'LOWER' || triggerMode === 'BOTH') && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-400">Lower trigger:</span>
+            <span className="text-red-400 font-mono">
+              {formatTriggerPrice(config.sqrtPriceX96Lower, quoteTokenDecimals)} {quoteTokenSymbol}
+            </span>
+          </div>
+        )}
+        {(triggerMode === 'UPPER' || triggerMode === 'BOTH') && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-400">Upper trigger:</span>
+            <span className="text-green-400 font-mono">
+              {formatTriggerPrice(config.sqrtPriceX96Upper, quoteTokenDecimals)} {quoteTokenSymbol}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Details Row */}
+      <div className="flex items-center justify-between text-xs text-slate-500 mb-3">
+        <div className="flex items-center gap-1">
+          {isExpiringSoon && <AlertTriangle className="w-3 h-3 text-amber-400" />}
+          <span className={isExpiringSoon ? 'text-amber-400' : ''}>
+            Expires: {expiresAt ? expiresAt.toLocaleDateString() : 'Never'}
+          </span>
+        </div>
+        {config.slippageBps && (
+          <span>Slippage: {(config.slippageBps / 100).toFixed(1)}%</span>
+        )}
+      </div>
+
+      {/* Actions */}
+      {canCancel && onCancel && (
+        <button
+          onClick={() => onCancel(order.id)}
+          disabled={isCancelling}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <X className="w-3 h-3" />
+          {isCancelling ? 'Cancelling...' : 'Cancel Order'}
+        </button>
+      )}
+    </div>
+  );
+}

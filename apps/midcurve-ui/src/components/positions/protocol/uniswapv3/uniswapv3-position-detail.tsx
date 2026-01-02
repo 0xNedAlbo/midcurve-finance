@@ -5,6 +5,7 @@ import { PositionDetailTabs } from "../../position-detail-tabs";
 import { UniswapV3OverviewTab } from "./uniswapv3-overview-tab";
 import { UniswapV3AprTab } from "./uniswapv3-apr-tab";
 import { UniswapV3HistoryTab } from "./uniswapv3-history-tab";
+import { UniswapV3AutomationTab } from "./uniswapv3-automation-tab";
 import { UniswapV3TechnicalTab } from "./uniswapv3-technical-tab";
 import { getChainMetadataByChainId } from "@/config/chains";
 import { getNonfungiblePositionManagerAddress } from "@/config/contracts/nonfungible-position-manager";
@@ -15,7 +16,7 @@ interface UniswapV3PositionDetailProps {
   isRefreshing?: boolean;
 }
 
-export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "technical";
+export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "automation" | "technical";
 
 export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: UniswapV3PositionDetailProps) {
   const [searchParams] = useSearchParams();
@@ -80,6 +81,7 @@ export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: U
         {activeTab === "overview" && <UniswapV3OverviewTab position={position} />}
         {activeTab === "apr-analysis" && <UniswapV3AprTab position={position} />}
         {activeTab === "pnl-analysis" && <UniswapV3HistoryTab position={position} />}
+        {activeTab === "automation" && <UniswapV3AutomationTab position={position} />}
         {activeTab === "technical" && <UniswapV3TechnicalTab position={position} />}
       </div>
     </div>

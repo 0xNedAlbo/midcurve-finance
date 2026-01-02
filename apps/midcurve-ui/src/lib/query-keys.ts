@@ -9,7 +9,7 @@
  * fine-grained cache invalidation and updates.
  */
 
-import type { ListPositionsParams, ListStrategiesParams } from '@midcurve/api-shared';
+import type { ListPositionsParams, ListStrategiesParams, ListCloseOrdersRequest, ListContractsRequest } from '@midcurve/api-shared';
 
 export const queryKeys = {
   // ============================================
@@ -158,6 +158,68 @@ export const queryKeys = {
     vault: {
       prepare: (strategyId: string) =>
         [...queryKeys.strategies.all, 'vault', 'prepare', strategyId] as const,
+    },
+  },
+
+  // ============================================
+  // AUTOMATION (Close Orders + Contracts)
+  // ============================================
+  automation: {
+    // Root
+    all: ['automation'] as const,
+
+    // ---------------------------------------------------------------------------
+    // Close Orders
+    // ---------------------------------------------------------------------------
+    closeOrders: {
+      all: ['automation', 'close-orders'] as const,
+
+      // List operations
+      lists: () => [...queryKeys.automation.closeOrders.all, 'list'] as const,
+      list: (params?: ListCloseOrdersRequest) =>
+        [...queryKeys.automation.closeOrders.lists(), params ?? {}] as const,
+
+      // By position (common filter)
+      byPosition: (positionId: string) =>
+        [...queryKeys.automation.closeOrders.all, 'position', positionId] as const,
+
+      // Single order detail
+      details: () => [...queryKeys.automation.closeOrders.all, 'detail'] as const,
+      detail: (orderId: string) =>
+        [...queryKeys.automation.closeOrders.details(), orderId] as const,
+
+      // Order status (for polling)
+      statuses: () => [...queryKeys.automation.closeOrders.all, 'status'] as const,
+      status: (orderId: string) =>
+        [...queryKeys.automation.closeOrders.statuses(), orderId] as const,
+    },
+
+    // ---------------------------------------------------------------------------
+    // Contracts
+    // ---------------------------------------------------------------------------
+    contracts: {
+      all: ['automation', 'contracts'] as const,
+
+      // List operations
+      lists: () => [...queryKeys.automation.contracts.all, 'list'] as const,
+      list: (params?: ListContractsRequest) =>
+        [...queryKeys.automation.contracts.lists(), params ?? {}] as const,
+
+      // By chain (one contract per user per chain)
+      byChain: (chainId: number) =>
+        [...queryKeys.automation.contracts.all, 'chain', chainId] as const,
+
+      // Contract status (for polling)
+      statuses: () => [...queryKeys.automation.contracts.all, 'status'] as const,
+      status: (contractId: string) =>
+        [...queryKeys.automation.contracts.statuses(), contractId] as const,
+    },
+
+    // Mutation keys
+    mutations: {
+      createOrder: ['automation', 'create-order'] as const,
+      updateOrder: ['automation', 'update-order'] as const,
+      cancelOrder: ['automation', 'cancel-order'] as const,
     },
   },
 };

@@ -161,3 +161,114 @@ export async function apiClientFn<TResponse>(
   // Return just the data for backward compatibility
   return response.data;
 }
+
+// =============================================================================
+// AUTOMATION API
+// =============================================================================
+
+import type {
+  // Close Orders
+  ListCloseOrdersRequest,
+  ListCloseOrdersResponse,
+  RegisterCloseOrderRequest,
+  RegisterCloseOrderResponse,
+  GetCloseOrderResponse,
+  UpdateCloseOrderRequest,
+  UpdateCloseOrderResponse,
+  CancelCloseOrderResponse,
+  GetCloseOrderStatusResponse,
+  // Contracts
+  ListContractsRequest,
+  ListContractsResponse,
+  GetContractByChainResponse,
+  GetContractStatusResponse,
+} from '@midcurve/api-shared';
+
+/**
+ * Build query string from params object
+ */
+function buildQueryString(params: object): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');
+}
+
+/**
+ * Automation API client for close orders and contracts
+ */
+export const automationApi = {
+  // ---------------------------------------------------------------------------
+  // Close Orders
+  // ---------------------------------------------------------------------------
+
+  /**
+   * List close orders for the current user
+   */
+  listCloseOrders(params: ListCloseOrdersRequest = {}) {
+    const qs = buildQueryString(params);
+    return apiClient.get<ListCloseOrdersResponse['data']>(`/api/v1/automation/close-orders${qs}`);
+  },
+
+  /**
+   * Create a new close order (async - returns 202)
+   */
+  createCloseOrder(input: RegisterCloseOrderRequest) {
+    return apiClient.post<RegisterCloseOrderResponse['data']>('/api/v1/automation/close-orders', input);
+  },
+
+  /**
+   * Get a single close order by ID
+   */
+  getCloseOrder(id: string) {
+    return apiClient.get<GetCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
+  },
+
+  /**
+   * Get close order registration status (for polling)
+   */
+  getCloseOrderStatus(id: string) {
+    return apiClient.get<GetCloseOrderStatusResponse['data']>(`/api/v1/automation/close-orders/${id}/status`);
+  },
+
+  /**
+   * Update an existing close order
+   */
+  updateCloseOrder(id: string, input: UpdateCloseOrderRequest) {
+    return apiClient.put<UpdateCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`, input);
+  },
+
+  /**
+   * Cancel a close order
+   */
+  cancelCloseOrder(id: string) {
+    return apiClient.delete<CancelCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
+  },
+
+  // ---------------------------------------------------------------------------
+  // Contracts
+  // ---------------------------------------------------------------------------
+
+  /**
+   * List automation contracts for the current user
+   */
+  listContracts(params: ListContractsRequest = {}) {
+    const qs = buildQueryString(params);
+    return apiClient.get<ListContractsResponse['data']>(`/api/v1/automation/contracts${qs}`);
+  },
+
+  /**
+   * Get automation contract by chain ID
+   */
+  getContractByChain(chainId: number, contractType: 'uniswapv3' = 'uniswapv3') {
+    return apiClient.get<GetContractByChainResponse['data']>(
+      `/api/v1/automation/contracts/${contractType}/chain/${chainId}`
+    );
+  },
+
+  /**
+   * Get contract deployment status (for polling)
+   */
+  getContractStatus(id: string) {
+    return apiClient.get<GetContractStatusResponse['data']>(`/api/v1/automation/contracts/status/${id}`);
+  },
+};

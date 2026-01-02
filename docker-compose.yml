@@ -5,6 +5,7 @@
 # - UI (Vite SPA served via nginx)
 # - API (Next.js backend)
 # - EVM (Strategy orchestrator)
+# - Automation (Price monitoring & close order execution)
 # - Signer (Private signing service)
 # - Geth (Private EVM node)
 # - RabbitMQ (Message broker)
@@ -125,6 +126,49 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ============================================
+  # AUTOMATION SERVICE (Price monitoring & order execution)
+  # ============================================
+  automation:
+    build:
+      context: .
+      dockerfile: apps/midcurve-automation/Dockerfile
+    container_name: midcurve-automation
+    expose:
+      - "3004"
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=${DATABASE_URL}
+      # RabbitMQ
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
+      # RPC URLs (for reading pool prices)
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      - RPC_URL_BSC=${RPC_URL_BSC}
+      - RPC_URL_POLYGON=${RPC_URL_POLYGON}
+      - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
+      # Signer service (for tx signing)
+      - SIGNER_SERVICE_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+      # Worker configuration
+      - PRICE_POLL_INTERVAL_MS=${PRICE_POLL_INTERVAL_MS:-10000}
+      - DEPLOY_POLL_INTERVAL_MS=${DEPLOY_POLL_INTERVAL_MS:-5000}
+      - ORDER_EXECUTOR_POOL_SIZE=${ORDER_EXECUTOR_POOL_SIZE:-3}
+      # Fee configuration
+      - EXECUTION_FEE_RECIPIENT=${EXECUTION_FEE_RECIPIENT:-}
+      - EXECUTION_FEE_BPS=${EXECUTION_FEE_BPS:-50}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      signer:
+        condition: service_started
     restart: unless-stopped
     networks:
       - backend
