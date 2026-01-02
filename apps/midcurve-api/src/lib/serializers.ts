@@ -12,7 +12,14 @@ import type {
   UniswapV3PositionState,
   Erc20Token,
   PoolDiscoveryResult,
+  AutomationContractInterface,
+  CloseOrderInterface,
 } from '@midcurve/shared';
+
+import type {
+  SerializedAutomationContract,
+  SerializedCloseOrder,
+} from '@midcurve/api-shared';
 
 // ============================================================================
 // GENERIC SERIALIZATION HELPERS
@@ -236,5 +243,56 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     // Timestamps
     createdAt: position.createdAt.toISOString(),
     updatedAt: position.updatedAt.toISOString(),
+  };
+}
+
+// ============================================================================
+// AUTOMATION SERIALIZATION
+// ============================================================================
+
+/**
+ * Serialize AutomationContract for JSON response
+ *
+ * Converts all bigint fields in config/state to strings and Date fields to ISO strings.
+ *
+ * @param contract - AutomationContractInterface from service layer
+ * @returns JSON-serializable contract object
+ */
+export function serializeAutomationContract(
+  contract: AutomationContractInterface
+): SerializedAutomationContract {
+  return {
+    id: contract.id,
+    contractType: contract.contractType,
+    userId: contract.userId,
+    isActive: contract.isActive,
+    config: serializeBigInt(contract.config) as Record<string, unknown>,
+    state: serializeBigInt(contract.state) as Record<string, unknown>,
+    createdAt: contract.createdAt.toISOString(),
+    updatedAt: contract.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Serialize CloseOrder for JSON response
+ *
+ * Converts all bigint fields in config/state to strings and Date fields to ISO strings.
+ *
+ * @param order - CloseOrderInterface from service layer
+ * @returns JSON-serializable close order object
+ */
+export function serializeCloseOrder(
+  order: CloseOrderInterface
+): SerializedCloseOrder {
+  return {
+    id: order.id,
+    contractId: order.contractId,
+    orderType: order.orderType,
+    status: order.status,
+    positionId: order.positionId,
+    config: serializeBigInt(order.config) as Record<string, unknown>,
+    state: serializeBigInt(order.state) as Record<string, unknown>,
+    createdAt: order.createdAt.toISOString(),
+    updatedAt: order.updatedAt.toISOString(),
   };
 }

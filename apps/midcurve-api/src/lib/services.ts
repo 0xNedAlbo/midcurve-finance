@@ -21,6 +21,9 @@ import {
   PositionAprService,
   StrategyService,
   StrategyMetricsService,
+  AutomationContractService,
+  CloseOrderService,
+  PoolSubscriptionService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -37,6 +40,9 @@ let _positionListService: PositionListService | null = null;
 let _positionAprService: PositionAprService | null = null;
 let _strategyService: StrategyService | null = null;
 let _strategyMetricsService: StrategyMetricsService | null = null;
+let _automationContractService: AutomationContractService | null = null;
+let _closeOrderService: CloseOrderService | null = null;
+let _poolSubscriptionService: PoolSubscriptionService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -166,4 +172,34 @@ export function getStrategyMetricsService(): StrategyMetricsService {
     _strategyMetricsService = new StrategyMetricsService();
   }
   return _strategyMetricsService;
+}
+
+/**
+ * Get singleton instance of AutomationContractService
+ */
+export function getAutomationContractService(): AutomationContractService {
+  if (!_automationContractService) {
+    _automationContractService = new AutomationContractService();
+  }
+  return _automationContractService;
+}
+
+/**
+ * Get singleton instance of CloseOrderService
+ */
+export function getCloseOrderService(): CloseOrderService {
+  if (!_closeOrderService) {
+    _closeOrderService = new CloseOrderService();
+  }
+  return _closeOrderService;
+}
+
+/**
+ * Get singleton instance of PoolSubscriptionService
+ */
+export function getPoolSubscriptionService(): PoolSubscriptionService {
+  if (!_poolSubscriptionService) {
+    _poolSubscriptionService = new PoolSubscriptionService();
+  }
+  return _poolSubscriptionService;
 }
