@@ -9,10 +9,10 @@ import {UniswapV3PositionCloser} from "../contracts/UniswapV3PositionCloser.sol"
  * @notice Deployment script for UniswapV3PositionCloser shared contract
  * @dev Usage:
  *   With Ledger:
- *     forge script script/Deploy.s.sol --rpc-url <chain> --broadcast --verify --ledger
+ *     forge script script/Deploy.s.sol --rpc-url <chain> --broadcast --ledger
  *
  *   With private key:
- *     forge script script/Deploy.s.sol --rpc-url <chain> --broadcast --verify --private-key $DEPLOYER_PRIVATE_KEY
+ *     forge script script/Deploy.s.sol --rpc-url <chain> --broadcast --private-key $DEPLOYER_PRIVATE_KEY
  *
  * Supported chains: mainnet, arbitrum, base, optimism, polygon
  */

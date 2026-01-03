@@ -1,11 +1,11 @@
 {
   "uniswapv3": {
     "1": {
-      "contractAddress": "",
+      "contractAddress": "0x66deed7C4669680BEF6484E269689490aA385d9a",
       "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
     },
     "42161": {
-      "contractAddress": "",
+      "contractAddress": "0xA3dcc50358239De3b09F2733e1F62c0419FA6909",
       "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
     },
     "8453": {
