@@ -3,7 +3,7 @@
  *
  * GET /api/v1/tokens/erc20/balance - Fetch token balance for wallet
  *
- * Authentication: Optional (works for any public wallet address)
+ * Authentication: Required (session cookie)
  *
  * This endpoint implements backend-first architecture:
  * - Frontend never calls RPC directly
@@ -13,6 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
 
 import {
@@ -59,134 +60,135 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - 502 if RPC call fails
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  const requestId = crypto.randomUUID();
-  const startTime = Date.now();
+  return withSessionAuth(request, async (_user, requestId) => {
+    const startTime = Date.now();
 
-  try {
-    // 1. Parse and validate query params
-    const searchParams = Object.fromEntries(request.nextUrl.searchParams.entries());
-    const queryResult = GetTokenBalanceQuerySchema.safeParse(searchParams);
-
-    if (!queryResult.success) {
-      apiLog.validationError(apiLogger, requestId, queryResult.error.errors);
-
-      const errorResponse = createErrorResponse(
-        ApiErrorCode.VALIDATION_ERROR,
-        'Invalid query parameters',
-        queryResult.error.errors
-      );
-
-      apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-
-      return NextResponse.json(errorResponse, {
-        status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
-      });
-    }
-
-    const { walletAddress, tokenAddress, chainId } = queryResult.data;
-
-    // 2. Fetch balance from service (cached for 20 seconds)
-    let balance;
-    let cached = false;
     try {
-      balance = await getUserTokenBalanceService().getBalance(walletAddress, tokenAddress, chainId);
+      // 1. Parse and validate query params
+      const searchParams = Object.fromEntries(request.nextUrl.searchParams.entries());
+      const queryResult = GetTokenBalanceQuerySchema.safeParse(searchParams);
 
-      // Check if result was from cache by comparing timestamp
-      // (If timestamp is very recent, it was likely a cache hit)
-      const ageMs = Date.now() - balance.timestamp.getTime();
-      cached = ageMs < 1000; // Less than 1 second old = likely from cache
-    } catch (error) {
-      // Handle specific error cases
-      if (error instanceof Error) {
-        // Invalid addresses
-        if (
-          error.message.includes('Invalid wallet address') ||
-          error.message.includes('Invalid token address')
-        ) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.VALIDATION_ERROR,
-            error.message
-          );
+      if (!queryResult.success) {
+        apiLog.validationError(apiLogger, requestId, queryResult.error.errors);
 
-          apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.VALIDATION_ERROR,
+          'Invalid query parameters',
+          queryResult.error.errors
+        );
 
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
-          });
-        }
+        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
 
-        // Chain not supported
-        if (error.message.includes('not configured') || error.message.includes('not supported')) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.BAD_REQUEST,
-            error.message
-          );
-
-          apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_REQUEST],
-          });
-        }
-
-        // RPC or on-chain read failure
-        if (error.message.includes('Failed to fetch')) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.BAD_GATEWAY,
-            'Failed to fetch token balance from blockchain',
-            error.message
-          );
-
-          apiLog.requestEnd(apiLogger, requestId, 502, Date.now() - startTime);
-
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_GATEWAY],
-          });
-        }
+        return NextResponse.json(errorResponse, {
+          status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
+        });
       }
 
-      // Unknown error
-      throw error;
+      const { walletAddress, tokenAddress, chainId } = queryResult.data;
+
+      // 2. Fetch balance from service (cached for 20 seconds)
+      let balance;
+      let cached = false;
+      try {
+        balance = await getUserTokenBalanceService().getBalance(walletAddress, tokenAddress, chainId);
+
+        // Check if result was from cache by comparing timestamp
+        // (If timestamp is very recent, it was likely a cache hit)
+        const ageMs = Date.now() - balance.timestamp.getTime();
+        cached = ageMs < 1000; // Less than 1 second old = likely from cache
+      } catch (error) {
+        // Handle specific error cases
+        if (error instanceof Error) {
+          // Invalid addresses
+          if (
+            error.message.includes('Invalid wallet address') ||
+            error.message.includes('Invalid token address')
+          ) {
+            const errorResponse = createErrorResponse(
+              ApiErrorCode.VALIDATION_ERROR,
+              error.message
+            );
+
+            apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+
+            return NextResponse.json(errorResponse, {
+              status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
+            });
+          }
+
+          // Chain not supported
+          if (error.message.includes('not configured') || error.message.includes('not supported')) {
+            const errorResponse = createErrorResponse(
+              ApiErrorCode.BAD_REQUEST,
+              error.message
+            );
+
+            apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+
+            return NextResponse.json(errorResponse, {
+              status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_REQUEST],
+            });
+          }
+
+          // RPC or on-chain read failure
+          if (error.message.includes('Failed to fetch')) {
+            const errorResponse = createErrorResponse(
+              ApiErrorCode.BAD_GATEWAY,
+              'Failed to fetch token balance from blockchain',
+              error.message
+            );
+
+            apiLog.requestEnd(apiLogger, requestId, 502, Date.now() - startTime);
+
+            return NextResponse.json(errorResponse, {
+              status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_GATEWAY],
+            });
+          }
+        }
+
+        // Unknown error
+        throw error;
+      }
+
+      // 3. Build response
+      const responseData: TokenBalanceData = {
+        walletAddress: balance.walletAddress,
+        tokenAddress: balance.tokenAddress,
+        chainId: balance.chainId,
+        balance: balance.balance.toString(), // Convert BigInt to string for JSON
+        timestamp: balance.timestamp.toISOString(),
+        cached,
+      };
+
+      const response = createSuccessResponse(responseData, {
+        walletAddress: balance.walletAddress,
+        tokenAddress: balance.tokenAddress,
+        chainId,
+        cached,
+      });
+
+      apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
+
+      return NextResponse.json(response, { status: 200 });
+    } catch (error) {
+      // Unhandled error
+      apiLog.methodError(
+        apiLogger,
+        'GET /api/v1/tokens/erc20/balance',
+        error,
+        { requestId }
+      );
+
+      const errorResponse = createErrorResponse(
+        ApiErrorCode.INTERNAL_SERVER_ERROR,
+        'An unexpected error occurred'
+      );
+
+      apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+
+      return NextResponse.json(errorResponse, {
+        status: ErrorCodeToHttpStatus[ApiErrorCode.INTERNAL_SERVER_ERROR],
+      });
     }
-
-    // 3. Build response
-    const responseData: TokenBalanceData = {
-      walletAddress: balance.walletAddress,
-      tokenAddress: balance.tokenAddress,
-      chainId: balance.chainId,
-      balance: balance.balance.toString(), // Convert BigInt to string for JSON
-      timestamp: balance.timestamp.toISOString(),
-      cached,
-    };
-
-    const response = createSuccessResponse(responseData, {
-      walletAddress: balance.walletAddress,
-      tokenAddress: balance.tokenAddress,
-      chainId,
-      cached,
-    });
-
-    apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
-
-    return NextResponse.json(response, { status: 200 });
-  } catch (error) {
-    // Unhandled error
-    apiLog.methodError(
-      apiLogger,
-      'GET /api/v1/tokens/erc20/balance',
-      error,
-      { requestId }
-    );
-
-    const errorResponse = createErrorResponse(
-      ApiErrorCode.INTERNAL_SERVER_ERROR,
-      'An unexpected error occurred'
-    );
-
-    apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
-
-    return NextResponse.json(errorResponse, {
-      status: ErrorCodeToHttpStatus[ApiErrorCode.INTERNAL_SERVER_ERROR],
-    });
-  }
+  });
 }
