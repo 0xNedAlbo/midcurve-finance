@@ -9,7 +9,6 @@ import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PriceMonitor, type PriceMonitorStatus } from './price-monitor';
 import { OrderExecutor, type OrderExecutorStatus } from './order-executor';
-import { ContractDeployer, type ContractDeployerStatus } from './contract-deployer';
 
 const log = automationLogger.child({ component: 'WorkerManager' });
 
@@ -23,7 +22,6 @@ export interface WorkerManagerStatus {
   workers: {
     priceMonitor: PriceMonitorStatus;
     orderExecutor: OrderExecutorStatus;
-    contractDeployer: ContractDeployerStatus;
   };
 }
 
@@ -37,7 +35,6 @@ class WorkerManager {
 
   private priceMonitor: PriceMonitor | null = null;
   private orderExecutor: OrderExecutor | null = null;
-  private contractDeployer: ContractDeployer | null = null;
 
   /**
    * Start all workers
@@ -59,13 +56,11 @@ class WorkerManager {
       // Create worker instances
       this.priceMonitor = new PriceMonitor();
       this.orderExecutor = new OrderExecutor();
-      this.contractDeployer = new ContractDeployer();
 
       // Start all workers in parallel
       await Promise.all([
         this.priceMonitor.start(),
         this.orderExecutor.start(),
-        this.contractDeployer.start(),
       ]);
 
       this.status = 'running';
@@ -97,7 +92,6 @@ class WorkerManager {
       await Promise.all([
         this.priceMonitor?.stop(),
         this.orderExecutor?.stop(),
-        this.contractDeployer?.stop(),
       ]);
 
       // Close RabbitMQ connection
@@ -136,14 +130,6 @@ class WorkerManager {
           failedTotal: 0,
           lastProcessedAt: null,
         },
-        contractDeployer: this.contractDeployer?.getStatus() || {
-          status: 'idle',
-          pendingContracts: 0,
-          deployedTotal: 0,
-          failedTotal: 0,
-          lastPollAt: null,
-          pollIntervalMs: 0,
-        },
       },
     };
   }
@@ -158,12 +144,10 @@ class WorkerManager {
 
     const priceMonitorStatus = this.priceMonitor?.getStatus();
     const orderExecutorStatus = this.orderExecutor?.getStatus();
-    const contractDeployerStatus = this.contractDeployer?.getStatus();
 
     return (
       priceMonitorStatus?.status === 'running' &&
-      orderExecutorStatus?.status === 'running' &&
-      contractDeployerStatus?.status === 'running'
+      orderExecutorStatus?.status === 'running'
     );
   }
 }
@@ -206,4 +190,3 @@ export async function stopWorkers(): Promise<void> {
 // Re-export types
 export { PriceMonitor, type PriceMonitorStatus };
 export { OrderExecutor, type OrderExecutorStatus };
-export { ContractDeployer, type ContractDeployerStatus };

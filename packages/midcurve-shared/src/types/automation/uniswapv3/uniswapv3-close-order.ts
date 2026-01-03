@@ -6,7 +6,12 @@
  */
 
 import { BaseCloseOrder } from '../base-close-order.js';
-import type { BaseCloseOrderParams, CloseOrderStatus, CloseOrderType } from '../close-order.types.js';
+import type {
+  AutomationContractConfig,
+  BaseCloseOrderParams,
+  CloseOrderStatus,
+  CloseOrderType,
+} from '../close-order.types.js';
 import {
   UniswapV3CloseOrderConfig,
   type UniswapV3CloseOrderConfigJSON,
@@ -29,8 +34,8 @@ export interface UniswapV3CloseOrderParams extends BaseCloseOrderParams {
  */
 export interface UniswapV3CloseOrderRow {
   id: string;
-  contractId: string;
-  orderType: 'uniswapv3';
+  closeOrderType: 'uniswapv3';
+  automationContractConfig: Record<string, unknown>;
   status: CloseOrderStatus;
   positionId: string;
   config: Record<string, unknown>;
@@ -46,7 +51,7 @@ export interface UniswapV3CloseOrderRow {
  * and triggers automatic closing when conditions are met.
  */
 export class UniswapV3CloseOrder extends BaseCloseOrder {
-  readonly orderType: CloseOrderType = 'uniswapv3';
+  readonly closeOrderType: CloseOrderType = 'uniswapv3';
 
   private readonly _config: UniswapV3CloseOrderConfig;
   private readonly _state: UniswapV3CloseOrderState;
@@ -143,7 +148,7 @@ export class UniswapV3CloseOrder extends BaseCloseOrder {
   static fromDB(row: UniswapV3CloseOrderRow): UniswapV3CloseOrder {
     return new UniswapV3CloseOrder({
       id: row.id,
-      contractId: row.contractId,
+      automationContractConfig: row.automationContractConfig as unknown as AutomationContractConfig,
       status: row.status,
       positionId: row.positionId,
       config: UniswapV3CloseOrderConfig.fromJSON(

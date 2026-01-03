@@ -10,7 +10,7 @@
  * 2. User signs registerClose() tx in their wallet (Wagmi)
  * 3. Wait for tx confirmation
  * 4. Parse CloseRegistered event for closeId
- * 5. Notify API: POST /api/v1/automation/close-orders/notify
+ * 5. POST to /api/v1/automation/close-orders with all order details
  * 6. Return the created order
  */
 
@@ -21,14 +21,16 @@ import { decodeEventLog, type Address, type Hash, type TransactionReceipt } from
 import { queryKeys } from '@/lib/query-keys';
 import { automationApi } from '@/lib/api-client';
 import { POSITION_CLOSER_ABI } from '@/config/contracts/uniswapv3-position-closer';
-import type { SerializedCloseOrder } from '@midcurve/api-shared';
+import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
 
 /**
  * Parameters for registering a close order
  */
 export interface RegisterCloseOrderParams {
-  /** The automation contract address on this chain */
+  /** Shared automation contract address on this chain */
   contractAddress: Address;
+  /** Position manager (NFPM) address for this chain */
+  positionManager: Address;
   /** Chain ID */
   chainId: number;
   /** NFT token ID of the position */
@@ -39,10 +41,14 @@ export interface RegisterCloseOrderParams {
   sqrtPriceX96Upper: bigint;
   /** Address to receive funds after close */
   payoutAddress: Address;
+  /** Operator address (user's autowallet) */
+  operatorAddress: Address;
   /** Unix timestamp when order expires */
   validUntil: bigint;
   /** Slippage tolerance in basis points (e.g., 100 = 1%) */
   slippageBps: number;
+  /** Trigger mode (LOWER, UPPER, or BOTH) */
+  triggerMode: TriggerMode;
   /** Position ID for API notification and cache invalidation */
   positionId: string;
   /** Pool address for API notification */
@@ -158,16 +164,30 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
           throw new Error('Failed to parse CloseRegistered event from transaction');
         }
 
-        // Notify API about the new order
+        // Build validUntil as ISO string
+        const validUntilDate = new Date(Number(currentParams.validUntil) * 1000);
+
+        // Create close order via API
         try {
-          const response = await automationApi.notifyOrderRegistered({
-            chainId: currentParams.chainId,
-            contractAddress: currentParams.contractAddress,
-            closeId: closeId.toString(),
-            nftId: currentParams.nftId.toString(),
+          const response = await automationApi.createCloseOrder({
+            closeOrderType: 'uniswapv3',
             positionId: currentParams.positionId,
+            automationContractConfig: {
+              chainId: currentParams.chainId,
+              contractAddress: currentParams.contractAddress,
+              positionManager: currentParams.positionManager,
+            },
+            closeId: Number(closeId),
+            nftId: currentParams.nftId.toString(),
             poolAddress: currentParams.poolAddress,
-            txHash,
+            operatorAddress: currentParams.operatorAddress,
+            triggerMode: currentParams.triggerMode,
+            sqrtPriceX96Lower: currentParams.sqrtPriceX96Lower.toString(),
+            sqrtPriceX96Upper: currentParams.sqrtPriceX96Upper.toString(),
+            payoutAddress: currentParams.payoutAddress,
+            validUntil: validUntilDate.toISOString(),
+            slippageBps: currentParams.slippageBps,
+            registrationTxHash: txHash,
           });
 
           setResult({
@@ -208,7 +228,7 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
     }
   }, [writeError, receiptError]);
 
-  // Register function
+  // Register function - calls registerClose on shared contract with operator
   const registerOrder = useCallback((params: RegisterCloseOrderParams) => {
     // Reset state
     setResult(null);
@@ -216,17 +236,20 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
     setCurrentParams(params);
 
     // Call writeContract with registerClose function
+    // New contract signature includes operator parameter
     writeContract({
       address: params.contractAddress,
       abi: POSITION_CLOSER_ABI,
       functionName: 'registerClose',
       args: [
-        params.nftId,
-        params.sqrtPriceX96Lower,
-        params.sqrtPriceX96Upper,
-        params.payoutAddress,
-        params.validUntil,
-        params.slippageBps,
+        params.poolAddress,           // pool address
+        params.nftId,                  // tokenId
+        params.sqrtPriceX96Lower,      // sqrtPriceX96Lower
+        params.sqrtPriceX96Upper,      // sqrtPriceX96Upper
+        params.payoutAddress,          // payout
+        params.operatorAddress,        // operator (user's autowallet)
+        params.validUntil,             // validUntil
+        params.slippageBps,            // slippageBps
       ],
       chainId: params.chainId,
     });

@@ -122,26 +122,6 @@ export const autoLog = {
   },
 
   /**
-   * Log contract deployment
-   */
-  contractDeployment(
-    logger: ServiceLogger,
-    contractId: string,
-    chainId: number,
-    event: 'started' | 'signed' | 'broadcast' | 'confirmed' | 'failed',
-    metadata?: Record<string, unknown>
-  ): void {
-    const level = event === 'failed' ? 'error' : 'info';
-    logger[level]({
-      contractId,
-      chainId,
-      event,
-      ...metadata,
-      msg: `Contract ${contractId} deployment ${event}`,
-    });
-  },
-
-  /**
    * Log transaction broadcast
    */
   txBroadcast(

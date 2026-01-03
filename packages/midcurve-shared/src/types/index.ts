@@ -220,6 +220,7 @@ export type {
   CloseOrderJSON,
   BaseCloseOrderParams,
   CloseOrderInterface,
+  AutomationContractConfig,
 } from './automation/index.js';
 
 export { BaseCloseOrder } from './automation/index.js';

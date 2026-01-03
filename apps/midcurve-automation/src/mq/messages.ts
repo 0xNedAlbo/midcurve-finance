@@ -27,22 +27,6 @@ export interface OrderTriggerMessage {
 }
 
 /**
- * Contract deployment message - published when contract needs deployment
- */
-export interface ContractDeployMessage {
-  /** Contract ID from database */
-  contractId: string;
-  /** User ID who owns the contract */
-  userId: string;
-  /** Chain ID for deployment */
-  chainId: number;
-  /** Contract type (e.g., 'uniswapv3') */
-  contractType: string;
-  /** Timestamp of request */
-  requestedAt: string;
-}
-
-/**
  * Serialize a message for publishing
  */
 export function serializeMessage<T>(message: T): Buffer {

@@ -4,23 +4,23 @@ pragma solidity ^0.8.20;
 /**
  * UniswapV3PositionCloser.sol
  *
- * A per-user contract for automated Uniswap V3 position closing based on price triggers.
- * Each user deploys their own contract (per chain) with a single operator (automation wallet).
+ * A shared contract for automated Uniswap V3 position closing based on price triggers.
+ * One contract deployed per chain, used by all users.
  *
  * Architecture:
- * - 1 contract per user per chain
- * - 1 operator per contract (set at deployment, immutable)
- * - Multiple close orders per contract
+ * - 1 shared contract per chain (deployed by Midcurve)
+ * - Operator specified per close order (user's automation wallet)
+ * - Multiple close orders from multiple users
  *
  * Owner flow (user's EOA):
  * - registerClose(cfg) stores an on-chain close intent (price trigger + slippage policy)
  * - Owner keeps custody of the NFT until execution
  * - Owner must approve this contract on the PositionManager
  *
- * Operator flow (automation wallet):
+ * Operator flow (user's automation wallet):
  * - executeClose(closeId, feeRecipient, feeBps) checks:
  *   - order REGISTERED
- *   - caller is the contract's operator
+ *   - caller is the order's operator
  *   - not expired (validUntil)
  *   - price trigger met (pool.slot0.sqrtPriceX96)
  * - then atomically:
@@ -131,6 +131,7 @@ interface IUniswapV3PositionCloser {
         TriggerMode mode;
 
         address payout;
+        address operator;  // Per-order operator (user's automation wallet)
 
         uint256 validUntil; // 0 = no expiry
         uint16 slippageBps; // 0..10000
@@ -142,6 +143,7 @@ interface IUniswapV3PositionCloser {
 
         address owner;
         address payout;
+        address operator;  // Per-order operator
 
         address pool;
         uint160 lower;
@@ -179,6 +181,7 @@ interface IUniswapV3PositionCloser {
         uint256 indexed tokenId,
         address indexed owner,
         address pool,
+        address operator,
         address payout,
         uint160 lower,
         uint160 upper,
@@ -207,6 +210,7 @@ interface IUniswapV3PositionCloser {
 
     event CloseCancelled(uint256 indexed closeId, uint256 indexed tokenId, address indexed owner);
 
+    event CloseOperatorUpdated(uint256 indexed closeId, address indexed oldOperator, address indexed newOperator);
     event ClosePayoutUpdated(uint256 indexed closeId, address indexed oldPayout, address indexed newPayout);
     event CloseBoundsUpdated(
         uint256 indexed closeId,
@@ -227,6 +231,7 @@ interface IUniswapV3PositionCloser {
 
     function cancelClose(uint256 closeId) external;
 
+    function setCloseOperator(uint256 closeId, address newOperator) external;
     function setClosePayout(uint256 closeId, address newPayout) external;
 
     function setCloseBounds(uint256 closeId, uint160 newLower, uint160 newUpper, TriggerMode newMode) external;
@@ -242,9 +247,7 @@ interface IUniswapV3PositionCloser {
 
     function canExecuteClose(uint256 closeId) external view returns (bool);
 
-    function positionManager() external view returns (INonfungiblePositionManagerMinimal);
-
-    function operator() external view returns (address);
+    function positionManager() external view returns (address);
 
     function nextCloseId() external view returns (uint256);
 }
@@ -263,19 +266,20 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
     // 1% global fee cap (operator may choose feeBps within [0..MAX_FEE_BPS] per close execution)
     uint16 public constant MAX_FEE_BPS = 100;
 
-    INonfungiblePositionManagerMinimal public immutable override positionManager;
-
-    /// @notice The operator address (automation wallet) that can execute close orders
-    address public immutable operator;
+    // Internal storage with interface type for convenience
+    INonfungiblePositionManagerMinimal internal immutable _positionManager;
 
     uint256 public override nextCloseId = 1;
     mapping(uint256 => CloseOrder) internal _closes;
 
-    constructor(address _positionManager, address _operator) {
-        if (_positionManager == address(0)) revert ZeroAddress();
-        if (_operator == address(0)) revert ZeroAddress();
-        positionManager = INonfungiblePositionManagerMinimal(_positionManager);
-        operator = _operator;
+    constructor(address positionManager_) {
+        if (positionManager_ == address(0)) revert ZeroAddress();
+        _positionManager = INonfungiblePositionManagerMinimal(positionManager_);
+    }
+
+    /// @notice Returns the Uniswap V3 NonfungiblePositionManager address
+    function positionManager() external view override returns (address) {
+        return address(_positionManager);
     }
 
     // ----------------------------
@@ -286,7 +290,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         _validateConfig(cfg);
 
         // Must own the NFT at registration time.
-        address owner = positionManager.ownerOf(cfg.tokenId);
+        address owner = _positionManager.ownerOf(cfg.tokenId);
         if (owner != msg.sender) revert NotOwner();
 
         closeId = nextCloseId++;
@@ -295,6 +299,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             tokenId: cfg.tokenId,
             owner: owner,
             payout: cfg.payout,
+            operator: cfg.operator,
             pool: cfg.pool,
             lower: cfg.sqrtPriceX96Lower,
             upper: cfg.sqrtPriceX96Upper,
@@ -308,6 +313,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             cfg.tokenId,
             owner,
             cfg.pool,
+            cfg.operator,
             cfg.payout,
             cfg.sqrtPriceX96Lower,
             cfg.sqrtPriceX96Upper,
@@ -320,7 +326,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
     function executeClose(uint256 closeId, address feeRecipient, uint16 feeBps) external override nonReentrant {
         CloseOrder storage o = _closes[closeId];
         if (o.status != CloseStatus.REGISTERED) revert WrongStatus(CloseStatus.REGISTERED, o.status);
-        if (msg.sender != operator) revert NotOperator();
+        if (msg.sender != o.operator) revert NotOperator();
 
         if (o.validUntil != 0 && block.timestamp > o.validUntil) {
             revert CloseExpired(o.validUntil, block.timestamp);
@@ -336,15 +342,15 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         }
 
         // 2) Pre-check NFT ownership + approval (clear errors)
-        address actualOwner = positionManager.ownerOf(o.tokenId);
+        address actualOwner = _positionManager.ownerOf(o.tokenId);
         if (actualOwner != o.owner) revert NftNotOwnedByRecordedOwner(o.owner, actualOwner);
 
-        bool approved = (positionManager.getApproved(o.tokenId) == address(this))
-            || positionManager.isApprovedForAll(o.owner, address(this));
+        bool approved = (_positionManager.getApproved(o.tokenId) == address(this))
+            || _positionManager.isApprovedForAll(o.owner, address(this));
         if (!approved) revert NftNotApproved(o.owner, o.tokenId);
 
         // 3) Pull the NFT from the recorded owner (atomic close)
-        positionManager.transferFrom(o.owner, address(this), o.tokenId);
+        _positionManager.transferFrom(o.owner, address(this), o.tokenId);
 
         // 4) Read position data (liquidity, ticks, token0/token1)
         (
@@ -360,7 +366,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             ,
             ,
 
-        ) = positionManager.positions(o.tokenId);
+        ) = _positionManager.positions(o.tokenId);
 
         // 5) Compute expected amounts at current price, derive mins from on-chain slippage policy
         uint160 sqrtPriceAX96 = TickMath.getSqrtRatioAtTick(tickLower);
@@ -382,7 +388,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
                 deadline: block.timestamp
             });
 
-        (uint256 dec0, uint256 dec1) = positionManager.decreaseLiquidity(dec);
+        (uint256 dec0, uint256 dec1) = _positionManager.decreaseLiquidity(dec);
 
         // 7) Collect everything to this contract
         INonfungiblePositionManagerMinimal.CollectParams memory col = INonfungiblePositionManagerMinimal.CollectParams({
@@ -392,7 +398,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             amount1Max: type(uint128).max
         });
 
-        (uint256 col0, uint256 col1) = positionManager.collect(col);
+        (uint256 col0, uint256 col1) = _positionManager.collect(col);
 
         uint256 amount0Out = dec0 + col0;
         uint256 amount1Out = dec1 + col1;
@@ -424,7 +430,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         emit CloseExecuted(closeId, o.tokenId, o.owner, o.payout, current, amount0Out, amount1Out);
 
         // 11) Return the now-empty NFT to the owner (not to payout)
-        positionManager.transferFrom(address(this), o.owner, o.tokenId);
+        _positionManager.transferFrom(address(this), o.owner, o.tokenId);
     }
 
     function cancelClose(uint256 closeId) external override {
@@ -439,6 +445,17 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
     // ----------------------------
     // Owner updates
     // ----------------------------
+
+    function setCloseOperator(uint256 closeId, address newOperator) external override {
+        if (newOperator == address(0)) revert ZeroAddress();
+        CloseOrder storage o = _closes[closeId];
+        if (msg.sender != o.owner) revert NotOwner();
+        if (o.status != CloseStatus.REGISTERED) revert WrongStatus(CloseStatus.REGISTERED, o.status);
+
+        address old = o.operator;
+        o.operator = newOperator;
+        emit CloseOperatorUpdated(closeId, old, newOperator);
+    }
 
     function setClosePayout(uint256 closeId, address newPayout) external override {
         if (newPayout == address(0)) revert ZeroAddress();
@@ -516,7 +533,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
     // ----------------------------
 
     function _validateConfig(CloseConfig calldata cfg) internal view {
-        if (cfg.pool == address(0) || cfg.payout == address(0)) revert ZeroAddress();
+        if (cfg.pool == address(0) || cfg.payout == address(0) || cfg.operator == address(0)) revert ZeroAddress();
         if (cfg.slippageBps > 10_000) revert SlippageBpsOutOfRange(cfg.slippageBps);
 
         // Optional: reject already-expired at registration (keeps UI sane)

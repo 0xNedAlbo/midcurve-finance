@@ -16,8 +16,8 @@ import {
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
-  getAutomationContractService,
   getCloseOrderService,
+  getUniswapV3PositionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -76,11 +76,11 @@ export async function GET(
         return NextResponse.json(errorResponse, { status: 404 });
       }
 
-      // Verify ownership through contract
-      const contractService = getAutomationContractService();
-      const contract = await contractService.findById(order.contractId);
+      // Verify ownership through position
+      const positionService = getUniswapV3PositionService();
+      const position = await positionService.findById(order.positionId);
 
-      if (!contract || contract.userId !== user.id) {
+      if (!position || position.userId !== user.id) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.FORBIDDEN,
           'You do not have access to this order'
@@ -90,6 +90,7 @@ export async function GET(
       }
 
       // Map order status to operation status
+      // In the new model, orders are created as 'active' (already registered on-chain)
       let operationStatus: 'pending' | 'registering' | 'completed' | 'failed';
 
       switch (order.status) {
@@ -117,19 +118,20 @@ export async function GET(
       const orderState = order.state as Record<string, unknown>;
       const operationError =
         operationStatus === 'failed' && 'executionError' in orderState
-          ? (orderState.executionError as string | null) ?? undefined
+          ? ((orderState.executionError as string | null) ?? undefined)
           : undefined;
 
       // Build response
       const response: GetCloseOrderStatusResponse = createSuccessResponse({
         id: order.id,
-        orderType: order.orderType,
+        closeOrderType: order.closeOrderType,
         positionId: order.positionId,
         operationStatus,
         operationError,
-        order: operationStatus === 'completed' || operationStatus === 'failed'
-          ? serializeCloseOrder(order)
-          : undefined,
+        order:
+          operationStatus === 'completed' || operationStatus === 'failed'
+            ? serializeCloseOrder(order)
+            : undefined,
       });
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

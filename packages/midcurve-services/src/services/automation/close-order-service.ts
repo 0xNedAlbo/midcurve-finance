@@ -63,29 +63,34 @@ export class CloseOrderService {
   // ============================================================================
 
   /**
-   * Registers a new close order (status: pending)
+   * Registers a new close order (status: active)
    *
-   * @param input - Close order registration input
+   * In the shared contract model, orders are registered on-chain first,
+   * then notified to the API. The order is created directly in 'active' status.
+   *
+   * @param input - Close order registration input (includes closeId and registrationTxHash)
    * @returns The created close order
    */
   async register(input: RegisterCloseOrderInput): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'register', {
-      contractId: input.contractId,
-      orderType: input.orderType,
+      closeOrderType: input.closeOrderType,
       positionId: input.positionId,
+      chainId: input.automationContractConfig.chainId,
+      closeId: input.closeId,
     });
 
     try {
       // Create config and state based on order type
       const config = this.createConfig(input);
-      const state = this.createInitialState(input.orderType);
+      const state = this.createInitialState(input);
 
       const result = await this.prisma.automationCloseOrder.create({
         data: {
-          contractId: input.contractId,
-          orderType: input.orderType,
+          closeOrderType: input.closeOrderType,
           positionId: input.positionId,
-          status: 'pending',
+          status: 'active', // Already registered on-chain
+          automationContractConfig:
+            input.automationContractConfig as unknown as Prisma.InputJsonValue,
           config: config as unknown as Prisma.InputJsonValue,
           state: state as unknown as Prisma.InputJsonValue,
         },
@@ -97,7 +102,8 @@ export class CloseOrderService {
         {
           id: order.id,
           positionId: order.positionId,
-          orderType: order.orderType,
+          closeOrderType: order.closeOrderType,
+          closeId: input.closeId,
         },
         'Close order registered'
       );
@@ -134,43 +140,6 @@ export class CloseOrderService {
       return order;
     } catch (error) {
       log.methodError(this.logger, 'findById', error as Error, { id });
-      throw error;
-    }
-  }
-
-  /**
-   * Finds close orders by contract ID
-   *
-   * @param contractId - Contract ID
-   * @param options - Find options for filtering
-   * @returns Array of close orders
-   */
-  async findByContractId(
-    contractId: string,
-    options: FindCloseOrderOptions = {}
-  ): Promise<CloseOrderInterface[]> {
-    log.methodEntry(this.logger, 'findByContractId', { contractId, options });
-
-    try {
-      const whereClause = this.buildWhereClause({ ...options, contractId });
-
-      const results = await this.prisma.automationCloseOrder.findMany({
-        where: whereClause,
-        orderBy: { createdAt: 'desc' },
-      });
-
-      const orders = results.map((r) => this.mapToOrder(r));
-
-      log.methodExit(this.logger, 'findByContractId', {
-        contractId,
-        count: orders.length,
-      });
-      return orders;
-    } catch (error) {
-      log.methodError(this.logger, 'findByContractId', error as Error, {
-        contractId,
-        options,
-      });
       throw error;
     }
   }
@@ -218,7 +187,9 @@ export class CloseOrderService {
    * @param poolAddress - Pool address
    * @returns Array of active close orders for the pool
    */
-  async findActiveOrdersForPool(poolAddress: string): Promise<CloseOrderInterface[]> {
+  async findActiveOrdersForPool(
+    poolAddress: string
+  ): Promise<CloseOrderInterface[]> {
     log.methodEntry(this.logger, 'findActiveOrdersForPool', { poolAddress });
 
     try {
@@ -278,7 +249,12 @@ export class CloseOrderService {
       });
       return addresses;
     } catch (error) {
-      log.methodError(this.logger, 'getActivePoolAddresses', error as Error, {});
+      log.methodError(
+        this.logger,
+        'getActivePoolAddresses',
+        error as Error,
+        {}
+      );
       throw error;
     }
   }
@@ -353,7 +329,10 @@ export class CloseOrderService {
       log.methodExit(this.logger, 'markRegistered', { id });
       return order;
     } catch (error) {
-      log.methodError(this.logger, 'markRegistered', error as Error, { id, input });
+      log.methodError(this.logger, 'markRegistered', error as Error, {
+        id,
+        input,
+      });
       throw error;
     }
   }
@@ -402,7 +381,10 @@ export class CloseOrderService {
       log.methodExit(this.logger, 'markTriggered', { id });
       return order;
     } catch (error) {
-      log.methodError(this.logger, 'markTriggered', error as Error, { id, input });
+      log.methodError(this.logger, 'markTriggered', error as Error, {
+        id,
+        input,
+      });
       throw error;
     }
   }
@@ -461,7 +443,10 @@ export class CloseOrderService {
       log.methodExit(this.logger, 'markExecuted', { id });
       return order;
     } catch (error) {
-      log.methodError(this.logger, 'markExecuted', error as Error, { id, input });
+      log.methodError(this.logger, 'markExecuted', error as Error, {
+        id,
+        input,
+      });
       throw error;
     }
   }
@@ -531,7 +516,12 @@ export class CloseOrderService {
         throw new Error(`Close order not found: ${id}`);
       }
 
-      const terminalStates: CloseOrderStatus[] = ['executed', 'cancelled', 'expired', 'failed'];
+      const terminalStates: CloseOrderStatus[] = [
+        'executed',
+        'cancelled',
+        'expired',
+        'failed',
+      ];
       if (terminalStates.includes(existing.status as CloseOrderStatus)) {
         throw new Error(
           `Cannot cancel order in terminal state: ${existing.status}`
@@ -561,7 +551,10 @@ export class CloseOrderService {
    * @param input - Update input
    * @returns The updated order
    */
-  async update(id: string, input: UpdateCloseOrderInput): Promise<CloseOrderInterface> {
+  async update(
+    id: string,
+    input: UpdateCloseOrderInput
+  ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'update', { id, input });
 
     try {
@@ -657,8 +650,8 @@ export class CloseOrderService {
   ): Prisma.AutomationCloseOrderWhereInput {
     const where: Prisma.AutomationCloseOrderWhereInput = {};
 
-    if (options.orderType) {
-      where.orderType = options.orderType;
+    if (options.closeOrderType) {
+      where.closeOrderType = options.closeOrderType;
     }
 
     if (options.status) {
@@ -673,21 +666,19 @@ export class CloseOrderService {
       where.positionId = options.positionId;
     }
 
-    if (options.contractId) {
-      where.contractId = options.contractId;
-    }
-
     return where;
   }
 
   /**
    * Creates config from input based on order type
    */
-  private createConfig(input: RegisterCloseOrderInput): Record<string, unknown> {
-    switch (input.orderType) {
+  private createConfig(
+    input: RegisterCloseOrderInput
+  ): Record<string, unknown> {
+    switch (input.closeOrderType) {
       case 'uniswapv3':
         return {
-          closeId: 0, // Will be set after registration
+          closeId: input.closeId,
           nftId: input.nftId.toString(),
           poolAddress: input.poolAddress,
           triggerMode: input.triggerMode,
@@ -699,19 +690,22 @@ export class CloseOrderService {
           slippageBps: input.slippageBps,
         };
       default:
-        throw new Error(`Unknown order type: ${input.orderType}`);
+        throw new Error(`Unknown close order type: ${input.closeOrderType}`);
     }
   }
 
   /**
    * Creates initial state based on order type
+   * Includes registration info since orders are registered on-chain first
    */
-  private createInitialState(orderType: CloseOrderType): Record<string, unknown> {
-    switch (orderType) {
+  private createInitialState(
+    input: RegisterCloseOrderInput
+  ): Record<string, unknown> {
+    switch (input.closeOrderType) {
       case 'uniswapv3':
         return {
-          registrationTxHash: null,
-          registeredAt: null,
+          registrationTxHash: input.registrationTxHash,
+          registeredAt: new Date().toISOString(),
           triggeredAt: null,
           triggerSqrtPriceX96: null,
           executionTxHash: null,
@@ -723,7 +717,7 @@ export class CloseOrderService {
           amount1Out: null,
         };
       default:
-        throw new Error(`Unknown order type: ${orderType}`);
+        throw new Error(`Unknown close order type: ${input.closeOrderType}`);
     }
   }
 
@@ -738,8 +732,11 @@ export class CloseOrderService {
       id: dbResult.id,
       createdAt: dbResult.createdAt,
       updatedAt: dbResult.updatedAt,
-      orderType: dbResult.orderType as CloseOrderType,
-      contractId: dbResult.contractId,
+      closeOrderType: dbResult.closeOrderType as CloseOrderType,
+      automationContractConfig: dbResult.automationContractConfig as Record<
+        string,
+        unknown
+      >,
       positionId: dbResult.positionId,
       status: dbResult.status as CloseOrderStatus,
       config: dbResult.config as Record<string, unknown>,

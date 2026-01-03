@@ -21,8 +21,8 @@ import type { CloseOrderInterface } from '@midcurve/shared';
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
-  getAutomationContractService,
   getCloseOrderService,
+  getUniswapV3PositionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -43,7 +43,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 /**
- * Verify order ownership through contract chain
+ * Verify order ownership through position link
  */
 async function verifyOrderOwnership(
   orderId: string,
@@ -55,7 +55,7 @@ async function verifyOrderOwnership(
   | { success: false; response: Response }
 > {
   const closeOrderService = getCloseOrderService();
-  const contractService = getAutomationContractService();
+  const positionService = getUniswapV3PositionService();
 
   const order = await closeOrderService.findById(orderId);
 
@@ -71,10 +71,10 @@ async function verifyOrderOwnership(
     };
   }
 
-  // Verify ownership through contract
-  const contract = await contractService.findById(order.contractId);
+  // Verify ownership through position
+  const position = await positionService.findById(order.positionId);
 
-  if (!contract || contract.userId !== userId) {
+  if (!position || position.userId !== userId) {
     const errorResponse = createErrorResponse(
       ApiErrorCode.FORBIDDEN,
       'You do not have access to this order'
@@ -115,13 +115,18 @@ export async function GET(
       );
 
       // Verify ownership
-      const result = await verifyOrderOwnership(id, user.id, requestId, startTime);
+      const result = await verifyOrderOwnership(
+        id,
+        user.id,
+        requestId,
+        startTime
+      );
       if (!result.success) {
         return result.response;
       }
 
       // Serialize and return
-      const serialized = serializeCloseOrder(result.order!);
+      const serialized = serializeCloseOrder(result.order);
       const response: GetCloseOrderResponse = createSuccessResponse(serialized);
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
@@ -185,7 +190,8 @@ export async function PATCH(
         return NextResponse.json(errorResponse, { status: 400 });
       }
 
-      const { sqrtPriceX96Lower, sqrtPriceX96Upper, slippageBps } = validation.data;
+      const { sqrtPriceX96Lower, sqrtPriceX96Upper, slippageBps } =
+        validation.data;
 
       // Log business operation
       apiLog.businessOperation(
@@ -198,12 +204,17 @@ export async function PATCH(
       );
 
       // Verify ownership
-      const result = await verifyOrderOwnership(id, user.id, requestId, startTime);
+      const result = await verifyOrderOwnership(
+        id,
+        user.id,
+        requestId,
+        startTime
+      );
       if (!result.success) {
         return result.response;
       }
 
-      const order = result.order!;
+      const order = result.order;
 
       // Check if order is in updatable state
       const updatableStates = ['pending', 'active'];
@@ -219,14 +230,19 @@ export async function PATCH(
       // Update the order
       const closeOrderService = getCloseOrderService();
       const updatedOrder = await closeOrderService.update(id, {
-        sqrtPriceX96Lower: sqrtPriceX96Lower ? BigInt(sqrtPriceX96Lower) : undefined,
-        sqrtPriceX96Upper: sqrtPriceX96Upper ? BigInt(sqrtPriceX96Upper) : undefined,
+        sqrtPriceX96Lower: sqrtPriceX96Lower
+          ? BigInt(sqrtPriceX96Lower)
+          : undefined,
+        sqrtPriceX96Upper: sqrtPriceX96Upper
+          ? BigInt(sqrtPriceX96Upper)
+          : undefined,
         slippageBps,
       });
 
       // Serialize and return
       const serialized = serializeCloseOrder(updatedOrder);
-      const response: UpdateCloseOrderResponse = createSuccessResponse(serialized);
+      const response: UpdateCloseOrderResponse =
+        createSuccessResponse(serialized);
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
       return NextResponse.json(response, { status: 200 });
@@ -274,12 +290,17 @@ export async function DELETE(
       );
 
       // Verify ownership
-      const result = await verifyOrderOwnership(id, user.id, requestId, startTime);
+      const result = await verifyOrderOwnership(
+        id,
+        user.id,
+        requestId,
+        startTime
+      );
       if (!result.success) {
         return result.response;
       }
 
-      const order = result.order!;
+      const order = result.order;
 
       // Check if order is in cancellable state
       const terminalStates = ['executed', 'cancelled', 'expired', 'failed'];
@@ -302,7 +323,8 @@ export async function DELETE(
 
       // Serialize and return
       const serialized = serializeCloseOrder(cancelledOrder);
-      const response: CancelCloseOrderResponse = createSuccessResponse(serialized);
+      const response: CancelCloseOrderResponse =
+        createSuccessResponse(serialized);
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
       return NextResponse.json(response, { status: 200 });

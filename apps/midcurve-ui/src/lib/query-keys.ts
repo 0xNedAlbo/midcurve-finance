@@ -9,7 +9,7 @@
  * fine-grained cache invalidation and updates.
  */
 
-import type { ListPositionsParams, ListStrategiesParams, ListCloseOrdersRequest, ListContractsRequest } from '@midcurve/api-shared';
+import type { ListPositionsParams, ListStrategiesParams, ListCloseOrdersRequest } from '@midcurve/api-shared';
 
 export const queryKeys = {
   // ============================================
@@ -195,24 +195,17 @@ export const queryKeys = {
     },
 
     // ---------------------------------------------------------------------------
-    // Contracts
+    // Shared Contracts
     // ---------------------------------------------------------------------------
-    contracts: {
-      all: ['automation', 'contracts'] as const,
+    sharedContracts: {
+      all: ['automation', 'shared-contracts'] as const,
 
-      // List operations
-      lists: () => [...queryKeys.automation.contracts.all, 'list'] as const,
-      list: (params?: ListContractsRequest) =>
-        [...queryKeys.automation.contracts.lists(), params ?? {}] as const,
+      // List all shared contracts
+      lists: () => [...queryKeys.automation.sharedContracts.all, 'list'] as const,
 
-      // By chain (one contract per user per chain)
+      // By chain
       byChain: (chainId: number) =>
-        [...queryKeys.automation.contracts.all, 'chain', chainId] as const,
-
-      // Contract status (for polling)
-      statuses: () => [...queryKeys.automation.contracts.all, 'status'] as const,
-      status: (contractId: string) =>
-        [...queryKeys.automation.contracts.statuses(), contractId] as const,
+        [...queryKeys.automation.sharedContracts.all, 'chain', chainId] as const,
     },
 
     // Mutation keys

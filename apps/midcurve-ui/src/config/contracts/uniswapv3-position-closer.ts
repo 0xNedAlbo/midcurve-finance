@@ -19,7 +19,8 @@
  * UniswapV3PositionCloser ABI
  *
  * Minimal ABI with only the functions needed for UI interaction.
- * Full contract deployed separately per user per chain.
+ * This is the shared contract - one per chain, shared by all users.
+ * Each order specifies its own operator (user's autowallet).
  */
 export const POSITION_CLOSER_ABI = [
   // =============================================================================
@@ -39,6 +40,7 @@ export const POSITION_CLOSER_ABI = [
     outputs: [
       { name: 'owner', type: 'address' },
       { name: 'operator', type: 'address' },
+      { name: 'pool', type: 'address' },
       { name: 'nftId', type: 'uint256' },
       { name: 'sqrtPriceX96Lower', type: 'uint160' },
       { name: 'sqrtPriceX96Upper', type: 'uint160' },
@@ -65,10 +67,12 @@ export const POSITION_CLOSER_ABI = [
     type: 'function',
     name: 'registerClose',
     inputs: [
-      { name: 'nftId', type: 'uint256' },
+      { name: 'pool', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
       { name: 'sqrtPriceX96Lower', type: 'uint160' },
       { name: 'sqrtPriceX96Upper', type: 'uint160' },
-      { name: 'payoutAddress', type: 'address' },
+      { name: 'payout', type: 'address' },
+      { name: 'operator', type: 'address' },
       { name: 'validUntil', type: 'uint256' },
       { name: 'slippageBps', type: 'uint16' },
     ],

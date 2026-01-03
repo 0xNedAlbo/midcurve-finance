@@ -7,6 +7,7 @@
 
 import type { CloseOrderInterface } from './close-order.interface.js';
 import type {
+  AutomationContractConfig,
   BaseCloseOrderParams,
   CloseOrderJSON,
   CloseOrderStatus,
@@ -18,7 +19,7 @@ import type {
  *
  * Provides common implementation for all close orders.
  * Derived classes must implement:
- * - orderType getter
+ * - closeOrderType getter
  * - config getter
  * - state getter
  * - getDisplayName method
@@ -29,12 +30,12 @@ export abstract class BaseCloseOrder implements CloseOrderInterface {
   // ============================================================================
 
   readonly id: string;
-  readonly contractId: string;
+  readonly automationContractConfig: AutomationContractConfig;
 
   /**
-   * Order type discriminator (implemented by derived classes)
+   * Close order type discriminator (implemented by derived classes)
    */
-  abstract readonly orderType: CloseOrderType;
+  abstract readonly closeOrderType: CloseOrderType;
 
   // ============================================================================
   // Position Link
@@ -75,7 +76,7 @@ export abstract class BaseCloseOrder implements CloseOrderInterface {
 
   constructor(params: BaseCloseOrderParams) {
     this.id = params.id;
-    this.contractId = params.contractId;
+    this.automationContractConfig = params.automationContractConfig;
     this.status = params.status;
     this.positionId = params.positionId;
     this.createdAt = params.createdAt;
@@ -92,10 +93,10 @@ export abstract class BaseCloseOrder implements CloseOrderInterface {
   toJSON(): CloseOrderJSON {
     return {
       id: this.id,
-      contractId: this.contractId,
-      orderType: this.orderType,
+      closeOrderType: this.closeOrderType,
       status: this.status,
       positionId: this.positionId,
+      automationContractConfig: this.automationContractConfig,
       config: this.config,
       state: this.state,
       createdAt: this.createdAt.toISOString(),

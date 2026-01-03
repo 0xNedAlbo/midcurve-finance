@@ -1,0 +1,24 @@
+{
+  "uniswapv3": {
+    "1": {
+      "contractAddress": "",
+      "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+    },
+    "42161": {
+      "contractAddress": "",
+      "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+    },
+    "8453": {
+      "contractAddress": "",
+      "positionManager": "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"
+    },
+    "10": {
+      "contractAddress": "",
+      "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+    },
+    "137": {
+      "contractAddress": "",
+      "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+    }
+  }
+}

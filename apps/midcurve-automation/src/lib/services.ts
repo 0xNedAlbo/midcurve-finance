@@ -6,27 +6,15 @@
  */
 
 import {
-  AutomationContractService,
   CloseOrderService,
   PoolSubscriptionService,
   UniswapV3PoolService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
-let _automationContractService: AutomationContractService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
-
-/**
- * Get singleton instance of AutomationContractService
- */
-export function getAutomationContractService(): AutomationContractService {
-  if (!_automationContractService) {
-    _automationContractService = new AutomationContractService();
-  }
-  return _automationContractService;
-}
 
 /**
  * Get singleton instance of CloseOrderService

@@ -35,8 +35,8 @@ export interface AutomationContractRow {
  */
 export interface CloseOrderRow {
   id: string;
-  contractId: string;
-  orderType: string;
+  closeOrderType: string;
+  automationContractConfig: Record<string, unknown>;
   status: string;
   positionId: string;
   config: Record<string, unknown>;
@@ -94,36 +94,36 @@ export class AutomationContractFactory {
  * Close Order Factory
  *
  * Creates typed close order instances from database rows.
- * Dispatches to the correct implementation based on orderType.
+ * Dispatches to the correct implementation based on closeOrderType.
  */
 export class CloseOrderFactory {
   /**
    * Create a close order from a database row
    *
-   * @param row - Database row with orderType discriminator
+   * @param row - Database row with closeOrderType discriminator
    * @returns Typed close order instance
    * @throws Error if order type is unknown
    */
   static fromDB(row: CloseOrderRow): CloseOrderInterface {
-    const orderType = row.orderType as CloseOrderType;
+    const closeOrderType = row.closeOrderType as CloseOrderType;
 
-    switch (orderType) {
+    switch (closeOrderType) {
       case 'uniswapv3':
         return UniswapV3CloseOrder.fromDB({
           ...row,
-          orderType: 'uniswapv3',
+          closeOrderType: 'uniswapv3',
           status: row.status as 'pending' | 'registering' | 'active' | 'triggering' | 'executed' | 'cancelled' | 'expired' | 'failed',
         });
 
       default:
-        throw new Error(`Unknown order type: ${row.orderType}`);
+        throw new Error(`Unknown close order type: ${row.closeOrderType}`);
     }
   }
 
   /**
-   * Check if an order type is supported
+   * Check if a close order type is supported
    */
-  static isSupported(orderType: string): orderType is CloseOrderType {
-    return ['uniswapv3'].includes(orderType);
+  static isSupported(closeOrderType: string): closeOrderType is CloseOrderType {
+    return ['uniswapv3'].includes(closeOrderType);
   }
 }

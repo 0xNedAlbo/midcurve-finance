@@ -21,7 +21,6 @@ import {
   PositionAprService,
   StrategyService,
   StrategyMetricsService,
-  AutomationContractService,
   CloseOrderService,
   PoolSubscriptionService,
 } from '@midcurve/services';
@@ -40,7 +39,6 @@ let _positionListService: PositionListService | null = null;
 let _positionAprService: PositionAprService | null = null;
 let _strategyService: StrategyService | null = null;
 let _strategyMetricsService: StrategyMetricsService | null = null;
-let _automationContractService: AutomationContractService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 
@@ -172,16 +170,6 @@ export function getStrategyMetricsService(): StrategyMetricsService {
     _strategyMetricsService = new StrategyMetricsService();
   }
   return _strategyMetricsService;
-}
-
-/**
- * Get singleton instance of AutomationContractService
- */
-export function getAutomationContractService(): AutomationContractService {
-  if (!_automationContractService) {
-    _automationContractService = new AutomationContractService();
-  }
-  return _automationContractService;
 }
 
 /**

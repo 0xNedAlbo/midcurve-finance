@@ -1,7 +1,7 @@
 /**
  * Automation Hooks
  *
- * React hooks for managing close orders, automation contracts, and wallets.
+ * React hooks for managing close orders, shared contracts, and wallets.
  *
  * Transaction Signing Architecture:
  * - registerClose, cancelClose, setClose* - User signs via Wagmi (msg.sender == owner)
@@ -44,16 +44,8 @@ export {
 // Close Orders - Read only
 export { useCloseOrders, useCloseOrder } from './useCloseOrders';
 
-// Contracts
-export { useAutomationContract, useAutomationContracts } from './useAutomationContract';
-
-// Contract Deployment - User signing via Wagmi
-export {
-  useDeployAutomationContract,
-  type DeployContractParams,
-  type DeployContractResult,
-  type UseDeployAutomationContractResult,
-} from './useDeployAutomationContract';
+// Shared Contracts
+export { useSharedContract } from './useSharedContract';
 
 // Operator Approval (setApprovalForAll on NFPM)
 export { useOperatorApproval, type UseOperatorApprovalResult } from './useOperatorApproval';

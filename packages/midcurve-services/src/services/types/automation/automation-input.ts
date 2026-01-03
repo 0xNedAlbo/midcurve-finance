@@ -6,80 +6,11 @@
  */
 
 import type {
-  AutomationContractType,
+  AutomationContractConfig,
   CloseOrderType,
   CloseOrderStatus,
   TriggerMode,
 } from '@midcurve/shared';
-
-// =============================================================================
-// AUTOMATION CONTRACT INPUT TYPES
-// =============================================================================
-
-/**
- * Input type for deploying a new automation contract
- */
-export interface DeployContractInput {
-  /**
-   * User ID who owns this contract
-   */
-  userId: string;
-
-  /**
-   * Contract type (protocol)
-   */
-  contractType: AutomationContractType;
-
-  /**
-   * Chain ID to deploy on
-   */
-  chainId: number;
-}
-
-/**
- * Input for updating contract state after deployment
- */
-export interface UpdateContractDeploymentInput {
-  /**
-   * Deployed contract address
-   */
-  contractAddress: string;
-
-  /**
-   * Deployment transaction hash
-   */
-  deploymentTxHash: string;
-
-  /**
-   * Operator address
-   */
-  operatorAddress: string;
-
-  /**
-   * NFPM address for UniswapV3
-   */
-  nfpmAddress?: string;
-}
-
-/**
- * Options for finding automation contracts
- */
-export interface FindContractOptions {
-  /**
-   * Filter by contract type
-   */
-  contractType?: AutomationContractType;
-
-  /**
-   * Filter by chain ID
-   */
-  chainId?: number;
-
-  /**
-   * Filter by active status
-   */
-  isActive?: boolean;
-}
 
 // =============================================================================
 // CLOSE ORDER INPUT TYPES
@@ -87,22 +18,31 @@ export interface FindContractOptions {
 
 /**
  * Input type for registering a new close order
+ *
+ * In the shared contract model, orders are registered on-chain first,
+ * then notified to the API with closeId and registrationTxHash.
  */
 export interface RegisterCloseOrderInput {
   /**
-   * Contract ID this order belongs to
+   * Close order type (protocol)
    */
-  contractId: string;
+  closeOrderType: CloseOrderType;
 
   /**
-   * Order type (protocol)
+   * Automation contract configuration (immutable at registration time)
+   * Contains shared contract address used for this order
    */
-  orderType: CloseOrderType;
+  automationContractConfig: AutomationContractConfig;
 
   /**
    * Position ID to close when triggered
    */
   positionId: string;
+
+  /**
+   * Close ID from the on-chain registration (returned by registerClose())
+   */
+  closeId: number;
 
   /**
    * NFT ID (token ID from NFPM)
@@ -137,7 +77,7 @@ export interface RegisterCloseOrderInput {
   payoutAddress: string;
 
   /**
-   * Operator address
+   * Operator address (user's automation wallet)
    */
   operatorAddress: string;
 
@@ -150,6 +90,11 @@ export interface RegisterCloseOrderInput {
    * Maximum slippage in basis points (e.g., 50 = 0.5%)
    */
   slippageBps: number;
+
+  /**
+   * Registration transaction hash (from on-chain registration)
+   */
+  registrationTxHash: string;
 }
 
 /**
@@ -177,9 +122,9 @@ export interface UpdateCloseOrderInput {
  */
 export interface FindCloseOrderOptions {
   /**
-   * Filter by order type (protocol)
+   * Filter by close order type (protocol)
    */
-  orderType?: CloseOrderType;
+  closeOrderType?: CloseOrderType;
 
   /**
    * Filter by status
@@ -192,17 +137,12 @@ export interface FindCloseOrderOptions {
   positionId?: string;
 
   /**
-   * Filter by contract ID
-   */
-  contractId?: string;
-
-  /**
    * Filter by pool address
    */
   poolAddress?: string;
 
   /**
-   * Filter by chain ID (via contract)
+   * Filter by chain ID (via automationContractConfig)
    */
   chainId?: number;
 }

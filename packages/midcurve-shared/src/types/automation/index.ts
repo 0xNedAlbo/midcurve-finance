@@ -30,6 +30,7 @@ export type {
   CloseOrderStatus,
   CloseOrderJSON,
   BaseCloseOrderParams,
+  AutomationContractConfig,
 } from './close-order.types.js';
 
 export type { CloseOrderInterface } from './close-order.interface.js';

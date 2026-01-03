@@ -3,15 +3,14 @@
  *
  * Re-exports all automation service classes and types.
  * These services handle position automation features:
- * - Automation contracts (per-user, per-chain)
  * - Close orders (price-triggered position closing)
  * - Pool subscriptions (price monitoring)
+ *
+ * Note: Shared contract addresses are loaded from JSON config files,
+ * not from database. See apps/midcurve-automation/config/shared-contracts.json
  */
 
 // Main services
-export { AutomationContractService } from './automation-contract-service.js';
-export type { AutomationContractServiceDependencies } from './automation-contract-service.js';
-
 export { CloseOrderService } from './close-order-service.js';
 export type { CloseOrderServiceDependencies } from './close-order-service.js';
 

@@ -38,16 +38,26 @@ export type CloseOrderStatus =
   | 'failed';
 
 /**
+ * Contract configuration stored per-order (immutable at registration time)
+ * Contains shared contract reference for this order
+ */
+export interface AutomationContractConfig {
+  chainId: number;
+  contractAddress: string;
+  positionManager: string;
+}
+
+/**
  * JSON-serializable representation of a close order
  *
  * Used for API responses and database storage.
  */
 export interface CloseOrderJSON {
   id: string;
-  contractId: string;
-  orderType: CloseOrderType;
+  closeOrderType: CloseOrderType;
   status: CloseOrderStatus;
   positionId: string;
+  automationContractConfig: AutomationContractConfig;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
   createdAt: string;
@@ -59,7 +69,7 @@ export interface CloseOrderJSON {
  */
 export interface BaseCloseOrderParams {
   id: string;
-  contractId: string;
+  automationContractConfig: AutomationContractConfig;
   status: CloseOrderStatus;
   positionId: string;
   createdAt: Date;

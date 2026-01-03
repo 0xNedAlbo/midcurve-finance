@@ -31,12 +31,6 @@ export interface SignedTransaction {
   from: string;
 }
 
-export interface DeployCloserParams {
-  userId: string;
-  chainId: number;
-  nfpmAddress: string;
-}
-
 export interface ExecuteCloseParams {
   userId: string;
   chainId: number;
@@ -129,19 +123,6 @@ class SignerClient {
     }
 
     return data.data as T;
-  }
-
-  /**
-   * Sign a UniswapV3PositionCloser deployment transaction
-   */
-  async deployCloser(params: DeployCloserParams): Promise<SignedTransaction> {
-    log.info({
-      userId: params.userId,
-      chainId: params.chainId,
-      msg: 'Signing closer deployment',
-    });
-
-    return this.request<SignedTransaction>('POST', '/api/sign/automation/deploy-closer', params);
   }
 
   /**

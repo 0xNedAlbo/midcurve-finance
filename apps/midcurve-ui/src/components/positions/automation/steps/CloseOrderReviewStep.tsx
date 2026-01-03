@@ -22,10 +22,6 @@ interface CloseOrderReviewStepProps {
   };
   error: string | null;
   /**
-   * Whether a contract deployment is needed
-   */
-  needsDeploy?: boolean;
-  /**
    * Whether operator approval is needed
    */
   needsApproval?: boolean;
@@ -58,7 +54,6 @@ export function CloseOrderReviewStep({
   baseToken,
   quoteToken,
   error,
-  needsDeploy = false,
   needsApproval = false,
 }: CloseOrderReviewStepProps) {
   // Calculate expiration date
@@ -137,23 +132,20 @@ export function CloseOrderReviewStep({
         </div>
       )}
 
-      {/* Setup Notice - shown when deploy or approval needed */}
-      {(needsDeploy || needsApproval) && (
+      {/* Setup Notice - shown when approval is needed */}
+      {needsApproval && (
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
             <div>
               <h4 className="text-sm font-medium text-blue-300 mb-2">One-time Setup Required</h4>
               <p className="text-xs text-slate-400 mb-3">
-                {needsDeploy
-                  ? 'This is your first close order on this chain. You will need to deploy your automation contract first.'
-                  : 'You need to approve the automation contract to manage your position.'}
+                You need to approve the automation contract to manage your position.
               </p>
               <div className="text-xs text-slate-400 space-y-1">
                 <p className="font-medium text-slate-300">You will be asked to sign:</p>
                 <ul className="list-disc list-inside ml-1 space-y-0.5">
-                  {needsDeploy && <li>Deploy automation contract (gas required)</li>}
-                  {needsApproval && <li>Approve operator permissions (gas required)</li>}
+                  <li>Approve operator permissions (gas required)</li>
                   <li>Register close order (gas required)</li>
                 </ul>
               </div>

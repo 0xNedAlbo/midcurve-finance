@@ -1,47 +1,19 @@
 /**
  * Automation Endpoint Types
  *
- * Types for position automation features (contracts, close orders).
+ * Types for position automation features (shared contracts, close orders, wallet).
  */
 
-// Contracts
+// Shared Contracts
 export {
-  CONTRACT_TYPES,
-  type ContractType,
-  type SerializedAutomationContract,
-  type SerializedUniswapV3ContractConfig,
-  type SerializedUniswapV3ContractState,
-  // Deploy
-  type DeployContractRequest,
-  DeployContractRequestSchema,
-  type DeployContractInput,
-  type DeployContractResponseData,
-  type DeployContractResponse,
-  // List
-  type ListContractsRequest,
-  ListContractsQuerySchema,
-  type ListContractsInput,
-  type ListContractsResponse,
+  SHARED_CONTRACT_PROTOCOLS,
+  type SharedContractProtocol,
+  type SharedContractInfo,
   // Get by chain
-  type GetContractByChainParams,
-  type GetContractByChainRequest,
-  GetContractByChainQuerySchema,
-  type GetContractByChainInput,
-  type GetContractByChainResponse,
-  // Status
-  type ContractDeploymentStatus,
-  type GetContractStatusResponse,
-  // Bytecode (user-signed deployment)
-  type GetContractBytecodeRequest,
-  GetContractBytecodeQuerySchema,
-  type GetContractBytecodeInput,
-  type GetContractBytecodeResponseData,
-  type GetContractBytecodeResponse,
-  // Notify Contract Deployed (user signed on-chain)
-  type NotifyContractDeployedRequest,
-  NotifyContractDeployedRequestSchema,
-  type NotifyContractDeployedInput,
-  type NotifyContractDeployedResponse,
+  type GetSharedContractResponse,
+  // List
+  type ListSharedContractsResponseData,
+  type ListSharedContractsResponse,
 } from './contracts.js';
 
 // Close Orders
@@ -52,14 +24,14 @@ export {
   type CloseOrderStatus,
   TRIGGER_MODES,
   type TriggerMode,
+  type SerializedAutomationContractConfig,
   type SerializedCloseOrder,
   type SerializedUniswapV3CloseOrderConfig,
   type SerializedUniswapV3CloseOrderState,
-  // Register
+  // Register (user signs on-chain, then calls this endpoint)
   type RegisterCloseOrderRequest,
   RegisterCloseOrderRequestSchema,
   type RegisterCloseOrderInput,
-  type RegisterCloseOrderResponseData,
   type RegisterCloseOrderResponse,
   // List
   type ListCloseOrdersRequest,
@@ -78,11 +50,6 @@ export {
   // Status
   type CloseOrderRegistrationStatus,
   type GetCloseOrderStatusResponse,
-  // Notify Order Registered (user signed on-chain)
-  type NotifyOrderRegisteredRequest,
-  NotifyOrderRegisteredRequestSchema,
-  type NotifyOrderRegisteredInput,
-  type NotifyOrderRegisteredResponse,
   // Notify Order Cancelled (user signed on-chain)
   type NotifyOrderCancelledRequest,
   NotifyOrderCancelledRequestSchema,

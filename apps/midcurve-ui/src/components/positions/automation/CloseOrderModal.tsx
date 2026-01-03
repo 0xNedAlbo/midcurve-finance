@@ -19,8 +19,8 @@ import type { Address } from 'viem';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
 import {
   useCreateCloseOrder,
-  useDeployAutomationContract,
   useOperatorApproval,
+  useAutowallet,
 } from '@/hooks/automation';
 import { CloseOrderConfigureStep } from './steps/CloseOrderConfigureStep';
 import { CloseOrderReviewStep } from './steps/CloseOrderReviewStep';
@@ -54,15 +54,14 @@ export interface CloseOrderModalProps {
   chainId: number;
 
   /**
-   * Automation contract address on this chain
-   * Optional - if undefined, contract will be deployed as part of the flow
+   * Shared automation contract address on this chain
    */
-  contractAddress?: Address;
+  contractAddress: Address;
 
   /**
-   * Whether the user has a deployed automation contract on this chain
+   * Position manager (NFPM) address on this chain
    */
-  hasContract?: boolean;
+  positionManager: Address;
 
   /**
    * NFT ID of the position
@@ -121,8 +120,8 @@ export function CloseOrderModal({
   positionId,
   poolAddress,
   chainId,
-  contractAddress: initialContractAddress,
-  hasContract: initialHasContract = false,
+  contractAddress,
+  positionManager,
   nftId,
   baseToken,
   quoteToken,
@@ -145,22 +144,9 @@ export function CloseOrderModal({
   const [createdOrder, setCreatedOrder] = useState<SerializedCloseOrder | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // Track deployed contract address (may be updated during flow)
-  const [deployedContractAddress, setDeployedContractAddress] = useState<Address | undefined>(
-    initialContractAddress
-  );
-
-  // Deployment hook
-  const {
-    deploy,
-    isFetchingBytecode,
-    isDeploying,
-    isWaitingForConfirmation: isWaitingForDeployConfirmation,
-    isSuccess: isDeploySuccess,
-    result: deployResult,
-    error: deployError,
-    reset: resetDeploy,
-  } = useDeployAutomationContract();
+  // Get user's autowallet (operator address for executing close orders)
+  const { data: autowalletData } = useAutowallet();
+  const operatorAddress = autowalletData?.address as Address | undefined;
 
   // Operator approval hook (NFPM setApprovalForAll)
   const {
@@ -172,7 +158,7 @@ export function CloseOrderModal({
     isApprovalSuccess,
     error: approveError,
     reset: resetApproval,
-  } = useOperatorApproval(chainId, deployedContractAddress);
+  } = useOperatorApproval(chainId, contractAddress);
 
   // Create order hook (Wagmi-based)
   const {
@@ -185,9 +171,8 @@ export function CloseOrderModal({
     reset: resetHook,
   } = useCreateCloseOrder();
 
-  // Detect what's needed
-  const needsDeploy = !initialHasContract && !deployedContractAddress;
-  const needsApproval = !needsDeploy && !isApproved && !isCheckingApproval;
+  // Detect if approval is needed (shared contract is always deployed)
+  const needsApproval = !isApproved && !isCheckingApproval;
 
   // Mount check for portal
   useEffect(() => {
@@ -209,12 +194,10 @@ export function CloseOrderModal({
       });
       setCreatedOrder(null);
       setLocalError(null);
-      setDeployedContractAddress(initialContractAddress);
       resetHook();
-      resetDeploy();
       resetApproval();
     }
-  }, [isOpen, initialContractAddress, resetHook, resetDeploy, resetApproval]);
+  }, [isOpen, resetHook, resetApproval]);
 
   // Track hook success/error state
   useEffect(() => {
@@ -234,23 +217,6 @@ export function CloseOrderModal({
       setStep('review'); // Go back to review on error
     }
   }, [hookError]);
-
-  // Handle deploy success - update contract address and continue to approval/register
-  useEffect(() => {
-    if (isDeploySuccess && deployResult?.contractAddress) {
-      setDeployedContractAddress(deployResult.contractAddress);
-      // Don't proceed automatically - the approval hook will re-check with new address
-      // The flow continues via startApprovalOrRegister being called
-    }
-  }, [isDeploySuccess, deployResult]);
-
-  // Handle deploy error
-  useEffect(() => {
-    if (deployError) {
-      setLocalError(deployError.message);
-      setStep('review');
-    }
-  }, [deployError]);
 
   // Handle approval error
   useEffect(() => {
@@ -279,8 +245,8 @@ export function CloseOrderModal({
       return;
     }
 
-    if (!deployedContractAddress) {
-      setLocalError('No contract address available');
+    if (!operatorAddress) {
+      setLocalError('Autowallet not available. Please try again.');
       setStep('review');
       return;
     }
@@ -302,41 +268,32 @@ export function CloseOrderModal({
 
     // Call the hook's registerOrder function
     registerOrder({
-      contractAddress: deployedContractAddress,
+      contractAddress,
+      positionManager,
       chainId,
       nftId,
       sqrtPriceX96Lower,
       sqrtPriceX96Upper,
       payoutAddress: userAddress,
+      operatorAddress,
       validUntil,
       slippageBps: formData.slippageBps,
+      triggerMode: formData.triggerMode,
       positionId,
       poolAddress: poolAddress as Address,
     });
   }, [
     userAddress,
+    operatorAddress,
     formData,
-    deployedContractAddress,
+    contractAddress,
+    positionManager,
     chainId,
     nftId,
     positionId,
     poolAddress,
     registerOrder,
   ]);
-
-  // Continue flow after deployment completes - start approval or registration
-  useEffect(() => {
-    if (isDeploySuccess && deployedContractAddress && step === 'processing') {
-      // Contract deployed, now check if we need approval
-      if (!isApproved && !isCheckingApproval) {
-        // Need to approve - start approval
-        approve();
-      } else if (isApproved) {
-        // Already approved, proceed to registration
-        executeRegistration();
-      }
-    }
-  }, [isDeploySuccess, deployedContractAddress, step, isApproved, isCheckingApproval, approve, executeRegistration]);
 
   // Handle approval success - continue to registration
   useEffect(() => {
@@ -346,7 +303,7 @@ export function CloseOrderModal({
     }
   }, [isApprovalSuccess, step, executeRegistration]);
 
-  // Submit the order - orchestrates deploy → approve → register flow
+  // Submit the order - orchestrates approve → register flow
   const submitOrder = useCallback(() => {
     if (!userAddress) {
       setLocalError('Wallet not connected');
@@ -354,23 +311,23 @@ export function CloseOrderModal({
       return;
     }
 
-    setLocalError(null);
-
-    // Step 1: Deploy if needed
-    if (needsDeploy) {
-      deploy({ chainId, contractType: 'uniswapv3' });
+    if (!operatorAddress) {
+      setLocalError('Autowallet not available. Please try again.');
+      setStep('review');
       return;
     }
 
-    // Step 2: Approve if needed
+    setLocalError(null);
+
+    // Step 1: Approve if needed
     if (needsApproval) {
       approve();
       return;
     }
 
-    // Step 3: Register the order
+    // Step 2: Register the order
     executeRegistration();
-  }, [userAddress, needsDeploy, needsApproval, chainId, deploy, approve, executeRegistration]);
+  }, [userAddress, operatorAddress, needsApproval, approve, executeRegistration]);
 
   // Handle step progression
   const handleContinue = useCallback(() => {
@@ -445,19 +402,12 @@ export function CloseOrderModal({
                 baseToken={baseToken}
                 quoteToken={quoteToken}
                 error={localError}
-                needsDeploy={needsDeploy}
                 needsApproval={needsApproval}
               />
             )}
 
             {step === 'processing' && (
               <CloseOrderProcessingStep
-                // Deploy state
-                needsDeploy={needsDeploy}
-                isFetchingBytecode={isFetchingBytecode}
-                isDeploying={isDeploying}
-                isWaitingForDeployConfirmation={isWaitingForDeployConfirmation}
-                deployComplete={isDeploySuccess}
                 // Approval state
                 needsApproval={needsApproval}
                 isApproving={isApproving}

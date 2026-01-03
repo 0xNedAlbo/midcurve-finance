@@ -13,7 +13,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import type { Address } from "viem";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { calculatePositionStates } from "@/lib/position-states";
-import { useAutomationContract } from "@/hooks/automation";
+import { useSharedContract } from "@/hooks/automation";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
 import { PositionCloseOrdersPanel, CloseOrderModal } from "../../automation";
 
@@ -40,15 +40,16 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
 
-  // Get automation contract for this chain
+  // Get shared automation contract for this chain
   const {
     data: contractData,
     isLoading: isContractLoading,
     error: contractError,
-  } = useAutomationContract(poolConfig.chainId);
+  } = useSharedContract(poolConfig.chainId);
 
   const contractAddress = contractData?.contractAddress as Address | undefined;
-  const hasContract = contractData?.hasContract ?? false;
+  const positionManager = contractData?.positionManager as Address | undefined;
+  const isChainSupported = contractData?.isSupported ?? false;
 
   // PnL breakdown data for position states calculation
   const pnlBreakdown = {
@@ -81,8 +82,15 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
     );
   }
 
-  // NOTE: We no longer block when no contract exists.
-  // The modal will handle deployment as part of the close order creation flow.
+  // Chain not supported for automation
+  if (!isChainSupported) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-amber-400">
+        <AlertCircle className="w-5 h-5" />
+        <span>Automation is not yet available on this chain</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -105,8 +113,8 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         positionId={position.id}
         poolAddress={poolConfig.address}
         chainId={poolConfig.chainId}
-        contractAddress={contractAddress}
-        hasContract={hasContract}
+        contractAddress={contractAddress!}
+        positionManager={positionManager!}
         nftId={BigInt(positionConfig.nftId)}
         baseToken={{
           address: baseTokenConfig.address,

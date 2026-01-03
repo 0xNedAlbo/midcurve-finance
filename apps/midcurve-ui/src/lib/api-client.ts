@@ -177,18 +177,11 @@ import type {
   UpdateCloseOrderResponse,
   CancelCloseOrderResponse,
   GetCloseOrderStatusResponse,
-  NotifyOrderRegisteredRequest,
-  NotifyOrderRegisteredResponse,
   NotifyOrderCancelledRequest,
   NotifyOrderCancelledResponse,
-  // Contracts
-  ListContractsRequest,
-  ListContractsResponse,
-  GetContractByChainResponse,
-  GetContractStatusResponse,
-  GetContractBytecodeResponse,
-  NotifyContractDeployedRequest,
-  NotifyContractDeployedResponse,
+  // Shared Contracts
+  GetSharedContractResponse,
+  ListSharedContractsResponse,
   // Wallet
   GetAutowalletResponse,
   RefundAutowalletRequest,
@@ -257,13 +250,6 @@ export const automationApi = {
   },
 
   /**
-   * Notify API after user registers a close order on-chain
-   */
-  notifyOrderRegistered(input: NotifyOrderRegisteredRequest) {
-    return apiClient.post<NotifyOrderRegisteredResponse['data']>('/api/v1/automation/close-orders/notify', input);
-  },
-
-  /**
    * Notify API after user cancels a close order on-chain
    */
   notifyOrderCancelled(orderId: string, input: NotifyOrderCancelledRequest) {
@@ -274,47 +260,21 @@ export const automationApi = {
   },
 
   // ---------------------------------------------------------------------------
-  // Contracts
+  // Shared Contracts
   // ---------------------------------------------------------------------------
 
   /**
-   * List automation contracts for the current user
+   * List all shared contracts (grouped by protocol)
    */
-  listContracts(params: ListContractsRequest = {}) {
-    const qs = buildQueryString(params);
-    return apiClient.get<ListContractsResponse['data']>(`/api/v1/automation/contracts${qs}`);
+  listSharedContracts() {
+    return apiClient.get<ListSharedContractsResponse['data']>('/api/v1/automation/shared-contracts');
   },
 
   /**
-   * Get automation contract by chain ID
+   * Get shared contract for a specific chain
    */
-  getContractByChain(chainId: number, contractType: 'uniswapv3' = 'uniswapv3') {
-    return apiClient.get<GetContractByChainResponse['data']>(
-      `/api/v1/automation/contracts/${contractType}/chain/${chainId}`
-    );
-  },
-
-  /**
-   * Get contract deployment status (for polling)
-   */
-  getContractStatus(id: string) {
-    return apiClient.get<GetContractStatusResponse['data']>(`/api/v1/automation/contracts/status/${id}`);
-  },
-
-  /**
-   * Get contract bytecode for user to deploy
-   */
-  getContractBytecode(chainId: number, contractType: 'uniswapv3' = 'uniswapv3') {
-    return apiClient.get<GetContractBytecodeResponse['data']>(
-      `/api/v1/automation/contracts/bytecode?chainId=${chainId}&contractType=${contractType}`
-    );
-  },
-
-  /**
-   * Notify API after user deploys contract on-chain
-   */
-  notifyContractDeployed(input: NotifyContractDeployedRequest) {
-    return apiClient.post<NotifyContractDeployedResponse['data']>('/api/v1/automation/contracts/notify', input);
+  getSharedContract(chainId: number) {
+    return apiClient.get<GetSharedContractResponse['data']>(`/api/v1/automation/shared-contracts/${chainId}`);
   },
 
   // ---------------------------------------------------------------------------

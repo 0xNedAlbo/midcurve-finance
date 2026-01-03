@@ -736,56 +736,15 @@ model AutomationWalletNonce {
 // Position Automation Models
 // =============================================================================
 
-// AutomationContract - User's deployed automation contracts (e.g., UniswapV3PositionCloser)
-// One contract per user per protocol per chain
-model AutomationContract {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Type discriminator (protocol-specific)
-  contractType String // 'uniswapv3' (future: 'orca', 'raydium')
-
-  // Owner reference
-  userId String
-
-  // Status
-  isActive Boolean @default(true)
-
-  // Platform-specific configuration (JSON) - Immutable after deployment
-  // UniswapV3: { chainId, contractAddress, nfpmAddress, operatorAddress }
-  config Json
-
-  // Deployment state (JSON) - Mutable
-  // UniswapV3: { deploymentTxHash, deployedAt, lastCloseId }
-  state Json
-
-  // Relations
-  closeOrders AutomationCloseOrder[]
-
-  // Constraints
-  // One contract per user per protocol per chain (chainId is in config JSON)
-  // Uniqueness enforced at application level since chainId is in JSON
-  @@index([userId])
-  @@index([contractType])
-  @@index([isActive])
-  @@index([userId, contractType]) // Fast lookup for user's contracts by type
-  @@map("automation_contracts")
-}
-
 // AutomationCloseOrder - Registered close triggers for positions
-// Links a Position to an AutomationContract with price trigger conditions
+// Uses shared contracts deployed per-chain, with per-order operator specification
 model AutomationCloseOrder {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Type discriminator
-  orderType String // 'uniswapv3' (future: 'orca', 'raydium')
-
-  // Parent contract reference
-  contractId String
-  contract   AutomationContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  // Type discriminator - determines which protocol this order is for
+  closeOrderType String // 'uniswapv3' (future: 'orca', 'raydium')
 
   // Required position link (automation is always for a specific position)
   positionId String
@@ -795,9 +754,14 @@ model AutomationCloseOrder {
   // pending -> registering -> active -> triggering -> executed/cancelled/expired/failed
   status String @default("pending")
 
+  // Contract config (JSON) - Immutable at registration time
+  // Stores the shared contract address used for this order (snapshot at registration)
+  // UniswapV3: { chainId, contractAddress, positionManager }
+  automationContractConfig Json
+
   // Protocol-specific config (JSON) - Immutable after registration
-  // UniswapV3: { closeId, nftId, poolAddress, triggerMode, sqrtPriceX96Lower, sqrtPriceX96Upper,
-  //              payoutAddress, operatorAddress, validUntil, slippageBps }
+  // UniswapV3: { closeId, nftId, poolAddress, operatorAddress, triggerMode,
+  //              sqrtPriceX96Lower, sqrtPriceX96Upper, payoutAddress, validUntil, slippageBps }
   config Json
 
   // Protocol-specific state (JSON) - Mutable
@@ -807,11 +771,10 @@ model AutomationCloseOrder {
   state Json
 
   // Indexes
-  @@index([contractId])
-  @@index([orderType])
+  @@index([closeOrderType])
   @@index([status])
   @@index([positionId])
-  @@index([contractId, status]) // Fast lookup for active orders by contract
+  @@index([closeOrderType, status]) // Fast lookup for active orders by type
   @@map("automation_close_orders")
 }
 

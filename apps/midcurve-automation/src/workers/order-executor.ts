@@ -5,7 +5,9 @@
  * Uses competing consumers pattern for parallel execution.
  */
 
-import { getCloseOrderService, getPoolSubscriptionService, getAutomationContractService } from '../lib/services';
+import { prisma } from '@midcurve/database';
+import type { AutomationContractConfig } from '@midcurve/shared';
+import { getCloseOrderService, getPoolSubscriptionService } from '../lib/services';
 import { broadcastTransaction, waitForTransaction, type SupportedChainId } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -169,7 +171,6 @@ export class OrderExecutor {
   ): Promise<void> {
     const closeOrderService = getCloseOrderService();
     const poolSubscriptionService = getPoolSubscriptionService();
-    const automationContractService = getAutomationContractService();
     const signerClient = getSignerClient();
     const feeConfig = getFeeConfig();
 
@@ -184,34 +185,39 @@ export class OrderExecutor {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    // Get contract details
-    const contract = await automationContractService.findById(order.contractId);
-    if (!contract) {
-      throw new Error(`Contract not found: ${order.contractId}`);
-    }
-
-    // Get contract address from config (set after deployment)
-    const contractConfig = contract.config as { contractAddress?: string };
+    // Get contract address from automationContractConfig (immutable at registration)
+    const contractConfig = order.automationContractConfig as AutomationContractConfig;
     const contractAddress = contractConfig.contractAddress;
     if (!contractAddress) {
-      throw new Error(`Contract not deployed: ${order.contractId}`);
+      throw new Error(`Contract address not configured for order: ${orderId}`);
     }
 
-    // Get closeId from order config
-    const orderConfig = order.config as { closeId?: number };
+    // Get closeId and operatorAddress from order config
+    const orderConfig = order.config as { closeId?: number; operatorAddress?: string };
     const closeId = orderConfig.closeId;
     if (closeId === undefined) {
       throw new Error(`Order not registered on-chain: ${orderId}`);
     }
 
+    const operatorAddress = orderConfig.operatorAddress;
+    if (!operatorAddress) {
+      throw new Error(`Operator address not configured for order: ${orderId}`);
+    }
+
+    // Get userId from position (needed for signer service)
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
+      select: { userId: true },
+    });
+    if (!position) {
+      throw new Error(`Position not found: ${positionId}`);
+    }
+    const userId = position.userId;
+
     // Mark order as triggering (use BigInt for the price)
     await closeOrderService.markTriggered(orderId, {
       triggerSqrtPriceX96: BigInt(triggerPrice),
     });
-
-    // Get operator wallet address (needed for gas estimation)
-    const wallet = await signerClient.getOrCreateWallet(contract.userId);
-    const operatorAddress = wallet.walletAddress;
 
     autoLog.orderExecution(log, orderId, 'signing', {
       positionId,
@@ -222,7 +228,7 @@ export class OrderExecutor {
 
     // Sign the execution transaction (gas estimation done in signer-client)
     const signedTx = await signerClient.signExecuteClose({
-      userId: contract.userId,
+      userId,
       chainId,
       contractAddress,
       closeId,

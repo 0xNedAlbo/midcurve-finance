@@ -39,14 +39,23 @@ export const TRIGGER_MODES = ['LOWER', 'UPPER', 'BOTH'] as const;
 export type TriggerMode = (typeof TRIGGER_MODES)[number];
 
 /**
+ * Automation contract configuration stored per-order
+ */
+export interface SerializedAutomationContractConfig {
+  chainId: number;
+  contractAddress: string;
+  positionManager: string;
+}
+
+/**
  * Serialized close order for API responses
  */
 export interface SerializedCloseOrder {
   id: string;
-  contractId: string;
-  orderType: CloseOrderType;
+  closeOrderType: CloseOrderType;
   status: CloseOrderStatus;
   positionId: string;
+  automationContractConfig: SerializedAutomationContractConfig;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
   createdAt: string;
@@ -93,18 +102,49 @@ export interface SerializedUniswapV3CloseOrderState {
 /**
  * POST /api/v1/automation/close-orders - Request body
  *
- * Register a new close order for a position.
+ * Register a close order after on-chain registration.
+ * In the shared contract model, the user signs registerClose() on-chain first,
+ * then calls this endpoint to notify the API.
  */
 export interface RegisterCloseOrderRequest {
   /**
-   * Order type (protocol)
+   * Close order type (protocol)
    */
-  orderType: CloseOrderType;
+  closeOrderType: CloseOrderType;
 
   /**
    * Position ID to close when triggered
    */
   positionId: string;
+
+  /**
+   * Automation contract configuration (immutable at registration)
+   */
+  automationContractConfig: {
+    chainId: number;
+    contractAddress: string;
+    positionManager: string;
+  };
+
+  /**
+   * On-chain close ID from registerClose() transaction
+   */
+  closeId: number;
+
+  /**
+   * NFT ID of the position (bigint as string)
+   */
+  nftId: string;
+
+  /**
+   * Pool address
+   */
+  poolAddress: string;
+
+  /**
+   * Operator address (user's autowallet)
+   */
+  operatorAddress: string;
 
   /**
    * Trigger mode (LOWER, UPPER, or BOTH)
@@ -125,21 +165,23 @@ export interface RegisterCloseOrderRequest {
 
   /**
    * Address to receive closed position tokens
-   * Defaults to position owner
    */
-  payoutAddress?: string;
+  payoutAddress: string;
 
   /**
    * Order expiration (ISO date string)
-   * Defaults to 30 days from now
    */
-  validUntil?: string;
+  validUntil: string;
 
   /**
    * Maximum slippage in basis points (e.g., 50 = 0.5%)
-   * Defaults to 100 (1%)
    */
-  slippageBps?: number;
+  slippageBps: number;
+
+  /**
+   * Registration transaction hash
+   */
+  registrationTxHash: string;
 }
 
 /**
@@ -147,45 +189,41 @@ export interface RegisterCloseOrderRequest {
  */
 export const RegisterCloseOrderRequestSchema = z
   .object({
-    orderType: z.enum(CLOSE_ORDER_TYPES, {
-      errorMap: () => ({ message: `Order type must be one of: ${CLOSE_ORDER_TYPES.join(', ')}` }),
+    closeOrderType: z.enum(CLOSE_ORDER_TYPES, {
+      errorMap: () => ({ message: `Close order type must be one of: ${CLOSE_ORDER_TYPES.join(', ')}` }),
     }),
 
-    positionId: z
-      .string()
-      .min(1, 'Position ID is required'),
+    positionId: z.string().min(1, 'Position ID is required'),
+
+    automationContractConfig: z.object({
+      chainId: z.number().int().positive('Chain ID must be a positive integer'),
+      contractAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid contract address'),
+      positionManager: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid position manager address'),
+    }),
+
+    closeId: z.number().int().nonnegative('Close ID must be a non-negative integer'),
+
+    nftId: z.string().regex(/^\d+$/, 'NFT ID must be a valid bigint string'),
+
+    poolAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address'),
+
+    operatorAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid operator address'),
 
     triggerMode: z.enum(TRIGGER_MODES, {
       errorMap: () => ({ message: `Trigger mode must be one of: ${TRIGGER_MODES.join(', ')}` }),
     }),
 
-    sqrtPriceX96Lower: z
-      .string()
-      .regex(/^\d+$/, 'sqrtPriceX96Lower must be a valid bigint string')
-      .optional(),
+    sqrtPriceX96Lower: z.string().regex(/^\d+$/, 'sqrtPriceX96Lower must be a valid bigint string').optional(),
 
-    sqrtPriceX96Upper: z
-      .string()
-      .regex(/^\d+$/, 'sqrtPriceX96Upper must be a valid bigint string')
-      .optional(),
+    sqrtPriceX96Upper: z.string().regex(/^\d+$/, 'sqrtPriceX96Upper must be a valid bigint string').optional(),
 
-    payoutAddress: z
-      .string()
-      .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address')
-      .optional(),
+    payoutAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid payout address'),
 
-    validUntil: z
-      .string()
-      .datetime({ message: 'validUntil must be a valid ISO date string' })
-      .optional(),
+    validUntil: z.string().datetime({ message: 'validUntil must be a valid ISO date string' }),
 
-    slippageBps: z
-      .number()
-      .int('Slippage must be an integer')
-      .min(0, 'Slippage cannot be negative')
-      .max(10000, 'Slippage cannot exceed 100%')
-      .optional()
-      .default(100),
+    slippageBps: z.number().int().min(0).max(10000, 'Slippage cannot exceed 100%'),
+
+    registrationTxHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash'),
   })
   .refine(
     (data) => {
@@ -212,39 +250,11 @@ export const RegisterCloseOrderRequestSchema = z
 export type RegisterCloseOrderInput = z.infer<typeof RegisterCloseOrderRequestSchema>;
 
 /**
- * Register close order response (async operation - returns 202)
- */
-export interface RegisterCloseOrderResponseData {
-  /**
-   * Close order ID
-   */
-  id: string;
-
-  /**
-   * Order type
-   */
-  orderType: CloseOrderType;
-
-  /**
-   * Position ID
-   */
-  positionId: string;
-
-  /**
-   * Operation status
-   */
-  operationStatus: 'pending' | 'registering' | 'completed' | 'failed';
-
-  /**
-   * URL to poll for status
-   */
-  pollUrl: string;
-}
-
-/**
  * POST /api/v1/automation/close-orders - Response
+ *
+ * Returns the created close order (201 Created).
  */
-export type RegisterCloseOrderResponse = ApiResponse<RegisterCloseOrderResponseData>;
+export type RegisterCloseOrderResponse = ApiResponse<SerializedCloseOrder>;
 
 // =============================================================================
 // LIST CLOSE ORDERS
@@ -255,9 +265,9 @@ export type RegisterCloseOrderResponse = ApiResponse<RegisterCloseOrderResponseD
  */
 export interface ListCloseOrdersRequest {
   /**
-   * Filter by order type (optional)
+   * Filter by close order type (optional)
    */
-  orderType?: CloseOrderType;
+  closeOrderType?: CloseOrderType;
 
   /**
    * Filter by status (optional)
@@ -268,21 +278,15 @@ export interface ListCloseOrdersRequest {
    * Filter by position ID (optional)
    */
   positionId?: string;
-
-  /**
-   * Filter by contract ID (optional)
-   */
-  contractId?: string;
 }
 
 /**
  * Zod schema for list close orders query
  */
 export const ListCloseOrdersQuerySchema = z.object({
-  orderType: z.enum(CLOSE_ORDER_TYPES).optional(),
+  closeOrderType: z.enum(CLOSE_ORDER_TYPES).optional(),
   status: z.enum(CLOSE_ORDER_STATUSES).optional(),
   positionId: z.string().optional(),
-  contractId: z.string().optional(),
 });
 
 /**
@@ -385,7 +389,7 @@ export type CancelCloseOrderResponse = ApiResponse<SerializedCloseOrder>;
  */
 export interface CloseOrderRegistrationStatus {
   id: string;
-  orderType: CloseOrderType;
+  closeOrderType: CloseOrderType;
   positionId: string;
   operationStatus: 'pending' | 'registering' | 'completed' | 'failed';
   operationError?: string;
@@ -396,83 +400,6 @@ export interface CloseOrderRegistrationStatus {
  * GET /api/v1/automation/close-orders/[id]/status - Response
  */
 export type GetCloseOrderStatusResponse = ApiResponse<CloseOrderRegistrationStatus>;
-
-// =============================================================================
-// NOTIFY ORDER REGISTERED (User Signs On-Chain)
-// =============================================================================
-
-/**
- * POST /api/v1/automation/close-orders/notify - Request body
- *
- * Notify the API after user registers a close order on-chain.
- * The UI signs the transaction via Wagmi, then calls this endpoint
- * to inform the backend to start monitoring.
- */
-export interface NotifyOrderRegisteredRequest {
-  /**
-   * Chain ID where the order was registered
-   */
-  chainId: number;
-
-  /**
-   * Automation contract address
-   */
-  contractAddress: string;
-
-  /**
-   * On-chain close order ID (from CloseRegistered event)
-   */
-  closeId: string;
-
-  /**
-   * NFT ID of the position
-   */
-  nftId: string;
-
-  /**
-   * Position ID in the database
-   */
-  positionId: string;
-
-  /**
-   * Pool address for monitoring
-   */
-  poolAddress: string;
-
-  /**
-   * Transaction hash of the registration
-   */
-  txHash: string;
-}
-
-/**
- * Zod schema for notify order registered request
- */
-export const NotifyOrderRegisteredRequestSchema = z.object({
-  chainId: z.number().int().positive(),
-  contractAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid contract address'),
-  closeId: z.string().regex(/^\d+$/, 'closeId must be a numeric string'),
-  nftId: z.string().regex(/^\d+$/, 'nftId must be a numeric string'),
-  positionId: z.string().min(1, 'Position ID is required'),
-  poolAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address'),
-  txHash: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash'),
-});
-
-/**
- * Inferred type from schema
- */
-export type NotifyOrderRegisteredInput = z.infer<typeof NotifyOrderRegisteredRequestSchema>;
-
-/**
- * POST /api/v1/automation/close-orders/notify - Response
- */
-export type NotifyOrderRegisteredResponse = ApiResponse<SerializedCloseOrder>;
 
 // =============================================================================
 // NOTIFY ORDER CANCELLED (User Signs On-Chain)

@@ -5,7 +5,12 @@
  * Each protocol (uniswapv3, orca, etc.) implements this interface.
  */
 
-import type { CloseOrderJSON, CloseOrderStatus, CloseOrderType } from './close-order.types.js';
+import type {
+  AutomationContractConfig,
+  CloseOrderJSON,
+  CloseOrderStatus,
+  CloseOrderType,
+} from './close-order.types.js';
 
 /**
  * Close Order Interface
@@ -24,14 +29,15 @@ export interface CloseOrderInterface {
   readonly id: string;
 
   /**
-   * Parent automation contract ID
+   * Automation contract configuration (immutable at registration time)
+   * Contains shared contract address used for this order
    */
-  readonly contractId: string;
+  readonly automationContractConfig: AutomationContractConfig;
 
   /**
-   * Order type discriminator
+   * Close order type discriminator
    */
-  readonly orderType: CloseOrderType;
+  readonly closeOrderType: CloseOrderType;
 
   // ============================================================================
   // Position Link

@@ -5,10 +5,6 @@
  */
 
 export type {
-  // Contract inputs
-  DeployContractInput,
-  UpdateContractDeploymentInput,
-  FindContractOptions,
   // Close order inputs
   RegisterCloseOrderInput,
   UpdateCloseOrderInput,
