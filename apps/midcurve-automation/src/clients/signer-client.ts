@@ -2,11 +2,20 @@
  * Signer Client
  *
  * HTTP client for communicating with the midcurve-signer service.
- * Handles signing of deployment, registration, and execution transactions.
+ * Handles signing of deployment and execution transactions.
+ *
+ * Note: registerClose and cancelClose are owner-only functions that users
+ * sign with their own EOA wallet. Only executeClose (operator-only) needs
+ * to be signed by the automation wallet via this client.
+ *
+ * Gas estimation is done here before calling the signer, keeping the
+ * signer isolated from external RPC endpoints for security.
  */
 
+import { encodeFunctionData, type Address } from 'viem';
 import { getSignerConfig } from '../lib/config';
 import { automationLogger } from '../lib/logger';
+import { getPublicClient, type SupportedChainId } from '../lib/evm';
 
 const log = automationLogger.child({ component: 'SignerClient' });
 
@@ -28,18 +37,6 @@ export interface DeployCloserParams {
   nfpmAddress: string;
 }
 
-export interface RegisterCloseParams {
-  userId: string;
-  chainId: number;
-  contractAddress: string;
-  nftId: string;
-  sqrtPriceX96Lower: string;
-  sqrtPriceX96Upper: string;
-  payoutAddress: string;
-  validUntil: string;
-  slippageBps: number;
-}
-
 export interface ExecuteCloseParams {
   userId: string;
   chainId: number;
@@ -47,14 +44,30 @@ export interface ExecuteCloseParams {
   closeId: number;
   feeRecipient: string;
   feeBps: number;
+  // Operator address for gas estimation
+  operatorAddress: string;
 }
 
-export interface CancelCloseParams {
-  userId: string;
-  chainId: number;
-  contractAddress: string;
-  closeId: number;
-}
+// =============================================================================
+// Contract ABI (minimal for gas estimation)
+// =============================================================================
+
+const POSITION_CLOSER_ABI = [
+  {
+    type: 'function',
+    name: 'executeClose',
+    inputs: [
+      { name: 'closeId', type: 'uint256' },
+      { name: 'feeRecipient', type: 'address' },
+      { name: 'feeBps', type: 'uint16' },
+    ],
+    outputs: [
+      { name: 'amount0', type: 'uint256' },
+      { name: 'amount1', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+] as const;
 
 // =============================================================================
 // Client
@@ -132,48 +145,79 @@ class SignerClient {
   }
 
   /**
-   * Sign a registerClose transaction
-   */
-  async signRegisterClose(params: RegisterCloseParams): Promise<SignedTransaction> {
-    log.info({
-      userId: params.userId,
-      chainId: params.chainId,
-      contractAddress: params.contractAddress,
-      nftId: params.nftId,
-      msg: 'Signing close order registration',
-    });
-
-    return this.request<SignedTransaction>('POST', '/api/sign/automation/register-close', params);
-  }
-
-  /**
    * Sign an executeClose transaction
+   *
+   * Gas estimation is performed here before calling the signer.
+   * This keeps the signer isolated from external RPC endpoints.
    */
   async signExecuteClose(params: ExecuteCloseParams): Promise<SignedTransaction> {
+    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, operatorAddress } = params;
+
     log.info({
-      userId: params.userId,
-      chainId: params.chainId,
-      contractAddress: params.contractAddress,
-      closeId: params.closeId,
+      userId,
+      chainId,
+      contractAddress,
+      closeId,
+      msg: 'Estimating gas for close order execution',
+    });
+
+    // Estimate gas locally (automation service has RPC access)
+    const publicClient = getPublicClient(chainId as SupportedChainId);
+
+    const callData = encodeFunctionData({
+      abi: POSITION_CLOSER_ABI,
+      functionName: 'executeClose',
+      args: [BigInt(closeId), feeRecipient as Address, feeBps],
+    });
+
+    let gasLimit: bigint;
+    let gasPrice: bigint;
+
+    try {
+      // Get current gas price and estimate gas
+      [gasPrice, gasLimit] = await Promise.all([
+        publicClient.getGasPrice(),
+        publicClient.estimateGas({
+          account: operatorAddress as Address,
+          to: contractAddress as Address,
+          data: callData,
+        }).then((estimate) => (estimate * 120n) / 100n), // 20% buffer
+      ]);
+    } catch (error) {
+      log.warn({
+        userId,
+        chainId,
+        contractAddress,
+        closeId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        msg: 'Gas estimation failed, using fallback values',
+      });
+      // Fallback values if estimation fails
+      gasPrice = await publicClient.getGasPrice();
+      gasLimit = 500_000n;
+    }
+
+    log.info({
+      userId,
+      chainId,
+      contractAddress,
+      closeId,
+      gasLimit: gasLimit.toString(),
+      gasPrice: gasPrice.toString(),
       msg: 'Signing close order execution',
     });
 
-    return this.request<SignedTransaction>('POST', '/api/sign/automation/execute-close', params);
-  }
-
-  /**
-   * Sign a cancelClose transaction
-   */
-  async signCancelClose(params: CancelCloseParams): Promise<SignedTransaction> {
-    log.info({
-      userId: params.userId,
-      chainId: params.chainId,
-      contractAddress: params.contractAddress,
-      closeId: params.closeId,
-      msg: 'Signing close order cancellation',
+    // Call signer with gas params
+    return this.request<SignedTransaction>('POST', '/api/sign/automation/execute-close', {
+      userId,
+      chainId,
+      contractAddress,
+      closeId,
+      feeRecipient,
+      feeBps,
+      gasLimit: gasLimit.toString(),
+      gasPrice: gasPrice.toString(),
     });
-
-    return this.request<SignedTransaction>('POST', '/api/sign/automation/cancel-close', params);
   }
 
   /**

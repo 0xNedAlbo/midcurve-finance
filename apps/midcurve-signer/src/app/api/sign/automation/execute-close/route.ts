@@ -6,6 +6,9 @@
  *
  * Called by the automation service when a price trigger is met.
  *
+ * Gas parameters (gasLimit, gasPrice) must be provided by the caller.
+ * This keeps the signer isolated from external RPC endpoints for security.
+ *
  * Prerequisites:
  * - User must have an automation wallet
  * - Close order must be registered and active
@@ -19,7 +22,9 @@
  *     contractAddress: string,
  *     closeId: number,
  *     feeRecipient: string,
- *     feeBps: number (0-100, max 1%)
+ *     feeBps: number (0-100, max 1%),
+ *     gasLimit: string (bigint as string),
+ *     gasPrice: string (bigint as string)
  *   }
  *
  * Response (Success):
@@ -52,6 +57,9 @@ const logger = signerLogger.child({ endpoint: 'sign-automation-execute-close' })
 
 /**
  * Request body schema
+ *
+ * Gas parameters are provided as strings and transformed to BigInt.
+ * This allows JSON transport of bigint values.
  */
 const SignExecuteCloseSchema = z.object({
   userId: z.string().min(1, 'userId is required'),
@@ -60,6 +68,9 @@ const SignExecuteCloseSchema = z.object({
   closeId: z.number().int().nonnegative('closeId must be a non-negative integer'),
   feeRecipient: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid fee recipient address'),
   feeBps: z.number().int().min(0).max(100, 'feeBps must be 0-100 (max 1%)'),
+  // Gas parameters from caller (signer does not access RPC)
+  gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
+  gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
 });
 
 type SignExecuteCloseRequest = z.infer<typeof SignExecuteCloseSchema>;
@@ -102,7 +113,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps } = validation.data;
+  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice } = validation.data;
 
   logger.info({
     requestId,
@@ -111,6 +122,8 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     contractAddress,
     closeId,
     feeBps,
+    gasLimit: gasLimit.toString(),
+    gasPrice: gasPrice.toString(),
     msg: 'Processing execute-close signing request',
   });
 
@@ -123,6 +136,8 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       closeId,
       feeRecipient: feeRecipient as Address,
       feeBps,
+      gasLimit,
+      gasPrice,
     });
 
     logger.info({

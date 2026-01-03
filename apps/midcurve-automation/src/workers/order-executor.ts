@@ -209,13 +209,18 @@ export class OrderExecutor {
       triggerSqrtPriceX96: BigInt(triggerPrice),
     });
 
+    // Get operator wallet address (needed for gas estimation)
+    const wallet = await signerClient.getOrCreateWallet(contract.userId);
+    const operatorAddress = wallet.walletAddress;
+
     autoLog.orderExecution(log, orderId, 'signing', {
       positionId,
       poolAddress,
       triggerPrice,
+      operatorAddress,
     });
 
-    // Sign the execution transaction
+    // Sign the execution transaction (gas estimation done in signer-client)
     const signedTx = await signerClient.signExecuteClose({
       userId: contract.userId,
       chainId,
@@ -223,6 +228,7 @@ export class OrderExecutor {
       closeId,
       feeRecipient: feeConfig.recipient,
       feeBps: feeConfig.bps,
+      operatorAddress,
     });
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {
