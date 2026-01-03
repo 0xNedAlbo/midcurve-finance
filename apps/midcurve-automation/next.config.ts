@@ -20,15 +20,9 @@ const nextConfig: NextConfig = {
 
   /* Output File Tracing */
   outputFileTracingRoot: path.join(__dirname, '../../'),
-  outputFileTracingIncludes: {
-    '/api/**/*': ['../../packages/midcurve-database/src/generated/prisma/**/*'],
-  },
-
-  /* Transpile Packages */
-  transpilePackages: ['@midcurve/shared', '@midcurve/services', '@midcurve/api-shared', '@midcurve/database'],
 
   /* Webpack Configuration */
-  webpack: (config, { isServer }) => {
+  webpack: (config) => {
     // Fix for ESM packages
     config.resolve.fallback = {
       ...config.resolve.fallback,
@@ -40,23 +34,7 @@ const nextConfig: NextConfig = {
     // External packages that should not be bundled
     config.externals.push('pino-pretty', 'lokijs', 'encoding');
 
-    // Include Prisma query engine binaries in the build
-    if (isServer) {
-      config.externals.push('_http_common');
-
-      // Use Prisma monorepo workaround plugin
-      const { PrismaPlugin } = require('@prisma/nextjs-monorepo-workaround-plugin');
-      config.plugins = [...config.plugins, new PrismaPlugin()];
-    }
-
     return config;
-  },
-
-  /* Experimental Features */
-  experimental: {
-    serverActions: {
-      bodySizeLimit: '2mb',
-    },
   },
 
   /* Environment Variables */

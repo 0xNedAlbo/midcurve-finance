@@ -108,24 +108,28 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 400 });
       }
 
-      // Get operator address from signer
+      // Get operator address from signer (no RPC, just database lookup)
       let operatorAddress: string;
       try {
-        const signerResponse = await fetch(`${SIGNER_URL}/api/automation/wallet`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Internal-API-Key': SIGNER_INTERNAL_API_KEY,
-          },
-          body: JSON.stringify({ userId: user.id }),
-        });
+        const signerResponse = await fetch(
+          `${SIGNER_URL}/api/wallets/automation?userId=${encodeURIComponent(user.id)}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${SIGNER_INTERNAL_API_KEY}`,
+            },
+          }
+        );
 
         if (!signerResponse.ok) {
           throw new Error('Failed to get operator address');
         }
 
         const signerData = await signerResponse.json();
-        operatorAddress = signerData.data.walletAddress;
+        if (!signerData.wallet?.walletAddress) {
+          throw new Error('No autowallet found for user');
+        }
+        operatorAddress = signerData.wallet.walletAddress;
       } catch (error) {
         apiLogger.error({
           requestId,

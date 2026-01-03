@@ -3,8 +3,10 @@
  *
  * GET /api/v1/automation/contracts/bytecode - Get contract bytecode for user deployment
  *
- * Returns the UniswapV3PositionCloser bytecode and constructor args for the user
- * to deploy via their own wallet (Wagmi).
+ * Returns only the bytecode. Constructor args (nfpmAddress, operatorAddress) are
+ * built client-side since they don't change frequently and the UI already has:
+ * - NFPM addresses for all supported chains (for fee collection, etc.)
+ * - Autowallet address from the user's profile
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,16 +18,14 @@ import {
   GetContractBytecodeQuerySchema,
   type GetContractBytecodeResponse,
 } from '@midcurve/api-shared';
-import { getPositionManagerAddress } from '@midcurve/services';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Signer service URL
-const SIGNER_URL = process.env.SIGNER_URL || 'http://localhost:3003';
-const SIGNER_INTERNAL_API_KEY = process.env.SIGNER_INTERNAL_API_KEY || '';
+// Service URLs
+const AUTOMATION_URL = process.env.AUTOMATION_URL || 'http://localhost:3004';
 
 /**
  * Handle CORS preflight
@@ -38,7 +38,9 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * GET /api/v1/automation/contracts/bytecode
  *
  * Get contract bytecode for user to deploy automation contract.
- * This is the first step in the user-signed deployment flow.
+ * Returns only bytecode - UI builds constructor args locally using:
+ * - nfpmAddress: hardcoded per chain (UI already has these)
+ * - operatorAddress: autowallet address (UI fetches from /api/v1/automation/wallet)
  */
 export async function GET(request: NextRequest): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
@@ -86,40 +88,18 @@ export async function GET(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 400 });
       }
 
-      // Get NFPM address for this chain
-      let nfpmAddress: string;
-      try {
-        nfpmAddress = getPositionManagerAddress(chainId);
-      } catch {
-        const errorResponse = createErrorResponse(
-          ApiErrorCode.VALIDATION_ERROR,
-          `Chain ${chainId} is not supported for Uniswap V3`
-        );
-        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-        return NextResponse.json(errorResponse, { status: 400 });
-      }
+      // Get bytecode from automation service (no auth needed)
+      const bytecodeResponse = await fetch(
+        `${AUTOMATION_URL}/api/contracts/bytecode?contractType=${contractType}`
+      );
 
-      // Call signer service to get bytecode + operator address
-      const signerResponse = await fetch(`${SIGNER_URL}/api/automation/contracts/bytecode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-API-Key': SIGNER_INTERNAL_API_KEY,
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          chainId,
-          nfpmAddress,
-        }),
-      });
-
-      if (!signerResponse.ok) {
-        const errorText = await signerResponse.text();
+      if (!bytecodeResponse.ok) {
+        const errorText = await bytecodeResponse.text();
         apiLogger.error({
           requestId,
-          status: signerResponse.status,
+          status: bytecodeResponse.status,
           error: errorText,
-        }, 'Failed to get bytecode from signer');
+        }, 'Failed to get bytecode from automation service');
 
         const errorResponse = createErrorResponse(
           ApiErrorCode.INTERNAL_SERVER_ERROR,
@@ -129,16 +109,26 @@ export async function GET(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 500 });
       }
 
-      const signerData = await signerResponse.json();
+      const bytecodeData = await bytecodeResponse.json();
+      if (!bytecodeData.success || !bytecodeData.data?.bytecode) {
+        apiLogger.error({
+          requestId,
+          error: bytecodeData.error || 'Invalid response',
+        }, 'Invalid bytecode response from automation service');
 
-      // Build response
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.INTERNAL_SERVER_ERROR,
+          'Failed to get contract bytecode'
+        );
+        apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+        return NextResponse.json(errorResponse, { status: 500 });
+      }
+
+      // Build response - only bytecode, UI handles constructor args
       const response: GetContractBytecodeResponse = createSuccessResponse({
-        bytecode: signerData.data.bytecode,
-        constructorArgs: signerData.data.constructorArgs,
+        bytecode: bytecodeData.data.bytecode,
         contractType,
         chainId,
-        nfpmAddress,
-        operatorAddress: signerData.data.operatorAddress,
       });
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

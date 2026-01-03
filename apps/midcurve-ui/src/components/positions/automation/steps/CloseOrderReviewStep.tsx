@@ -126,6 +126,17 @@ export function CloseOrderReviewStep({
         </div>
       </div>
 
+      {/* Error Display - shown prominently after summary */}
+      {error && (
+        <div className="flex items-start gap-2 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-red-400">Order Failed</p>
+            <p className="text-sm text-red-300 mt-1">{error}</p>
+          </div>
+        </div>
+      )}
+
       {/* Setup Notice - shown when deploy or approval needed */}
       {(needsDeploy || needsApproval) && (
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
@@ -161,17 +172,6 @@ export function CloseOrderReviewStep({
           <li>4. Funds are sent directly to your wallet</li>
         </ul>
       </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className="flex items-start gap-2 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-red-400">Order Failed</p>
-            <p className="text-sm text-red-300 mt-1">{error}</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

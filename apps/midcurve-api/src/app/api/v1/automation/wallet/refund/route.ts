@@ -99,7 +99,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Internal-API-Key': SIGNER_INTERNAL_API_KEY,
+          Authorization: `Bearer ${SIGNER_INTERNAL_API_KEY}`,
         },
         body: JSON.stringify({
           requestId: refundRequestId,

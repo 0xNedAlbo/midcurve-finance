@@ -2,6 +2,12 @@
  * Automation Wallet API Endpoint
  *
  * GET /api/v1/automation/wallet - Get user's automation wallet info
+ *
+ * Returns the user's autowallet address. Balances are fetched client-side
+ * by the UI using wagmi/viem since:
+ * - UI already has RPC access configured for transaction signing
+ * - Avoids adding RPC dependencies to backend services
+ * - More responsive (no round-trip through API)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -32,7 +38,8 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 /**
  * GET /api/v1/automation/wallet
  *
- * Get user's automation wallet info including address and balances per chain.
+ * Get user's automation wallet address.
+ * Returns empty address if no wallet exists yet.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
@@ -49,15 +56,16 @@ export async function GET(request: NextRequest): Promise<Response> {
         {}
       );
 
-      // Call signer service to get wallet info
-      const signerResponse = await fetch(`${SIGNER_URL}/api/automation/wallet`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-API-Key': SIGNER_INTERNAL_API_KEY,
-        },
-        body: JSON.stringify({ userId: user.id }),
-      });
+      // Call signer service to get wallet info (no RPC, just database lookup)
+      const signerResponse = await fetch(
+        `${SIGNER_URL}/api/wallets/automation?userId=${encodeURIComponent(user.id)}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${SIGNER_INTERNAL_API_KEY}`,
+          },
+        }
+      );
 
       if (!signerResponse.ok) {
         const errorText = await signerResponse.text();
@@ -66,17 +74,6 @@ export async function GET(request: NextRequest): Promise<Response> {
           status: signerResponse.status,
           error: errorText,
         }, 'Failed to get autowallet from signer');
-
-        // If 404, wallet doesn't exist yet - return empty state
-        if (signerResponse.status === 404) {
-          const response: GetAutowalletResponse = createSuccessResponse({
-            address: '',
-            balances: [],
-            recentActivity: [],
-          });
-          apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
-          return NextResponse.json(response, { status: 200 });
-        }
 
         const errorResponse = createErrorResponse(
           ApiErrorCode.INTERNAL_SERVER_ERROR,
@@ -88,11 +85,22 @@ export async function GET(request: NextRequest): Promise<Response> {
 
       const signerData = await signerResponse.json();
 
-      // Build response with wallet info
+      // If wallet is null, user hasn't created one yet
+      if (!signerData.wallet) {
+        const response: GetAutowalletResponse = createSuccessResponse({
+          address: '',
+          balances: [], // UI fetches balances client-side
+          recentActivity: [],
+        });
+        apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
+        return NextResponse.json(response, { status: 200 });
+      }
+
+      // Build response with wallet address
       const response: GetAutowalletResponse = createSuccessResponse({
-        address: signerData.data.walletAddress || '',
-        balances: signerData.data.balances || [],
-        recentActivity: signerData.data.recentActivity || [],
+        address: signerData.wallet.walletAddress || '',
+        balances: [], // UI fetches balances client-side
+        recentActivity: [],
       });
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

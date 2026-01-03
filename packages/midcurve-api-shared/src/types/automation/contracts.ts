@@ -241,6 +241,9 @@ export type GetContractStatusResponse = ApiResponse<ContractDeploymentStatus>;
  * GET /api/v1/automation/contracts/bytecode - Query parameters
  *
  * Get contract bytecode for user to deploy via their wallet.
+ * Returns only bytecode - UI builds constructor args locally using:
+ * - nfpmAddress: hardcoded per chain (UI already has these)
+ * - operatorAddress: autowallet address (UI fetches from /api/v1/automation/wallet)
  */
 export interface GetContractBytecodeRequest {
   /**
@@ -271,18 +274,17 @@ export type GetContractBytecodeInput = z.infer<typeof GetContractBytecodeQuerySc
 
 /**
  * Contract bytecode response data
+ *
+ * Returns only the bytecode. Constructor args (nfpmAddress, operatorAddress) are
+ * built client-side since they don't change frequently and the UI already has:
+ * - NFPM addresses for all supported chains (for fee collection, etc.)
+ * - Autowallet address from the user's profile
  */
 export interface GetContractBytecodeResponseData {
   /**
    * Contract creation bytecode (hex string with 0x prefix)
    */
   bytecode: string;
-
-  /**
-   * ABI-encoded constructor arguments (hex string with 0x prefix)
-   * Already encoded, append to bytecode for deployment
-   */
-  constructorArgs: string;
 
   /**
    * Contract type being deployed
@@ -293,16 +295,6 @@ export interface GetContractBytecodeResponseData {
    * Chain ID for deployment
    */
   chainId: number;
-
-  /**
-   * NFPM address used in constructor (for reference)
-   */
-  nfpmAddress: string;
-
-  /**
-   * Operator address used in constructor (autowallet address)
-   */
-  operatorAddress: string;
 }
 
 /**

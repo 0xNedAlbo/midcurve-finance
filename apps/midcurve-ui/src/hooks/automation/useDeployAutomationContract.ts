@@ -2,25 +2,32 @@
  * useDeployAutomationContract - Deploy automation contract via user's wallet
  *
  * This hook allows users to deploy their UniswapV3PositionCloser contract
- * using their connected wallet (Wagmi). The bytecode is fetched from the API,
- * which includes the operator address from the user's autowallet.
+ * using their connected wallet (Wagmi).
+ *
+ * Constructor args are built locally using:
+ * - nfpmAddress: hardcoded per chain (from nonfungible-position-manager.ts)
+ * - operatorAddress: autowallet address (from useAutowallet hook)
  *
  * Flow:
  * 1. User calls deploy()
- * 2. Fetch bytecode + constructor args from API
- * 3. User signs deploy transaction in their wallet (Wagmi)
- * 4. Wait for tx confirmation
- * 5. Extract contract address from receipt
- * 6. Notify API: POST /api/v1/automation/contracts/notify
- * 7. Return the created contract
+ * 2. Fetch bytecode from API (just bytecode, no args)
+ * 3. Build constructor args locally (nfpm + operator)
+ * 4. User signs deploy transaction in their wallet (Wagmi)
+ * 5. Wait for tx confirmation
+ * 6. Extract contract address from receipt
+ * 7. Notify API: POST /api/v1/automation/contracts/notify
+ * 8. Return the created contract
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
+import { encodeAbiParameters } from 'viem';
 import type { Address, Hash, Hex } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
 import { automationApi } from '@/lib/api-client';
+import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
+import { useAutowallet } from './useAutowallet';
 import type { SerializedAutomationContract } from '@midcurve/api-shared';
 
 /**
@@ -65,6 +72,10 @@ export interface UseDeployAutomationContractResult {
   error: Error | null;
   /** Reset the hook state */
   reset: () => void;
+  /** Whether autowallet is loaded (required for deployment) */
+  isAutowalletReady: boolean;
+  /** Whether autowallet exists (required for deployment) */
+  hasAutowallet: boolean;
 }
 
 /**
@@ -76,6 +87,11 @@ export function useDeployAutomationContract(): UseDeployAutomationContractResult
   const [error, setError] = useState<Error | null>(null);
   const [currentParams, setCurrentParams] = useState<DeployContractParams | null>(null);
   const [isFetchingBytecode, setIsFetchingBytecode] = useState(false);
+
+  // Get autowallet data (operator address)
+  const { data: autowallet, isLoading: isAutowalletLoading } = useAutowallet();
+  const isAutowalletReady = !isAutowalletLoading;
+  const hasAutowallet = !!autowallet?.address;
 
   // Wagmi send transaction hook (for contract deployment)
   const {
@@ -162,16 +178,39 @@ export function useDeployAutomationContract(): UseDeployAutomationContractResult
     setResult(null);
     setError(null);
     setCurrentParams(params);
+
+    // Validate prerequisites
+    if (!hasAutowallet || !autowallet?.address) {
+      setError(new Error('No autowallet found. Please create an autowallet in Settings first.'));
+      return;
+    }
+
+    const nfpmAddress = getNonfungiblePositionManagerAddress(params.chainId);
+    if (!nfpmAddress) {
+      setError(new Error(`Chain ${params.chainId} is not supported for Uniswap V3`));
+      return;
+    }
+
     setIsFetchingBytecode(true);
 
     try {
-      // Fetch bytecode from API
+      // Fetch bytecode from API (just bytecode, no constructor args)
       const bytecodeResponse = await automationApi.getContractBytecode(
         params.chainId,
         params.contractType
       );
 
-      const { bytecode, constructorArgs } = bytecodeResponse.data;
+      const { bytecode } = bytecodeResponse.data;
+
+      // Build constructor args locally
+      // UniswapV3PositionCloser constructor: (address _positionManager, address _operator)
+      const constructorArgs = encodeAbiParameters(
+        [
+          { type: 'address', name: '_positionManager' },
+          { type: 'address', name: '_operator' },
+        ],
+        [nfpmAddress, autowallet.address as Address]
+      );
 
       // Combine bytecode with constructor args
       const deployData = (bytecode + constructorArgs.slice(2)) as Hex;
@@ -188,7 +227,7 @@ export function useDeployAutomationContract(): UseDeployAutomationContractResult
       setIsFetchingBytecode(false);
       setError(err instanceof Error ? err : new Error('Failed to fetch contract bytecode'));
     }
-  }, [sendTransaction]);
+  }, [sendTransaction, hasAutowallet, autowallet?.address]);
 
   // Reset function
   const reset = useCallback(() => {
@@ -208,5 +247,7 @@ export function useDeployAutomationContract(): UseDeployAutomationContractResult
     result,
     error,
     reset,
+    isAutowalletReady,
+    hasAutowallet,
   };
 }
