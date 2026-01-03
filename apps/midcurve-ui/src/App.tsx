@@ -10,6 +10,9 @@ import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
 import { StrategyDetailPage } from './pages/StrategyDetailPage';
 
+// Automation
+import { AutowalletPage } from './components/automation';
+
 export function App() {
   return (
     <QueryProvider>
@@ -27,6 +30,10 @@ export function App() {
                 <Route
                   path="/strategies/:strategyId"
                   element={<StrategyDetailPage />}
+                />
+                <Route
+                  path="/automation/wallet"
+                  element={<AutowalletPage />}
                 />
               </Routes>
             </BrowserRouter>

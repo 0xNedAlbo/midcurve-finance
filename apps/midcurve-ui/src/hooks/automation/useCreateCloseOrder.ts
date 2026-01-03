@@ -1,127 +1,254 @@
 /**
- * useCreateCloseOrder - Create a new close order with polling
+ * useCreateCloseOrder - Register a close order via user's wallet
  *
- * Mutation hook for creating a close order. The API returns 202 Accepted
- * and this hook polls until the order is registered or fails.
+ * This hook uses Wagmi to have the user sign the registerClose transaction
+ * directly with their connected wallet. After confirmation, it notifies
+ * the API to start monitoring the order.
+ *
+ * Flow:
+ * 1. User calls registerOrder()
+ * 2. User signs registerClose() tx in their wallet (Wagmi)
+ * 3. Wait for tx confirmation
+ * 4. Parse CloseRegistered event for closeId
+ * 5. Notify API: POST /api/v1/automation/close-orders/notify
+ * 6. Return the created order
  */
 
-import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
+import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
+import { decodeEventLog, type Address, type Hash, type TransactionReceipt } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
-import { ApiError, automationApi } from '@/lib/api-client';
-import type {
-  RegisterCloseOrderRequest,
-  RegisterCloseOrderResponseData,
-  CloseOrderRegistrationStatus,
-  SerializedCloseOrder,
-} from '@midcurve/api-shared';
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import { automationApi } from '@/lib/api-client';
+import { POSITION_CLOSER_ABI } from '@/config/contracts/uniswapv3-position-closer';
+import type { SerializedCloseOrder } from '@midcurve/api-shared';
 
 /**
- * Poll the order status endpoint until registration completes or fails
+ * Parameters for registering a close order
  */
-async function pollForOrderRegistration(
-  orderId: string,
-  maxAttempts = 60,
-  intervalMs = 2000
-): Promise<SerializedCloseOrder> {
-  for (let i = 0; i < maxAttempts; i++) {
-    await sleep(intervalMs);
-
-    const response = await automationApi.getCloseOrderStatus(orderId);
-    const status = response.data as CloseOrderRegistrationStatus;
-
-    // Check if completed
-    if (status.operationStatus === 'completed' && status.order) {
-      return status.order;
-    }
-
-    // Check if failed
-    if (status.operationStatus === 'failed') {
-      throw new ApiError(
-        status.operationError || 'Close order registration failed',
-        500,
-        'ORDER_REGISTRATION_FAILED'
-      );
-    }
-
-    // Still in progress (pending or registering), continue polling
-  }
-
-  throw new ApiError(
-    'Close order registration timed out',
-    408,
-    'ORDER_REGISTRATION_TIMEOUT'
-  );
-}
-
-export interface CreateCloseOrderResult {
-  /**
-   * The created order (after registration completes)
-   */
-  order: SerializedCloseOrder;
-
-  /**
-   * Position ID for cache invalidation
-   */
+export interface RegisterCloseOrderParams {
+  /** The automation contract address on this chain */
+  contractAddress: Address;
+  /** Chain ID */
+  chainId: number;
+  /** NFT token ID of the position */
+  nftId: bigint;
+  /** Lower price trigger (sqrtPriceX96) */
+  sqrtPriceX96Lower: bigint;
+  /** Upper price trigger (sqrtPriceX96) */
+  sqrtPriceX96Upper: bigint;
+  /** Address to receive funds after close */
+  payoutAddress: Address;
+  /** Unix timestamp when order expires */
+  validUntil: bigint;
+  /** Slippage tolerance in basis points (e.g., 100 = 1%) */
+  slippageBps: number;
+  /** Position ID for API notification and cache invalidation */
   positionId: string;
+  /** Pool address for API notification */
+  poolAddress: Address;
 }
 
-export function useCreateCloseOrder(
-  options?: Omit<
-    UseMutationOptions<CreateCloseOrderResult, ApiError, RegisterCloseOrderRequest, unknown>,
-    'mutationFn' | 'onSuccess'
-  >
-) {
+/**
+ * Result from creating a close order
+ */
+export interface CreateCloseOrderResult {
+  /** The on-chain close order ID */
+  closeId: bigint;
+  /** Transaction hash */
+  txHash: Hash;
+  /** The created order (after API notification) */
+  order?: SerializedCloseOrder;
+}
+
+/**
+ * Hook result
+ */
+export interface UseCreateCloseOrderResult {
+  /** Register a new close order */
+  registerOrder: (params: RegisterCloseOrderParams) => void;
+  /** Whether a registration is in progress */
+  isRegistering: boolean;
+  /** Whether waiting for transaction confirmation */
+  isWaitingForConfirmation: boolean;
+  /** Whether the registration was successful */
+  isSuccess: boolean;
+  /** The result data (closeId, txHash, order) */
+  result: CreateCloseOrderResult | null;
+  /** Any error that occurred */
+  error: Error | null;
+  /** Reset the hook state */
+  reset: () => void;
+}
+
+/**
+ * Parse CloseRegistered event from transaction receipt
+ */
+function parseCloseRegisteredEvent(
+  receipt: TransactionReceipt,
+  contractAddress: Address
+): bigint | null {
+  try {
+    // Find the CloseRegistered event
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== contractAddress.toLowerCase()) {
+        continue;
+      }
+
+      try {
+        const decoded = decodeEventLog({
+          abi: POSITION_CLOSER_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+
+        if (decoded.eventName === 'CloseRegistered') {
+          // The closeId is the first indexed parameter
+          return (decoded.args as { closeId: bigint }).closeId;
+        }
+      } catch {
+        // Not this event, continue
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to parse CloseRegistered event:', error);
+    return null;
+  }
+}
+
+/**
+ * Hook for creating a close order via user's wallet
+ */
+export function useCreateCloseOrder(): UseCreateCloseOrderResult {
   const queryClient = useQueryClient();
+  const [result, setResult] = useState<CreateCloseOrderResult | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [currentParams, setCurrentParams] = useState<RegisterCloseOrderParams | null>(null);
 
-  return useMutation({
-    mutationKey: queryKeys.automation.mutations.createOrder,
+  // Wagmi write contract hook
+  const {
+    writeContract,
+    data: txHash,
+    isPending: isWritePending,
+    error: writeError,
+    reset: resetWrite,
+  } = useWriteContract();
 
-    mutationFn: async (input: RegisterCloseOrderRequest): Promise<CreateCloseOrderResult> => {
-      // Initial request - starts the registration
-      const response = await automationApi.createCloseOrder(input);
-      const data = response.data as RegisterCloseOrderResponseData;
-
-      // If somehow already completed (shouldn't happen), fetch the order
-      if (data.operationStatus === 'completed') {
-        const orderResponse = await automationApi.getCloseOrder(data.id);
-        return {
-          order: orderResponse.data,
-          positionId: input.positionId,
-        };
-      }
-
-      // If failed immediately
-      if (data.operationStatus === 'failed') {
-        throw new ApiError(
-          'Close order registration failed',
-          500,
-          'ORDER_REGISTRATION_FAILED'
-        );
-      }
-
-      // Poll until registration completes
-      const order = await pollForOrderRegistration(data.id);
-
-      return {
-        order,
-        positionId: input.positionId,
-      };
-    },
-
-    onSuccess: (result) => {
-      // Invalidate close orders for this position
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.byPosition(result.positionId),
-      });
-
-      // Invalidate all close orders list
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.lists(),
-      });
-    },
-
-    ...options,
+  // Wait for transaction confirmation
+  const {
+    isLoading: isWaitingForConfirmation,
+    isSuccess: isTxSuccess,
+    data: receipt,
+    error: receiptError,
+  } = useWaitForTransactionReceipt({
+    hash: txHash,
   });
+
+  // Handle transaction success - parse event and notify API
+  useEffect(() => {
+    if (!isTxSuccess || !receipt || !txHash || !currentParams) return;
+
+    const handleSuccess = async () => {
+      try {
+        // Parse closeId from event
+        const closeId = parseCloseRegisteredEvent(receipt, currentParams.contractAddress);
+
+        if (closeId === null) {
+          throw new Error('Failed to parse CloseRegistered event from transaction');
+        }
+
+        // Notify API about the new order
+        try {
+          const response = await automationApi.notifyOrderRegistered({
+            chainId: currentParams.chainId,
+            contractAddress: currentParams.contractAddress,
+            closeId: closeId.toString(),
+            nftId: currentParams.nftId.toString(),
+            positionId: currentParams.positionId,
+            poolAddress: currentParams.poolAddress,
+            txHash,
+          });
+
+          setResult({
+            closeId,
+            txHash,
+            order: response.data,
+          });
+        } catch (apiError) {
+          // Even if API notification fails, the on-chain tx succeeded
+          console.error('Failed to notify API of close order:', apiError);
+          setResult({
+            closeId,
+            txHash,
+          });
+        }
+
+        // Invalidate caches
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.automation.closeOrders.lists(),
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error('Unknown error'));
+      }
+    };
+
+    handleSuccess();
+  }, [isTxSuccess, receipt, txHash, currentParams, queryClient]);
+
+  // Handle errors
+  useEffect(() => {
+    if (writeError) {
+      setError(writeError);
+    } else if (receiptError) {
+      setError(receiptError);
+    }
+  }, [writeError, receiptError]);
+
+  // Register function
+  const registerOrder = useCallback((params: RegisterCloseOrderParams) => {
+    // Reset state
+    setResult(null);
+    setError(null);
+    setCurrentParams(params);
+
+    // Call writeContract with registerClose function
+    writeContract({
+      address: params.contractAddress,
+      abi: POSITION_CLOSER_ABI,
+      functionName: 'registerClose',
+      args: [
+        params.nftId,
+        params.sqrtPriceX96Lower,
+        params.sqrtPriceX96Upper,
+        params.payoutAddress,
+        params.validUntil,
+        params.slippageBps,
+      ],
+      chainId: params.chainId,
+    });
+  }, [writeContract]);
+
+  // Reset function
+  const reset = useCallback(() => {
+    resetWrite();
+    setResult(null);
+    setError(null);
+    setCurrentParams(null);
+  }, [resetWrite]);
+
+  return {
+    registerOrder,
+    isRegistering: isWritePending,
+    isWaitingForConfirmation,
+    isSuccess: isTxSuccess && result !== null,
+    result,
+    error,
+    reset,
+  };
 }
+
+export type { SerializedCloseOrder };

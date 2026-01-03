@@ -177,11 +177,23 @@ import type {
   UpdateCloseOrderResponse,
   CancelCloseOrderResponse,
   GetCloseOrderStatusResponse,
+  NotifyOrderRegisteredRequest,
+  NotifyOrderRegisteredResponse,
+  NotifyOrderCancelledRequest,
+  NotifyOrderCancelledResponse,
   // Contracts
   ListContractsRequest,
   ListContractsResponse,
   GetContractByChainResponse,
   GetContractStatusResponse,
+  GetContractBytecodeResponse,
+  NotifyContractDeployedRequest,
+  NotifyContractDeployedResponse,
+  // Wallet
+  GetAutowalletResponse,
+  RefundAutowalletRequest,
+  RefundAutowalletResponse,
+  GetRefundStatusResponse,
 } from '@midcurve/api-shared';
 
 /**
@@ -244,6 +256,23 @@ export const automationApi = {
     return apiClient.delete<CancelCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
   },
 
+  /**
+   * Notify API after user registers a close order on-chain
+   */
+  notifyOrderRegistered(input: NotifyOrderRegisteredRequest) {
+    return apiClient.post<NotifyOrderRegisteredResponse['data']>('/api/v1/automation/close-orders/notify', input);
+  },
+
+  /**
+   * Notify API after user cancels a close order on-chain
+   */
+  notifyOrderCancelled(orderId: string, input: NotifyOrderCancelledRequest) {
+    return apiClient.post<NotifyOrderCancelledResponse['data']>(
+      `/api/v1/automation/close-orders/${orderId}/cancelled`,
+      input
+    );
+  },
+
   // ---------------------------------------------------------------------------
   // Contracts
   // ---------------------------------------------------------------------------
@@ -270,5 +299,46 @@ export const automationApi = {
    */
   getContractStatus(id: string) {
     return apiClient.get<GetContractStatusResponse['data']>(`/api/v1/automation/contracts/status/${id}`);
+  },
+
+  /**
+   * Get contract bytecode for user to deploy
+   */
+  getContractBytecode(chainId: number, contractType: 'uniswapv3' = 'uniswapv3') {
+    return apiClient.get<GetContractBytecodeResponse['data']>(
+      `/api/v1/automation/contracts/bytecode?chainId=${chainId}&contractType=${contractType}`
+    );
+  },
+
+  /**
+   * Notify API after user deploys contract on-chain
+   */
+  notifyContractDeployed(input: NotifyContractDeployedRequest) {
+    return apiClient.post<NotifyContractDeployedResponse['data']>('/api/v1/automation/contracts/notify', input);
+  },
+
+  // ---------------------------------------------------------------------------
+  // Automation Wallet
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get user's automation wallet info (address, balances, activity)
+   */
+  getWallet() {
+    return apiClient.get<GetAutowalletResponse['data']>('/api/v1/automation/wallet');
+  },
+
+  /**
+   * Request refund of gas from autowallet to user's wallet
+   */
+  requestRefund(input: RefundAutowalletRequest) {
+    return apiClient.post<RefundAutowalletResponse['data']>('/api/v1/automation/wallet/refund', input);
+  },
+
+  /**
+   * Get refund operation status (for polling)
+   */
+  getRefundStatus(requestId: string) {
+    return apiClient.get<GetRefundStatusResponse['data']>(`/api/v1/automation/wallet/refund/${requestId}`);
   },
 };

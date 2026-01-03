@@ -1,61 +1,247 @@
 /**
- * useUpdateCloseOrder - Update close order price thresholds
+ * useUpdateCloseOrder - Update close order parameters via user's wallet
  *
- * Mutation hook for updating an existing close order's trigger prices
- * or slippage settings. Updates require on-chain transaction.
+ * This hook uses Wagmi to have the user sign update transactions
+ * directly with their connected wallet. After confirmation, it
+ * invalidates the cache and returns success.
+ *
+ * Available updates:
+ * - setCloseBounds(closeId, sqrtPriceX96Lower, sqrtPriceX96Upper)
+ * - setCloseSlippage(closeId, slippageBps)
+ * - setClosePayout(closeId, payoutAddress)
+ * - setCloseValidUntil(closeId, validUntil)
+ *
+ * Flow:
+ * 1. User calls updateOrder() with the update type and params
+ * 2. User signs the update tx in their wallet (Wagmi)
+ * 3. Wait for tx confirmation
+ * 4. Invalidate cache and return success
  */
 
-import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
+import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
+import type { Address, Hash } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
-import { ApiError, automationApi } from '@/lib/api-client';
-import type { UpdateCloseOrderRequest, SerializedCloseOrder } from '@midcurve/api-shared';
+import { POSITION_CLOSER_ABI } from '@/config/contracts/uniswapv3-position-closer';
 
-interface UpdateCloseOrderParams extends UpdateCloseOrderRequest {
-  /**
-   * Order ID to update
-   */
+/**
+ * Update type enum
+ */
+export type UpdateType = 'bounds' | 'slippage' | 'payout' | 'validUntil';
+
+/**
+ * Base parameters for all updates
+ */
+interface BaseUpdateParams {
+  /** The automation contract address */
+  contractAddress: Address;
+  /** Chain ID */
+  chainId: number;
+  /** On-chain close order ID */
+  closeId: bigint;
+  /** Database order ID for cache invalidation */
   orderId: string;
-
-  /**
-   * Position ID for cache invalidation
-   */
+  /** Position ID for cache invalidation */
   positionId: string;
 }
 
-export function useUpdateCloseOrder(
-  options?: Omit<
-    UseMutationOptions<SerializedCloseOrder, ApiError, UpdateCloseOrderParams, unknown>,
-    'mutationFn' | 'onSuccess'
-  >
-) {
+/**
+ * Parameters for updating price bounds
+ */
+export interface UpdateBoundsParams extends BaseUpdateParams {
+  updateType: 'bounds';
+  sqrtPriceX96Lower: bigint;
+  sqrtPriceX96Upper: bigint;
+}
+
+/**
+ * Parameters for updating slippage
+ */
+export interface UpdateSlippageParams extends BaseUpdateParams {
+  updateType: 'slippage';
+  slippageBps: number;
+}
+
+/**
+ * Parameters for updating payout address
+ */
+export interface UpdatePayoutParams extends BaseUpdateParams {
+  updateType: 'payout';
+  payoutAddress: Address;
+}
+
+/**
+ * Parameters for updating valid until
+ */
+export interface UpdateValidUntilParams extends BaseUpdateParams {
+  updateType: 'validUntil';
+  validUntil: bigint;
+}
+
+/**
+ * Union type of all update params
+ */
+export type UpdateCloseOrderParams =
+  | UpdateBoundsParams
+  | UpdateSlippageParams
+  | UpdatePayoutParams
+  | UpdateValidUntilParams;
+
+/**
+ * Result from updating a close order
+ */
+export interface UpdateCloseOrderResult {
+  /** Transaction hash */
+  txHash: Hash;
+  /** Update type that was performed */
+  updateType: UpdateType;
+}
+
+/**
+ * Hook result
+ */
+export interface UseUpdateCloseOrderResult {
+  /** Update the close order */
+  updateOrder: (params: UpdateCloseOrderParams) => void;
+  /** Whether update is in progress */
+  isUpdating: boolean;
+  /** Whether waiting for transaction confirmation */
+  isWaitingForConfirmation: boolean;
+  /** Whether the update was successful */
+  isSuccess: boolean;
+  /** The result data (txHash, updateType) */
+  result: UpdateCloseOrderResult | null;
+  /** Any error that occurred */
+  error: Error | null;
+  /** Reset the hook state */
+  reset: () => void;
+}
+
+/**
+ * Hook for updating a close order via user's wallet
+ */
+export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
   const queryClient = useQueryClient();
+  const [result, setResult] = useState<UpdateCloseOrderResult | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [currentParams, setCurrentParams] = useState<UpdateCloseOrderParams | null>(null);
 
-  return useMutation({
-    mutationKey: queryKeys.automation.mutations.updateOrder,
+  // Wagmi write contract hook
+  const {
+    writeContract,
+    data: txHash,
+    isPending: isWritePending,
+    error: writeError,
+    reset: resetWrite,
+  } = useWriteContract();
 
-    mutationFn: async (params: UpdateCloseOrderParams): Promise<SerializedCloseOrder> => {
-      const { orderId, positionId: _, ...updateData } = params;
-      const response = await automationApi.updateCloseOrder(orderId, updateData);
-      return response.data;
-    },
-
-    onSuccess: (_, params) => {
-      // Invalidate close orders for this position
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.byPosition(params.positionId),
-      });
-
-      // Invalidate all close orders list
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.lists(),
-      });
-
-      // Invalidate specific order
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.detail(params.orderId),
-      });
-    },
-
-    ...options,
+  // Wait for transaction confirmation
+  const {
+    isLoading: isWaitingForConfirmation,
+    isSuccess: isTxSuccess,
+    error: receiptError,
+  } = useWaitForTransactionReceipt({
+    hash: txHash,
   });
+
+  // Handle transaction success
+  useEffect(() => {
+    if (!isTxSuccess || !txHash || !currentParams) return;
+
+    // Set result
+    setResult({
+      txHash,
+      updateType: currentParams.updateType,
+    });
+
+    // Invalidate caches
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.automation.closeOrders.lists(),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.automation.closeOrders.detail(currentParams.orderId),
+    });
+  }, [isTxSuccess, txHash, currentParams, queryClient]);
+
+  // Handle errors
+  useEffect(() => {
+    if (writeError) {
+      setError(writeError);
+    } else if (receiptError) {
+      setError(receiptError);
+    }
+  }, [writeError, receiptError]);
+
+  // Update function
+  const updateOrder = useCallback((params: UpdateCloseOrderParams) => {
+    // Reset state
+    setResult(null);
+    setError(null);
+    setCurrentParams(params);
+
+    // Call the appropriate contract function based on update type
+    switch (params.updateType) {
+      case 'bounds':
+        writeContract({
+          address: params.contractAddress,
+          abi: POSITION_CLOSER_ABI,
+          functionName: 'setCloseBounds',
+          args: [params.closeId, params.sqrtPriceX96Lower, params.sqrtPriceX96Upper],
+          chainId: params.chainId,
+        });
+        break;
+
+      case 'slippage':
+        writeContract({
+          address: params.contractAddress,
+          abi: POSITION_CLOSER_ABI,
+          functionName: 'setCloseSlippage',
+          args: [params.closeId, params.slippageBps],
+          chainId: params.chainId,
+        });
+        break;
+
+      case 'payout':
+        writeContract({
+          address: params.contractAddress,
+          abi: POSITION_CLOSER_ABI,
+          functionName: 'setClosePayout',
+          args: [params.closeId, params.payoutAddress],
+          chainId: params.chainId,
+        });
+        break;
+
+      case 'validUntil':
+        writeContract({
+          address: params.contractAddress,
+          abi: POSITION_CLOSER_ABI,
+          functionName: 'setCloseValidUntil',
+          args: [params.closeId, params.validUntil],
+          chainId: params.chainId,
+        });
+        break;
+    }
+  }, [writeContract]);
+
+  // Reset function
+  const reset = useCallback(() => {
+    resetWrite();
+    setResult(null);
+    setError(null);
+    setCurrentParams(null);
+  }, [resetWrite]);
+
+  return {
+    updateOrder,
+    isUpdating: isWritePending,
+    isWaitingForConfirmation,
+    isSuccess: isTxSuccess && result !== null,
+    result,
+    error,
+    reset,
+  };
 }

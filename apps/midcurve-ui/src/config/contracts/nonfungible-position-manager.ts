@@ -144,6 +144,39 @@ export const NONFUNGIBLE_POSITION_MANAGER_ABI = [
     stateMutability: 'payable',
     type: 'function',
   },
+  // isApprovedForAll() - Check operator approval (ERC721)
+  {
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'operator', type: 'address' },
+    ],
+    name: 'isApprovedForAll',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  // setApprovalForAll() - Set operator approval (ERC721)
+  {
+    inputs: [
+      { name: 'operator', type: 'address' },
+      { name: 'approved', type: 'bool' },
+    ],
+    name: 'setApprovalForAll',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // ApprovalForAll event (ERC721)
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'owner', type: 'address' },
+      { indexed: true, name: 'operator', type: 'address' },
+      { indexed: false, name: 'approved', type: 'bool' },
+    ],
+    name: 'ApprovalForAll',
+    type: 'event',
+  },
   // Transfer event for extracting tokenId
   {
     anonymous: false,

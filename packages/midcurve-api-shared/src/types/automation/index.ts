@@ -31,6 +31,17 @@ export {
   // Status
   type ContractDeploymentStatus,
   type GetContractStatusResponse,
+  // Bytecode (user-signed deployment)
+  type GetContractBytecodeRequest,
+  GetContractBytecodeQuerySchema,
+  type GetContractBytecodeInput,
+  type GetContractBytecodeResponseData,
+  type GetContractBytecodeResponse,
+  // Notify Contract Deployed (user signed on-chain)
+  type NotifyContractDeployedRequest,
+  NotifyContractDeployedRequestSchema,
+  type NotifyContractDeployedInput,
+  type NotifyContractDeployedResponse,
 } from './contracts.js';
 
 // Close Orders
@@ -67,4 +78,32 @@ export {
   // Status
   type CloseOrderRegistrationStatus,
   type GetCloseOrderStatusResponse,
+  // Notify Order Registered (user signed on-chain)
+  type NotifyOrderRegisteredRequest,
+  NotifyOrderRegisteredRequestSchema,
+  type NotifyOrderRegisteredInput,
+  type NotifyOrderRegisteredResponse,
+  // Notify Order Cancelled (user signed on-chain)
+  type NotifyOrderCancelledRequest,
+  NotifyOrderCancelledRequestSchema,
+  type NotifyOrderCancelledInput,
+  type NotifyOrderCancelledResponse,
 } from './close-orders.js';
+
+// Wallet
+export {
+  type AutowalletChainBalance,
+  type AutowalletActivity,
+  // Get
+  type GetAutowalletResponseData,
+  type GetAutowalletResponse,
+  // Refund
+  type RefundAutowalletRequest,
+  RefundAutowalletRequestSchema,
+  type RefundAutowalletInput,
+  type RefundAutowalletResponseData,
+  type RefundAutowalletResponse,
+  // Refund Status
+  type RefundOperationStatus,
+  type GetRefundStatusResponse,
+} from './wallet.js';

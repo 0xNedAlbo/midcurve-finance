@@ -396,3 +396,115 @@ export interface CloseOrderRegistrationStatus {
  * GET /api/v1/automation/close-orders/[id]/status - Response
  */
 export type GetCloseOrderStatusResponse = ApiResponse<CloseOrderRegistrationStatus>;
+
+// =============================================================================
+// NOTIFY ORDER REGISTERED (User Signs On-Chain)
+// =============================================================================
+
+/**
+ * POST /api/v1/automation/close-orders/notify - Request body
+ *
+ * Notify the API after user registers a close order on-chain.
+ * The UI signs the transaction via Wagmi, then calls this endpoint
+ * to inform the backend to start monitoring.
+ */
+export interface NotifyOrderRegisteredRequest {
+  /**
+   * Chain ID where the order was registered
+   */
+  chainId: number;
+
+  /**
+   * Automation contract address
+   */
+  contractAddress: string;
+
+  /**
+   * On-chain close order ID (from CloseRegistered event)
+   */
+  closeId: string;
+
+  /**
+   * NFT ID of the position
+   */
+  nftId: string;
+
+  /**
+   * Position ID in the database
+   */
+  positionId: string;
+
+  /**
+   * Pool address for monitoring
+   */
+  poolAddress: string;
+
+  /**
+   * Transaction hash of the registration
+   */
+  txHash: string;
+}
+
+/**
+ * Zod schema for notify order registered request
+ */
+export const NotifyOrderRegisteredRequestSchema = z.object({
+  chainId: z.number().int().positive(),
+  contractAddress: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid contract address'),
+  closeId: z.string().regex(/^\d+$/, 'closeId must be a numeric string'),
+  nftId: z.string().regex(/^\d+$/, 'nftId must be a numeric string'),
+  positionId: z.string().min(1, 'Position ID is required'),
+  poolAddress: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address'),
+  txHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash'),
+});
+
+/**
+ * Inferred type from schema
+ */
+export type NotifyOrderRegisteredInput = z.infer<typeof NotifyOrderRegisteredRequestSchema>;
+
+/**
+ * POST /api/v1/automation/close-orders/notify - Response
+ */
+export type NotifyOrderRegisteredResponse = ApiResponse<SerializedCloseOrder>;
+
+// =============================================================================
+// NOTIFY ORDER CANCELLED (User Signs On-Chain)
+// =============================================================================
+
+/**
+ * POST /api/v1/automation/close-orders/[id]/cancelled - Request body
+ *
+ * Notify the API after user cancels a close order on-chain.
+ */
+export interface NotifyOrderCancelledRequest {
+  /**
+   * Transaction hash of the cancellation
+   */
+  txHash: string;
+}
+
+/**
+ * Zod schema for notify order cancelled request
+ */
+export const NotifyOrderCancelledRequestSchema = z.object({
+  txHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash'),
+});
+
+/**
+ * Inferred type from schema
+ */
+export type NotifyOrderCancelledInput = z.infer<typeof NotifyOrderCancelledRequestSchema>;
+
+/**
+ * POST /api/v1/automation/close-orders/[id]/cancelled - Response
+ */
+export type NotifyOrderCancelledResponse = ApiResponse<SerializedCloseOrder>;

@@ -14,8 +14,14 @@
 import { useState, useCallback, useEffect } from 'react';
 import { X, ArrowLeft, ArrowRight, Shield } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useAccount } from 'wagmi';
+import type { Address } from 'viem';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
-import { useCreateCloseOrder, type CreateCloseOrderResult } from '@/hooks/automation';
+import {
+  useCreateCloseOrder,
+  useDeployAutomationContract,
+  useOperatorApproval,
+} from '@/hooks/automation';
 import { CloseOrderConfigureStep } from './steps/CloseOrderConfigureStep';
 import { CloseOrderReviewStep } from './steps/CloseOrderReviewStep';
 import { CloseOrderProcessingStep } from './steps/CloseOrderProcessingStep';
@@ -46,6 +52,22 @@ export interface CloseOrderModalProps {
    * Chain ID
    */
   chainId: number;
+
+  /**
+   * Automation contract address on this chain
+   * Optional - if undefined, contract will be deployed as part of the flow
+   */
+  contractAddress?: Address;
+
+  /**
+   * Whether the user has a deployed automation contract on this chain
+   */
+  hasContract?: boolean;
+
+  /**
+   * NFT ID of the position
+   */
+  nftId: bigint;
 
   /**
    * Base token (the asset being priced)
@@ -97,14 +119,18 @@ export function CloseOrderModal({
   isOpen,
   onClose,
   positionId,
-  poolAddress: _poolAddress, // Reserved for future use (pool subscription)
-  chainId: _chainId, // Reserved for future use (chain-specific logic)
+  poolAddress,
+  chainId,
+  contractAddress: initialContractAddress,
+  hasContract: initialHasContract = false,
+  nftId,
   baseToken,
   quoteToken,
   currentSqrtPriceX96,
   currentPriceDisplay,
   onSuccess,
 }: CloseOrderModalProps) {
+  const { address: userAddress } = useAccount();
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<WizardStep>('configure');
   const [formData, setFormData] = useState<CloseOrderFormData>({
@@ -117,10 +143,51 @@ export function CloseOrderModal({
     validUntilDays: 30,
   });
   const [createdOrder, setCreatedOrder] = useState<SerializedCloseOrder | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  // Create order mutation
-  const createOrderMutation = useCreateCloseOrder();
+  // Track deployed contract address (may be updated during flow)
+  const [deployedContractAddress, setDeployedContractAddress] = useState<Address | undefined>(
+    initialContractAddress
+  );
+
+  // Deployment hook
+  const {
+    deploy,
+    isFetchingBytecode,
+    isDeploying,
+    isWaitingForConfirmation: isWaitingForDeployConfirmation,
+    isSuccess: isDeploySuccess,
+    result: deployResult,
+    error: deployError,
+    reset: resetDeploy,
+  } = useDeployAutomationContract();
+
+  // Operator approval hook (NFPM setApprovalForAll)
+  const {
+    isApproved,
+    isChecking: isCheckingApproval,
+    approve,
+    isApproving,
+    isWaitingForConfirmation: isWaitingForApprovalConfirmation,
+    isApprovalSuccess,
+    error: approveError,
+    reset: resetApproval,
+  } = useOperatorApproval(chainId, deployedContractAddress);
+
+  // Create order hook (Wagmi-based)
+  const {
+    registerOrder,
+    isRegistering,
+    isWaitingForConfirmation,
+    isSuccess,
+    result,
+    error: hookError,
+    reset: resetHook,
+  } = useCreateCloseOrder();
+
+  // Detect what's needed
+  const needsDeploy = !initialHasContract && !deployedContractAddress;
+  const needsApproval = !needsDeploy && !isApproved && !isCheckingApproval;
 
   // Mount check for portal
   useEffect(() => {
@@ -141,14 +208,169 @@ export function CloseOrderModal({
         validUntilDays: 30,
       });
       setCreatedOrder(null);
-      setError(null);
+      setLocalError(null);
+      setDeployedContractAddress(initialContractAddress);
+      resetHook();
+      resetDeploy();
+      resetApproval();
     }
-  }, [isOpen]);
+  }, [isOpen, initialContractAddress, resetHook, resetDeploy, resetApproval]);
+
+  // Track hook success/error state
+  useEffect(() => {
+    if (isSuccess && result) {
+      // Order was successfully registered
+      if (result.order) {
+        setCreatedOrder(result.order);
+        onSuccess?.(result.order);
+      }
+      setStep('success');
+    }
+  }, [isSuccess, result, onSuccess]);
+
+  useEffect(() => {
+    if (hookError) {
+      setLocalError(hookError.message);
+      setStep('review'); // Go back to review on error
+    }
+  }, [hookError]);
+
+  // Handle deploy success - update contract address and continue to approval/register
+  useEffect(() => {
+    if (isDeploySuccess && deployResult?.contractAddress) {
+      setDeployedContractAddress(deployResult.contractAddress);
+      // Don't proceed automatically - the approval hook will re-check with new address
+      // The flow continues via startApprovalOrRegister being called
+    }
+  }, [isDeploySuccess, deployResult]);
+
+  // Handle deploy error
+  useEffect(() => {
+    if (deployError) {
+      setLocalError(deployError.message);
+      setStep('review');
+    }
+  }, [deployError]);
+
+  // Handle approval error
+  useEffect(() => {
+    if (approveError) {
+      setLocalError(approveError.message);
+      setStep('review');
+    }
+  }, [approveError]);
 
   // Handle form data updates
   const handleFormChange = useCallback((updates: Partial<CloseOrderFormData>) => {
     setFormData((prev) => ({ ...prev, ...updates }));
   }, []);
+
+  const handleBack = useCallback(() => {
+    if (step === 'review') {
+      setStep('configure');
+    }
+  }, [step]);
+
+  // Execute the actual order registration (final step)
+  const executeRegistration = useCallback(() => {
+    if (!userAddress) {
+      setLocalError('Wallet not connected');
+      setStep('review');
+      return;
+    }
+
+    if (!deployedContractAddress) {
+      setLocalError('No contract address available');
+      setStep('review');
+      return;
+    }
+
+    // Calculate valid until timestamp
+    const validUntilDate = new Date();
+    validUntilDate.setDate(validUntilDate.getDate() + formData.validUntilDays);
+    const validUntil = BigInt(Math.floor(validUntilDate.getTime() / 1000));
+
+    // Parse price values as bigint
+    const sqrtPriceX96Lower =
+      formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH'
+        ? BigInt(formData.sqrtPriceX96Lower || '0')
+        : 0n;
+    const sqrtPriceX96Upper =
+      formData.triggerMode === 'UPPER' || formData.triggerMode === 'BOTH'
+        ? BigInt(formData.sqrtPriceX96Upper || '0')
+        : BigInt('0xffffffffffffffffffffffffffffffffffffffff'); // Max sqrtPriceX96
+
+    // Call the hook's registerOrder function
+    registerOrder({
+      contractAddress: deployedContractAddress,
+      chainId,
+      nftId,
+      sqrtPriceX96Lower,
+      sqrtPriceX96Upper,
+      payoutAddress: userAddress,
+      validUntil,
+      slippageBps: formData.slippageBps,
+      positionId,
+      poolAddress: poolAddress as Address,
+    });
+  }, [
+    userAddress,
+    formData,
+    deployedContractAddress,
+    chainId,
+    nftId,
+    positionId,
+    poolAddress,
+    registerOrder,
+  ]);
+
+  // Continue flow after deployment completes - start approval or registration
+  useEffect(() => {
+    if (isDeploySuccess && deployedContractAddress && step === 'processing') {
+      // Contract deployed, now check if we need approval
+      if (!isApproved && !isCheckingApproval) {
+        // Need to approve - start approval
+        approve();
+      } else if (isApproved) {
+        // Already approved, proceed to registration
+        executeRegistration();
+      }
+    }
+  }, [isDeploySuccess, deployedContractAddress, step, isApproved, isCheckingApproval, approve, executeRegistration]);
+
+  // Handle approval success - continue to registration
+  useEffect(() => {
+    if (isApprovalSuccess && step === 'processing') {
+      // Approval complete, now register the order
+      executeRegistration();
+    }
+  }, [isApprovalSuccess, step, executeRegistration]);
+
+  // Submit the order - orchestrates deploy → approve → register flow
+  const submitOrder = useCallback(() => {
+    if (!userAddress) {
+      setLocalError('Wallet not connected');
+      setStep('review');
+      return;
+    }
+
+    setLocalError(null);
+
+    // Step 1: Deploy if needed
+    if (needsDeploy) {
+      deploy({ chainId, contractType: 'uniswapv3' });
+      return;
+    }
+
+    // Step 2: Approve if needed
+    if (needsApproval) {
+      approve();
+      return;
+    }
+
+    // Step 3: Register the order
+    executeRegistration();
+  }, [userAddress, needsDeploy, needsApproval, chainId, deploy, approve, executeRegistration]);
 
   // Handle step progression
   const handleContinue = useCallback(() => {
@@ -158,47 +380,7 @@ export function CloseOrderModal({
       setStep('processing');
       submitOrder();
     }
-  }, [step]);
-
-  const handleBack = useCallback(() => {
-    if (step === 'review') {
-      setStep('configure');
-    }
-  }, [step]);
-
-  // Submit the order
-  const submitOrder = useCallback(async () => {
-    setError(null);
-
-    // Calculate valid until date
-    const validUntil = new Date();
-    validUntil.setDate(validUntil.getDate() + formData.validUntilDays);
-
-    try {
-      const result: CreateCloseOrderResult = await createOrderMutation.mutateAsync({
-        orderType: 'uniswapv3',
-        positionId,
-        triggerMode: formData.triggerMode,
-        sqrtPriceX96Lower:
-          formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH'
-            ? formData.sqrtPriceX96Lower
-            : undefined,
-        sqrtPriceX96Upper:
-          formData.triggerMode === 'UPPER' || formData.triggerMode === 'BOTH'
-            ? formData.sqrtPriceX96Upper
-            : undefined,
-        slippageBps: formData.slippageBps,
-        validUntil: validUntil.toISOString(),
-      });
-
-      setCreatedOrder(result.order);
-      setStep('success');
-      onSuccess?.(result.order);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create close order');
-      setStep('review'); // Go back to review on error
-    }
-  }, [formData, positionId, createOrderMutation, onSuccess]);
+  }, [step, submitOrder]);
 
   // Handle close
   const handleClose = useCallback(() => {
@@ -262,12 +444,29 @@ export function CloseOrderModal({
                 formData={formData}
                 baseToken={baseToken}
                 quoteToken={quoteToken}
-                error={error}
+                error={localError}
+                needsDeploy={needsDeploy}
+                needsApproval={needsApproval}
               />
             )}
 
             {step === 'processing' && (
-              <CloseOrderProcessingStep />
+              <CloseOrderProcessingStep
+                // Deploy state
+                needsDeploy={needsDeploy}
+                isFetchingBytecode={isFetchingBytecode}
+                isDeploying={isDeploying}
+                isWaitingForDeployConfirmation={isWaitingForDeployConfirmation}
+                deployComplete={isDeploySuccess}
+                // Approval state
+                needsApproval={needsApproval}
+                isApproving={isApproving}
+                isWaitingForApprovalConfirmation={isWaitingForApprovalConfirmation}
+                approvalComplete={isApprovalSuccess || isApproved}
+                // Registration state
+                isRegistering={isRegistering}
+                isWaitingForConfirmation={isWaitingForConfirmation}
+              />
             )}
 
             {step === 'success' && createdOrder && (

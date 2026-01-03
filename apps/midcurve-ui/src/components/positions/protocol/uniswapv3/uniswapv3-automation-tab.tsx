@@ -9,8 +9,11 @@
  */
 
 import { useState } from "react";
+import { AlertCircle, Loader2 } from "lucide-react";
+import type { Address } from "viem";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { calculatePositionStates } from "@/lib/position-states";
+import { useAutomationContract } from "@/hooks/automation";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
 import { PositionCloseOrdersPanel, CloseOrderModal } from "../../automation";
 
@@ -33,8 +36,19 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   // Extract pool and position config for automation
   const poolConfig = position.pool.config as { address: string; chainId: number };
   const poolState = position.pool.state as { sqrtPriceX96: string };
+  const positionConfig = position.config as { nftId: number };
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
+
+  // Get automation contract for this chain
+  const {
+    data: contractData,
+    isLoading: isContractLoading,
+    error: contractError,
+  } = useAutomationContract(poolConfig.chainId);
+
+  const contractAddress = contractData?.contractAddress as Address | undefined;
+  const hasContract = contractData?.hasContract ?? false;
 
   // PnL breakdown data for position states calculation
   const pnlBreakdown = {
@@ -48,11 +62,35 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   // Calculate position states (for current pool price)
   const positionStates = calculatePositionStates(position, pnlBreakdown);
 
+  // Loading state while fetching contract
+  if (isContractLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+      </div>
+    );
+  }
+
+  // Error state if contract fetch failed
+  if (contractError) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-red-400">
+        <AlertCircle className="w-5 h-5" />
+        <span>Failed to load automation contract</span>
+      </div>
+    );
+  }
+
+  // NOTE: We no longer block when no contract exists.
+  // The modal will handle deployment as part of the close order creation flow.
+
   return (
     <div className="space-y-6">
       {/* Close Orders Panel */}
       <PositionCloseOrdersPanel
         positionId={position.id}
+        chainId={poolConfig.chainId}
+        contractAddress={contractAddress}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
         baseTokenSymbol={baseToken.symbol}
@@ -67,6 +105,9 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         positionId={position.id}
         poolAddress={poolConfig.address}
         chainId={poolConfig.chainId}
+        contractAddress={contractAddress}
+        hasContract={hasContract}
+        nftId={BigInt(positionConfig.nftId)}
         baseToken={{
           address: baseTokenConfig.address,
           symbol: baseToken.symbol,

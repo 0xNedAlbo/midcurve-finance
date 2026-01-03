@@ -232,3 +232,133 @@ export interface ContractDeploymentStatus {
  * GET /api/v1/automation/contracts/status/[id] - Response
  */
 export type GetContractStatusResponse = ApiResponse<ContractDeploymentStatus>;
+
+// =============================================================================
+// GET CONTRACT BYTECODE (for user-signed deployment)
+// =============================================================================
+
+/**
+ * GET /api/v1/automation/contracts/bytecode - Query parameters
+ *
+ * Get contract bytecode for user to deploy via their wallet.
+ */
+export interface GetContractBytecodeRequest {
+  /**
+   * Chain ID to deploy on
+   */
+  chainId: number;
+
+  /**
+   * Contract type to deploy
+   */
+  contractType: ContractType;
+}
+
+/**
+ * Zod schema for get contract bytecode query
+ */
+export const GetContractBytecodeQuerySchema = z.object({
+  chainId: z.coerce.number().int().positive(),
+  contractType: z.enum(CONTRACT_TYPES, {
+    errorMap: () => ({ message: `Contract type must be one of: ${CONTRACT_TYPES.join(', ')}` }),
+  }),
+});
+
+/**
+ * Inferred type from schema
+ */
+export type GetContractBytecodeInput = z.infer<typeof GetContractBytecodeQuerySchema>;
+
+/**
+ * Contract bytecode response data
+ */
+export interface GetContractBytecodeResponseData {
+  /**
+   * Contract creation bytecode (hex string with 0x prefix)
+   */
+  bytecode: string;
+
+  /**
+   * ABI-encoded constructor arguments (hex string with 0x prefix)
+   * Already encoded, append to bytecode for deployment
+   */
+  constructorArgs: string;
+
+  /**
+   * Contract type being deployed
+   */
+  contractType: ContractType;
+
+  /**
+   * Chain ID for deployment
+   */
+  chainId: number;
+
+  /**
+   * NFPM address used in constructor (for reference)
+   */
+  nfpmAddress: string;
+
+  /**
+   * Operator address used in constructor (autowallet address)
+   */
+  operatorAddress: string;
+}
+
+/**
+ * GET /api/v1/automation/contracts/bytecode - Response
+ */
+export type GetContractBytecodeResponse = ApiResponse<GetContractBytecodeResponseData>;
+
+// =============================================================================
+// NOTIFY CONTRACT DEPLOYED (user signed on-chain)
+// =============================================================================
+
+/**
+ * POST /api/v1/automation/contracts/notify - Request body
+ *
+ * Notify API after user deploys contract on-chain via their wallet.
+ */
+export interface NotifyContractDeployedRequest {
+  /**
+   * Chain ID where contract was deployed
+   */
+  chainId: number;
+
+  /**
+   * Contract type that was deployed
+   */
+  contractType: ContractType;
+
+  /**
+   * Deployed contract address (from transaction receipt)
+   */
+  contractAddress: string;
+
+  /**
+   * Deployment transaction hash
+   */
+  txHash: string;
+}
+
+/**
+ * Zod schema for notify contract deployed request
+ */
+export const NotifyContractDeployedRequestSchema = z.object({
+  chainId: z.number().int().positive(),
+  contractType: z.enum(CONTRACT_TYPES, {
+    errorMap: () => ({ message: `Contract type must be one of: ${CONTRACT_TYPES.join(', ')}` }),
+  }),
+  contractAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid contract address'),
+  txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash'),
+});
+
+/**
+ * Inferred type from schema
+ */
+export type NotifyContractDeployedInput = z.infer<typeof NotifyContractDeployedRequestSchema>;
+
+/**
+ * POST /api/v1/automation/contracts/notify - Response
+ */
+export type NotifyContractDeployedResponse = ApiResponse<SerializedAutomationContract>;

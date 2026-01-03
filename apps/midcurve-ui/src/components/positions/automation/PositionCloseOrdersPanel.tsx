@@ -7,7 +7,10 @@
  * - Loading and error states
  */
 
+import { useState } from 'react';
 import { Plus, AlertCircle, Loader2, Shield } from 'lucide-react';
+import type { Address } from 'viem';
+import type { SerializedUniswapV3CloseOrderConfig } from '@midcurve/api-shared';
 import { useCloseOrders } from '@/hooks/automation';
 import { useCancelCloseOrder } from '@/hooks/automation';
 import { CloseOrderCard } from './CloseOrderCard';
@@ -18,6 +21,17 @@ interface PositionCloseOrdersPanelProps {
    * Position ID to fetch orders for
    */
   positionId: string;
+
+  /**
+   * Chain ID of the position
+   */
+  chainId: number;
+
+  /**
+   * Automation contract address on this chain
+   * Optional - when undefined, shows empty state but allows creating orders
+   */
+  contractAddress?: Address;
 
   /**
    * Quote token symbol
@@ -47,20 +61,35 @@ interface PositionCloseOrdersPanelProps {
 
 export function PositionCloseOrdersPanel({
   positionId,
+  chainId,
+  contractAddress,
   quoteTokenSymbol,
   quoteTokenDecimals,
   baseTokenSymbol,
   baseTokenDecimals,
   onCreateOrder,
 }: PositionCloseOrdersPanelProps) {
-  // Fetch close orders for this position
+  // Track which order is being cancelled
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+
+  // Whether contract exists - determines if we can fetch orders
+  const hasContract = !!contractAddress;
+
+  // Fetch close orders for this position (only if contract exists)
   const { data: orders, isLoading, error, refetch } = useCloseOrders(
     { positionId, polling: true },
-    { enabled: !!positionId }
+    { enabled: !!positionId && hasContract }
   );
 
-  // Cancel mutation
-  const cancelMutation = useCancelCloseOrder();
+  // Cancel hook
+  const {
+    cancelOrder,
+    isCancelling,
+    isWaitingForConfirmation,
+    isSuccess: isCancelSuccess,
+    error: cancelError,
+    reset: resetCancel,
+  } = useCancelCloseOrder();
 
   // Filter to show active orders first, then terminal ones
   const activeOrders = orders?.filter((o) => !isCloseOrderTerminal(o.status)) ?? [];
@@ -69,14 +98,44 @@ export function PositionCloseOrdersPanel({
   // Has any active (non-terminal) orders
   const hasActiveOrders = activeOrders.length > 0;
 
-  const handleCancel = async (orderId: string) => {
-    try {
-      await cancelMutation.mutateAsync({ orderId, positionId });
-      refetch();
-    } catch (err) {
-      console.error('Failed to cancel order:', err);
-    }
+  // Handle cancel success
+  if (isCancelSuccess && cancellingOrderId) {
+    setCancellingOrderId(null);
+    resetCancel();
+    refetch();
+  }
+
+  // Handle cancel error
+  if (cancelError && cancellingOrderId) {
+    console.error('Failed to cancel order:', cancelError);
+    setCancellingOrderId(null);
+    resetCancel();
+  }
+
+  const handleCancel = (orderId: string) => {
+    // Can't cancel without contract address
+    if (!contractAddress) return;
+
+    // Find the order to get the closeId
+    const order = orders?.find((o) => o.id === orderId);
+    if (!order) return;
+
+    const config = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
+    const closeId = BigInt(config.closeId);
+
+    setCancellingOrderId(orderId);
+    cancelOrder({
+      contractAddress,
+      chainId,
+      closeId,
+      orderId,
+      positionId,
+    });
   };
+
+  // Check if a specific order is being cancelled
+  const isOrderCancelling = (orderId: string) =>
+    orderId === cancellingOrderId && (isCancelling || isWaitingForConfirmation);
 
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4 md:p-6">
@@ -98,7 +157,15 @@ export function PositionCloseOrdersPanel({
       </div>
 
       {/* Content */}
-      {isLoading ? (
+      {!hasContract ? (
+        // No contract deployed yet - show empty state
+        <div className="text-center py-8">
+          <p className="text-slate-400 mb-3">No close orders set for this position.</p>
+          <p className="text-slate-500 text-sm">
+            Set a close order to automatically close your position when price reaches your target.
+          </p>
+        </div>
+      ) : isLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
         </div>
@@ -129,7 +196,7 @@ export function PositionCloseOrdersPanel({
                   baseTokenSymbol={baseTokenSymbol}
                   baseTokenDecimals={baseTokenDecimals}
                   onCancel={handleCancel}
-                  isCancelling={cancelMutation.isPending}
+                  isCancelling={isOrderCancelling(order.id)}
                 />
               ))}
             </div>

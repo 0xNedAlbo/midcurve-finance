@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/providers/AuthProvider";
-import { User, LogOut, ChevronDown } from "lucide-react";
+import { User, LogOut, ChevronDown, Wallet } from "lucide-react";
 
 interface UserDropdownProps {
   mode?: "loading" | "unauthenticated" | "authenticated";
@@ -8,6 +9,7 @@ interface UserDropdownProps {
 
 export function UserDropdown({ mode }: UserDropdownProps) {
   const { user, status, signOut } = useAuth();
+  const navigate = useNavigate();
 
   // Dropdown state
   const [isOpen, setIsOpen] = useState(false);
@@ -101,6 +103,17 @@ export function UserDropdown({ mode }: UserDropdownProps) {
             >
               <User className="w-4 h-4" />
               Profile
+            </button>
+
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                navigate('/automation/wallet');
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
+            >
+              <Wallet className="w-4 h-4" />
+              Automation Wallet
             </button>
 
             <hr className="my-1 border-slate-700/50" />
