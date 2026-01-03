@@ -11,6 +11,7 @@
 
 import { X, AlertTriangle, TrendingDown, TrendingUp, ArrowLeftRight } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
+import { pricePerToken0InToken1, pricePerToken1InToken0 } from '@midcurve/shared';
 import { CloseOrderStatusBadge, canCancelCloseOrder } from './CloseOrderStatusBadge';
 import { formatCompactValue } from '@/lib/fraction-format';
 
@@ -39,6 +40,16 @@ interface CloseOrderCardProps {
    * Base token decimals for formatting
    */
   baseTokenDecimals: number;
+
+  /**
+   * Base token address for price conversion
+   */
+  baseTokenAddress: string;
+
+  /**
+   * Quote token address for price conversion
+   */
+  quoteTokenAddress: string;
 
   /**
    * Callback when cancel is clicked
@@ -84,28 +95,27 @@ function getTriggerLabel(mode: TriggerMode): string {
 }
 
 /**
- * Format sqrtPriceX96 to human-readable price
- * This is a simplified display - real conversion needs token order context
+ * Format sqrtPriceX96 to human-readable price using proper token ordering
  */
 function formatTriggerPrice(
   sqrtPriceX96: string | undefined,
-  quoteDecimals: number
+  baseTokenAddress: string,
+  quoteTokenAddress: string,
+  baseTokenDecimals: number,
+  quoteTokenDecimals: number
 ): string {
   if (!sqrtPriceX96 || sqrtPriceX96 === '0') return '-';
 
   try {
-    // sqrtPriceX96 to price conversion
-    // price = (sqrtPriceX96 / 2^96)^2
     const sqrtPrice = BigInt(sqrtPriceX96);
-    const Q96 = BigInt(2) ** BigInt(96);
+    const baseIsToken0 = BigInt(baseTokenAddress) < BigInt(quoteTokenAddress);
 
-    // Calculate price with high precision
-    // Using shifted arithmetic: (sqrtPrice^2 * 10^decimals) / Q96^2
-    const priceNumerator = sqrtPrice * sqrtPrice * (BigInt(10) ** BigInt(quoteDecimals));
-    const priceDenominator = Q96 * Q96;
-    const price = priceNumerator / priceDenominator;
+    // Get price in quote token raw units (quote per base)
+    const price = baseIsToken0
+      ? pricePerToken0InToken1(sqrtPrice, baseTokenDecimals)
+      : pricePerToken1InToken0(sqrtPrice, baseTokenDecimals);
 
-    return formatCompactValue(price, quoteDecimals);
+    return formatCompactValue(price, quoteTokenDecimals);
   } catch {
     return '-';
   }
@@ -115,7 +125,9 @@ export function CloseOrderCard({
   order,
   quoteTokenSymbol,
   quoteTokenDecimals,
-  baseTokenSymbol: _baseTokenSymbol, // Reserved for future price formatting with token order
+  baseTokenDecimals,
+  baseTokenAddress,
+  quoteTokenAddress,
   onCancel,
   isCancelling = false,
 }: CloseOrderCardProps) {
@@ -151,7 +163,7 @@ export function CloseOrderCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Lower trigger:</span>
             <span className="text-red-400 font-mono">
-              {formatTriggerPrice(config.sqrtPriceX96Lower, quoteTokenDecimals)} {quoteTokenSymbol}
+              {formatTriggerPrice(config.sqrtPriceX96Lower, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
             </span>
           </div>
         )}
@@ -159,7 +171,7 @@ export function CloseOrderCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Upper trigger:</span>
             <span className="text-green-400 font-mono">
-              {formatTriggerPrice(config.sqrtPriceX96Upper, quoteTokenDecimals)} {quoteTokenSymbol}
+              {formatTriggerPrice(config.sqrtPriceX96Upper, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
             </span>
           </div>
         )}

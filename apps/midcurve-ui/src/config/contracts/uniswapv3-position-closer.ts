@@ -67,14 +67,21 @@ export const POSITION_CLOSER_ABI = [
     type: 'function',
     name: 'registerClose',
     inputs: [
-      { name: 'pool', type: 'address' },
-      { name: 'tokenId', type: 'uint256' },
-      { name: 'sqrtPriceX96Lower', type: 'uint160' },
-      { name: 'sqrtPriceX96Upper', type: 'uint160' },
-      { name: 'payout', type: 'address' },
-      { name: 'operator', type: 'address' },
-      { name: 'validUntil', type: 'uint256' },
-      { name: 'slippageBps', type: 'uint16' },
+      {
+        name: 'cfg',
+        type: 'tuple',
+        components: [
+          { name: 'pool', type: 'address' },
+          { name: 'tokenId', type: 'uint256' },
+          { name: 'sqrtPriceX96Lower', type: 'uint160' },
+          { name: 'sqrtPriceX96Upper', type: 'uint160' },
+          { name: 'mode', type: 'uint8' },  // TriggerMode enum: 0=LOWER_ONLY, 1=UPPER_ONLY, 2=BOTH
+          { name: 'payout', type: 'address' },
+          { name: 'operator', type: 'address' },
+          { name: 'validUntil', type: 'uint256' },
+          { name: 'slippageBps', type: 'uint16' },
+        ],
+      },
     ],
     outputs: [{ name: 'closeId', type: 'uint256' }],
     stateMutability: 'nonpayable',
@@ -97,6 +104,7 @@ export const POSITION_CLOSER_ABI = [
       { name: 'closeId', type: 'uint256' },
       { name: 'sqrtPriceX96Lower', type: 'uint160' },
       { name: 'sqrtPriceX96Upper', type: 'uint160' },
+      { name: 'mode', type: 'uint8' },  // TriggerMode enum: 0=LOWER_ONLY, 1=UPPER_ONLY, 2=BOTH
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -168,10 +176,27 @@ export const POSITION_CLOSER_ABI = [
     name: 'CloseRegistered',
     inputs: [
       { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'tokenId', type: 'uint256', indexed: true },
       { name: 'owner', type: 'address', indexed: true },
-      { name: 'nftId', type: 'uint256', indexed: true },
-      { name: 'sqrtPriceX96Lower', type: 'uint160', indexed: false },
-      { name: 'sqrtPriceX96Upper', type: 'uint160', indexed: false },
+      { name: 'pool', type: 'address', indexed: false },
+      { name: 'operator', type: 'address', indexed: false },
+      { name: 'payout', type: 'address', indexed: false },
+      { name: 'lower', type: 'uint160', indexed: false },
+      { name: 'upper', type: 'uint160', indexed: false },
+      { name: 'mode', type: 'uint8', indexed: false },
+      { name: 'validUntil', type: 'uint256', indexed: false },
+      { name: 'slippageBps', type: 'uint16', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'CloseFeeApplied',
+    inputs: [
+      { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'feeRecipient', type: 'address', indexed: true },
+      { name: 'feeBps', type: 'uint16', indexed: false },
+      { name: 'feeAmount0', type: 'uint256', indexed: false },
+      { name: 'feeAmount1', type: 'uint256', indexed: false },
     ],
   },
   {
@@ -179,9 +204,12 @@ export const POSITION_CLOSER_ABI = [
     name: 'CloseExecuted',
     inputs: [
       { name: 'closeId', type: 'uint256', indexed: true },
-      { name: 'executor', type: 'address', indexed: true },
-      { name: 'amount0', type: 'uint256', indexed: false },
-      { name: 'amount1', type: 'uint256', indexed: false },
+      { name: 'tokenId', type: 'uint256', indexed: true },
+      { name: 'owner', type: 'address', indexed: true },
+      { name: 'payout', type: 'address', indexed: false },
+      { name: 'executionSqrtPriceX96', type: 'uint160', indexed: false },
+      { name: 'amount0Out', type: 'uint256', indexed: false },
+      { name: 'amount1Out', type: 'uint256', indexed: false },
     ],
   },
   {
@@ -189,6 +217,26 @@ export const POSITION_CLOSER_ABI = [
     name: 'CloseCancelled',
     inputs: [
       { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'tokenId', type: 'uint256', indexed: true },
+      { name: 'owner', type: 'address', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'CloseOperatorUpdated',
+    inputs: [
+      { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'oldOperator', type: 'address', indexed: true },
+      { name: 'newOperator', type: 'address', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'ClosePayoutUpdated',
+    inputs: [
+      { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'oldPayout', type: 'address', indexed: true },
+      { name: 'newPayout', type: 'address', indexed: true },
     ],
   },
   {
@@ -196,8 +244,30 @@ export const POSITION_CLOSER_ABI = [
     name: 'CloseBoundsUpdated',
     inputs: [
       { name: 'closeId', type: 'uint256', indexed: true },
-      { name: 'sqrtPriceX96Lower', type: 'uint160', indexed: false },
-      { name: 'sqrtPriceX96Upper', type: 'uint160', indexed: false },
+      { name: 'oldLower', type: 'uint160', indexed: false },
+      { name: 'oldUpper', type: 'uint160', indexed: false },
+      { name: 'oldMode', type: 'uint8', indexed: false },
+      { name: 'newLower', type: 'uint160', indexed: false },
+      { name: 'newUpper', type: 'uint160', indexed: false },
+      { name: 'newMode', type: 'uint8', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'CloseValidUntilUpdated',
+    inputs: [
+      { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'oldValidUntil', type: 'uint256', indexed: false },
+      { name: 'newValidUntil', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'CloseSlippageUpdated',
+    inputs: [
+      { name: 'closeId', type: 'uint256', indexed: true },
+      { name: 'oldSlippageBps', type: 'uint16', indexed: false },
+      { name: 'newSlippageBps', type: 'uint16', indexed: false },
     ],
   },
 ] as const;

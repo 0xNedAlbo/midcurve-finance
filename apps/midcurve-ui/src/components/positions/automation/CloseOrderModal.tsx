@@ -69,6 +69,11 @@ export interface CloseOrderModalProps {
   nftId: bigint;
 
   /**
+   * Position owner address (for pre-flight wallet ownership check)
+   */
+  positionOwner: Address;
+
+  /**
    * Base token (the asset being priced)
    */
   baseToken: {
@@ -123,6 +128,7 @@ export function CloseOrderModal({
   contractAddress,
   positionManager,
   nftId,
+  positionOwner,
   baseToken,
   quoteToken,
   currentSqrtPriceX96,
@@ -212,7 +218,9 @@ export function CloseOrderModal({
   }, [isSuccess, result, onSuccess]);
 
   useEffect(() => {
+    console.log('[CloseOrderModal] hookError changed:', hookError?.message);
     if (hookError) {
+      console.log('[CloseOrderModal] Setting localError and going back to review');
       setLocalError(hookError.message);
       setStep('review'); // Go back to review on error
     }
@@ -281,6 +289,7 @@ export function CloseOrderModal({
       triggerMode: formData.triggerMode,
       positionId,
       poolAddress: poolAddress as Address,
+      positionOwner,
     });
   }, [
     userAddress,
@@ -292,6 +301,7 @@ export function CloseOrderModal({
     nftId,
     positionId,
     poolAddress,
+    positionOwner,
     registerOrder,
   ]);
 

@@ -54,6 +54,16 @@ interface PositionCloseOrdersPanelProps {
   baseTokenDecimals: number;
 
   /**
+   * Base token address for price conversion
+   */
+  baseTokenAddress: string;
+
+  /**
+   * Quote token address for price conversion
+   */
+  quoteTokenAddress: string;
+
+  /**
    * Callback to open the create order modal
    */
   onCreateOrder?: () => void;
@@ -67,6 +77,8 @@ export function PositionCloseOrdersPanel({
   quoteTokenDecimals,
   baseTokenSymbol,
   baseTokenDecimals,
+  baseTokenAddress,
+  quoteTokenAddress,
   onCreateOrder,
 }: PositionCloseOrdersPanelProps) {
   // Track which order is being cancelled
@@ -195,6 +207,8 @@ export function PositionCloseOrdersPanel({
                   quoteTokenDecimals={quoteTokenDecimals}
                   baseTokenSymbol={baseTokenSymbol}
                   baseTokenDecimals={baseTokenDecimals}
+                  baseTokenAddress={baseTokenAddress}
+                  quoteTokenAddress={quoteTokenAddress}
                   onCancel={handleCancel}
                   isCancelling={isOrderCancelling(order.id)}
                 />
@@ -217,6 +231,8 @@ export function PositionCloseOrdersPanel({
                     quoteTokenDecimals={quoteTokenDecimals}
                     baseTokenSymbol={baseTokenSymbol}
                     baseTokenDecimals={baseTokenDecimals}
+                    baseTokenAddress={baseTokenAddress}
+                    quoteTokenAddress={quoteTokenAddress}
                   />
                 ))}
               </div>

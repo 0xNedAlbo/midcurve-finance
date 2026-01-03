@@ -15,7 +15,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
 import { decodeEventLog, type Address, type Hash, type TransactionReceipt } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
@@ -53,6 +53,8 @@ export interface RegisterCloseOrderParams {
   positionId: string;
   /** Pool address for API notification */
   poolAddress: Address;
+  /** Position owner address (for pre-flight ownership check) */
+  positionOwner: Address;
 }
 
 /**
@@ -94,10 +96,23 @@ function parseCloseRegisteredEvent(
   receipt: TransactionReceipt,
   contractAddress: Address
 ): bigint | null {
+  console.log('[parseCloseRegisteredEvent] Parsing receipt:', {
+    contractAddress,
+    logsCount: receipt.logs.length,
+    logs: receipt.logs.map((log) => ({
+      address: log.address,
+      topics: log.topics,
+      data: log.data,
+    })),
+  });
+
   try {
     // Find the CloseRegistered event
     for (const log of receipt.logs) {
+      console.log('[parseCloseRegisteredEvent] Checking log from:', log.address);
+
       if (log.address.toLowerCase() !== contractAddress.toLowerCase()) {
+        console.log('[parseCloseRegisteredEvent] Skipping - address mismatch');
         continue;
       }
 
@@ -108,14 +123,23 @@ function parseCloseRegisteredEvent(
           topics: log.topics,
         });
 
+        console.log('[parseCloseRegisteredEvent] Decoded event:', {
+          eventName: decoded.eventName,
+          args: decoded.args,
+        });
+
         if (decoded.eventName === 'CloseRegistered') {
           // The closeId is the first indexed parameter
-          return (decoded.args as { closeId: bigint }).closeId;
+          const closeId = (decoded.args as { closeId: bigint }).closeId;
+          console.log('[parseCloseRegisteredEvent] Found closeId:', closeId);
+          return closeId;
         }
-      } catch {
+      } catch (decodeError) {
+        console.log('[parseCloseRegisteredEvent] Failed to decode log:', decodeError);
         // Not this event, continue
       }
     }
+    console.log('[parseCloseRegisteredEvent] No CloseRegistered event found');
     return null;
   } catch (error) {
     console.error('Failed to parse CloseRegistered event:', error);
@@ -128,6 +152,7 @@ function parseCloseRegisteredEvent(
  */
 export function useCreateCloseOrder(): UseCreateCloseOrderResult {
   const queryClient = useQueryClient();
+  const { address: connectedAddress } = useAccount();
   const [result, setResult] = useState<CreateCloseOrderResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [currentParams, setCurrentParams] = useState<RegisterCloseOrderParams | null>(null);
@@ -222,38 +247,109 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
   // Handle errors
   useEffect(() => {
     if (writeError) {
+      console.log('[useCreateCloseOrder] writeError:', {
+        name: writeError.name,
+        message: writeError.message,
+        cause: writeError.cause,
+        stack: writeError.stack,
+      });
       setError(writeError);
     } else if (receiptError) {
+      console.log('[useCreateCloseOrder] receiptError:', {
+        name: receiptError.name,
+        message: receiptError.message,
+        cause: receiptError.cause,
+        stack: receiptError.stack,
+      });
       setError(receiptError);
     }
   }, [writeError, receiptError]);
 
   // Register function - calls registerClose on shared contract with operator
   const registerOrder = useCallback((params: RegisterCloseOrderParams) => {
+    console.log('[useCreateCloseOrder] registerOrder called', {
+      connectedAddress,
+      positionOwner: params.positionOwner,
+    });
+
     // Reset state
     setResult(null);
     setError(null);
     setCurrentParams(params);
 
+    // Pre-flight check: verify connected wallet matches position owner
+    if (!connectedAddress) {
+      console.log('[useCreateCloseOrder] No wallet connected');
+      setError(new Error('No wallet connected. Please connect your wallet first.'));
+      return;
+    }
+
+    if (connectedAddress.toLowerCase() !== params.positionOwner.toLowerCase()) {
+      console.log('[useCreateCloseOrder] Wallet mismatch detected!', {
+        connected: connectedAddress.toLowerCase(),
+        owner: params.positionOwner.toLowerCase(),
+      });
+      setError(new Error(
+        `Wrong wallet connected. The position is owned by ${params.positionOwner}, ` +
+        `but you are connected with ${connectedAddress}. ` +
+        `Please switch to the wallet that owns this position.`
+      ));
+      return;
+    }
+
+    console.log('[useCreateCloseOrder] Wallet check passed, calling writeContract');
+
+    // Map TriggerMode string to contract enum value
+    // Contract: LOWER_ONLY = 0, UPPER_ONLY = 1, BOTH = 2
+    const triggerModeMap: Record<string, number> = {
+      'LOWER': 0,
+      'UPPER': 1,
+      'BOTH': 2,
+    };
+    const mode = triggerModeMap[params.triggerMode] ?? 0;
+
+    // Build the CloseConfig struct for logging
+    const closeConfig = {
+      pool: params.poolAddress,
+      tokenId: params.nftId.toString(),
+      sqrtPriceX96Lower: params.sqrtPriceX96Lower.toString(),
+      sqrtPriceX96Upper: params.sqrtPriceX96Upper.toString(),
+      mode,
+      payout: params.payoutAddress,
+      operator: params.operatorAddress,
+      validUntil: params.validUntil.toString(),
+      slippageBps: params.slippageBps,
+    };
+
+    console.log('[useCreateCloseOrder] writeContract params:', {
+      contractAddress: params.contractAddress,
+      chainId: params.chainId,
+      functionName: 'registerClose',
+      closeConfig,  // Single struct argument
+    });
+
     // Call writeContract with registerClose function
-    // New contract signature includes operator parameter
+    // Contract takes CloseConfig struct as a single tuple argument
     writeContract({
       address: params.contractAddress,
       abi: POSITION_CLOSER_ABI,
       functionName: 'registerClose',
       args: [
-        params.poolAddress,           // pool address
-        params.nftId,                  // tokenId
-        params.sqrtPriceX96Lower,      // sqrtPriceX96Lower
-        params.sqrtPriceX96Upper,      // sqrtPriceX96Upper
-        params.payoutAddress,          // payout
-        params.operatorAddress,        // operator (user's autowallet)
-        params.validUntil,             // validUntil
-        params.slippageBps,            // slippageBps
+        {
+          pool: params.poolAddress,
+          tokenId: params.nftId,
+          sqrtPriceX96Lower: params.sqrtPriceX96Lower,
+          sqrtPriceX96Upper: params.sqrtPriceX96Upper,
+          mode,
+          payout: params.payoutAddress,
+          operator: params.operatorAddress,
+          validUntil: params.validUntil,
+          slippageBps: params.slippageBps,
+        },
       ],
       chainId: params.chainId,
     });
-  }, [writeContract]);
+  }, [writeContract, connectedAddress]);
 
   // Reset function
   const reset = useCallback(() => {

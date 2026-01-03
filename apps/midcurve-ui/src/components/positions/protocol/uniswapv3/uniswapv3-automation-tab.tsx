@@ -37,6 +37,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   const poolConfig = position.pool.config as { address: string; chainId: number };
   const poolState = position.pool.state as { sqrtPriceX96: string };
   const positionConfig = position.config as { nftId: number };
+  const positionState = position.state as { ownerAddress: string };
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
 
@@ -103,6 +104,8 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         quoteTokenDecimals={quoteToken.decimals}
         baseTokenSymbol={baseToken.symbol}
         baseTokenDecimals={baseToken.decimals}
+        baseTokenAddress={baseTokenConfig.address}
+        quoteTokenAddress={quoteTokenConfig.address}
         onCreateOrder={() => setIsCloseOrderModalOpen(true)}
       />
 
@@ -116,6 +119,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         contractAddress={contractAddress!}
         positionManager={positionManager!}
         nftId={BigInt(positionConfig.nftId)}
+        positionOwner={positionState.ownerAddress as Address}
         baseToken={{
           address: baseTokenConfig.address,
           symbol: baseToken.symbol,
