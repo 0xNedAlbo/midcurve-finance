@@ -10,7 +10,14 @@
     "build": "pnpm compile && next build",
     "start": "next start -p 3004",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "forge:build": "forge build",
+    "forge:test": "forge test",
+    "forge:deploy:arbitrum": "forge script script/Deploy.s.sol --rpc-url arbitrum --broadcast --verify",
+    "forge:deploy:base": "forge script script/Deploy.s.sol --rpc-url base --broadcast --verify",
+    "forge:deploy:mainnet": "forge script script/Deploy.s.sol --rpc-url mainnet --broadcast --verify",
+    "forge:deploy:optimism": "forge script script/Deploy.s.sol --rpc-url optimism --broadcast --verify",
+    "forge:deploy:polygon": "forge script script/Deploy.s.sol --rpc-url polygon --broadcast --verify"
   },
   "dependencies": {
     "@types/node": "^20",

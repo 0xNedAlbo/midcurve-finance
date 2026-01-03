@@ -60,3 +60,8 @@ yalc.lock
 *.temp
 .cache/
 temp/
+
+# Foundry
+lib/
+cache/
+broadcast/
