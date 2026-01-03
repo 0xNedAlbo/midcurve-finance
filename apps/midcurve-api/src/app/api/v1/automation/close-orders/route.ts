@@ -65,6 +65,8 @@ const RegisterCloseOrderRequestSchema = z.object({
   triggerMode: z.enum(['LOWER', 'UPPER', 'BOTH']),
   sqrtPriceX96Lower: z.string().optional(),
   sqrtPriceX96Upper: z.string().optional(),
+  priceLowerDisplay: z.string().optional(),
+  priceUpperDisplay: z.string().optional(),
   payoutAddress: z
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid payout address'),
@@ -204,6 +206,8 @@ export async function POST(request: NextRequest): Promise<Response> {
         sqrtPriceX96Upper: data.sqrtPriceX96Upper
           ? BigInt(data.sqrtPriceX96Upper)
           : undefined,
+        priceLowerDisplay: data.priceLowerDisplay,
+        priceUpperDisplay: data.priceUpperDisplay,
         payoutAddress: data.payoutAddress,
         validUntil: new Date(data.validUntil),
         slippageBps: data.slippageBps,

@@ -72,6 +72,16 @@ export interface RegisterCloseOrderInput {
   sqrtPriceX96Upper?: bigint;
 
   /**
+   * Lower price display string (human-readable, for UI)
+   */
+  priceLowerDisplay?: string;
+
+  /**
+   * Upper price display string (human-readable, for UI)
+   */
+  priceUpperDisplay?: string;
+
+  /**
    * Address to receive closed position tokens
    */
   payoutAddress: string;
