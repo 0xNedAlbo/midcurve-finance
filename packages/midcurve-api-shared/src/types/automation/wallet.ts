@@ -101,6 +101,34 @@ export interface GetAutowalletResponseData {
 export type GetAutowalletResponse = ApiResponse<GetAutowalletResponseData>;
 
 // =============================================================================
+// CREATE AUTOWALLET
+// =============================================================================
+
+/**
+ * POST /api/v1/automation/wallet - Response
+ *
+ * Create user's automation wallet.
+ */
+export interface CreateAutowalletResponseData {
+  /**
+   * Automation wallet address
+   */
+  address: string;
+
+  /**
+   * Wallet label
+   */
+  label: string;
+
+  /**
+   * Creation timestamp
+   */
+  createdAt: string;
+}
+
+export type CreateAutowalletResponse = ApiResponse<CreateAutowalletResponseData>;
+
+// =============================================================================
 // REQUEST REFUND
 // =============================================================================
 
@@ -108,6 +136,8 @@ export type GetAutowalletResponse = ApiResponse<GetAutowalletResponseData>;
  * POST /api/v1/automation/wallet/refund - Request body
  *
  * Request refund of gas from autowallet back to user's wallet.
+ * The destination address is determined by the signer from the database
+ * (user's primary wallet), not passed in the request.
  */
 export interface RefundAutowalletRequest {
   /**
@@ -119,11 +149,6 @@ export interface RefundAutowalletRequest {
    * Amount to refund in wei (as string for bigint)
    */
   amount: string;
-
-  /**
-   * Destination address (user's wallet)
-   */
-  toAddress: string;
 }
 
 /**
@@ -138,10 +163,6 @@ export const RefundAutowalletRequestSchema = z.object({
   amount: z
     .string()
     .regex(/^\d+$/, 'Amount must be a numeric string (wei)'),
-
-  toAddress: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address'),
 });
 
 /**

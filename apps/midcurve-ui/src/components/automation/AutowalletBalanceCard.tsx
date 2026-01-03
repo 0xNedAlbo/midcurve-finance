@@ -2,26 +2,40 @@
  * Autowallet Balance Card
  *
  * Displays the balance for a single chain with fund and refund buttons.
+ * Fetches balance client-side using wagmi.
  */
 
-import { formatUnits } from 'viem';
+import { useBalance } from 'wagmi';
 import { getChainMetadataByChainId } from '@/config/chains';
-import type { AutowalletChainBalance } from '@midcurve/api-shared';
+import { formatCompactValue } from '@/lib/fraction-format';
 
 interface AutowalletBalanceCardProps {
-  balance: AutowalletChainBalance;
+  chainId: number;
+  autowalletAddress: `0x${string}`;
+  symbol: string;
   onFund: () => void;
-  onRefund: () => void;
+  onRefund: (balance: string) => void;
 }
 
 export function AutowalletBalanceCard({
-  balance,
+  chainId,
+  autowalletAddress,
+  symbol,
   onFund,
   onRefund,
 }: AutowalletBalanceCardProps) {
-  const chainMetadata = getChainMetadataByChainId(balance.chainId);
-  const formattedBalance = formatUnits(BigInt(balance.balance), balance.decimals);
-  const hasBalance = BigInt(balance.balance) > 0n;
+  const chainMetadata = getChainMetadataByChainId(chainId);
+
+  // Fetch balance client-side
+  const { data: balanceData, isLoading } = useBalance({
+    address: autowalletAddress,
+    chainId,
+  });
+
+  const hasBalance = balanceData && balanceData.value > 0n;
+  const formattedBalance = balanceData
+    ? formatCompactValue(balanceData.value, balanceData.decimals)
+    : '0';
 
   return (
     <div className="flex items-center justify-between py-3 px-4 bg-slate-800/50 rounded-lg border border-slate-700/50">
@@ -33,10 +47,14 @@ export function AutowalletBalanceCard({
 
         <div>
           <p className="text-sm font-medium text-slate-200">
-            {chainMetadata?.shortName || `Chain ${balance.chainId}`}
+            {chainMetadata?.shortName || `Chain ${chainId}`}
           </p>
           <p className="text-xs text-slate-400">
-            {parseFloat(formattedBalance).toFixed(6)} {balance.symbol}
+            {isLoading ? (
+              <span className="text-slate-500">Loading...</span>
+            ) : (
+              `${formattedBalance} ${symbol}`
+            )}
           </p>
         </div>
       </div>
@@ -51,7 +69,7 @@ export function AutowalletBalanceCard({
 
         {hasBalance && (
           <button
-            onClick={onRefund}
+            onClick={() => onRefund(balanceData?.value.toString() ?? '0')}
             className="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-slate-300 hover:bg-slate-700/50 rounded transition-colors cursor-pointer"
           >
             Refund

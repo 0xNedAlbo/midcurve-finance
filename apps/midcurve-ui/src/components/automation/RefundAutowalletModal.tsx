@@ -8,9 +8,9 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, ExternalLink, Check, AlertCircle } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
-import { useAccount } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
 import { getChainMetadataByChainId } from '@/config/chains';
-import { useRefundAutowallet, useRefundStatus } from '@/hooks/automation';
+import { useRefundAutowallet, useRefundStatus, autowalletQueryKey } from '@/hooks/automation';
 
 interface RefundAutowalletModalProps {
   isOpen: boolean;
@@ -18,6 +18,7 @@ interface RefundAutowalletModalProps {
   chainId: number;
   currentBalance: string; // in wei
   symbol: string;
+  autowalletAddress: string;
 }
 
 export function RefundAutowalletModal({
@@ -26,10 +27,15 @@ export function RefundAutowalletModal({
   chainId,
   currentBalance,
   symbol,
+  autowalletAddress,
 }: RefundAutowalletModalProps) {
   const [amount, setAmount] = useState('');
   const [requestId, setRequestId] = useState<string | null>(null);
-  const { address: userAddress } = useAccount();
+  const [initialResponse, setInitialResponse] = useState<{
+    operationStatus: string;
+    txHash?: string;
+  } | null>(null);
+  const queryClient = useQueryClient();
 
   const chainMetadata = getChainMetadataByChainId(chainId);
 
@@ -40,24 +46,49 @@ export function RefundAutowalletModal({
     error: requestError,
   } = useRefundAutowallet();
 
-  // Poll for refund status
-  const { data: refundStatus } = useRefundStatus(requestId, !!requestId);
+  // Only poll if initial response was 'pending' (not completed immediately)
+  const shouldPoll = !!requestId && initialResponse?.operationStatus === 'pending';
+  const { data: refundStatus } = useRefundStatus(requestId, shouldPoll);
 
   const maxBalance = formatUnits(BigInt(currentBalance), 18);
-  const isComplete = refundStatus?.operationStatus === 'completed';
-  const isFailed = refundStatus?.operationStatus === 'failed';
-  const isProcessing = requestId && !isComplete && !isFailed;
+
+  // Use polled status if available, otherwise use initial response
+  const currentStatus = refundStatus?.operationStatus ?? initialResponse?.operationStatus;
+  const currentTxHash = refundStatus?.txHash ?? initialResponse?.txHash;
+
+  const isComplete = currentStatus === 'completed';
+  const isFailed = currentStatus === 'failed';
+  const isProcessing = !!requestId && !isComplete && !isFailed;
 
   // Reset when modal closes
   useEffect(() => {
     if (!isOpen) {
       setAmount('');
       setRequestId(null);
+      setInitialResponse(null);
     }
   }, [isOpen]);
 
+  // Invalidate balance queries when refund completes
+  useEffect(() => {
+    if (isComplete) {
+      // Invalidate autowallet query
+      queryClient.invalidateQueries({ queryKey: autowalletQueryKey });
+      // Invalidate wagmi balance queries for the autowallet address
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === 'balance' &&
+          typeof query.queryKey[1] === 'object' &&
+          query.queryKey[1] !== null &&
+          'address' in query.queryKey[1] &&
+          (query.queryKey[1] as { address?: string }).address?.toLowerCase() ===
+            autowalletAddress.toLowerCase(),
+      });
+    }
+  }, [isComplete, autowalletAddress, queryClient]);
+
   const handleRefund = () => {
-    if (!amount || parseFloat(amount) <= 0 || !userAddress) return;
+    if (!amount || parseFloat(amount) <= 0) return;
 
     const value = parseUnits(amount, 18);
 
@@ -65,11 +96,15 @@ export function RefundAutowalletModal({
       {
         chainId,
         amount: value.toString(),
-        toAddress: userAddress,
       },
       {
         onSuccess: (data) => {
           setRequestId(data.requestId);
+          // Store the initial response - if already completed, no need to poll
+          setInitialResponse({
+            operationStatus: data.operationStatus,
+            txHash: data.txHash,
+          });
         },
       }
     );
@@ -123,16 +158,10 @@ export function RefundAutowalletModal({
           </div>
 
           {/* Destination */}
-          <div>
-            <label className="block text-sm font-medium text-slate-400 mb-2">
-              Refund to
-            </label>
-            <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
-              <code className="text-sm text-slate-200 font-mono">
-                {userAddress ? `${userAddress.slice(0, 10)}...${userAddress.slice(-8)}` : 'Not connected'}
-              </code>
-              <p className="text-xs text-slate-500 mt-1">Your connected wallet</p>
-            </div>
+          <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
+            <p className="text-sm text-slate-300">
+              Refunds are sent to your primary wallet address.
+            </p>
           </div>
 
           {/* Amount input */}
@@ -189,9 +218,9 @@ export function RefundAutowalletModal({
                 <Check className="w-4 h-4" />
                 <span>Refund completed!</span>
               </div>
-              {refundStatus?.txHash && (
+              {currentTxHash && (
                 <a
-                  href={`${chainMetadata?.explorer}/tx/${refundStatus.txHash}`}
+                  href={`${chainMetadata?.explorer}/tx/${currentTxHash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 mt-2 text-xs text-blue-400 hover:text-blue-300"
@@ -234,8 +263,7 @@ export function RefundAutowalletModal({
                 parseFloat(amount) <= 0 ||
                 parseFloat(amount) > parseFloat(maxBalance) ||
                 isRequesting ||
-                isProcessing ||
-                !userAddress
+                isProcessing
               }
               className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >

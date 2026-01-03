@@ -53,6 +53,8 @@ export interface UpdateBoundsParams extends BaseUpdateParams {
   updateType: 'bounds';
   sqrtPriceX96Lower: bigint;
   sqrtPriceX96Upper: bigint;
+  /** Trigger mode: 'LOWER', 'UPPER', or 'BOTH' */
+  triggerMode: 'LOWER' | 'UPPER' | 'BOTH';
 }
 
 /**
@@ -185,15 +187,25 @@ export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
 
     // Call the appropriate contract function based on update type
     switch (params.updateType) {
-      case 'bounds':
+      case 'bounds': {
+        // Map TriggerMode string to contract enum value
+        // Contract: LOWER_ONLY = 0, UPPER_ONLY = 1, BOTH = 2
+        const triggerModeMap: Record<string, number> = {
+          'LOWER': 0,
+          'UPPER': 1,
+          'BOTH': 2,
+        };
+        const mode = triggerModeMap[params.triggerMode] ?? 0;
+
         writeContract({
           address: params.contractAddress,
           abi: POSITION_CLOSER_ABI,
           functionName: 'setCloseBounds',
-          args: [params.closeId, params.sqrtPriceX96Lower, params.sqrtPriceX96Upper],
+          args: [params.closeId, params.sqrtPriceX96Lower, params.sqrtPriceX96Upper, mode],
           chainId: params.chainId,
         });
         break;
+      }
 
       case 'slippage':
         writeContract({

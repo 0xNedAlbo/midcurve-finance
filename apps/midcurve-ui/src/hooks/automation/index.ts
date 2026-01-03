@@ -53,6 +53,7 @@ export { useOperatorApproval, type UseOperatorApprovalResult } from './useOperat
 // Wallet (autowallet)
 export {
   useAutowallet,
+  useCreateAutowallet,
   useRefundAutowallet,
   useRefundStatus,
   autowalletQueryKey,

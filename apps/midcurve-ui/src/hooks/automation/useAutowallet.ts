@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { automationApi } from '@/lib/api-client';
 import type {
   GetAutowalletResponseData,
+  CreateAutowalletResponseData,
   RefundAutowalletRequest,
   RefundAutowalletResponseData,
 } from '@midcurve/api-shared';
@@ -33,6 +34,27 @@ export function useAutowallet() {
     },
     staleTime: 30_000, // Consider fresh for 30 seconds
     refetchInterval: 60_000, // Refetch every minute
+  });
+}
+
+/**
+ * Hook to create the user's automation wallet
+ *
+ * Creates a new automation wallet for the authenticated user.
+ * Each user can only have one automation wallet.
+ */
+export function useCreateAutowallet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (): Promise<CreateAutowalletResponseData> => {
+      const response = await automationApi.createWallet();
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate wallet data to refresh and show the new wallet
+      queryClient.invalidateQueries({ queryKey: autowalletQueryKey });
+    },
   });
 }
 

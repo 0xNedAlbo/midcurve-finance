@@ -68,6 +68,17 @@ export function FundAutowalletModal({
     if (isConfirmed) {
       // Invalidate autowallet query to refresh balances
       queryClient.invalidateQueries({ queryKey: autowalletQueryKey });
+      // Invalidate wagmi balance queries for the autowallet address
+      // This ensures the AutowalletBalanceCard components refetch their balances
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === 'balance' &&
+          typeof query.queryKey[1] === 'object' &&
+          query.queryKey[1] !== null &&
+          'address' in query.queryKey[1] &&
+          (query.queryKey[1] as { address?: string }).address?.toLowerCase() ===
+            autowalletAddress.toLowerCase(),
+      });
     }
     setAmount('');
     onClose();

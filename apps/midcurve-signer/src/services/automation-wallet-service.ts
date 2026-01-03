@@ -38,12 +38,12 @@ interface KeyManagementConfig {
  */
 function getKeyManagementConfig(): KeyManagementConfig {
   const useLocalKeys = process.env.SIGNER_USE_LOCAL_KEYS === 'true';
-  const encryptionPassword = process.env.SIGNER_KEY_ENCRYPTION_PASSWORD;
+  const encryptionPassword = process.env.SIGNER_LOCAL_ENCRYPTION_KEY;
   const kmsKeyId = process.env.AWS_KMS_KEY_ID;
 
   if (useLocalKeys && !encryptionPassword) {
     throw new AutomationWalletServiceError(
-      'SIGNER_KEY_ENCRYPTION_PASSWORD is required when SIGNER_USE_LOCAL_KEYS=true',
+      'SIGNER_LOCAL_ENCRYPTION_KEY is required when SIGNER_USE_LOCAL_KEYS=true',
       'CONFIGURATION_ERROR',
       500
     );

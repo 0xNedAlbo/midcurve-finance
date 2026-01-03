@@ -184,6 +184,7 @@ import type {
   ListSharedContractsResponse,
   // Wallet
   GetAutowalletResponse,
+  CreateAutowalletResponse,
   RefundAutowalletRequest,
   RefundAutowalletResponse,
   GetRefundStatusResponse,
@@ -286,6 +287,13 @@ export const automationApi = {
    */
   getWallet() {
     return apiClient.get<GetAutowalletResponse['data']>('/api/v1/automation/wallet');
+  },
+
+  /**
+   * Create user's automation wallet
+   */
+  createWallet() {
+    return apiClient.post<CreateAutowalletResponse['data']>('/api/v1/automation/wallet', {});
   },
 
   /**

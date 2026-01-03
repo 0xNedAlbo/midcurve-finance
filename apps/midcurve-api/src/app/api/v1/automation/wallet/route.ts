@@ -2,6 +2,7 @@
  * Automation Wallet API Endpoint
  *
  * GET /api/v1/automation/wallet - Get user's automation wallet info
+ * POST /api/v1/automation/wallet - Create user's automation wallet
  *
  * Returns the user's autowallet address. Balances are fetched client-side
  * by the UI using wagmi/viem since:
@@ -17,6 +18,7 @@ import {
   createErrorResponse,
   ApiErrorCode,
   type GetAutowalletResponse,
+  type CreateAutowalletResponse,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse } from '@/lib/cors';
@@ -115,6 +117,97 @@ export async function GET(request: NextRequest): Promise<Response> {
       const errorResponse = createErrorResponse(
         ApiErrorCode.INTERNAL_SERVER_ERROR,
         'Failed to retrieve automation wallet'
+      );
+      apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+      return NextResponse.json(errorResponse, { status: 500 });
+    }
+  });
+}
+
+/**
+ * POST /api/v1/automation/wallet
+ *
+ * Create user's automation wallet.
+ * Returns 409 if wallet already exists.
+ */
+export async function POST(request: NextRequest): Promise<Response> {
+  return withSessionAuth(request, async (user, requestId) => {
+    const startTime = Date.now();
+
+    try {
+      // Log business operation
+      apiLog.businessOperation(
+        apiLogger,
+        requestId,
+        'create',
+        'autowallet',
+        user.id,
+        {}
+      );
+
+      // Call signer service to create wallet
+      const signerResponse = await fetch(
+        `${SIGNER_URL}/api/wallets/automation`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${SIGNER_INTERNAL_API_KEY}`,
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            label: 'Automation Wallet',
+          }),
+        }
+      );
+
+      // Handle conflict (wallet already exists)
+      if (signerResponse.status === 409) {
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.CONFLICT,
+          'Automation wallet already exists'
+        );
+        apiLog.requestEnd(apiLogger, requestId, 409, Date.now() - startTime);
+        return NextResponse.json(errorResponse, { status: 409 });
+      }
+
+      if (!signerResponse.ok) {
+        const errorText = await signerResponse.text();
+        apiLogger.error({
+          requestId,
+          status: signerResponse.status,
+          error: errorText,
+        }, 'Failed to create autowallet via signer');
+
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.INTERNAL_SERVER_ERROR,
+          'Failed to create automation wallet'
+        );
+        apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+        return NextResponse.json(errorResponse, { status: 500 });
+      }
+
+      const signerData = await signerResponse.json();
+
+      // Build response
+      const response: CreateAutowalletResponse = createSuccessResponse({
+        address: signerData.wallet.walletAddress,
+        label: signerData.wallet.label,
+        createdAt: signerData.wallet.createdAt,
+      });
+
+      apiLog.requestEnd(apiLogger, requestId, 201, Date.now() - startTime);
+      return NextResponse.json(response, { status: 201 });
+    } catch (error) {
+      apiLog.methodError(
+        apiLogger,
+        'POST /api/v1/automation/wallet',
+        error,
+        { requestId }
+      );
+      const errorResponse = createErrorResponse(
+        ApiErrorCode.INTERNAL_SERVER_ERROR,
+        'Failed to create automation wallet'
       );
       apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
       return NextResponse.json(errorResponse, { status: 500 });

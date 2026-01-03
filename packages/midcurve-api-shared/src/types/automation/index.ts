@@ -64,6 +64,9 @@ export {
   // Get
   type GetAutowalletResponseData,
   type GetAutowalletResponse,
+  // Create
+  type CreateAutowalletResponseData,
+  type CreateAutowalletResponse,
   // Refund
   type RefundAutowalletRequest,
   RefundAutowalletRequestSchema,

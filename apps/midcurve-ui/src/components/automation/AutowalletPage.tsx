@@ -9,14 +9,13 @@
  */
 
 import { useState } from 'react';
-import { Copy, Check, Wallet, ArrowLeft, RefreshCw } from 'lucide-react';
+import { Copy, Check, Wallet, ArrowLeft, RefreshCw, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useAutowallet } from '@/hooks/automation';
+import { useAutowallet, useCreateAutowallet } from '@/hooks/automation';
 import { ALL_EVM_CHAINS, CHAIN_METADATA } from '@/config/chains';
 import { AutowalletBalanceCard } from './AutowalletBalanceCard';
 import { FundAutowalletModal } from './FundAutowalletModal';
 import { RefundAutowalletModal } from './RefundAutowalletModal';
-import type { AutowalletChainBalance } from '@midcurve/api-shared';
 
 /**
  * Get native token symbol for a chain
@@ -35,6 +34,7 @@ function getNativeSymbol(chainId: number): string {
 export function AutowalletPage() {
   const navigate = useNavigate();
   const { data: wallet, isLoading, refetch, isRefetching } = useAutowallet();
+  const { mutate: createWallet, isPending: isCreating } = useCreateAutowallet();
 
   const [copied, setCopied] = useState(false);
   const [fundModalState, setFundModalState] = useState<{ isOpen: boolean; chainId: number | null }>({
@@ -64,39 +64,25 @@ export function AutowalletPage() {
     setFundModalState({ isOpen: true, chainId });
   };
 
-  const handleRefund = (balance: AutowalletChainBalance) => {
+  const handleRefund = (chainId: number, balance: string, symbol: string) => {
     setRefundModalState({
       isOpen: true,
-      chainId: balance.chainId,
-      balance: balance.balance,
-      symbol: balance.symbol,
+      chainId,
+      balance,
+      symbol,
     });
   };
 
-  // Build balances map for easy lookup
-  const balancesByChain = new Map<number, AutowalletChainBalance>();
-  wallet?.balances?.forEach((b) => {
-    balancesByChain.set(b.chainId, b);
-  });
-
-  // Create balance entries for all chains
-  const allChainBalances: AutowalletChainBalance[] = ALL_EVM_CHAINS.map((slug) => {
-    const chainId = CHAIN_METADATA[slug].chainId;
-    const existing = balancesByChain.get(chainId);
-    return (
-      existing || {
-        chainId,
-        balance: '0',
-        symbol: getNativeSymbol(chainId),
-        decimals: 18,
-      }
-    );
-  });
+  // Get all supported chain IDs with their symbols
+  const allChains = ALL_EVM_CHAINS.map((slug) => ({
+    chainId: CHAIN_METADATA[slug].chainId,
+    symbol: getNativeSymbol(CHAIN_METADATA[slug].chainId),
+  }));
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* Header */}
-      <div className="bg-slate-900/50 border-b border-slate-800/50">
+      <div className="bg-slate-800/50 border-b border-slate-700/50">
         <div className="max-w-4xl mx-auto px-4 py-6">
           <button
             onClick={() => navigate(-1)}
@@ -138,19 +124,32 @@ export function AutowalletPage() {
           </div>
         ) : !wallet?.address ? (
           <div className="text-center py-12">
-            <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto mb-4">
-              <Wallet className="w-8 h-8 text-slate-600" />
+            <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center mx-auto mb-4">
+              <Wallet className="w-8 h-8 text-slate-500" />
             </div>
             <h2 className="text-lg font-medium text-white mb-2">No Automation Wallet</h2>
-            <p className="text-sm text-slate-400 max-w-md mx-auto">
-              Your automation wallet will be created automatically when you set up your first
-              close order.
+            <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
+              Create an automation wallet to enable automated close orders on your positions.
             </p>
+            <button
+              onClick={() => createWallet()}
+              disabled={isCreating}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Automation Wallet'
+              )}
+            </button>
           </div>
         ) : (
           <div className="space-y-6">
             {/* Wallet Address */}
-            <div className="bg-slate-900/50 rounded-xl border border-slate-800/50 p-6">
+            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
               <h2 className="text-sm font-medium text-slate-400 mb-3">Wallet Address</h2>
               <div className="flex items-center gap-3">
                 <code className="flex-1 text-sm font-mono text-white bg-slate-800/50 px-4 py-3 rounded-lg overflow-hidden text-ellipsis">
@@ -170,15 +169,17 @@ export function AutowalletPage() {
             </div>
 
             {/* Balances */}
-            <div className="bg-slate-900/50 rounded-xl border border-slate-800/50 p-6">
+            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
               <h2 className="text-sm font-medium text-slate-400 mb-4">Balances by Chain</h2>
               <div className="space-y-2">
-                {allChainBalances.map((balance) => (
+                {allChains.map((chain) => (
                   <AutowalletBalanceCard
-                    key={balance.chainId}
-                    balance={balance}
-                    onFund={() => handleFund(balance.chainId)}
-                    onRefund={() => handleRefund(balance)}
+                    key={chain.chainId}
+                    chainId={chain.chainId}
+                    autowalletAddress={wallet.address as `0x${string}`}
+                    symbol={chain.symbol}
+                    onFund={() => handleFund(chain.chainId)}
+                    onRefund={(balance) => handleRefund(chain.chainId, balance, chain.symbol)}
                   />
                 ))}
               </div>
@@ -186,7 +187,7 @@ export function AutowalletPage() {
 
             {/* Recent Activity */}
             {wallet.recentActivity && wallet.recentActivity.length > 0 && (
-              <div className="bg-slate-900/50 rounded-xl border border-slate-800/50 p-6">
+              <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
                 <h2 className="text-sm font-medium text-slate-400 mb-4">Recent Activity</h2>
                 <div className="space-y-3">
                   {wallet.recentActivity.map((activity, index) => (
@@ -235,7 +236,7 @@ export function AutowalletPage() {
       )}
 
       {/* Refund Modal */}
-      {refundModalState.chainId && (
+      {refundModalState.chainId && wallet?.address && (
         <RefundAutowalletModal
           isOpen={refundModalState.isOpen}
           onClose={() =>
@@ -244,6 +245,7 @@ export function AutowalletPage() {
           chainId={refundModalState.chainId}
           currentBalance={refundModalState.balance}
           symbol={refundModalState.symbol}
+          autowalletAddress={wallet.address}
         />
       )}
     </div>
