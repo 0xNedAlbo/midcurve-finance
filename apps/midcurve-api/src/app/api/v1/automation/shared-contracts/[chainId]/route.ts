@@ -14,7 +14,7 @@ import {
   ApiErrorCode,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { createPreflightResponse } from '@/lib/cors';
+import { createPreflightResponse, applyCorsHeaders } from '@/lib/cors';
 import {
   isChainSupported,
   getSharedContractConfig,
@@ -56,6 +56,7 @@ export async function GET(
   { params }: RouteParams
 ): Promise<Response> {
   const requestId = request.headers.get('x-request-id') || 'unknown';
+  const origin = request.headers.get('origin');
   const startTime = Date.now();
 
   try {
@@ -71,7 +72,10 @@ export async function GET(
         'Invalid chainId: must be a positive integer'
       );
       apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-      return NextResponse.json(errorResponse, { status: 400 });
+      return applyCorsHeaders(
+        NextResponse.json(errorResponse, { status: 400 }),
+        origin
+      );
     }
 
     // Check if chain is supported for UniswapV3
@@ -81,7 +85,10 @@ export async function GET(
         `No shared contract available for chain ${chainId}`
       );
       apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
-      return NextResponse.json(errorResponse, { status: 404 });
+      return applyCorsHeaders(
+        NextResponse.json(errorResponse, { status: 404 }),
+        origin
+      );
     }
 
     // Get the contract config
@@ -94,7 +101,10 @@ export async function GET(
 
     const response = createSuccessResponse(result);
     apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
-    return NextResponse.json(response, { status: 200 });
+    return applyCorsHeaders(
+      NextResponse.json(response, { status: 200 }),
+      origin
+    );
   } catch (error) {
     apiLog.methodError(
       apiLogger,
@@ -107,6 +117,9 @@ export async function GET(
       'Failed to retrieve shared contract'
     );
     apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
-    return NextResponse.json(errorResponse, { status: 500 });
+    return applyCorsHeaders(
+      NextResponse.json(errorResponse, { status: 500 }),
+      origin
+    );
   }
 }
