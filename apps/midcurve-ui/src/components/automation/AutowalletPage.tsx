@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { Copy, Check, Wallet, ArrowLeft, RefreshCw, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAutowallet, useCreateAutowallet } from '@/hooks/automation';
-import { ALL_EVM_CHAINS, CHAIN_METADATA } from '@/config/chains';
+import { getAllUniswapV3Chains } from '@/config/protocols/uniswapv3';
 import { AutowalletBalanceCard } from './AutowalletBalanceCard';
 import { FundAutowalletModal } from './FundAutowalletModal';
 import { RefundAutowalletModal } from './RefundAutowalletModal';
@@ -20,15 +20,9 @@ import { RefundAutowalletModal } from './RefundAutowalletModal';
 /**
  * Get native token symbol for a chain
  */
-function getNativeSymbol(chainId: number): string {
-  switch (chainId) {
-    case 56:
-      return 'BNB';
-    case 137:
-      return 'MATIC';
-    default:
-      return 'ETH';
-  }
+function getNativeSymbol(_chainId: number): string {
+  // All supported chains (Ethereum, Arbitrum, Base) use ETH
+  return 'ETH';
 }
 
 export function AutowalletPage() {
@@ -73,10 +67,10 @@ export function AutowalletPage() {
     });
   };
 
-  // Get all supported chain IDs with their symbols
-  const allChains = ALL_EVM_CHAINS.map((slug) => ({
-    chainId: CHAIN_METADATA[slug].chainId,
-    symbol: getNativeSymbol(CHAIN_METADATA[slug].chainId),
+  // Get all supported chain IDs with their symbols (Uniswap V3 supported chains only)
+  const allChains = getAllUniswapV3Chains().map((chain) => ({
+    chainId: chain.chainId,
+    symbol: getNativeSymbol(chain.chainId),
   }));
 
   return (

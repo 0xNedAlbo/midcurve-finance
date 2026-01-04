@@ -5,22 +5,16 @@ import { Plus, ChevronDown, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
 import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
-
-// Map chain names to chain IDs
-const CHAIN_IDS = {
-  ethereum: 1,
-  arbitrum: 42161,
-  base: 8453,
-  bsc: 56,
-  polygon: 137,
-  optimism: 10,
-} as const;
+import {
+  getAllUniswapV3Chains,
+  type UniswapV3ChainSlug,
+} from "@/config/protocols/uniswapv3";
 
 export function CreatePositionDropdown() {
   // Dropdown state
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showNftForm, setShowNftForm] = useState(false);
-  const [selectedChain, setSelectedChain] = useState<keyof typeof CHAIN_IDS>("ethereum");
+  const [selectedChain, setSelectedChain] = useState<UniswapV3ChainSlug>("ethereum");
   const [nftId, setNftId] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
@@ -63,7 +57,9 @@ export function CreatePositionDropdown() {
     setImportError(null);
     setImportSuccess(null);
 
-    const chainId = CHAIN_IDS[selectedChain];
+    const chains = getAllUniswapV3Chains();
+    const chainMetadata = chains.find((c) => c.slug === selectedChain);
+    const chainId = chainMetadata?.chainId ?? 1;
 
     importMutation.mutate(
       { chainId, nftId: nftId.trim() },
@@ -146,15 +142,14 @@ export function CreatePositionDropdown() {
                     </label>
                     <select
                       value={selectedChain}
-                      onChange={(e) => setSelectedChain(e.target.value as keyof typeof CHAIN_IDS)}
+                      onChange={(e) => setSelectedChain(e.target.value as UniswapV3ChainSlug)}
                       className="w-full px-2 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                     >
-                      <option value="ethereum">Ethereum</option>
-                      <option value="arbitrum">Arbitrum</option>
-                      <option value="base">Base</option>
-                      <option value="bsc">BNB Smart Chain</option>
-                      <option value="polygon">Polygon</option>
-                      <option value="optimism">Optimism</option>
+                      {getAllUniswapV3Chains().map((chain) => (
+                        <option key={chain.slug} value={chain.slug}>
+                          {chain.shortName}
+                        </option>
+                      ))}
                     </select>
                   </div>
 

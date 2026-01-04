@@ -5,17 +5,10 @@ import { useState } from "react";
 import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
 import { StrategyDeployWizard } from "../strategies/wizard/strategy-deploy-wizard";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
-
-const CHAIN_IDS = {
-  ethereum: 1,
-  arbitrum: 42161,
-  base: 8453,
-  bsc: 56,
-  polygon: 137,
-  optimism: 10,
-} as const;
-
-type ChainKey = keyof typeof CHAIN_IDS;
+import {
+  getAllUniswapV3Chains,
+  type UniswapV3ChainSlug,
+} from "@/config/protocols/uniswapv3";
 
 interface EmptyStateActionsProps {
   onImportSuccess?: (position: any) => void;
@@ -26,7 +19,7 @@ export function EmptyStateActions({
 }: EmptyStateActionsProps) {
   const [showNftForm, setShowNftForm] = useState(false);
   const [nftId, setNftId] = useState("");
-  const [selectedChain, setSelectedChain] = useState("ethereum");
+  const [selectedChain, setSelectedChain] = useState<UniswapV3ChainSlug>("ethereum");
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<{
     chainName: string;
@@ -40,26 +33,6 @@ export function EmptyStateActions({
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isStrategyWizardOpen, setIsStrategyWizardOpen] = useState(false);
 
-  // Helper function to format chain name for display
-  const formatChainName = (chain: string): string => {
-    switch (chain.toLowerCase()) {
-      case "ethereum":
-        return "Ethereum";
-      case "arbitrum":
-        return "Arbitrum";
-      case "base":
-        return "Base";
-      case "bsc":
-        return "BNB Smart Chain";
-      case "polygon":
-        return "Polygon";
-      case "optimism":
-        return "Optimism";
-      default:
-        return chain.charAt(0).toUpperCase() + chain.slice(1);
-    }
-  };
-
   // Real import handler using API
   const handleImportNft = () => {
     if (!nftId.trim()) return;
@@ -67,7 +40,9 @@ export function EmptyStateActions({
     setImportError(null);
     setImportSuccess(null);
 
-    const chainId = CHAIN_IDS[selectedChain as ChainKey];
+    const chains = getAllUniswapV3Chains();
+    const chainMetadata = chains.find((c) => c.slug === selectedChain);
+    const chainId = chainMetadata?.chainId ?? 1;
 
     importMutation.mutate(
       { chainId, nftId: nftId.trim() },
@@ -75,7 +50,7 @@ export function EmptyStateActions({
         onSuccess: (position) => {
           const config = position.config as { chainId: number; nftId: number };
           setImportSuccess({
-            chainName: formatChainName(selectedChain),
+            chainName: chainMetadata?.shortName ?? selectedChain,
             nftId: String(config.nftId),
           });
           onImportSuccess?.(position);
@@ -174,15 +149,14 @@ export function EmptyStateActions({
                   </label>
                   <select
                     value={selectedChain}
-                    onChange={(e) => setSelectedChain(e.target.value)}
+                    onChange={(e) => setSelectedChain(e.target.value as UniswapV3ChainSlug)}
                     className="w-full px-3 py-2 text-sm bg-slate-700 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                   >
-                    <option value="ethereum">Ethereum</option>
-                    <option value="arbitrum">Arbitrum</option>
-                    <option value="base">Base</option>
-                    <option value="bsc">BNB Smart Chain</option>
-                    <option value="polygon">Polygon</option>
-                    <option value="optimism">Optimism</option>
+                    {getAllUniswapV3Chains().map((chain) => (
+                      <option key={chain.slug} value={chain.slug}>
+                        {chain.shortName}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

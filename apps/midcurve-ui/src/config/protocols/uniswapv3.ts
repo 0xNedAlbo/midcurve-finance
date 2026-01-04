@@ -18,8 +18,6 @@ export const UNISWAPV3_SUPPORTED_CHAINS: readonly EvmChainSlug[] = [
   'ethereum',
   'arbitrum',
   'base',
-  'polygon',
-  'optimism',
 ] as const;
 
 /**
@@ -66,9 +64,6 @@ export const UNISWAPV3_FACTORY_ADDRESSES: Partial<
   ethereum: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   arbitrum: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   base: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
-  polygon: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-  optimism: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-  // Note: BSC uses PancakeSwap V3, not Uniswap V3
 };
 
 /**
@@ -82,9 +77,6 @@ export const UNISWAPV3_POSITION_MANAGER_ADDRESSES: Partial<
   ethereum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   arbitrum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   base: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
-  polygon: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  optimism: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  // Note: BSC uses PancakeSwap V3, not Uniswap V3
 };
 
 /**
@@ -194,58 +186,6 @@ export const UNISWAPV3_POPULAR_TOKENS = {
       {
         symbol: 'USDC',
         address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-        name: 'USD Coin',
-      },
-    ],
-  },
-  polygon: {
-    base: [
-      {
-        symbol: 'WETH',
-        address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
-        name: 'Wrapped Ether',
-      },
-      {
-        symbol: 'WBTC',
-        address: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6',
-        name: 'Wrapped Bitcoin',
-      },
-    ],
-    quote: [
-      {
-        symbol: 'WETH',
-        address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
-        name: 'Wrapped Ether',
-      },
-      {
-        symbol: 'USDC',
-        address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
-        name: 'USD Coin',
-      },
-    ],
-  },
-  optimism: {
-    base: [
-      {
-        symbol: 'WETH',
-        address: '0x4200000000000000000000000000000000000006',
-        name: 'Wrapped Ether',
-      },
-      {
-        symbol: 'WBTC',
-        address: '0x68f180fcCe6836688e9084f035309E29Bf0A2095',
-        name: 'Wrapped Bitcoin',
-      },
-    ],
-    quote: [
-      {
-        symbol: 'WETH',
-        address: '0x4200000000000000000000000000000000000006',
-        name: 'Wrapped Ether',
-      },
-      {
-        symbol: 'USDC',
-        address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
         name: 'USD Coin',
       },
     ],
