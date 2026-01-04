@@ -29,3 +29,5 @@ base = "${RPC_URL_BASE}"
 mainnet = "${RPC_URL_ETHEREUM}"
 optimism = "${RPC_URL_OPTIMISM}"
 polygon = "${RPC_URL_POLYGON}"
+# Local Anvil fork (port 8547 to avoid conflict with midcurve-evm Geth on 8545-8546)
+local = "http://localhost:8547"

@@ -5,16 +5,16 @@
  */
 
 import { createPublicClient, http, type PublicClient, type Chain } from 'viem';
-import { mainnet, arbitrum, base, bsc, polygon, optimism } from 'viem/chains';
+import { mainnet, arbitrum, base, bsc, polygon, optimism, localhost } from 'viem/chains';
 import type { SupportedChainId } from './config';
 
 // Re-export for convenience
 export type { SupportedChainId } from './config';
 
 /**
- * Chain configurations with RPC URLs from environment
+ * Production chain configurations
  */
-const CHAIN_CONFIGS: Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }> = {
+const PRODUCTION_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
   1: { chain: mainnet, rpcEnvVar: 'RPC_URL_ETHEREUM' },
   42161: { chain: arbitrum, rpcEnvVar: 'RPC_URL_ARBITRUM' },
   8453: { chain: base, rpcEnvVar: 'RPC_URL_BASE' },
@@ -22,6 +22,25 @@ const CHAIN_CONFIGS: Record<SupportedChainId, { chain: Chain; rpcEnvVar: string 
   137: { chain: polygon, rpcEnvVar: 'RPC_URL_POLYGON' },
   10: { chain: optimism, rpcEnvVar: 'RPC_URL_OPTIMISM' },
 };
+
+/**
+ * Local chain configuration (dev/test only)
+ */
+const LOCAL_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
+  31337: { chain: { ...localhost, id: 31337 }, rpcEnvVar: 'RPC_URL_LOCAL' },
+};
+
+/**
+ * Chain configurations with RPC URLs from environment
+ * Local chain is only included in non-production environments.
+ */
+const CHAIN_CONFIGS: Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }> =
+  process.env.NODE_ENV === 'production'
+    ? (PRODUCTION_CHAIN_CONFIGS as Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }>)
+    : ({ ...PRODUCTION_CHAIN_CONFIGS, ...LOCAL_CHAIN_CONFIGS } as Record<
+        SupportedChainId,
+        { chain: Chain; rpcEnvVar: string }
+      >);
 
 /**
  * Cache for public clients (one per chain)

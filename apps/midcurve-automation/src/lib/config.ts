@@ -129,13 +129,31 @@ export function getAutomationConfig(): AutomationConfig {
 
 /**
  * Supported chain IDs
+ *
+ * Production chains are always available.
+ * Local chain (31337) is only available in non-production environments.
  */
-export const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 56, 137, 10] as const;
-export type SupportedChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
+const PRODUCTION_CHAIN_IDS = [1, 42161, 8453, 56, 137, 10] as const;
+const LOCAL_CHAIN_IDS = [31337] as const;
+
+// Include local chain only in non-production
+export const SUPPORTED_CHAIN_IDS =
+  process.env.NODE_ENV === 'production'
+    ? PRODUCTION_CHAIN_IDS
+    : ([...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const);
+
+export type SupportedChainId =
+  | (typeof PRODUCTION_CHAIN_IDS)[number]
+  | (typeof LOCAL_CHAIN_IDS)[number];
+
+/**
+ * All possible chain IDs (for type checking)
+ */
+const ALL_CHAIN_IDS = [...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const;
 
 /**
  * Check if a chain ID is supported
  */
 export function isSupportedChain(chainId: number): chainId is SupportedChainId {
-  return SUPPORTED_CHAIN_IDS.includes(chainId as SupportedChainId);
+  return (ALL_CHAIN_IDS as readonly number[]).includes(chainId);
 }
