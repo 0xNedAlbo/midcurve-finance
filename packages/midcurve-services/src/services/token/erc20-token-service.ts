@@ -1125,6 +1125,48 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 ...coinGeckoToAdd,
             ];
 
+            // 4. Auto-discover fallback for LOCAL CHAINS only
+            // If user searched by specific address on a local chain and we found nothing,
+            // try on-chain discovery (CoinGecko doesn't index local chains)
+            if (candidates.length === 0 && normalizedAddress && isLocal) {
+                this.logger.debug(
+                    { chainId, address: normalizedAddress },
+                    "No search results on local chain, attempting on-chain discovery"
+                );
+
+                try {
+                    // Attempt to discover token directly from contract
+                    const discovered = await this.discover({
+                        address: normalizedAddress,
+                        chainId,
+                    });
+
+                    // Convert discovered token to search candidate format
+                    const config = discovered.config as { address: string; chainId: number };
+                    candidates.push({
+                        coingeckoId: discovered.coingeckoId || "",
+                        symbol: discovered.symbol,
+                        name: discovered.name,
+                        address: config.address,
+                        chainId: config.chainId,
+                        logoUrl: discovered.logoUrl || undefined,
+                        marketCap: discovered.marketCap || undefined,
+                    });
+
+                    this.logger.info(
+                        { chainId, address: normalizedAddress, symbol: discovered.symbol },
+                        "Token auto-discovered from contract on local chain"
+                    );
+                } catch (error) {
+                    // Discovery failed - not a valid ERC-20 contract or RPC error
+                    // Log and return empty results (expected behavior)
+                    this.logger.debug(
+                        { chainId, address: normalizedAddress, error: (error as Error).message },
+                        "Auto-discovery failed - not a valid ERC-20 contract"
+                    );
+                }
+            }
+
             this.logger.info(
                 {
                     chainId,
