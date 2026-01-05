@@ -201,6 +201,21 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                     return existing;
                 }
 
+                // For local chains, CoinGecko enrichment is not possible - return as-is
+                if (isLocalChain(chainId)) {
+                    this.logger.info(
+                        {
+                            id: existing.id,
+                            address: normalizedAddress,
+                            chainId,
+                            symbol: existing.symbol,
+                        },
+                        "Token exists on local chain, skipping CoinGecko enrichment"
+                    );
+                    log.methodExit(this.logger, "discover", { id: existing.id, fromDatabase: true });
+                    return existing;
+                }
+
                 // Token exists but not enriched - enrich and return
                 this.logger.info(
                     { id: existing.id, symbol: existing.symbol },
