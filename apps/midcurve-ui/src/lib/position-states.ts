@@ -170,17 +170,28 @@ export function calculatePositionStates(
 ): PositionStates {
   const currentTick = position.pool.state.currentTick;
 
+  // When isToken0Quote = true, tick-to-price relationship is inverted:
+  // - tickLower gives HIGHER price (more quote per base)
+  // - tickUpper gives LOWER price (fewer quote per base)
+  // So we swap which tick represents "lower range" vs "upper range"
+  const lowerRangeTick = position.isToken0Quote
+    ? position.config.tickUpper
+    : position.config.tickLower;
+  const upperRangeTick = position.isToken0Quote
+    ? position.config.tickLower
+    : position.config.tickUpper;
+
   return {
     lowerRange: calculatePositionStateAtTick(
       position,
       pnlBreakdown,
-      position.config.tickLower
+      lowerRangeTick
     ),
     current: calculatePositionStateAtTick(position, pnlBreakdown, currentTick),
     upperRange: calculatePositionStateAtTick(
       position,
       pnlBreakdown,
-      position.config.tickUpper
+      upperRangeTick
     ),
   };
 }
@@ -225,14 +236,36 @@ export function calculateBreakEvenPrice(
     return null;
   }
 
+  // Validate pool is not at extreme tick bounds
+  // At MIN_TICK or MAX_TICK, price calculations become unreliable
+  const currentTick = position.pool.state.currentTick;
+  const MIN_TICK = -887272;
+  const MAX_TICK = 887272;
+
+  if (currentTick <= MIN_TICK || currentTick >= MAX_TICK) {
+    console.warn(
+      "calculateBreakEvenPrice: Pool at extreme tick, cannot calculate break-even"
+    );
+    return null;
+  }
+
   // Binary search for break-even price
   // Search range: from very low to very high price
   const currentPrice = tickToPrice(
-    position.pool.state.currentTick,
+    currentTick,
     baseTokenConfig.address,
     quoteTokenConfig.address,
     Number(baseToken.decimals)
   );
+
+  // Validate currentPrice is usable for binary search
+  // Need at least 10 to divide by 10 and get non-zero result
+  if (currentPrice < 10n) {
+    console.warn(
+      "calculateBreakEvenPrice: Current price too low for break-even calculation"
+    );
+    return null;
+  }
 
   let lowPrice = currentPrice / 10n; // Start search at 10% of current price
   let highPrice = currentPrice * 10n; // End search at 1000% of current price
@@ -244,6 +277,14 @@ export function calculateBreakEvenPrice(
 
   for (let i = 0; i < maxIterations; i++) {
     const midPrice = (lowPrice + highPrice) / 2n;
+
+    // Validate midPrice is valid before converting to tick
+    if (midPrice <= 0n) {
+      console.warn(
+        "calculateBreakEvenPrice: Binary search reached invalid price"
+      );
+      break;
+    }
 
     // Convert price to tick
     const tick = priceToTick(

@@ -55,19 +55,26 @@ export function UniswapV3RangeStatusLine({
   const quoteTokenConfig = quoteToken.config as { address: string };
 
   // Calculate prices from ticks
-  const lowerPrice = tickToPrice(
+  // When isToken0Quote = true, tick-to-price relationship is inverted:
+  // - tickLower gives HIGHER price (more quote per base)
+  // - tickUpper gives LOWER price (fewer quote per base)
+  const priceAtTickLower = tickToPrice(
     position.config.tickLower,
     baseTokenConfig.address,
     quoteTokenConfig.address,
     Number(baseToken.decimals)
   );
 
-  const upperPrice = tickToPrice(
+  const priceAtTickUpper = tickToPrice(
     position.config.tickUpper,
     baseTokenConfig.address,
     quoteTokenConfig.address,
     Number(baseToken.decimals)
   );
+
+  // Swap prices when quote is token0 (inverted tick-price relationship)
+  const lowerPrice = position.isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+  const upperPrice = position.isToken0Quote ? priceAtTickLower : priceAtTickUpper;
 
   // Calculate current price from current tick (only for active positions)
   let currentTick: number | null = null;

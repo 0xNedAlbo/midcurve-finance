@@ -95,19 +95,27 @@ export function UniswapV3MiniPnLCurve({
       const quoteTokenConfig = quoteToken.config as { address: string };
 
       // Calculate price range boundaries
-      const lowerPrice = tickToPrice(
+      // When isToken0Quote = true, tick-to-price relationship is inverted:
+      // - tickLower gives HIGHER price (more quote per base)
+      // - tickUpper gives LOWER price (fewer quote per base)
+      // So we need to swap them for correct display
+      const priceAtTickLower = tickToPrice(
         config.tickLower,
         baseTokenConfig.address,
         quoteTokenConfig.address,
         Number(baseToken.decimals)
       );
 
-      const upperPrice = tickToPrice(
+      const priceAtTickUpper = tickToPrice(
         config.tickUpper,
         baseTokenConfig.address,
         quoteTokenConfig.address,
         Number(baseToken.decimals)
       );
+
+      // Swap prices when quote is token0 (inverted tick-price relationship)
+      const lowerPrice = position.isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+      const upperPrice = position.isToken0Quote ? priceAtTickLower : priceAtTickUpper;
 
       // Calculate ±50% buffer around position range
       const rangeWidth = upperPrice - lowerPrice;
@@ -152,25 +160,41 @@ export function UniswapV3MiniPnLCurve({
       );
       const currentPriceNumber = Number(currentPriceBigInt) / quoteDivisor;
 
-      let currentPriceIndex = 0;
-      let minDistance = Infinity;
-      points.forEach((point, i) => {
-        const distance = Math.abs(point.price - currentPriceNumber);
-        if (distance < minDistance) {
-          minDistance = distance;
-          currentPriceIndex = i;
-        }
-      });
-
-      // Calculate ranges for scaling
+      // Calculate ranges for scaling (needed for bounds checking below)
       const allPrices = points.map((p) => p.price);
       const allPnls = points.map((p) => p.pnl);
+      const priceRangeMin = Math.min(...allPrices);
+      const priceRangeMax = Math.max(...allPrices);
+
+      // Find current price index
+      // Handle prices outside curve range by using edge indices directly
+      // This is important when currentPriceNumber is astronomically outside the range
+      // (e.g., at MIN_TICK the price can be 340 quadrillion, far outside the curve)
+      let currentPriceIndex: number;
+      if (currentPriceNumber >= priceRangeMax) {
+        // Price above range -> rightmost point (above range on curve)
+        currentPriceIndex = points.length - 1;
+      } else if (currentPriceNumber <= priceRangeMin) {
+        // Price below range -> leftmost point (below range on curve)
+        currentPriceIndex = 0;
+      } else {
+        // Price within range -> search for closest point
+        currentPriceIndex = 0;
+        let minDistance = Infinity;
+        points.forEach((point, i) => {
+          const distance = Math.abs(point.price - currentPriceNumber);
+          if (distance < minDistance) {
+            minDistance = distance;
+            currentPriceIndex = i;
+          }
+        });
+      }
 
       return {
         points,
         priceRange: {
-          min: Math.min(...allPrices),
-          max: Math.max(...allPrices),
+          min: priceRangeMin,
+          max: priceRangeMax,
         },
         pnlRange: {
           min: Math.min(...allPnls),

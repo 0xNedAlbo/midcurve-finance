@@ -56,19 +56,26 @@ export function UniswapV3PositionSimulator({
   // Calculate price range for slider (30% below lower, 30% above upper)
   const { minPrice, maxPrice, lowerRangePrice, upperRangePrice } =
     useMemo(() => {
-      const lowerPrice = tickToPrice(
+      // When isToken0Quote = true, tick-to-price relationship is inverted:
+      // - tickLower gives HIGHER price (more quote per base)
+      // - tickUpper gives LOWER price (fewer quote per base)
+      const priceAtTickLower = tickToPrice(
         positionConfig.tickLower,
         baseTokenConfig.address,
         quoteTokenConfig.address,
         Number(baseToken.decimals)
       );
 
-      const upperPrice = tickToPrice(
+      const priceAtTickUpper = tickToPrice(
         positionConfig.tickUpper,
         baseTokenConfig.address,
         quoteTokenConfig.address,
         Number(baseToken.decimals)
       );
+
+      // Swap prices when quote is token0 (inverted tick-price relationship)
+      const lowerPrice = position.isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+      const upperPrice = position.isToken0Quote ? priceAtTickLower : priceAtTickUpper;
 
       const rangeWidth = upperPrice - lowerPrice;
       const extension = (rangeWidth * 30n) / 100n;
@@ -85,6 +92,7 @@ export function UniswapV3PositionSimulator({
       baseTokenConfig.address,
       quoteTokenConfig.address,
       baseToken.decimals,
+      position.isToken0Quote,
     ]);
 
   // Slider state - use percentage (0-100) for smooth sliding

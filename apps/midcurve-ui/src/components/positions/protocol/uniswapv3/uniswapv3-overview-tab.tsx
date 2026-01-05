@@ -456,7 +456,13 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   position={position as any}
                   width={240}
                   height={144}
-                  overrideTick={(position.config as { tickLower: number }).tickLower}
+                  // When isToken0Quote = true, tickLower gives higher price, tickUpper gives lower price
+                  // So for "Lower Range" card, use tickUpper when isToken0Quote (gives lower price)
+                  overrideTick={
+                    position.isToken0Quote
+                      ? (position.config as { tickUpper: number }).tickUpper
+                      : (position.config as { tickLower: number }).tickLower
+                  }
                 />
               </div>
             </div>
@@ -562,7 +568,13 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   position={position as any}
                   width={240}
                   height={144}
-                  overrideTick={(position.config as { tickUpper: number }).tickUpper}
+                  // When isToken0Quote = true, tickLower gives higher price, tickUpper gives lower price
+                  // So for "Upper Range" card, use tickLower when isToken0Quote (gives higher price)
+                  overrideTick={
+                    position.isToken0Quote
+                      ? (position.config as { tickLower: number }).tickLower
+                      : (position.config as { tickUpper: number }).tickUpper
+                  }
                 />
               </div>
             </div>

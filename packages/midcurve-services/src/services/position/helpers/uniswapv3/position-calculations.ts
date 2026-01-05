@@ -453,19 +453,26 @@ export function calculatePriceRange(
   const baseTokenDecimals = baseToken.decimals;
 
   // Convert ticks to prices (quote per base)
-  const priceRangeLower = tickToPrice(
+  // When isToken0Quote = true, tick-to-price relationship is inverted:
+  // - tickLower gives HIGHER price (more quote per base)
+  // - tickUpper gives LOWER price (fewer quote per base)
+  const priceAtTickLower = tickToPrice(
     tickLower,
     baseTokenAddress,
     quoteTokenAddress,
     baseTokenDecimals
   );
 
-  const priceRangeUpper = tickToPrice(
+  const priceAtTickUpper = tickToPrice(
     tickUpper,
     baseTokenAddress,
     quoteTokenAddress,
     baseTokenDecimals
   );
+
+  // Swap prices when quote is token0 (inverted tick-price relationship)
+  const priceRangeLower = position.isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+  const priceRangeUpper = position.isToken0Quote ? priceAtTickLower : priceAtTickUpper;
 
   return { priceRangeLower, priceRangeUpper };
 }
