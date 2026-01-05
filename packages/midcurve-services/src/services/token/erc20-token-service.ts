@@ -265,24 +265,43 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 "Token metadata discovered from contract"
             );
 
-            // 6. Fetch CoinGecko enrichment data (MANDATORY - no try/catch)
-            this.logger.debug(
-                { address: normalizedAddress, chainId },
-                "Fetching CoinGecko enrichment data"
-            );
+            // 6. Fetch CoinGecko enrichment data
+            // For local chains, skip CoinGecko (not indexed) and use on-chain data only
+            let enrichmentData: {
+                coingeckoId: string | null;
+                logoUrl: string | null | undefined;
+                marketCap: number | null | undefined;
+            };
 
-            const enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
-                chainId,
-                normalizedAddress
-            );
+            if (isLocalChain(chainId)) {
+                this.logger.debug(
+                    { address: normalizedAddress, chainId },
+                    "Skipping CoinGecko enrichment for local chain"
+                );
+                enrichmentData = {
+                    coingeckoId: null,
+                    logoUrl: undefined,
+                    marketCap: undefined,
+                };
+            } else {
+                this.logger.debug(
+                    { address: normalizedAddress, chainId },
+                    "Fetching CoinGecko enrichment data"
+                );
 
-            this.logger.info(
-                {
-                    coingeckoId: enrichmentData.coingeckoId,
-                    marketCap: enrichmentData.marketCap,
-                },
-                "CoinGecko enrichment data fetched"
-            );
+                enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
+                    chainId,
+                    normalizedAddress
+                );
+
+                this.logger.info(
+                    {
+                        coingeckoId: enrichmentData.coingeckoId,
+                        marketCap: enrichmentData.marketCap,
+                    },
+                    "CoinGecko enrichment data fetched"
+                );
+            }
 
             // 7. Check for auto-linking to basic currency
             const basicCurrencyCode = Erc20TokenService.getAutoLinkBasicCurrency(metadata.symbol);
@@ -303,14 +322,15 @@ export class Erc20TokenService extends TokenService<"erc20"> {
             }
 
             // 8. Create token with all data
+            // Convert null to undefined for optional fields (create() expects undefined, not null)
             const token = await this.create({
                 tokenType: "erc20",
                 name: metadata.name,
                 symbol: metadata.symbol,
                 decimals: metadata.decimals,
-                logoUrl: enrichmentData.logoUrl,
-                coingeckoId: enrichmentData.coingeckoId,
-                marketCap: enrichmentData.marketCap,
+                logoUrl: enrichmentData.logoUrl ?? undefined,
+                coingeckoId: enrichmentData.coingeckoId ?? undefined,
+                marketCap: enrichmentData.marketCap ?? undefined,
                 config: {
                     address: normalizedAddress,
                     chainId,
