@@ -257,7 +257,7 @@ class LifecycleService {
         registry.unregister(contractAddress);
       }
 
-      const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
+      const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8555';
       const chainId = strategy.chainId ?? 31337;
 
       // Determine signing mode: use signer API if SIGNER_SERVICE_URL is set
@@ -485,7 +485,7 @@ class LifecycleService {
     abi: Abi,
     timeoutMs: number = 60000
   ): Promise<void> {
-    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
+    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8555';
     const chain = {
       id: chainId,
       name: 'SEMSEE',

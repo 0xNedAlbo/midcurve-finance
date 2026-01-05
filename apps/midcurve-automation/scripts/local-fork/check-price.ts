@@ -47,7 +47,7 @@ loadEnv();
 import { localhost } from 'viem/chains';
 import { UNISWAP_V3_POOL_ABI } from '../../src/lib/evm';
 
-const LOCAL_RPC = 'http://localhost:8547';
+const LOCAL_RPC = 'http://localhost:8545';
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
 
 async function main(): Promise<void> {

@@ -16,7 +16,7 @@
     "logs": "docker-compose logs -f geth-dev",
     "status": "docker-compose ps",
     "reset": "docker-compose down -v && npm run up",
-    "health": "curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}'",
+    "health": "curl -s -X POST http://localhost:8555 -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}'",
     "up:prod": "npm run generate:genesis && docker-compose -f docker-compose.yml -f docker-compose.prod.yml build && docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "down:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down",
     "reset:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml down -v && npm run up:prod",

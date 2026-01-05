@@ -56,13 +56,13 @@ exec geth \
     --password "$PASSWORD_FILE" \
     --http \
     --http.addr "0.0.0.0" \
-    --http.port 8545 \
+    --http.port 8555 \
     --http.api "eth,net,web3,personal,debug,clique" \
     --http.corsdomain "*" \
     --http.vhosts "*" \
     --ws \
     --ws.addr "0.0.0.0" \
-    --ws.port 8546 \
+    --ws.port 8556 \
     --ws.api "eth,net,web3" \
     --ws.origins "*" \
     --allow-insecure-unlock \

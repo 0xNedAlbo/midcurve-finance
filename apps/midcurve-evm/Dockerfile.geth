@@ -22,12 +22,12 @@ COPY genesis/genesis.json /genesis.json
 COPY docker/start-geth.sh /start-geth.sh
 RUN chmod +x /start-geth.sh
 
-# Expose RPC and WS ports
-EXPOSE 8545 8546
+# Expose RPC and WS ports (moved from 8545/8546 to avoid conflict with Anvil)
+EXPOSE 8555 8556
 
 # Health check using wget (available in Geth image)
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=5 \
-    CMD wget -qO- http://localhost:8545 >/dev/null 2>&1 || exit 1
+    CMD wget -qO- http://localhost:8555 >/dev/null 2>&1 || exit 1
 
 # Use custom entrypoint script that handles init + run
 ENTRYPOINT ["/start-geth.sh"]

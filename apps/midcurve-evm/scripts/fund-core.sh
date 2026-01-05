@@ -16,7 +16,7 @@ export FOUNDRY_DISABLE_NIGHTLY_WARNING=1
 CORE_ADDRESS="${CORE_ADDRESS:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266}"
 # 1000 ETH in wei, pre-calculated hex: 0x3635c9adc5dea00000
 FUNDING_AMOUNT_HEX="0x3635c9adc5dea00000"
-RPC_URL="${RPC_URL:-http://geth:8545}"
+RPC_URL="${RPC_URL:-http://geth:8555}"
 
 echo "========================================"
 echo "SEMSEE CORE Account Funding Script"

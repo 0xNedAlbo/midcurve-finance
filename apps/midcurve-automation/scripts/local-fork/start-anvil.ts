@@ -4,7 +4,7 @@
  * Launches an Anvil instance forking from Ethereum mainnet.
  * Requires: anvil (from foundry) and RPC_URL_ETHEREUM env var.
  *
- * Port: 8547 (to avoid conflict with midcurve-evm Geth on 8545-8546)
+ * Port: 8545 (default RPC port - wallet clients expect chain 31337 here)
  * Chain ID: 31337
  */
 
@@ -46,7 +46,7 @@ function loadEnv(): void {
 
 loadEnv();
 
-const ANVIL_PORT = 8547;
+const ANVIL_PORT = 8545;
 const CHAIN_ID = 31337;
 
 async function main(): Promise<void> {

@@ -4,8 +4,8 @@
 # Strategies are deployed dynamically by Core.
 #
 # Ports:
-# - 8545: HTTP RPC (Geth)
-# - 8546: WebSocket RPC (Geth)
+# - 8555: HTTP RPC (Geth) - moved from 8545 to avoid conflict with Anvil
+# - 8556: WebSocket RPC (Geth) - moved from 8546
 # - 5672: AMQP (RabbitMQ)
 # - 15672: Management UI (RabbitMQ)
 
@@ -16,12 +16,12 @@ services:
       dockerfile: Dockerfile.geth
     container_name: midcurve-geth
     ports:
-      - "8545:8545"
-      - "8546:8546"
+      - "8555:8555"
+      - "8556:8556"
     volumes:
       - geth-data:/data  # Persistent state
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8555"]
       interval: 5s
       timeout: 3s
       retries: 5

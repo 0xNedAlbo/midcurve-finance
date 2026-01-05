@@ -66,7 +66,7 @@ const OPERATOR_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as Address
 
 // Chain configuration
 const CHAIN_ID = 31337;
-const RPC_URL = 'http://localhost:8545';
+const RPC_URL = 'http://localhost:8555';
 
 // Event type for test
 const PING_EVENT_TYPE = keccak256(toHex('PING'));

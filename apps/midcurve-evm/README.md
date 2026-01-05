@@ -77,8 +77,8 @@ npm run test:contracts
 
 | Port | Protocol | Description |
 |------|----------|-------------|
-| 8545 | HTTP | JSON-RPC endpoint |
-| 8546 | WebSocket | WebSocket RPC endpoint |
+| 8555 | HTTP | JSON-RPC endpoint |
+| 8556 | WebSocket | WebSocket RPC endpoint |
 
 ## Development
 
@@ -136,7 +136,7 @@ const chain = { ...localhost, id: 31337 };
 
 const publicClient = createPublicClient({
   chain,
-  transport: http('http://localhost:8545'),
+  transport: http('http://localhost:8555'),
 });
 
 const account = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
@@ -144,7 +144,7 @@ const account = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478c
 const walletClient = createWalletClient({
   account,
   chain,
-  transport: http('http://localhost:8545'),
+  transport: http('http://localhost:8555'),
 });
 
 // Deploy a strategy contract...

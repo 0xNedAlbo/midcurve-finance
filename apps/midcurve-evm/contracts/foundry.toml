@@ -18,4 +18,4 @@ tab_width = 4
 bracket_spacing = true
 
 [rpc_endpoints]
-local = "http://localhost:8545"
+local = "http://localhost:8555"

@@ -687,7 +687,7 @@ interface DeployResponse {
 
 | Service | Purpose | Ports |
 |---------|---------|-------|
-| `geth` | EVM node | 8545 (HTTP), 8546 (WS) |
+| `geth` | EVM node | 8555 (HTTP), 8556 (WS) |
 | `rabbitmq` | Message broker | 5672 (AMQP), 15672 (Management) |
 | `core` | Orchestrator | Internal |
 

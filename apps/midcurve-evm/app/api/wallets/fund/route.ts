@@ -28,7 +28,7 @@ const semseeChain = {
   name: 'SEMSEE',
   nativeCurrency: { decimals: 18, name: 'Ether', symbol: 'ETH' },
   rpcUrls: {
-    default: { http: [process.env.SEMSEE_RPC_URL || 'http://localhost:8545'] },
+    default: { http: [process.env.SEMSEE_RPC_URL || 'http://localhost:8555'] },
   },
 } as const;
 
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
+    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8555';
 
     const account = privateKeyToAccount(corePrivateKey as `0x${string}`);
 

@@ -364,7 +364,7 @@ class DeploymentService {
    * Create a public client for SEMSEE chain
    */
   private createPublicClient() {
-    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8545';
+    const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8555';
     const chain = {
       id: SEMSEE_CHAIN_ID,
       name: 'SEMSEE',

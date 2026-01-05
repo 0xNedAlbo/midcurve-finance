@@ -80,7 +80,7 @@ export POSITION_CLOSER_ADDRESS="0x..."
 
 | Script | Description |
 |--------|-------------|
-| `pnpm local:anvil` | Start Anvil mainnet fork on port 8547 |
+| `pnpm local:anvil` | Start Anvil mainnet fork on port 8545 |
 | `pnpm local:setup` | Deploy contracts, create pool, add liquidity, fund test account |
 | `pnpm local:deploy` | Deploy MockUSD token contract |
 | `pnpm local:create-pool` | Create WETH/MockUSD pool at ~$3000/ETH |
@@ -202,7 +202,8 @@ For local development, use Foundry's default test account (pre-funded in Anvil):
 
 ### Port Configuration
 
-- Anvil fork runs on port **8547** to avoid conflicts with midcurve-evm's Geth node (ports 8545-8546)
+- Anvil fork runs on port **8545** (default RPC port, wallet clients expect chain 31337 here)
+- SEMSEE/Geth now runs on ports **8555-8556** to avoid conflicts
 - Dev server runs on port **3004**
 
 ### Price Calculation

@@ -13,7 +13,7 @@
  * - RPC_URL_OPTIMISM    - Optimism RPC
  *
  * Environment Variables (OPTIONAL for development):
- * - RPC_URL_LOCAL       - Local Anvil fork RPC (e.g., http://localhost:8547)
+ * - RPC_URL_LOCAL       - Local Anvil fork RPC (e.g., http://localhost:8545)
  *                         Only enabled when NODE_ENV !== 'production'
  *
  * Note: getChainConfig() and getPublicClient() will throw an error if the
@@ -45,7 +45,7 @@ const localAnvil = defineChain({
   name: 'Local Anvil Fork',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ['http://localhost:8547'] },
+    default: { http: ['http://localhost:8545'] },
   },
   testnet: true,
   // Multicall3 is available on the forked mainnet at the canonical address

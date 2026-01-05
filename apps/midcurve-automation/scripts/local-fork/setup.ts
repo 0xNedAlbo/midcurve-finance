@@ -8,7 +8,7 @@
  *   pnpm local:setup
  *
  * Prerequisites:
- *   - Anvil running on port 8547 (pnpm local:anvil in another terminal)
+ *   - Anvil running on port 8545 (pnpm local:anvil in another terminal)
  *   - .env file with RPC_URL_ETHEREUM set
  */
 
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
   console.log('4. Fund test account #0 with 100 WETH + 1,000,000 MockUSD');
   console.log('');
   console.log('Prerequisites:');
-  console.log('- Anvil running on port 8547 (pnpm local:anvil)');
+  console.log('- Anvil running on port 8545 (pnpm local:anvil)');
   console.log('');
 
   const state: SetupState = {};
