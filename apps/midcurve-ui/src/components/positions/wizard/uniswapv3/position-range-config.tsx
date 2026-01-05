@@ -218,19 +218,27 @@ export function PositionRangeConfig({
         : pool.token1.decimals;
 
       // Use tickToPrice from @midcurve/shared (same as currentPrice useMemo)
-      const lowerPriceBigInt = tickToPrice(
+      const priceAtTickLower = tickToPrice(
         tickLower,
         baseToken.config.address,
         quoteToken.config.address,
         baseTokenDecimals
       );
 
-      const upperPriceBigInt = tickToPrice(
+      const priceAtTickUpper = tickToPrice(
         tickUpper,
         baseToken.config.address,
         quoteToken.config.address,
         baseTokenDecimals
       );
+
+      // When quote is token0 (isToken0Base is false), tick-to-price relationship is inverted:
+      // - tickLower gives HIGHER price (more quote per base)
+      // - tickUpper gives LOWER price (fewer quote per base)
+      // So we swap them to display correctly (lower price first, upper price second)
+      const isToken0Quote = !isToken0Base;
+      const lowerPriceBigInt = isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+      const upperPriceBigInt = isToken0Quote ? priceAtTickLower : priceAtTickUpper;
 
       // Format using quote token decimals
       return {
@@ -321,11 +329,21 @@ export function PositionRangeConfig({
           <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6">
             <RangeSlider
               currentPrice={currentPrice}
-              lowerPrice={convertTickToPrice(tickLower)}
-              upperPrice={convertTickToPrice(tickUpper)}
+              // When quote is token0, tick-to-price relationship is inverted:
+              // - tickLower gives HIGHER price, tickUpper gives LOWER price
+              // Swap them so RangeSlider always receives (lower numeric value, higher numeric value)
+              lowerPrice={!isToken0Base ? convertTickToPrice(tickUpper) : convertTickToPrice(tickLower)}
+              upperPrice={!isToken0Base ? convertTickToPrice(tickLower) : convertTickToPrice(tickUpper)}
               onRangeChange={(newLowerPrice, newUpperPrice) => {
-                const newLowerTick = convertPriceToTickValue(newLowerPrice);
-                const newUpperTick = convertPriceToTickValue(newUpperPrice);
+                // When quote is token0, we need to swap back:
+                // - The lower price should become tickUpper (since tickUpper gives lower price)
+                // - The higher price should become tickLower (since tickLower gives higher price)
+                const newLowerTick = !isToken0Base
+                  ? convertPriceToTickValue(newUpperPrice)  // Higher price → tickLower
+                  : convertPriceToTickValue(newLowerPrice);
+                const newUpperTick = !isToken0Base
+                  ? convertPriceToTickValue(newLowerPrice)  // Lower price → tickUpper
+                  : convertPriceToTickValue(newUpperPrice);
                 onTickRangeChange(newLowerTick, newUpperTick);
               }}
               quoteTokenSymbol={quoteToken.symbol}

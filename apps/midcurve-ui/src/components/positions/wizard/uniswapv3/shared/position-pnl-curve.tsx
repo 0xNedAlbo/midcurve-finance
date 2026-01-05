@@ -92,14 +92,14 @@ export function PositionPnLCurve({
         ? pool.token0.decimals
         : pool.token1.decimals;
 
-      const lowerPriceBigInt = tickToPrice(
+      const priceAtTickLower = tickToPrice(
         tickLower,
         baseToken.config.address,
         quoteToken.config.address,
         baseTokenDecimals
       );
 
-      const upperPriceBigInt = tickToPrice(
+      const priceAtTickUpper = tickToPrice(
         tickUpper,
         baseToken.config.address,
         quoteToken.config.address,
@@ -108,9 +108,19 @@ export function PositionPnLCurve({
 
       const divisor = 10n ** BigInt(quoteToken.decimals);
 
+      // When quote is token0 (isBaseToken0 is false), tick-to-price relationship is inverted:
+      // - tickLower gives HIGHER price (more quote per base)
+      // - tickUpper gives LOWER price (fewer quote per base)
+      // So we swap them to display correctly (lower price first, upper price second)
+      const isToken0Quote = !isBaseToken0;
+
       return {
-        lowerPrice: Number(lowerPriceBigInt) / Number(divisor),
-        upperPrice: Number(upperPriceBigInt) / Number(divisor),
+        lowerPrice: isToken0Quote
+          ? Number(priceAtTickUpper) / Number(divisor)
+          : Number(priceAtTickLower) / Number(divisor),
+        upperPrice: isToken0Quote
+          ? Number(priceAtTickLower) / Number(divisor)
+          : Number(priceAtTickUpper) / Number(divisor),
       };
     } catch (error) {
       console.error("Error calculating range prices:", error);
