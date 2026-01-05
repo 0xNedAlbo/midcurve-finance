@@ -286,8 +286,8 @@ async function main(): Promise<void> {
     console.log('   (Note: SWAP_AMOUNT=1000000000 = 1000 MockUSD. Use smaller amounts to avoid draining liquidity)');
     console.log('');
     console.log('3. Manipulate ETH price DOWN (sell ETH for MockUSD - makes ETH cheaper):');
-    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=down SWAP_AMOUNT=500000000000000000 pnpm local:price-down`);
-    console.log('   (Note: SWAP_AMOUNT=500000000000000000 = 0.5 ETH. Use smaller amounts to avoid draining liquidity)');
+    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down`);
+    console.log('   (Note: SWAP_AMOUNT=300000000000000000 = 0.3 ETH. Use smaller amounts to avoid draining liquidity)');
   } catch (error) {
     console.error('\n' + '='.repeat(60));
     console.error('Setup Failed!');

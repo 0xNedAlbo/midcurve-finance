@@ -55,7 +55,7 @@ interface IUniswapV3Pool {
  *   DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up
  *
  *   # Push ETH price DOWN (sell ETH for MockUSD - makes ETH cheaper)
- *   DIRECTION=down SWAP_AMOUNT=500000000000000000 pnpm local:price-down --value 0.5ether
+ *   DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down --value 0.3ether
  *
  * DIRECTION: "up" or "down" (refers to ETH price in USD)
  * SWAP_AMOUNT: Amount in base units (6 decimals for MockUSD, 18 for ETH)

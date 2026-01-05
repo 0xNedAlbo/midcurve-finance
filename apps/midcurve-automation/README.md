@@ -98,11 +98,11 @@ After setup, manipulate prices to test trigger conditions:
 # Check current price
 POOL_ADDRESS="0x..." pnpm local:check-price
 
-# Push price down (sell ETH)
-MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." DIRECTION=down SWAP_AMOUNT=5000000000000000000 pnpm local:price-down
+# Push price down (sell 0.3 ETH)
+MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down
 
-# Push price up (buy ETH)
-MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." DIRECTION=up SWAP_AMOUNT=5000000000 pnpm local:price-up
+# Push price up (buy ETH with 1000 MockUSD)
+MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up
 ```
 
 ## Environment Variables
