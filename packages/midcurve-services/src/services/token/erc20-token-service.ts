@@ -21,7 +21,7 @@ import {
     readTokenMetadata,
     TokenMetadataError,
 } from "../../utils/evm/index.js";
-import { EvmConfig } from "../../config/evm.js";
+import { EvmConfig, isLocalChain } from "../../config/evm.js";
 import { CoinGeckoClient } from "../../clients/coingecko/index.js";
 import { log } from "../../logging/index.js";
 
@@ -948,9 +948,12 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 throw error;
             }
 
-            // Get platform ID for this chain
+            // Get platform ID for this chain (null for local chains)
             const platformId = this.getPlatformId(chainId);
-            if (!platformId) {
+            const isLocal = isLocalChain(chainId);
+
+            // For non-local chains, require a CoinGecko platform mapping
+            if (!platformId && !isLocal) {
                 const error = new Error(
                     `No CoinGecko platform mapping for chain ${chainId}`
                 );
@@ -1052,9 +1055,10 @@ export class Erc20TokenService extends TokenService<"erc20"> {
             );
 
             // 2. If we have less than 10 DB results, search CoinGecko for more
+            // Skip CoinGecko search for local chains (no platform mapping available)
             let coinGeckoToAdd: Erc20TokenSearchCandidate[] = [];
 
-            if (dbCandidates.length < 10) {
+            if (dbCandidates.length < 10 && platformId) {
                 this.logger.debug(
                     { chainId, platformId, symbol, name, address: normalizedAddress },
                     "Searching CoinGecko for additional tokens"
@@ -1102,6 +1106,11 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                         coinGeckoAdded: coinGeckoToAdd.length,
                     },
                     "CoinGecko search completed"
+                );
+            } else if (isLocal) {
+                this.logger.debug(
+                    { chainId, dbCount: dbCandidates.length },
+                    "Skipping CoinGecko search (local chain - no platform mapping)"
                 );
             } else {
                 this.logger.debug(
