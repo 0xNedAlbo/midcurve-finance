@@ -281,11 +281,13 @@ async function main(): Promise<void> {
     console.log('1. Check pool price:');
     console.log(`   POOL_ADDRESS="${state.poolAddress}" pnpm local:check-price`);
     console.log('');
-    console.log('2. Manipulate price UP (buy ETH with MockUSD):');
-    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=up SWAP_AMOUNT=50000000000 pnpm local:price-up`);
+    console.log('2. Manipulate ETH price UP (buy ETH with MockUSD - makes ETH more expensive):');
+    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up`);
+    console.log('   (Note: SWAP_AMOUNT=1000000000 = 1000 MockUSD. Use smaller amounts to avoid draining liquidity)');
     console.log('');
-    console.log('3. Manipulate price DOWN (sell ETH for MockUSD):');
-    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=down SWAP_AMOUNT=5000000000000000000 pnpm local:price-down`);
+    console.log('3. Manipulate ETH price DOWN (sell ETH for MockUSD - makes ETH cheaper):');
+    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=down SWAP_AMOUNT=500000000000000000 pnpm local:price-down`);
+    console.log('   (Note: SWAP_AMOUNT=500000000000000000 = 0.5 ETH. Use smaller amounts to avoid draining liquidity)');
   } catch (error) {
     console.error('\n' + '='.repeat(60));
     console.error('Setup Failed!');

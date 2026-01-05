@@ -49,16 +49,24 @@ interface IUniswapV3Pool {
 
 /**
  * @title ManipulatePriceScript
- * @notice Executes swaps to move the pool price up or down
+ * @notice Executes swaps to move the ETH price (in USD terms) up or down
  * @dev Usage:
- *   # Push price UP (buy ETH with MockUSD)
- *   DIRECTION=up SWAP_AMOUNT=50000000000 pnpm local:price-up
+ *   # Push ETH price UP (buy ETH with MockUSD - makes ETH more expensive)
+ *   DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up
  *
- *   # Push price DOWN (sell ETH for MockUSD)
- *   DIRECTION=down SWAP_AMOUNT=5000000000000000000 pnpm local:price-down --value 5ether
+ *   # Push ETH price DOWN (sell ETH for MockUSD - makes ETH cheaper)
+ *   DIRECTION=down SWAP_AMOUNT=500000000000000000 pnpm local:price-down --value 0.5ether
  *
- * DIRECTION: "up" or "down"
+ * DIRECTION: "up" or "down" (refers to ETH price in USD)
  * SWAP_AMOUNT: Amount in base units (6 decimals for MockUSD, 18 for ETH)
+ *
+ * Note: When quote token (MockUSD) is token0, the Uniswap V3 internal tick
+ * moves in the OPPOSITE direction of the user-facing ETH price:
+ *   - price-up → tick moves DOWN (toward MIN_TICK)
+ *   - price-down → tick moves UP (toward MAX_TICK)
+ *
+ * Use smaller swap amounts (e.g., 1000 MockUSD = 1000000000) to avoid
+ * draining all liquidity and hitting tick boundaries.
  */
 contract ManipulatePriceScript is Script {
     address constant SWAP_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
@@ -154,19 +162,40 @@ contract ManipulatePriceScript is Script {
         console.log("=== After Swap ===");
         console.log("sqrtPriceX96:", priceAfter);
         console.log("tick:", tickAfter);
+        console.log("tick change:");
         console.logInt(tickChange);
+
+        // Determine if quote token is token0 (inverted price semantics)
+        // When quote is token0: tick DOWN = ETH price UP (more expensive)
+        // When quote is token1: tick UP = ETH price UP (more expensive)
+        address token0 = poolContract.token0();
+        bool isQuoteToken0 = (token0 == mockUSD);
 
         // Calculate approximate price change
         // Each tick represents ~0.01% price change
         // 100 ticks = ~1% price change
-        if (tickChange > 0) {
-            console.log("Price moved UP by approximately:");
-            console.log("  percent:", uint256(tickChange) / 100);
-        } else if (tickChange < 0) {
-            console.log("Price moved DOWN by approximately:");
-            console.log("  percent:", uint256(-tickChange) / 100);
-        } else {
+        bool priceWentUp = isQuoteToken0 ? (tickChange < 0) : (tickChange > 0);
+        uint256 percentChange = tickChange > 0 ? uint256(tickChange) / 100 : uint256(-tickChange) / 100;
+
+        if (tickChange == 0) {
             console.log("Price unchanged (swap amount may be too small)");
+        } else if (priceWentUp) {
+            console.log("ETH price moved UP by approximately:");
+            console.log("  percent:", percentChange);
+        } else {
+            console.log("ETH price moved DOWN by approximately:");
+            console.log("  percent:", percentChange);
+        }
+
+        // Warn if hit tick boundaries
+        if (tickAfter <= -887272 + 1000) {
+            console.log("");
+            console.log("WARNING: Hit MIN_TICK boundary! Pool has no more WETH liquidity.");
+            console.log("ETH price is now astronomically high. Reset pool with pnpm local:setup");
+        } else if (tickAfter >= 887272 - 1000) {
+            console.log("");
+            console.log("WARNING: Hit MAX_TICK boundary! Pool has no more MockUSD liquidity.");
+            console.log("ETH price is now near zero. Reset pool with pnpm local:setup");
         }
     }
 }
