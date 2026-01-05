@@ -34,9 +34,10 @@ export interface PoolMetadata {
  * 1. Queries the pool by ID (with token0 and token1 included)
  * 2. Validates the pool exists
  * 3. Validates both tokens are present
- * 4. Determines quote token designation (currently defaults to token1 as quote)
+ * 4. Uses the provided quote token designation from the position
  *
  * @param poolId - Pool ID to fetch
+ * @param isToken0Quote - Whether token0 is the quote token (from position's user preference)
  * @param prisma - Prisma client instance
  * @param logger - Structured logger
  * @returns Pool metadata with tokens and decimals
@@ -46,6 +47,7 @@ export interface PoolMetadata {
  * ```typescript
  * const metadata = await fetchPoolWithTokens(
  *   'pool_eth_usdc_500',
+ *   false, // token1 (USDC) is quote
  *   prisma,
  *   logger
  * );
@@ -57,6 +59,7 @@ export interface PoolMetadata {
  */
 export async function fetchPoolWithTokens(
   poolId: string,
+  isToken0Quote: boolean,
   prisma: PrismaClient,
   logger: Logger
 ): Promise<PoolMetadata> {
@@ -78,15 +81,11 @@ export async function fetchPoolWithTokens(
     throw new Error(`Pool tokens not found for pool: ${poolId}`);
   }
 
-  // Determine quote token (convention: USDC/WETH pairs have USDC as token1)
-  // For now, assume token1 is quote (can be enhanced with heuristics)
-  const token0IsQuote = false;
-
   return {
     pool: pool as unknown as UniswapV3Pool,
     token0: pool.token0 as unknown as Erc20Token,
     token1: pool.token1 as unknown as Erc20Token,
-    token0IsQuote,
+    token0IsQuote: isToken0Quote,
     token0Decimals: pool.token0.decimals,
     token1Decimals: pool.token1.decimals,
   };

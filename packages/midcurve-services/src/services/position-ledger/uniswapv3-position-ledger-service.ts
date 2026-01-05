@@ -89,6 +89,7 @@ interface PositionData {
   nftId: bigint;
   chainId: number;
   poolId: string;
+  isToken0Quote: boolean;
 }
 
 /**
@@ -311,8 +312,8 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       // 2. Delete existing events (rebuild from scratch)
       await this.deleteAllItems(positionId);
 
-      // 3. Fetch pool metadata
-      const poolMetadata = await this.fetchPoolMetadata(poolId);
+      // 3. Fetch pool metadata (pass position's quote token preference)
+      const poolMetadata = await this.fetchPoolMetadata(poolId, positionData.isToken0Quote);
 
       // 4. Fetch raw events from Etherscan
       this.logger.info({ chainId, nftId }, 'Fetching events from Etherscan');
@@ -472,8 +473,8 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
         throw error;
       }
 
-      // 2. Fetch pool metadata
-      const poolMetadata = await this.fetchPoolMetadata(poolId);
+      // 2. Fetch pool metadata (pass position's quote token preference)
+      const poolMetadata = await this.fetchPoolMetadata(poolId, positionData.isToken0Quote);
 
       // 3. Fetch last event (for previous state)
       const existingEvents = await this.findAllItems(positionId);
@@ -597,6 +598,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       nftId: BigInt(config.nftId),
       chainId: config.chainId,
       poolId: position.poolId,
+      isToken0Quote: position.isToken0Quote,
     };
   }
 
@@ -604,10 +606,11 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
    * Fetch pool metadata from database
    *
    * @param poolId - Pool ID
+   * @param isToken0Quote - Whether token0 is the quote token (from position's user preference)
    * @returns Pool metadata with tokens and decimals
    * @throws Error if pool or tokens not found
    */
-  private async fetchPoolMetadata(poolId: string): Promise<PoolMetadata> {
+  private async fetchPoolMetadata(poolId: string, isToken0Quote: boolean): Promise<PoolMetadata> {
     log.dbOperation(this.logger, 'findUnique', 'Pool', { id: poolId });
 
     const pool = await this.prisma.pool.findUnique({
@@ -626,15 +629,11 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       throw new Error(`Pool tokens not found for pool: ${poolId}`);
     }
 
-    // Determine quote token (convention: USDC/WETH pairs have USDC as token1)
-    // For now, assume token1 is quote (can be enhanced with heuristics)
-    const token0IsQuote = false;
-
     return {
       pool: pool as unknown as UniswapV3Pool,
       token0: pool.token0 as unknown as Erc20Token,
       token1: pool.token1 as unknown as Erc20Token,
-      token0IsQuote,
+      token0IsQuote: isToken0Quote,
       token0Decimals: pool.token0.decimals,
       token1Decimals: pool.token1.decimals,
     };
@@ -697,7 +696,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
         'Position data fetched'
       );
 
-      const poolMetadata = await this.fetchPoolMetadata(poolId);
+      const poolMetadata = await this.fetchPoolMetadata(poolId, positionData.isToken0Quote);
 
       this.logger.debug(
         {

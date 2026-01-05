@@ -513,10 +513,10 @@ async function processAndSaveEvents(
     'Starting event processing'
   );
 
-  // 1. Get poolId from position
+  // 1. Get poolId and quote token preference from position
   const position = await prisma.position.findUnique({
     where: { id: positionId },
-    select: { poolId: true },
+    select: { poolId: true, isToken0Quote: true },
   });
 
   if (!position) {
@@ -526,7 +526,7 @@ async function processAndSaveEvents(
   const poolId = position.poolId;
 
   // 2. Fetch pool metadata (tokens, decimals, quote designation)
-  const poolMetadata = await fetchPoolWithTokens(poolId, prisma, logger);
+  const poolMetadata = await fetchPoolWithTokens(poolId, position.isToken0Quote, prisma, logger);
 
   // 3. Get last existing event for state initialization
   // IMPORTANT: This must be called AFTER deleteEventsFromBlock() to ensure
