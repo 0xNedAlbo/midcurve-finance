@@ -42,6 +42,9 @@ import {
   POOL_METRICS_QUERY,
   POOL_FEE_DATA_QUERY,
 } from './queries.js';
+import {
+  PoolNotFoundInSubgraphError,
+} from './types.js';
 import type {
   SubgraphResponse,
   PoolMetrics,
@@ -49,7 +52,6 @@ import type {
   RawPoolData,
   UniswapV3SubgraphApiError,
   UniswapV3SubgraphUnavailableError,
-  PoolNotFoundInSubgraphError,
 } from './types.js';
 
 /**
@@ -354,14 +356,7 @@ export class UniswapV3SubgraphClient {
       );
 
       // For local chains, throw a specific error that callers can handle
-      const error = new Error(
-        `Pool fee data not available for local chain ${chainId}. ` +
-          'The Graph does not index local development chains.'
-      ) as PoolNotFoundInSubgraphError;
-      error.name = 'PoolNotFoundInSubgraphError';
-      (error as any).chainId = chainId;
-      (error as any).poolAddress = poolAddress;
-      (error as any).isLocalChain = true;
+      const error = new PoolNotFoundInSubgraphError(chainId, normalizeAddress(poolAddress));
       log.methodError(this.logger, 'getPoolFeeData', error, { reason: 'local_chain' });
       throw error;
     }
@@ -397,12 +392,7 @@ export class UniswapV3SubgraphClient {
 
       // Pool not found
       if (!response.data?.pools || response.data.pools.length === 0) {
-        const error = new Error(
-          `Pool ${poolAddress} not found in subgraph for chain ${chainId}`
-        ) as PoolNotFoundInSubgraphError;
-        error.name = 'PoolNotFoundInSubgraphError';
-        (error as any).chainId = chainId;
-        (error as any).poolAddress = poolAddress;
+        const error = new PoolNotFoundInSubgraphError(chainId, normalizedAddress);
         log.methodError(this.logger, 'getPoolFeeData', error, { chainId, poolAddress });
         throw error;
       }
