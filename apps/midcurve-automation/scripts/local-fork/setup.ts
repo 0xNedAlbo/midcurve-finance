@@ -275,6 +275,7 @@ async function main(): Promise<void> {
     console.log('Environment Variables for Manual Commands:');
     console.log(`  export MOCK_USD_ADDRESS="${state.mockUsdAddress}"`);
     console.log(`  export POOL_ADDRESS="${state.poolAddress}"`);
+    console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
     console.log('');
     console.log('Next Steps:');
     console.log('1. Check pool price:');

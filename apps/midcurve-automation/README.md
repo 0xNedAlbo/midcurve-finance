@@ -73,6 +73,7 @@ The setup script will output environment variables to export for subsequent comm
 ```bash
 export MOCK_USD_ADDRESS="0x..."
 export POOL_ADDRESS="0x..."
+export POSITION_CLOSER_ADDRESS="0x..."
 ```
 
 ## Local Testing Scripts
