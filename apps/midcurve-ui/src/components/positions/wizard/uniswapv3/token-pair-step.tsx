@@ -125,24 +125,24 @@ function TokenInput({
                     >
                       <Copy className="w-3 h-3" />
                     </div>
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (selection.token?.address) {
-                          window.open(
-                            getExplorerAddressUrl(
+                    {getExplorerAddressUrl(selection.token.address, chain) && (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (selection.token?.address) {
+                            const url = getExplorerAddressUrl(
                               selection.token.address,
                               chain
-                            ),
-                            "_blank"
-                          );
-                        }
-                      }}
-                      className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-                      title="View on explorer"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </div>
+                            );
+                            if (url) window.open(url, "_blank");
+                          }
+                        }}
+                        className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                        title="View on explorer"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -229,19 +229,19 @@ function TokenInput({
                           >
                             <Copy className="w-3 h-3" />
                           </div>
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(
-                                getExplorerAddressUrl(token.address, chain),
-                                "_blank"
-                              );
-                            }}
-                            className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-                            title="View on explorer"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                          </div>
+                          {getExplorerAddressUrl(token.address, chain) && (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const url = getExplorerAddressUrl(token.address, chain);
+                                if (url) window.open(url, "_blank");
+                              }}
+                              className="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                              title="View on explorer"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </div>
+                          )}
                         </div>
                       </>
                     )}

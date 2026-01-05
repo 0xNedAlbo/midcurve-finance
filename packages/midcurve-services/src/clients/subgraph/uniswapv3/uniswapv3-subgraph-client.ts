@@ -28,6 +28,7 @@
  */
 
 import crypto from 'crypto';
+import { isLocalChain } from '../../../config/evm.js';
 import { createServiceLogger, log } from '../../../logging/index.js';
 import type { ServiceLogger } from '../../../logging/index.js';
 import { CacheService } from '../../../services/cache/index.js';
@@ -216,6 +217,24 @@ export class UniswapV3SubgraphClient {
   async getPoolMetrics(chainId: number, poolAddress: string): Promise<PoolMetrics> {
     log.methodEntry(this.logger, 'getPoolMetrics', { chainId, poolAddress });
 
+    // Graceful degradation for local development chains
+    // The Graph doesn't index local chains, so return default metrics
+    if (isLocalChain(chainId)) {
+      this.logger.warn(
+        { chainId, poolAddress },
+        'Subgraph not available for local chain, returning default metrics'
+      );
+
+      const defaultMetrics: PoolMetrics = {
+        tvlUSD: '0',
+        volumeUSD: '0',
+        feesUSD: '0',
+      };
+
+      log.methodExit(this.logger, 'getPoolMetrics', { reason: 'local_chain' });
+      return defaultMetrics;
+    }
+
     try {
       // Normalize address to lowercase for subgraph query
       const poolId = normalizeAddress(poolAddress).toLowerCase();
@@ -325,6 +344,27 @@ export class UniswapV3SubgraphClient {
    */
   async getPoolFeeData(chainId: number, poolAddress: string): Promise<PoolFeeData> {
     log.methodEntry(this.logger, 'getPoolFeeData', { chainId, poolAddress });
+
+    // Graceful degradation for local development chains
+    // The Graph doesn't index local chains, so we can't provide fee data
+    if (isLocalChain(chainId)) {
+      this.logger.warn(
+        { chainId, poolAddress },
+        'Subgraph not available for local chain, fee data unavailable'
+      );
+
+      // For local chains, throw a specific error that callers can handle
+      const error = new Error(
+        `Pool fee data not available for local chain ${chainId}. ` +
+          'The Graph does not index local development chains.'
+      ) as PoolNotFoundInSubgraphError;
+      error.name = 'PoolNotFoundInSubgraphError';
+      (error as any).chainId = chainId;
+      (error as any).poolAddress = poolAddress;
+      (error as any).isLocalChain = true;
+      log.methodError(this.logger, 'getPoolFeeData', error, { reason: 'local_chain' });
+      throw error;
+    }
 
     try {
       // Normalize address

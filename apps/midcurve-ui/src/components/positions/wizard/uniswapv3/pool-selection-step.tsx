@@ -64,9 +64,10 @@ export function PoolSelectionStep(props: PoolSelectionStepProps) {
   // Get recommended pool (highest TVL)
   const recommendedPool = getRecommendedPool(pools);
 
-  // Get explorer URL for a given address
-  const getExplorerUrl = (address: string): string => {
+  // Get explorer URL for a given address (returns null if no explorer for chain)
+  const getExplorerUrl = (address: string): string | null => {
     const chainMeta = CHAIN_METADATA[chain];
+    if (!chainMeta?.explorer) return null;
     return `${chainMeta.explorer}/address/${address}`;
   };
 
@@ -219,26 +220,28 @@ export function PoolSelectionStep(props: PoolSelectionStepProps) {
                           >
                             <Copy className="w-3 h-3" />
                           </span>
-                          {/* Explorer Link Button */}
-                          <span
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(getExplorerUrl(poolResult.pool.config.address), '_blank');
-                            }}
-                            className="text-slate-400 hover:text-slate-200 transition-colors p-0.5 cursor-pointer inline-flex items-center justify-center"
-                            title="View on blockchain explorer"
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
+                          {/* Explorer Link Button - only shown if chain has explorer */}
+                          {getExplorerUrl(poolResult.pool.config.address) && (
+                            <span
+                              onClick={(e) => {
                                 e.stopPropagation();
-                                window.open(getExplorerUrl(poolResult.pool.config.address), '_blank');
-                              }
-                            }}
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                          </span>
+                                window.open(getExplorerUrl(poolResult.pool.config.address)!, '_blank');
+                              }}
+                              className="text-slate-400 hover:text-slate-200 transition-colors p-0.5 cursor-pointer inline-flex items-center justify-center"
+                              title="View on blockchain explorer"
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  window.open(getExplorerUrl(poolResult.pool.config.address)!, '_blank');
+                                }
+                              }}
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

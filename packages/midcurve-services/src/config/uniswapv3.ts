@@ -33,6 +33,9 @@ export const UNISWAP_V3_POSITION_MANAGER_ADDRESSES: Record<
 
   // BNB Chain uses a different address
   [SupportedChainId.BSC]: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+
+  // Local Anvil fork uses mainnet addresses (since it forks mainnet)
+  [SupportedChainId.LOCAL]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
 };
 
 /**
@@ -151,6 +154,9 @@ export const UNISWAP_V3_FACTORY_ADDRESSES: Record<SupportedChainId, Address> =
 
     // BSC uses a different address
     [SupportedChainId.BSC]: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7',
+
+    // Local Anvil fork uses mainnet addresses (since it forks mainnet)
+    [SupportedChainId.LOCAL]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   };
 
 /**
@@ -234,6 +240,9 @@ export const NFPM_DEPLOYMENT_BLOCKS: Record<SupportedChainId, bigint> = {
   [SupportedChainId.BSC]: 26324014n,
   [SupportedChainId.POLYGON]: 22757547n,
   [SupportedChainId.OPTIMISM]: 4294n,
+
+  // Local Anvil fork uses mainnet addresses (since it forks mainnet)
+  [SupportedChainId.LOCAL]: 12369621n,
 };
 
 /**

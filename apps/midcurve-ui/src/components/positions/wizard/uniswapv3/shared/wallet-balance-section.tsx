@@ -58,8 +58,8 @@ export function WalletBalanceSection({
   const { switchChain, isPending: isSwitchingNetwork } = useSwitchChain();
 
   const chainConfig = CHAIN_METADATA[chain];
-  const expectedChainName = chainConfig.name;
-  const expectedChainId = chainConfig.chainId;
+  const expectedChainName = chainConfig?.name ?? 'Unknown Chain';
+  const expectedChainId = chainConfig?.chainId ?? 0;
 
   // Get token data for display
   const baseTokenData =

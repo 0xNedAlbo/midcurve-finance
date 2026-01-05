@@ -55,8 +55,8 @@ export function TransactionStep({
             {title}
           </h5>
 
-          {/* Block explorer link - shown when transaction hash exists */}
-          {transactionHash && chain && (
+          {/* Block explorer link - shown when transaction hash exists and chain has explorer */}
+          {transactionHash && chain && CHAIN_METADATA[chain]?.explorer && (
             <a
               href={`${CHAIN_METADATA[chain].explorer}/tx/${transactionHash}`}
               target="_blank"

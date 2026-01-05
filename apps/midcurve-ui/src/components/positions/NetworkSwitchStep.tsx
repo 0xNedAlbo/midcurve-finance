@@ -20,7 +20,7 @@ export function NetworkSwitchStep({ chain, isWrongNetwork }: NetworkSwitchStepPr
   const { switchChain } = useSwitchChain();
   const chainConfig = CHAIN_METADATA[chain];
 
-  if (!isWrongNetwork) {
+  if (!isWrongNetwork || !chainConfig) {
     return null;
   }
 

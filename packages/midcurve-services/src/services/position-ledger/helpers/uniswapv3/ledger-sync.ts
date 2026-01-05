@@ -13,6 +13,7 @@ import type { PositionAprService } from '../../../position-apr/position-apr-serv
 import type { UniswapV3PositionLedgerService } from '../../uniswapv3-position-ledger-service.js';
 import type { UniswapV3PoolPriceService } from '../../../pool-price/uniswapv3-pool-price-service.js';
 import { getNfpmDeploymentBlock } from '../../../../config/uniswapv3.js';
+import { isLocalChain } from '../../../../config/evm.js';
 import type { RawPositionEvent } from '../../../../clients/etherscan/types.js';
 import { calculatePoolPriceInQuoteToken } from '../../../../utils/uniswapv3/ledger-calculations.js';
 import { fetchPoolWithTokens } from './pool-metadata.js';
@@ -277,7 +278,11 @@ export async function syncLedgerEvents(
     );
 
     // 8. Clean up sync state (remove missing events if found in Etherscan OR finalized but not found)
-    if (missingEventsDB.length > 0) {
+    // For local development chains, skip finalization-based cleanup since:
+    // - Etherscan doesn't index local chains (returns empty)
+    // - Local chains don't have proper finalization
+    // - Events should remain "forever pending" for testing purposes
+    if (missingEventsDB.length > 0 && !isLocalChain(chainId)) {
       let totalRemoved = 0;
 
       // Check each missing event against Etherscan results and finalization status
@@ -345,6 +350,16 @@ export async function syncLedgerEvents(
           finalizedBlock: finalizedBlock.toString(),
         },
         'Cleaned up missing events'
+      );
+    } else if (missingEventsDB.length > 0 && isLocalChain(chainId)) {
+      // For local chains, log that events will remain pending forever
+      logger.info(
+        {
+          positionId,
+          chainId,
+          missingEventCount: missingEventsDB.length,
+        },
+        'Skipping missing event cleanup for local chain - events will remain pending'
       );
     }
 

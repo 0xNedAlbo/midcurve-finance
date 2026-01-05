@@ -44,17 +44,17 @@ export function truncateText(text: string, maxLength = 20): string {
  * Get block explorer URL for a specific address
  * @param address - Ethereum address
  * @param chain - Chain slug (ethereum, arbitrum, etc.)
- * @returns Full URL to the address page on the block explorer
+ * @returns Full URL to the address page on the block explorer, or null if explorer not available
  */
 export function getExplorerAddressUrl(
   address: string,
   chain: EvmChainSlug
-): string {
+): string | null {
   const chainMetadata = CHAIN_METADATA[chain];
 
-  if (!chainMetadata) {
-    // Fallback to Etherscan if chain not found
-    return `https://etherscan.io/address/${address}`;
+  if (!chainMetadata || !chainMetadata.explorer) {
+    // No explorer available for this chain (e.g., local testnet)
+    return null;
   }
 
   return `${chainMetadata.explorer}/address/${address}`;
@@ -64,14 +64,14 @@ export function getExplorerAddressUrl(
  * Get block explorer URL for a specific transaction
  * @param txHash - Transaction hash
  * @param chain - Chain slug (ethereum, arbitrum, etc.)
- * @returns Full URL to the transaction page on the block explorer
+ * @returns Full URL to the transaction page on the block explorer, or null if explorer not available
  */
-export function getExplorerTxUrl(txHash: string, chain: EvmChainSlug): string {
+export function getExplorerTxUrl(txHash: string, chain: EvmChainSlug): string | null {
   const chainMetadata = CHAIN_METADATA[chain];
 
-  if (!chainMetadata) {
-    // Fallback to Etherscan if chain not found
-    return `https://etherscan.io/tx/${txHash}`;
+  if (!chainMetadata || !chainMetadata.explorer) {
+    // No explorer available for this chain (e.g., local testnet)
+    return null;
   }
 
   return `${chainMetadata.explorer}/tx/${txHash}`;

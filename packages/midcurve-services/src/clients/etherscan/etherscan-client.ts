@@ -14,6 +14,7 @@
  * @see https://docs.etherscan.io/v/etherscan-v2
  */
 
+import { isLocalChain } from '../../config/evm.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { CacheService } from '../../services/cache/index.js';
@@ -645,6 +646,18 @@ export class EtherscanClient {
     options: FetchPositionEventsOptions = {}
   ): Promise<RawPositionEvent[]> {
     log.methodEntry(this.logger, 'fetchPositionEvents', { chainId, nftId, options });
+
+    // Graceful degradation for local development chains
+    // Etherscan doesn't index local chains, so return empty array
+    if (isLocalChain(chainId)) {
+      this.logger.warn(
+        { chainId, nftId },
+        'Etherscan not available for local chain, returning empty events. ' +
+          'Use the pending events API to submit events manually.'
+      );
+      log.methodExit(this.logger, 'fetchPositionEvents', { count: 0, reason: 'local_chain' });
+      return [];
+    }
 
     this.validateChainId(chainId);
 

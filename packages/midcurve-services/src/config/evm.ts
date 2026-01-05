@@ -4,7 +4,7 @@
  * Centralized configuration for all supported EVM chains.
  * Manages RPC endpoints, public clients, and chain metadata.
  *
- * Environment Variables (REQUIRED):
+ * Environment Variables (REQUIRED for production chains):
  * - RPC_URL_ETHEREUM    - Ethereum mainnet RPC
  * - RPC_URL_ARBITRUM    - Arbitrum One RPC
  * - RPC_URL_BASE        - Base RPC
@@ -12,11 +12,20 @@
  * - RPC_URL_POLYGON     - Polygon RPC
  * - RPC_URL_OPTIMISM    - Optimism RPC
  *
+ * Environment Variables (OPTIONAL for development):
+ * - RPC_URL_LOCAL       - Local Anvil fork RPC (e.g., http://localhost:8547)
+ *                         Only enabled when NODE_ENV !== 'production'
+ *
  * Note: getChainConfig() and getPublicClient() will throw an error if the
  * required RPC URL environment variable is not set for the requested chain.
  */
 
-import { createPublicClient, http, type PublicClient } from 'viem';
+import {
+  createPublicClient,
+  defineChain,
+  http,
+  type PublicClient,
+} from 'viem';
 import {
   mainnet,
   arbitrum,
@@ -26,6 +35,20 @@ import {
   optimism,
   type Chain,
 } from 'viem/chains';
+
+/**
+ * Local Anvil chain definition for development testing
+ * Only used when NODE_ENV !== 'production' and RPC_URL_LOCAL is set
+ */
+const localAnvil = defineChain({
+  id: 31337,
+  name: 'Local Anvil Fork',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: {
+    default: { http: ['http://localhost:8547'] },
+  },
+  testnet: true,
+});
 
 /**
  * Finality configuration for a chain
@@ -64,6 +87,22 @@ export enum SupportedChainId {
   BSC = 56,
   POLYGON = 137,
   OPTIMISM = 10,
+  /** Local Anvil chain - only available in development */
+  LOCAL = 31337,
+}
+
+/**
+ * Check if a chain ID is a local development chain
+ *
+ * Local chains don't have finalization delays and should skip
+ * block confirmation checks. They also don't have Etherscan or
+ * The Graph indexing support.
+ *
+ * @param chainId - Chain ID to check
+ * @returns true if the chain is a local development chain
+ */
+export function isLocalChain(chainId: number): boolean {
+  return chainId === SupportedChainId.LOCAL;
 }
 
 /**
@@ -180,6 +219,21 @@ export class EvmConfig {
       viemChain: optimism,
       finality: { type: 'blockTag' },
     });
+
+    // Local Anvil Fork (development only)
+    // Only available when NODE_ENV !== 'production' and RPC_URL_LOCAL is set
+    if (env['NODE_ENV'] !== 'production' && env['RPC_URL_LOCAL']) {
+      this.chains.set(SupportedChainId.LOCAL, {
+        chainId: SupportedChainId.LOCAL,
+        name: 'Local Anvil Fork',
+        rpcUrl: env['RPC_URL_LOCAL'],
+        blockExplorer: undefined, // No explorer for local chain
+        viemChain: localAnvil,
+        // Local chains don't have finalization - blocks are mined instantly
+        // We use 'blockTag' but finalization checks are skipped via isLocalChain()
+        finality: { type: 'blockTag' },
+      });
+    }
   }
 
   /**
@@ -196,6 +250,7 @@ export class EvmConfig {
       [SupportedChainId.BSC]: 'RPC_URL_BSC',
       [SupportedChainId.POLYGON]: 'RPC_URL_POLYGON',
       [SupportedChainId.OPTIMISM]: 'RPC_URL_OPTIMISM',
+      [SupportedChainId.LOCAL]: 'RPC_URL_LOCAL',
     };
 
     return envVarMap[chainId] ?? `RPC_URL_UNKNOWN_${chainId}`;

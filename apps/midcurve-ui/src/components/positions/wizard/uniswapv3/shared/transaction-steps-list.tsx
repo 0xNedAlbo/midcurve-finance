@@ -77,6 +77,7 @@ export function TransactionStepsList({
   const getExplorerUrl = (txHash: Address | undefined) => {
     if (!txHash || !chain) return null;
     const chainConfig = CHAIN_METADATA[chain];
+    if (!chainConfig?.explorer) return null;
     return `${chainConfig.explorer}/tx/${txHash}`;
   };
 

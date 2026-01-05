@@ -60,7 +60,7 @@ export function OpenPositionStep({
   const { address: userAddress, isConnected } = useAccount();
   const connectedChainId = useChainId();
   const chainConfig = CHAIN_METADATA[chain];
-  const expectedChainId = chainConfig.chainId;
+  const expectedChainId = chainConfig?.chainId ?? 0;
 
   // Check if on wrong network
   const isWrongNetwork = isConnected && connectedChainId !== expectedChainId;
