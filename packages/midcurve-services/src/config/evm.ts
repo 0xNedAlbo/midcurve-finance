@@ -48,6 +48,12 @@ const localAnvil = defineChain({
     default: { http: ['http://localhost:8547'] },
   },
   testnet: true,
+  // Multicall3 is available on the forked mainnet at the canonical address
+  contracts: {
+    multicall3: {
+      address: '0xcA11bde05977b3631167028862bE2a173976CA11',
+    },
+  },
 });
 
 /**
