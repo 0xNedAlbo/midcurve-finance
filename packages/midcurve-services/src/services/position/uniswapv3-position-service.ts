@@ -2831,25 +2831,27 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             });
 
             const existingPosition = await this.prisma.position.findUnique({
-                where: { positionHash },
+                where: {
+                    userId_positionHash: { userId, positionHash },
+                },
                 include: { pool: true },
             });
 
-            // Return null for both "not found" and "not owned" (security)
-            if (!existingPosition || existingPosition.userId !== userId) {
+            // Return null if not found (ownership now enforced by composite unique key)
+            if (!existingPosition) {
                 this.logger.info(
-                    { userId, chainId, nftId, exists: !!existingPosition },
-                    "Position not found or not owned by user"
+                    { userId, chainId, nftId },
+                    "Position not found for user"
                 );
                 log.methodExit(this.logger, "updatePositionWithEvents", {
-                    result: "not_found_or_not_owned",
+                    result: "not_found",
                 });
                 return null;
             }
 
             this.logger.debug(
                 { positionId: existingPosition.id, userId, chainId, nftId },
-                "Position found and ownership verified"
+                "Position found for user"
             );
 
             // 2. Add events to ledger
