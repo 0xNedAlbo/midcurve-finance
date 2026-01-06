@@ -15,6 +15,7 @@ import { useCloseOrders } from '@/hooks/automation';
 import { useCancelCloseOrder } from '@/hooks/automation';
 import { CloseOrderCard } from './CloseOrderCard';
 import { isCloseOrderTerminal } from './CloseOrderStatusBadge';
+import { AutomationLogList } from './AutomationLogList';
 
 interface PositionCloseOrdersPanelProps {
   /**
@@ -245,6 +246,13 @@ export function PositionCloseOrdersPanel({
           )}
         </div>
       )}
+
+      {/* Activity Log - always show if we have position ID */}
+      <AutomationLogList
+        positionId={positionId}
+        chainId={chainId}
+        hasActiveOrders={hasActiveOrders}
+      />
     </div>
   );
 }

@@ -208,6 +208,17 @@ export const queryKeys = {
         [...queryKeys.automation.sharedContracts.all, 'chain', chainId] as const,
     },
 
+    // ---------------------------------------------------------------------------
+    // Automation Logs
+    // ---------------------------------------------------------------------------
+    logs: {
+      all: ['automation', 'logs'] as const,
+
+      // By position
+      byPosition: (positionId: string) =>
+        [...queryKeys.automation.logs.all, 'position', positionId] as const,
+    },
+
     // Mutation keys
     mutations: {
       createOrder: ['automation', 'create-order'] as const,

@@ -464,14 +464,15 @@ model Position {
   aprPeriods       PositionAprPeriod[]
   syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
   automationOrders AutomationCloseOrder[] // Close orders linked to this position
+  automationLogs   AutomationLog[] // Automation event logs for this position
 
+  @@unique([userId, positionHash]) // Same user can't import same position twice; allows multi-user watching
   // Indexes for efficient queries
   @@index([protocol])
   @@index([positionType])
   @@index([userId])
   @@index([poolId])
   @@index([isActive])
-  @@unique([userId, positionHash]) // Same user can't import same position twice; allows multi-user watching
   @@map("positions")
 }
 
@@ -572,12 +573,12 @@ model PositionLedgerEvent {
   config Json // Protocol-specific config (blockNumber, txIndex, logIndex, liquidity, fees, etc.)
   state  Json // Raw event data (INCREASE_LIQUIDITY, DECREASE_LIQUIDITY, COLLECT)
 
+  @@unique([positionId, inputHash]) // Deduplication per-position; allows multi-user event import
   // Indexes for efficient queries
   @@index([positionId, timestamp]) // Time-series queries for position
   @@index([protocol]) // Filter by protocol
   @@index([eventType]) // Filter by event type
   @@index([previousId]) // Event chain traversal
-  @@unique([positionId, inputHash]) // Deduplication per-position; allows multi-user event import
   @@map("position_ledger_events")
 }
 
@@ -775,6 +776,9 @@ model AutomationCloseOrder {
   //              amount0Out, amount1Out }
   state Json
 
+  // Relations
+  logs AutomationLog[] // Log entries for this close order
+
   // Indexes
   @@index([closeOrderType])
   @@index([status])
@@ -806,4 +810,39 @@ model PoolPriceSubscription {
   @@index([isActive])
   @@index([activeOrderCount]) // Find pools with active orders
   @@map("pool_price_subscriptions")
+}
+
+// AutomationLog - User-facing automation event logs
+// Scoped to positions, tracks lifecycle events for close orders
+model AutomationLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Parent: Position (logs scoped to position)
+  positionId String
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  // Optional: Link to specific close order
+  closeOrderId String?
+  closeOrder   AutomationCloseOrder? @relation(fields: [closeOrderId], references: [id], onDelete: SetNull)
+
+  // Log classification
+  level   Int // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+  logType String // ORDER_CREATED, ORDER_TRIGGERED, ORDER_EXECUTING, ORDER_EXECUTED, ORDER_FAILED, ORDER_CANCELLED, RETRY_SCHEDULED
+
+  // User-facing message
+  message String
+
+  // Platform-independent context (JSON)
+  // Contains all event details in a flexible, extensible structure
+  // EVM: { platform: 'evm', chainId, txHash, gasLimit, gasPrice, gasUsed, ... }
+  // Solana (future): { platform: 'solana', signature, slot, ... }
+  // Common: { triggerPrice, currentPrice, amounts, error, retryCount, ... }
+  context Json?
+
+  // Indexes for efficient queries
+  @@index([positionId, createdAt])
+  @@index([positionId, level, createdAt])
+  @@index([closeOrderId])
+  @@map("automation_logs")
 }

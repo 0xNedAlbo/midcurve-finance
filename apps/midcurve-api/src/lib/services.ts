@@ -23,6 +23,7 @@ import {
   StrategyMetricsService,
   CloseOrderService,
   PoolSubscriptionService,
+  AutomationLogService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -41,6 +42,7 @@ let _strategyService: StrategyService | null = null;
 let _strategyMetricsService: StrategyMetricsService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
+let _automationLogService: AutomationLogService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -190,4 +192,14 @@ export function getPoolSubscriptionService(): PoolSubscriptionService {
     _poolSubscriptionService = new PoolSubscriptionService();
   }
   return _poolSubscriptionService;
+}
+
+/**
+ * Get singleton instance of AutomationLogService
+ */
+export function getAutomationLogService(): AutomationLogService {
+  if (!_automationLogService) {
+    _automationLogService = new AutomationLogService();
+  }
+  return _automationLogService;
 }

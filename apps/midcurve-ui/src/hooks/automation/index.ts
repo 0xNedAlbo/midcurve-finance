@@ -44,6 +44,13 @@ export {
 // Close Orders - Read only
 export { useCloseOrders, useCloseOrder } from './useCloseOrders';
 
+// Automation Logs
+export {
+  useAutomationLogs,
+  type AutomationLogData,
+  type ListAutomationLogsResponseData,
+} from './useAutomationLogs';
+
 // Shared Contracts
 export { useSharedContract } from './useSharedContract';
 

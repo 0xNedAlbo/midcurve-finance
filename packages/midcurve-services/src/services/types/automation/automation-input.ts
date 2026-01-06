@@ -255,3 +255,169 @@ export interface FindPoolSubscriptionOptions {
    */
   hasActiveOrders?: boolean;
 }
+
+// =============================================================================
+// AUTOMATION LOG INPUT TYPES
+// =============================================================================
+
+/**
+ * Platform type for log context
+ */
+export type AutomationPlatform = 'evm' | 'solana';
+
+/**
+ * Base context for all automation log entries
+ */
+export interface BaseLogContext {
+  /**
+   * Platform identifier for multi-chain support
+   */
+  platform?: AutomationPlatform;
+}
+
+/**
+ * EVM-specific context fields
+ */
+export interface EvmLogContext extends BaseLogContext {
+  platform?: 'evm';
+  chainId?: number;
+  txHash?: string;
+  gasLimit?: string;
+  gasPrice?: string;
+  gasUsed?: string;
+  operatorAddress?: string;
+}
+
+/**
+ * Solana-specific context fields (future)
+ */
+export interface SolanaLogContext extends BaseLogContext {
+  platform: 'solana';
+  signature?: string;
+  slot?: number;
+  computeUnits?: number;
+}
+
+/**
+ * Context for ORDER_CREATED event
+ */
+export interface OrderCreatedContext extends EvmLogContext {
+  triggerLowerPrice?: string;
+  triggerUpperPrice?: string;
+  slippageBps?: number;
+}
+
+/**
+ * Context for ORDER_TRIGGERED event
+ */
+export interface OrderTriggeredContext extends EvmLogContext {
+  triggerSide: 'lower' | 'upper';
+  triggerPrice: string;
+  currentPrice: string;
+  humanTriggerPrice: string;
+  humanCurrentPrice: string;
+}
+
+/**
+ * Context for ORDER_EXECUTING event
+ */
+export interface OrderExecutingContext extends EvmLogContext {
+  // txHash, gasLimit, gasPrice, operatorAddress from EvmLogContext
+}
+
+/**
+ * Context for ORDER_EXECUTED event
+ */
+export interface OrderExecutedContext extends EvmLogContext {
+  // txHash, gasUsed from EvmLogContext
+  amount0Out: string;
+  amount1Out: string;
+  executionFeeBps: number;
+}
+
+/**
+ * Context for ORDER_FAILED event
+ */
+export interface OrderFailedContext extends EvmLogContext {
+  error: string;
+  retryCount: number;
+  maxRetries: number;
+  willRetry: boolean;
+}
+
+/**
+ * Context for ORDER_CANCELLED event
+ */
+export interface OrderCancelledContext extends EvmLogContext {
+  cancelledBy?: string;
+  reason?: string;
+}
+
+/**
+ * Union type for all context types
+ */
+export type AutomationLogContext =
+  | BaseLogContext
+  | EvmLogContext
+  | SolanaLogContext
+  | OrderCreatedContext
+  | OrderTriggeredContext
+  | OrderExecutingContext
+  | OrderExecutedContext
+  | OrderFailedContext
+  | OrderCancelledContext;
+
+/**
+ * Input for creating an automation log entry
+ */
+export interface CreateAutomationLogInput {
+  /**
+   * Position ID (logs are scoped to positions)
+   */
+  positionId: string;
+
+  /**
+   * Optional close order ID (for order-specific logs)
+   */
+  closeOrderId?: string;
+
+  /**
+   * Log level (0=DEBUG, 1=INFO, 2=WARN, 3=ERROR)
+   */
+  level: number;
+
+  /**
+   * Log type (ORDER_CREATED, ORDER_TRIGGERED, etc.)
+   */
+  logType: string;
+
+  /**
+   * User-facing message
+   */
+  message: string;
+
+  /**
+   * Platform-independent context (JSON)
+   */
+  context?: AutomationLogContext;
+}
+
+/**
+ * Options for listing automation logs
+ */
+export interface ListAutomationLogsOptions {
+  /**
+   * Filter by log level
+   */
+  level?: number;
+
+  /**
+   * Maximum number of logs to return
+   */
+  limit?: number;
+
+  /**
+   * Cursor for pagination (log ID to start after)
+   */
+  cursor?: string;
+}

@@ -7,7 +7,7 @@
 
 import { prisma } from '@midcurve/database';
 import type { AutomationContractConfig } from '@midcurve/shared';
-import { getCloseOrderService, getPoolSubscriptionService } from '../lib/services';
+import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService } from '../lib/services';
 import { broadcastTransaction, waitForTransaction, type SupportedChainId } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -158,11 +158,36 @@ export class OrderExecutor {
       autoLog.methodError(log, 'handleMessage.execute', error, { orderId, positionId });
 
       // Increment retry counter and record error
+      const automationLogService = getAutomationLogService();
       try {
         const { retryCount } = await closeOrderService.incrementExecutionAttempt(
           orderId,
           error.message
         );
+
+        const willRetry = retryCount < MAX_EXECUTION_ATTEMPTS;
+
+        // Log ORDER_FAILED for user visibility
+        await automationLogService.logOrderFailed(positionId, orderId, {
+          platform: 'evm',
+          chainId,
+          error: error.message,
+          retryCount,
+          maxRetries: MAX_EXECUTION_ATTEMPTS,
+          willRetry,
+        });
+
+        if (willRetry) {
+          // Log retry scheduled
+          await automationLogService.logRetryScheduled(positionId, orderId, {
+            platform: 'evm',
+            chainId,
+            error: error.message,
+            retryCount,
+            maxRetries: MAX_EXECUTION_ATTEMPTS,
+            willRetry: true,
+          });
+        }
 
         if (retryCount >= MAX_EXECUTION_ATTEMPTS) {
           // Permanently failed - mark as failed and remove from queue
@@ -267,6 +292,18 @@ export class OrderExecutor {
       triggerSqrtPriceX96: BigInt(triggerPrice),
     });
 
+    // Log ORDER_TRIGGERED for user visibility
+    const automationLogService = getAutomationLogService();
+    await automationLogService.logOrderTriggered(positionId, orderId, {
+      platform: 'evm',
+      chainId,
+      triggerSide,
+      triggerPrice,
+      currentPrice: _currentPrice,
+      humanTriggerPrice: triggerPrice, // TODO: Convert to human-readable price
+      humanCurrentPrice: _currentPrice, // TODO: Convert to human-readable price
+    });
+
     autoLog.orderExecution(log, orderId, 'signing', {
       positionId,
       poolAddress,
@@ -287,6 +324,14 @@ export class OrderExecutor {
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {
       txHash: signedTx.txHash,
+    });
+
+    // Log ORDER_EXECUTING for user visibility
+    await automationLogService.logOrderExecuting(positionId, orderId, {
+      platform: 'evm',
+      chainId,
+      txHash: signedTx.txHash,
+      operatorAddress,
     });
 
     // Broadcast transaction
@@ -325,6 +370,17 @@ export class OrderExecutor {
     } catch (err) {
       log.warn({ orderId, poolAddress, error: err, msg: 'Failed to decrement order count' });
     }
+
+    // Log ORDER_EXECUTED for user visibility
+    await automationLogService.logOrderExecuted(positionId, orderId, {
+      platform: 'evm',
+      chainId,
+      txHash,
+      gasUsed: receipt.gasUsed.toString(),
+      amount0Out: '0', // TODO: Parse from tx receipt
+      amount1Out: '0', // TODO: Parse from tx receipt
+      executionFeeBps: feeConfig.bps,
+    });
 
     autoLog.orderExecution(log, orderId, 'completed', {
       txHash,

@@ -15,4 +15,18 @@ export type {
   // Pool subscription inputs
   UpdatePoolSubscriptionInput,
   FindPoolSubscriptionOptions,
+  // Automation log types
+  AutomationPlatform,
+  BaseLogContext,
+  EvmLogContext,
+  SolanaLogContext,
+  OrderCreatedContext,
+  OrderTriggeredContext,
+  OrderExecutingContext,
+  OrderExecutedContext,
+  OrderFailedContext,
+  OrderCancelledContext,
+  AutomationLogContext,
+  CreateAutomationLogInput,
+  ListAutomationLogsOptions,
 } from './automation-input.js';

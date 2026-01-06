@@ -9,12 +9,14 @@ import {
   CloseOrderService,
   PoolSubscriptionService,
   UniswapV3PoolService,
+  AutomationLogService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
 let _closeOrderService: CloseOrderService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
+let _automationLogService: AutomationLogService | null = null;
 
 /**
  * Get singleton instance of CloseOrderService
@@ -44,4 +46,14 @@ export function getUniswapV3PoolService(): UniswapV3PoolService {
     _uniswapV3PoolService = new UniswapV3PoolService();
   }
   return _uniswapV3PoolService;
+}
+
+/**
+ * Get singleton instance of AutomationLogService
+ */
+export function getAutomationLogService(): AutomationLogService {
+  if (!_automationLogService) {
+    _automationLogService = new AutomationLogService();
+  }
+  return _automationLogService;
 }

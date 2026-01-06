@@ -188,6 +188,8 @@ import type {
   RefundAutowalletRequest,
   RefundAutowalletResponse,
   GetRefundStatusResponse,
+  // Logs
+  ListAutomationLogsResponse,
 } from '@midcurve/api-shared';
 
 /**
@@ -308,5 +310,17 @@ export const automationApi = {
    */
   getRefundStatus(requestId: string) {
     return apiClient.get<GetRefundStatusResponse['data']>(`/api/v1/automation/wallet/refund/${requestId}`);
+  },
+
+  // ---------------------------------------------------------------------------
+  // Automation Logs
+  // ---------------------------------------------------------------------------
+
+  /**
+   * List automation logs for a position
+   */
+  listLogs(params: { positionId: string; level?: number; limit?: number; cursor?: string }) {
+    const qs = buildQueryString(params);
+    return apiClient.get<ListAutomationLogsResponse['data']>(`/api/v1/automation/logs${qs}`);
   },
 };

@@ -77,3 +77,27 @@ export {
   type RefundOperationStatus,
   type GetRefundStatusResponse,
 } from './wallet.js';
+
+// Logs
+export {
+  AUTOMATION_LOG_LEVELS,
+  type AutomationLogLevel,
+  AUTOMATION_LOG_LEVEL_NAMES,
+  type AutomationLogLevelName,
+  AUTOMATION_LOG_TYPES,
+  type AutomationLogType,
+  type AutomationPlatform,
+  type AutomationLogContextBase,
+  type AutomationLogContextEvm,
+  type AutomationLogContext,
+  type AutomationLogData,
+  // List
+  ListAutomationLogsQuerySchema,
+  type ListAutomationLogsQuery,
+  type ListAutomationLogsResponseData,
+  type ListAutomationLogsResponse,
+  // Get
+  type GetAutomationLogResponse,
+  // Utils
+  getAutomationLogLevelName,
+} from './logs.js';
