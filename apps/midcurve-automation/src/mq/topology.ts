@@ -28,7 +28,12 @@ export const QUEUES = {
   ORDERS_PENDING: 'orders.pending',
   /** Queue for contracts ready for deployment */
   CONTRACTS_PENDING: 'contracts.pending',
+  /** Delay queue for order retries (60s TTL, dead-letters back to orders.pending) */
+  ORDERS_RETRY_DELAY: 'orders.retry-delay',
 } as const;
+
+/** Retry delay in milliseconds (60 seconds) */
+export const ORDER_RETRY_DELAY_MS = 60000;
 
 /** Routing keys */
 export const ROUTING_KEYS = {
@@ -89,6 +94,26 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     msg: 'Queue bound to exchange',
   });
 
+  // Create orders.retry-delay queue (for delayed retries)
+  // Messages in this queue will dead-letter back to orders.pending after TTL expires
+  await channel.assertQueue(QUEUES.ORDERS_RETRY_DELAY, {
+    durable: true,
+    exclusive: false,
+    autoDelete: false,
+    arguments: {
+      'x-message-ttl': ORDER_RETRY_DELAY_MS,
+      'x-dead-letter-exchange': EXCHANGES.TRIGGERS,
+      'x-dead-letter-routing-key': ROUTING_KEYS.ORDER_TRIGGERED,
+    },
+  });
+  log.info({
+    queue: QUEUES.ORDERS_RETRY_DELAY,
+    ttlMs: ORDER_RETRY_DELAY_MS,
+    deadLetterExchange: EXCHANGES.TRIGGERS,
+    deadLetterRoutingKey: ROUTING_KEYS.ORDER_TRIGGERED,
+    msg: 'Delay queue declared with TTL and dead-letter config',
+  });
+
   // Create contracts.pending queue
   await channel.assertQueue(QUEUES.CONTRACTS_PENDING, {
     durable: true,
@@ -122,6 +147,7 @@ export async function verifyAutomationTopology(channel: Channel): Promise<boolea
     await channel.checkExchange(EXCHANGES.TRIGGERS);
     await channel.checkExchange(EXCHANGES.DEPLOYMENTS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
+    await channel.checkQueue(QUEUES.ORDERS_RETRY_DELAY);
     await channel.checkQueue(QUEUES.CONTRACTS_PENDING);
     return true;
   } catch {

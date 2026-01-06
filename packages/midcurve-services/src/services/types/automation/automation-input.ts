@@ -343,6 +343,10 @@ export interface OrderFailedContext extends EvmLogContext {
   retryCount: number;
   maxRetries: number;
   willRetry: boolean;
+  /** Delay in milliseconds before retry (if willRetry is true) */
+  retryDelayMs?: number;
+  /** ISO timestamp when retry is scheduled (if willRetry is true) */
+  scheduledRetryAt?: string;
 }
 
 /**

@@ -12,8 +12,8 @@ import { broadcastTransaction, waitForTransaction, type SupportedChainId } from 
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
-import { QUEUES } from '../mq/topology';
-import { deserializeMessage, type OrderTriggerMessage } from '../mq/messages';
+import { QUEUES, ORDER_RETRY_DELAY_MS } from '../mq/topology';
+import { deserializeMessage, serializeMessage, type OrderTriggerMessage } from '../mq/messages';
 import { getSignerClient } from '../clients/signer-client';
 
 const log = automationLogger.child({ component: 'OrderExecutor' });
@@ -178,7 +178,7 @@ export class OrderExecutor {
         });
 
         if (willRetry) {
-          // Log retry scheduled
+          // Log retry scheduled with delay info
           await automationLogService.logRetryScheduled(positionId, orderId, {
             platform: 'evm',
             chainId,
@@ -186,6 +186,8 @@ export class OrderExecutor {
             retryCount,
             maxRetries: MAX_EXECUTION_ATTEMPTS,
             willRetry: true,
+            retryDelayMs: ORDER_RETRY_DELAY_MS,
+            scheduledRetryAt: new Date(Date.now() + ORDER_RETRY_DELAY_MS).toISOString(),
           });
         }
 
@@ -198,11 +200,22 @@ export class OrderExecutor {
             'Order permanently failed after max attempts'
           );
         } else {
-          // Temporary failure - requeue for retry
-          await mq.nack(msg, true);
+          // Temporary failure - send to delay queue for retry after delay
+          await mq.ack(msg); // Remove from main queue
+
+          // Republish to delay queue (will dead-letter back to main queue after TTL)
+          const delayContent = serializeMessage(message);
+          await mq.publishToQueue(QUEUES.ORDERS_RETRY_DELAY, delayContent);
+
           log.warn(
-            { orderId, positionId, retryCount, maxAttempts: MAX_EXECUTION_ATTEMPTS },
-            'Order execution failed, will retry'
+            {
+              orderId,
+              positionId,
+              retryCount,
+              maxAttempts: MAX_EXECUTION_ATTEMPTS,
+              retryDelayMs: ORDER_RETRY_DELAY_MS,
+            },
+            `Order execution failed, scheduled for retry after ${ORDER_RETRY_DELAY_MS / 1000}s delay`
           );
         }
       } catch (trackingErr) {

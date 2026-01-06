@@ -419,7 +419,9 @@ export class AutomationLogService {
     closeOrderId: string,
     context: OrderFailedContext
   ): Promise<void> {
-    const message = `Retrying execution (attempt ${context.retryCount}/${context.maxRetries})`;
+    const delaySeconds = context.retryDelayMs ? Math.round(context.retryDelayMs / 1000) : 0;
+    const delayInfo = delaySeconds > 0 ? ` after ${delaySeconds}s delay` : '';
+    const message = `Retrying execution (attempt ${context.retryCount}/${context.maxRetries})${delayInfo}`;
     await this.log({
       positionId,
       closeOrderId,

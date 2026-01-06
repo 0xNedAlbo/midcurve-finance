@@ -187,6 +187,17 @@ class RabbitMQConnectionManager {
   }
 
   /**
+   * Publish a message directly to a queue (bypassing exchange)
+   */
+  async publishToQueue(queue: string, content: Buffer): Promise<boolean> {
+    const channel = await this.getChannel();
+    return channel.sendToQueue(queue, content, {
+      persistent: true,
+      contentType: 'application/json',
+    });
+  }
+
+  /**
    * Consume messages from a queue
    */
   async consume(
