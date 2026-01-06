@@ -5,9 +5,9 @@
  * Uses competing consumers pattern for parallel execution.
  */
 
-import { prisma } from '@midcurve/database';
 import type { AutomationContractConfig } from '@midcurve/shared';
-import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService } from '../lib/services';
+import { formatCurrency } from '@midcurve/shared';
+import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
 import { broadcastTransaction, waitForTransaction, type SupportedChainId } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -290,15 +290,18 @@ export class OrderExecutor {
       throw new Error(`Operator address not configured for order: ${orderId}`);
     }
 
-    // Get userId from position (needed for signer service)
-    const position = await prisma.position.findUnique({
-      where: { id: positionId },
-      select: { userId: true },
-    });
+    // Get full position data (needed for signer service + price formatting)
+    const positionService = getPositionService();
+    const position = await positionService.findById(positionId);
     if (!position) {
       throw new Error(`Position not found: ${positionId}`);
     }
     const userId = position.userId;
+
+    // Get quote token decimals for human-readable price formatting
+    const quoteTokenDecimals = position.isToken0Quote
+      ? position.pool.token0.decimals
+      : position.pool.token1.decimals;
 
     // Mark order as triggering (use BigInt for the price)
     await closeOrderService.markTriggered(orderId, {
@@ -313,8 +316,8 @@ export class OrderExecutor {
       triggerSide,
       triggerPrice,
       currentPrice: _currentPrice,
-      humanTriggerPrice: triggerPrice, // TODO: Convert to human-readable price
-      humanCurrentPrice: _currentPrice, // TODO: Convert to human-readable price
+      humanTriggerPrice: formatCurrency(triggerPrice, quoteTokenDecimals),
+      humanCurrentPrice: formatCurrency(_currentPrice, quoteTokenDecimals),
     });
 
     autoLog.orderExecution(log, orderId, 'signing', {

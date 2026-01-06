@@ -5,15 +5,43 @@
  * Publishes trigger events to RabbitMQ when price conditions are met.
  */
 
-import { getPoolSubscriptionService, getCloseOrderService, getUniswapV3PoolService } from '../lib/services';
+import { getPoolSubscriptionService, getCloseOrderService, getUniswapV3PoolService, getPositionService } from '../lib/services';
 import { readPoolPrice, type SupportedChainId } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
 import { serializeMessage, type OrderTriggerMessage } from '../mq/messages';
+import { pricePerToken0InToken1, pricePerToken1InToken0, formatCurrency } from '@midcurve/shared';
 
 const log = automationLogger.child({ component: 'PriceMonitor' });
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Convert sqrtPriceX96 to actual token price (quote per base)
+ * Takes isToken0Quote into account to return the user-facing price
+ *
+ * When isToken0Quote=true: quote=token0, base=token1, price=token0/token1
+ * When isToken0Quote=false: quote=token1, base=token0, price=token1/token0
+ */
+function sqrtPriceToActualPrice(
+  sqrtPriceX96: bigint,
+  isToken0Quote: boolean,
+  baseTokenDecimals: number
+): bigint {
+  if (isToken0Quote) {
+    // quote = token0, base = token1
+    // Price = token0 per token1
+    return pricePerToken1InToken0(sqrtPriceX96, baseTokenDecimals);
+  } else {
+    // quote = token1, base = token0
+    // Price = token1 per token0
+    return pricePerToken0InToken1(sqrtPriceX96, baseTokenDecimals);
+  }
+}
 
 // =============================================================================
 // Types
@@ -215,48 +243,81 @@ export class PriceMonitor {
 
   /**
    * Check if an order's trigger condition is met
+   *
+   * Converts sqrtPriceX96 values to actual token prices before comparison,
+   * taking isToken0Quote into account to handle inverted price relationships.
    */
   private async checkTrigger(
     orderId: string,
     positionId: string,
     poolAddress: string,
     chainId: number,
-    currentPrice: bigint,
+    currentSqrtPrice: bigint,
     config: { sqrtPriceX96Lower: bigint; sqrtPriceX96Upper: bigint }
   ): Promise<boolean> {
     const { sqrtPriceX96Lower, sqrtPriceX96Upper } = config;
 
+    // Fetch position to get isToken0Quote and token decimals
+    const positionService = getPositionService();
+    const position = await positionService.findById(positionId);
+
+    if (!position) {
+      log.warn({ orderId, positionId, msg: 'Position not found for trigger evaluation' });
+      return false;
+    }
+
+    const { isToken0Quote } = position;
+    // Base token is token1 if isToken0Quote, otherwise token0
+    const baseTokenDecimals = isToken0Quote
+      ? position.pool.token1.decimals
+      : position.pool.token0.decimals;
+    // Quote token decimals for formatting
+    const quoteTokenDecimals = isToken0Quote
+      ? position.pool.token0.decimals
+      : position.pool.token1.decimals;
+
+    // Convert sqrtPrices to actual token prices (quote per base)
+    const currentPrice = sqrtPriceToActualPrice(currentSqrtPrice, isToken0Quote, baseTokenDecimals);
+    const lowerTriggerPrice = sqrtPriceX96Lower > 0n
+      ? sqrtPriceToActualPrice(sqrtPriceX96Lower, isToken0Quote, baseTokenDecimals)
+      : 0n;
+    const upperTriggerPrice = sqrtPriceX96Upper > 0n
+      ? sqrtPriceToActualPrice(sqrtPriceX96Upper, isToken0Quote, baseTokenDecimals)
+      : 0n;
+
     let triggerSide: 'lower' | 'upper' | null = null;
     let triggerPrice: bigint | null = null;
 
-    // Check lower bound (price dropped below range)
-    // Only trigger if lower bound is set (> 0)
-    if (sqrtPriceX96Lower > 0n && currentPrice <= sqrtPriceX96Lower) {
+    // Compare ACTUAL prices (not sqrtPrices)
+    // Lower trigger = stop loss: actual price dropped to or below threshold
+    if (lowerTriggerPrice > 0n && currentPrice <= lowerTriggerPrice) {
       triggerSide = 'lower';
-      triggerPrice = sqrtPriceX96Lower;
+      triggerPrice = lowerTriggerPrice;
     }
-    // Check upper bound (price rose above range)
-    // Only trigger if upper bound is set (> 0)
-    else if (sqrtPriceX96Upper > 0n && currentPrice >= sqrtPriceX96Upper) {
+    // Upper trigger = take profit: actual price rose to or above threshold
+    else if (upperTriggerPrice > 0n && currentPrice >= upperTriggerPrice) {
       triggerSide = 'upper';
-      triggerPrice = sqrtPriceX96Upper;
+      triggerPrice = upperTriggerPrice;
     }
 
     if (!triggerSide || !triggerPrice) {
       return false;
     }
 
-    // Log trigger
+    // Log with human-readable prices for clarity
+    const currentPriceFormatted = formatCurrency(currentPrice.toString(), quoteTokenDecimals);
+    const triggerPriceFormatted = formatCurrency(triggerPrice.toString(), quoteTokenDecimals);
+
     autoLog.orderTriggered(
       log,
       orderId,
       positionId,
       poolAddress,
-      currentPrice.toString(),
-      triggerPrice.toString()
+      currentPriceFormatted,
+      triggerPriceFormatted
     );
 
-    // Publish trigger message
+    // Publish trigger message (with raw prices for precision)
     await this.publishTrigger({
       orderId,
       positionId,
