@@ -161,3 +161,83 @@ export async function waitForTransaction(
     status: receipt.status,
   };
 }
+
+/**
+ * Get the revert reason for a failed transaction.
+ *
+ * Simulates the transaction at the block it was included to extract
+ * the revert data, then decodes it to a human-readable message.
+ *
+ * @param chainId - Chain ID
+ * @param txHash - Transaction hash
+ * @returns Decoded revert reason, or null if unable to determine
+ */
+export async function getRevertReason(
+  chainId: SupportedChainId,
+  txHash: `0x${string}`
+): Promise<string | null> {
+  // Import here to avoid circular dependency
+  const { decodeRevertReason } = await import('./error-decoder');
+  const client = getPublicClient(chainId);
+
+  try {
+    // Get the original transaction
+    const tx = await client.getTransaction({ hash: txHash });
+
+    if (!tx) {
+      return 'Transaction not found';
+    }
+
+    // Simulate the transaction at the block it was included
+    // This will throw an error with the revert data
+    await client.call({
+      account: tx.from,
+      to: tx.to,
+      data: tx.input,
+      value: tx.value,
+      blockNumber: tx.blockNumber,
+      gas: tx.gas,
+    });
+
+    // If call succeeded, something is unexpected
+    return 'Transaction simulation succeeded (unexpected for reverted tx)';
+  } catch (error) {
+    // Extract revert data from error
+    const err = error as Error & { data?: string; cause?: { data?: string } };
+
+    // Try to get revert data from error
+    let revertData = err.data || err.cause?.data;
+
+    // Some RPC providers include the data in a different format
+    if (!revertData && err.message) {
+      // Try to extract hex data from error message
+      const match = err.message.match(/0x[a-fA-F0-9]+/);
+      if (match && match[0].length >= 10) {
+        revertData = match[0];
+      }
+    }
+
+    if (revertData) {
+      return decodeRevertReason(revertData as `0x${string}`);
+    }
+
+    // Fallback to error message
+    return err.message || 'Unknown revert reason';
+  }
+}
+
+/**
+ * Get the current on-chain nonce for an address.
+ *
+ * @param chainId - Chain ID
+ * @param address - Wallet address
+ * @returns Current nonce
+ */
+export async function getOnChainNonce(
+  chainId: SupportedChainId,
+  address: `0x${string}`
+): Promise<number> {
+  const client = getPublicClient(chainId);
+  const nonce = await client.getTransactionCount({ address });
+  return nonce;
+}

@@ -64,8 +64,16 @@ export function AutomationLogList({
   return (
     <div className="mt-6 border-t border-slate-700/50 pt-4">
       {/* Header - always visible, clickable to expand */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
         className="w-full flex items-center justify-between text-left cursor-pointer group"
       >
         <div className="flex items-center gap-2">
@@ -97,7 +105,7 @@ export function AutomationLogList({
             <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-slate-300" />
           )}
         </div>
-      </button>
+      </div>
 
       {/* Expanded content */}
       {expanded && (

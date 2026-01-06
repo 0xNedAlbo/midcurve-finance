@@ -132,6 +132,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         }}
         currentSqrtPriceX96={poolState.sqrtPriceX96}
         currentPriceDisplay={formatCompactValue(positionStates.current.poolPrice, quoteToken.decimals)}
+        isToken0Quote={position.isToken0Quote}
       />
     </div>
   );

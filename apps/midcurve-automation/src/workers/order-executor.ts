@@ -8,7 +8,7 @@
 import type { AutomationContractConfig } from '@midcurve/shared';
 import { formatCurrency } from '@midcurve/shared';
 import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
-import { broadcastTransaction, waitForTransaction, type SupportedChainId } from '../lib/evm';
+import { broadcastTransaction, waitForTransaction, getRevertReason, type SupportedChainId } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
@@ -303,22 +303,33 @@ export class OrderExecutor {
       ? position.pool.token0.decimals
       : position.pool.token1.decimals;
 
-    // Mark order as triggering (use BigInt for the price)
-    await closeOrderService.markTriggered(orderId, {
-      triggerSqrtPriceX96: BigInt(triggerPrice),
-    });
+    // Check if this is a retry attempt (order already in 'triggering' status)
+    const isRetry = order.status === 'triggering';
 
-    // Log ORDER_TRIGGERED for user visibility
+    // Only mark as triggering on first attempt, not retries
     const automationLogService = getAutomationLogService();
-    await automationLogService.logOrderTriggered(positionId, orderId, {
-      platform: 'evm',
-      chainId,
-      triggerSide,
-      triggerPrice,
-      currentPrice: _currentPrice,
-      humanTriggerPrice: formatCurrency(triggerPrice, quoteTokenDecimals),
-      humanCurrentPrice: formatCurrency(_currentPrice, quoteTokenDecimals),
-    });
+    if (!isRetry) {
+      // Mark order as triggering (use BigInt for the price)
+      await closeOrderService.markTriggered(orderId, {
+        triggerSqrtPriceX96: BigInt(triggerPrice),
+      });
+
+      // Log ORDER_TRIGGERED for user visibility
+      await automationLogService.logOrderTriggered(positionId, orderId, {
+        platform: 'evm',
+        chainId,
+        triggerSide,
+        triggerPrice,
+        currentPrice: _currentPrice,
+        humanTriggerPrice: formatCurrency(triggerPrice, quoteTokenDecimals),
+        humanCurrentPrice: formatCurrency(_currentPrice, quoteTokenDecimals),
+      });
+    } else {
+      log.info(
+        { orderId, positionId, status: order.status },
+        'Retry attempt - order already in triggering status, skipping markTriggered'
+      );
+    }
 
     autoLog.orderExecution(log, orderId, 'signing', {
       positionId,
@@ -362,7 +373,9 @@ export class OrderExecutor {
     const receipt = await waitForTransaction(chainId as SupportedChainId, txHash);
 
     if (receipt.status === 'reverted') {
-      throw new Error(`Transaction reverted: ${txHash}`);
+      // Fetch and decode the revert reason for better debugging
+      const revertReason = await getRevertReason(chainId as SupportedChainId, txHash);
+      throw new Error(`Transaction reverted: ${revertReason || 'unknown reason'} (tx: ${txHash})`);
     }
 
     // Mark order as executed with proper input shape

@@ -190,6 +190,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       await subscriptionService.ensureSubscription(position.pool.id);
 
       // Register the close order in database
+      // NOTE: Store the ORIGINAL values from the UI/on-chain registration.
+      // The price monitor handles isToken0Quote inversion during trigger detection.
       const closeOrderService = getCloseOrderService();
       const order = await closeOrderService.register({
         closeOrderType: data.closeOrderType,

@@ -304,6 +304,24 @@ export class PriceMonitor {
       return false;
     }
 
+    // CRITICAL: Verify order is still 'active' before publishing trigger message
+    // This prevents duplicate messages when the order is already being processed
+    const closeOrderService = getCloseOrderService();
+    const order = await closeOrderService.findById(orderId);
+
+    if (!order) {
+      log.debug({ orderId }, 'Order not found, skipping trigger');
+      return false;
+    }
+
+    if (order.status !== 'active') {
+      log.debug(
+        { orderId, status: order.status },
+        'Order no longer active, skipping trigger (already processing or completed)'
+      );
+      return false;
+    }
+
     // Log with human-readable prices for clarity
     const currentPriceFormatted = formatCurrency(currentPrice.toString(), quoteTokenDecimals);
     const triggerPriceFormatted = formatCurrency(triggerPrice.toString(), quoteTokenDecimals);

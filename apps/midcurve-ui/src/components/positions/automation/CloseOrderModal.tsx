@@ -102,6 +102,11 @@ export interface CloseOrderModalProps {
   currentPriceDisplay: string;
 
   /**
+   * Whether token0 is the quote token (affects price direction for contract calls)
+   */
+  isToken0Quote: boolean;
+
+  /**
    * Callback when order is created
    */
   onSuccess?: (order: SerializedCloseOrder) => void;
@@ -133,6 +138,7 @@ export function CloseOrderModal({
   quoteToken,
   currentSqrtPriceX96,
   currentPriceDisplay,
+  isToken0Quote,
   onSuccess,
 }: CloseOrderModalProps) {
   const { address: userAddress, isConnected, chainId: connectedChainId } = useAccount();
@@ -296,6 +302,8 @@ export function CloseOrderModal({
         : BigInt('0xffffffffffffffffffffffffffffffffffffffff'); // Max sqrtPriceX96
 
     // Call the hook's registerOrder function
+    // NOTE: isToken0Quote is passed so the hook can transform the trigger mode
+    // and sqrtPriceX96 values for correct contract behavior
     registerOrder({
       contractAddress,
       positionManager,
@@ -311,6 +319,7 @@ export function CloseOrderModal({
       positionId,
       poolAddress: poolAddress as Address,
       positionOwner,
+      isToken0Quote,
     });
   }, [
     userAddress,
@@ -323,6 +332,7 @@ export function CloseOrderModal({
     positionId,
     poolAddress,
     positionOwner,
+    isToken0Quote,
     registerOrder,
   ]);
 

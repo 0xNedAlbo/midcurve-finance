@@ -340,9 +340,13 @@ export class CloseOrderService {
   /**
    * Marks order as triggering (active -> triggering)
    *
+   * Uses atomic conditional update to prevent race conditions where multiple
+   * trigger messages attempt to execute the same order concurrently.
+   *
    * @param id - Order ID
    * @param input - Trigger info
    * @returns The updated order
+   * @throws Error if order not found or not in 'active' status
    */
   async markTriggered(
     id: string,
@@ -351,12 +355,21 @@ export class CloseOrderService {
     log.methodEntry(this.logger, 'markTriggered', { id, input });
 
     try {
+      // First fetch to get existing state and validate order exists
       const existing = await this.prisma.automationCloseOrder.findUnique({
         where: { id },
       });
 
       if (!existing) {
         throw new Error(`Close order not found: ${id}`);
+      }
+
+      // Early check for status - provides clear error message
+      if (existing.status !== 'active') {
+        throw new Error(
+          `Cannot trigger order ${id}: expected status 'active', got '${existing.status}'. ` +
+            `This may indicate a duplicate trigger message (race condition).`
+        );
       }
 
       // Update state with trigger info
@@ -367,13 +380,40 @@ export class CloseOrderService {
         triggerSqrtPriceX96: input.triggerSqrtPriceX96.toString(),
       };
 
-      const result = await this.prisma.automationCloseOrder.update({
-        where: { id },
+      // Atomic conditional update: only update if status is still 'active'
+      // This prevents race conditions where status changed between findUnique and update
+      const updateResult = await this.prisma.automationCloseOrder.updateMany({
+        where: {
+          id,
+          status: 'active', // Only update if still active
+        },
         data: {
           status: 'triggering',
           state: updatedState as unknown as Prisma.InputJsonValue,
         },
       });
+
+      // If no rows were updated, status changed between check and update (race condition)
+      if (updateResult.count === 0) {
+        // Fetch current status for error message
+        const current = await this.prisma.automationCloseOrder.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        throw new Error(
+          `Failed to trigger order ${id}: status changed to '${current?.status}' ` +
+            `during processing (race condition detected).`
+        );
+      }
+
+      // Fetch the updated record to return
+      const result = await this.prisma.automationCloseOrder.findUnique({
+        where: { id },
+      });
+
+      if (!result) {
+        throw new Error(`Close order ${id} not found after update`);
+      }
 
       const order = this.mapToOrder(result);
 

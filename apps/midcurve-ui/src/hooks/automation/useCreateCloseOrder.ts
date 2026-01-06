@@ -55,6 +55,8 @@ export interface RegisterCloseOrderParams {
   poolAddress: Address;
   /** Position owner address (for pre-flight ownership check) */
   positionOwner: Address;
+  /** Whether token0 is the quote token (affects price direction for contract calls) */
+  isToken0Quote: boolean;
 }
 
 /**
@@ -193,6 +195,9 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
         const validUntilDate = new Date(Number(currentParams.validUntil) * 1000);
 
         // Create close order via API
+        // NOTE: Send ORIGINAL (user-facing) values to API for correct UI display.
+        // The contract receives transformed values (done in registerOrder).
+        // The price monitor handles isToken0Quote inversion during trigger detection.
         try {
           const response = await automationApi.createCloseOrder({
             closeOrderType: 'uniswapv3',
@@ -206,9 +211,9 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
             nftId: currentParams.nftId.toString(),
             poolAddress: currentParams.poolAddress,
             operatorAddress: currentParams.operatorAddress,
-            triggerMode: currentParams.triggerMode,
-            sqrtPriceX96Lower: currentParams.sqrtPriceX96Lower.toString(),
-            sqrtPriceX96Upper: currentParams.sqrtPriceX96Upper.toString(),
+            triggerMode: currentParams.triggerMode,  // Original user intent
+            sqrtPriceX96Lower: currentParams.sqrtPriceX96Lower.toString(),  // Original
+            sqrtPriceX96Upper: currentParams.sqrtPriceX96Upper.toString(),  // Original
             payoutAddress: currentParams.payoutAddress,
             validUntil: validUntilDate.toISOString(),
             slippageBps: currentParams.slippageBps,
@@ -299,6 +304,39 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
 
     console.log('[useCreateCloseOrder] Wallet check passed, calling writeContract');
 
+    // ============ isToken0Quote TRANSFORMATION ============
+    // When isToken0Quote=true, the sqrtPriceX96-to-price relationship is inverted:
+    // - Lower sqrtPriceX96 = Higher user-facing price
+    // - Higher sqrtPriceX96 = Lower user-facing price
+    // We need to swap bounds AND flip trigger mode so the contract checks correctly
+    let contractSqrtPriceX96Lower = params.sqrtPriceX96Lower;
+    let contractSqrtPriceX96Upper = params.sqrtPriceX96Upper;
+    let contractTriggerMode: TriggerMode = params.triggerMode;
+
+    if (params.isToken0Quote) {
+      // Swap the bounds
+      contractSqrtPriceX96Lower = params.sqrtPriceX96Upper;
+      contractSqrtPriceX96Upper = params.sqrtPriceX96Lower;
+
+      // Flip the trigger mode
+      if (params.triggerMode === 'LOWER') {
+        contractTriggerMode = 'UPPER';
+      } else if (params.triggerMode === 'UPPER') {
+        contractTriggerMode = 'LOWER';
+      }
+      // 'BOTH' stays the same
+
+      console.log('[useCreateCloseOrder] isToken0Quote transformation applied:', {
+        originalMode: params.triggerMode,
+        contractMode: contractTriggerMode,
+        originalLower: params.sqrtPriceX96Lower.toString(),
+        originalUpper: params.sqrtPriceX96Upper.toString(),
+        contractLower: contractSqrtPriceX96Lower.toString(),
+        contractUpper: contractSqrtPriceX96Upper.toString(),
+      });
+    }
+    // ============ END TRANSFORMATION ============
+
     // Map TriggerMode string to contract enum value
     // Contract: LOWER_ONLY = 0, UPPER_ONLY = 1, BOTH = 2
     const triggerModeMap: Record<string, number> = {
@@ -306,14 +344,14 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
       'UPPER': 1,
       'BOTH': 2,
     };
-    const mode = triggerModeMap[params.triggerMode] ?? 0;
+    const mode = triggerModeMap[contractTriggerMode] ?? 0;
 
-    // Build the CloseConfig struct for logging
+    // Build the CloseConfig struct for logging (using transformed values)
     const closeConfig = {
       pool: params.poolAddress,
       tokenId: params.nftId.toString(),
-      sqrtPriceX96Lower: params.sqrtPriceX96Lower.toString(),
-      sqrtPriceX96Upper: params.sqrtPriceX96Upper.toString(),
+      sqrtPriceX96Lower: contractSqrtPriceX96Lower.toString(),
+      sqrtPriceX96Upper: contractSqrtPriceX96Upper.toString(),
       mode,
       payout: params.payoutAddress,
       operator: params.operatorAddress,
@@ -325,11 +363,13 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
       contractAddress: params.contractAddress,
       chainId: params.chainId,
       functionName: 'registerClose',
-      closeConfig,  // Single struct argument
+      closeConfig,  // Single struct argument (with transformed values)
+      isToken0Quote: params.isToken0Quote,
     });
 
     // Call writeContract with registerClose function
     // Contract takes CloseConfig struct as a single tuple argument
+    // NOTE: Using transformed sqrtPriceX96 values and mode for isToken0Quote positions
     writeContract({
       address: params.contractAddress,
       abi: POSITION_CLOSER_ABI,
@@ -338,8 +378,8 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
         {
           pool: params.poolAddress,
           tokenId: params.nftId,
-          sqrtPriceX96Lower: params.sqrtPriceX96Lower,
-          sqrtPriceX96Upper: params.sqrtPriceX96Upper,
+          sqrtPriceX96Lower: contractSqrtPriceX96Lower,
+          sqrtPriceX96Upper: contractSqrtPriceX96Upper,
           mode,
           payout: params.payoutAddress,
           operator: params.operatorAddress,
