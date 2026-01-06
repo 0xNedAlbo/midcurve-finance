@@ -18,6 +18,9 @@ import { getSignerClient } from '../clients/signer-client';
 
 const log = automationLogger.child({ component: 'OrderExecutor' });
 
+// Maximum number of execution attempts before marking order as permanently failed
+const MAX_EXECUTION_ATTEMPTS = 3;
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -141,6 +144,8 @@ export class OrderExecutor {
       triggerSide,
     });
 
+    const closeOrderService = getCloseOrderService();
+
     try {
       await this.executeOrder(orderId, positionId, poolAddress, chainId, currentPrice, triggerPrice, triggerSide);
 
@@ -149,10 +154,53 @@ export class OrderExecutor {
       this.processedTotal++;
       this.lastProcessedAt = new Date();
     } catch (err) {
-      autoLog.methodError(log, 'handleMessage.execute', err, { orderId, positionId });
+      const error = err as Error;
+      autoLog.methodError(log, 'handleMessage.execute', error, { orderId, positionId });
 
-      // Requeue for retry (could implement dead letter queue for repeated failures)
-      await mq.nack(msg, true);
+      // Increment retry counter and record error
+      try {
+        const { retryCount } = await closeOrderService.incrementExecutionAttempt(
+          orderId,
+          error.message
+        );
+
+        if (retryCount >= MAX_EXECUTION_ATTEMPTS) {
+          // Permanently failed - mark as failed and remove from queue
+          await closeOrderService.markFailed(orderId, error.message);
+          await mq.ack(msg); // Remove from queue - don't requeue
+          log.error(
+            { orderId, positionId, retryCount, error: error.message },
+            'Order permanently failed after max attempts'
+          );
+        } else {
+          // Temporary failure - requeue for retry
+          await mq.nack(msg, true);
+          log.warn(
+            { orderId, positionId, retryCount, maxAttempts: MAX_EXECUTION_ATTEMPTS },
+            'Order execution failed, will retry'
+          );
+        }
+      } catch (trackingErr) {
+        const trackingError = trackingErr as Error;
+        const errorMessage = trackingError.message.toLowerCase();
+
+        // If order doesn't exist, drop the message - don't requeue
+        if (errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+          await mq.ack(msg); // Remove from queue
+          log.warn(
+            { orderId, positionId, error: trackingError.message },
+            'Order not found in database, dropping message'
+          );
+        } else {
+          // For other tracking errors, requeue but log the issue
+          log.error(
+            { orderId, positionId, error: trackingError.message },
+            'Failed to track execution attempt, requeueing anyway'
+          );
+          await mq.nack(msg, true);
+        }
+      }
+
       this.failedTotal++;
     }
   }

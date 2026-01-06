@@ -452,6 +452,62 @@ export class CloseOrderService {
   }
 
   /**
+   * Increments execution attempt counter and records error
+   * Used for retry tracking without changing order status
+   *
+   * @param id - Order ID
+   * @param error - Error message from execution attempt
+   * @returns Object containing updated retry count
+   */
+  async incrementExecutionAttempt(
+    id: string,
+    error: string
+  ): Promise<{ retryCount: number }> {
+    log.methodEntry(this.logger, 'incrementExecutionAttempt', { id, error });
+
+    try {
+      const existing = await this.prisma.automationCloseOrder.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      // Increment retry count and store error in state
+      const state = existing.state as Record<string, unknown>;
+      const retryCount = ((state.retryCount as number) || 0) + 1;
+      const updatedState = {
+        ...state,
+        executionError: error,
+        retryCount,
+        lastExecutionAt: new Date().toISOString(),
+      };
+
+      await this.prisma.automationCloseOrder.update({
+        where: { id },
+        data: {
+          state: updatedState as unknown as Prisma.InputJsonValue,
+        },
+      });
+
+      this.logger.warn(
+        { id, retryCount, error },
+        'Close order execution attempt recorded'
+      );
+
+      log.methodExit(this.logger, 'incrementExecutionAttempt', { id, retryCount });
+      return { retryCount };
+    } catch (err) {
+      log.methodError(this.logger, 'incrementExecutionAttempt', err as Error, {
+        id,
+        error,
+      });
+      throw err;
+    }
+  }
+
+  /**
    * Marks order as failed
    *
    * @param id - Order ID

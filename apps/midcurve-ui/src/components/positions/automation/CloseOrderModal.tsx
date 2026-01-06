@@ -135,7 +135,7 @@ export function CloseOrderModal({
   currentPriceDisplay,
   onSuccess,
 }: CloseOrderModalProps) {
-  const { address: userAddress } = useAccount();
+  const { address: userAddress, isConnected, chainId: connectedChainId } = useAccount();
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<WizardStep>('configure');
   const [formData, setFormData] = useState<CloseOrderFormData>({
@@ -179,6 +179,20 @@ export function CloseOrderModal({
 
   // Detect if approval is needed (shared contract is always deployed)
   const needsApproval = !isApproved && !isCheckingApproval;
+
+  // Check if connected to wrong network
+  const isWrongNetwork = !!(
+    isConnected &&
+    connectedChainId !== chainId
+  );
+
+  // Check if connected wallet is not the position owner
+  const isWrongAccount = !!(
+    isConnected &&
+    userAddress &&
+    positionOwner &&
+    userAddress.toLowerCase() !== positionOwner.toLowerCase()
+  );
 
   // Mount check for portal
   useEffect(() => {
@@ -225,6 +239,13 @@ export function CloseOrderModal({
       setStep('review'); // Go back to review on error
     }
   }, [hookError]);
+
+  // Clear wallet-related errors when wallet connects
+  useEffect(() => {
+    if (isConnected && localError === 'Wallet not connected') {
+      setLocalError(null);
+    }
+  }, [isConnected, localError]);
 
   // Handle approval error
   useEffect(() => {
@@ -413,6 +434,12 @@ export function CloseOrderModal({
                 quoteToken={quoteToken}
                 error={localError}
                 needsApproval={needsApproval}
+                isConnected={isConnected}
+                connectedChainId={connectedChainId}
+                positionChainId={chainId}
+                connectedAddress={userAddress}
+                positionOwner={positionOwner}
+                hasAutowallet={!!operatorAddress}
               />
             )}
 
@@ -469,7 +496,8 @@ export function CloseOrderModal({
                 </button>
                 <button
                   onClick={handleContinue}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2"
+                  disabled={!isConnected || isWrongNetwork || isWrongAccount || !operatorAddress}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Confirm
                 </button>

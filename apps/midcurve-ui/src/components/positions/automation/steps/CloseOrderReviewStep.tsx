@@ -4,9 +4,14 @@
  * Step 2: Review order summary before confirmation
  */
 
+import { Link } from 'react-router-dom';
 import { AlertCircle, TrendingDown, TrendingUp, ArrowLeftRight, Info } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
 import type { CloseOrderFormData } from '../CloseOrderModal';
+import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
+import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
+import { CHAIN_METADATA } from '@/config/chains';
+import type { EvmChainSlug } from '@/config/chains';
 
 interface CloseOrderReviewStepProps {
   formData: CloseOrderFormData;
@@ -25,6 +30,30 @@ interface CloseOrderReviewStepProps {
    * Whether operator approval is needed
    */
   needsApproval?: boolean;
+  /**
+   * Whether wallet is connected
+   */
+  isConnected: boolean;
+  /**
+   * Connected wallet's chain ID
+   */
+  connectedChainId: number | undefined;
+  /**
+   * Position's chain ID
+   */
+  positionChainId: number;
+  /**
+   * Connected wallet address
+   */
+  connectedAddress: string | undefined;
+  /**
+   * Position owner address
+   */
+  positionOwner: string;
+  /**
+   * Whether the user has an autowallet configured
+   */
+  hasAutowallet: boolean;
 }
 
 function getTriggerModeIcon(mode: TriggerMode) {
@@ -49,16 +78,47 @@ function getTriggerModeLabel(mode: TriggerMode): string {
   }
 }
 
+// Helper to map chainId to chain slug
+function getChainSlugFromChainId(chainId: number): EvmChainSlug | null {
+  const entry = Object.entries(CHAIN_METADATA).find(
+    ([_, meta]) => meta.chainId === chainId
+  );
+  return entry ? (entry[0] as EvmChainSlug) : null;
+}
+
 export function CloseOrderReviewStep({
   formData,
   baseToken,
   quoteToken,
   error,
   needsApproval = false,
+  isConnected,
+  connectedChainId,
+  positionChainId,
+  connectedAddress,
+  positionOwner,
+  hasAutowallet,
 }: CloseOrderReviewStepProps) {
   // Calculate expiration date
   const expirationDate = new Date();
   expirationDate.setDate(expirationDate.getDate() + formData.validUntilDays);
+
+  // Get chain slug for NetworkSwitchStep
+  const chain = getChainSlugFromChainId(positionChainId);
+
+  // Check if connected to wrong network
+  const isWrongNetwork = !!(
+    isConnected &&
+    connectedChainId !== positionChainId
+  );
+
+  // Check if connected wallet is not the position owner
+  const isWrongAccount = !!(
+    isConnected &&
+    connectedAddress &&
+    positionOwner &&
+    connectedAddress.toLowerCase() !== positionOwner.toLowerCase()
+  );
 
   return (
     <div className="space-y-6">
@@ -121,8 +181,29 @@ export function CloseOrderReviewStep({
         </div>
       </div>
 
-      {/* Error Display - shown prominently after summary */}
-      {error && (
+      {/* Autowallet Setup Warning - shown when autowallet is not configured */}
+      {!hasAutowallet && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-medium text-amber-300 mb-1">Autowallet Setup Required</h4>
+              <p className="text-sm text-slate-400">
+                You need to set up an autowallet before creating close orders.
+              </p>
+              <Link
+                to="/automation/wallet"
+                className="inline-block mt-2 text-sm text-blue-400 hover:text-blue-300 underline"
+              >
+                Go to Autowallet Setup →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Display - shown for errors (excluding autowallet errors which are handled above) */}
+      {error && !error.toLowerCase().includes('autowallet') && (
         <div className="flex items-start gap-2 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
           <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
           <div>
@@ -130,6 +211,38 @@ export function CloseOrderReviewStep({
             <p className="text-sm text-red-300 mt-1">{error}</p>
           </div>
         </div>
+      )}
+
+      {/* Wallet/Network/Account Validation Section */}
+      {/* 1. Wallet Connection Prompt - shown when wallet is not connected */}
+      {!isConnected && (
+        <EvmWalletConnectionPrompt
+          title="Connect Wallet"
+          description="Please connect your wallet to create a close order"
+        />
+      )}
+
+      {/* 2. Account Switch Prompt - shown when connected wallet is not position owner */}
+      {isConnected && isWrongAccount && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-medium text-amber-300 mb-1">Wrong Account</h4>
+              <p className="text-sm text-slate-400">
+                Please switch to the position owner account in your wallet.
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                Position Owner: {positionOwner.slice(0, 6)}...{positionOwner.slice(-4)}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Network Switch Prompt - shown when connected to wrong network */}
+      {isConnected && !isWrongAccount && chain && (
+        <NetworkSwitchStep chain={chain} isWrongNetwork={isWrongNetwork} />
       )}
 
       {/* Setup Notice - shown when approval is needed */}

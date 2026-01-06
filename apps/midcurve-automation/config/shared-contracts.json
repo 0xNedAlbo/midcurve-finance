@@ -19,6 +19,10 @@
     "137": {
       "contractAddress": "",
       "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+    },
+    "31337": {
+      "contractAddress": "0xB7b8738297d4a91F08d9Ff18E4bA5eEDB21522C2",
+      "positionManager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
     }
   }
 }

@@ -13,7 +13,7 @@
  */
 
 import { spawn } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 // Load .env file manually (no dotenv dependency)
@@ -108,6 +108,46 @@ function extractAddress(output: string, pattern: RegExp): string | undefined {
   return match ? match[1] : undefined;
 }
 
+/**
+ * Update shared-contracts.json files with the deployed PositionCloser address.
+ * Updates both automation and API config files.
+ */
+function updateSharedContractsConfig(positionCloserAddress: string): void {
+  const configPaths = [
+    resolve(process.cwd(), 'config/shared-contracts.json'), // automation
+    resolve(process.cwd(), '../midcurve-api/config/shared-contracts.json'), // api
+  ];
+
+  const MAINNET_POSITION_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
+
+  for (const configPath of configPaths) {
+    if (!existsSync(configPath)) {
+      console.warn(`Warning: Config file not found: ${configPath}`);
+      continue;
+    }
+
+    try {
+      const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+
+      // Initialize uniswapv3 if not present
+      if (!config.uniswapv3) {
+        config.uniswapv3 = {};
+      }
+
+      // Add or update local chain entry (31337)
+      config.uniswapv3['31337'] = {
+        contractAddress: positionCloserAddress,
+        positionManager: MAINNET_POSITION_MANAGER,
+      };
+
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+      console.log(`Updated: ${configPath}`);
+    } catch (error) {
+      console.error(`Failed to update ${configPath}:`, error);
+    }
+  }
+}
+
 async function step1Deploy(state: SetupState): Promise<void> {
   console.log('\n' + '='.repeat(60));
   console.log('Step 1: Deploy MockUSD and PositionCloser');
@@ -136,6 +176,12 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('\n--- Extracted Addresses ---');
   console.log('MockUSD:', state.mockUsdAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
+
+  // Update shared-contracts.json with deployed PositionCloser address
+  if (state.positionCloserAddress) {
+    console.log('\n--- Updating Configuration ---');
+    updateSharedContractsConfig(state.positionCloserAddress);
+  }
 }
 
 async function step2CreatePool(state: SetupState): Promise<void> {
