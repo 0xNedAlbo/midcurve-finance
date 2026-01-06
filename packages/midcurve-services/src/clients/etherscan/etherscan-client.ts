@@ -14,11 +14,12 @@
  * @see https://docs.etherscan.io/v/etherscan-v2
  */
 
-import { isLocalChain } from '../../config/evm.js';
+import { isLocalChain, EvmConfig } from '../../config/evm.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { CacheService } from '../../services/cache/index.js';
 import { RequestScheduler } from '../../utils/request-scheduler/index.js';
+import { fetchPositionEventsViaRpc } from './rpc-event-fetcher.js';
 import type {
   EtherscanLog,
   EtherscanLogsResponse,
@@ -54,6 +55,7 @@ export const NFT_POSITION_MANAGER_ADDRESSES: Record<number, string> = {
   8453: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', // Base (deployed at block 1371714)
   10: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Optimism
   137: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Polygon
+  31337: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Local Anvil fork (mainnet NFPM)
 };
 
 /**
@@ -647,16 +649,39 @@ export class EtherscanClient {
   ): Promise<RawPositionEvent[]> {
     log.methodEntry(this.logger, 'fetchPositionEvents', { chainId, nftId, options });
 
-    // Graceful degradation for local development chains
-    // Etherscan doesn't index local chains, so return empty array
+    // For local development chains, use RPC fallback instead of Etherscan
     if (isLocalChain(chainId)) {
-      this.logger.warn(
+      this.logger.info(
         { chainId, nftId },
-        'Etherscan not available for local chain, returning empty events. ' +
-          'Use the pending events API to submit events manually.'
+        'Using RPC fallback for local chain event fetching'
       );
-      log.methodExit(this.logger, 'fetchPositionEvents', { count: 0, reason: 'local_chain' });
-      return [];
+
+      try {
+        // Default to block 0 for local chains (no deployment block to query)
+        const fromBlock = options.fromBlock ?? 0;
+        const toBlock = options.toBlock ?? 'latest';
+
+        const events = await fetchPositionEventsViaRpc(
+          chainId,
+          nftId,
+          fromBlock,
+          toBlock,
+          EvmConfig.getInstance()
+        );
+
+        log.methodExit(this.logger, 'fetchPositionEvents', {
+          count: events.length,
+          reason: 'rpc_fallback',
+        });
+        return events;
+      } catch (error) {
+        this.logger.error(
+          { chainId, nftId, error },
+          'RPC fallback failed for local chain, returning empty events'
+        );
+        log.methodExit(this.logger, 'fetchPositionEvents', { count: 0, reason: 'rpc_fallback_error' });
+        return [];
+      }
     }
 
     this.validateChainId(chainId);

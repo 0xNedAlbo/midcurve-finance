@@ -238,9 +238,7 @@ export function CloseOrderModal({
   }, [isSuccess, result, onSuccess]);
 
   useEffect(() => {
-    console.log('[CloseOrderModal] hookError changed:', hookError?.message);
     if (hookError) {
-      console.log('[CloseOrderModal] Setting localError and going back to review');
       setLocalError(hookError.message);
       setStep('review'); // Go back to review on error
     }

@@ -98,23 +98,10 @@ function parseCloseRegisteredEvent(
   receipt: TransactionReceipt,
   contractAddress: Address
 ): bigint | null {
-  console.log('[parseCloseRegisteredEvent] Parsing receipt:', {
-    contractAddress,
-    logsCount: receipt.logs.length,
-    logs: receipt.logs.map((log) => ({
-      address: log.address,
-      topics: log.topics,
-      data: log.data,
-    })),
-  });
-
   try {
     // Find the CloseRegistered event
     for (const log of receipt.logs) {
-      console.log('[parseCloseRegisteredEvent] Checking log from:', log.address);
-
       if (log.address.toLowerCase() !== contractAddress.toLowerCase()) {
-        console.log('[parseCloseRegisteredEvent] Skipping - address mismatch');
         continue;
       }
 
@@ -125,23 +112,15 @@ function parseCloseRegisteredEvent(
           topics: log.topics,
         });
 
-        console.log('[parseCloseRegisteredEvent] Decoded event:', {
-          eventName: decoded.eventName,
-          args: decoded.args,
-        });
-
         if (decoded.eventName === 'CloseRegistered') {
           // The closeId is the first indexed parameter
           const closeId = (decoded.args as { closeId: bigint }).closeId;
-          console.log('[parseCloseRegisteredEvent] Found closeId:', closeId);
           return closeId;
         }
-      } catch (decodeError) {
-        console.log('[parseCloseRegisteredEvent] Failed to decode log:', decodeError);
+      } catch {
         // Not this event, continue
       }
     }
-    console.log('[parseCloseRegisteredEvent] No CloseRegistered event found');
     return null;
   } catch (error) {
     console.error('Failed to parse CloseRegistered event:', error);
@@ -252,31 +231,14 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
   // Handle errors
   useEffect(() => {
     if (writeError) {
-      console.log('[useCreateCloseOrder] writeError:', {
-        name: writeError.name,
-        message: writeError.message,
-        cause: writeError.cause,
-        stack: writeError.stack,
-      });
       setError(writeError);
     } else if (receiptError) {
-      console.log('[useCreateCloseOrder] receiptError:', {
-        name: receiptError.name,
-        message: receiptError.message,
-        cause: receiptError.cause,
-        stack: receiptError.stack,
-      });
       setError(receiptError);
     }
   }, [writeError, receiptError]);
 
   // Register function - calls registerClose on shared contract with operator
   const registerOrder = useCallback((params: RegisterCloseOrderParams) => {
-    console.log('[useCreateCloseOrder] registerOrder called', {
-      connectedAddress,
-      positionOwner: params.positionOwner,
-    });
-
     // Reset state
     setResult(null);
     setError(null);
@@ -284,16 +246,11 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
 
     // Pre-flight check: verify connected wallet matches position owner
     if (!connectedAddress) {
-      console.log('[useCreateCloseOrder] No wallet connected');
       setError(new Error('No wallet connected. Please connect your wallet first.'));
       return;
     }
 
     if (connectedAddress.toLowerCase() !== params.positionOwner.toLowerCase()) {
-      console.log('[useCreateCloseOrder] Wallet mismatch detected!', {
-        connected: connectedAddress.toLowerCase(),
-        owner: params.positionOwner.toLowerCase(),
-      });
       setError(new Error(
         `Wrong wallet connected. The position is owned by ${params.positionOwner}, ` +
         `but you are connected with ${connectedAddress}. ` +
@@ -301,8 +258,6 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
       ));
       return;
     }
-
-    console.log('[useCreateCloseOrder] Wallet check passed, calling writeContract');
 
     // ============ isToken0Quote TRANSFORMATION ============
     // When isToken0Quote=true, the sqrtPriceX96-to-price relationship is inverted:
@@ -325,15 +280,6 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
         contractTriggerMode = 'LOWER';
       }
       // 'BOTH' stays the same
-
-      console.log('[useCreateCloseOrder] isToken0Quote transformation applied:', {
-        originalMode: params.triggerMode,
-        contractMode: contractTriggerMode,
-        originalLower: params.sqrtPriceX96Lower.toString(),
-        originalUpper: params.sqrtPriceX96Upper.toString(),
-        contractLower: contractSqrtPriceX96Lower.toString(),
-        contractUpper: contractSqrtPriceX96Upper.toString(),
-      });
     }
     // ============ END TRANSFORMATION ============
 
@@ -345,27 +291,6 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
       'BOTH': 2,
     };
     const mode = triggerModeMap[contractTriggerMode] ?? 0;
-
-    // Build the CloseConfig struct for logging (using transformed values)
-    const closeConfig = {
-      pool: params.poolAddress,
-      tokenId: params.nftId.toString(),
-      sqrtPriceX96Lower: contractSqrtPriceX96Lower.toString(),
-      sqrtPriceX96Upper: contractSqrtPriceX96Upper.toString(),
-      mode,
-      payout: params.payoutAddress,
-      operator: params.operatorAddress,
-      validUntil: params.validUntil.toString(),
-      slippageBps: params.slippageBps,
-    };
-
-    console.log('[useCreateCloseOrder] writeContract params:', {
-      contractAddress: params.contractAddress,
-      chainId: params.chainId,
-      functionName: 'registerClose',
-      closeConfig,  // Single struct argument (with transformed values)
-      isToken0Quote: params.isToken0Quote,
-    });
 
     // Call writeContract with registerClose function
     // Contract takes CloseConfig struct as a single tuple argument

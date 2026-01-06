@@ -153,6 +153,7 @@ export async function waitForTransaction(
   const receipt = await client.waitForTransactionReceipt({
     hash: txHash,
     confirmations,
+    timeout: 60_000, // 60 second timeout
   });
 
   return {
@@ -240,4 +241,445 @@ export async function getOnChainNonce(
   const client = getPublicClient(chainId);
   const nonce = await client.getTransactionCount({ address });
   return nonce;
+}
+
+// =============================================================================
+// Position Data Reading (for pre-flight validation)
+// =============================================================================
+
+/**
+ * NonfungiblePositionManager ABI for position data reading
+ */
+const NFPM_ABI = [
+  {
+    inputs: [{ internalType: 'uint256', name: 'tokenId', type: 'uint256' }],
+    name: 'positions',
+    outputs: [
+      { internalType: 'uint96', name: 'nonce', type: 'uint96' },
+      { internalType: 'address', name: 'operator', type: 'address' },
+      { internalType: 'address', name: 'token0', type: 'address' },
+      { internalType: 'address', name: 'token1', type: 'address' },
+      { internalType: 'uint24', name: 'fee', type: 'uint24' },
+      { internalType: 'int24', name: 'tickLower', type: 'int24' },
+      { internalType: 'int24', name: 'tickUpper', type: 'int24' },
+      { internalType: 'uint128', name: 'liquidity', type: 'uint128' },
+      { internalType: 'uint256', name: 'feeGrowthInside0LastX128', type: 'uint256' },
+      { internalType: 'uint256', name: 'feeGrowthInside1LastX128', type: 'uint256' },
+      { internalType: 'uint128', name: 'tokensOwed0', type: 'uint128' },
+      { internalType: 'uint128', name: 'tokensOwed1', type: 'uint128' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: 'tokenId', type: 'uint256' }],
+    name: 'ownerOf',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'tokenId', type: 'uint256' },
+    ],
+    name: 'getApproved',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'owner', type: 'address' },
+      { internalType: 'address', name: 'operator', type: 'address' },
+    ],
+    name: 'isApprovedForAll',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+/**
+ * ERC20 ABI for balance checking
+ */
+const ERC20_ABI = [
+  {
+    inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'symbol',
+    outputs: [{ internalType: 'string', name: '', type: 'string' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+/**
+ * NonfungiblePositionManager addresses by chain ID
+ */
+const NFPM_ADDRESSES: Record<number, `0x${string}`> = {
+  1: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  42161: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  10: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  137: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  8453: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+  56: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
+  31337: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+};
+
+/**
+ * Position data from NonfungiblePositionManager
+ */
+export interface OnChainPositionData {
+  nonce: bigint;
+  operator: `0x${string}`;
+  token0: `0x${string}`;
+  token1: `0x${string}`;
+  fee: number;
+  tickLower: number;
+  tickUpper: number;
+  liquidity: bigint;
+  feeGrowthInside0LastX128: bigint;
+  feeGrowthInside1LastX128: bigint;
+  tokensOwed0: bigint;
+  tokensOwed1: bigint;
+}
+
+/**
+ * Pre-flight validation result for close order execution
+ */
+export interface PreflightValidation {
+  isValid: boolean;
+  reason?: string;
+  positionData?: OnChainPositionData;
+  owner?: `0x${string}`;
+  isApproved?: boolean;
+  approvedAddress?: `0x${string}`;
+  isApprovedForAll?: boolean;
+}
+
+/**
+ * Read position data from NonfungiblePositionManager
+ *
+ * @param chainId - Chain ID
+ * @param tokenId - NFT token ID
+ * @returns Position data
+ */
+export async function readPositionData(
+  chainId: SupportedChainId,
+  tokenId: bigint
+): Promise<OnChainPositionData> {
+  const client = getPublicClient(chainId);
+  const nfpmAddress = NFPM_ADDRESSES[chainId];
+
+  if (!nfpmAddress) {
+    throw new Error(`NFPM address not configured for chain ${chainId}`);
+  }
+
+  const result = await client.readContract({
+    address: nfpmAddress,
+    abi: NFPM_ABI,
+    functionName: 'positions',
+    args: [tokenId],
+  });
+
+  return {
+    nonce: result[0],
+    operator: result[1],
+    token0: result[2],
+    token1: result[3],
+    fee: result[4],
+    tickLower: result[5],
+    tickUpper: result[6],
+    liquidity: result[7],
+    feeGrowthInside0LastX128: result[8],
+    feeGrowthInside1LastX128: result[9],
+    tokensOwed0: result[10],
+    tokensOwed1: result[11],
+  };
+}
+
+/**
+ * Read NFT owner from NonfungiblePositionManager
+ *
+ * @param chainId - Chain ID
+ * @param tokenId - NFT token ID
+ * @returns Owner address
+ */
+export async function readNftOwner(
+  chainId: SupportedChainId,
+  tokenId: bigint
+): Promise<`0x${string}`> {
+  const client = getPublicClient(chainId);
+  const nfpmAddress = NFPM_ADDRESSES[chainId];
+
+  if (!nfpmAddress) {
+    throw new Error(`NFPM address not configured for chain ${chainId}`);
+  }
+
+  const owner = await client.readContract({
+    address: nfpmAddress,
+    abi: NFPM_ABI,
+    functionName: 'ownerOf',
+    args: [tokenId],
+  });
+
+  return owner;
+}
+
+/**
+ * Check if contract is approved for NFT
+ *
+ * @param chainId - Chain ID
+ * @param tokenId - NFT token ID
+ * @param owner - NFT owner address
+ * @param contractAddress - Contract to check approval for
+ * @returns Approval status
+ */
+export async function checkNftApproval(
+  chainId: SupportedChainId,
+  tokenId: bigint,
+  owner: `0x${string}`,
+  contractAddress: `0x${string}`
+): Promise<{ isApproved: boolean; approvedAddress: `0x${string}`; isApprovedForAll: boolean }> {
+  const client = getPublicClient(chainId);
+  const nfpmAddress = NFPM_ADDRESSES[chainId];
+
+  if (!nfpmAddress) {
+    throw new Error(`NFPM address not configured for chain ${chainId}`);
+  }
+
+  const [approvedAddress, isApprovedForAll] = await Promise.all([
+    client.readContract({
+      address: nfpmAddress,
+      abi: NFPM_ABI,
+      functionName: 'getApproved',
+      args: [tokenId],
+    }),
+    client.readContract({
+      address: nfpmAddress,
+      abi: NFPM_ABI,
+      functionName: 'isApprovedForAll',
+      args: [owner, contractAddress],
+    }),
+  ]);
+
+  const isApproved = approvedAddress.toLowerCase() === contractAddress.toLowerCase() || isApprovedForAll;
+
+  return { isApproved, approvedAddress, isApprovedForAll };
+}
+
+/**
+ * Validate position state before close order execution
+ *
+ * @param chainId - Chain ID
+ * @param tokenId - NFT token ID
+ * @param expectedOwner - Expected owner address
+ * @param contractAddress - PositionCloser contract address
+ * @returns Validation result with detailed diagnostics
+ */
+export async function validatePositionForClose(
+  chainId: SupportedChainId,
+  tokenId: bigint,
+  expectedOwner: `0x${string}`,
+  contractAddress: `0x${string}`
+): Promise<PreflightValidation> {
+  try {
+    // Read position data and owner in parallel
+    const [positionData, owner] = await Promise.all([
+      readPositionData(chainId, tokenId),
+      readNftOwner(chainId, tokenId),
+    ]);
+
+    // Check owner matches
+    if (owner.toLowerCase() !== expectedOwner.toLowerCase()) {
+      return {
+        isValid: false,
+        reason: `NFT ownership changed. Expected: ${expectedOwner}, Actual: ${owner}`,
+        positionData,
+        owner,
+      };
+    }
+
+    // Check liquidity > 0
+    if (positionData.liquidity === 0n) {
+      return {
+        isValid: false,
+        reason: `Position has zero liquidity. Token0: ${positionData.token0}, Token1: ${positionData.token1}`,
+        positionData,
+        owner,
+      };
+    }
+
+    // Check approval
+    const approvalStatus = await checkNftApproval(chainId, tokenId, owner, contractAddress);
+
+    if (!approvalStatus.isApproved) {
+      return {
+        isValid: false,
+        reason: `NFT not approved for contract. ApprovedAddress: ${approvalStatus.approvedAddress}, IsApprovedForAll: ${approvalStatus.isApprovedForAll}`,
+        positionData,
+        owner,
+        ...approvalStatus,
+      };
+    }
+
+    return {
+      isValid: true,
+      positionData,
+      owner,
+      ...approvalStatus,
+    };
+  } catch (error) {
+    const err = error as Error;
+    return {
+      isValid: false,
+      reason: `Failed to read position data: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Check ERC20 token balance of an address
+ *
+ * @param chainId - Chain ID
+ * @param tokenAddress - Token contract address
+ * @param holderAddress - Address to check balance of
+ * @returns Balance and symbol
+ */
+export async function checkTokenBalance(
+  chainId: SupportedChainId,
+  tokenAddress: `0x${string}`,
+  holderAddress: `0x${string}`
+): Promise<{ balance: bigint; symbol: string }> {
+  const client = getPublicClient(chainId);
+
+  const [balance, symbol] = await Promise.all([
+    client.readContract({
+      address: tokenAddress,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [holderAddress],
+    }),
+    client.readContract({
+      address: tokenAddress,
+      abi: ERC20_ABI,
+      functionName: 'symbol',
+    }).catch(() => 'UNKNOWN'),
+  ]);
+
+  return { balance, symbol: symbol as string };
+}
+
+/**
+ * Check balances of both tokens in a position for the PositionCloser contract
+ *
+ * @param chainId - Chain ID
+ * @param token0 - Token0 address
+ * @param token1 - Token1 address
+ * @param contractAddress - PositionCloser contract address
+ * @returns Balances of both tokens
+ */
+export async function checkContractTokenBalances(
+  chainId: SupportedChainId,
+  token0: `0x${string}`,
+  token1: `0x${string}`,
+  contractAddress: `0x${string}`
+): Promise<{
+  token0Balance: bigint;
+  token0Symbol: string;
+  token1Balance: bigint;
+  token1Symbol: string;
+}> {
+  const [token0Data, token1Data] = await Promise.all([
+    checkTokenBalance(chainId, token0, contractAddress),
+    checkTokenBalance(chainId, token1, contractAddress),
+  ]);
+
+  return {
+    token0Balance: token0Data.balance,
+    token0Symbol: token0Data.symbol,
+    token1Balance: token1Data.balance,
+    token1Symbol: token1Data.symbol,
+  };
+}
+
+/**
+ * PositionCloser ABI for executeClose simulation
+ */
+const POSITION_CLOSER_ABI = [
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'closeId', type: 'uint256' },
+      { internalType: 'address', name: 'feeRecipient', type: 'address' },
+      { internalType: 'uint16', name: 'feeBps', type: 'uint16' },
+    ],
+    name: 'executeClose',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+/**
+ * Simulate executeClose transaction to catch errors before broadcasting
+ *
+ * @param chainId - Chain ID
+ * @param contractAddress - PositionCloser contract address
+ * @param closeId - Close order ID
+ * @param feeRecipient - Fee recipient address
+ * @param feeBps - Fee in basis points
+ * @param operatorAddress - Operator address (caller)
+ * @returns Simulation result
+ */
+export async function simulateExecuteClose(
+  chainId: SupportedChainId,
+  contractAddress: `0x${string}`,
+  closeId: number,
+  feeRecipient: `0x${string}`,
+  feeBps: number,
+  operatorAddress: `0x${string}`
+): Promise<{ success: boolean; error?: string; decodedError?: string }> {
+  const { decodeRevertReason } = await import('./error-decoder');
+  const client = getPublicClient(chainId);
+
+  try {
+    await client.simulateContract({
+      address: contractAddress,
+      abi: POSITION_CLOSER_ABI,
+      functionName: 'executeClose',
+      args: [BigInt(closeId), feeRecipient, feeBps],
+      account: operatorAddress,
+    });
+
+    return { success: true };
+  } catch (error) {
+    const err = error as Error & { data?: string; cause?: { data?: string } };
+
+    // Extract revert data
+    let revertData = err.data || err.cause?.data;
+
+    // Try to extract from error message
+    if (!revertData && err.message) {
+      const match = err.message.match(/0x[a-fA-F0-9]+/);
+      if (match && match[0].length >= 10) {
+        revertData = match[0];
+      }
+    }
+
+    const decodedError = revertData
+      ? decodeRevertReason(revertData as `0x${string}`)
+      : err.message;
+
+    return {
+      success: false,
+      error: err.message,
+      decodedError,
+    };
+  }
 }

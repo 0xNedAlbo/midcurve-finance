@@ -26,6 +26,8 @@ export type {
   OrderExecutedContext,
   OrderFailedContext,
   OrderCancelledContext,
+  PreflightValidationContext,
+  SimulationFailedContext,
   AutomationLogContext,
   CreateAutomationLogInput,
   ListAutomationLogsOptions,

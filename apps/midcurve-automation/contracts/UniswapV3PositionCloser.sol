@@ -388,7 +388,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
                 deadline: block.timestamp
             });
 
-        (uint256 dec0, uint256 dec1) = _positionManager.decreaseLiquidity(dec);
+        _positionManager.decreaseLiquidity(dec);
 
         // 7) Collect everything to this contract
         INonfungiblePositionManagerMinimal.CollectParams memory col = INonfungiblePositionManagerMinimal.CollectParams({
@@ -400,8 +400,10 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
 
         (uint256 col0, uint256 col1) = _positionManager.collect(col);
 
-        uint256 amount0Out = dec0 + col0;
-        uint256 amount1Out = dec1 + col1;
+        // NOTE: collect() returns the TOTAL collected including what decreaseLiquidity added to tokensOwed.
+        // Do NOT add dec0/dec1 here - that would double-count!
+        uint256 amount0Out = col0;
+        uint256 amount1Out = col1;
 
         // 8) Mark executed before external transfers (reentrancy hygiene)
         o.status = CloseStatus.EXECUTED;

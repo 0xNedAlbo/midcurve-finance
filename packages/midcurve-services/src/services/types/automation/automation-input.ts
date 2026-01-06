@@ -350,6 +350,42 @@ export interface OrderFailedContext extends EvmLogContext {
 }
 
 /**
+ * Context for PREFLIGHT_VALIDATION event
+ */
+export interface PreflightValidationContext extends EvmLogContext {
+  isValid: boolean;
+  reason?: string;
+  liquidity?: string;
+  token0?: string;
+  token1?: string;
+  tickLower?: number;
+  tickUpper?: number;
+  tokensOwed0?: string;
+  tokensOwed1?: string;
+  owner?: string;
+  isApproved?: boolean;
+  isApprovedForAll?: boolean;
+}
+
+/**
+ * Context for SIMULATION_FAILED event
+ */
+export interface SimulationFailedContext extends EvmLogContext {
+  error: string;
+  closeId: number;
+  contractAddress: string;
+  feeRecipient: string;
+  feeBps: number;
+  decodedError?: string;
+  contractBalances?: {
+    token0Symbol: string;
+    token0Balance: string;
+    token1Symbol: string;
+    token1Balance: string;
+  };
+}
+
+/**
  * Context for ORDER_CANCELLED event
  */
 export interface OrderCancelledContext extends EvmLogContext {
@@ -369,7 +405,9 @@ export type AutomationLogContext =
   | OrderExecutingContext
   | OrderExecutedContext
   | OrderFailedContext
-  | OrderCancelledContext;
+  | OrderCancelledContext
+  | PreflightValidationContext
+  | SimulationFailedContext;
 
 /**
  * Input for creating an automation log entry

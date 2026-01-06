@@ -8,7 +8,15 @@
 import type { AutomationContractConfig } from '@midcurve/shared';
 import { formatCurrency } from '@midcurve/shared';
 import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
-import { broadcastTransaction, waitForTransaction, getRevertReason, type SupportedChainId } from '../lib/evm';
+import {
+  broadcastTransaction,
+  waitForTransaction,
+  getRevertReason,
+  validatePositionForClose,
+  simulateExecuteClose,
+  checkContractTokenBalances,
+  type SupportedChainId,
+} from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
@@ -303,6 +311,75 @@ export class OrderExecutor {
       ? position.pool.token0.decimals
       : position.pool.token1.decimals;
 
+    // Get nftId from position config
+    const nftId = position.config.nftId ? BigInt(position.config.nftId) : undefined;
+
+    // =========================================================================
+    // PRE-FLIGHT VALIDATION: Check position state before execution
+    // =========================================================================
+    if (nftId) {
+      log.info({
+        orderId,
+        positionId,
+        nftId: nftId.toString(),
+        contractAddress,
+        msg: 'Running pre-flight validation',
+      });
+
+      const preflight = await validatePositionForClose(
+        chainId as SupportedChainId,
+        nftId,
+        position.state.ownerAddress as `0x${string}`,
+        contractAddress as `0x${string}`
+      );
+
+      // Log preflight result for diagnostics (console + database)
+      if (preflight.positionData) {
+        log.info({
+          orderId,
+          positionId,
+          preflight: {
+            isValid: preflight.isValid,
+            reason: preflight.reason,
+            liquidity: preflight.positionData.liquidity.toString(),
+            token0: preflight.positionData.token0,
+            token1: preflight.positionData.token1,
+            tickLower: preflight.positionData.tickLower,
+            tickUpper: preflight.positionData.tickUpper,
+            tokensOwed0: preflight.positionData.tokensOwed0.toString(),
+            tokensOwed1: preflight.positionData.tokensOwed1.toString(),
+            owner: preflight.owner,
+            isApproved: preflight.isApproved,
+            isApprovedForAll: preflight.isApprovedForAll,
+          },
+          msg: 'Pre-flight validation result',
+        });
+
+        // Log to database for UI visibility
+        const automationLogService = getAutomationLogService();
+        await automationLogService.logPreflightValidation(positionId, orderId, {
+          platform: 'evm',
+          chainId,
+          isValid: preflight.isValid,
+          reason: preflight.reason,
+          liquidity: preflight.positionData.liquidity.toString(),
+          token0: preflight.positionData.token0,
+          token1: preflight.positionData.token1,
+          tickLower: preflight.positionData.tickLower,
+          tickUpper: preflight.positionData.tickUpper,
+          tokensOwed0: preflight.positionData.tokensOwed0.toString(),
+          tokensOwed1: preflight.positionData.tokensOwed1.toString(),
+          owner: preflight.owner,
+          isApproved: preflight.isApproved,
+          isApprovedForAll: preflight.isApprovedForAll,
+        });
+      }
+
+      if (!preflight.isValid) {
+        throw new Error(`Pre-flight validation failed: ${preflight.reason}`);
+      }
+    }
+
     // Check if this is a retry attempt (order already in 'triggering' status)
     const isRetry = order.status === 'triggering';
 
@@ -330,6 +407,109 @@ export class OrderExecutor {
         'Retry attempt - order already in triggering status, skipping markTriggered'
       );
     }
+
+    // =========================================================================
+    // SIMULATION: Simulate transaction before signing to catch errors early
+    // =========================================================================
+    log.info({
+      orderId,
+      positionId,
+      closeId,
+      contractAddress,
+      operatorAddress,
+      msg: 'Simulating executeClose transaction',
+    });
+
+    const simulation = await simulateExecuteClose(
+      chainId as SupportedChainId,
+      contractAddress as `0x${string}`,
+      closeId,
+      feeConfig.recipient as `0x${string}`,
+      feeConfig.bps,
+      operatorAddress as `0x${string}`
+    );
+
+    if (!simulation.success) {
+      log.error({
+        orderId,
+        positionId,
+        closeId,
+        simulation,
+        msg: 'Transaction simulation failed',
+      });
+
+      // If we have position data, try to get contract token balances for additional diagnostics
+      let contractBalances: {
+        token0Symbol: string;
+        token0Balance: string;
+        token1Symbol: string;
+        token1Balance: string;
+      } | undefined;
+
+      if (nftId) {
+        try {
+          const simDiagPreflight = await validatePositionForClose(
+            chainId as SupportedChainId,
+            nftId,
+            position.state.ownerAddress as `0x${string}`,
+            contractAddress as `0x${string}`
+          );
+
+          if (simDiagPreflight.positionData) {
+            const balances = await checkContractTokenBalances(
+              chainId as SupportedChainId,
+              simDiagPreflight.positionData.token0,
+              simDiagPreflight.positionData.token1,
+              contractAddress as `0x${string}`
+            );
+
+            contractBalances = {
+              token0Symbol: balances.token0Symbol,
+              token0Balance: balances.token0Balance.toString(),
+              token1Symbol: balances.token1Symbol,
+              token1Balance: balances.token1Balance.toString(),
+            };
+
+            log.error({
+              orderId,
+              positionId,
+              contractBalances,
+              msg: 'Contract token balances at simulation failure',
+            });
+          }
+        } catch (balanceErr) {
+          log.warn({
+            orderId,
+            positionId,
+            error: (balanceErr as Error).message,
+            msg: 'Failed to fetch contract balances for diagnostics',
+          });
+        }
+      }
+
+      // Log simulation failure to database for UI visibility
+      const automationLogService = getAutomationLogService();
+      await automationLogService.logSimulationFailed(positionId, orderId, {
+        platform: 'evm',
+        chainId,
+        error: simulation.error || 'Unknown simulation error',
+        decodedError: simulation.decodedError,
+        closeId,
+        contractAddress,
+        operatorAddress,
+        feeRecipient: feeConfig.recipient,
+        feeBps: feeConfig.bps,
+        contractBalances,
+      });
+
+      throw new Error(`Simulation failed: ${simulation.decodedError || simulation.error}`);
+    }
+
+    log.info({
+      orderId,
+      positionId,
+      msg: 'Transaction simulation successful',
+    });
 
     autoLog.orderExecution(log, orderId, 'signing', {
       positionId,
@@ -375,6 +555,75 @@ export class OrderExecutor {
     if (receipt.status === 'reverted') {
       // Fetch and decode the revert reason for better debugging
       const revertReason = await getRevertReason(chainId as SupportedChainId, txHash);
+
+      // Enhanced diagnostics: Log position state and contract balances after revert
+      log.error({
+        orderId,
+        positionId,
+        txHash,
+        revertReason,
+        receipt: {
+          blockNumber: receipt.blockNumber.toString(),
+          gasUsed: receipt.gasUsed.toString(),
+        },
+        msg: 'Transaction reverted - gathering diagnostics',
+      });
+
+      // Try to get post-revert position state and contract balances
+      if (nftId) {
+        try {
+          const postRevertPreflight = await validatePositionForClose(
+            chainId as SupportedChainId,
+            nftId,
+            position.state.ownerAddress as `0x${string}`,
+            contractAddress as `0x${string}`
+          );
+
+          log.error({
+            orderId,
+            positionId,
+            postRevertState: {
+              isValid: postRevertPreflight.isValid,
+              reason: postRevertPreflight.reason,
+              liquidity: postRevertPreflight.positionData?.liquidity.toString(),
+              token0: postRevertPreflight.positionData?.token0,
+              token1: postRevertPreflight.positionData?.token1,
+              owner: postRevertPreflight.owner,
+              isApproved: postRevertPreflight.isApproved,
+            },
+            msg: 'Position state after revert',
+          });
+
+          if (postRevertPreflight.positionData) {
+            const balances = await checkContractTokenBalances(
+              chainId as SupportedChainId,
+              postRevertPreflight.positionData.token0,
+              postRevertPreflight.positionData.token1,
+              contractAddress as `0x${string}`
+            );
+
+            log.error({
+              orderId,
+              positionId,
+              contractBalances: {
+                token0Symbol: balances.token0Symbol,
+                token0Balance: balances.token0Balance.toString(),
+                token1Symbol: balances.token1Symbol,
+                token1Balance: balances.token1Balance.toString(),
+              },
+              msg: 'Contract token balances after revert',
+            });
+          }
+        } catch (diagErr) {
+          log.warn({
+            orderId,
+            positionId,
+            error: (diagErr as Error).message,
+            msg: 'Failed to gather post-revert diagnostics',
+          });
+        }
+      }
+
       throw new Error(`Transaction reverted: ${revertReason || 'unknown reason'} (tx: ${txHash})`);
     }
 

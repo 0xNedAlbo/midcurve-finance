@@ -19,6 +19,8 @@ import type {
   OrderFailedContext,
   OrderCreatedContext,
   OrderCancelledContext,
+  PreflightValidationContext,
+  SimulationFailedContext,
 } from '../types/automation/index.js';
 
 // =============================================================================
@@ -49,6 +51,8 @@ export const AutomationLogType = {
   ORDER_FAILED: 'ORDER_FAILED',
   ORDER_CANCELLED: 'ORDER_CANCELLED',
   RETRY_SCHEDULED: 'RETRY_SCHEDULED',
+  PREFLIGHT_VALIDATION: 'PREFLIGHT_VALIDATION',
+  SIMULATION_FAILED: 'SIMULATION_FAILED',
 } as const;
 
 export type AutomationLogTypeValue =
@@ -427,6 +431,46 @@ export class AutomationLogService {
       closeOrderId,
       level: LogLevel.WARN,
       logType: AutomationLogType.RETRY_SCHEDULED,
+      message,
+      context,
+    });
+  }
+
+  /**
+   * Logs pre-flight validation result
+   */
+  async logPreflightValidation(
+    positionId: string,
+    closeOrderId: string,
+    context: PreflightValidationContext
+  ): Promise<void> {
+    const message = context.isValid
+      ? `Pre-flight validation passed (liquidity: ${context.liquidity})`
+      : `Pre-flight validation failed: ${context.reason}`;
+    await this.log({
+      positionId,
+      closeOrderId,
+      level: context.isValid ? LogLevel.INFO : LogLevel.ERROR,
+      logType: AutomationLogType.PREFLIGHT_VALIDATION,
+      message,
+      context,
+    });
+  }
+
+  /**
+   * Logs simulation failure
+   */
+  async logSimulationFailed(
+    positionId: string,
+    closeOrderId: string,
+    context: SimulationFailedContext
+  ): Promise<void> {
+    const message = `Transaction simulation failed: ${context.decodedError || 'unknown error'}`;
+    await this.log({
+      positionId,
+      closeOrderId,
+      level: LogLevel.ERROR,
+      logType: AutomationLogType.SIMULATION_FAILED,
       message,
       context,
     });
