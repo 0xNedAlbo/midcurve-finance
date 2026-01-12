@@ -210,34 +210,35 @@ interface IUniswapV3PositionCloser {
     }
 
     // --- Errors ---
-    error NotOwner();
-    error NotOperator();
+    // Selector codes computed via: cast sig "ErrorName(params)"
+    error NotOwner();                                                                            // 0x30cd7471
+    error NotOperator();                                                                         // 0x7c214f04
 
-    error ZeroAddress();
-    error SlippageBpsOutOfRange(uint16 slippageBps);
-    error InvalidBounds();
+    error ZeroAddress();                                                                         // 0xd92e233d
+    error SlippageBpsOutOfRange(uint16 slippageBps);                                             // 0x49c26c64
+    error InvalidBounds();                                                                       // 0xa8834357
 
-    error WrongStatus(CloseStatus expected, CloseStatus actual);
-    error CloseExpired(uint256 validUntil, uint256 nowTs);
+    error WrongStatus(CloseStatus expected, CloseStatus actual);                                 // 0xe064752b
+    error CloseExpired(uint256 validUntil, uint256 nowTs);                                       // 0xa12436aa
 
-    error PriceConditionNotMet(uint160 currentSqrtPriceX96, uint160 lower, uint160 upper, TriggerMode mode);
+    error PriceConditionNotMet(uint160 currentSqrtPriceX96, uint160 lower, uint160 upper, TriggerMode mode);  // 0xbbaee1a8
 
-    error NftNotOwnedByRecordedOwner(address expectedOwner, address actualOwner);
-    error NftNotApproved(address owner, uint256 tokenId);
+    error NftNotOwnedByRecordedOwner(address expectedOwner, address actualOwner);                // 0x9d6db1ad
+    error NftNotApproved(address owner, uint256 tokenId);                                        // 0xa38f26fd
 
-    error FeeBpsTooHigh(uint16 feeBps, uint16 maxFeeBps);
+    error FeeBpsTooHigh(uint16 feeBps, uint16 maxFeeBps);                                        // 0x84c6b9b5
 
-    error TransferFailed();
-    error ExternalCallFailed();
+    error TransferFailed();                                                                      // 0x90b8ec18
+    error ExternalCallFailed();                                                                  // 0x350c20f1
 
     // Swap-related errors
-    error InvalidAugustus(address augustus);
-    error SwapDeadlineExpired(uint256 deadline, uint256 current);
-    error SwapFailed();
-    error SwapOutputZero();
-    error InvalidQuoteToken(address quoteToken, address token0, address token1);
-    error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);
-    error SwapNotConfigured();
+    error InvalidAugustus(address augustus);                                                     // 0x0411b82d
+    error SwapDeadlineExpired(uint256 deadline, uint256 current);                                // 0xa2efa66f
+    error SwapFailed();                                                                          // 0x81ceff30
+    error SwapOutputZero();                                                                      // 0x5273e2e8
+    error InvalidQuoteToken(address quoteToken, address token0, address token1);                 // 0xb2883cfc
+    error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);                                     // 0x22fecc1f
+    error SwapNotConfigured();                                                                   // 0x7883fed8
 
     // --- Events ---
     event CloseRegistered(

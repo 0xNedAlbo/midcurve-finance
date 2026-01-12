@@ -610,7 +610,7 @@ export async function checkContractTokenBalances(
 }
 
 /**
- * PositionCloser ABI for executeClose simulation
+ * PositionCloser ABI for executeClose simulation and order reading
  */
 const POSITION_CLOSER_ABI = [
   {
@@ -632,6 +632,35 @@ const POSITION_CLOSER_ABI = [
     name: 'executeClose',
     outputs: [],
     stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: 'closeId', type: 'uint256' }],
+    name: 'getCloseOrder',
+    outputs: [
+      {
+        internalType: 'struct IUniswapV3PositionCloser.CloseOrder',
+        name: '',
+        type: 'tuple',
+        components: [
+          { internalType: 'enum IUniswapV3PositionCloser.CloseStatus', name: 'status', type: 'uint8' },
+          { internalType: 'uint256', name: 'tokenId', type: 'uint256' },
+          { internalType: 'address', name: 'owner', type: 'address' },
+          { internalType: 'address', name: 'payout', type: 'address' },
+          { internalType: 'address', name: 'operator', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
+          { internalType: 'uint160', name: 'lower', type: 'uint160' },
+          { internalType: 'uint160', name: 'upper', type: 'uint160' },
+          { internalType: 'enum IUniswapV3PositionCloser.TriggerMode', name: 'mode', type: 'uint8' },
+          { internalType: 'uint256', name: 'validUntil', type: 'uint256' },
+          { internalType: 'uint16', name: 'slippageBps', type: 'uint16' },
+          { internalType: 'enum IUniswapV3PositionCloser.SwapDirection', name: 'swapDirection', type: 'uint8' },
+          { internalType: 'address', name: 'swapQuoteToken', type: 'address' },
+          { internalType: 'uint16', name: 'swapSlippageBps', type: 'uint16' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
     type: 'function',
   },
 ] as const;
@@ -715,4 +744,53 @@ export async function simulateExecuteClose(
       decodedError,
     };
   }
+}
+
+/**
+ * On-chain close order data (relevant swap fields)
+ */
+export interface OnChainCloseOrderSwapInfo {
+  /** SwapDirection enum: 0=NONE, 1=BASE_TO_QUOTE, 2=QUOTE_TO_BASE */
+  swapDirection: number;
+  /** Quote token address (for swap direction resolution) */
+  swapQuoteToken: `0x${string}`;
+  /** Swap slippage in basis points */
+  swapSlippageBps: number;
+}
+
+/**
+ * Read on-chain close order to get swap configuration
+ *
+ * This is used to determine if a swap is needed at execution time,
+ * regardless of what's stored in the database.
+ *
+ * @param chainId - Chain ID
+ * @param contractAddress - PositionCloser contract address
+ * @param closeId - Close order ID
+ * @returns Swap configuration from on-chain order
+ */
+export async function getOnChainCloseOrder(
+  chainId: SupportedChainId,
+  contractAddress: `0x${string}`,
+  closeId: number
+): Promise<OnChainCloseOrderSwapInfo> {
+  const client = getPublicClient(chainId);
+
+  const result = await client.readContract({
+    address: contractAddress,
+    abi: POSITION_CLOSER_ABI,
+    functionName: 'getCloseOrder',
+    args: [BigInt(closeId)],
+  });
+
+  // Result is a tuple matching CloseOrder struct
+  // Index mapping from ABI:
+  // 0: status, 1: tokenId, 2: owner, 3: payout, 4: operator
+  // 5: pool, 6: lower, 7: upper, 8: mode, 9: validUntil
+  // 10: slippageBps, 11: swapDirection, 12: swapQuoteToken, 13: swapSlippageBps
+  return {
+    swapDirection: Number(result.swapDirection),
+    swapQuoteToken: result.swapQuoteToken as `0x${string}`,
+    swapSlippageBps: Number(result.swapSlippageBps),
+  };
 }

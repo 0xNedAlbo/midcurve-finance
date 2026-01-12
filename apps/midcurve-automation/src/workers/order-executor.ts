@@ -16,6 +16,7 @@ import {
   simulateExecuteClose,
   checkContractTokenBalances,
   getOnChainNonce,
+  getOnChainCloseOrder,
   type SupportedChainId,
 } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
@@ -25,7 +26,6 @@ import { QUEUES, ORDER_RETRY_DELAY_MS } from '../mq/topology';
 import { deserializeMessage, serializeMessage, type OrderTriggerMessage } from '../mq/messages';
 import { getSignerClient } from '../clients/signer-client';
 import { getParaswapClient, type ParaswapSwapParams, PARASWAP_SUPPORTED_CHAINS } from '../clients/paraswap-client';
-import type { SwapConfig } from '@midcurve/shared';
 
 const log = automationLogger.child({ component: 'OrderExecutor' });
 
@@ -289,11 +289,11 @@ export class OrderExecutor {
       throw new Error(`Contract address not configured for order: ${orderId}`);
     }
 
-    // Get closeId, operatorAddress, and swapConfig from order config
+    // Get closeId and operatorAddress from order config
+    // NOTE: swapConfig is no longer used - we read swap state from on-chain
     const orderConfig = order.config as {
       closeId?: number;
       operatorAddress?: string;
-      swapConfig?: SwapConfig;
     };
     const closeId = orderConfig.closeId;
     if (closeId === undefined) {
@@ -305,9 +305,33 @@ export class OrderExecutor {
       throw new Error(`Operator address not configured for order: ${orderId}`);
     }
 
-    // Extract swap config if present
-    const swapConfig = orderConfig.swapConfig;
-    const swapEnabled = swapConfig?.enabled === true;
+    // =========================================================================
+    // ON-CHAIN SWAP STATE: Read swap configuration from on-chain order
+    // IMPORTANT: The contract decides whether to swap based on on-chain swapDirection,
+    // not database config. We MUST use on-chain state to determine if swap params are needed.
+    // =========================================================================
+    const onChainOrder = await getOnChainCloseOrder(
+      chainId as SupportedChainId,
+      contractAddress as `0x${string}`,
+      closeId
+    );
+
+    // SwapDirection enum: 0=NONE, 1=BASE_TO_QUOTE, 2=QUOTE_TO_BASE
+    const swapEnabled = onChainOrder.swapDirection !== 0;
+    const swapDirection = onChainOrder.swapDirection === 1 ? 'BASE_TO_QUOTE' : 'QUOTE_TO_BASE';
+    const swapSlippageBps = onChainOrder.swapSlippageBps;
+
+    log.info({
+      orderId,
+      positionId,
+      closeId,
+      onChainSwapDirection: onChainOrder.swapDirection,
+      swapEnabled,
+      swapDirection: swapEnabled ? swapDirection : null,
+      swapQuoteToken: swapEnabled ? onChainOrder.swapQuoteToken : null,
+      swapSlippageBps: swapEnabled ? swapSlippageBps : null,
+      msg: 'On-chain swap configuration',
+    });
 
     // Get full position data (needed for signer service + price formatting)
     const positionService = getPositionService();
@@ -439,12 +463,12 @@ export class OrderExecutor {
 
     // =========================================================================
     // SWAP PARAMS: Build Paraswap swap params BEFORE simulation if swap is enabled
-    // This is needed because the on-chain order's swapDirection determines
-    // whether the contract will execute swap - not the params we pass.
+    // Uses on-chain swap configuration (swapDirection, swapSlippageBps) since
+    // the contract decides whether to swap based on on-chain state.
     // =========================================================================
     let swapParams: ParaswapSwapParams | undefined;
 
-    if (swapEnabled && swapConfig) {
+    if (swapEnabled) {
       const paraswapClient = getParaswapClient();
 
       // Check if chain supports Paraswap
@@ -453,18 +477,19 @@ export class OrderExecutor {
           orderId,
           positionId,
           chainId,
-          msg: 'Swap enabled but chain not supported by Paraswap, skipping swap',
+          msg: 'Swap enabled on-chain but chain not supported by Paraswap - execution will fail',
         });
+        throw new Error(`Swap enabled on-chain but Paraswap does not support chain ${chainId}`);
       } else {
         log.info({
           orderId,
           positionId,
-          swapDirection: swapConfig.direction,
-          swapSlippageBps: swapConfig.slippageBps,
-          msg: 'Building Paraswap swap params',
+          swapDirection,
+          swapSlippageBps,
+          msg: 'Building Paraswap swap params from on-chain config',
         });
 
-        // Resolve tokens based on swap direction
+        // Resolve tokens based on swap direction (using on-chain direction)
         const quoteToken = position.isToken0Quote
           ? position.pool.token0.config.address
           : position.pool.token1.config.address;
@@ -478,11 +503,11 @@ export class OrderExecutor {
           ? position.pool.token1.decimals
           : position.pool.token0.decimals;
 
-        // Determine src/dest based on swap direction
-        const srcToken = swapConfig.direction === 'BASE_TO_QUOTE' ? baseToken : quoteToken;
-        const destToken = swapConfig.direction === 'BASE_TO_QUOTE' ? quoteToken : baseToken;
-        const srcDecimals = swapConfig.direction === 'BASE_TO_QUOTE' ? baseDecimals : quoteDecimals;
-        const destDecimals = swapConfig.direction === 'BASE_TO_QUOTE' ? quoteDecimals : baseDecimals;
+        // Determine src/dest based on swap direction (using on-chain direction)
+        const srcToken = swapDirection === 'BASE_TO_QUOTE' ? baseToken : quoteToken;
+        const destToken = swapDirection === 'BASE_TO_QUOTE' ? quoteToken : baseToken;
+        const srcDecimals = swapDirection === 'BASE_TO_QUOTE' ? baseDecimals : quoteDecimals;
+        const destDecimals = swapDirection === 'BASE_TO_QUOTE' ? quoteDecimals : baseDecimals;
 
         // Get swap params from Paraswap
         // Note: The contract will handle the actual swap with the collected amounts
@@ -496,7 +521,7 @@ export class OrderExecutor {
             destDecimals,
             amount: '1000000000000000000', // Use 1 token as dummy for route discovery
             userAddress: contractAddress as `0x${string}`,
-            slippageBps: swapConfig.slippageBps,
+            slippageBps: swapSlippageBps, // Use on-chain slippage
           });
 
           log.info({
@@ -512,9 +537,10 @@ export class OrderExecutor {
             orderId,
             positionId,
             error: (swapErr as Error).message,
-            msg: 'Failed to get Paraswap swap params, executing without swap',
+            msg: 'Failed to get Paraswap swap params - on-chain swap required but API failed',
           });
-          // Continue without swap - don't fail the entire execution
+          // Throw error since on-chain swap is required but we can't get params
+          throw new Error(`Swap required on-chain but failed to get Paraswap params: ${(swapErr as Error).message}`);
         }
       }
     }
