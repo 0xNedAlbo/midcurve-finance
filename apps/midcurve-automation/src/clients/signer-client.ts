@@ -40,6 +40,8 @@ export interface ExecuteCloseParams {
   feeBps: number;
   // Operator address for gas estimation
   operatorAddress: string;
+  // Optional explicit nonce for retry scenarios (caller fetches from chain)
+  nonce?: number;
 }
 
 // =============================================================================
@@ -130,15 +132,18 @@ class SignerClient {
    *
    * Gas estimation is performed here before calling the signer.
    * This keeps the signer isolated from external RPC endpoints.
+   *
+   * For retry scenarios, pass an explicit nonce fetched from the chain.
    */
   async signExecuteClose(params: ExecuteCloseParams): Promise<SignedTransaction> {
-    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, operatorAddress } = params;
+    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, operatorAddress, nonce } = params;
 
     log.info({
       userId,
       chainId,
       contractAddress,
       closeId,
+      explicitNonce: nonce,
       msg: 'Estimating gas for close order execution',
     });
 
@@ -188,7 +193,7 @@ class SignerClient {
       msg: 'Signing close order execution',
     });
 
-    // Call signer with gas params
+    // Call signer with gas params (and optional explicit nonce for retries)
     return this.request<SignedTransaction>('POST', '/api/sign/automation/execute-close', {
       userId,
       chainId,
@@ -198,6 +203,7 @@ class SignerClient {
       feeBps,
       gasLimit: gasLimit.toString(),
       gasPrice: gasPrice.toString(),
+      ...(nonce !== undefined && { nonce }),
     });
   }
 

@@ -15,6 +15,7 @@ import {
   validatePositionForClose,
   simulateExecuteClose,
   checkContractTokenBalances,
+  getOnChainNonce,
   type SupportedChainId,
 } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
@@ -383,6 +384,31 @@ export class OrderExecutor {
     // Check if this is a retry attempt (order already in 'triggering' status)
     const isRetry = order.status === 'triggering';
 
+    // For retry attempts, fetch the on-chain nonce to avoid "nonce too low" errors
+    // This handles cases where the original tx succeeded but we didn't get confirmation
+    let explicitNonce: number | undefined;
+
+    if (isRetry) {
+      log.info(
+        { orderId, positionId, status: order.status },
+        'Retry attempt - fetching on-chain nonce for sync'
+      );
+
+      // Get the automation wallet address to fetch its nonce
+      const wallet = await signerClient.getOrCreateWallet(userId);
+
+      // Fetch current on-chain nonce
+      explicitNonce = await getOnChainNonce(
+        chainId as SupportedChainId,
+        wallet.walletAddress as `0x${string}`
+      );
+
+      log.info(
+        { orderId, positionId, operatorAddress, explicitNonce },
+        'Will use explicit nonce for retry to avoid nonce desync'
+      );
+    }
+
     // Only mark as triggering on first attempt, not retries
     const automationLogService = getAutomationLogService();
     if (!isRetry) {
@@ -401,11 +427,6 @@ export class OrderExecutor {
         humanTriggerPrice: formatCurrency(triggerPrice, quoteTokenDecimals),
         humanCurrentPrice: formatCurrency(_currentPrice, quoteTokenDecimals),
       });
-    } else {
-      log.info(
-        { orderId, positionId, status: order.status },
-        'Retry attempt - order already in triggering status, skipping markTriggered'
-      );
     }
 
     // =========================================================================
@@ -519,6 +540,7 @@ export class OrderExecutor {
     });
 
     // Sign the execution transaction (gas estimation done in signer-client)
+    // For retry attempts, pass the explicit on-chain nonce to avoid "nonce too low" errors
     const signedTx = await signerClient.signExecuteClose({
       userId,
       chainId,
@@ -527,6 +549,7 @@ export class OrderExecutor {
       feeRecipient: feeConfig.recipient,
       feeBps: feeConfig.bps,
       operatorAddress,
+      nonce: explicitNonce,
     });
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {
@@ -637,16 +660,13 @@ export class OrderExecutor {
       amount1Out: 0n, // TODO: Parse from tx receipt
     });
 
-    // Decrement pool subscription order count (uses poolId, not poolAddress)
-    // We need to look up the pool subscription by the pool it belongs to
-    // For now, let's try using the poolAddress as the poolId since that's how it's stored
+    // Decrement pool subscription order count
+    // Use position.pool.id (database UUID), not poolAddress (contract address)
     try {
-      const subscription = await poolSubscriptionService.findByPoolId(poolAddress);
-      if (subscription) {
-        await poolSubscriptionService.decrementOrderCount(subscription.poolId);
-      }
+      await poolSubscriptionService.decrementOrderCount(position.pool.id);
+      log.info({ orderId, poolId: position.pool.id, msg: 'Decremented pool subscription order count' });
     } catch (err) {
-      log.warn({ orderId, poolAddress, error: err, msg: 'Failed to decrement order count' });
+      log.warn({ orderId, poolId: position.pool.id, error: err, msg: 'Failed to decrement order count' });
     }
 
     // Log ORDER_EXECUTED for user visibility

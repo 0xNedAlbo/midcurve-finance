@@ -9,6 +9,9 @@
  * Gas parameters (gasLimit, gasPrice) must be provided by the caller.
  * This keeps the signer isolated from external RPC endpoints for security.
  *
+ * For retry scenarios, the caller can provide an explicit nonce. The caller
+ * is responsible for fetching the on-chain nonce - the signer has no RPC access.
+ *
  * Prerequisites:
  * - User must have an automation wallet
  * - Close order must be registered and active
@@ -24,7 +27,8 @@
  *     feeRecipient: string,
  *     feeBps: number (0-100, max 1%),
  *     gasLimit: string (bigint as string),
- *     gasPrice: string (bigint as string)
+ *     gasPrice: string (bigint as string),
+ *     nonce?: number (optional, for retry scenarios)
  *   }
  *
  * Response (Success):
@@ -71,6 +75,8 @@ const SignExecuteCloseSchema = z.object({
   // Gas parameters from caller (signer does not access RPC)
   gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
+  // Optional explicit nonce for retry scenarios (caller fetches from chain)
+  nonce: z.number().int().nonnegative().optional(),
 });
 
 type SignExecuteCloseRequest = z.infer<typeof SignExecuteCloseSchema>;
@@ -113,7 +119,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice } = validation.data;
+  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce } = validation.data;
 
   logger.info({
     requestId,
@@ -124,6 +130,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     feeBps,
     gasLimit: gasLimit.toString(),
     gasPrice: gasPrice.toString(),
+    explicitNonce: nonce,
     msg: 'Processing execute-close signing request',
   });
 
@@ -138,6 +145,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       feeBps,
       gasLimit,
       gasPrice,
+      nonce,
     });
 
     logger.info({

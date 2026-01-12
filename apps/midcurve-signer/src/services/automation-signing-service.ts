@@ -57,6 +57,8 @@ export interface SignExecuteCloseInput {
   // Gas parameters from caller (signer does not access RPC)
   gasLimit: bigint;
   gasPrice: bigint;
+  // Optional explicit nonce for retry scenarios (caller fetches from chain)
+  nonce?: number;
 }
 
 /**
@@ -123,8 +125,8 @@ class AutomationSigningServiceImpl {
    * @returns Signed transaction
    */
   async signExecuteClose(input: SignExecuteCloseInput): Promise<SignTransactionResult> {
-    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice } = input;
-    signerLog.methodEntry(this.logger, 'signExecuteClose', { userId, chainId, contractAddress, closeId });
+    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce } = input;
+    signerLog.methodEntry(this.logger, 'signExecuteClose', { userId, chainId, contractAddress, closeId, explicitNonce: nonce });
 
     // 1. Get wallet
     const wallet = await automationWalletService.getWalletByUserId(userId);
@@ -152,6 +154,7 @@ class AutomationSigningServiceImpl {
       callData,
       gasLimit,
       gasPrice,
+      explicitNonce: nonce,
     });
 
     this.logger.info({
@@ -177,6 +180,9 @@ class AutomationSigningServiceImpl {
    *
    * Gas parameters (gasLimit, gasPrice) must be provided by the caller.
    * This keeps the signer isolated from external RPC endpoints.
+   *
+   * If explicitNonce is provided, it will be used instead of auto-incrementing.
+   * This is used for retry scenarios where the caller has fetched the on-chain nonce.
    */
   private async signContractCall(params: {
     walletId: string;
@@ -186,11 +192,20 @@ class AutomationSigningServiceImpl {
     callData: Hex;
     gasLimit: bigint;
     gasPrice: bigint;
+    explicitNonce?: number;
   }): Promise<SignTransactionResult> {
-    const { walletId, walletAddress, chainId, contractAddress, callData, gasLimit, gasPrice } = params;
+    const { walletId, walletAddress, chainId, contractAddress, callData, gasLimit, gasPrice, explicitNonce } = params;
 
-    // 1. Get nonce
-    const nonce = await automationWalletService.getAndIncrementNonce(walletId, chainId);
+    // 1. Get nonce - use explicit nonce if provided, otherwise auto-increment
+    let nonce: number;
+    if (explicitNonce !== undefined) {
+      nonce = explicitNonce;
+      // Sync DB nonce to stay consistent (set to nonce + 1 for next transaction)
+      await automationWalletService.syncNonce(walletId, chainId, explicitNonce + 1);
+      this.logger.info({ walletId, chainId, nonce }, 'Using explicit nonce from caller (retry scenario)');
+    } else {
+      nonce = await automationWalletService.getAndIncrementNonce(walletId, chainId);
+    }
 
     // 2. Build and sign transaction
     const tx = {

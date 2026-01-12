@@ -23,6 +23,7 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import {
   getCloseOrderService,
   getUniswapV3PositionService,
+  getPoolSubscriptionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -317,9 +318,30 @@ export async function DELETE(
       const closeOrderService = getCloseOrderService();
       const cancelledOrder = await closeOrderService.cancel(id);
 
-      // TODO: Decrement pool subscription order count
-      // This requires looking up the pool ID from the order's pool address
-      // and calling PoolSubscriptionService.decrementOrderCount(poolId)
+      // Decrement pool subscription order count
+      // Get the position to access position.pool.id (database UUID)
+      try {
+        const positionService = getUniswapV3PositionService();
+        const position = await positionService.findById(cancelledOrder.positionId);
+        if (position) {
+          const subscriptionService = getPoolSubscriptionService();
+          await subscriptionService.decrementOrderCount(position.pool.id);
+          apiLogger.info({
+            requestId,
+            orderId: id,
+            poolId: position.pool.id,
+            msg: 'Decremented pool subscription order count on cancellation',
+          });
+        }
+      } catch (decrementError) {
+        // Log but don't fail the cancellation - the order is already cancelled
+        apiLogger.warn({
+          requestId,
+          orderId: id,
+          error: decrementError instanceof Error ? decrementError.message : 'Unknown error',
+          msg: 'Failed to decrement pool subscription order count on cancellation',
+        });
+      }
 
       // Serialize and return
       const serialized = serializeCloseOrder(cancelledOrder);
