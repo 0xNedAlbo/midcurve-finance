@@ -37,9 +37,12 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   const poolConfig = position.pool.config as { address: string; chainId: number };
   const poolState = position.pool.state as { sqrtPriceX96: string };
   const positionConfig = position.config as { nftId: number };
-  const positionState = position.state as { ownerAddress: string };
+  const positionState = position.state as { ownerAddress: string; liquidity: string };
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
+
+  // Check if position is closed (liquidity = 0)
+  const isPositionClosed = BigInt(positionState.liquidity || '0') === 0n;
 
   // Get shared automation contract for this chain
   const {
@@ -107,6 +110,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         baseTokenAddress={baseTokenConfig.address}
         quoteTokenAddress={quoteTokenConfig.address}
         onCreateOrder={() => setIsCloseOrderModalOpen(true)}
+        isPositionClosed={isPositionClosed}
       />
 
       {/* Close Order Modal */}

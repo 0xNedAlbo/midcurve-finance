@@ -185,6 +185,71 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 403 });
       }
 
+      // Check if position is closed (liquidity = 0)
+      const positionLiquidity = position.state?.liquidity ?? 0n;
+      if (positionLiquidity === 0n) {
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.VALIDATION_ERROR,
+          'Cannot create automation orders for closed positions'
+        );
+        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+        return NextResponse.json(errorResponse, { status: 400 });
+      }
+
+      // Validate trigger price against current pool price
+      // This prevents users from creating SL orders above current price or TP orders below
+      const poolState = position.pool.state;
+      if (poolState?.sqrtPriceX96) {
+        const currentSqrtPriceX96 = poolState.sqrtPriceX96;
+        const isToken0Quote = position.isToken0Quote;
+
+        // Validation functions account for isToken0Quote inversion
+        // When isToken0Quote=true: Higher sqrtPriceX96 = LOWER user-facing price
+        const isLowerPriceValid = (triggerSqrt: bigint) => {
+          return isToken0Quote
+            ? triggerSqrt > currentSqrtPriceX96 // inverted: lower user price = higher sqrtPriceX96
+            : triggerSqrt < currentSqrtPriceX96; // normal: lower user price = lower sqrtPriceX96
+        };
+
+        const isUpperPriceValid = (triggerSqrt: bigint) => {
+          return isToken0Quote
+            ? triggerSqrt < currentSqrtPriceX96 // inverted: higher user price = lower sqrtPriceX96
+            : triggerSqrt > currentSqrtPriceX96; // normal: higher user price = higher sqrtPriceX96
+        };
+
+        // Check LOWER trigger price (stop-loss must be below current price)
+        if (
+          (data.triggerMode === 'LOWER' || data.triggerMode === 'BOTH') &&
+          data.sqrtPriceX96Lower
+        ) {
+          const lowerSqrt = BigInt(data.sqrtPriceX96Lower);
+          if (!isLowerPriceValid(lowerSqrt)) {
+            const errorResponse = createErrorResponse(
+              ApiErrorCode.VALIDATION_ERROR,
+              'Stop-loss price must be below current pool price'
+            );
+            apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+            return NextResponse.json(errorResponse, { status: 400 });
+          }
+        }
+
+        // Check UPPER trigger price (take-profit must be above current price)
+        if (
+          (data.triggerMode === 'UPPER' || data.triggerMode === 'BOTH') &&
+          data.sqrtPriceX96Upper
+        ) {
+          const upperSqrt = BigInt(data.sqrtPriceX96Upper);
+          if (!isUpperPriceValid(upperSqrt)) {
+            const errorResponse = createErrorResponse(
+              ApiErrorCode.VALIDATION_ERROR,
+              'Take-profit price must be above current pool price'
+            );
+            apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+            return NextResponse.json(errorResponse, { status: 400 });
+          }
+        }
+      }
+
       // Ensure pool subscription exists for price monitoring
       const subscriptionService = getPoolSubscriptionService();
       await subscriptionService.ensureSubscription(position.pool.id);

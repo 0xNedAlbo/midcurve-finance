@@ -122,6 +122,10 @@ export interface CloseOrderFormData {
   priceUpperDisplay: string;
   slippageBps: number;
   validUntilDays: number;
+  /**
+   * Validation error message if trigger prices are invalid relative to current price
+   */
+  priceValidationError: string | null;
 }
 
 export function CloseOrderModal({
@@ -152,6 +156,7 @@ export function CloseOrderModal({
     priceUpperDisplay: '',
     slippageBps: 100, // 1%
     validUntilDays: 30,
+    priceValidationError: null,
   });
   const [createdOrder, setCreatedOrder] = useState<SerializedCloseOrder | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -217,6 +222,7 @@ export function CloseOrderModal({
         priceUpperDisplay: '',
         slippageBps: 100,
         validUntilDays: 30,
+        priceValidationError: null,
       });
       setCreatedOrder(null);
       setLocalError(null);
@@ -389,10 +395,12 @@ export function CloseOrderModal({
   if (!isOpen || !mounted) return null;
 
   // Check if form is valid for proceeding
-  const isFormValid =
+  // Requires: prices filled for selected trigger mode AND no price validation error
+  const hasPricesForMode =
     (formData.triggerMode === 'LOWER' && formData.sqrtPriceX96Lower) ||
     (formData.triggerMode === 'UPPER' && formData.sqrtPriceX96Upper) ||
     (formData.triggerMode === 'BOTH' && formData.sqrtPriceX96Lower && formData.sqrtPriceX96Upper);
+  const isFormValid = hasPricesForMode && !formData.priceValidationError;
 
   const modalContent = (
     <>
@@ -432,6 +440,7 @@ export function CloseOrderModal({
                 quoteToken={quoteToken}
                 currentSqrtPriceX96={currentSqrtPriceX96}
                 currentPriceDisplay={currentPriceDisplay}
+                isToken0Quote={isToken0Quote}
               />
             )}
 

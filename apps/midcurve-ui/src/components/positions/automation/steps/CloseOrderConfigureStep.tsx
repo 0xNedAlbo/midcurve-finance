@@ -4,8 +4,8 @@
  * Step 1: Configure trigger mode and price thresholds
  */
 
-import { useState, useCallback } from 'react';
-import { TrendingDown, TrendingUp, ArrowLeftRight, Info } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
 import { priceToSqrtRatioX96 } from '@midcurve/shared';
 import { parseUnits } from 'viem';
@@ -26,6 +26,63 @@ interface CloseOrderConfigureStepProps {
   };
   currentSqrtPriceX96: string;
   currentPriceDisplay: string;
+  /**
+   * Whether token0 is the quote token (affects price direction validation)
+   */
+  isToken0Quote: boolean;
+}
+
+/**
+ * Validates trigger price against current price
+ * Returns error message if invalid, null if valid
+ *
+ * The validation depends on isToken0Quote:
+ * - When isToken0Quote=false: Higher sqrtPriceX96 = Higher user price
+ * - When isToken0Quote=true: Higher sqrtPriceX96 = LOWER user price (inverted)
+ */
+function validateTriggerPrice(
+  triggerMode: TriggerMode,
+  sqrtPriceX96Lower: string | undefined,
+  sqrtPriceX96Upper: string | undefined,
+  currentSqrtPriceX96: string,
+  isToken0Quote: boolean
+): string | null {
+  if (!currentSqrtPriceX96) return null;
+
+  try {
+    const current = BigInt(currentSqrtPriceX96);
+
+    // For isToken0Quote=true, the comparison is inverted
+    // Lower user price = Higher sqrtPriceX96
+    const isLowerValid = isToken0Quote
+      ? (trigger: bigint) => trigger > current // inverted: lower user price = higher sqrtPriceX96
+      : (trigger: bigint) => trigger < current; // normal: lower user price = lower sqrtPriceX96
+
+    const isUpperValid = isToken0Quote
+      ? (trigger: bigint) => trigger < current // inverted: higher user price = lower sqrtPriceX96
+      : (trigger: bigint) => trigger > current; // normal: higher user price = higher sqrtPriceX96
+
+    // Check LOWER trigger (stop-loss must be below current price)
+    if ((triggerMode === 'LOWER' || triggerMode === 'BOTH') && sqrtPriceX96Lower) {
+      const lower = BigInt(sqrtPriceX96Lower);
+      if (!isLowerValid(lower)) {
+        return 'Stop-loss price must be below current price';
+      }
+    }
+
+    // Check UPPER trigger (take-profit must be above current price)
+    if ((triggerMode === 'UPPER' || triggerMode === 'BOTH') && sqrtPriceX96Upper) {
+      const upper = BigInt(sqrtPriceX96Upper);
+      if (!isUpperValid(upper)) {
+        return 'Take-profit price must be above current price';
+      }
+    }
+
+    return null;
+  } catch {
+    // If bigint conversion fails, skip validation
+    return null;
+  }
 }
 
 const TRIGGER_MODES: { value: TriggerMode; label: string; description: string; icon: typeof TrendingDown }[] = [
@@ -67,11 +124,31 @@ export function CloseOrderConfigureStep({
   onChange,
   baseToken,
   quoteToken,
-  currentSqrtPriceX96: _currentSqrtPriceX96,
+  currentSqrtPriceX96,
   currentPriceDisplay,
+  isToken0Quote,
 }: CloseOrderConfigureStepProps) {
   const [lowerPriceInput, setLowerPriceInput] = useState(formData.priceLowerDisplay);
   const [upperPriceInput, setUpperPriceInput] = useState(formData.priceUpperDisplay);
+
+  // Validate prices whenever relevant form data changes
+  useEffect(() => {
+    const validationError = validateTriggerPrice(
+      formData.triggerMode,
+      formData.sqrtPriceX96Lower || undefined,
+      formData.sqrtPriceX96Upper || undefined,
+      currentSqrtPriceX96,
+      isToken0Quote
+    );
+    onChange({ priceValidationError: validationError });
+  }, [
+    formData.triggerMode,
+    formData.sqrtPriceX96Lower,
+    formData.sqrtPriceX96Upper,
+    currentSqrtPriceX96,
+    isToken0Quote,
+    onChange,
+  ]);
 
   // Convert price input to sqrtPriceX96
   const convertToSqrtPrice = useCallback(
@@ -216,6 +293,14 @@ export function CloseOrderConfigureStep({
             <p className="mt-1 text-xs text-slate-500">
               Position closes when price rises above this level
             </p>
+          </div>
+        )}
+
+        {/* Price Validation Error */}
+        {formData.priceValidationError && (
+          <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            <p className="text-sm text-red-400">{formData.priceValidationError}</p>
           </div>
         )}
       </div>

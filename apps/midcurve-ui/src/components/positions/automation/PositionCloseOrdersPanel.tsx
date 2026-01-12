@@ -68,6 +68,12 @@ interface PositionCloseOrdersPanelProps {
    * Callback to open the create order modal
    */
   onCreateOrder?: () => void;
+
+  /**
+   * Whether the position is closed (liquidity = 0)
+   * When true, disables order creation
+   */
+  isPositionClosed?: boolean;
 }
 
 export function PositionCloseOrdersPanel({
@@ -81,6 +87,7 @@ export function PositionCloseOrdersPanel({
   baseTokenAddress,
   quoteTokenAddress,
   onCreateOrder,
+  isPositionClosed = false,
 }: PositionCloseOrdersPanelProps) {
   // Track which order is being cancelled
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
@@ -158,7 +165,7 @@ export function PositionCloseOrdersPanel({
           <Shield className="w-5 h-5 text-blue-400" />
           <h3 className="text-lg font-semibold text-slate-200">Automation</h3>
         </div>
-        {onCreateOrder && (
+        {onCreateOrder && !isPositionClosed && (
           <button
             onClick={onCreateOrder}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-400 hover:text-blue-300 bg-blue-900/20 hover:bg-blue-900/30 border border-blue-700/50 rounded-lg transition-colors cursor-pointer"
@@ -170,7 +177,15 @@ export function PositionCloseOrdersPanel({
       </div>
 
       {/* Content */}
-      {!hasContract ? (
+      {isPositionClosed && !hasActiveOrders && terminalOrders.length === 0 ? (
+        // Position is closed - show message
+        <div className="text-center py-8">
+          <p className="text-slate-400 mb-3">This position is closed.</p>
+          <p className="text-slate-500 text-sm">
+            Automation orders cannot be created for closed positions.
+          </p>
+        </div>
+      ) : !hasContract ? (
         // No contract deployed yet - show empty state
         <div className="text-center py-8">
           <p className="text-slate-400 mb-3">No close orders set for this position.</p>

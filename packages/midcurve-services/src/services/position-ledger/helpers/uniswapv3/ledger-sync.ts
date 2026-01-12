@@ -30,6 +30,8 @@ import {
   deduplicateEvents,
 } from './missing-events.js';
 import { UniswapV3PositionSyncState } from '../../position-sync-state.js';
+import { CloseOrderService } from '../../../automation/close-order-service.js';
+import { PoolSubscriptionService } from '../../../automation/pool-subscription-service.js';
 
 /**
  * Parameters for syncLedgerEvents function
@@ -258,6 +260,17 @@ export async function syncLedgerEvents(
       // Save sync state (may have pruned events)
       await syncState.save(prisma, 'ledger-sync');
 
+      // Even with no new events, check if position is closed and cancel any stale orders
+      // (handles case where position was closed before auto-cancel was implemented)
+      const currentLiquidity = await getPositionLiquidityFromLastEvent(positionId, prisma);
+      if (currentLiquidity !== null && currentLiquidity === 0n) {
+        logger.info(
+          { positionId, currentLiquidity: currentLiquidity.toString() },
+          'Position is closed (no new events), checking for stale active orders'
+        );
+        await cancelActiveCloseOrdersForPosition(positionId, prisma, logger);
+      }
+
       return {
         eventsAdded: 0,
         finalizedBlock,
@@ -266,14 +279,14 @@ export async function syncLedgerEvents(
     }
 
     // 7. Process and save events sequentially
-    const eventsAdded = await processAndSaveEvents(
+    const processResult = await processAndSaveEvents(
       positionId,
       deduplicatedEvents,
       deps
     );
 
     logger.info(
-      { positionId, eventsAdded },
+      { positionId, eventsAdded: processResult.eventsAdded },
       'Processed and saved events'
     );
 
@@ -370,10 +383,20 @@ export async function syncLedgerEvents(
     logger.info({ positionId }, 'Refreshing APR periods');
     await aprService.refresh(positionId);
 
+    // 10. Auto-cancel close orders if position is now closed (liquidity = 0)
+    // Use the finalLiquidity from processed events (not position.state which may be stale)
+    if (processResult.finalLiquidity !== null && processResult.finalLiquidity === 0n) {
+      logger.info(
+        { positionId, finalLiquidity: processResult.finalLiquidity.toString() },
+        'Position is closed (liquidity=0), auto-cancelling active close orders'
+      );
+      await cancelActiveCloseOrdersForPosition(positionId, prisma, logger);
+    }
+
     logger.info(
       {
         positionId,
-        eventsAdded,
+        eventsAdded: processResult.eventsAdded,
         fromBlock: fromBlock.toString(),
         finalizedBlock: finalizedBlock.toString(),
       },
@@ -381,7 +404,7 @@ export async function syncLedgerEvents(
     );
 
     return {
-      eventsAdded,
+      eventsAdded: processResult.eventsAdded,
       finalizedBlock,
       fromBlock,
     };
@@ -483,6 +506,16 @@ async function deleteEventsFromBlock(
 }
 
 /**
+ * Result from processAndSaveEvents
+ */
+interface ProcessAndSaveEventsResult {
+  /** Number of events successfully saved */
+  eventsAdded: number;
+  /** Final liquidity after processing all events (null if no events processed) */
+  finalLiquidity: bigint | null;
+}
+
+/**
  * Process and save raw events sequentially
  *
  * Orchestrates the complete event processing pipeline:
@@ -499,13 +532,13 @@ async function deleteEventsFromBlock(
  * @param positionId - Position database ID
  * @param rawEvents - Raw events from Etherscan
  * @param deps - Service dependencies
- * @returns Number of events successfully saved
+ * @returns Result with event count and final liquidity state
  */
 async function processAndSaveEvents(
   positionId: string,
   rawEvents: RawPositionEvent[],
   deps: LedgerSyncDependencies
-): Promise<number> {
+): Promise<ProcessAndSaveEventsResult> {
   const { prisma, ledgerService, poolPriceService, logger } = deps;
 
   logger.debug(
@@ -659,5 +692,102 @@ async function processAndSaveEvents(
     'Event processing completed'
   );
 
-  return eventsAdded;
+  return {
+    eventsAdded,
+    finalLiquidity: previousState.liquidity,
+  };
+}
+
+/**
+ * Get the current liquidity of a position from its last ledger event
+ *
+ * This is more reliable than position.state during ledger sync because
+ * position.state may not be updated until after the sync completes.
+ *
+ * @param positionId - Position database ID
+ * @param prisma - Prisma client
+ * @returns Position liquidity as bigint, or null if no events exist
+ */
+async function getPositionLiquidityFromLastEvent(
+  positionId: string,
+  prisma: PrismaClient
+): Promise<bigint | null> {
+  // Get the most recent ledger event to check liquidityAfter
+  const lastEvent = await prisma.positionLedgerEvent.findFirst({
+    where: { positionId },
+    orderBy: { timestamp: 'desc' },
+    select: { config: true },
+  });
+
+  if (!lastEvent) {
+    return null; // No events = can't determine liquidity
+  }
+
+  const config = lastEvent.config as { liquidityAfter?: string | bigint } | null;
+  if (!config?.liquidityAfter) {
+    return null;
+  }
+
+  return BigInt(config.liquidityAfter);
+}
+
+/**
+ * Cancel all active close orders for a position when it's closed
+ *
+ * @param positionId - Position database ID
+ * @param prisma - Prisma client
+ * @param logger - Logger instance
+ */
+async function cancelActiveCloseOrdersForPosition(
+  positionId: string,
+  prisma: PrismaClient,
+  logger: Logger
+): Promise<void> {
+  // Get services
+  const closeOrderService = new CloseOrderService({ prisma });
+  const poolSubscriptionService = new PoolSubscriptionService({ prisma });
+
+  // Find active orders for this position (non-terminal statuses)
+  const activeOrders = await closeOrderService.findByPositionId(positionId, {
+    status: ['pending', 'active', 'registering', 'triggering'],
+  });
+
+  if (activeOrders.length === 0) {
+    logger.debug({ positionId }, 'No active close orders to cancel');
+    return;
+  }
+
+  logger.info(
+    { positionId, orderCount: activeOrders.length },
+    'Cancelling active close orders for closed position'
+  );
+
+  // Get poolId for subscription management
+  const position = await prisma.position.findUnique({
+    where: { id: positionId },
+    select: { poolId: true },
+  });
+
+  // Cancel each order and decrement pool subscription counts
+  for (const order of activeOrders) {
+    try {
+      await closeOrderService.cancel(order.id);
+
+      // Decrement pool subscription order count
+      if (position?.poolId) {
+        await poolSubscriptionService.decrementOrderCount(position.poolId);
+      }
+
+      logger.info(
+        { positionId, orderId: order.id },
+        'Cancelled close order due to position closure'
+      );
+    } catch (error) {
+      // Log but continue - order may already be cancelled
+      logger.warn(
+        { positionId, orderId: order.id, error },
+        'Failed to cancel close order (may already be in terminal state)'
+      );
+    }
+  }
 }
