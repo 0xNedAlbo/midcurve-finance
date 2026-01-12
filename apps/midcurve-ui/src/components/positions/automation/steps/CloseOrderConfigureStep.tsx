@@ -10,6 +10,7 @@ import type { TriggerMode } from '@midcurve/api-shared';
 import { priceToSqrtRatioX96 } from '@midcurve/shared';
 import { parseUnits } from 'viem';
 import type { CloseOrderFormData } from '../CloseOrderModal';
+import { SwapConfigSection } from './SwapConfigSection';
 
 interface CloseOrderConfigureStepProps {
   formData: CloseOrderFormData;
@@ -30,6 +31,10 @@ interface CloseOrderConfigureStepProps {
    * Whether token0 is the quote token (affects price direction validation)
    */
   isToken0Quote: boolean;
+  /**
+   * Chain ID (used to check swap support)
+   */
+  chainId: number;
 }
 
 /**
@@ -127,6 +132,7 @@ export function CloseOrderConfigureStep({
   currentSqrtPriceX96,
   currentPriceDisplay,
   isToken0Quote,
+  chainId,
 }: CloseOrderConfigureStepProps) {
   const [lowerPriceInput, setLowerPriceInput] = useState(formData.priceLowerDisplay);
   const [upperPriceInput, setUpperPriceInput] = useState(formData.priceUpperDisplay);
@@ -356,6 +362,15 @@ export function CloseOrderConfigureStep({
           funds sent to your wallet.
         </p>
       </div>
+
+      {/* Post-Close Swap Configuration */}
+      <SwapConfigSection
+        formData={formData}
+        onChange={onChange}
+        baseToken={baseToken}
+        quoteToken={quoteToken}
+        chainId={chainId}
+      />
     </div>
   );
 }

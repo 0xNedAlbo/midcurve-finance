@@ -24,6 +24,16 @@ import { POSITION_CLOSER_ABI } from '@/config/contracts/uniswapv3-position-close
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
 
 /**
+ * Swap configuration for post-close swap
+ */
+export interface SwapConfig {
+  enabled: boolean;
+  direction: 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+  slippageBps: number;
+  quoteToken: string;
+}
+
+/**
  * Parameters for registering a close order
  */
 export interface RegisterCloseOrderParams {
@@ -57,6 +67,8 @@ export interface RegisterCloseOrderParams {
   positionOwner: Address;
   /** Whether token0 is the quote token (affects price direction for contract calls) */
   isToken0Quote: boolean;
+  /** Optional swap configuration for post-close swap */
+  swapConfig?: SwapConfig;
 }
 
 /**
@@ -197,6 +209,8 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
             validUntil: validUntilDate.toISOString(),
             slippageBps: currentParams.slippageBps,
             registrationTxHash: txHash,
+            // Optional swap config
+            swapConfig: currentParams.swapConfig,
           });
 
           setResult({

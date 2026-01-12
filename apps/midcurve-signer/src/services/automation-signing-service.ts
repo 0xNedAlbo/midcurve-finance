@@ -42,10 +42,19 @@ export interface SignTransactionResult {
 }
 
 /**
+ * Swap params for executeClose with post-close swap via Paraswap
+ */
+export interface SwapParams {
+  augustus: Address;
+  swapCalldata: Hex;
+  deadline: number;
+}
+
+/**
  * Input for signing an executeClose transaction
  *
  * Based on contract function:
- * executeClose(uint256 closeId, address feeRecipient, uint16 feeBps)
+ * executeClose(uint256 closeId, address feeRecipient, uint16 feeBps, SwapParams calldata swapParams)
  */
 export interface SignExecuteCloseInput {
   userId: string;
@@ -59,6 +68,8 @@ export interface SignExecuteCloseInput {
   gasPrice: bigint;
   // Optional explicit nonce for retry scenarios (caller fetches from chain)
   nonce?: number;
+  // Optional swap params for post-close swap via Paraswap
+  swapParams?: SwapParams;
 }
 
 /**
@@ -102,6 +113,15 @@ const POSITION_CLOSER_ABI = [
       { name: 'closeId', type: 'uint256' },
       { name: 'feeRecipient', type: 'address' },
       { name: 'feeBps', type: 'uint16' },
+      {
+        name: 'swapParams',
+        type: 'tuple',
+        components: [
+          { name: 'augustus', type: 'address' },
+          { name: 'swapCalldata', type: 'bytes' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
     ],
     outputs: [
       { name: 'amount0', type: 'uint256' },
@@ -110,6 +130,13 @@ const POSITION_CLOSER_ABI = [
     stateMutability: 'nonpayable',
   },
 ] as const;
+
+// Empty swap params (no swap)
+const EMPTY_SWAP_PARAMS = {
+  augustus: '0x0000000000000000000000000000000000000000' as Address,
+  swapCalldata: '0x' as Hex,
+  deadline: 0n,
+} as const;
 
 // =============================================================================
 // Service
@@ -125,8 +152,8 @@ class AutomationSigningServiceImpl {
    * @returns Signed transaction
    */
   async signExecuteClose(input: SignExecuteCloseInput): Promise<SignTransactionResult> {
-    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce } = input;
-    signerLog.methodEntry(this.logger, 'signExecuteClose', { userId, chainId, contractAddress, closeId, explicitNonce: nonce });
+    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = input;
+    signerLog.methodEntry(this.logger, 'signExecuteClose', { userId, chainId, contractAddress, closeId, explicitNonce: nonce, hasSwap: !!swapParams });
 
     // 1. Get wallet
     const wallet = await automationWalletService.getWalletByUserId(userId);
@@ -138,14 +165,23 @@ class AutomationSigningServiceImpl {
       );
     }
 
-    // 2. Encode function call
+    // 2. Build swap params tuple (use empty params if no swap)
+    const swapParamsTuple = swapParams
+      ? {
+          augustus: swapParams.augustus,
+          swapCalldata: swapParams.swapCalldata,
+          deadline: BigInt(swapParams.deadline),
+        }
+      : EMPTY_SWAP_PARAMS;
+
+    // 3. Encode function call
     const callData = encodeFunctionData({
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeClose',
-      args: [BigInt(closeId), feeRecipient, feeBps],
+      args: [BigInt(closeId), feeRecipient, feeBps, swapParamsTuple],
     });
 
-    // 3. Sign and return (gas params provided by caller)
+    // 4. Sign and return (gas params provided by caller)
     const result = await this.signContractCall({
       walletId: wallet.id,
       walletAddress: wallet.walletAddress,

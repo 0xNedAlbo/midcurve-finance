@@ -17,11 +17,14 @@ import {MockUSD} from "../contracts/MockUSD.sol";
 contract DeployLocalScript is Script {
     // Mainnet NFPM address (available in fork)
     address constant NFPM = 0xC36442b4a4522E871399CD717aBDD847Ab11FE88;
+    // Mainnet AugustusRegistry address (available in fork)
+    address constant AUGUSTUS_REGISTRY = 0xa68bEA62Dc4034A689AA0F58A76681433caCa663;
 
     function run() public {
         console.log("=== Local Fork Deployment ===");
         console.log("Chain ID:", block.chainid);
         console.log("NFPM (forked):", NFPM);
+        console.log("AugustusRegistry (forked):", AUGUSTUS_REGISTRY);
         console.log("");
 
         vm.startBroadcast();
@@ -31,7 +34,7 @@ contract DeployLocalScript is Script {
         console.log("MockUSD deployed at:", address(mockUSD));
 
         // Deploy UniswapV3PositionCloser
-        UniswapV3PositionCloser closer = new UniswapV3PositionCloser(NFPM);
+        UniswapV3PositionCloser closer = new UniswapV3PositionCloser(NFPM, AUGUSTUS_REGISTRY);
         console.log("PositionCloser deployed at:", address(closer));
 
         vm.stopBroadcast();

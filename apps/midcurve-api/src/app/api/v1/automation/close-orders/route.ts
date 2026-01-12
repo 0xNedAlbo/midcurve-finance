@@ -13,7 +13,7 @@ import {
   createErrorResponse,
   ApiErrorCode,
 } from '@midcurve/api-shared';
-import type { TriggerMode } from '@midcurve/shared';
+import type { TriggerMode, SwapDirection, SwapConfig } from '@midcurve/shared';
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
@@ -25,6 +25,9 @@ import {
 import { createPreflightResponse } from '@/lib/cors';
 import { isChainSupported } from '@/config/shared-contracts';
 import type { UniswapV3Position } from '@midcurve/shared';
+
+// Chains supported for Paraswap swap integration
+const PARASWAP_SUPPORTED_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,6 +75,16 @@ const RegisterCloseOrderRequestSchema = z.object({
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid payout address'),
   validUntil: z.string().datetime(),
   slippageBps: z.number().int().min(0).max(10000),
+
+  // Optional swap config for post-close swap via Paraswap
+  swapConfig: z
+    .object({
+      enabled: z.boolean(),
+      direction: z.enum(['BASE_TO_QUOTE', 'QUOTE_TO_BASE']),
+      slippageBps: z.number().int().min(0).max(10000),
+      quoteToken: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid quote token address'),
+    })
+    .optional(),
 
   // Registration proof
   registrationTxHash: z
@@ -144,6 +157,29 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
         apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
         return NextResponse.json(errorResponse, { status: 400 });
+      }
+
+      // Validate swap chain support if swap is enabled
+      if (data.swapConfig?.enabled) {
+        const chainId = data.automationContractConfig.chainId;
+        if (!PARASWAP_SUPPORTED_CHAINS.includes(chainId as typeof PARASWAP_SUPPORTED_CHAINS[number])) {
+          const errorResponse = createErrorResponse(
+            ApiErrorCode.VALIDATION_ERROR,
+            `Post-close swap is not supported on chain ${chainId}. Supported chains: Ethereum, Arbitrum, Base, Optimism`
+          );
+          apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+          return NextResponse.json(errorResponse, { status: 400 });
+        }
+
+        // Warn if slippage is high (> 5%)
+        if (data.swapConfig.slippageBps > 500) {
+          apiLogger.warn({
+            requestId,
+            userId: user.id,
+            swapSlippageBps: data.swapConfig.slippageBps,
+            msg: 'High swap slippage configured',
+          });
+        }
       }
 
       // Log business operation
@@ -258,6 +294,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       // NOTE: Store the ORIGINAL values from the UI/on-chain registration.
       // The price monitor handles isToken0Quote inversion during trigger detection.
       const closeOrderService = getCloseOrderService();
+
+      // Build swap config if enabled
+      const swapConfig: SwapConfig | undefined = data.swapConfig?.enabled
+        ? {
+            enabled: true,
+            direction: data.swapConfig.direction as SwapDirection,
+            slippageBps: data.swapConfig.slippageBps,
+            quoteToken: data.swapConfig.quoteToken,
+          }
+        : undefined;
+
       const order = await closeOrderService.register({
         closeOrderType: data.closeOrderType,
         positionId: data.positionId,
@@ -278,6 +325,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         payoutAddress: data.payoutAddress,
         validUntil: new Date(data.validUntil),
         slippageBps: data.slippageBps,
+        swapConfig,
         registrationTxHash: data.registrationTxHash,
       });
 

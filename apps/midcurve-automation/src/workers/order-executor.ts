@@ -24,6 +24,8 @@ import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-man
 import { QUEUES, ORDER_RETRY_DELAY_MS } from '../mq/topology';
 import { deserializeMessage, serializeMessage, type OrderTriggerMessage } from '../mq/messages';
 import { getSignerClient } from '../clients/signer-client';
+import { getParaswapClient, type ParaswapSwapParams, PARASWAP_SUPPORTED_CHAINS } from '../clients/paraswap-client';
+import type { SwapConfig } from '@midcurve/shared';
 
 const log = automationLogger.child({ component: 'OrderExecutor' });
 
@@ -287,8 +289,12 @@ export class OrderExecutor {
       throw new Error(`Contract address not configured for order: ${orderId}`);
     }
 
-    // Get closeId and operatorAddress from order config
-    const orderConfig = order.config as { closeId?: number; operatorAddress?: string };
+    // Get closeId, operatorAddress, and swapConfig from order config
+    const orderConfig = order.config as {
+      closeId?: number;
+      operatorAddress?: string;
+      swapConfig?: SwapConfig;
+    };
     const closeId = orderConfig.closeId;
     if (closeId === undefined) {
       throw new Error(`Order not registered on-chain: ${orderId}`);
@@ -298,6 +304,10 @@ export class OrderExecutor {
     if (!operatorAddress) {
       throw new Error(`Operator address not configured for order: ${orderId}`);
     }
+
+    // Extract swap config if present
+    const swapConfig = orderConfig.swapConfig;
+    const swapEnabled = swapConfig?.enabled === true;
 
     // Get full position data (needed for signer service + price formatting)
     const positionService = getPositionService();
@@ -532,11 +542,92 @@ export class OrderExecutor {
       msg: 'Transaction simulation successful',
     });
 
+    // =========================================================================
+    // SWAP PARAMS: Build Paraswap swap params if swap is enabled
+    // =========================================================================
+    let swapParams: ParaswapSwapParams | undefined;
+
+    if (swapEnabled && swapConfig) {
+      const paraswapClient = getParaswapClient();
+
+      // Check if chain supports Paraswap
+      if (!paraswapClient.isChainSupported(chainId)) {
+        log.warn({
+          orderId,
+          positionId,
+          chainId,
+          msg: 'Swap enabled but chain not supported by Paraswap, skipping swap',
+        });
+      } else {
+        log.info({
+          orderId,
+          positionId,
+          swapDirection: swapConfig.direction,
+          swapSlippageBps: swapConfig.slippageBps,
+          msg: 'Building Paraswap swap params',
+        });
+
+        // Resolve tokens based on swap direction
+        const quoteToken = position.isToken0Quote
+          ? position.pool.token0.config.address
+          : position.pool.token1.config.address;
+        const baseToken = position.isToken0Quote
+          ? position.pool.token1.config.address
+          : position.pool.token0.config.address;
+        const quoteDecimals = position.isToken0Quote
+          ? position.pool.token0.decimals
+          : position.pool.token1.decimals;
+        const baseDecimals = position.isToken0Quote
+          ? position.pool.token1.decimals
+          : position.pool.token0.decimals;
+
+        // Determine src/dest based on swap direction
+        const srcToken = swapConfig.direction === 'BASE_TO_QUOTE' ? baseToken : quoteToken;
+        const destToken = swapConfig.direction === 'BASE_TO_QUOTE' ? quoteToken : baseToken;
+        const srcDecimals = swapConfig.direction === 'BASE_TO_QUOTE' ? baseDecimals : quoteDecimals;
+        const destDecimals = swapConfig.direction === 'BASE_TO_QUOTE' ? quoteDecimals : baseDecimals;
+
+        // Get swap params from Paraswap
+        // Note: The contract will handle the actual swap with the collected amounts
+        // We use a dummy amount (1 token) to get the route and calldata format
+        try {
+          swapParams = await paraswapClient.getSwapParams({
+            chainId: chainId as (typeof PARASWAP_SUPPORTED_CHAINS)[number],
+            srcToken: srcToken as `0x${string}`,
+            srcDecimals,
+            destToken: destToken as `0x${string}`,
+            destDecimals,
+            amount: '1000000000000000000', // Use 1 token as dummy for route discovery
+            userAddress: contractAddress as `0x${string}`,
+            slippageBps: swapConfig.slippageBps,
+          });
+
+          log.info({
+            orderId,
+            positionId,
+            augustusAddress: swapParams.augustusAddress,
+            srcToken: swapParams.srcToken,
+            destToken: swapParams.destToken,
+            msg: 'Paraswap swap params obtained',
+          });
+        } catch (swapErr) {
+          log.error({
+            orderId,
+            positionId,
+            error: (swapErr as Error).message,
+            msg: 'Failed to get Paraswap swap params, executing without swap',
+          });
+          // Continue without swap - don't fail the entire execution
+        }
+      }
+    }
+
     autoLog.orderExecution(log, orderId, 'signing', {
       positionId,
       poolAddress,
       triggerPrice,
       operatorAddress,
+      hasSwap: !!swapParams,
     });
 
     // Sign the execution transaction (gas estimation done in signer-client)
@@ -550,6 +641,13 @@ export class OrderExecutor {
       feeBps: feeConfig.bps,
       operatorAddress,
       nonce: explicitNonce,
+      swapParams: swapParams
+        ? {
+            augustus: swapParams.augustusAddress,
+            swapCalldata: swapParams.swapCalldata,
+            deadline: 0, // No deadline by default
+          }
+        : undefined,
     });
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {

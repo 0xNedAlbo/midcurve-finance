@@ -31,6 +31,15 @@ export interface SignedTransaction {
   from: string;
 }
 
+/**
+ * Swap parameters for executeClose with swap
+ */
+export interface SwapParamsInput {
+  augustus: string;       // Augustus swapper address
+  swapCalldata: string;   // Hex-encoded calldata
+  deadline: number;       // Unix timestamp or 0 for no deadline
+}
+
 export interface ExecuteCloseParams {
   userId: string;
   chainId: number;
@@ -42,6 +51,8 @@ export interface ExecuteCloseParams {
   operatorAddress: string;
   // Optional explicit nonce for retry scenarios (caller fetches from chain)
   nonce?: number;
+  // Optional swap params for post-close swap
+  swapParams?: SwapParamsInput;
 }
 
 // =============================================================================
@@ -56,14 +67,27 @@ const POSITION_CLOSER_ABI = [
       { name: 'closeId', type: 'uint256' },
       { name: 'feeRecipient', type: 'address' },
       { name: 'feeBps', type: 'uint16' },
+      {
+        name: 'swapParams',
+        type: 'tuple',
+        components: [
+          { name: 'augustus', type: 'address' },
+          { name: 'swapCalldata', type: 'bytes' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
     ],
-    outputs: [
-      { name: 'amount0', type: 'uint256' },
-      { name: 'amount1', type: 'uint256' },
-    ],
+    outputs: [],
     stateMutability: 'nonpayable',
   },
 ] as const;
+
+// Empty swap params (no swap)
+const EMPTY_SWAP_PARAMS = {
+  augustus: '0x0000000000000000000000000000000000000000' as Address,
+  swapCalldata: '0x' as `0x${string}`,
+  deadline: 0n,
+} as const;
 
 // =============================================================================
 // Client
@@ -136,7 +160,8 @@ class SignerClient {
    * For retry scenarios, pass an explicit nonce fetched from the chain.
    */
   async signExecuteClose(params: ExecuteCloseParams): Promise<SignedTransaction> {
-    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, operatorAddress, nonce } = params;
+    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, operatorAddress, nonce, swapParams } =
+      params;
 
     log.info({
       userId,
@@ -144,16 +169,26 @@ class SignerClient {
       contractAddress,
       closeId,
       explicitNonce: nonce,
+      hasSwap: !!swapParams,
       msg: 'Estimating gas for close order execution',
     });
 
     // Estimate gas locally (automation service has RPC access)
     const publicClient = getPublicClient(chainId as SupportedChainId);
 
+    // Build swap params tuple (use empty params if no swap)
+    const swapParamsTuple = swapParams
+      ? {
+          augustus: swapParams.augustus as Address,
+          swapCalldata: swapParams.swapCalldata as `0x${string}`,
+          deadline: BigInt(swapParams.deadline),
+        }
+      : EMPTY_SWAP_PARAMS;
+
     const callData = encodeFunctionData({
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeClose',
-      args: [BigInt(closeId), feeRecipient as Address, feeBps],
+      args: [BigInt(closeId), feeRecipient as Address, feeBps, swapParamsTuple],
     });
 
     let gasLimit: bigint;
@@ -193,7 +228,7 @@ class SignerClient {
       msg: 'Signing close order execution',
     });
 
-    // Call signer with gas params (and optional explicit nonce for retries)
+    // Call signer with gas params (and optional explicit nonce and swap params for retries)
     return this.request<SignedTransaction>('POST', '/api/sign/automation/execute-close', {
       userId,
       chainId,
@@ -204,6 +239,7 @@ class SignerClient {
       gasLimit: gasLimit.toString(),
       gasPrice: gasPrice.toString(),
       ...(nonce !== undefined && { nonce }),
+      ...(swapParams && { swapParams }),
     });
   }
 

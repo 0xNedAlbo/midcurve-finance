@@ -114,6 +114,11 @@ export interface CloseOrderModalProps {
 
 type WizardStep = 'configure' | 'review' | 'processing' | 'success';
 
+/**
+ * Swap direction for post-close swap
+ */
+export type SwapDirection = 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+
 export interface CloseOrderFormData {
   triggerMode: TriggerMode;
   sqrtPriceX96Lower: string;
@@ -126,6 +131,12 @@ export interface CloseOrderFormData {
    * Validation error message if trigger prices are invalid relative to current price
    */
   priceValidationError: string | null;
+  /**
+   * Optional swap configuration for post-close swap
+   */
+  swapEnabled: boolean;
+  swapDirection: SwapDirection;
+  swapSlippageBps: number;
 }
 
 export function CloseOrderModal({
@@ -157,6 +168,10 @@ export function CloseOrderModal({
     slippageBps: 100, // 1%
     validUntilDays: 30,
     priceValidationError: null,
+    // Swap config (disabled by default)
+    swapEnabled: false,
+    swapDirection: 'BASE_TO_QUOTE',
+    swapSlippageBps: 100, // 1%
   });
   const [createdOrder, setCreatedOrder] = useState<SerializedCloseOrder | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -223,6 +238,10 @@ export function CloseOrderModal({
         slippageBps: 100,
         validUntilDays: 30,
         priceValidationError: null,
+        // Swap config (disabled by default)
+        swapEnabled: false,
+        swapDirection: 'BASE_TO_QUOTE',
+        swapSlippageBps: 100,
       });
       setCreatedOrder(null);
       setLocalError(null);
@@ -324,6 +343,15 @@ export function CloseOrderModal({
       poolAddress: poolAddress as Address,
       positionOwner,
       isToken0Quote,
+      // Optional swap config
+      swapConfig: formData.swapEnabled
+        ? {
+            enabled: true,
+            direction: formData.swapDirection,
+            slippageBps: formData.swapSlippageBps,
+            quoteToken: quoteToken.address,
+          }
+        : undefined,
     });
   }, [
     userAddress,
@@ -337,6 +365,7 @@ export function CloseOrderModal({
     poolAddress,
     positionOwner,
     isToken0Quote,
+    quoteToken.address,
     registerOrder,
   ]);
 
@@ -441,6 +470,7 @@ export function CloseOrderModal({
                 currentSqrtPriceX96={currentSqrtPriceX96}
                 currentPriceDisplay={currentPriceDisplay}
                 isToken0Quote={isToken0Quote}
+                chainId={chainId}
               />
             )}
 

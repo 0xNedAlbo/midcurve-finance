@@ -5,7 +5,7 @@
  */
 
 import { Link } from 'react-router-dom';
-import { AlertCircle, TrendingDown, TrendingUp, ArrowLeftRight, Info } from 'lucide-react';
+import { AlertCircle, TrendingDown, TrendingUp, ArrowLeftRight, ArrowRightLeft, Info, AlertTriangle } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
 import type { CloseOrderFormData } from '../CloseOrderModal';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
@@ -179,6 +179,27 @@ export function CloseOrderReviewStep({
             {baseToken.symbol}/{quoteToken.symbol}
           </span>
         </div>
+
+        {/* Post-Close Swap */}
+        {formData.swapEnabled && (
+          <>
+            <div className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft className="w-4 h-4 text-blue-400" />
+                <span className="text-slate-400">Post-Close Swap</span>
+              </div>
+              <span className="text-blue-400 font-medium">
+                {formData.swapDirection === 'BASE_TO_QUOTE'
+                  ? `${baseToken.symbol} → ${quoteToken.symbol}`
+                  : `${quoteToken.symbol} → ${baseToken.symbol}`}
+              </span>
+            </div>
+            <div className="p-4 flex items-center justify-between">
+              <span className="text-slate-400">Swap Slippage</span>
+              <span className="text-slate-200">{(formData.swapSlippageBps / 100).toFixed(1)}%</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Autowallet Setup Warning - shown when autowallet is not configured */}
@@ -267,6 +288,18 @@ export function CloseOrderReviewStep({
         </div>
       )}
 
+      {/* High Swap Slippage Warning */}
+      {formData.swapEnabled && formData.swapSlippageBps > 300 && (
+        <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+          <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-yellow-300">
+            High swap slippage ({(formData.swapSlippageBps / 100).toFixed(1)}%) may result in
+            unfavorable swap rates. Consider lowering the slippage tolerance unless you expect
+            high volatility or low liquidity.
+          </p>
+        </div>
+      )}
+
       {/* What Happens Next */}
       <div className="bg-slate-800/50 rounded-lg p-4">
         <h4 className="text-sm font-medium text-slate-300 mb-2">What happens next?</h4>
@@ -274,7 +307,14 @@ export function CloseOrderReviewStep({
           <li>1. Your close order will be registered on-chain</li>
           <li>2. We monitor the pool price continuously</li>
           <li>3. When price reaches your trigger, we execute the close</li>
-          <li>4. Funds are sent directly to your wallet</li>
+          {formData.swapEnabled ? (
+            <>
+              <li>4. Withdrawn assets are swapped to {formData.swapDirection === 'BASE_TO_QUOTE' ? quoteToken.symbol : baseToken.symbol} via Paraswap</li>
+              <li>5. Final proceeds sent directly to your wallet</li>
+            </>
+          ) : (
+            <li>4. Funds are sent directly to your wallet</li>
+          )}
         </ul>
       </div>
     </div>

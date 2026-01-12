@@ -10,6 +10,7 @@ import type {
   CloseOrderType,
   CloseOrderStatus,
   TriggerMode,
+  SwapConfig,
 } from '@midcurve/shared';
 
 // =============================================================================
@@ -100,6 +101,11 @@ export interface RegisterCloseOrderInput {
    * Maximum slippage in basis points (e.g., 50 = 0.5%)
    */
   slippageBps: number;
+
+  /**
+   * Optional swap configuration for post-close swap via Paraswap
+   */
+  swapConfig?: SwapConfig;
 
   /**
    * Registration transaction hash (from on-chain registration)

@@ -20,6 +20,9 @@ contract DeployScript is Script {
     // Uniswap V3 NonfungiblePositionManager addresses per chain
     mapping(uint256 => address) public positionManagers;
 
+    // Paraswap AugustusRegistry addresses per chain
+    mapping(uint256 => address) public augustusRegistries;
+
     function setUp() public {
         // Ethereum, Arbitrum, Optimism, Polygon use the same NFPM address
         positionManagers[1] = 0xC36442b4a4522E871399CD717aBDD847Ab11FE88;
@@ -29,21 +32,31 @@ contract DeployScript is Script {
 
         // Base uses a different NFPM address
         positionManagers[8453] = 0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1;
+
+        // Paraswap AugustusRegistry addresses
+        augustusRegistries[1] = 0xa68bEA62Dc4034A689AA0F58A76681433caCa663;       // Ethereum
+        augustusRegistries[42161] = 0xdC6E2b14260F972ad4e5a31c68294Fba7E720701;   // Arbitrum
+        augustusRegistries[8453] = 0x7E31B336F9E8bA52ba3c4ac861b033Ba90900bb3;    // Base
+        augustusRegistries[10] = 0x6e7bE86000dF697facF4396efD2aE2C322165dC3;      // Optimism
+        augustusRegistries[137] = 0xca35a4866747Ff7A604EF7a2A7F246bb870f3ca1;     // Polygon
     }
 
     function run() public {
         uint256 chainId = block.chainid;
         address nfpm = positionManagers[chainId];
-        require(nfpm != address(0), "Unsupported chain");
+        address augustusRegistry = augustusRegistries[chainId];
+        require(nfpm != address(0), "Unsupported chain: no NFPM");
+        require(augustusRegistry != address(0), "Unsupported chain: no AugustusRegistry");
 
         console.log("=== UniswapV3PositionCloser Deployment ===");
         console.log("Chain ID:", chainId);
         console.log("NFPM Address:", nfpm);
+        console.log("AugustusRegistry:", augustusRegistry);
         console.log("");
 
         vm.startBroadcast();
 
-        UniswapV3PositionCloser closer = new UniswapV3PositionCloser(nfpm);
+        UniswapV3PositionCloser closer = new UniswapV3PositionCloser(nfpm, augustusRegistry);
 
         vm.stopBroadcast();
 
@@ -56,7 +69,7 @@ contract DeployScript is Script {
         console.log("2. Verify on block explorer:");
         console.log("   forge verify-contract \\");
         console.log("     --chain-id %s \\", chainId);
-        console.log("     --constructor-args $(cast abi-encode 'constructor(address)' %s) \\", nfpm);
+        console.log("     --constructor-args $(cast abi-encode 'constructor(address,address)' %s %s) \\", nfpm, augustusRegistry);
         console.log("     %s \\", address(closer));
         console.log("     contracts/UniswapV3PositionCloser.sol:UniswapV3PositionCloser");
     }

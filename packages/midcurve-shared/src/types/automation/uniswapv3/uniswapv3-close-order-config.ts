@@ -15,6 +15,39 @@
 export type TriggerMode = 'LOWER' | 'UPPER' | 'BOTH';
 
 /**
+ * Swap direction for post-close token conversion
+ *
+ * - BASE_TO_QUOTE: Swap base token to quote token
+ * - QUOTE_TO_BASE: Swap quote token to base token
+ */
+export type SwapDirection = 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+
+/**
+ * Optional swap configuration for post-close token conversion
+ */
+export interface SwapConfig {
+  /**
+   * Whether swap is enabled
+   */
+  enabled: boolean;
+
+  /**
+   * Direction of swap
+   */
+  direction: SwapDirection;
+
+  /**
+   * Slippage tolerance in basis points (0-10000)
+   */
+  slippageBps: number;
+
+  /**
+   * Quote token address (user's perspective of the "stable" token)
+   */
+  quoteToken: string;
+}
+
+/**
  * UniswapV3 Close Order Config Data
  *
  * Immutable configuration set at order registration.
@@ -71,11 +104,26 @@ export interface UniswapV3CloseOrderConfigData {
    * Maximum slippage in basis points (e.g., 50 = 0.5%)
    */
   slippageBps: number;
+
+  /**
+   * Optional swap configuration for post-close token conversion
+   */
+  swapConfig?: SwapConfig;
 }
 
 /**
  * JSON-serializable representation of config
  */
+/**
+ * JSON-serializable swap config
+ */
+export interface SwapConfigJSON {
+  enabled: boolean;
+  direction: SwapDirection;
+  slippageBps: number;
+  quoteToken: string;
+}
+
 export interface UniswapV3CloseOrderConfigJSON {
   closeId: number;
   nftId: string;
@@ -87,6 +135,7 @@ export interface UniswapV3CloseOrderConfigJSON {
   operatorAddress: string;
   validUntil: string;
   slippageBps: number;
+  swapConfig?: SwapConfigJSON;
 }
 
 /**
@@ -105,6 +154,7 @@ export class UniswapV3CloseOrderConfig implements UniswapV3CloseOrderConfigData 
   readonly operatorAddress: string;
   readonly validUntil: Date;
   readonly slippageBps: number;
+  readonly swapConfig?: SwapConfig;
 
   constructor(data: UniswapV3CloseOrderConfigData) {
     this.closeId = data.closeId;
@@ -117,6 +167,14 @@ export class UniswapV3CloseOrderConfig implements UniswapV3CloseOrderConfigData 
     this.operatorAddress = data.operatorAddress;
     this.validUntil = data.validUntil;
     this.slippageBps = data.slippageBps;
+    this.swapConfig = data.swapConfig;
+  }
+
+  /**
+   * Check if swap is enabled
+   */
+  hasSwapEnabled(): boolean {
+    return this.swapConfig?.enabled === true;
   }
 
   /**
@@ -134,6 +192,7 @@ export class UniswapV3CloseOrderConfig implements UniswapV3CloseOrderConfigData 
       operatorAddress: this.operatorAddress,
       validUntil: this.validUntil.toISOString(),
       slippageBps: this.slippageBps,
+      swapConfig: this.swapConfig,
     };
   }
 
@@ -152,6 +211,7 @@ export class UniswapV3CloseOrderConfig implements UniswapV3CloseOrderConfigData 
       operatorAddress: json.operatorAddress,
       validUntil: new Date(json.validUntil),
       slippageBps: json.slippageBps,
+      swapConfig: json.swapConfig,
     });
   }
 }

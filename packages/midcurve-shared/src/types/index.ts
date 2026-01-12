@@ -262,6 +262,10 @@ export {
 // UniswapV3 Automation types
 export type {
   TriggerMode,
+  SwapDirection,
+  SwapConfig,
+  SwapConfigJSON,
+  SwapExecution,
   UniswapV3CloseOrderConfigData,
   UniswapV3CloseOrderConfigJSON,
   UniswapV3CloseOrderStateData,

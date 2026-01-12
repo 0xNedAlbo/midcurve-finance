@@ -28,7 +28,12 @@
  *     feeBps: number (0-100, max 1%),
  *     gasLimit: string (bigint as string),
  *     gasPrice: string (bigint as string),
- *     nonce?: number (optional, for retry scenarios)
+ *     nonce?: number (optional, for retry scenarios),
+ *     swapParams?: {
+ *       augustus: string (swap contract address),
+ *       swapCalldata: string (hex-encoded calldata),
+ *       deadline: number (unix timestamp or 0)
+ *     }
  *   }
  *
  * Response (Success):
@@ -65,6 +70,15 @@ const logger = signerLogger.child({ endpoint: 'sign-automation-execute-close' })
  * Gas parameters are provided as strings and transformed to BigInt.
  * This allows JSON transport of bigint values.
  */
+/**
+ * Swap params schema for executeClose with post-close swap
+ */
+const SwapParamsSchema = z.object({
+  augustus: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid augustus address'),
+  swapCalldata: z.string().regex(/^0x[a-fA-F0-9]*$/, 'Invalid swap calldata'),
+  deadline: z.number().int().nonnegative('deadline must be non-negative'),
+});
+
 const SignExecuteCloseSchema = z.object({
   userId: z.string().min(1, 'userId is required'),
   chainId: z.number().int().positive('chainId must be a positive integer'),
@@ -77,6 +91,8 @@ const SignExecuteCloseSchema = z.object({
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
   // Optional explicit nonce for retry scenarios (caller fetches from chain)
   nonce: z.number().int().nonnegative().optional(),
+  // Optional swap params for post-close swap via Paraswap
+  swapParams: SwapParamsSchema.optional(),
 });
 
 type SignExecuteCloseRequest = z.infer<typeof SignExecuteCloseSchema>;
@@ -119,7 +135,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce } = validation.data;
+  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = validation.data;
 
   logger.info({
     requestId,
@@ -131,6 +147,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     gasLimit: gasLimit.toString(),
     gasPrice: gasPrice.toString(),
     explicitNonce: nonce,
+    hasSwap: !!swapParams,
     msg: 'Processing execute-close signing request',
   });
 
@@ -146,6 +163,13 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       gasLimit,
       gasPrice,
       nonce,
+      swapParams: swapParams
+        ? {
+            augustus: swapParams.augustus as Address,
+            swapCalldata: swapParams.swapCalldata as `0x${string}`,
+            deadline: swapParams.deadline,
+          }
+        : undefined,
     });
 
     logger.info({

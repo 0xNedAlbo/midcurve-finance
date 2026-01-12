@@ -39,6 +39,37 @@ export const TRIGGER_MODES = ['LOWER', 'UPPER', 'BOTH'] as const;
 export type TriggerMode = (typeof TRIGGER_MODES)[number];
 
 /**
+ * Swap direction values for post-close swap
+ */
+export const SWAP_DIRECTIONS = ['BASE_TO_QUOTE', 'QUOTE_TO_BASE'] as const;
+export type SwapDirection = (typeof SWAP_DIRECTIONS)[number];
+
+/**
+ * Swap configuration for post-close token swap via Paraswap
+ */
+export interface SwapConfig {
+  /**
+   * Whether swap is enabled
+   */
+  enabled: boolean;
+
+  /**
+   * Direction of the swap
+   */
+  direction: SwapDirection;
+
+  /**
+   * Slippage tolerance in basis points (e.g., 100 = 1%)
+   */
+  slippageBps: number;
+
+  /**
+   * Quote token address (used to determine src/dest tokens)
+   */
+  quoteToken: string;
+}
+
+/**
  * Automation contract configuration stored per-order
  */
 export interface SerializedAutomationContractConfig {
@@ -182,6 +213,11 @@ export interface RegisterCloseOrderRequest {
    * Registration transaction hash
    */
   registrationTxHash: string;
+
+  /**
+   * Optional swap configuration for post-close token swap via Paraswap
+   */
+  swapConfig?: SwapConfig;
 }
 
 /**
@@ -224,6 +260,17 @@ export const RegisterCloseOrderRequestSchema = z
     slippageBps: z.number().int().min(0).max(10000, 'Slippage cannot exceed 100%'),
 
     registrationTxHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash'),
+
+    swapConfig: z
+      .object({
+        enabled: z.boolean(),
+        direction: z.enum(SWAP_DIRECTIONS, {
+          errorMap: () => ({ message: `Swap direction must be one of: ${SWAP_DIRECTIONS.join(', ')}` }),
+        }),
+        slippageBps: z.number().int().min(0).max(10000, 'Swap slippage cannot exceed 100%'),
+        quoteToken: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid quote token address'),
+      })
+      .optional(),
   })
   .refine(
     (data) => {

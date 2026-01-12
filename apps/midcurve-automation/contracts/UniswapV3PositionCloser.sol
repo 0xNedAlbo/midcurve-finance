@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./interfaces/IParaswap.sol";
+
 /**
  * UniswapV3PositionCloser.sol
  *
@@ -18,7 +20,7 @@ pragma solidity ^0.8.20;
  * - Owner must approve this contract on the PositionManager
  *
  * Operator flow (user's automation wallet):
- * - executeClose(closeId, feeRecipient, feeBps) checks:
+ * - executeClose(closeId, feeRecipient, feeBps, swapParams) checks:
  *   - order REGISTERED
  *   - caller is the order's operator
  *   - not expired (validUntil)
@@ -28,15 +30,19 @@ pragma solidity ^0.8.20;
  *   - decreases ALL liquidity with amountMins derived on-chain from slippageBps
  *   - collects fees
  *   - applies an operator-chosen fee (0..1%) if feeRecipient != 0x0
+ *   - optionally swaps tokens via Paraswap if swap intent was registered
  *   - pays remaining amounts to payout
  *   - returns the now-empty NFT to the owner
  *
  * Notes:
  * - ERC20 transfers are done via low-level call to support non-standard tokens (no bool return).
+ * - Swap functionality uses Paraswap Augustus V5 with on-chain registry verification.
  */
 
 interface IERC20Minimal {
     function transfer(address to, uint256 value) external returns (bool);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
 }
 
 interface IERC721Minimal {
@@ -122,6 +128,48 @@ interface IUniswapV3PositionCloser {
         CANCELLED
     }
 
+    /// @notice Direction of post-close swap
+    enum SwapDirection {
+        NONE,           // No swap (default - current behavior)
+        BASE_TO_QUOTE,  // Swap base token -> quote token
+        QUOTE_TO_BASE   // Swap quote token -> base token
+    }
+
+    /// @notice Swap intent stored at registration time
+    /// @dev User specifies intent; actual swap calldata provided at execution
+    struct SwapIntent {
+        SwapDirection direction;   // Which direction to swap
+        address quoteToken;        // The token user considers "quote" (must be token0 or token1)
+        uint16 swapSlippageBps;    // Separate slippage for swap (0-10000)
+    }
+
+    /// @notice Swap parameters provided at execution time
+    /// @dev Contains fresh Paraswap calldata fetched by operator
+    struct SwapParams {
+        address augustus;          // AugustusSwapper address (verified against registry)
+        bytes swapCalldata;        // Fresh calldata from Paraswap API
+        uint256 deadline;          // Swap deadline (0 = no deadline)
+    }
+
+    /// @notice Internal struct to hold swap execution context (avoids stack-too-deep)
+    struct SwapContext {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        address augustus;
+        address spender;
+        uint256 balanceBefore;
+    }
+
+    /// @notice Internal struct to hold close execution context (avoids stack-too-deep)
+    struct CloseContext {
+        address token0;
+        address token1;
+        uint128 liquidity;
+        uint256 amount0Out;
+        uint256 amount1Out;
+    }
+
     struct CloseConfig {
         address pool;
         uint256 tokenId;
@@ -135,6 +183,8 @@ interface IUniswapV3PositionCloser {
 
         uint256 validUntil; // 0 = no expiry
         uint16 slippageBps; // 0..10000
+
+        SwapIntent swap;   // Optional swap configuration
     }
 
     struct CloseOrder {
@@ -152,6 +202,11 @@ interface IUniswapV3PositionCloser {
 
         uint256 validUntil;
         uint16 slippageBps;
+
+        // Swap configuration (stored from registration)
+        SwapDirection swapDirection;
+        address swapQuoteToken;
+        uint16 swapSlippageBps;
     }
 
     // --- Errors ---
@@ -174,6 +229,15 @@ interface IUniswapV3PositionCloser {
 
     error TransferFailed();
     error ExternalCallFailed();
+
+    // Swap-related errors
+    error InvalidAugustus(address augustus);
+    error SwapDeadlineExpired(uint256 deadline, uint256 current);
+    error SwapFailed();
+    error SwapOutputZero();
+    error InvalidQuoteToken(address quoteToken, address token0, address token1);
+    error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);
+    error SwapNotConfigured();
 
     // --- Events ---
     event CloseRegistered(
@@ -224,10 +288,29 @@ interface IUniswapV3PositionCloser {
     event CloseValidUntilUpdated(uint256 indexed closeId, uint256 oldValidUntil, uint256 newValidUntil);
     event CloseSlippageUpdated(uint256 indexed closeId, uint16 oldSlippageBps, uint16 newSlippageBps);
 
+    // Swap-related events
+    event SwapExecuted(
+        uint256 indexed closeId,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut
+    );
+
+    event CloseSwapIntentUpdated(
+        uint256 indexed closeId,
+        SwapDirection oldDirection,
+        SwapDirection newDirection,
+        address oldQuoteToken,
+        address newQuoteToken,
+        uint16 oldSlippageBps,
+        uint16 newSlippageBps
+    );
+
     // --- Actions ---
     function registerClose(CloseConfig calldata cfg) external returns (uint256 closeId);
 
-    function executeClose(uint256 closeId, address feeRecipient, uint16 feeBps) external;
+    function executeClose(uint256 closeId, address feeRecipient, uint16 feeBps, SwapParams calldata swapParams) external;
 
     function cancelClose(uint256 closeId) external;
 
@@ -240,6 +323,8 @@ interface IUniswapV3PositionCloser {
 
     function setCloseSlippage(uint256 closeId, uint16 newSlippageBps) external;
 
+    function setCloseSwapIntent(uint256 closeId, SwapDirection direction, address quoteToken, uint16 swapSlippageBps) external;
+
     // --- Views ---
     function getCloseOrder(uint256 closeId) external view returns (CloseOrder memory);
 
@@ -248,6 +333,8 @@ interface IUniswapV3PositionCloser {
     function canExecuteClose(uint256 closeId) external view returns (bool);
 
     function positionManager() external view returns (address);
+
+    function augustusRegistry() external view returns (address);
 
     function nextCloseId() external view returns (uint256);
 }
@@ -269,17 +356,27 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
     // Internal storage with interface type for convenience
     INonfungiblePositionManagerMinimal internal immutable _positionManager;
 
+    // Paraswap AugustusRegistry for swap verification
+    IAugustusRegistry internal immutable _augustusRegistry;
+
     uint256 public override nextCloseId = 1;
     mapping(uint256 => CloseOrder) internal _closes;
 
-    constructor(address positionManager_) {
+    constructor(address positionManager_, address augustusRegistry_) {
         if (positionManager_ == address(0)) revert ZeroAddress();
+        if (augustusRegistry_ == address(0)) revert ZeroAddress();
         _positionManager = INonfungiblePositionManagerMinimal(positionManager_);
+        _augustusRegistry = IAugustusRegistry(augustusRegistry_);
     }
 
     /// @notice Returns the Uniswap V3 NonfungiblePositionManager address
     function positionManager() external view override returns (address) {
         return address(_positionManager);
+    }
+
+    /// @notice Returns the Paraswap AugustusRegistry address
+    function augustusRegistry() external view override returns (address) {
+        return address(_augustusRegistry);
     }
 
     // ----------------------------
@@ -288,6 +385,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
 
     function registerClose(CloseConfig calldata cfg) external override returns (uint256 closeId) {
         _validateConfig(cfg);
+        _validateSwapIntent(cfg.swap, cfg.pool);
 
         // Must own the NFT at registration time.
         address owner = _positionManager.ownerOf(cfg.tokenId);
@@ -305,7 +403,10 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             upper: cfg.sqrtPriceX96Upper,
             mode: cfg.mode,
             validUntil: cfg.validUntil,
-            slippageBps: cfg.slippageBps
+            slippageBps: cfg.slippageBps,
+            swapDirection: cfg.swap.direction,
+            swapQuoteToken: cfg.swap.quoteToken,
+            swapSlippageBps: cfg.swap.swapSlippageBps
         });
 
         emit CloseRegistered(
@@ -323,7 +424,12 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         );
     }
 
-    function executeClose(uint256 closeId, address feeRecipient, uint16 feeBps) external override nonReentrant {
+    function executeClose(
+        uint256 closeId,
+        address feeRecipient,
+        uint16 feeBps,
+        SwapParams calldata swapParams
+    ) external override nonReentrant {
         CloseOrder storage o = _closes[closeId];
         if (o.status != CloseStatus.REGISTERED) revert WrongStatus(CloseStatus.REGISTERED, o.status);
         if (msg.sender != o.operator) revert NotOperator();
@@ -342,17 +448,67 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         }
 
         // 2) Pre-check NFT ownership + approval (clear errors)
+        _validateNftOwnershipAndApproval(o);
+
+        // 3) Pull the NFT from the recorded owner (atomic close)
+        _positionManager.transferFrom(o.owner, address(this), o.tokenId);
+
+        // 4-7) Withdraw liquidity and collect tokens
+        CloseContext memory ctx = _withdrawAndCollect(o.tokenId, o.slippageBps, current);
+
+        // 8) Mark executed before external transfers (reentrancy hygiene)
+        o.status = CloseStatus.EXECUTED;
+
+        // 9) Apply optional operator-chosen fee
+        (uint256 payout0, uint256 payout1) = _applyFees(
+            closeId, ctx, feeRecipient, feeBps
+        );
+
+        // 10) Execute optional swap if configured
+        if (o.swapDirection != SwapDirection.NONE) {
+            (payout0, payout1) = _executeSwap(
+                closeId,
+                o.swapDirection,
+                o.swapQuoteToken,
+                ctx.token0,
+                ctx.token1,
+                payout0,
+                payout1,
+                swapParams
+            );
+        }
+
+        // 11) Payout remainder to the configured payout address
+        if (payout0 > 0) _safeErc20Transfer(ctx.token0, o.payout, payout0);
+        if (payout1 > 0) _safeErc20Transfer(ctx.token1, o.payout, payout1);
+
+        emit CloseExecuted(closeId, o.tokenId, o.owner, o.payout, current, ctx.amount0Out, ctx.amount1Out);
+
+        // 12) Return the now-empty NFT to the owner (not to payout)
+        _positionManager.transferFrom(address(this), o.owner, o.tokenId);
+    }
+
+    /**
+     * @dev Validate NFT ownership and approval
+     */
+    function _validateNftOwnershipAndApproval(CloseOrder storage o) internal view {
         address actualOwner = _positionManager.ownerOf(o.tokenId);
         if (actualOwner != o.owner) revert NftNotOwnedByRecordedOwner(o.owner, actualOwner);
 
         bool approved = (_positionManager.getApproved(o.tokenId) == address(this))
             || _positionManager.isApprovedForAll(o.owner, address(this));
         if (!approved) revert NftNotApproved(o.owner, o.tokenId);
+    }
 
-        // 3) Pull the NFT from the recorded owner (atomic close)
-        _positionManager.transferFrom(o.owner, address(this), o.tokenId);
-
-        // 4) Read position data (liquidity, ticks, token0/token1)
+    /**
+     * @dev Withdraw liquidity and collect tokens from position
+     */
+    function _withdrawAndCollect(
+        uint256 tokenId,
+        uint16 slippageBps,
+        uint160 currentSqrtPrice
+    ) internal returns (CloseContext memory ctx) {
+        // Read position data
         (
             ,
             ,
@@ -366,73 +522,68 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             ,
             ,
 
-        ) = _positionManager.positions(o.tokenId);
+        ) = _positionManager.positions(tokenId);
 
-        // 5) Compute expected amounts at current price, derive mins from on-chain slippage policy
+        ctx.token0 = token0;
+        ctx.token1 = token1;
+        ctx.liquidity = liquidity;
+
+        // Compute expected amounts and derive mins from slippage
         uint160 sqrtPriceAX96 = TickMath.getSqrtRatioAtTick(tickLower);
         uint160 sqrtPriceBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
 
         (uint256 amount0Expected, uint256 amount1Expected) =
-            LiquidityAmounts.getAmountsForLiquidity(current, sqrtPriceAX96, sqrtPriceBX96, liquidity);
+            LiquidityAmounts.getAmountsForLiquidity(currentSqrtPrice, sqrtPriceAX96, sqrtPriceBX96, liquidity);
 
-        uint256 amount0Min = (amount0Expected * (10_000 - uint256(o.slippageBps))) / 10_000;
-        uint256 amount1Min = (amount1Expected * (10_000 - uint256(o.slippageBps))) / 10_000;
+        uint256 amount0Min = (amount0Expected * (10_000 - uint256(slippageBps))) / 10_000;
+        uint256 amount1Min = (amount1Expected * (10_000 - uint256(slippageBps))) / 10_000;
 
-        // 6) Decrease ALL liquidity with mins (slippage protection)
-        INonfungiblePositionManagerMinimal.DecreaseLiquidityParams memory dec = INonfungiblePositionManagerMinimal
-            .DecreaseLiquidityParams({
-                tokenId: o.tokenId,
+        // Decrease ALL liquidity
+        _positionManager.decreaseLiquidity(
+            INonfungiblePositionManagerMinimal.DecreaseLiquidityParams({
+                tokenId: tokenId,
                 liquidity: liquidity,
                 amount0Min: amount0Min,
                 amount1Min: amount1Min,
                 deadline: block.timestamp
-            });
+            })
+        );
 
-        _positionManager.decreaseLiquidity(dec);
+        // Collect everything to this contract
+        (ctx.amount0Out, ctx.amount1Out) = _positionManager.collect(
+            INonfungiblePositionManagerMinimal.CollectParams({
+                tokenId: tokenId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
+    }
 
-        // 7) Collect everything to this contract
-        INonfungiblePositionManagerMinimal.CollectParams memory col = INonfungiblePositionManagerMinimal.CollectParams({
-            tokenId: o.tokenId,
-            recipient: address(this),
-            amount0Max: type(uint128).max,
-            amount1Max: type(uint128).max
-        });
-
-        (uint256 col0, uint256 col1) = _positionManager.collect(col);
-
-        // NOTE: collect() returns the TOTAL collected including what decreaseLiquidity added to tokensOwed.
-        // Do NOT add dec0/dec1 here - that would double-count!
-        uint256 amount0Out = col0;
-        uint256 amount1Out = col1;
-
-        // 8) Mark executed before external transfers (reentrancy hygiene)
-        o.status = CloseStatus.EXECUTED;
-
-        // 9) Apply optional operator-chosen fee (only if feeRecipient != 0x0)
-        uint256 fee0 = 0;
-        uint256 fee1 = 0;
+    /**
+     * @dev Apply operator fees and return remaining payout amounts
+     */
+    function _applyFees(
+        uint256 closeId,
+        CloseContext memory ctx,
+        address feeRecipient,
+        uint16 feeBps
+    ) internal returns (uint256 payout0, uint256 payout1) {
+        payout0 = ctx.amount0Out;
+        payout1 = ctx.amount1Out;
 
         if (feeRecipient != address(0) && feeBps > 0) {
-            fee0 = (amount0Out * uint256(feeBps)) / 10_000;
-            fee1 = (amount1Out * uint256(feeBps)) / 10_000;
+            uint256 fee0 = (ctx.amount0Out * uint256(feeBps)) / 10_000;
+            uint256 fee1 = (ctx.amount1Out * uint256(feeBps)) / 10_000;
 
-            if (fee0 > 0) _safeErc20Transfer(token0, feeRecipient, fee0);
-            if (fee1 > 0) _safeErc20Transfer(token1, feeRecipient, fee1);
+            if (fee0 > 0) _safeErc20Transfer(ctx.token0, feeRecipient, fee0);
+            if (fee1 > 0) _safeErc20Transfer(ctx.token1, feeRecipient, fee1);
 
             emit CloseFeeApplied(closeId, feeRecipient, feeBps, fee0, fee1);
+
+            payout0 = ctx.amount0Out - fee0;
+            payout1 = ctx.amount1Out - fee1;
         }
-
-        uint256 payout0 = amount0Out - fee0;
-        uint256 payout1 = amount1Out - fee1;
-
-        // 10) Payout remainder to the configured payout address
-        if (payout0 > 0) _safeErc20Transfer(token0, o.payout, payout0);
-        if (payout1 > 0) _safeErc20Transfer(token1, o.payout, payout1);
-
-        emit CloseExecuted(closeId, o.tokenId, o.owner, o.payout, current, amount0Out, amount1Out);
-
-        // 11) Return the now-empty NFT to the owner (not to payout)
-        _positionManager.transferFrom(address(this), o.owner, o.tokenId);
     }
 
     function cancelClose(uint256 closeId) external override {
@@ -509,6 +660,46 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         emit CloseSlippageUpdated(closeId, old, newSlippageBps);
     }
 
+    function setCloseSwapIntent(
+        uint256 closeId,
+        SwapDirection direction,
+        address quoteToken,
+        uint16 swapSlippageBps
+    ) external override {
+        CloseOrder storage o = _closes[closeId];
+        if (msg.sender != o.owner) revert NotOwner();
+        if (o.status != CloseStatus.REGISTERED) revert WrongStatus(CloseStatus.REGISTERED, o.status);
+
+        // Validate swap intent if not NONE
+        if (direction != SwapDirection.NONE) {
+            if (swapSlippageBps > 10_000) revert SwapSlippageBpsOutOfRange(swapSlippageBps);
+            // Validate quoteToken is one of the pool tokens
+            address token0 = IUniswapV3PoolMinimal(o.pool).token0();
+            address token1 = IUniswapV3PoolMinimal(o.pool).token1();
+            if (quoteToken != token0 && quoteToken != token1) {
+                revert InvalidQuoteToken(quoteToken, token0, token1);
+            }
+        }
+
+        SwapDirection oldDirection = o.swapDirection;
+        address oldQuoteToken = o.swapQuoteToken;
+        uint16 oldSlippageBps = o.swapSlippageBps;
+
+        o.swapDirection = direction;
+        o.swapQuoteToken = quoteToken;
+        o.swapSlippageBps = swapSlippageBps;
+
+        emit CloseSwapIntentUpdated(
+            closeId,
+            oldDirection,
+            direction,
+            oldQuoteToken,
+            quoteToken,
+            oldSlippageBps,
+            swapSlippageBps
+        );
+    }
+
     // ----------------------------
     // Views
     // ----------------------------
@@ -573,6 +764,151 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         (bool ok, bytes memory data) = token.call(abi.encodeWithSelector(IERC20Minimal.transfer.selector, to, amount));
         if (!ok) revert TransferFailed();
         if (data.length > 0 && !abi.decode(data, (bool))) revert TransferFailed();
+    }
+
+    function _safeErc20Approve(address token, address spender, uint256 amount) internal {
+        (bool ok, bytes memory data) = token.call(abi.encodeWithSelector(IERC20Minimal.approve.selector, spender, amount));
+        if (!ok) revert TransferFailed();
+        if (data.length > 0 && !abi.decode(data, (bool))) revert TransferFailed();
+    }
+
+    function _validateSwapIntent(SwapIntent calldata swap, address pool) internal view {
+        if (swap.direction == SwapDirection.NONE) {
+            return; // No swap, no validation needed
+        }
+
+        if (swap.swapSlippageBps > 10_000) {
+            revert SwapSlippageBpsOutOfRange(swap.swapSlippageBps);
+        }
+
+        // Verify quoteToken is one of the pool tokens
+        address token0 = IUniswapV3PoolMinimal(pool).token0();
+        address token1 = IUniswapV3PoolMinimal(pool).token1();
+
+        if (swap.quoteToken != token0 && swap.quoteToken != token1) {
+            revert InvalidQuoteToken(swap.quoteToken, token0, token1);
+        }
+    }
+
+    /**
+     * @notice Execute a swap via Paraswap after position close
+     * @dev Called only if swapDirection != NONE
+     * @param closeId The close order ID (for event emission)
+     * @param direction The swap direction (BASE_TO_QUOTE or QUOTE_TO_BASE)
+     * @param quoteToken The user's quote token address
+     * @param token0 Pool's token0
+     * @param token1 Pool's token1
+     * @param amount0 Current balance of token0 to consider for swap
+     * @param amount1 Current balance of token1 to consider for swap
+     * @param params Swap parameters from operator (fresh Paraswap calldata)
+     * @return finalAmount0 Remaining token0 after swap
+     * @return finalAmount1 Remaining token1 after swap
+     */
+    function _executeSwap(
+        uint256 closeId,
+        SwapDirection direction,
+        address quoteToken,
+        address token0,
+        address token1,
+        uint256 amount0,
+        uint256 amount1,
+        SwapParams calldata params
+    ) internal returns (uint256 finalAmount0, uint256 finalAmount1) {
+        // 1) Validate Augustus address against registry
+        if (!_augustusRegistry.isValidAugustus(params.augustus)) {
+            revert InvalidAugustus(params.augustus);
+        }
+
+        // 2) Check deadline if set
+        if (params.deadline != 0 && block.timestamp > params.deadline) {
+            revert SwapDeadlineExpired(params.deadline, block.timestamp);
+        }
+
+        // 3) Build swap context (uses struct to avoid stack-too-deep)
+        SwapContext memory ctx = _buildSwapContext(direction, quoteToken, token0, token1, amount0, amount1, params.augustus);
+
+        // Nothing to swap if amountIn is 0
+        if (ctx.amountIn == 0) {
+            return (amount0, amount1);
+        }
+
+        // 4) Execute swap and get output
+        uint256 amountOut = _performSwap(ctx, params.swapCalldata);
+
+        // 5) Emit swap event
+        emit SwapExecuted(closeId, ctx.tokenIn, ctx.tokenOut, ctx.amountIn, amountOut);
+
+        // 6) Compute final amounts
+        if (ctx.tokenIn == token0) {
+            finalAmount0 = 0;
+            finalAmount1 = amount1 + amountOut;
+        } else {
+            finalAmount0 = amount0 + amountOut;
+            finalAmount1 = 0;
+        }
+    }
+
+    /**
+     * @dev Build swap context struct to avoid stack-too-deep
+     */
+    function _buildSwapContext(
+        SwapDirection direction,
+        address quoteToken,
+        address token0,
+        address token1,
+        uint256 amount0,
+        uint256 amount1,
+        address augustus
+    ) internal view returns (SwapContext memory ctx) {
+        // Determine which is base and which is quote
+        address baseToken = (quoteToken == token0) ? token1 : token0;
+
+        if (direction == SwapDirection.BASE_TO_QUOTE) {
+            ctx.tokenIn = baseToken;
+            ctx.tokenOut = quoteToken;
+            ctx.amountIn = (baseToken == token0) ? amount0 : amount1;
+        } else {
+            ctx.tokenIn = quoteToken;
+            ctx.tokenOut = baseToken;
+            ctx.amountIn = (quoteToken == token0) ? amount0 : amount1;
+        }
+
+        ctx.augustus = augustus;
+        ctx.spender = IAugustus(augustus).getTokenTransferProxy();
+        ctx.balanceBefore = IERC20Minimal(ctx.tokenOut).balanceOf(address(this));
+    }
+
+    /**
+     * @dev Perform the actual swap via Augustus
+     */
+    function _performSwap(
+        SwapContext memory ctx,
+        bytes calldata swapCalldata
+    ) internal returns (uint256 amountOut) {
+        // Approve exact amount
+        _safeErc20Approve(ctx.tokenIn, ctx.spender, ctx.amountIn);
+
+        // Execute swap via Augustus
+        (bool success, bytes memory returnData) = ctx.augustus.call(swapCalldata);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
+                }
+            }
+            revert SwapFailed();
+        }
+
+        // Reset approval to zero (security best practice)
+        _safeErc20Approve(ctx.tokenIn, ctx.spender, 0);
+
+        // Verify output via balance diff
+        uint256 balanceAfter = IERC20Minimal(ctx.tokenOut).balanceOf(address(this));
+        amountOut = balanceAfter - ctx.balanceBefore;
+
+        if (amountOut == 0) {
+            revert SwapOutputZero();
+        }
     }
 }
 

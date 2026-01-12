@@ -5,6 +5,63 @@
  * Tracks execution progress and results.
  */
 
+import type { SwapDirection } from './uniswapv3-close-order-config.js';
+
+/**
+ * Swap execution result data
+ */
+export interface SwapExecution {
+  /**
+   * Whether swap was executed
+   */
+  swapExecuted: boolean;
+
+  /**
+   * Direction of swap that was executed
+   */
+  swapDirection: SwapDirection;
+
+  /**
+   * Source token address
+   */
+  srcToken: string;
+
+  /**
+   * Destination token address
+   */
+  destToken: string;
+
+  /**
+   * Amount of source token swapped
+   */
+  srcAmount: string;
+
+  /**
+   * Amount of destination token received
+   */
+  destAmount: string;
+
+  /**
+   * Minimum expected destination amount (with slippage)
+   */
+  minDestAmount: string;
+
+  /**
+   * Augustus swapper address used
+   */
+  augustusAddress: string;
+
+  /**
+   * Slippage used for swap (basis points)
+   */
+  swapSlippageBps: number;
+
+  /**
+   * Error message if swap failed
+   */
+  swapError?: string;
+}
+
 /**
  * UniswapV3 Close Order State Data
  *
@@ -65,6 +122,11 @@ export interface UniswapV3CloseOrderStateData {
    * Amount of token1 received after close
    */
   amount1Out: bigint | null;
+
+  /**
+   * Swap execution details (if swap was configured)
+   */
+  swapExecution?: SwapExecution;
 }
 
 /**
@@ -82,6 +144,7 @@ export interface UniswapV3CloseOrderStateJSON {
   retryCount: number;
   amount0Out: string | null;
   amount1Out: string | null;
+  swapExecution?: SwapExecution;
 }
 
 /**
@@ -101,6 +164,7 @@ export class UniswapV3CloseOrderState implements UniswapV3CloseOrderStateData {
   readonly retryCount: number;
   readonly amount0Out: bigint | null;
   readonly amount1Out: bigint | null;
+  readonly swapExecution?: SwapExecution;
 
   constructor(data: Partial<UniswapV3CloseOrderStateData>) {
     this.registrationTxHash = data.registrationTxHash ?? null;
@@ -114,6 +178,7 @@ export class UniswapV3CloseOrderState implements UniswapV3CloseOrderStateData {
     this.retryCount = data.retryCount ?? 0;
     this.amount0Out = data.amount0Out ?? null;
     this.amount1Out = data.amount1Out ?? null;
+    this.swapExecution = data.swapExecution;
   }
 
   /**
@@ -121,6 +186,13 @@ export class UniswapV3CloseOrderState implements UniswapV3CloseOrderStateData {
    */
   static empty(): UniswapV3CloseOrderState {
     return new UniswapV3CloseOrderState({});
+  }
+
+  /**
+   * Check if a swap was executed
+   */
+  wasSwapExecuted(): boolean {
+    return this.swapExecution?.swapExecuted === true;
   }
 
   /**
@@ -139,6 +211,7 @@ export class UniswapV3CloseOrderState implements UniswapV3CloseOrderStateData {
       retryCount: this.retryCount,
       amount0Out: this.amount0Out?.toString() ?? null,
       amount1Out: this.amount1Out?.toString() ?? null,
+      swapExecution: this.swapExecution,
     };
   }
 
@@ -158,6 +231,7 @@ export class UniswapV3CloseOrderState implements UniswapV3CloseOrderStateData {
       retryCount: json.retryCount,
       amount0Out: json.amount0Out ? BigInt(json.amount0Out) : null,
       amount1Out: json.amount1Out ? BigInt(json.amount1Out) : null,
+      swapExecution: json.swapExecution,
     });
   }
 }

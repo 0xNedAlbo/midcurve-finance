@@ -10,12 +10,16 @@ export {
   type UniswapV3CloseOrderConfigData,
   type UniswapV3CloseOrderConfigJSON,
   type TriggerMode,
+  type SwapDirection,
+  type SwapConfig,
+  type SwapConfigJSON,
 } from './uniswapv3-close-order-config.js';
 
 export {
   UniswapV3CloseOrderState,
   type UniswapV3CloseOrderStateData,
   type UniswapV3CloseOrderStateJSON,
+  type SwapExecution,
 } from './uniswapv3-close-order-state.js';
 
 export {

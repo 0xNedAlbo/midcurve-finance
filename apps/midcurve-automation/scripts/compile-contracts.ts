@@ -42,6 +42,25 @@ interface SolcOutput {
   }>>;
 }
 
+/**
+ * Import callback for solc to resolve imports from local files
+ */
+function findImports(importPath: string): { contents: string } | { error: string } {
+  try {
+    // Normalize the path - remove leading ./ if present
+    const normalizedPath = importPath.startsWith('./') ? importPath.slice(2) : importPath;
+
+    // Handle relative imports (e.g., ./interfaces/IParaswap.sol -> interfaces/IParaswap.sol)
+    const fullPath = path.join(CONTRACTS_DIR, normalizedPath);
+    if (fs.existsSync(fullPath)) {
+      return { contents: fs.readFileSync(fullPath, 'utf8') };
+    }
+    return { error: 'File not found: ' + importPath + ' (resolved to: ' + fullPath + ')' };
+  } catch (error) {
+    return { error: 'Error reading file: ' + importPath };
+  }
+}
+
 function compileContract(contractName: string): void {
   const contractPath = path.join(CONTRACTS_DIR, contractName + '.sol');
   const outputPath = path.join(ARTIFACTS_DIR, contractName + '.json');
@@ -72,7 +91,8 @@ function compileContract(contractName: string): void {
     }
   };
 
-  const output: SolcOutput = JSON.parse(solc.compile(JSON.stringify(input)));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const output: SolcOutput = JSON.parse((solc as any).compile(JSON.stringify(input), { import: findImports }));
 
   // Check for errors
   if (output.errors) {

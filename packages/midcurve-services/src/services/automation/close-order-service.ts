@@ -780,10 +780,21 @@ export class CloseOrderService {
           triggerMode: input.triggerMode,
           sqrtPriceX96Lower: input.sqrtPriceX96Lower?.toString() || '0',
           sqrtPriceX96Upper: input.sqrtPriceX96Upper?.toString() || '0',
+          priceLowerDisplay: input.priceLowerDisplay,
+          priceUpperDisplay: input.priceUpperDisplay,
           payoutAddress: input.payoutAddress,
           operatorAddress: input.operatorAddress,
           validUntil: input.validUntil.toISOString(),
           slippageBps: input.slippageBps,
+          // Optional swap config for post-close swap
+          swapConfig: input.swapConfig
+            ? {
+                enabled: input.swapConfig.enabled,
+                direction: input.swapConfig.direction,
+                slippageBps: input.swapConfig.slippageBps,
+                quoteToken: input.swapConfig.quoteToken,
+              }
+            : undefined,
         };
       default:
         throw new Error(`Unknown close order type: ${input.closeOrderType}`);
