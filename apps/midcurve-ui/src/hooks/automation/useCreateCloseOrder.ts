@@ -306,6 +306,19 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
     };
     const mode = triggerModeMap[contractTriggerMode] ?? 0;
 
+    // Build swap intent (default to no swap if not configured)
+    const swapIntent = params.swapConfig?.enabled
+      ? {
+          direction: params.swapConfig.direction === 'BASE_TO_QUOTE' ? 1 : 2,
+          quoteToken: params.swapConfig.quoteToken as Address,
+          swapSlippageBps: params.swapConfig.slippageBps,
+        }
+      : {
+          direction: 0,  // SwapDirection.NONE
+          quoteToken: '0x0000000000000000000000000000000000000000' as Address,
+          swapSlippageBps: 0,
+        };
+
     // Call writeContract with registerClose function
     // Contract takes CloseConfig struct as a single tuple argument
     // NOTE: Using transformed sqrtPriceX96 values and mode for isToken0Quote positions
@@ -324,6 +337,7 @@ export function useCreateCloseOrder(): UseCreateCloseOrderResult {
           operator: params.operatorAddress,
           validUntil: params.validUntil,
           slippageBps: params.slippageBps,
+          swap: swapIntent,
         },
       ],
       chainId: params.chainId,

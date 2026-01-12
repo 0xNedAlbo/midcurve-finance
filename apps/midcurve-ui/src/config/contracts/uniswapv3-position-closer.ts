@@ -80,6 +80,16 @@ export const POSITION_CLOSER_ABI = [
           { name: 'operator', type: 'address' },
           { name: 'validUntil', type: 'uint256' },
           { name: 'slippageBps', type: 'uint16' },
+          // SwapIntent tuple for optional post-close swap
+          {
+            name: 'swap',
+            type: 'tuple',
+            components: [
+              { name: 'direction', type: 'uint8' },     // SwapDirection: 0=NONE, 1=BASE_TO_QUOTE, 2=QUOTE_TO_BASE
+              { name: 'quoteToken', type: 'address' },  // User's quote token (token0 or token1)
+              { name: 'swapSlippageBps', type: 'uint16' },  // Slippage for swap (0-10000)
+            ],
+          },
         ],
       },
     ],

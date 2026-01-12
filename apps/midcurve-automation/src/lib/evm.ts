@@ -618,6 +618,16 @@ const POSITION_CLOSER_ABI = [
       { internalType: 'uint256', name: 'closeId', type: 'uint256' },
       { internalType: 'address', name: 'feeRecipient', type: 'address' },
       { internalType: 'uint16', name: 'feeBps', type: 'uint16' },
+      {
+        internalType: 'struct IUniswapV3PositionCloser.SwapParams',
+        name: 'swapParams',
+        type: 'tuple',
+        components: [
+          { internalType: 'address', name: 'augustus', type: 'address' },
+          { internalType: 'bytes', name: 'swapCalldata', type: 'bytes' },
+          { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+        ],
+      },
     ],
     name: 'executeClose',
     outputs: [],
@@ -625,6 +635,24 @@ const POSITION_CLOSER_ABI = [
     type: 'function',
   },
 ] as const;
+
+/**
+ * Empty swap params for no-swap execution
+ */
+const EMPTY_SWAP_PARAMS = {
+  augustus: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+  swapCalldata: '0x' as `0x${string}`,
+  deadline: 0n,
+} as const;
+
+/**
+ * Swap params type for simulation
+ */
+export interface SimulationSwapParams {
+  augustus: `0x${string}`;
+  swapCalldata: `0x${string}`;
+  deadline: bigint;
+}
 
 /**
  * Simulate executeClose transaction to catch errors before broadcasting
@@ -635,6 +663,7 @@ const POSITION_CLOSER_ABI = [
  * @param feeRecipient - Fee recipient address
  * @param feeBps - Fee in basis points
  * @param operatorAddress - Operator address (caller)
+ * @param swapParams - Optional swap parameters (defaults to empty/no-swap)
  * @returns Simulation result
  */
 export async function simulateExecuteClose(
@@ -643,17 +672,21 @@ export async function simulateExecuteClose(
   closeId: number,
   feeRecipient: `0x${string}`,
   feeBps: number,
-  operatorAddress: `0x${string}`
+  operatorAddress: `0x${string}`,
+  swapParams?: SimulationSwapParams
 ): Promise<{ success: boolean; error?: string; decodedError?: string }> {
   const { decodeRevertReason } = await import('./error-decoder');
   const client = getPublicClient(chainId);
+
+  // Use empty swap params if not provided
+  const swapParamsTuple = swapParams || EMPTY_SWAP_PARAMS;
 
   try {
     await client.simulateContract({
       address: contractAddress,
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeClose',
-      args: [BigInt(closeId), feeRecipient, feeBps],
+      args: [BigInt(closeId), feeRecipient, feeBps, swapParamsTuple],
       account: operatorAddress,
     });
 

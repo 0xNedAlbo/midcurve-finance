@@ -244,33 +244,24 @@ class SignerClient {
   }
 
   /**
-   * Get or create automation wallet for a user
+   * Get automation wallet for a user
+   *
+   * Throws if wallet doesn't exist - wallet must be created during order registration in UI.
+   * This is intentional: if wallet doesn't exist at execution time, it's an error condition.
    */
-  async getOrCreateWallet(userId: string): Promise<{ walletAddress: string }> {
-    log.info({ userId, msg: 'Getting or creating automation wallet' });
+  async getWallet(userId: string): Promise<{ walletAddress: string }> {
+    log.info({ userId, msg: 'Getting automation wallet' });
 
-    // First try to get existing wallet
-    try {
-      const existing = await this.request<{ wallet: { walletAddress: string } | null }>(
-        'GET',
-        `/api/wallets/automation?userId=${userId}`
-      );
-
-      if (existing.wallet) {
-        return { walletAddress: existing.wallet.walletAddress };
-      }
-    } catch {
-      // Wallet doesn't exist, create it
-    }
-
-    // Create new wallet
-    const created = await this.request<{ wallet: { walletAddress: string } }>(
-      'POST',
-      '/api/wallets/automation',
-      { userId, label: 'Position Automation Wallet' }
+    const result = await this.request<{ wallet: { walletAddress: string } | null }>(
+      'GET',
+      `/api/wallets/automation?userId=${userId}`
     );
 
-    return { walletAddress: created.wallet.walletAddress };
+    if (!result.wallet) {
+      throw new Error(`No automation wallet found for user ${userId}. Wallet must be created during order registration.`);
+    }
+
+    return { walletAddress: result.wallet.walletAddress };
   }
 }
 
