@@ -32,6 +32,11 @@ import {
 import { UniswapV3PositionSyncState } from '../../position-sync-state.js';
 import { CloseOrderService } from '../../../automation/close-order-service.js';
 import { PoolSubscriptionService } from '../../../automation/pool-subscription-service.js';
+import {
+  getDomainEventPublisher,
+  createDomainEvent,
+  type PositionClosedPayload,
+} from '../../../../events/index.js';
 
 /**
  * Parameters for syncLedgerEvents function
@@ -268,6 +273,9 @@ export async function syncLedgerEvents(
           { positionId, currentLiquidity: currentLiquidity.toString() },
           'Position is closed (no new events), checking for stale active orders'
         );
+        // Publish position.closed event (enables event-driven consumers)
+        await publishPositionClosedEvent(positionId, chainId, nftId, prisma, logger);
+        // Direct cancellation (dual-write for reliability during migration)
         await cancelActiveCloseOrdersForPosition(positionId, prisma, logger);
       }
 
@@ -390,6 +398,9 @@ export async function syncLedgerEvents(
         { positionId, finalLiquidity: processResult.finalLiquidity.toString() },
         'Position is closed (liquidity=0), auto-cancelling active close orders'
       );
+      // Publish position.closed event (enables event-driven consumers)
+      await publishPositionClosedEvent(positionId, chainId, nftId, prisma, logger);
+      // Direct cancellation (dual-write for reliability during migration)
       await cancelActiveCloseOrdersForPosition(positionId, prisma, logger);
     }
 
@@ -789,5 +800,90 @@ async function cancelActiveCloseOrdersForPosition(
         'Failed to cancel close order (may already be in terminal state)'
       );
     }
+  }
+}
+
+/**
+ * Publish a position.closed domain event when a position's liquidity drops to 0
+ *
+ * This enables event-driven reactions to position closures across the system,
+ * such as automatic order cancellation, notifications, and hedge management.
+ *
+ * @param positionId - Position database ID
+ * @param chainId - Chain ID
+ * @param nftId - NFT token ID
+ * @param prisma - Prisma client
+ * @param logger - Logger instance
+ */
+async function publishPositionClosedEvent(
+  positionId: string,
+  chainId: number,
+  nftId: bigint,
+  prisma: PrismaClient,
+  logger: Logger
+): Promise<void> {
+  try {
+    // Fetch position with pool for event payload
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
+      select: {
+        id: true,
+        poolId: true,
+        userId: true,
+        collectedFees: true,
+        config: true,
+        state: true,
+      },
+    });
+
+    if (!position) {
+      logger.warn({ positionId }, 'Cannot publish position.closed event: position not found');
+      return;
+    }
+
+    // Extract final state from position state (amounts should be 0 for closed position)
+    const state = position.state as {
+      token0Amount?: string;
+      token1Amount?: string;
+    } | null;
+
+    // Construct payload
+    const payload: PositionClosedPayload = {
+      positionId: position.id,
+      poolId: position.poolId,
+      chainId,
+      nftId: nftId.toString(),
+      closedAt: new Date().toISOString(),
+      finalState: {
+        token0Amount: state?.token0Amount ?? '0',
+        token1Amount: state?.token1Amount ?? '0',
+        collectedFees0: '0', // TODO: Track per-token fees if available
+        collectedFees1: '0',
+      },
+    };
+
+    // Create and publish event via outbox pattern
+    const publisher = getDomainEventPublisher({ prisma });
+    const event = createDomainEvent({
+      type: 'position.closed',
+      entityType: 'position',
+      entityId: positionId,
+      userId: position.userId,
+      payload,
+      source: 'ledger-sync',
+    });
+
+    await publisher.publish(event, prisma);
+
+    logger.info(
+      { positionId, eventId: event.id, eventType: event.type },
+      'Published position.closed domain event'
+    );
+  } catch (error) {
+    // Log but don't throw - event publishing failure shouldn't break ledger sync
+    logger.error(
+      { positionId, error },
+      'Failed to publish position.closed event (non-fatal)'
+    );
   }
 }

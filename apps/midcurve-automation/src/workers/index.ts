@@ -9,6 +9,11 @@ import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PriceMonitor, type PriceMonitorStatus } from './price-monitor';
 import { OrderExecutor, type OrderExecutorStatus } from './order-executor';
+import {
+  OutboxPublisher,
+  PositionClosedOrderCanceller,
+  setupDomainEventsTopology,
+} from '@midcurve/services';
 
 const log = automationLogger.child({ component: 'WorkerManager' });
 
@@ -16,12 +21,22 @@ const log = automationLogger.child({ component: 'WorkerManager' });
 // Types
 // =============================================================================
 
+export interface OutboxPublisherStatus {
+  running: boolean;
+}
+
+export interface PositionClosedOrderCancellerStatus {
+  running: boolean;
+}
+
 export interface WorkerManagerStatus {
   status: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped';
   startedAt: string | null;
   workers: {
     priceMonitor: PriceMonitorStatus;
     orderExecutor: OrderExecutorStatus;
+    outboxPublisher: OutboxPublisherStatus;
+    positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
   };
 }
 
@@ -35,6 +50,8 @@ class WorkerManager {
 
   private priceMonitor: PriceMonitor | null = null;
   private orderExecutor: OrderExecutor | null = null;
+  private outboxPublisher: OutboxPublisher | null = null;
+  private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
 
   /**
    * Start all workers
@@ -51,17 +68,27 @@ class WorkerManager {
     try {
       // Initialize RabbitMQ connection first
       const mq = getRabbitMQConnection();
-      await mq.connect();
+      const channel = await mq.connect();
+
+      // Setup domain events topology (exchange, queues, bindings)
+      await setupDomainEventsTopology(channel);
+      log.info({ msg: 'Domain events topology ready' });
 
       // Create worker instances
       this.priceMonitor = new PriceMonitor();
       this.orderExecutor = new OrderExecutor();
+      this.outboxPublisher = new OutboxPublisher({ channel });
+      this.positionClosedOrderCanceller = new PositionClosedOrderCanceller();
 
       // Start all workers in parallel
       await Promise.all([
         this.priceMonitor.start(),
         this.orderExecutor.start(),
       ]);
+
+      // Start domain events workers
+      this.outboxPublisher.start();
+      await this.positionClosedOrderCanceller.start(channel);
 
       this.status = 'running';
       this.startedAt = new Date();
@@ -92,7 +119,11 @@ class WorkerManager {
       await Promise.all([
         this.priceMonitor?.stop(),
         this.orderExecutor?.stop(),
+        this.positionClosedOrderCanceller?.stop(),
       ]);
+
+      // Stop outbox publisher (synchronous)
+      this.outboxPublisher?.stop();
 
       // Close RabbitMQ connection
       const mq = getRabbitMQConnection();
@@ -130,6 +161,12 @@ class WorkerManager {
           failedTotal: 0,
           lastProcessedAt: null,
         },
+        outboxPublisher: {
+          running: this.outboxPublisher?.isRunning() ?? false,
+        },
+        positionClosedOrderCanceller: {
+          running: this.positionClosedOrderCanceller?.isRunning() ?? false,
+        },
       },
     };
   }
@@ -144,10 +181,14 @@ class WorkerManager {
 
     const priceMonitorStatus = this.priceMonitor?.getStatus();
     const orderExecutorStatus = this.orderExecutor?.getStatus();
+    const outboxPublisherRunning = this.outboxPublisher?.isRunning() ?? false;
+    const orderCancellerRunning = this.positionClosedOrderCanceller?.isRunning() ?? false;
 
     return (
       priceMonitorStatus?.status === 'running' &&
-      orderExecutorStatus?.status === 'running'
+      orderExecutorStatus?.status === 'running' &&
+      outboxPublisherRunning &&
+      orderCancellerRunning
     );
   }
 }

@@ -53,6 +53,9 @@ export * from './services/types/block/index.js';
 export * from './services/types/strategy/index.js';
 export * from './services/types/automation/index.js';
 
+// Export domain events
+export * from './events/index.js';
+
 // Export auth utilities (specific exports to avoid conflicts)
 export {
   validateAndNormalizeAddress,

@@ -846,3 +846,60 @@ model AutomationLog {
   @@index([closeOrderId])
   @@map("automation_logs")
 }
+
+// =============================================================================
+// Domain Events Models
+// =============================================================================
+
+// DomainEventOutbox - Transactional outbox for reliable event publishing
+// Events are written to this table in the same transaction as state changes,
+// then published to RabbitMQ by a background worker for at-least-once delivery.
+model DomainEventOutbox {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Event classification
+  eventType  String // 'position.closed', 'order.cancelled', etc.
+  entityType String // 'position', 'order', 'pool'
+  entityId   String // ID of the entity this event is about
+
+  // Event data
+  payload  Json // Event-specific payload
+  metadata Json // Source, traceId, causedBy, etc.
+
+  // Publishing state
+  status      String    @default("pending") // 'pending', 'published', 'failed'
+  publishedAt DateTime?
+  retryCount  Int       @default(0)
+  lastError   String?
+
+  // Indexes for efficient polling and cleanup
+  @@index([status, createdAt]) // Poll for pending events
+  @@index([entityType, entityId]) // Query events by entity
+  @@map("domain_event_outbox")
+}
+
+// DomainEvent - Permanent event store for audit trail and analytics
+// Events are copied here after successful RabbitMQ publishing.
+// Provides complete history of all domain events for debugging, analytics, and compliance.
+model DomainEvent {
+  id        String   @id // Same ID as outbox event (CUID)
+  createdAt DateTime @default(now())
+
+  // Event classification
+  eventType  String // 'position.closed', 'order.cancelled', etc.
+  entityType String // 'position', 'order', 'pool'
+  entityId   String // ID of the entity this event is about
+  userId     String? // User ID if applicable (for user-scoped events)
+
+  // Event data
+  payload  Json // Event-specific payload
+  metadata Json // Source, traceId, causedBy, etc.
+  version  Int  @default(1) // Schema version for evolution
+
+  // Indexes for efficient querying
+  @@index([entityType, entityId]) // Query events by entity
+  @@index([eventType, createdAt]) // Query events by type over time
+  @@index([userId, createdAt]) // Query events by user over time
+  @@map("domain_events")
+}
