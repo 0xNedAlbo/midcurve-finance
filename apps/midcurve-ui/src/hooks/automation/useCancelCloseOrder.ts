@@ -8,10 +8,14 @@
  * Flow:
  * 1. User calls cancelOrder()
  * 2. User signs cancelClose() tx in their wallet (Wagmi)
- * 3. Wait for tx confirmation
- * 4. Notify API: POST /api/v1/automation/close-orders/[id]/cancelled
- * 5. Invalidate cache and return success
+ * 3. Wait for tx confirmation (with timeout)
+ * 4. On success: Notify API: POST /api/v1/automation/close-orders/[id]/cancelled
+ * 5. On failure/timeout: Force cancel via DELETE /api/v1/automation/close-orders/[id]
+ * 6. Invalidate cache and return success
  */
+
+/** Timeout for waiting on transaction confirmation (60 seconds) */
+const TX_TIMEOUT_MS = 60_000;
 
 import { useState, useEffect, useCallback } from 'react';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
@@ -42,10 +46,12 @@ export interface CancelCloseOrderParams {
  * Result from cancelling a close order
  */
 export interface CancelCloseOrderResult {
-  /** Transaction hash */
-  txHash: Hash;
+  /** Transaction hash (may be undefined if force-cancelled before tx was submitted) */
+  txHash?: Hash;
   /** Updated order from API */
   order?: SerializedCloseOrder;
+  /** True if cancelled in DB without on-chain confirmation (due to timeout or tx failure) */
+  forceCancelled?: boolean;
 }
 
 /**
@@ -64,6 +70,10 @@ export interface UseCancelCloseOrderResult {
   result: CancelCloseOrderResult | null;
   /** Any error that occurred */
   error: Error | null;
+  /** Whether the transaction timed out */
+  isTimedOut: boolean;
+  /** Whether the order was force-cancelled in DB (due to timeout or tx failure) */
+  forceCancelled: boolean;
   /** Reset the hook state */
   reset: () => void;
 }
@@ -76,6 +86,8 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
   const [result, setResult] = useState<CancelCloseOrderResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [currentParams, setCurrentParams] = useState<CancelCloseOrderParams | null>(null);
+  const [isTimedOut, setIsTimedOut] = useState(false);
+  const [forceCancelled, setForceCancelled] = useState(false);
 
   // Wagmi write contract hook
   const {
@@ -95,9 +107,35 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     hash: txHash,
   });
 
+  // Force cancel the order in the database (DELETE endpoint)
+  const forceCancel = useCallback(async (orderId: string, positionId: string) => {
+    try {
+      const response = await automationApi.cancelCloseOrder(orderId);
+      setForceCancelled(true);
+      setResult({
+        txHash,
+        order: response.data,
+        forceCancelled: true,
+      });
+
+      // Invalidate caches
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.automation.closeOrders.byPosition(positionId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.automation.closeOrders.lists(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.automation.closeOrders.detail(orderId),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to force cancel order'));
+    }
+  }, [txHash, queryClient]);
+
   // Handle transaction success - notify API
   useEffect(() => {
-    if (!isTxSuccess || !txHash || !currentParams) return;
+    if (!isTxSuccess || !txHash || !currentParams || forceCancelled) return;
 
     const handleSuccess = async () => {
       try {
@@ -135,22 +173,39 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     };
 
     handleSuccess();
-  }, [isTxSuccess, txHash, currentParams, queryClient]);
+  }, [isTxSuccess, txHash, currentParams, queryClient, forceCancelled]);
 
-  // Handle errors
+  // Timeout mechanism - force cancel if tx takes too long
   useEffect(() => {
-    if (writeError) {
-      setError(writeError);
-    } else if (receiptError) {
-      setError(receiptError);
+    // Only start timeout after tx is submitted (we have txHash) and still waiting
+    if (!txHash || isTxSuccess || forceCancelled || !currentParams) return;
+
+    const timeout = setTimeout(() => {
+      console.warn('Transaction timeout reached, force cancelling order in database');
+      setIsTimedOut(true);
+      forceCancel(currentParams.orderId, currentParams.positionId);
+    }, TX_TIMEOUT_MS);
+
+    return () => clearTimeout(timeout);
+  }, [txHash, isTxSuccess, forceCancelled, currentParams, forceCancel]);
+
+  // Handle errors - force cancel on tx failure
+  useEffect(() => {
+    const err = writeError || receiptError;
+    if (err && currentParams && !forceCancelled) {
+      console.error('Transaction failed, force cancelling order in database:', err);
+      setError(err);
+      forceCancel(currentParams.orderId, currentParams.positionId);
     }
-  }, [writeError, receiptError]);
+  }, [writeError, receiptError, currentParams, forceCancelled, forceCancel]);
 
   // Cancel function
   const cancelOrder = useCallback((params: CancelCloseOrderParams) => {
     // Reset state
     setResult(null);
     setError(null);
+    setIsTimedOut(false);
+    setForceCancelled(false);
     setCurrentParams(params);
 
     // Call writeContract with cancelClose function
@@ -169,15 +224,19 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     setResult(null);
     setError(null);
     setCurrentParams(null);
+    setIsTimedOut(false);
+    setForceCancelled(false);
   }, [resetWrite]);
 
   return {
     cancelOrder,
     isCancelling: isWritePending,
     isWaitingForConfirmation,
-    isSuccess: isTxSuccess && result !== null,
+    isSuccess: (isTxSuccess || forceCancelled) && result !== null,
     result,
     error,
+    isTimedOut,
+    forceCancelled,
     reset,
   };
 }

@@ -103,6 +103,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         positionId={position.id}
         chainId={poolConfig.chainId}
         contractAddress={contractAddress}
+        positionOwner={positionState.ownerAddress as Address}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
         baseTokenSymbol={baseToken.symbol}

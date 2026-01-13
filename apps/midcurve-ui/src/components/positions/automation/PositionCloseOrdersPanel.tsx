@@ -8,12 +8,13 @@
  */
 
 import { useState } from 'react';
-import { Plus, AlertCircle, Loader2, Shield } from 'lucide-react';
+import { Plus, AlertCircle, AlertTriangle, Loader2, Shield } from 'lucide-react';
 import type { Address } from 'viem';
+import { useAccount } from 'wagmi';
 import type { SerializedUniswapV3CloseOrderConfig } from '@midcurve/api-shared';
 import { useCloseOrders } from '@/hooks/automation';
 import { useCancelCloseOrder } from '@/hooks/automation';
-import { CloseOrderCard } from './CloseOrderCard';
+import { CloseOrderCard, type WalletIssue } from './CloseOrderCard';
 import { isCloseOrderTerminal } from './CloseOrderStatusBadge';
 import { AutomationLogList } from './AutomationLogList';
 
@@ -33,6 +34,11 @@ interface PositionCloseOrdersPanelProps {
    * Optional - when undefined, shows empty state but allows creating orders
    */
   contractAddress?: Address;
+
+  /**
+   * Position owner address - used to check if connected wallet can cancel orders
+   */
+  positionOwner?: Address;
 
   /**
    * Quote token symbol
@@ -80,6 +86,7 @@ export function PositionCloseOrdersPanel({
   positionId,
   chainId,
   contractAddress,
+  positionOwner,
   quoteTokenSymbol,
   quoteTokenDecimals,
   baseTokenSymbol,
@@ -91,6 +98,30 @@ export function PositionCloseOrdersPanel({
 }: PositionCloseOrdersPanelProps) {
   // Track which order is being cancelled
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+
+  // Wallet connection state
+  const { address: connectedAddress, isConnected, chainId: connectedChainId } = useAccount();
+
+  // Check wallet connection issues for cancel functionality
+  const isWrongNetwork = isConnected && connectedChainId !== chainId;
+  const isWrongAccount = !!(
+    isConnected &&
+    connectedAddress &&
+    positionOwner &&
+    connectedAddress.toLowerCase() !== positionOwner.toLowerCase()
+  );
+
+  // Determine wallet issue for UI feedback
+  const walletIssue: WalletIssue | undefined = !isConnected
+    ? 'not-connected'
+    : isWrongNetwork
+      ? 'wrong-network'
+      : isWrongAccount
+        ? 'wrong-account'
+        : undefined;
+
+  // Can cancel orders only if wallet is properly connected
+  const canCancelOrders = isConnected && !isWrongNetwork && !isWrongAccount;
 
   // Whether contract exists - determines if we can fetch orders
   const hasContract = !!contractAddress;
@@ -108,6 +139,8 @@ export function PositionCloseOrdersPanel({
     isWaitingForConfirmation,
     isSuccess: isCancelSuccess,
     error: cancelError,
+    isTimedOut,
+    forceCancelled,
     reset: resetCancel,
   } = useCancelCloseOrder();
 
@@ -118,18 +151,14 @@ export function PositionCloseOrdersPanel({
   // Has any active (non-terminal) orders
   const hasActiveOrders = activeOrders.length > 0;
 
-  // Handle cancel success
+  // Handle cancel success (including force-cancelled)
   if (isCancelSuccess && cancellingOrderId) {
     setCancellingOrderId(null);
-    resetCancel();
+    // Don't reset if force-cancelled - we want to show the warning
+    if (!forceCancelled) {
+      resetCancel();
+    }
     refetch();
-  }
-
-  // Handle cancel error
-  if (cancelError && cancellingOrderId) {
-    console.error('Failed to cancel order:', cancelError);
-    setCancellingOrderId(null);
-    resetCancel();
   }
 
   const handleCancel = (orderId: string) => {
@@ -153,9 +182,9 @@ export function PositionCloseOrdersPanel({
     });
   };
 
-  // Check if a specific order is being cancelled
+  // Check if a specific order is being cancelled (not if already force-cancelled)
   const isOrderCancelling = (orderId: string) =>
-    orderId === cancellingOrderId && (isCancelling || isWaitingForConfirmation);
+    orderId === cancellingOrderId && (isCancelling || isWaitingForConfirmation) && !forceCancelled;
 
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4 md:p-6">
@@ -175,6 +204,42 @@ export function PositionCloseOrdersPanel({
           </button>
         )}
       </div>
+
+      {/* Warning: Order was force-cancelled due to timeout/failure */}
+      {forceCancelled && (
+        <div className="flex items-start gap-2 p-3 mb-4 bg-amber-900/30 border border-amber-700/50 rounded-lg text-amber-400 text-sm">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span>
+              Order cancelled in system.{' '}
+              {isTimedOut ? 'The transaction timed out - ' : 'The transaction failed - '}
+              if the order is still active on-chain, it will be ignored by automation.
+            </span>
+            <button
+              onClick={resetCancel}
+              className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error: Cancel failed completely */}
+      {cancelError && !forceCancelled && (
+        <div className="flex items-start gap-2 p-3 mb-4 bg-red-900/30 border border-red-700/50 rounded-lg text-red-400 text-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span>Failed to cancel order: {cancelError.message}</span>
+            <button
+              onClick={resetCancel}
+              className="ml-2 text-red-300 hover:text-red-200 underline cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       {isPositionClosed && !hasActiveOrders && terminalOrders.length === 0 ? (
@@ -225,8 +290,9 @@ export function PositionCloseOrdersPanel({
                   baseTokenDecimals={baseTokenDecimals}
                   baseTokenAddress={baseTokenAddress}
                   quoteTokenAddress={quoteTokenAddress}
-                  onCancel={handleCancel}
+                  onCancel={canCancelOrders ? handleCancel : undefined}
                   isCancelling={isOrderCancelling(order.id)}
+                  walletIssue={walletIssue}
                 />
               ))}
             </div>
