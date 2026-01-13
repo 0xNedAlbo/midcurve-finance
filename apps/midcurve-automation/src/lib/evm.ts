@@ -627,6 +627,7 @@ const POSITION_CLOSER_ABI = [
           { internalType: 'bytes', name: 'swapCalldata', type: 'bytes' },
           { internalType: 'uint256', name: 'deadline', type: 'uint256' },
           { internalType: 'uint256', name: 'minAmountOut', type: 'uint256' },
+          { internalType: 'uint256', name: 'balanceOffset', type: 'uint256' },
         ],
       },
     ],
@@ -674,6 +675,7 @@ const EMPTY_SWAP_PARAMS = {
   swapCalldata: '0x' as `0x${string}`,
   deadline: 0n,
   minAmountOut: 0n,
+  balanceOffset: 0n,
 } as const;
 
 /**
@@ -684,6 +686,7 @@ export interface SimulationSwapParams {
   swapCalldata: `0x${string}`;
   deadline: bigint;
   minAmountOut: bigint;
+  balanceOffset: bigint;
 }
 
 /**
@@ -726,21 +729,34 @@ export async function simulateExecuteClose(
   } catch (error) {
     const err = error as Error & { data?: unknown; cause?: { data?: unknown } };
 
-    // Extract revert data - handle various formats from viem errors
-    let revertData: unknown = err.data || err.cause?.data;
+    // First, try to extract the reason from viem's error message
+    // viem formats it as: "reverted with the following reason:\n<REASON>\n"
+    let decodedError: string | undefined;
 
-    // Try to extract from error message if no direct data
-    if (!revertData && err.message) {
-      const match = err.message.match(/0x[a-fA-F0-9]+/);
-      if (match && match[0].length >= 10) {
-        revertData = match[0];
+    if (err.message) {
+      const reasonMatch = err.message.match(/reverted with the following reason:\s*\n([^\n]+)/);
+      if (reasonMatch && reasonMatch[1]) {
+        decodedError = reasonMatch[1].trim();
       }
     }
 
-    // decodeRevertReason now handles unknown types gracefully
-    const decodedError = revertData
-      ? decodeRevertReason(revertData)
-      : err.message;
+    // If viem didn't decode it, try to extract raw revert data
+    if (!decodedError) {
+      let revertData: unknown = err.data || err.cause?.data;
+
+      // Try to extract hex data from error message if no direct data
+      if (!revertData && err.message) {
+        const match = err.message.match(/0x[a-fA-F0-9]+/);
+        if (match && match[0].length >= 10) {
+          revertData = match[0];
+        }
+      }
+
+      // decodeRevertReason handles unknown types gracefully
+      decodedError = revertData
+        ? decodeRevertReason(revertData)
+        : err.message;
+    }
 
     return {
       success: false,

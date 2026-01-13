@@ -150,6 +150,7 @@ interface IUniswapV3PositionCloser {
         bytes swapCalldata;        // Fresh calldata from Paraswap API
         uint256 deadline;          // Swap deadline (0 = no deadline)
         uint256 minAmountOut;      // Minimum output amount (slippage protection)
+        uint256 balanceOffset;     // Byte offset in calldata to patch with actual balance
     }
 
     /// @notice Internal struct to hold swap execution context (avoids stack-too-deep)
@@ -836,8 +837,8 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
             return (amount0, amount1);
         }
 
-        // 4) Execute swap and get output
-        uint256 amountOut = _performSwap(ctx, params.swapCalldata);
+        // 4) Execute swap and get output (patching calldata with actual balance)
+        uint256 amountOut = _performSwap(ctx, params.swapCalldata, params.balanceOffset);
 
         // 5) Emit swap event
         emit SwapExecuted(closeId, ctx.tokenIn, ctx.tokenOut, ctx.amountIn, amountOut);
@@ -886,16 +887,34 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
 
     /**
      * @dev Perform the actual swap via Augustus
+     * @param ctx Swap context with token addresses and amounts
+     * @param swapCalldata Fresh calldata from Paraswap API
+     * @param balanceOffset Byte offset in calldata where srcAmount is located (0 = no patching)
      */
     function _performSwap(
         SwapContext memory ctx,
-        bytes calldata swapCalldata
+        bytes calldata swapCalldata,
+        uint256 balanceOffset
     ) internal returns (uint256 amountOut) {
-        // Approve exact amount
-        _safeErc20Approve(ctx.tokenIn, ctx.spender, ctx.amountIn);
+        // Get actual balance of tokenIn (may differ from pre-calculated amount)
+        uint256 actualBalance = IERC20Minimal(ctx.tokenIn).balanceOf(address(this));
 
-        // Execute swap via Augustus
-        (bool success, bytes memory returnData) = ctx.augustus.call(swapCalldata);
+        // Approve actual balance (not pre-calculated amount)
+        _safeErc20Approve(ctx.tokenIn, ctx.spender, actualBalance);
+
+        // Copy calldata to memory and patch srcAmount with actual balance if offset provided
+        bytes memory patchedCalldata = swapCalldata;
+        if (balanceOffset > 0 && balanceOffset + 32 <= patchedCalldata.length) {
+            assembly {
+                // In memory, bytes has 32-byte length prefix
+                // balanceOffset is relative to calldata start (after 4-byte selector)
+                let ptr := add(add(patchedCalldata, 32), balanceOffset)
+                mstore(ptr, actualBalance)
+            }
+        }
+
+        // Execute swap via Augustus with patched calldata
+        (bool success, bytes memory returnData) = ctx.augustus.call(patchedCalldata);
         if (!success) {
             if (returnData.length > 0) {
                 assembly {

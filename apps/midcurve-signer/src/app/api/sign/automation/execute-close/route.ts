@@ -33,7 +33,8 @@
  *       augustus: string (swap contract address),
  *       swapCalldata: string (hex-encoded calldata),
  *       deadline: number (unix timestamp or 0),
- *       minAmountOut: string (minimum output amount for slippage protection)
+ *       minAmountOut: string (minimum output amount for slippage protection),
+ *       balanceOffset: number (byte offset to patch with actual balance)
  *     }
  *   }
  *
@@ -79,6 +80,7 @@ const SwapParamsSchema = z.object({
   swapCalldata: z.string().regex(/^0x[a-fA-F0-9]*$/, 'Invalid swap calldata'),
   deadline: z.number().int().nonnegative('deadline must be non-negative'),
   minAmountOut: z.string().regex(/^\d+$/, 'minAmountOut must be numeric string'),
+  balanceOffset: z.number().int().nonnegative('balanceOffset must be non-negative'),
 });
 
 const SignExecuteCloseSchema = z.object({
@@ -171,6 +173,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
             swapCalldata: swapParams.swapCalldata as `0x${string}`,
             deadline: swapParams.deadline,
             minAmountOut: swapParams.minAmountOut,
+            balanceOffset: swapParams.balanceOffset,
           }
         : undefined,
     });

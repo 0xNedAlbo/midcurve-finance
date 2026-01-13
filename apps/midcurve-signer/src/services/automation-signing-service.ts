@@ -49,6 +49,7 @@ export interface SwapParams {
   swapCalldata: Hex;
   deadline: number;
   minAmountOut: string; // Minimum output amount (slippage protection)
+  balanceOffset: number; // Byte offset in calldata to patch with actual balance
 }
 
 /**
@@ -122,6 +123,7 @@ const POSITION_CLOSER_ABI = [
           { name: 'swapCalldata', type: 'bytes' },
           { name: 'deadline', type: 'uint256' },
           { name: 'minAmountOut', type: 'uint256' },
+          { name: 'balanceOffset', type: 'uint256' },
         ],
       },
     ],
@@ -139,6 +141,7 @@ const EMPTY_SWAP_PARAMS = {
   swapCalldata: '0x' as Hex,
   deadline: 0n,
   minAmountOut: 0n,
+  balanceOffset: 0n,
 } as const;
 
 // =============================================================================
@@ -175,6 +178,7 @@ class AutomationSigningServiceImpl {
           swapCalldata: swapParams.swapCalldata,
           deadline: BigInt(swapParams.deadline),
           minAmountOut: BigInt(swapParams.minAmountOut),
+          balanceOffset: BigInt(swapParams.balanceOffset),
         }
       : EMPTY_SWAP_PARAMS;
 

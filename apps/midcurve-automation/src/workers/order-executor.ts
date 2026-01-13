@@ -542,6 +542,10 @@ export class OrderExecutor {
             swapAmount = position.isToken0Quote ? totalAmount0 : totalAmount1;
           }
 
+          // Note: We use the calculated amount for Paraswap routing optimization,
+          // but the contract will patch the calldata with actual balance at execution time
+          // using swapAllBalanceOffset. This ensures we swap exactly what we have.
+
           log.info({
             orderId,
             positionId,
@@ -549,8 +553,8 @@ export class OrderExecutor {
             totalAmount0: totalAmount0.toString(),
             totalAmount1: totalAmount1.toString(),
             swapDirection,
-            swapAmount: swapAmount.toString(),
-            msg: 'Calculated expected swap amount from position data',
+            estimatedSwapAmount: swapAmount.toString(),
+            msg: 'Calculated estimated swap amount for Paraswap routing (contract will use actual balance)',
           });
         } else {
           // Hard error - cannot proceed without position data for swap amount calculation
@@ -578,8 +582,27 @@ export class OrderExecutor {
             augustusAddress: swapParams.augustusAddress,
             srcToken: swapParams.srcToken,
             destToken: swapParams.destToken,
+            swapAllBalanceOffset: swapParams.swapAllBalanceOffset,
             msg: 'Paraswap swap params obtained',
           });
+
+          // Validate swapAllBalanceOffset is available
+          // Not all swap pairs support this - Paraswap may return null, omit the field, or return 0
+          // Without it, we cannot patch the calldata with the actual balance
+          if (!swapParams.swapAllBalanceOffset || swapParams.swapAllBalanceOffset === 0) {
+            log.error({
+              orderId,
+              positionId,
+              srcToken: swapParams.srcToken,
+              destToken: swapParams.destToken,
+              swapAllBalanceOffset: swapParams.swapAllBalanceOffset,
+              msg: 'Paraswap route does not support swapAllBalanceOffset - cannot patch calldata with actual balance',
+            });
+            throw new Error(
+              `Swap route does not support balance patching (swapAllBalanceOffset=${swapParams.swapAllBalanceOffset}). ` +
+                `This swap pair may require a different routing strategy.`
+            );
+          }
         } catch (swapErr) {
           log.error({
             orderId,
@@ -600,6 +623,7 @@ export class OrderExecutor {
           swapCalldata: swapParams.swapCalldata as `0x${string}`,
           deadline: 0n,
           minAmountOut: BigInt(swapParams.minDestAmount),
+          balanceOffset: BigInt(swapParams.swapAllBalanceOffset),
         }
       : undefined;
 
@@ -732,6 +756,7 @@ export class OrderExecutor {
             swapCalldata: swapParams.swapCalldata,
             deadline: 0, // No deadline by default
             minAmountOut: swapParams.minDestAmount,
+            balanceOffset: swapParams.swapAllBalanceOffset,
           }
         : undefined,
     });

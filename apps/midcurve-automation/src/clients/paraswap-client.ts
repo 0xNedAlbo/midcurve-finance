@@ -90,6 +90,8 @@ export interface ParaswapTransactionData {
   data: Hex;
   gasPrice: string;
   chainId: number;
+  /** Byte offset in data where srcAmount is located (for patching with actual balance) */
+  swapAllBalanceOffset?: number;
 }
 
 /**
@@ -104,6 +106,8 @@ export interface ParaswapSwapParams {
   srcAmount: string;
   destAmount: string;
   minDestAmount: string;
+  /** Byte offset in swapCalldata where srcAmount is located (for patching with actual balance) */
+  swapAllBalanceOffset: number;
 }
 
 // =============================================================================
@@ -318,6 +322,7 @@ class ParaswapClient {
       srcAmount: quote.srcAmount,
       destAmount: quote.destAmount,
       minDestAmount: quote.minDestAmount,
+      swapAllBalanceOffset: txData.swapAllBalanceOffset || 0,
     };
   }
 }
