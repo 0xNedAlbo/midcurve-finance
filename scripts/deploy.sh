@@ -67,8 +67,10 @@ check_env_file() {
     log_info "Using environment file: $ENV_FILE"
 
     # Export variables to suppress Docker Compose warnings
-    # shellcheck disable=SC2046
-    export $(grep -v '^#' "$ENV_FILE" | grep -v '^$' | xargs) 2>/dev/null || true
+    # shellcheck disable=SC1090
+    set -a  # Auto-export all variables
+    source "$ENV_FILE"
+    set +a  # Disable auto-export
 }
 
 check_docker() {
