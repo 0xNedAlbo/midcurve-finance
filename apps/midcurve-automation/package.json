@@ -29,6 +29,8 @@
     "local:setup": "tsx scripts/local-fork/setup.ts"
   },
   "dependencies": {
+    "@midcurve/database": "workspace:^",
+    "@midcurve/services": "workspace:^",
     "@midcurve/shared": "workspace:^",
     "amqplib": "^0.10.7",
     "@types/node": "^20",
