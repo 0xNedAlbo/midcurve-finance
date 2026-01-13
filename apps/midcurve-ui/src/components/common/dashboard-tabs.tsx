@@ -22,6 +22,7 @@ export function DashboardTabs({ activeTab, onTabChange }: DashboardTabsProps) {
       >
         Positions
       </button>
+      {/* TODO: Re-enable Strategies tab when strategy feature is ready
       <button
         onClick={() => onTabChange('strategies')}
         className={`px-4 py-3 font-medium transition-colors cursor-pointer ${
@@ -32,6 +33,7 @@ export function DashboardTabs({ activeTab, onTabChange }: DashboardTabsProps) {
       >
         Strategies
       </button>
+      */}
     </div>
   );
 }
