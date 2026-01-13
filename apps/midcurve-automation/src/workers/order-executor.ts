@@ -17,6 +17,7 @@ import {
   checkContractTokenBalances,
   getOnChainNonce,
   getOnChainCloseOrder,
+  readPoolPrice,
   type SupportedChainId,
   type PreflightValidation,
 } from '../lib/evm';
@@ -518,13 +519,26 @@ export class OrderExecutor {
         let swapAmount: bigint;
 
         if (nftId && preflight?.positionData) {
-          // Use _currentPrice (sqrtPriceX96) passed to executeOrder
-          const sqrtPriceX96 = BigInt(_currentPrice);
+          // Fetch FRESH pool price at execution time for accurate amount calculation
+          // The trigger price (_currentPrice) can be stale by seconds/minutes due to queue latency
+          const { sqrtPriceX96: freshPoolPrice } = await readPoolPrice(
+            chainId as SupportedChainId,
+            poolAddress as `0x${string}`
+          );
 
-          // Calculate expected token amounts from liquidity
+          log.info({
+            orderId,
+            positionId,
+            triggerPrice: _currentPrice,
+            freshPrice: freshPoolPrice.toString(),
+            priceDelta: (freshPoolPrice - BigInt(_currentPrice)).toString(),
+            msg: 'Using fresh pool price for swap calculation (trigger price may be stale)',
+          });
+
+          // Calculate expected token amounts from liquidity using FRESH price
           const expectedAmounts = getTokenAmountsFromLiquidity(
             preflight.positionData.liquidity,
-            sqrtPriceX96,
+            freshPoolPrice,
             preflight.positionData.tickLower,
             preflight.positionData.tickUpper
           );
@@ -542,9 +556,9 @@ export class OrderExecutor {
             swapAmount = position.isToken0Quote ? totalAmount0 : totalAmount1;
           }
 
-          // Note: We use the calculated amount for Paraswap routing optimization,
-          // but the contract will patch the calldata with actual balance at execution time
-          // using swapAllBalanceOffset. This ensures we swap exactly what we have.
+          // Note: We use fresh pool price to calculate accurate swap amounts.
+          // This ensures the Paraswap calldata matches the actual amounts returned by
+          // decreaseLiquidity + collect, avoiding "transfer amount exceeds balance" errors.
 
           log.info({
             orderId,
@@ -554,7 +568,7 @@ export class OrderExecutor {
             totalAmount1: totalAmount1.toString(),
             swapDirection,
             estimatedSwapAmount: swapAmount.toString(),
-            msg: 'Calculated estimated swap amount for Paraswap routing (contract will use actual balance)',
+            msg: 'Calculated swap amount using fresh pool price',
           });
         } else {
           // Hard error - cannot proceed without position data for swap amount calculation
@@ -585,24 +599,6 @@ export class OrderExecutor {
             swapAllBalanceOffset: swapParams.swapAllBalanceOffset,
             msg: 'Paraswap swap params obtained',
           });
-
-          // Validate swapAllBalanceOffset is available
-          // Not all swap pairs support this - Paraswap may return null, omit the field, or return 0
-          // Without it, we cannot patch the calldata with the actual balance
-          if (!swapParams.swapAllBalanceOffset || swapParams.swapAllBalanceOffset === 0) {
-            log.error({
-              orderId,
-              positionId,
-              srcToken: swapParams.srcToken,
-              destToken: swapParams.destToken,
-              swapAllBalanceOffset: swapParams.swapAllBalanceOffset,
-              msg: 'Paraswap route does not support swapAllBalanceOffset - cannot patch calldata with actual balance',
-            });
-            throw new Error(
-              `Swap route does not support balance patching (swapAllBalanceOffset=${swapParams.swapAllBalanceOffset}). ` +
-                `This swap pair may require a different routing strategy.`
-            );
-          }
         } catch (swapErr) {
           log.error({
             orderId,

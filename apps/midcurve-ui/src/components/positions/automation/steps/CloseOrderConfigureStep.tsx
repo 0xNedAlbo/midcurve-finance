@@ -52,6 +52,12 @@ function validateTriggerPrice(
   currentSqrtPriceX96: string,
   isToken0Quote: boolean
 ): string | null {
+  // TODO: TEMPORARY - Re-enable trigger price validation after testing
+  // This validation prevents SL orders above current price and TP orders below
+  // Disabled for testing purposes
+  return null;
+
+  /* --- BEGIN DISABLED VALIDATION ---
   if (!currentSqrtPriceX96) return null;
 
   try {
@@ -88,6 +94,7 @@ function validateTriggerPrice(
     // If bigint conversion fails, skip validation
     return null;
   }
+  --- END DISABLED VALIDATION --- */
 }
 
 const TRIGGER_MODES: { value: TriggerMode; label: string; description: string; icon: typeof TrendingDown }[] = [

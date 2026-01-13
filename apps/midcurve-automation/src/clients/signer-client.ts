@@ -204,8 +204,9 @@ class SignerClient {
 
     try {
       // Get current gas price and estimate gas
+      // Add buffers to both: 20% for gasLimit, 20% for gasPrice (Arbitrum base fee can fluctuate)
       [gasPrice, gasLimit] = await Promise.all([
-        publicClient.getGasPrice(),
+        publicClient.getGasPrice().then((price) => (price * 120n) / 100n), // 20% buffer for base fee fluctuation
         publicClient.estimateGas({
           account: operatorAddress as Address,
           to: contractAddress as Address,
@@ -221,8 +222,8 @@ class SignerClient {
         error: error instanceof Error ? error.message : 'Unknown error',
         msg: 'Gas estimation failed, using fallback values',
       });
-      // Fallback values if estimation fails
-      gasPrice = await publicClient.getGasPrice();
+      // Fallback values if estimation fails (with 20% buffer on gas price)
+      gasPrice = await publicClient.getGasPrice().then((price) => (price * 120n) / 100n);
       gasLimit = 500_000n;
     }
 
