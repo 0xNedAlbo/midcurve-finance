@@ -596,7 +596,6 @@ export class OrderExecutor {
             augustusAddress: swapParams.augustusAddress,
             srcToken: swapParams.srcToken,
             destToken: swapParams.destToken,
-            swapAllBalanceOffset: swapParams.swapAllBalanceOffset,
             msg: 'Paraswap swap params obtained',
           });
         } catch (swapErr) {
@@ -619,7 +618,6 @@ export class OrderExecutor {
           swapCalldata: swapParams.swapCalldata as `0x${string}`,
           deadline: 0n,
           minAmountOut: BigInt(swapParams.minDestAmount),
-          balanceOffset: BigInt(swapParams.swapAllBalanceOffset),
         }
       : undefined;
 
@@ -752,7 +750,6 @@ export class OrderExecutor {
             swapCalldata: swapParams.swapCalldata,
             deadline: 0, // No deadline by default
             minAmountOut: swapParams.minDestAmount,
-            balanceOffset: swapParams.swapAllBalanceOffset,
           }
         : undefined,
     });

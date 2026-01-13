@@ -39,7 +39,6 @@ export interface SwapParamsInput {
   swapCalldata: string;   // Hex-encoded calldata
   deadline: number;       // Unix timestamp or 0 for no deadline
   minAmountOut: string;   // Minimum output amount (slippage protection)
-  balanceOffset: number;  // Byte offset in calldata to patch with actual balance
 }
 
 export interface ExecuteCloseParams {
@@ -77,7 +76,6 @@ const POSITION_CLOSER_ABI = [
           { name: 'swapCalldata', type: 'bytes' },
           { name: 'deadline', type: 'uint256' },
           { name: 'minAmountOut', type: 'uint256' },
-          { name: 'balanceOffset', type: 'uint256' },
         ],
       },
     ],
@@ -92,7 +90,6 @@ const EMPTY_SWAP_PARAMS = {
   swapCalldata: '0x' as `0x${string}`,
   deadline: 0n,
   minAmountOut: 0n,
-  balanceOffset: 0n,
 } as const;
 
 // =============================================================================
@@ -189,7 +186,6 @@ class SignerClient {
           swapCalldata: swapParams.swapCalldata as `0x${string}`,
           deadline: BigInt(swapParams.deadline),
           minAmountOut: BigInt(swapParams.minAmountOut),
-          balanceOffset: BigInt(swapParams.balanceOffset),
         }
       : EMPTY_SWAP_PARAMS;
 

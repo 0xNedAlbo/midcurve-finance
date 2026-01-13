@@ -627,7 +627,6 @@ const POSITION_CLOSER_ABI = [
           { internalType: 'bytes', name: 'swapCalldata', type: 'bytes' },
           { internalType: 'uint256', name: 'deadline', type: 'uint256' },
           { internalType: 'uint256', name: 'minAmountOut', type: 'uint256' },
-          { internalType: 'uint256', name: 'balanceOffset', type: 'uint256' },
         ],
       },
     ],
@@ -675,7 +674,6 @@ const EMPTY_SWAP_PARAMS = {
   swapCalldata: '0x' as `0x${string}`,
   deadline: 0n,
   minAmountOut: 0n,
-  balanceOffset: 0n,
 } as const;
 
 /**
@@ -686,7 +684,6 @@ export interface SimulationSwapParams {
   swapCalldata: `0x${string}`;
   deadline: bigint;
   minAmountOut: bigint;
-  balanceOffset: bigint;
 }
 
 /**
