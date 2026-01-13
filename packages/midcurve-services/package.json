@@ -53,6 +53,7 @@
   "author": "Midcurve Finance",
   "license": "MIT",
   "devDependencies": {
+    "@types/amqplib": "^0.10.7",
     "@types/node": "^20.10.0",
     "dotenv-cli": "^10.0.0",
     "tsx": "^4.20.6",
