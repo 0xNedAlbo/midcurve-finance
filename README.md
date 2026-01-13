@@ -32,6 +32,7 @@ Midcurve Finance enables liquidity providers to monitor, analyze, and optimize t
 │  Backend Services:                                      │
 │  ├── midcurve-api (Next.js REST API) - port 3001       │
 │  ├── midcurve-evm (Strategy orchestrator) - port 3002  │
+│  ├── midcurve-automation (Price monitoring) - port 3004│
 │  ├── midcurve-signer (Signing service) - port 3003     │
 │  ├── geth (Private EVM node) - port 8545               │
 │  └── rabbitmq (Message broker) - port 5672             │
@@ -71,6 +72,7 @@ midcurve-finance/
 │   ├── midcurve-ui/          # Vite SPA (React frontend)
 │   ├── midcurve-api/         # Next.js REST API backend
 │   ├── midcurve-evm/         # EVM strategy engine + Geth node
+│   ├── midcurve-automation/  # Price monitoring & order execution
 │   └── midcurve-signer/      # Transaction signing service
 ├── packages/
 │   ├── midcurve-shared/      # Domain types & utilities
@@ -92,8 +94,9 @@ midcurve-finance/
 |-----|-------------|------|------------|
 | **midcurve-ui** | Frontend SPA with wallet connection | 3000 | Vite, React 19, React Router, nginx |
 | **midcurve-api** | REST API server with session-based authentication | 3001 | Next.js 15, Prisma |
-| **midcurve-evm** | EVM strategy orchestrator with private Geth node | 3002 | Node.js, RabbitMQ, Geth |
-| **midcurve-signer** | Transaction signing service | 3003 | Node.js |
+| **midcurve-evm** | EVM strategy orchestrator with private Geth node | 3002 | Next.js 15, RabbitMQ, Geth |
+| **midcurve-automation** | Price monitoring & close order execution | 3004 | Next.js 15, RabbitMQ, Foundry |
+| **midcurve-signer** | Transaction signing service | 3003 | Next.js 15 |
 
 ### Packages
 
@@ -108,9 +111,9 @@ midcurve-finance/
 
 ### Prerequisites
 
-- **Node.js** 18+ ([download](https://nodejs.org/))
+- **Node.js** 20.19.x ([download](https://nodejs.org/))
 - **PostgreSQL** 14+ ([download](https://www.postgresql.org/download/))
-- **pnpm** 8+ (`npm install -g pnpm`)
+- **pnpm** 9.12.0 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 
 ### Installation
 

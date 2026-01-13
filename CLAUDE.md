@@ -50,16 +50,18 @@ The platform runs as a **multi-service Docker Compose stack** with separate fron
 │  │  └───────────┬─────────────┘  └───────────┬─────────────┘       │
 │  │              │                            │                       │
 │  │  ┌───────────▼─────────────┐  ┌───────────▼─────────────┐       │
-│  │  │   midcurve-signer       │  │   geth                  │       │
-│  │  │   Port 3003             │  │   Ports 8545/8546       │       │
-│  │  │   Transaction Signing   │  │   Private EVM Node      │       │
-│  │  │   Key Management        │  │   Clique PoA            │       │
+│  │  │   midcurve-automation   │  │   midcurve-signer       │       │
+│  │  │   Port 3004             │  │   Port 3003             │       │
+│  │  │   Price Monitoring      │  │   Transaction Signing   │       │
+│  │  │   Order Execution       │  │   Key Management        │       │
 │  │  └─────────────────────────┘  └─────────────────────────┘       │
 │  │                                                                   │
-│  │  ┌─────────────────────────┐                                     │
-│  │  │   rabbitmq              │  Message broker for                 │
-│  │  │   Port 5672             │  strategy orchestration             │
-│  │  └─────────────────────────┘                                     │
+│  │  ┌─────────────────────────┐  ┌─────────────────────────┐       │
+│  │  │   geth                  │  │   rabbitmq              │       │
+│  │  │   Ports 8545/8546       │  │   Port 5672             │       │
+│  │  │   Private EVM Node      │  │   Message broker        │       │
+│  │  │   Clique PoA            │  │   RabbitMQ 3.13         │       │
+│  │  └─────────────────────────┘  └─────────────────────────┘       │
 │  │                                                                   │
 │  EXTERNAL ──────────────────────────────────────────────────────    │
 │  │                                                                   │
@@ -86,6 +88,7 @@ midcurve-finance/
 │   ├── midcurve-ui/          # Vite SPA - React frontend
 │   ├── midcurve-api/         # Next.js REST API backend
 │   ├── midcurve-evm/         # Strategy orchestrator + Geth node
+│   ├── midcurve-automation/  # Price monitoring & order execution
 │   └── midcurve-signer/      # Transaction signing service
 ├── packages/
 │   ├── midcurve-shared/      # @midcurve/shared - Domain types & utilities
@@ -465,18 +468,58 @@ midcurve-signer/
 
 ---
 
+### @midcurve/automation - Price Monitoring & Order Execution
+
+**Location:** `apps/midcurve-automation/`
+
+**Purpose:** Automated position management for Uniswap V3 positions. Monitors pool prices and executes close orders when user-defined trigger conditions are met.
+
+**Technology:**
+- **Next.js 15** - API server with standalone output
+- **Foundry** - Smart contract development (Solidity 0.8.20)
+- **RabbitMQ** - Event-driven order processing
+- **Paraswap** - DEX aggregator for token swaps
+
+**Components:**
+- **Price Monitor Worker** - Polls pools (10s default), detects trigger conditions
+- **Order Executor Worker** - Consumes RabbitMQ messages, executes close orders
+- **UniswapV3PositionCloser.sol** - Smart contract for atomic position closing
+
+**Key Characteristics:**
+- ✅ **Event-driven** - RabbitMQ for async processing
+- ✅ **Atomic execution** - Smart contract closes position in one tx
+- ✅ **Slippage protection** - Configurable minimum amounts
+- ✅ **Multi-chain** - Deployed on all supported EVM chains
+
+**Directory Structure:**
+```
+midcurve-automation/
+├── src/
+│   ├── app/api/              # Health check, worker status endpoints
+│   ├── workers/              # Price monitor, order executor
+│   ├── clients/              # Paraswap, signer, tx broadcaster
+│   └── mq/                   # RabbitMQ connection management
+├── contracts/                # Solidity contracts
+│   └── UniswapV3PositionCloser.sol
+├── Dockerfile
+└── foundry.toml              # Foundry configuration
+```
+
+---
+
 ## Technology Stack
 
 ### Languages & Runtimes
 - **TypeScript 5.3+** - Strict mode, ESM modules
-- **Node.js 20+** - Server-side runtime
-- **Solidity** - Smart contracts (strategy vaults)
+- **Node.js 20.19.x** - Server-side runtime
+- **Solidity 0.8.20** - Smart contracts (strategy vaults, position closer)
 
 ### Build Tools
 - **Vite** - Frontend build tool (midcurve-ui)
-- **Next.js 15** - Backend API framework (api, evm, signer)
+- **Next.js 15** - Backend API framework (api, evm, automation, signer)
 - **Turborepo** - Monorepo build orchestration
-- **pnpm 9.12+** - Package manager
+- **pnpm 9.12.0** - Package manager
+- **Foundry** - Smart contract development (midcurve-automation)
 
 ### Frontend
 - **React 19** - UI framework
@@ -498,7 +541,7 @@ midcurve-signer/
 - **Caddy** - Reverse proxy with auto SSL
 - **nginx** - Static file serving (UI)
 - **PostgreSQL** - Primary database (AWS RDS)
-- **RabbitMQ** - Message broker for strategy orchestration
+- **RabbitMQ 3.13** - Message broker for strategy orchestration
 - **Geth** - Private EVM node (Clique PoA)
 
 ### Testing

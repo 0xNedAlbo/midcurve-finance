@@ -20,12 +20,12 @@
 
 ## Overview
 
-**@midcurve/ui** is the frontend application for Midcurve Finance, built with Next.js 15 and React 19. It provides a modern, type-safe interface for monitoring and managing concentrated liquidity positions across multiple DEX protocols.
+**@midcurve/ui** is the frontend application for Midcurve Finance, built with Vite 6.0 and React 19. It provides a modern, type-safe interface for monitoring and managing concentrated liquidity positions across multiple DEX protocols.
 
 **Key Design Decisions:**
 - **English-only** (no i18n complexity)
 - **No global state store** (no Zustand - uses TanStack Query + React Context)
-- **Server-first architecture** (leverages Next.js App Router and server components)
+- **SPA architecture** (Vite for fast development, nginx for production serving)
 - **Type-safe** (strict TypeScript with full coverage)
 - **Glassmorphism design** (modern UI with backdrop blur effects)
 - **OKLCH colors** (perceptually uniform color space)
@@ -36,12 +36,12 @@
 
 ### Framework & Runtime
 
-**Next.js 15.5.2**
-- App Router (file-based routing)
-- Server components by default
-- API routes for backend proxying
+**Vite 6.0.5**
+- Fast HMR (Hot Module Replacement)
+- ESBuild for development
+- Rollup for production builds
 - Automatic code splitting
-- Image optimization
+- Environment variable handling (VITE_* prefix)
 
 **React 19.1.0**
 - Server components
@@ -1250,7 +1250,7 @@ export function usePools(chainId?: number) {
 ## Summary
 
 **@midcurve/ui** is a modern, type-safe frontend application built with:
-- **Next.js 15 + React 19** for cutting-edge performance
+- **Vite 6 + React 19** for cutting-edge performance
 - **TanStack Query** for intelligent server state management
 - **Wagmi + RainbowKit** for best-in-class Web3 integration
 - **Tailwind CSS 4** with OKLCH colors for beautiful, maintainable styling
