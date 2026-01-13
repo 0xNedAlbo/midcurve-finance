@@ -62,6 +62,10 @@ yalc.lock
 temp/
 
 # Foundry
-lib/
-cache/
-broadcast/
+/lib/
+apps/midcurve-automation/lib/
+apps/midcurve-automation/cache/
+apps/midcurve-automation/broadcast/
+apps/midcurve-evm/contracts/lib/
+apps/midcurve-evm/contracts/cache/
+apps/midcurve-evm/contracts/broadcast/
