@@ -2,16 +2,15 @@
  * useCancelCloseOrder - Cancel a close order via user's wallet
  *
  * This hook uses Wagmi to have the user sign the cancelClose transaction
- * directly with their connected wallet. After confirmation, it notifies
- * the API to update the order status.
+ * directly with their connected wallet. After confirmation, it updates
+ * the order status in the database.
  *
  * Flow:
  * 1. User calls cancelOrder()
  * 2. User signs cancelClose() tx in their wallet (Wagmi)
- * 3. Wait for tx confirmation (with timeout)
- * 4. On success: Notify API: POST /api/v1/automation/close-orders/[id]/cancelled
- * 5. On failure/timeout: Force cancel via DELETE /api/v1/automation/close-orders/[id]
- * 6. Invalidate cache and return success
+ * 3. Wait for tx confirmation (with 60s timeout)
+ * 4. On success/failure/timeout: Cancel via DELETE /api/v1/automation/close-orders/[id]
+ * 5. Invalidate cache and return success
  */
 
 /** Timeout for waiting on transaction confirmation (60 seconds) */
@@ -133,29 +132,19 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     }
   }, [txHash, queryClient]);
 
-  // Handle transaction success - notify API
+  // Handle transaction success - update order status in database
   useEffect(() => {
     if (!isTxSuccess || !txHash || !currentParams || forceCancelled) return;
 
     const handleSuccess = async () => {
       try {
-        // Notify API about the cancellation
-        try {
-          const response = await automationApi.notifyOrderCancelled(currentParams.orderId, {
-            txHash,
-          });
+        // Cancel the order in the database via DELETE endpoint
+        const response = await automationApi.cancelCloseOrder(currentParams.orderId);
 
-          setResult({
-            txHash,
-            order: response.data,
-          });
-        } catch (apiError) {
-          // Even if API notification fails, the on-chain tx succeeded
-          console.error('Failed to notify API of order cancellation:', apiError);
-          setResult({
-            txHash,
-          });
-        }
+        setResult({
+          txHash,
+          order: response.data,
+        });
 
         // Invalidate caches
         queryClient.invalidateQueries({
@@ -168,7 +157,11 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
           queryKey: queryKeys.automation.closeOrders.detail(currentParams.orderId),
         });
       } catch (err) {
-        setError(err instanceof Error ? err : new Error('Unknown error'));
+        // Even if DB update fails, the on-chain tx succeeded
+        console.error('Failed to update order status in database:', err);
+        setResult({
+          txHash,
+        });
       }
     };
 
