@@ -46,11 +46,11 @@ interface CloseOrderConfigureStepProps {
  * - When isToken0Quote=true: Higher sqrtPriceX96 = LOWER user price (inverted)
  */
 function validateTriggerPrice(
-  triggerMode: TriggerMode,
-  sqrtPriceX96Lower: string | undefined,
-  sqrtPriceX96Upper: string | undefined,
-  currentSqrtPriceX96: string,
-  isToken0Quote: boolean
+  _triggerMode: TriggerMode,
+  _sqrtPriceX96Lower: string | undefined,
+  _sqrtPriceX96Upper: string | undefined,
+  _currentSqrtPriceX96: string,
+  _isToken0Quote: boolean
 ): string | null {
   // TODO: TEMPORARY - Re-enable trigger price validation after testing
   // This validation prevents SL orders above current price and TP orders below
