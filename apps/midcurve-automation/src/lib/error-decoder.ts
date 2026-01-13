@@ -66,13 +66,34 @@ const PANIC_CODES: Record<string, string> = {
  * @param revertData - The raw revert data from the transaction
  * @returns Human-readable error description
  */
-export function decodeRevertReason(revertData: Hex | string): string {
+export function decodeRevertReason(revertData: Hex | string | unknown): string {
   // Handle empty or invalid data
-  if (!revertData || revertData === '0x' || revertData.length < 10) {
+  if (!revertData) {
     return 'Unknown error (no revert data)';
   }
 
-  const data = revertData as Hex;
+  // Ensure revertData is a string - handle object cases
+  let data: Hex;
+  if (typeof revertData === 'string') {
+    data = revertData as Hex;
+  } else if (typeof revertData === 'object' && revertData !== null) {
+    // Some RPC errors return data as an object with a data property
+    const obj = revertData as Record<string, unknown>;
+    if (typeof obj.data === 'string') {
+      data = obj.data as Hex;
+    } else {
+      log.debug({ revertData, type: typeof revertData }, 'Unexpected revert data format');
+      return `Unknown error (unexpected data format: ${typeof revertData})`;
+    }
+  } else {
+    log.debug({ revertData, type: typeof revertData }, 'Unexpected revert data type');
+    return `Unknown error (unexpected data type: ${typeof revertData})`;
+  }
+
+  if (data === '0x' || data.length < 10) {
+    return 'Unknown error (no revert data)';
+  }
+
   const selector = data.slice(0, 10).toLowerCase();
 
   // Check known error selectors

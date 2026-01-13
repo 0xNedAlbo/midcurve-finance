@@ -38,6 +38,7 @@ export interface SwapParamsInput {
   augustus: string;       // Augustus swapper address
   swapCalldata: string;   // Hex-encoded calldata
   deadline: number;       // Unix timestamp or 0 for no deadline
+  minAmountOut: string;   // Minimum output amount (slippage protection)
 }
 
 export interface ExecuteCloseParams {

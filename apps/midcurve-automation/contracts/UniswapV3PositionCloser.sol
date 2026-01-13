@@ -149,6 +149,7 @@ interface IUniswapV3PositionCloser {
         address augustus;          // AugustusSwapper address (verified against registry)
         bytes swapCalldata;        // Fresh calldata from Paraswap API
         uint256 deadline;          // Swap deadline (0 = no deadline)
+        uint256 minAmountOut;      // Minimum output amount (slippage protection)
     }
 
     /// @notice Internal struct to hold swap execution context (avoids stack-too-deep)
@@ -159,6 +160,7 @@ interface IUniswapV3PositionCloser {
         address augustus;
         address spender;
         uint256 balanceBefore;
+        uint256 minAmountOut;      // Minimum output for slippage check
     }
 
     /// @notice Internal struct to hold close execution context (avoids stack-too-deep)
@@ -239,6 +241,7 @@ interface IUniswapV3PositionCloser {
     error InvalidQuoteToken(address quoteToken, address token0, address token1);                 // 0xb2883cfc
     error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);                                     // 0x22fecc1f
     error SwapNotConfigured();                                                                   // 0x7883fed8
+    error SlippageExceeded(uint256 minExpected, uint256 actual);                                 // Slippage protection failed
 
     // --- Events ---
     event CloseRegistered(
@@ -826,7 +829,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         }
 
         // 3) Build swap context (uses struct to avoid stack-too-deep)
-        SwapContext memory ctx = _buildSwapContext(direction, quoteToken, token0, token1, amount0, amount1, params.augustus);
+        SwapContext memory ctx = _buildSwapContext(direction, quoteToken, token0, token1, amount0, amount1, params.augustus, params.minAmountOut);
 
         // Nothing to swap if amountIn is 0
         if (ctx.amountIn == 0) {
@@ -859,7 +862,8 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         address token1,
         uint256 amount0,
         uint256 amount1,
-        address augustus
+        address augustus,
+        uint256 minAmountOut
     ) internal view returns (SwapContext memory ctx) {
         // Determine which is base and which is quote
         address baseToken = (quoteToken == token0) ? token1 : token0;
@@ -877,6 +881,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         ctx.augustus = augustus;
         ctx.spender = IAugustus(augustus).getTokenTransferProxy();
         ctx.balanceBefore = IERC20Minimal(ctx.tokenOut).balanceOf(address(this));
+        ctx.minAmountOut = minAmountOut;
     }
 
     /**
@@ -909,6 +914,11 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
 
         if (amountOut == 0) {
             revert SwapOutputZero();
+        }
+
+        // Slippage protection: verify output meets minimum
+        if (amountOut < ctx.minAmountOut) {
+            revert SlippageExceeded(ctx.minAmountOut, amountOut);
         }
     }
 }

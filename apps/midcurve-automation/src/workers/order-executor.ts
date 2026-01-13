@@ -6,7 +6,7 @@
  */
 
 import type { AutomationContractConfig } from '@midcurve/shared';
-import { formatCurrency } from '@midcurve/shared';
+import { formatCurrency, getTokenAmountsFromLiquidity } from '@midcurve/shared';
 import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
 import {
   broadcastTransaction,
@@ -18,6 +18,7 @@ import {
   getOnChainNonce,
   getOnChainCloseOrder,
   type SupportedChainId,
+  type PreflightValidation,
 } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -349,6 +350,9 @@ export class OrderExecutor {
     // Get nftId from position config
     const nftId = position.config.nftId ? BigInt(position.config.nftId) : undefined;
 
+    // Declare preflight outside if block so it's accessible in swap params section
+    let preflight: PreflightValidation | undefined;
+
     // =========================================================================
     // PRE-FLIGHT VALIDATION: Check position state before execution
     // =========================================================================
@@ -361,7 +365,7 @@ export class OrderExecutor {
         msg: 'Running pre-flight validation',
       });
 
-      const preflight = await validatePositionForClose(
+      preflight = await validatePositionForClose(
         chainId as SupportedChainId,
         nftId,
         position.state.ownerAddress as `0x${string}`,
@@ -509,9 +513,53 @@ export class OrderExecutor {
         const srcDecimals = swapDirection === 'BASE_TO_QUOTE' ? baseDecimals : quoteDecimals;
         const destDecimals = swapDirection === 'BASE_TO_QUOTE' ? quoteDecimals : baseDecimals;
 
-        // Get swap params from Paraswap
-        // Note: The contract will handle the actual swap with the collected amounts
-        // We use a dummy amount (1 token) to get the route and calldata format
+        // Calculate expected swap amount from preflight position data
+        // This uses the same Uniswap V3 math the contract uses to determine actual amounts
+        let swapAmount: bigint;
+
+        if (nftId && preflight?.positionData) {
+          // Use _currentPrice (sqrtPriceX96) passed to executeOrder
+          const sqrtPriceX96 = BigInt(_currentPrice);
+
+          // Calculate expected token amounts from liquidity
+          const expectedAmounts = getTokenAmountsFromLiquidity(
+            preflight.positionData.liquidity,
+            sqrtPriceX96,
+            preflight.positionData.tickLower,
+            preflight.positionData.tickUpper
+          );
+
+          // Add tokensOwed (uncollected fees) to expected amounts
+          const totalAmount0 = expectedAmounts.token0Amount + preflight.positionData.tokensOwed0;
+          const totalAmount1 = expectedAmounts.token1Amount + preflight.positionData.tokensOwed1;
+
+          // Determine swap source amount based on direction
+          // BASE_TO_QUOTE: swap base token → source is base
+          // QUOTE_TO_BASE: swap quote token → source is quote
+          if (swapDirection === 'BASE_TO_QUOTE') {
+            swapAmount = position.isToken0Quote ? totalAmount1 : totalAmount0;
+          } else {
+            swapAmount = position.isToken0Quote ? totalAmount0 : totalAmount1;
+          }
+
+          log.info({
+            orderId,
+            positionId,
+            liquidity: preflight.positionData.liquidity.toString(),
+            totalAmount0: totalAmount0.toString(),
+            totalAmount1: totalAmount1.toString(),
+            swapDirection,
+            swapAmount: swapAmount.toString(),
+            msg: 'Calculated expected swap amount from position data',
+          });
+        } else {
+          // Hard error - cannot proceed without position data for swap amount calculation
+          throw new Error(
+            `Cannot calculate swap amount: preflight position data unavailable for order ${orderId}`
+          );
+        }
+
+        // Get swap params from Paraswap using calculated amount
         try {
           swapParams = await paraswapClient.getSwapParams({
             chainId: chainId as (typeof PARASWAP_SUPPORTED_CHAINS)[number],
@@ -519,7 +567,7 @@ export class OrderExecutor {
             srcDecimals,
             destToken: destToken as `0x${string}`,
             destDecimals,
-            amount: '1000000000000000000', // Use 1 token as dummy for route discovery
+            amount: swapAmount.toString(),
             userAddress: contractAddress as `0x${string}`,
             slippageBps: swapSlippageBps, // Use on-chain slippage
           });
@@ -551,6 +599,7 @@ export class OrderExecutor {
           augustus: swapParams.augustusAddress as `0x${string}`,
           swapCalldata: swapParams.swapCalldata as `0x${string}`,
           deadline: 0n,
+          minAmountOut: BigInt(swapParams.minDestAmount),
         }
       : undefined;
 
@@ -682,6 +731,7 @@ export class OrderExecutor {
             augustus: swapParams.augustusAddress,
             swapCalldata: swapParams.swapCalldata,
             deadline: 0, // No deadline by default
+            minAmountOut: swapParams.minDestAmount,
           }
         : undefined,
     });

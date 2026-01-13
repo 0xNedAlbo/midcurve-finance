@@ -48,6 +48,7 @@ export interface SwapParams {
   augustus: Address;
   swapCalldata: Hex;
   deadline: number;
+  minAmountOut: string; // Minimum output amount (slippage protection)
 }
 
 /**
@@ -120,6 +121,7 @@ const POSITION_CLOSER_ABI = [
           { name: 'augustus', type: 'address' },
           { name: 'swapCalldata', type: 'bytes' },
           { name: 'deadline', type: 'uint256' },
+          { name: 'minAmountOut', type: 'uint256' },
         ],
       },
     ],
@@ -136,6 +138,7 @@ const EMPTY_SWAP_PARAMS = {
   augustus: '0x0000000000000000000000000000000000000000' as Address,
   swapCalldata: '0x' as Hex,
   deadline: 0n,
+  minAmountOut: 0n,
 } as const;
 
 // =============================================================================
@@ -171,6 +174,7 @@ class AutomationSigningServiceImpl {
           augustus: swapParams.augustus,
           swapCalldata: swapParams.swapCalldata,
           deadline: BigInt(swapParams.deadline),
+          minAmountOut: BigInt(swapParams.minAmountOut),
         }
       : EMPTY_SWAP_PARAMS;
 

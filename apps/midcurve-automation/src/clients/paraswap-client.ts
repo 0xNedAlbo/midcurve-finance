@@ -249,10 +249,12 @@ class ParaswapClient {
       partner: PARTNER_NAME,
       srcDecimals: priceRoute.srcDecimals,
       destDecimals: priceRoute.destDecimals,
+      ignoreChecks: true, // Skip balance/allowance checks - contract receives tokens mid-tx
       ...(deadline && { deadline }),
     };
 
-    const url = `${PARASWAP_API_BASE}/transactions/${chainId}`;
+    // Add ignoreChecks to both body and query string (due to known Paraswap bug with parameter handling)
+    const url = `${PARASWAP_API_BASE}/transactions/${chainId}?ignoreChecks=true`;
 
     const response = await fetch(url, {
       method: 'POST',

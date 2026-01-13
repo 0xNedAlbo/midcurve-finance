@@ -626,6 +626,7 @@ const POSITION_CLOSER_ABI = [
           { internalType: 'address', name: 'augustus', type: 'address' },
           { internalType: 'bytes', name: 'swapCalldata', type: 'bytes' },
           { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+          { internalType: 'uint256', name: 'minAmountOut', type: 'uint256' },
         ],
       },
     ],
@@ -672,6 +673,7 @@ const EMPTY_SWAP_PARAMS = {
   augustus: '0x0000000000000000000000000000000000000000' as `0x${string}`,
   swapCalldata: '0x' as `0x${string}`,
   deadline: 0n,
+  minAmountOut: 0n,
 } as const;
 
 /**
@@ -681,6 +683,7 @@ export interface SimulationSwapParams {
   augustus: `0x${string}`;
   swapCalldata: `0x${string}`;
   deadline: bigint;
+  minAmountOut: bigint;
 }
 
 /**
@@ -721,12 +724,12 @@ export async function simulateExecuteClose(
 
     return { success: true };
   } catch (error) {
-    const err = error as Error & { data?: string; cause?: { data?: string } };
+    const err = error as Error & { data?: unknown; cause?: { data?: unknown } };
 
-    // Extract revert data
-    let revertData = err.data || err.cause?.data;
+    // Extract revert data - handle various formats from viem errors
+    let revertData: unknown = err.data || err.cause?.data;
 
-    // Try to extract from error message
+    // Try to extract from error message if no direct data
     if (!revertData && err.message) {
       const match = err.message.match(/0x[a-fA-F0-9]+/);
       if (match && match[0].length >= 10) {
@@ -734,8 +737,9 @@ export async function simulateExecuteClose(
       }
     }
 
+    // decodeRevertReason now handles unknown types gracefully
     const decodedError = revertData
-      ? decodeRevertReason(revertData as `0x${string}`)
+      ? decodeRevertReason(revertData)
       : err.message;
 
     return {
