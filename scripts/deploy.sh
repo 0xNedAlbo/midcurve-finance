@@ -67,10 +67,14 @@ check_env_file() {
     log_info "Using environment file: $ENV_FILE"
 
     # Export variables to suppress Docker Compose warnings
+    # Filter out comments and empty lines, then export each variable
     # shellcheck disable=SC1090
-    set -a  # Auto-export all variables
-    source "$ENV_FILE"
-    set +a  # Disable auto-export
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Export the variable
+        export "$line"
+    done < "$ENV_FILE"
 }
 
 check_docker() {
