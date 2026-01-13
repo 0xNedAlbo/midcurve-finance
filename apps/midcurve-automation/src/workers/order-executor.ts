@@ -550,15 +550,19 @@ export class OrderExecutor {
           // Determine swap source amount based on direction
           // BASE_TO_QUOTE: swap base token → source is base
           // QUOTE_TO_BASE: swap quote token → source is quote
+          let rawSwapAmount: bigint;
           if (swapDirection === 'BASE_TO_QUOTE') {
-            swapAmount = position.isToken0Quote ? totalAmount1 : totalAmount0;
+            rawSwapAmount = position.isToken0Quote ? totalAmount1 : totalAmount0;
           } else {
-            swapAmount = position.isToken0Quote ? totalAmount0 : totalAmount1;
+            rawSwapAmount = position.isToken0Quote ? totalAmount0 : totalAmount1;
           }
 
-          // Note: We use fresh pool price to calculate accurate swap amounts.
-          // This ensures the Paraswap calldata matches the actual amounts returned by
-          // decreaseLiquidity + collect, avoiding "transfer amount exceeds balance" errors.
+          // Apply 0.5% safety margin to swap amount to account for price movement
+          // between off-chain calculation and on-chain execution. This prevents
+          // "transfer amount exceeds balance" errors when the price moves slightly
+          // against us during the transaction confirmation window.
+          const SWAP_SAFETY_MARGIN_BPS = 50n; // 0.5%
+          swapAmount = (rawSwapAmount * (10000n - SWAP_SAFETY_MARGIN_BPS)) / 10000n;
 
           log.info({
             orderId,
@@ -567,8 +571,10 @@ export class OrderExecutor {
             totalAmount0: totalAmount0.toString(),
             totalAmount1: totalAmount1.toString(),
             swapDirection,
-            estimatedSwapAmount: swapAmount.toString(),
-            msg: 'Calculated swap amount using fresh pool price',
+            rawSwapAmount: rawSwapAmount.toString(),
+            safeSwapAmount: swapAmount.toString(),
+            safetyMarginBps: Number(SWAP_SAFETY_MARGIN_BPS),
+            msg: 'Calculated swap amount with 0.5% safety margin',
           });
         } else {
           // Hard error - cannot proceed without position data for swap amount calculation

@@ -69,6 +69,14 @@ interface IUniswapV3PoolMinimal {
 
     function token0() external view returns (address);
     function token1() external view returns (address);
+
+    function swap(
+        address recipient,
+        bool zeroForOne,
+        int256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata data
+    ) external returns (int256 amount0, int256 amount1);
 }
 
 interface INonfungiblePositionManagerMinimal is IERC721Minimal {
@@ -301,6 +309,13 @@ interface IUniswapV3PositionCloser {
         uint256 amountOut
     );
 
+    event DustSwept(
+        uint256 indexed closeId,
+        address indexed tokenIn,
+        uint256 dustAmountIn,
+        uint256 dustAmountOut
+    );
+
     event CloseSwapIntentUpdated(
         uint256 indexed closeId,
         SwapDirection oldDirection,
@@ -365,6 +380,9 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
 
     uint256 public override nextCloseId = 1;
     mapping(uint256 => CloseOrder) internal _closes;
+
+    // Transient storage for swap callback validation (set during dust sweep, cleared after)
+    address private _expectedSwapPool;
 
     constructor(address positionManager_, address augustusRegistry_) {
         if (positionManager_ == address(0)) revert ZeroAddress();
@@ -472,6 +490,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         if (o.swapDirection != SwapDirection.NONE) {
             (payout0, payout1) = _executeSwap(
                 closeId,
+                o.pool,
                 o.swapDirection,
                 o.swapQuoteToken,
                 ctx.token0,
@@ -799,6 +818,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
      * @dev Called only if swapDirection != NONE
      * @param closeId The close order ID (for event emission)
      * @param direction The swap direction (BASE_TO_QUOTE or QUOTE_TO_BASE)
+     * @param pool The Uniswap V3 pool address (for dust sweep)
      * @param quoteToken The user's quote token address
      * @param token0 Pool's token0
      * @param token1 Pool's token1
@@ -810,6 +830,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
      */
     function _executeSwap(
         uint256 closeId,
+        address pool,
         SwapDirection direction,
         address quoteToken,
         address token0,
@@ -842,7 +863,17 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         // 5) Emit swap event
         emit SwapExecuted(closeId, ctx.tokenIn, ctx.tokenOut, ctx.amountIn, amountOut);
 
-        // 6) Compute final amounts
+        // 6) Sweep any remaining dust via direct pool swap
+        uint256 dustIn = IERC20Minimal(ctx.tokenIn).balanceOf(address(this));
+        if (dustIn >= 100) {
+            uint256 dustOut = _sweepDustViaPool(pool, ctx.tokenIn, ctx.tokenOut);
+            if (dustOut > 0) {
+                amountOut += dustOut;
+                emit DustSwept(closeId, ctx.tokenIn, dustIn, dustOut);
+            }
+        }
+
+        // 7) Compute final amounts
         if (ctx.tokenIn == token0) {
             finalAmount0 = 0;
             finalAmount1 = amount1 + amountOut;
@@ -925,6 +956,83 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         if (amountOut < ctx.minAmountOut) {
             revert SlippageExceeded(ctx.minAmountOut, amountOut);
         }
+    }
+
+    // ----------------------------
+    // Dust Sweep via Pool
+    // ----------------------------
+
+    /// @notice Callback from Uniswap V3 pool during swap
+    /// @dev Only callable by the pool during an active swap initiated by this contract
+    function uniswapV3SwapCallback(
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes calldata /* data */
+    ) external {
+        // Verify caller is the expected pool (set before calling pool.swap)
+        require(msg.sender == _expectedSwapPool, "Invalid callback caller");
+
+        // Transfer the required tokens to the pool
+        if (amount0Delta > 0) {
+            address token0 = IUniswapV3PoolMinimal(msg.sender).token0();
+            _safeErc20Transfer(token0, msg.sender, uint256(amount0Delta));
+        }
+        if (amount1Delta > 0) {
+            address token1 = IUniswapV3PoolMinimal(msg.sender).token1();
+            _safeErc20Transfer(token1, msg.sender, uint256(amount1Delta));
+        }
+    }
+
+    /**
+     * @dev Sweep remaining dust via direct pool swap after main Paraswap swap
+     * @param pool The Uniswap V3 pool address
+     * @param tokenIn The token to swap (dust remaining after Paraswap)
+     * @param tokenOut The token to receive
+     * @return amountOut The amount received from the dust swap
+     */
+    function _sweepDustViaPool(
+        address pool,
+        address tokenIn,
+        address tokenOut
+    ) internal returns (uint256 amountOut) {
+        uint256 dustAmount = IERC20Minimal(tokenIn).balanceOf(address(this));
+
+        // Skip if no dust or negligible amount (less than 100 wei)
+        if (dustAmount < 100) {
+            return 0;
+        }
+
+        // Determine swap direction
+        address token0 = IUniswapV3PoolMinimal(pool).token0();
+        bool zeroForOne = (tokenIn == token0);
+
+        // Use extreme price limits to ensure swap executes regardless of price movement
+        // For zeroForOne: limit is MIN_SQRT_RATIO + 1 (lowest possible price)
+        // For oneForZero: limit is MAX_SQRT_RATIO - 1 (highest possible price)
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_RATIO + 1
+            : TickMath.MAX_SQRT_RATIO - 1;
+
+        // Set expected pool for callback validation
+        _expectedSwapPool = pool;
+
+        // Track balance before
+        uint256 balanceBefore = IERC20Minimal(tokenOut).balanceOf(address(this));
+
+        // Execute swap (positive amountSpecified = exact input)
+        IUniswapV3PoolMinimal(pool).swap(
+            address(this),  // recipient
+            zeroForOne,
+            int256(dustAmount),  // exact input amount
+            sqrtPriceLimitX96,
+            ""  // no callback data needed
+        );
+
+        // Clear expected pool
+        _expectedSwapPool = address(0);
+
+        // Calculate output
+        amountOut = IERC20Minimal(tokenOut).balanceOf(address(this)) - balanceBefore;
     }
 }
 
