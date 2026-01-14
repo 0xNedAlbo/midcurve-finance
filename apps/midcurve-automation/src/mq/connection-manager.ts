@@ -59,52 +59,75 @@ class RabbitMQConnectionManager {
 
   /**
    * Connect to RabbitMQ and setup automation topology.
+   * Includes retry logic for initial connection.
    */
   async connect(): Promise<Channel> {
     autoLog.methodEntry(log, 'connect');
 
     const config = getRabbitMQConfig();
     const url = this.buildUrl(config);
+    const maxRetries = 10;
+    const baseDelayMs = 2000;
 
-    log.info({ host: config.host, port: config.port, msg: 'Connecting to RabbitMQ' });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      log.info({ host: config.host, port: config.port, attempt, maxRetries, msg: 'Connecting to RabbitMQ' });
 
-    try {
-      this.connection = await amqplib.connect(url);
-      this.reconnectAttempts = 0;
+      try {
+        this.connection = await amqplib.connect(url);
+        this.reconnectAttempts = 0;
 
-      this.connection.on('error', (err) => {
-        log.error({ error: err.message, msg: 'RabbitMQ connection error' });
-        this.handleDisconnect();
-      });
+        this.connection.on('error', (err) => {
+          log.error({ error: err.message, msg: 'RabbitMQ connection error' });
+          this.handleDisconnect();
+        });
 
-      this.connection.on('close', () => {
-        log.warn({ msg: 'RabbitMQ connection closed' });
-        this.handleDisconnect();
-      });
+        this.connection.on('close', () => {
+          log.warn({ msg: 'RabbitMQ connection closed' });
+          this.handleDisconnect();
+        });
 
-      this.channel = await this.connection.createChannel();
+        this.channel = await this.connection.createChannel();
 
-      this.channel.on('error', (err) => {
-        log.error({ error: err.message, msg: 'RabbitMQ channel error' });
-        this.channel = null;
-      });
+        this.channel.on('error', (err) => {
+          log.error({ error: err.message, msg: 'RabbitMQ channel error' });
+          this.channel = null;
+        });
 
-      this.channel.on('close', () => {
-        log.warn({ msg: 'RabbitMQ channel closed' });
-        this.channel = null;
-      });
+        this.channel.on('close', () => {
+          log.warn({ msg: 'RabbitMQ channel closed' });
+          this.channel = null;
+        });
 
-      // Setup automation topology
-      await setupAutomationTopology(this.channel);
+        // Setup automation topology
+        await setupAutomationTopology(this.channel);
 
-      log.info({ msg: 'RabbitMQ connected, automation topology ready' });
-      autoLog.methodExit(log, 'connect');
+        log.info({ msg: 'RabbitMQ connected, automation topology ready' });
+        autoLog.methodExit(log, 'connect');
 
-      return this.channel;
-    } catch (err) {
-      log.error({ error: err instanceof Error ? err.message : String(err), msg: 'Failed to connect to RabbitMQ' });
-      throw err;
+        return this.channel;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+
+        if (attempt < maxRetries) {
+          const delayMs = baseDelayMs * attempt; // Linear backoff
+          log.warn({ error: errorMsg, attempt, maxRetries, delayMs, msg: 'Failed to connect to RabbitMQ, retrying...' });
+          await this.sleep(delayMs);
+        } else {
+          log.error({ error: errorMsg, msg: 'Failed to connect to RabbitMQ after max retries' });
+          throw err;
+        }
+      }
     }
+
+    // Should never reach here
+    throw new Error('Unexpected: connect loop exited without success');
+  }
+
+  /**
+   * Sleep helper for retry delays
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
