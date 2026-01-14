@@ -120,8 +120,8 @@ services:
       - PORT=3002
       - HOSTNAME=0.0.0.0
       - DATABASE_URL=${DATABASE_URL}
-      - GETH_HTTP_URL=http://geth:8545
-      - GETH_WS_URL=ws://geth:8546
+      - GETH_HTTP_URL=http://geth:8555
+      - GETH_WS_URL=ws://geth:8556
       - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
       - SIGNER_SERVICE_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
@@ -188,12 +188,12 @@ services:
       dockerfile: Dockerfile.geth
     container_name: midcurve-geth
     expose:
-      - "8545"
-      - "8546"
+      - "8555"
+      - "8556"
     volumes:
       - geth-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8555"]
       interval: 5s
       timeout: 3s
       retries: 5

@@ -58,7 +58,7 @@ The platform runs as a **multi-service Docker Compose stack** with separate fron
 │  │                                                                   │
 │  │  ┌─────────────────────────┐  ┌─────────────────────────┐       │
 │  │  │   geth                  │  │   rabbitmq              │       │
-│  │  │   Ports 8545/8546       │  │   Port 5672             │       │
+│  │  │   Ports 8555/8556       │  │   Port 5672             │       │
 │  │  │   Private EVM Node      │  │   Message broker        │       │
 │  │  │   Clique PoA            │  │   RabbitMQ 3.13         │       │
 │  │  └─────────────────────────┘  └─────────────────────────┘       │
@@ -1356,8 +1356,8 @@ SIGNER_KEY_ENCRYPTION_PASSWORD="your-encryption-password"
 ```bash
 CORE_PRIVATE_KEY="your-deployer-private-key"
 CORE_ADDRESS="your-deployer-address"
-GETH_HTTP_URL="http://localhost:8545"
-GETH_WS_URL="ws://localhost:8546"
+GETH_HTTP_URL="http://localhost:8555"
+GETH_WS_URL="ws://localhost:8556"
 RABBITMQ_URL="amqp://guest:guest@localhost:5672"
 ```
 
@@ -1448,7 +1448,7 @@ The primary deployment method is Docker Compose with a multi-service architectur
 │  api           │ Next.js REST API (3001)                    │
 │  evm           │ Strategy orchestrator (3002)               │
 │  signer        │ Transaction signing (3003)                 │
-│  geth          │ Private EVM node (8545/8546)               │
+│  geth          │ Private EVM node (8555/8556)               │
 │  rabbitmq      │ Message broker (5672/15672)                │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -1501,8 +1501,8 @@ SIGNER_KEY_ENCRYPTION_PASSWORD="your-encryption-password"
 # EVM Orchestrator
 CORE_PRIVATE_KEY="your-deployer-private-key"
 CORE_ADDRESS="your-deployer-address"
-GETH_HTTP_URL="http://geth:8545"
-GETH_WS_URL="ws://geth:8546"
+GETH_HTTP_URL="http://geth:8555"
+GETH_WS_URL="ws://geth:8556"
 RABBITMQ_URL="amqp://midcurve:password@rabbitmq:5672"
 
 # RabbitMQ
