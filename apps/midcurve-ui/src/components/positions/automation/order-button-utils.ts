@@ -104,10 +104,14 @@ export function findClosestOrder(
   triggerMode: TriggerMode,
   tokenConfig: TokenConfig
 ): SerializedCloseOrder | undefined {
-  // Filter for active orders of the specified trigger mode
+  // Filter for active or triggering orders of the specified trigger mode
+  // Include 'triggering' status to show executing state in UI
   const relevantOrders = orders.filter((order) => {
     const config = order.config as CloseOrderConfig;
-    return config.triggerMode === triggerMode && order.status === 'active';
+    return (
+      config.triggerMode === triggerMode &&
+      (order.status === 'active' || order.status === 'triggering')
+    );
   });
 
   if (relevantOrders.length === 0) return undefined;
@@ -190,10 +194,17 @@ export function getOrderButtonLabel(
 }
 
 /**
- * Check if a close order has an active status (can be displayed on button).
+ * Check if a close order has a displayable status (active or executing).
  */
 export function isOrderActive(order: SerializedCloseOrder): boolean {
-  return order.status === 'active';
+  return order.status === 'active' || order.status === 'triggering';
+}
+
+/**
+ * Check if a close order is currently executing.
+ */
+export function isOrderExecuting(order: SerializedCloseOrder): boolean {
+  return order.status === 'triggering';
 }
 
 /**
