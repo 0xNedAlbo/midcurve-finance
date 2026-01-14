@@ -4,16 +4,23 @@
  * UniswapV3Actions - Action buttons for Uniswap V3 positions
  *
  * Protocol-specific component for position management actions.
+ * Includes position management (increase, withdraw, collect fees) and
+ * automation buttons (stop-loss, take-profit).
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Plus, Minus, DollarSign } from "lucide-react";
 import { useAccount } from "wagmi";
+import type { Address } from "viem";
 import type { ListPositionData } from "@midcurve/api-shared";
 import { IncreaseDepositModal } from "@/components/positions/increase-deposit-modal";
 import { WithdrawPositionModal } from "@/components/positions/withdraw-position-modal";
 import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
+import { StopLossButton } from "@/components/positions/automation/StopLossButton";
+import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
+import { useSharedContract, useAutowallet } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
+import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
 
 interface UniswapV3ActionsProps {
   position: ListPositionData;
@@ -29,6 +36,47 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
 
   // Extract owner address from position state
   const ownerAddress = position.state.ownerAddress;
+
+  // Extract position data for automation buttons
+  const poolConfig = position.pool.config as { address: string; chainId: number };
+  const poolState = position.pool.state as { sqrtPriceX96: string };
+  const positionConfig = position.config as { nftId: number; chainId: number };
+
+  // Get base/quote tokens
+  const quoteToken = position.isToken0Quote
+    ? position.pool.token0
+    : position.pool.token1;
+  const baseToken = position.isToken0Quote
+    ? position.pool.token1
+    : position.pool.token0;
+  const baseTokenConfig = baseToken.config as { address: string };
+  const quoteTokenConfig = quoteToken.config as { address: string };
+
+  // Check automation availability for this chain
+  const { data: contractData } = useSharedContract(positionConfig.chainId);
+  const { data: autowalletData } = useAutowallet();
+
+  // Automation visibility checks
+  const isChainSupported = contractData?.isSupported ?? false;
+  const hasAutowallet = !!autowalletData?.address;
+  const showAutomationButtons = position.isActive && isChainSupported && hasAutowallet;
+
+  // Build token config for price display
+  const tokenConfig: TokenConfig = useMemo(
+    () => ({
+      baseTokenAddress: baseTokenConfig.address,
+      quoteTokenAddress: quoteTokenConfig.address,
+      baseTokenDecimals: baseToken.decimals,
+      quoteTokenDecimals: quoteToken.decimals,
+      quoteTokenSymbol: quoteToken.symbol,
+    }),
+    [baseTokenConfig.address, quoteTokenConfig.address, baseToken.decimals, quoteToken.decimals, quoteToken.symbol]
+  );
+
+  // Calculate current price display
+  const currentPriceDisplay = useMemo(() => {
+    return formatTriggerPrice(poolState.sqrtPriceX96, tokenConfig);
+  }, [poolState.sqrtPriceX96, tokenConfig]);
 
   // Check if connected wallet owns this position
   const isOwner = !!(
@@ -84,6 +132,58 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           <DollarSign className="w-3 h-3" />
           Collect Fees
         </button>
+
+        {/* Automation Buttons - only visible when automation is available */}
+        {showAutomationButtons && (
+          <>
+            <StopLossButton
+              position={position}
+              positionId={position.id}
+              poolAddress={poolConfig.address}
+              chainId={positionConfig.chainId}
+              contractAddress={contractData!.contractAddress as Address}
+              positionManager={contractData!.positionManager as Address}
+              nftId={BigInt(positionConfig.nftId)}
+              positionOwner={ownerAddress as Address}
+              currentPriceDisplay={currentPriceDisplay}
+              currentSqrtPriceX96={poolState.sqrtPriceX96}
+              baseToken={{
+                address: baseTokenConfig.address,
+                symbol: baseToken.symbol,
+                decimals: baseToken.decimals,
+              }}
+              quoteToken={{
+                address: quoteTokenConfig.address,
+                symbol: quoteToken.symbol,
+                decimals: quoteToken.decimals,
+              }}
+              isToken0Quote={position.isToken0Quote}
+            />
+            <TakeProfitButton
+              position={position}
+              positionId={position.id}
+              poolAddress={poolConfig.address}
+              chainId={positionConfig.chainId}
+              contractAddress={contractData!.contractAddress as Address}
+              positionManager={contractData!.positionManager as Address}
+              nftId={BigInt(positionConfig.nftId)}
+              positionOwner={ownerAddress as Address}
+              currentPriceDisplay={currentPriceDisplay}
+              currentSqrtPriceX96={poolState.sqrtPriceX96}
+              baseToken={{
+                address: baseTokenConfig.address,
+                symbol: baseToken.symbol,
+                decimals: baseToken.decimals,
+              }}
+              quoteToken={{
+                address: quoteTokenConfig.address,
+                symbol: quoteToken.symbol,
+                decimals: quoteToken.decimals,
+              }}
+              isToken0Quote={position.isToken0Quote}
+            />
+          </>
+        )}
       </div>
 
       {/* Increase Deposit Modal */}

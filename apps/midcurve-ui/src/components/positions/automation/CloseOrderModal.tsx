@@ -110,6 +110,14 @@ export interface CloseOrderModalProps {
    * Callback when order is created
    */
   onSuccess?: (order: SerializedCloseOrder) => void;
+
+  /**
+   * Optional order type to lock the modal to a specific mode.
+   * When provided, the trigger mode selector is hidden and the mode is hardcoded.
+   * - 'stopLoss' → triggerMode 'LOWER'
+   * - 'takeProfit' → triggerMode 'UPPER'
+   */
+  orderType?: 'stopLoss' | 'takeProfit';
 }
 
 type WizardStep = 'configure' | 'review' | 'processing' | 'success';
@@ -155,12 +163,22 @@ export function CloseOrderModal({
   currentPriceDisplay,
   isToken0Quote,
   onSuccess,
+  orderType,
 }: CloseOrderModalProps) {
+  // Determine initial trigger mode based on orderType prop
+  const initialTriggerMode: TriggerMode = orderType === 'takeProfit' ? 'UPPER' : 'LOWER';
+
+  // Determine modal title based on orderType
+  const modalTitle = orderType === 'stopLoss'
+    ? 'Set Stop-Loss Order'
+    : orderType === 'takeProfit'
+      ? 'Set Take-Profit Order'
+      : 'Set Close Order';
   const { address: userAddress, isConnected, chainId: connectedChainId } = useAccount();
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<WizardStep>('configure');
   const [formData, setFormData] = useState<CloseOrderFormData>({
-    triggerMode: 'LOWER',
+    triggerMode: initialTriggerMode,
     sqrtPriceX96Lower: '',
     sqrtPriceX96Upper: '',
     priceLowerDisplay: '',
@@ -230,7 +248,7 @@ export function CloseOrderModal({
     if (isOpen) {
       setStep('configure');
       setFormData({
-        triggerMode: 'LOWER',
+        triggerMode: initialTriggerMode,
         sqrtPriceX96Lower: '',
         sqrtPriceX96Upper: '',
         priceLowerDisplay: '',
@@ -248,7 +266,7 @@ export function CloseOrderModal({
       resetHook();
       resetApproval();
     }
-  }, [isOpen, resetHook, resetApproval]);
+  }, [isOpen, resetHook, resetApproval, initialTriggerMode]);
 
   // Track hook success/error state
   useEffect(() => {
@@ -448,7 +466,7 @@ export function CloseOrderModal({
               <div className="p-2 border rounded-lg bg-blue-500/10 border-blue-500/20">
                 <Shield className="w-5 h-5 text-blue-400" />
               </div>
-              <h2 className="text-lg font-semibold text-white">Set Close Order</h2>
+              <h2 className="text-lg font-semibold text-white">{modalTitle}</h2>
             </div>
             <button
               onClick={handleClose}
@@ -471,6 +489,7 @@ export function CloseOrderModal({
                 currentPriceDisplay={currentPriceDisplay}
                 isToken0Quote={isToken0Quote}
                 chainId={chainId}
+                orderType={orderType}
               />
             )}
 

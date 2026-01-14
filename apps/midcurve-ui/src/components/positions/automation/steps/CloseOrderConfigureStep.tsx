@@ -35,6 +35,13 @@ interface CloseOrderConfigureStepProps {
    * Chain ID (used to check swap support)
    */
   chainId: number;
+  /**
+   * Optional order type to lock the trigger mode.
+   * When provided, the trigger mode selector is hidden.
+   * - 'stopLoss' → triggerMode 'LOWER' (only lower price input shown)
+   * - 'takeProfit' → triggerMode 'UPPER' (only upper price input shown)
+   */
+  orderType?: 'stopLoss' | 'takeProfit';
 }
 
 /**
@@ -140,7 +147,10 @@ export function CloseOrderConfigureStep({
   currentPriceDisplay,
   isToken0Quote,
   chainId,
+  orderType,
 }: CloseOrderConfigureStepProps) {
+  // When orderType is provided, hide the trigger mode selector
+  const showTriggerModeSelector = !orderType;
   const [lowerPriceInput, setLowerPriceInput] = useState(formData.priceLowerDisplay);
   const [upperPriceInput, setUpperPriceInput] = useState(formData.priceUpperDisplay);
 
@@ -217,39 +227,41 @@ export function CloseOrderConfigureStep({
 
   return (
     <div className="space-y-6">
-      {/* Trigger Mode Selection */}
-      <div>
-        <label className="block text-sm font-medium text-slate-300 mb-3">Trigger Mode</label>
-        <div className="grid grid-cols-3 gap-2">
-          {TRIGGER_MODES.map(({ value, label, description, icon: Icon }) => (
-            <button
-              key={value}
-              onClick={() => onChange({ triggerMode: value })}
-              className={`p-3 rounded-lg border transition-all cursor-pointer text-left ${
-                formData.triggerMode === value
-                  ? 'border-blue-500 bg-blue-500/10'
-                  : 'border-slate-600 hover:border-slate-500'
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Icon
-                  className={`w-4 h-4 ${
-                    formData.triggerMode === value ? 'text-blue-400' : 'text-slate-400'
-                  }`}
-                />
-                <span
-                  className={`text-sm font-medium ${
-                    formData.triggerMode === value ? 'text-blue-400' : 'text-slate-300'
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">{description}</p>
-            </button>
-          ))}
+      {/* Trigger Mode Selection - hidden when orderType is provided */}
+      {showTriggerModeSelector && (
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-3">Trigger Mode</label>
+          <div className="grid grid-cols-3 gap-2">
+            {TRIGGER_MODES.map(({ value, label, description, icon: Icon }) => (
+              <button
+                key={value}
+                onClick={() => onChange({ triggerMode: value })}
+                className={`p-3 rounded-lg border transition-all cursor-pointer text-left ${
+                  formData.triggerMode === value
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-slate-600 hover:border-slate-500'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Icon
+                    className={`w-4 h-4 ${
+                      formData.triggerMode === value ? 'text-blue-400' : 'text-slate-400'
+                    }`}
+                  />
+                  <span
+                    className={`text-sm font-medium ${
+                      formData.triggerMode === value ? 'text-blue-400' : 'text-slate-300'
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">{description}</p>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Current Price Display */}
       <div className="bg-slate-700/30 rounded-lg p-4">
