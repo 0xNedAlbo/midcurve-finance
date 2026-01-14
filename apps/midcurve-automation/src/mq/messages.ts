@@ -1,8 +1,10 @@
 /**
  * RabbitMQ Message Types
  *
- * Defines the message structures for order trigger events.
+ * Defines the message structures for automation events.
  */
+
+import type { UniswapV3OhlcCandle } from '../types/ohlc-uniswapv3';
 
 /**
  * Order trigger message - published when price condition is met
@@ -25,6 +27,14 @@ export interface OrderTriggerMessage {
   /** Timestamp of trigger detection */
   triggeredAt: string;
 }
+
+/**
+ * Uniswap V3 OHLC candle message - published on minute boundaries
+ *
+ * Contains 1-minute OHLC data with volume for both tokens.
+ * Prices are sqrtPriceX96 values (as strings for JSON serialization).
+ */
+export type UniswapV3OhlcCandleMessage = UniswapV3OhlcCandle;
 
 /**
  * Serialize a message for publishing
