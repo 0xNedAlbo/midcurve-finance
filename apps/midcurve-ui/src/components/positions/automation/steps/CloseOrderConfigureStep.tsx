@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle } from 'lucide-react';
+import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
 import { priceToSqrtRatioX96, calculatePositionValue, formatCompactValue } from '@midcurve/shared';
 import { parseUnits } from 'viem';
@@ -185,6 +185,7 @@ export function CloseOrderConfigureStep({
   const showTriggerModeSelector = !orderType;
   const [lowerPriceInput, setLowerPriceInput] = useState(formData.priceLowerDisplay);
   const [upperPriceInput, setUpperPriceInput] = useState(formData.priceUpperDisplay);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Calculate simulated PnL at trigger price
   const simulatedPnL = useMemo(() => {
@@ -471,47 +472,70 @@ export function CloseOrderConfigureStep({
         )}
       </div>
 
-      {/* Advanced Settings */}
-      <div className="space-y-4">
-        {/* Slippage */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Slippage Tolerance</label>
-          <div className="flex gap-2">
-            {SLIPPAGE_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => onChange({ slippageBps: value })}
-                className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
-                  formData.slippageBps === value
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                    : 'border-slate-600 text-slate-400 hover:border-slate-500'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Advanced Settings - Collapsible */}
+      <div className="border-t border-slate-700 pt-4">
+        {!showAdvanced ? (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(true)}
+            className="flex items-center justify-between w-full text-sm text-slate-400 hover:text-slate-300 transition-colors cursor-pointer"
+          >
+            <span>Advanced Settings</span>
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        ) : (
+          <div className="space-y-4">
+            {/* Slippage with close button */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-slate-300">Slippage Tolerance</label>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(false)}
+                  className="p-1 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  title="Close advanced settings"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex gap-2">
+                {SLIPPAGE_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => onChange({ slippageBps: value })}
+                    className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
+                      formData.slippageBps === value
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        {/* Expiration */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Valid Until</label>
-          <div className="flex gap-2">
-            {EXPIRATION_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => onChange({ validUntilDays: value })}
-                className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
-                  formData.validUntilDays === value
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                    : 'border-slate-600 text-slate-400 hover:border-slate-500'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+            {/* Expiration */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Valid Until</label>
+              <div className="flex gap-2">
+                {EXPIRATION_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => onChange({ validUntilDays: value })}
+                    className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
+                      formData.validUntilDays === value
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Info Note */}
