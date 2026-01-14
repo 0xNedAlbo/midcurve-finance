@@ -241,9 +241,23 @@ export class UniswapV3OhlcWorker {
    * Handle incoming Swap event logs
    */
   private handleSwapLogs(chainId: number, poolAddress: string, logs: unknown[]): void {
+    log.info({
+      chainId,
+      poolAddress,
+      eventCount: logs.length,
+      msg: 'Received swap events from WebSocket',
+    });
+
     const poolKey = getPoolKey(chainId, poolAddress);
     const subscription = this.subscriptions.get(poolKey);
-    if (!subscription) return;
+    if (!subscription) {
+      log.warn({
+        chainId,
+        poolAddress,
+        msg: 'No subscription found for pool - ignoring events',
+      });
+      return;
+    }
 
     const eventTimestampMs = Date.now();
 
@@ -284,6 +298,15 @@ export class UniswapV3OhlcWorker {
 
         // Update builder
         subscription.candleBuilder = builder;
+
+        log.debug({
+          chainId,
+          poolAddress,
+          sqrtPriceX96: event.sqrtPriceX96.toString(),
+          tick: event.tick,
+          swapCount: builder.swapCount,
+          msg: 'Processed swap event',
+        });
 
         // Publish completed candle if minute boundary crossed
         if (completedCandle) {
@@ -382,7 +405,7 @@ export class UniswapV3OhlcWorker {
     this.candlesPublished++;
     this.lastPublishAt = new Date();
 
-    log.debug({
+    log.info({
       chainId: candle.chainId,
       poolAddress: candle.poolAddress,
       timestamp: candle.timestamp,
