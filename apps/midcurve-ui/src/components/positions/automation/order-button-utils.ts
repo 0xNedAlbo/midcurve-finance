@@ -104,10 +104,14 @@ export function findClosestOrder(
   triggerMode: TriggerMode,
   tokenConfig: TokenConfig
 ): SerializedCloseOrder | undefined {
-  // Filter for active orders of the specified trigger mode
+  // Filter for active or triggering orders of the specified trigger mode
+  // Include 'triggering' status to show executing state in UI
   const relevantOrders = orders.filter((order) => {
     const config = order.config as CloseOrderConfig;
-    return config.triggerMode === triggerMode && order.status === 'active';
+    return (
+      config.triggerMode === triggerMode &&
+      (order.status === 'active' || order.status === 'triggering')
+    );
   });
 
   if (relevantOrders.length === 0) return undefined;
@@ -141,20 +145,33 @@ export function findClosestOrder(
 }
 
 /**
- * Generate button label for an existing order.
- *
- * Format: "SL @{price}" or "SL @{price} => {token}"
+ * Structured label data for order buttons.
+ * Allows components to render with icons instead of plain text.
+ */
+export interface OrderButtonLabel {
+  /** Order type prefix: "SL" or "TP" */
+  prefix: string;
+  /** Formatted trigger price */
+  priceDisplay: string;
+  /** Target token symbol (when swap is enabled) */
+  targetSymbol?: string;
+  /** Whether swap is enabled for this order */
+  hasSwap: boolean;
+}
+
+/**
+ * Generate button label data for an existing order.
  *
  * @param order - The close order
  * @param orderType - 'stopLoss' or 'takeProfit'
  * @param tokenConfig - Token configuration
- * @returns Button label string
+ * @returns Structured label data for rendering
  */
 export function getOrderButtonLabel(
   order: SerializedCloseOrder,
   orderType: 'stopLoss' | 'takeProfit',
   tokenConfig: TokenConfig
-): string {
+): OrderButtonLabel {
   const config = order.config as CloseOrderConfig;
   const prefix = orderType === 'stopLoss' ? 'SL' : 'TP';
 
@@ -170,17 +187,24 @@ export function getOrderButtonLabel(
     const targetSymbol = config.swapConfig.direction === 'BASE_TO_QUOTE'
       ? tokenConfig.quoteTokenSymbol
       : tokenConfig.baseTokenSymbol;
-    return `${prefix} @${priceDisplay} => ${targetSymbol}`;
+    return { prefix, priceDisplay, targetSymbol, hasSwap: true };
   }
 
-  return `${prefix} @${priceDisplay}`;
+  return { prefix, priceDisplay, hasSwap: false };
 }
 
 /**
- * Check if a close order has an active status (can be displayed on button).
+ * Check if a close order has a displayable status (active or executing).
  */
 export function isOrderActive(order: SerializedCloseOrder): boolean {
-  return order.status === 'active';
+  return order.status === 'active' || order.status === 'triggering';
+}
+
+/**
+ * Check if a close order is currently executing.
+ */
+export function isOrderExecuting(order: SerializedCloseOrder): boolean {
+  return order.status === 'triggering';
 }
 
 /**

@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Plus, Minus, DollarSign, Activity } from "lucide-react";
+import { Plus, Minus, DollarSign } from "lucide-react";
 import { useAccount } from "wagmi";
 import type { Address } from "viem";
 import type { ListPositionData } from "@midcurve/api-shared";
@@ -18,6 +18,7 @@ import { WithdrawPositionModal } from "@/components/positions/withdraw-position-
 import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
+import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
 import { useSharedContract, useAutowallet } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
@@ -165,10 +166,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
             />
 
             {/* Current Price Display - between SL and TP buttons */}
-            <span className="flex items-center gap-1 text-xs text-slate-400 px-2">
-              <Activity className="w-3 h-3" />
-              {currentPriceDisplay} {quoteToken.symbol}
-            </span>
+            <FlashingPriceLabel price={currentPriceDisplay} symbol={quoteToken.symbol} />
 
             <TakeProfitButton
               position={position}

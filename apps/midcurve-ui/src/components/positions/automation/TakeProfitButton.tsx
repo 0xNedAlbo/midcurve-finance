@@ -5,13 +5,14 @@
  *
  * States:
  * - No order: Green "+ | Take Profit" button (clickable to create)
- * - Order exists: Pink "TP @{price} | x" display (X clickable to cancel)
+ * - Order active: Pink "TP @{price} | x" display (X clickable to cancel)
+ * - Order executing: Amber spinner + "TP @{price}" (no cancel, order is being executed)
  */
 
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, X as XIcon } from 'lucide-react';
+import { Plus, X as XIcon, ArrowRight, Loader2 } from 'lucide-react';
 import type { Address } from 'viem';
 import type { ListPositionData, TriggerMode } from '@midcurve/api-shared';
 import { useCloseOrders } from '@/hooks/automation';
@@ -20,6 +21,7 @@ import { CancelOrderConfirmModal } from './CancelOrderConfirmModal';
 import {
   findClosestOrder,
   getOrderButtonLabel,
+  isOrderExecuting,
   type TokenConfig,
 } from './order-button-utils';
 
@@ -119,8 +121,9 @@ export function TakeProfitButton({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
 
-  // Fetch close orders for this position
-  const { data: orders = [] } = useCloseOrders({ positionId });
+  // Fetch close orders for this position with polling enabled
+  // Polling speeds up automatically when an order is executing
+  const { data: orders = [] } = useCloseOrders({ positionId, polling: true });
 
   // Build token config for utilities
   const tokenConfig: TokenConfig = useMemo(
@@ -145,6 +148,9 @@ export function TakeProfitButton({
     if (!activeOrder) return null;
     return getOrderButtonLabel(activeOrder, 'takeProfit', tokenConfig);
   }, [activeOrder, tokenConfig]);
+
+  // Check if order is currently executing
+  const isExecuting = activeOrder ? isOrderExecuting(activeOrder) : false;
 
   // Reset modal states when activeOrder changes
   // - When order is created (activeOrder becomes truthy): close create modal
@@ -214,11 +220,37 @@ export function TakeProfitButton({
     );
   }
 
+  // If order is executing, show amber spinner state (no cancel button)
+  if (isExecuting) {
+    return (
+      <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-amber-300 bg-amber-900/20 border-amber-600/50">
+        <Loader2 className="w-3 h-3 animate-spin" />
+        <span className="flex items-center gap-0.5">
+          {buttonLabel!.prefix} @{buttonLabel!.priceDisplay}
+          {buttonLabel!.hasSwap && (
+            <>
+              <ArrowRight className="w-3 h-3 mx-0.5" />
+              {buttonLabel!.targetSymbol}
+            </>
+          )}
+        </span>
+      </div>
+    );
+  }
+
   // If active order exists, show display button (pink) with cancel X
   return (
     <>
       <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-pink-300 bg-pink-900/20 border-pink-600/50">
-        <span>{buttonLabel}</span>
+        <span className="flex items-center gap-0.5">
+          {buttonLabel!.prefix} @{buttonLabel!.priceDisplay}
+          {buttonLabel!.hasSwap && (
+            <>
+              <ArrowRight className="w-3 h-3 mx-0.5" />
+              {buttonLabel!.targetSymbol}
+            </>
+          )}
+        </span>
         <button
           onClick={handleCancelClick}
           className="ml-1 p-0.5 hover:bg-pink-800/50 rounded transition-colors cursor-pointer"
