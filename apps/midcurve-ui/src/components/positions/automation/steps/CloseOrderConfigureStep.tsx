@@ -4,10 +4,10 @@
  * Step 1: Configure trigger mode and price thresholds
  */
 
-import { useState, useCallback, useEffect } from 'react';
-import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
-import { priceToSqrtRatioX96 } from '@midcurve/shared';
+import { priceToSqrtRatioX96, calculatePositionValue, formatCompactValue } from '@midcurve/shared';
 import { parseUnits } from 'viem';
 import type { CloseOrderFormData } from '../CloseOrderModal';
 import { SwapConfigSection } from './SwapConfigSection';
@@ -35,6 +35,39 @@ interface CloseOrderConfigureStepProps {
    * Chain ID (used to check swap support)
    */
   chainId: number;
+  /**
+   * Optional order type to lock the trigger mode.
+   * When provided, the trigger mode selector is hidden.
+   * - 'stopLoss' → triggerMode 'LOWER' (only lower price input shown)
+   * - 'takeProfit' → triggerMode 'UPPER' (only upper price input shown)
+   */
+  orderType?: 'stopLoss' | 'takeProfit';
+
+  // Position data for PnL simulation
+  /**
+   * Position liquidity
+   */
+  liquidity: bigint;
+
+  /**
+   * Position lower tick
+   */
+  tickLower: number;
+
+  /**
+   * Position upper tick
+   */
+  tickUpper: number;
+
+  /**
+   * Current cost basis (in quote token units, as string)
+   */
+  currentCostBasis: string;
+
+  /**
+   * Current unclaimed fees (in quote token units, as string)
+   */
+  unclaimedFees: string;
 }
 
 /**
@@ -140,9 +173,105 @@ export function CloseOrderConfigureStep({
   currentPriceDisplay,
   isToken0Quote,
   chainId,
+  orderType,
+  // Position data for PnL simulation
+  liquidity,
+  tickLower,
+  tickUpper,
+  currentCostBasis,
+  unclaimedFees,
 }: CloseOrderConfigureStepProps) {
+  // When orderType is provided, hide the trigger mode selector
+  const showTriggerModeSelector = !orderType;
   const [lowerPriceInput, setLowerPriceInput] = useState(formData.priceLowerDisplay);
   const [upperPriceInput, setUpperPriceInput] = useState(formData.priceUpperDisplay);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Calculate simulated PnL at trigger price
+  const simulatedPnL = useMemo(() => {
+    // Get the trigger sqrtPriceX96 based on order type/trigger mode
+    const triggerSqrtPriceX96 = formData.triggerMode === 'LOWER'
+      ? formData.sqrtPriceX96Lower
+      : formData.triggerMode === 'UPPER'
+        ? formData.sqrtPriceX96Upper
+        : null; // BOTH mode not supported for single PnL display
+
+    // Validation: return invalid if no trigger price or zero liquidity
+    if (!triggerSqrtPriceX96 || triggerSqrtPriceX96 === '0' || liquidity === 0n) {
+      return { isValid: false as const };
+    }
+
+    try {
+      const triggerPrice = BigInt(triggerSqrtPriceX96);
+      const currentPrice = BigInt(currentSqrtPriceX96);
+
+      // Handle immediate execution case
+      // For SL: should trigger when price falls BELOW trigger
+      // For TP: should trigger when price rises ABOVE trigger
+      let effectivePrice = triggerPrice;
+
+      if (formData.triggerMode === 'LOWER') {
+        // Stop-loss triggers when price falls below trigger
+        // If trigger >= current (would execute immediately), use current price
+        // Note: isToken0Quote inverts the relationship
+        const wouldExecuteImmediately = isToken0Quote
+          ? triggerPrice <= currentPrice  // inverted: lower sqrt = higher user price
+          : triggerPrice >= currentPrice;
+        if (wouldExecuteImmediately) {
+          effectivePrice = currentPrice;
+        }
+      } else if (formData.triggerMode === 'UPPER') {
+        // Take-profit triggers when price rises above trigger
+        // If trigger <= current (would execute immediately), use current price
+        const wouldExecuteImmediately = isToken0Quote
+          ? triggerPrice >= currentPrice  // inverted: higher sqrt = lower user price
+          : triggerPrice <= currentPrice;
+        if (wouldExecuteImmediately) {
+          effectivePrice = currentPrice;
+        }
+      }
+
+      // Calculate position value at effective price
+      const baseIsToken0 = !isToken0Quote;
+      const valueAtTrigger = calculatePositionValue(
+        liquidity,
+        effectivePrice,
+        tickLower,
+        tickUpper,
+        baseIsToken0
+      );
+
+      // Calculate simulated PnL including fees
+      const costBasis = BigInt(currentCostBasis || '0');
+      const fees = BigInt(unclaimedFees || '0');
+      const pnl = valueAtTrigger - costBasis + fees;
+
+      // Format the display value
+      const displayValue = formatCompactValue(pnl < 0n ? -pnl : pnl, quoteToken.decimals);
+
+      return {
+        isValid: true as const,
+        value: pnl,
+        isProfit: pnl >= 0n,
+        displayValue,
+        feesDisplay: formatCompactValue(fees, quoteToken.decimals),
+      };
+    } catch {
+      return { isValid: false as const };
+    }
+  }, [
+    formData.triggerMode,
+    formData.sqrtPriceX96Lower,
+    formData.sqrtPriceX96Upper,
+    currentSqrtPriceX96,
+    isToken0Quote,
+    liquidity,
+    tickLower,
+    tickUpper,
+    currentCostBasis,
+    unclaimedFees,
+    quoteToken.decimals,
+  ]);
 
   // Validate prices whenever relevant form data changes
   useEffect(() => {
@@ -217,39 +346,41 @@ export function CloseOrderConfigureStep({
 
   return (
     <div className="space-y-6">
-      {/* Trigger Mode Selection */}
-      <div>
-        <label className="block text-sm font-medium text-slate-300 mb-3">Trigger Mode</label>
-        <div className="grid grid-cols-3 gap-2">
-          {TRIGGER_MODES.map(({ value, label, description, icon: Icon }) => (
-            <button
-              key={value}
-              onClick={() => onChange({ triggerMode: value })}
-              className={`p-3 rounded-lg border transition-all cursor-pointer text-left ${
-                formData.triggerMode === value
-                  ? 'border-blue-500 bg-blue-500/10'
-                  : 'border-slate-600 hover:border-slate-500'
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Icon
-                  className={`w-4 h-4 ${
-                    formData.triggerMode === value ? 'text-blue-400' : 'text-slate-400'
-                  }`}
-                />
-                <span
-                  className={`text-sm font-medium ${
-                    formData.triggerMode === value ? 'text-blue-400' : 'text-slate-300'
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">{description}</p>
-            </button>
-          ))}
+      {/* Trigger Mode Selection - hidden when orderType is provided */}
+      {showTriggerModeSelector && (
+        <div>
+          <label className="block text-sm font-medium text-slate-300 mb-3">Trigger Mode</label>
+          <div className="grid grid-cols-3 gap-2">
+            {TRIGGER_MODES.map(({ value, label, description, icon: Icon }) => (
+              <button
+                key={value}
+                onClick={() => onChange({ triggerMode: value })}
+                className={`p-3 rounded-lg border transition-all cursor-pointer text-left ${
+                  formData.triggerMode === value
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-slate-600 hover:border-slate-500'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Icon
+                    className={`w-4 h-4 ${
+                      formData.triggerMode === value ? 'text-blue-400' : 'text-slate-400'
+                    }`}
+                  />
+                  <span
+                    className={`text-sm font-medium ${
+                      formData.triggerMode === value ? 'text-blue-400' : 'text-slate-300'
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">{description}</p>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Current Price Display */}
       <div className="bg-slate-700/30 rounded-lg p-4">
@@ -316,49 +447,95 @@ export function CloseOrderConfigureStep({
             <p className="text-sm text-red-400">{formData.priceValidationError}</p>
           </div>
         )}
+
+        {/* PnL Simulation */}
+        {formData.triggerMode !== 'BOTH' && (
+          <div className="p-3 bg-slate-700/30 rounded-lg">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-slate-400">Expected PnL at trigger:</span>
+              {simulatedPnL.isValid ? (
+                <span className={`text-sm font-medium ${
+                  simulatedPnL.isProfit ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {simulatedPnL.isProfit ? '+' : '-'}{simulatedPnL.displayValue} {quoteToken.symbol}
+                </span>
+              ) : (
+                <span className="text-sm text-slate-500">n/a</span>
+              )}
+            </div>
+            {simulatedPnL.isValid && (
+              <p className="text-xs text-slate-500 mt-1">
+                Includes {simulatedPnL.feesDisplay} {quoteToken.symbol} unclaimed fees
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Advanced Settings */}
-      <div className="space-y-4">
-        {/* Slippage */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Slippage Tolerance</label>
-          <div className="flex gap-2">
-            {SLIPPAGE_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => onChange({ slippageBps: value })}
-                className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
-                  formData.slippageBps === value
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                    : 'border-slate-600 text-slate-400 hover:border-slate-500'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Advanced Settings - Collapsible */}
+      <div className="border-t border-slate-700 pt-4">
+        {!showAdvanced ? (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(true)}
+            className="flex items-center justify-between w-full text-sm text-slate-400 hover:text-slate-300 transition-colors cursor-pointer"
+          >
+            <span>Advanced Settings</span>
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        ) : (
+          <div className="space-y-4">
+            {/* Slippage with close button */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-slate-300">Slippage Tolerance</label>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(false)}
+                  className="p-1 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  title="Close advanced settings"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex gap-2">
+                {SLIPPAGE_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => onChange({ slippageBps: value })}
+                    className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
+                      formData.slippageBps === value
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        {/* Expiration */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Valid Until</label>
-          <div className="flex gap-2">
-            {EXPIRATION_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => onChange({ validUntilDays: value })}
-                className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
-                  formData.validUntilDays === value
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                    : 'border-slate-600 text-slate-400 hover:border-slate-500'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+            {/* Expiration */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Valid Until</label>
+              <div className="flex gap-2">
+                {EXPIRATION_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => onChange({ validUntilDays: value })}
+                    className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors cursor-pointer ${
+                      formData.validUntilDays === value
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Info Note */}

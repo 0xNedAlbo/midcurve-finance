@@ -64,15 +64,6 @@ export function SwapConfigSection({
     onChange({ swapSlippageBps: slippageBps });
   };
 
-  // Determine token labels based on direction
-  const getDirectionLabel = (direction: SwapDirection): string => {
-    if (direction === 'BASE_TO_QUOTE') {
-      return `Swap all ${baseToken.symbol} to ${quoteToken.symbol}`;
-    } else {
-      return `Swap all ${quoteToken.symbol} to ${baseToken.symbol}`;
-    }
-  };
-
   return (
     <div className="border-t border-slate-700/50 pt-4 mt-4">
       {/* Section Header with Toggle */}
@@ -104,56 +95,28 @@ export function SwapConfigSection({
       {/* Swap Options (only shown when enabled) */}
       {formData.swapEnabled && (
         <div className="space-y-4">
-          {/* Direction Selection */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Swap Direction</label>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => handleDirectionChange('BASE_TO_QUOTE')}
-                className={`w-full p-3 rounded-lg border transition-all cursor-pointer text-left ${
-                  formData.swapDirection === 'BASE_TO_QUOTE'
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : 'border-slate-600 hover:border-slate-500'
-                }`}
-              >
-                <span
-                  className={`text-sm ${
-                    formData.swapDirection === 'BASE_TO_QUOTE'
-                      ? 'text-blue-400'
-                      : 'text-slate-300'
-                  }`}
-                >
-                  {getDirectionLabel('BASE_TO_QUOTE')}
-                </span>
-                <p className="text-xs text-slate-500 mt-1">
-                  Receive all proceeds in {quoteToken.symbol}
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDirectionChange('QUOTE_TO_BASE')}
-                className={`w-full p-3 rounded-lg border transition-all cursor-pointer text-left ${
-                  formData.swapDirection === 'QUOTE_TO_BASE'
-                    ? 'border-blue-500 bg-blue-500/10'
-                    : 'border-slate-600 hover:border-slate-500'
-                }`}
-              >
-                <span
-                  className={`text-sm ${
-                    formData.swapDirection === 'QUOTE_TO_BASE'
-                      ? 'text-blue-400'
-                      : 'text-slate-300'
-                  }`}
-                >
-                  {getDirectionLabel('QUOTE_TO_BASE')}
-                </span>
-                <p className="text-xs text-slate-500 mt-1">
-                  Receive all proceeds in {baseToken.symbol}
-                </p>
-              </button>
+          {/* Direction Selection - Compact */}
+          <div className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
+            <div>
+              <span className="text-sm text-slate-300">
+                {formData.swapDirection === 'BASE_TO_QUOTE'
+                  ? `${baseToken.symbol} → ${quoteToken.symbol}`
+                  : `${quoteToken.symbol} → ${baseToken.symbol}`}
+              </span>
+              <p className="text-xs text-slate-500">
+                Receive all in {formData.swapDirection === 'BASE_TO_QUOTE' ? quoteToken.symbol : baseToken.symbol}
+              </p>
             </div>
+            <button
+              type="button"
+              onClick={() => handleDirectionChange(
+                formData.swapDirection === 'BASE_TO_QUOTE' ? 'QUOTE_TO_BASE' : 'BASE_TO_QUOTE'
+              )}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white border border-slate-600 hover:border-slate-500 rounded-lg transition-colors cursor-pointer"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              Invert
+            </button>
           </div>
 
           {/* Swap Slippage */}
