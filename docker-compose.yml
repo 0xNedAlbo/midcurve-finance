@@ -104,6 +104,7 @@ services:
     networks:
       - frontend
       - backend
+      - database
 
   # ============================================
   # EVM STRATEGY ENGINE
@@ -133,6 +134,7 @@ services:
     restart: unless-stopped
     networks:
       - backend
+      - database
 
   # ============================================
   # AUTOMATION SERVICE
@@ -186,6 +188,7 @@ services:
     restart: unless-stopped
     networks:
       - backend
+      - database
 
   # ============================================
   # PRIVATE GETH NODE
@@ -258,6 +261,7 @@ services:
     restart: unless-stopped
     networks:
       - backend
+      - database
 
 # ============================================
 # NETWORKS
@@ -267,7 +271,11 @@ networks:
     driver: bridge
   backend:
     driver: bridge
-    internal: true  # No external access to backend network
+    internal: true  # No external access - keeps geth, rabbitmq isolated
+  database:
+    driver: bridge
+    # External access allowed for AWS RDS connectivity
+    # Only services that need database access should join this network
 
 # ============================================
 # VOLUMES
