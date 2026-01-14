@@ -112,7 +112,10 @@ class RabbitMQConnectionManager {
    */
   private buildUrl(config: RabbitMQConfig): string {
     const vhost = config.vhost ? `/${config.vhost}` : '';
-    return `amqp://${config.username}:${config.password}@${config.host}:${config.port}${vhost}`;
+    // URL-encode username and password to handle special characters
+    const encodedUser = encodeURIComponent(config.username);
+    const encodedPass = encodeURIComponent(config.password);
+    return `amqp://${encodedUser}:${encodedPass}@${config.host}:${config.port}${vhost}`;
   }
 
   /**
