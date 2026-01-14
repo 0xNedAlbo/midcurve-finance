@@ -9,11 +9,12 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, AlertTriangle, Loader2, CheckCircle } from 'lucide-react';
+import { X, AlertTriangle, Loader2, CheckCircle, Trash2 } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
 import type { Address } from 'viem';
 import { useCancelCloseOrder } from '@/hooks/automation';
 import { formatTriggerPrice, type TokenConfig } from './order-button-utils';
+import { PnLSimulation } from './PnLSimulation';
 
 interface CancelOrderConfirmModalProps {
   /**
@@ -50,6 +51,42 @@ interface CancelOrderConfirmModalProps {
    * Callback when cancellation succeeds
    */
   onSuccess?: () => void;
+
+  // Position data for PnL simulation
+  /**
+   * Position liquidity
+   */
+  liquidity: bigint;
+
+  /**
+   * Position lower tick
+   */
+  tickLower: number;
+
+  /**
+   * Position upper tick
+   */
+  tickUpper: number;
+
+  /**
+   * Current cost basis (in quote token units, as string)
+   */
+  currentCostBasis: string;
+
+  /**
+   * Current unclaimed fees (in quote token units, as string)
+   */
+  unclaimedFees: string;
+
+  /**
+   * Current pool price (sqrtPriceX96)
+   */
+  currentSqrtPriceX96: string;
+
+  /**
+   * Whether token0 is the quote token
+   */
+  isToken0Quote: boolean;
 }
 
 /**
@@ -76,6 +113,14 @@ export function CancelOrderConfirmModal({
   contractAddress,
   chainId,
   onSuccess,
+  // Position data for PnL simulation
+  liquidity,
+  tickLower,
+  tickUpper,
+  currentCostBasis,
+  unclaimedFees,
+  currentSqrtPriceX96,
+  isToken0Quote,
 }: CancelOrderConfirmModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -168,19 +213,13 @@ export function CancelOrderConfirmModal({
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
             <div className="flex items-center gap-3">
-              <div className={`p-2 border rounded-lg ${
-                showSuccessView
-                  ? 'bg-green-500/10 border-green-500/20'
-                  : 'bg-amber-500/10 border-amber-500/20'
-              }`}>
-                {showSuccessView ? (
+              {showSuccessView && (
+                <div className="p-2 border rounded-lg bg-green-500/10 border-green-500/20">
                   <CheckCircle className="w-5 h-5 text-green-400" />
-                ) : (
-                  <AlertTriangle className="w-5 h-5 text-amber-400" />
-                )}
-              </div>
+                </div>
+              )}
               <h2 className="text-lg font-semibold text-white">
-                {showSuccessView ? 'Order Cancelled' : 'Cancel Order'}
+                {showSuccessView ? 'Order Cancelled' : `${orderTypeLabel} Order`}
               </h2>
             </div>
             <button
@@ -217,7 +256,7 @@ export function CancelOrderConfirmModal({
             ) : (
               <>
                 <p className="text-slate-300">
-                  Are you sure you want to cancel this {orderTypeLabel.toLowerCase()} order?
+                  If you want to cancel this order, use the red button below.
                 </p>
 
                 {/* Order details */}
@@ -233,6 +272,26 @@ export function CancelOrderConfirmModal({
                     </span>
                   </div>
                 </div>
+
+                {/* PnL Simulation - shows expected PnL if order triggers */}
+                {sqrtPriceX96 && triggerMode !== 'BOTH' && (
+                  <PnLSimulation
+                    liquidity={liquidity}
+                    tickLower={tickLower}
+                    tickUpper={tickUpper}
+                    currentCostBasis={currentCostBasis}
+                    unclaimedFees={unclaimedFees}
+                    triggerSqrtPriceX96={sqrtPriceX96}
+                    currentSqrtPriceX96={currentSqrtPriceX96}
+                    isToken0Quote={isToken0Quote}
+                    quoteToken={{
+                      decimals: tokenConfig.quoteTokenDecimals,
+                      symbol: tokenConfig.quoteTokenSymbol,
+                    }}
+                    triggerMode={triggerMode as 'LOWER' | 'UPPER'}
+                    label="Expected PnL if order triggers:"
+                  />
+                )}
 
                 {/* Error message */}
                 {error && (
@@ -258,36 +317,34 @@ export function CancelOrderConfirmModal({
           </div>
 
           {/* Footer */}
-          <div className="p-6 border-t border-slate-700/50 flex gap-3">
+          <div className="p-6 border-t border-slate-700/50 flex items-center justify-between">
             {showSuccessView ? (
               <button
                 onClick={handleClose}
-                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-slate-600 hover:bg-slate-500 rounded-lg transition-colors cursor-pointer"
+                className="w-1/2 ml-auto px-4 py-2 text-sm font-medium text-white bg-slate-600 hover:bg-slate-500 rounded-lg transition-colors cursor-pointer"
               >
                 Close
               </button>
             ) : (
               <>
                 <button
-                  onClick={handleClose}
-                  disabled={isProcessing}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-slate-300 hover:text-white border border-slate-600 hover:border-slate-500 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Keep Order
-                </button>
-                <button
                   onClick={handleConfirm}
                   disabled={isProcessing}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Cancel order"
                 >
                   {isProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Cancelling...
-                    </>
+                    <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    'Cancel Order'
+                    <Trash2 className="w-5 h-5" />
                   )}
+                </button>
+                <button
+                  onClick={handleClose}
+                  disabled={isProcessing}
+                  className="w-1/2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Keep Order
                 </button>
               </>
             )}

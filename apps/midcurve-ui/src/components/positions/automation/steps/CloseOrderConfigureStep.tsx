@@ -4,13 +4,14 @@
  * Step 1: Configure trigger mode and price thresholds
  */
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
-import { priceToSqrtRatioX96, calculatePositionValue, formatCompactValue } from '@midcurve/shared';
+import { priceToSqrtRatioX96 } from '@midcurve/shared';
 import { parseUnits } from 'viem';
 import type { CloseOrderFormData } from '../CloseOrderModal';
 import { SwapConfigSection } from './SwapConfigSection';
+import { PnLSimulation } from '../PnLSimulation';
 
 interface CloseOrderConfigureStepProps {
   formData: CloseOrderFormData;
@@ -187,91 +188,12 @@ export function CloseOrderConfigureStep({
   const [upperPriceInput, setUpperPriceInput] = useState(formData.priceUpperDisplay);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Calculate simulated PnL at trigger price
-  const simulatedPnL = useMemo(() => {
-    // Get the trigger sqrtPriceX96 based on order type/trigger mode
-    const triggerSqrtPriceX96 = formData.triggerMode === 'LOWER'
-      ? formData.sqrtPriceX96Lower
-      : formData.triggerMode === 'UPPER'
-        ? formData.sqrtPriceX96Upper
-        : null; // BOTH mode not supported for single PnL display
-
-    // Validation: return invalid if no trigger price or zero liquidity
-    if (!triggerSqrtPriceX96 || triggerSqrtPriceX96 === '0' || liquidity === 0n) {
-      return { isValid: false as const };
-    }
-
-    try {
-      const triggerPrice = BigInt(triggerSqrtPriceX96);
-      const currentPrice = BigInt(currentSqrtPriceX96);
-
-      // Handle immediate execution case
-      // For SL: should trigger when price falls BELOW trigger
-      // For TP: should trigger when price rises ABOVE trigger
-      let effectivePrice = triggerPrice;
-
-      if (formData.triggerMode === 'LOWER') {
-        // Stop-loss triggers when price falls below trigger
-        // If trigger >= current (would execute immediately), use current price
-        // Note: isToken0Quote inverts the relationship
-        const wouldExecuteImmediately = isToken0Quote
-          ? triggerPrice <= currentPrice  // inverted: lower sqrt = higher user price
-          : triggerPrice >= currentPrice;
-        if (wouldExecuteImmediately) {
-          effectivePrice = currentPrice;
-        }
-      } else if (formData.triggerMode === 'UPPER') {
-        // Take-profit triggers when price rises above trigger
-        // If trigger <= current (would execute immediately), use current price
-        const wouldExecuteImmediately = isToken0Quote
-          ? triggerPrice >= currentPrice  // inverted: higher sqrt = lower user price
-          : triggerPrice <= currentPrice;
-        if (wouldExecuteImmediately) {
-          effectivePrice = currentPrice;
-        }
-      }
-
-      // Calculate position value at effective price
-      const baseIsToken0 = !isToken0Quote;
-      const valueAtTrigger = calculatePositionValue(
-        liquidity,
-        effectivePrice,
-        tickLower,
-        tickUpper,
-        baseIsToken0
-      );
-
-      // Calculate simulated PnL including fees
-      const costBasis = BigInt(currentCostBasis || '0');
-      const fees = BigInt(unclaimedFees || '0');
-      const pnl = valueAtTrigger - costBasis + fees;
-
-      // Format the display value
-      const displayValue = formatCompactValue(pnl < 0n ? -pnl : pnl, quoteToken.decimals);
-
-      return {
-        isValid: true as const,
-        value: pnl,
-        isProfit: pnl >= 0n,
-        displayValue,
-        feesDisplay: formatCompactValue(fees, quoteToken.decimals),
-      };
-    } catch {
-      return { isValid: false as const };
-    }
-  }, [
-    formData.triggerMode,
-    formData.sqrtPriceX96Lower,
-    formData.sqrtPriceX96Upper,
-    currentSqrtPriceX96,
-    isToken0Quote,
-    liquidity,
-    tickLower,
-    tickUpper,
-    currentCostBasis,
-    unclaimedFees,
-    quoteToken.decimals,
-  ]);
+  // Get the trigger sqrtPriceX96 based on order type/trigger mode for PnL simulation
+  const triggerSqrtPriceX96 = formData.triggerMode === 'LOWER'
+    ? formData.sqrtPriceX96Lower
+    : formData.triggerMode === 'UPPER'
+      ? formData.sqrtPriceX96Upper
+      : null; // BOTH mode not supported for single PnL display
 
   // Validate prices whenever relevant form data changes
   useEffect(() => {
@@ -449,26 +371,19 @@ export function CloseOrderConfigureStep({
         )}
 
         {/* PnL Simulation */}
-        {formData.triggerMode !== 'BOTH' && (
-          <div className="p-3 bg-slate-700/30 rounded-lg">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-400">Expected PnL at trigger:</span>
-              {simulatedPnL.isValid ? (
-                <span className={`text-sm font-medium ${
-                  simulatedPnL.isProfit ? 'text-green-400' : 'text-red-400'
-                }`}>
-                  {simulatedPnL.isProfit ? '+' : '-'}{simulatedPnL.displayValue} {quoteToken.symbol}
-                </span>
-              ) : (
-                <span className="text-sm text-slate-500">n/a</span>
-              )}
-            </div>
-            {simulatedPnL.isValid && (
-              <p className="text-xs text-slate-500 mt-1">
-                Includes {simulatedPnL.feesDisplay} {quoteToken.symbol} unclaimed fees
-              </p>
-            )}
-          </div>
+        {formData.triggerMode !== 'BOTH' && triggerSqrtPriceX96 && (
+          <PnLSimulation
+            liquidity={liquidity}
+            tickLower={tickLower}
+            tickUpper={tickUpper}
+            currentCostBasis={currentCostBasis}
+            unclaimedFees={unclaimedFees}
+            triggerSqrtPriceX96={triggerSqrtPriceX96}
+            currentSqrtPriceX96={currentSqrtPriceX96}
+            isToken0Quote={isToken0Quote}
+            quoteToken={quoteToken}
+            triggerMode={formData.triggerMode as 'LOWER' | 'UPPER'}
+          />
         )}
       </div>
 
