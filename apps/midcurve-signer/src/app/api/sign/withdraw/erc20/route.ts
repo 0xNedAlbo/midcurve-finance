@@ -3,6 +3,7 @@
  *
  * Signs an ERC-20 transfer transaction from the automation wallet to the
  * strategy owner. The recipient is HARD-WIRED by querying SEMSEE directly.
+ * Signer is stateless - nonce must be provided by caller.
  *
  * Security:
  * - Recipient queried from strategy.owner() on SEMSEE (cannot be spoofed)
@@ -26,7 +27,8 @@
  *     amount: string,           // BigInt as string
  *     maxFeePerGas: string,     // BigInt as string (Core provides)
  *     maxPriorityFeePerGas: string,  // BigInt as string (Core provides)
- *     gasLimit: string          // BigInt as string (Core provides)
+ *     gasLimit: string,         // BigInt as string (Core provides)
+ *     nonce: number             // Required - caller fetches from chain
  *   }
  *
  * Response:
@@ -96,6 +98,8 @@ const Erc20WithdrawRequestSchema = z.object({
   maxFeePerGas: z.string().min(1, 'maxFeePerGas is required'),
   maxPriorityFeePerGas: z.string().min(1, 'maxPriorityFeePerGas is required'),
   gasLimit: z.string().min(1, 'gasLimit is required'),
+  // Nonce is required - caller fetches from chain (signer is stateless)
+  nonce: z.number().int().nonnegative('nonce is required'),
 });
 
 type Erc20WithdrawRequest = z.infer<typeof Erc20WithdrawRequestSchema>;
@@ -142,6 +146,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     maxFeePerGas,
     maxPriorityFeePerGas,
     gasLimit,
+    nonce,
   } = validation.data;
 
   logger.info({
@@ -213,10 +218,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  // 6. Get and increment nonce for this chain
-  const nonce = await evmWalletService.getAndIncrementNonce(strategyAddress as Address, chainId);
-
-  // 7. Build the transfer transaction
+  // 6. Build the transfer transaction
   const calldata = encodeFunctionData({
     abi: ERC20_TRANSFER_ABI,
     functionName: 'transfer',

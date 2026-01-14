@@ -35,20 +35,6 @@ export interface EvmWalletConfig {
 }
 
 /**
- * EVM nonce config (immutable)
- */
-export interface EvmNonceConfig {
-  chainId: number; // 1, 42161, 8453, etc.
-}
-
-/**
- * Nonce state (mutable) - same for all platforms
- */
-export interface NonceState {
-  nonce: number;
-}
-
-/**
  * Result from creating a new wallet
  */
 export interface CreateEvmWalletResult {
@@ -117,14 +103,6 @@ function createEvmWalletHash(walletAddress: string): string {
 }
 
 /**
- * Generate nonceHash for EVM nonces
- * Format: "{walletId}/evm/{chainId}"
- */
-function createEvmNonceHash(walletId: string, chainId: number): string {
-  return `${walletId}/evm/${chainId}`;
-}
-
-/**
  * Parse EvmWalletConfig from JSON
  */
 function parseEvmWalletConfig(config: unknown): EvmWalletConfig {
@@ -136,14 +114,6 @@ function parseEvmWalletConfig(config: unknown): EvmWalletConfig {
     keyProvider: c.keyProvider,
     encryptedPrivateKey: c.encryptedPrivateKey,
   };
-}
-
-/**
- * Parse NonceState from JSON
- */
-function parseNonceState(state: unknown): NonceState {
-  const s = state as NonceState;
-  return { nonce: s.nonce };
 }
 
 // =============================================================================
@@ -459,204 +429,6 @@ class EvmWalletService {
       msg: 'Automation wallet deactivated',
     });
     return true;
-  }
-
-  /**
-   * Get and increment nonce for a strategy's wallet on a specific chain
-   *
-   * This is an atomic operation that:
-   * 1. Creates a nonce record if it doesn't exist (starting at 0)
-   * 2. Returns the current nonce value
-   * 3. Increments the nonce for the next transaction
-   *
-   * Uses the Strategy table relation for lookup.
-   *
-   * @returns The nonce to use for the current transaction
-   * @throws EvmWalletServiceError if wallet not found or operation fails
-   */
-  async getAndIncrementNonce(strategyAddress: Address, chainId: number): Promise<number> {
-    signerLog.methodEntry(this.logger, 'getAndIncrementNonce', { strategyAddress, chainId });
-
-    // Look up via Strategy table relation
-    const strategy = await prisma.strategy.findFirst({
-      where: { contractAddress: strategyAddress.toLowerCase() },
-      include: {
-        automationWallets: {
-          where: { walletType: WALLET_TYPE, isActive: true },
-          select: { id: true },
-          take: 1,
-        },
-      },
-    });
-
-    const wallet = strategy?.automationWallets[0];
-
-    if (!wallet) {
-      throw new EvmWalletServiceError(
-        'Strategy does not have an active automation wallet',
-        'NO_WALLET',
-        404
-      );
-    }
-
-    const nonceHash = createEvmNonceHash(wallet.id, chainId);
-    const nonceConfig: EvmNonceConfig = { chainId };
-
-    // Try to find existing nonce record first
-    const existingNonce = await prisma.automationWalletNonce.findUnique({
-      where: { nonceHash },
-    });
-
-    if (!existingNonce) {
-      // Create new nonce record with nonce = 1 (returning 0 as current)
-      await prisma.automationWalletNonce.create({
-        data: {
-          walletId: wallet.id,
-          nonceHash,
-          config: nonceConfig as unknown as PrismaTypes.InputJsonValue,
-          state: { nonce: 1 } as unknown as PrismaTypes.InputJsonValue,
-        },
-      });
-
-      this.logger.debug({
-        strategyAddress,
-        chainId,
-        nonce: 0,
-        msg: 'Nonce retrieved (new record)',
-      });
-
-      signerLog.methodExit(this.logger, 'getAndIncrementNonce', { nonce: 0 });
-      return 0;
-    }
-
-    // Existing record - increment and return previous value
-    const currentState = parseNonceState(existingNonce.state);
-    const currentNonce = currentState.nonce;
-    const newState: NonceState = { nonce: currentNonce + 1 };
-
-    await prisma.automationWalletNonce.update({
-      where: { nonceHash },
-      data: { state: newState as unknown as PrismaTypes.InputJsonValue },
-    });
-
-    this.logger.debug({
-      strategyAddress,
-      chainId,
-      nonce: currentNonce,
-      msg: 'Nonce retrieved and incremented',
-    });
-
-    signerLog.methodExit(this.logger, 'getAndIncrementNonce', { nonce: currentNonce });
-
-    return currentNonce;
-  }
-
-  /**
-   * Get current nonce without incrementing (for read-only queries)
-   *
-   * Uses the Strategy table relation for lookup.
-   *
-   * @returns Current nonce value, or 0 if no transactions have been made on this chain
-   */
-  async getCurrentNonce(strategyAddress: Address, chainId: number): Promise<number> {
-    signerLog.methodEntry(this.logger, 'getCurrentNonce', { strategyAddress, chainId });
-
-    // Look up via Strategy table relation
-    const strategy = await prisma.strategy.findFirst({
-      where: { contractAddress: strategyAddress.toLowerCase() },
-      include: {
-        automationWallets: {
-          where: { walletType: WALLET_TYPE, isActive: true },
-          select: { id: true },
-          take: 1,
-        },
-      },
-    });
-
-    const wallet = strategy?.automationWallets[0];
-
-    if (!wallet) {
-      throw new EvmWalletServiceError(
-        'Strategy does not have an active automation wallet',
-        'NO_WALLET',
-        404
-      );
-    }
-
-    const nonceHash = createEvmNonceHash(wallet.id, chainId);
-
-    const nonceRecord = await prisma.automationWalletNonce.findUnique({
-      where: { nonceHash },
-    });
-
-    if (!nonceRecord) {
-      return 0;
-    }
-
-    const state = parseNonceState(nonceRecord.state);
-    return state.nonce;
-  }
-
-  /**
-   * Reset nonce to a specific value (for recovery scenarios)
-   *
-   * Use this when the on-chain nonce gets out of sync with the database,
-   * for example after a failed transaction that was never broadcast.
-   *
-   * Uses the Strategy table relation for lookup.
-   *
-   * @param nonce The nonce value to set (typically from eth_getTransactionCount)
-   */
-  async resetNonce(strategyAddress: Address, chainId: number, nonce: number): Promise<void> {
-    signerLog.methodEntry(this.logger, 'resetNonce', { strategyAddress, chainId, nonce });
-
-    // Look up via Strategy table relation
-    const strategy = await prisma.strategy.findFirst({
-      where: { contractAddress: strategyAddress.toLowerCase() },
-      include: {
-        automationWallets: {
-          where: { walletType: WALLET_TYPE, isActive: true },
-          select: { id: true },
-          take: 1,
-        },
-      },
-    });
-
-    const wallet = strategy?.automationWallets[0];
-
-    if (!wallet) {
-      throw new EvmWalletServiceError(
-        'Strategy does not have an active automation wallet',
-        'NO_WALLET',
-        404
-      );
-    }
-
-    const nonceHash = createEvmNonceHash(wallet.id, chainId);
-    const nonceConfig: EvmNonceConfig = { chainId };
-    const nonceState: NonceState = { nonce };
-
-    await prisma.automationWalletNonce.upsert({
-      where: { nonceHash },
-      create: {
-        walletId: wallet.id,
-        nonceHash,
-        config: nonceConfig as unknown as PrismaTypes.InputJsonValue,
-        state: nonceState as unknown as PrismaTypes.InputJsonValue,
-      },
-      update: {
-        state: nonceState as unknown as PrismaTypes.InputJsonValue,
-      },
-    });
-
-    this.logger.info({
-      strategyAddress,
-      chainId,
-      nonce,
-      msg: 'Nonce reset to specified value',
-    });
-
-    signerLog.methodExit(this.logger, 'resetNonce', { nonce });
   }
 }
 

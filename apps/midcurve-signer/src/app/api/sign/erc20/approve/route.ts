@@ -2,6 +2,7 @@
  * POST /api/sign/erc20/approve - Sign ERC-20 Approval Transaction
  *
  * Signs an ERC-20 approve transaction using the strategy's automation wallet.
+ * Signer is stateless - nonce must be provided by caller.
  *
  * Flow:
  * 1. Validate request schema
@@ -17,7 +18,8 @@
  *     chainId: number,
  *     tokenAddress: string,
  *     spenderAddress: string,
- *     amount: string  // BigInt as string
+ *     amount: string,           // BigInt as string
+ *     nonce: number             // Required - caller fetches from chain
  *   }
  *
  * Response:
@@ -83,6 +85,8 @@ const Erc20ApproveRequestSchema = z.object({
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid spender address'),
   amount: z.string().min(1, 'amount is required'),
+  // Nonce is required - caller fetches from chain (signer is stateless)
+  nonce: z.number().int().nonnegative('nonce is required'),
 });
 
 type Erc20ApproveRequest = z.infer<typeof Erc20ApproveRequestSchema>;
@@ -121,7 +125,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { strategyAddress, chainId, tokenAddress, spenderAddress, amount } =
+  const { strategyAddress, chainId, tokenAddress, spenderAddress, amount, nonce } =
     validation.data;
 
   logger.info({
@@ -165,10 +169,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  // 5. Get and increment nonce for this chain
-  const nonce = await evmWalletService.getAndIncrementNonce(strategyAddress as Address, chainId);
-
-  // 6. Build the approve transaction
+  // 5. Build the approve transaction
   const calldata = encodeFunctionData({
     abi: ERC20_APPROVE_ABI,
     functionName: 'approve',

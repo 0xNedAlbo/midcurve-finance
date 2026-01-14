@@ -6,11 +6,9 @@
  *
  * Called by the automation service when a price trigger is met.
  *
- * Gas parameters (gasLimit, gasPrice) must be provided by the caller.
- * This keeps the signer isolated from external RPC endpoints for security.
- *
- * For retry scenarios, the caller can provide an explicit nonce. The caller
- * is responsible for fetching the on-chain nonce - the signer has no RPC access.
+ * Gas parameters (gasLimit, gasPrice) and nonce must be provided by the caller.
+ * This keeps the signer stateless and isolated from external RPC endpoints.
+ * The caller is responsible for fetching the on-chain nonce.
  *
  * Prerequisites:
  * - User must have an automation wallet
@@ -28,7 +26,7 @@
  *     feeBps: number (0-100, max 1%),
  *     gasLimit: string (bigint as string),
  *     gasPrice: string (bigint as string),
- *     nonce?: number (optional, for retry scenarios),
+ *     nonce: number (required, caller fetches from chain),
  *     swapParams?: {
  *       augustus: string (swap contract address),
  *       swapCalldata: string (hex-encoded calldata),
@@ -91,8 +89,8 @@ const SignExecuteCloseSchema = z.object({
   // Gas parameters from caller (signer does not access RPC)
   gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
-  // Optional explicit nonce for retry scenarios (caller fetches from chain)
-  nonce: z.number().int().nonnegative().optional(),
+  // Nonce is required - caller fetches from chain (signer is stateless)
+  nonce: z.number().int().nonnegative('nonce is required'),
   // Optional swap params for post-close swap via Paraswap
   swapParams: SwapParamsSchema.optional(),
 });

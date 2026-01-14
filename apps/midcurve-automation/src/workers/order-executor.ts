@@ -423,28 +423,17 @@ export class OrderExecutor {
     // Check if this is a retry attempt (order already in 'triggering' status)
     const isRetry = order.status === 'triggering';
 
-    // For retry attempts, fetch the on-chain nonce to avoid "nonce too low" errors
-    // This handles cases where the original tx succeeded but we didn't get confirmation
-    let explicitNonce: number | undefined;
+    // Always fetch on-chain nonce before signing
+    // Signer service is stateless and does not manage nonces
+    const nonce = await getOnChainNonce(
+      chainId as SupportedChainId,
+      operatorAddress as `0x${string}`
+    );
 
-    if (isRetry) {
-      log.info(
-        { orderId, positionId, status: order.status },
-        'Retry attempt - fetching on-chain nonce for sync'
-      );
-
-      // Use operatorAddress directly - wallet must exist (created at order registration)
-      // No need to call getOrCreateWallet, we already have the address from order config
-      explicitNonce = await getOnChainNonce(
-        chainId as SupportedChainId,
-        operatorAddress as `0x${string}`
-      );
-
-      log.info(
-        { orderId, positionId, operatorAddress, explicitNonce },
-        'Will use explicit nonce for retry to avoid nonce desync'
-      );
-    }
+    log.info(
+      { orderId, positionId, operatorAddress, nonce, isRetry },
+      'Fetched on-chain nonce for signing'
+    );
 
     // Only mark as triggering on first attempt, not retries
     const automationLogService = getAutomationLogService();
@@ -740,7 +729,7 @@ export class OrderExecutor {
     });
 
     // Sign the execution transaction (gas estimation done in signer-client)
-    // For retry attempts, pass the explicit on-chain nonce to avoid "nonce too low" errors
+    // Nonce is always fetched from chain - signer service is stateless
     const signedTx = await signerClient.signExecuteClose({
       userId,
       chainId,
@@ -749,7 +738,7 @@ export class OrderExecutor {
       feeRecipient: feeConfig.recipient,
       feeBps: feeConfig.bps,
       operatorAddress,
-      nonce: explicitNonce,
+      nonce,
       swapParams: swapParams
         ? {
             augustus: swapParams.augustusAddress,

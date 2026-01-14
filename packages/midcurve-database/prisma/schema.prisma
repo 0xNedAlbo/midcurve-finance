@@ -693,9 +693,6 @@ model AutomationWallet {
   isActive   Boolean   @default(true)
   lastUsedAt DateTime?
 
-  // Relations
-  nonces AutomationWalletNonce[]
-
   // Indexes
   @@index([walletType])
   @@index([walletPurpose])
@@ -706,37 +703,6 @@ model AutomationWallet {
   @@map("automation_wallets")
 }
 
-// AutomationWalletNonce - Per-network nonce tracking for automation wallets
-model AutomationWalletNonce {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Wallet reference
-  walletId String
-  wallet   AutomationWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
-  // Nonce hash for uniqueness (similar to positionHash pattern)
-  // Format: "{walletId}/{walletType}/{networkIdentifier}"
-  // - EVM: "{walletId}/evm/{chainId}"
-  // - Solana: "{walletId}/solana/{cluster}"
-  // - Hyperliquid: "{walletId}/hyperliquid/mainnet"
-  nonceHash String @unique
-
-  // Platform-specific immutable config (JSON)
-  // EVM: { chainId: number }
-  // Solana: { cluster: 'mainnet-beta' | 'devnet' }
-  // Hyperliquid: { network: 'mainnet' }
-  config Json
-
-  // Mutable state (JSON)
-  // All platforms: { nonce: number }
-  state Json
-
-  // Indexes
-  @@index([walletId])
-  @@map("automation_wallet_nonces")
-}
 
 // =============================================================================
 // Position Automation Models
