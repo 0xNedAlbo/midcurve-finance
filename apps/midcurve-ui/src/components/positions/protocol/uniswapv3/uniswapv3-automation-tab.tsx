@@ -36,7 +36,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   // Extract pool and position config for automation
   const poolConfig = position.pool.config as { address: string; chainId: number };
   const poolState = position.pool.state as { sqrtPriceX96: string };
-  const positionConfig = position.config as { nftId: number };
+  const positionConfig = position.config as { nftId: number; tickLower: number; tickUpper: number };
   const positionState = position.state as { ownerAddress: string; liquidity: string };
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
@@ -138,6 +138,12 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         currentSqrtPriceX96={poolState.sqrtPriceX96}
         currentPriceDisplay={formatCompactValue(positionStates.current.poolPrice, quoteToken.decimals)}
         isToken0Quote={position.isToken0Quote}
+        // Position data for PnL simulation
+        liquidity={BigInt(positionState.liquidity)}
+        tickLower={positionConfig.tickLower}
+        tickUpper={positionConfig.tickUpper}
+        currentCostBasis={position.currentCostBasis}
+        unclaimedFees={position.unClaimedFees}
       />
     </div>
   );

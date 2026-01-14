@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Plus, Minus, DollarSign } from "lucide-react";
+import { Plus, Minus, DollarSign, Activity } from "lucide-react";
 import { useAccount } from "wagmi";
 import type { Address } from "viem";
 import type { ListPositionData } from "@midcurve/api-shared";
@@ -68,9 +68,10 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
       quoteTokenAddress: quoteTokenConfig.address,
       baseTokenDecimals: baseToken.decimals,
       quoteTokenDecimals: quoteToken.decimals,
+      baseTokenSymbol: baseToken.symbol,
       quoteTokenSymbol: quoteToken.symbol,
     }),
-    [baseTokenConfig.address, quoteTokenConfig.address, baseToken.decimals, quoteToken.decimals, quoteToken.symbol]
+    [baseTokenConfig.address, quoteTokenConfig.address, baseToken.decimals, quoteToken.decimals, baseToken.symbol, quoteToken.symbol]
   );
 
   // Calculate current price display
@@ -136,6 +137,9 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         {/* Automation Buttons - only visible when automation is available */}
         {showAutomationButtons && (
           <>
+            {/* Divider between position actions and automation */}
+            <div className="w-px h-6 bg-slate-600/50 mx-1" />
+
             <StopLossButton
               position={position}
               positionId={position.id}
@@ -159,6 +163,13 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
               }}
               isToken0Quote={position.isToken0Quote}
             />
+
+            {/* Current Price Display - between SL and TP buttons */}
+            <span className="flex items-center gap-1 text-xs text-slate-400 px-2">
+              <Activity className="w-3 h-3" />
+              {currentPriceDisplay} {quoteToken.symbol}
+            </span>
+
             <TakeProfitButton
               position={position}
               positionId={position.id}

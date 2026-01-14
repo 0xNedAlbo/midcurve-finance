@@ -16,6 +16,7 @@ export interface TokenConfig {
   quoteTokenAddress: string;
   baseTokenDecimals: number;
   quoteTokenDecimals: number;
+  baseTokenSymbol: string;
   quoteTokenSymbol: string;
 }
 
@@ -165,7 +166,11 @@ export function getOrderButtonLabel(
 
   // Check if swap is enabled
   if (config.swapConfig?.enabled) {
-    return `${prefix} @${priceDisplay} => ${tokenConfig.quoteTokenSymbol}`;
+    // Determine target token based on swap direction
+    const targetSymbol = config.swapConfig.direction === 'BASE_TO_QUOTE'
+      ? tokenConfig.quoteTokenSymbol
+      : tokenConfig.baseTokenSymbol;
+    return `${prefix} @${priceDisplay} => ${targetSymbol}`;
   }
 
   return `${prefix} @${priceDisplay}`;

@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Plus, X as XIcon } from 'lucide-react';
 import type { Address } from 'viem';
 import type { ListPositionData, TriggerMode } from '@midcurve/api-shared';
@@ -99,8 +99,7 @@ interface TakeProfitButtonProps {
 }
 
 export function TakeProfitButton({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  position: _position, // Reserved for future use with PnL curve
+  position,
   positionId,
   poolAddress,
   chainId,
@@ -114,6 +113,9 @@ export function TakeProfitButton({
   quoteToken,
   isToken0Quote,
 }: TakeProfitButtonProps) {
+  // Extract position data for PnL simulation
+  const positionState = position.state as { liquidity: string };
+  const positionConfig = position.config as { tickLower: number; tickUpper: number };
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
 
@@ -127,6 +129,7 @@ export function TakeProfitButton({
       quoteTokenAddress: quoteToken.address,
       baseTokenDecimals: baseToken.decimals,
       quoteTokenDecimals: quoteToken.decimals,
+      baseTokenSymbol: baseToken.symbol,
       quoteTokenSymbol: quoteToken.symbol,
     }),
     [baseToken, quoteToken]
@@ -142,6 +145,23 @@ export function TakeProfitButton({
     if (!activeOrder) return null;
     return getOrderButtonLabel(activeOrder, 'takeProfit', tokenConfig);
   }, [activeOrder, tokenConfig]);
+
+  // Reset modal states when activeOrder changes
+  // - When order is created (activeOrder becomes truthy): close create modal
+  // - When order is cancelled (activeOrder becomes falsy): close cancel modal
+  useEffect(() => {
+    if (activeOrder) {
+      // Order exists - close create modal if it was open
+      if (showCreateModal) {
+        setShowCreateModal(false);
+      }
+    } else {
+      // No order - close cancel modal if it was open
+      if (showCancelModal) {
+        setShowCancelModal(false);
+      }
+    }
+  }, [activeOrder, showCreateModal, showCancelModal]);
 
   // Handle create button click
   const handleCreateClick = () => {
@@ -183,6 +203,12 @@ export function TakeProfitButton({
           currentPriceDisplay={currentPriceDisplay}
           isToken0Quote={isToken0Quote}
           orderType="takeProfit"
+          // Position data for PnL simulation
+          liquidity={BigInt(positionState.liquidity)}
+          tickLower={positionConfig.tickLower}
+          tickUpper={positionConfig.tickUpper}
+          currentCostBasis={position.currentCostBasis}
+          unclaimedFees={position.unClaimedFees}
         />
       </>
     );

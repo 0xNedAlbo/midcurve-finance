@@ -118,6 +118,32 @@ export interface CloseOrderModalProps {
    * - 'takeProfit' → triggerMode 'UPPER'
    */
   orderType?: 'stopLoss' | 'takeProfit';
+
+  // Position data for PnL simulation
+  /**
+   * Position liquidity (for calculating value at trigger price)
+   */
+  liquidity: bigint;
+
+  /**
+   * Position lower tick
+   */
+  tickLower: number;
+
+  /**
+   * Position upper tick
+   */
+  tickUpper: number;
+
+  /**
+   * Current cost basis of the position (in quote token units, as string)
+   */
+  currentCostBasis: string;
+
+  /**
+   * Current unclaimed fees (in quote token units, as string)
+   */
+  unclaimedFees: string;
 }
 
 type WizardStep = 'configure' | 'review' | 'processing' | 'success';
@@ -164,6 +190,12 @@ export function CloseOrderModal({
   isToken0Quote,
   onSuccess,
   orderType,
+  // Position data for PnL simulation
+  liquidity,
+  tickLower,
+  tickUpper,
+  currentCostBasis,
+  unclaimedFees,
 }: CloseOrderModalProps) {
   // Determine initial trigger mode based on orderType prop
   const initialTriggerMode: TriggerMode = orderType === 'takeProfit' ? 'UPPER' : 'LOWER';
@@ -439,7 +471,9 @@ export function CloseOrderModal({
     onClose();
   }, [step, onClose]);
 
-  if (!isOpen || !mounted) return null;
+  if (!isOpen || !mounted) {
+    return null;
+  }
 
   // Check if form is valid for proceeding
   // Requires: prices filled for selected trigger mode AND no price validation error
@@ -490,6 +524,12 @@ export function CloseOrderModal({
                 isToken0Quote={isToken0Quote}
                 chainId={chainId}
                 orderType={orderType}
+                // Position data for PnL simulation
+                liquidity={liquidity}
+                tickLower={tickLower}
+                tickUpper={tickUpper}
+                currentCostBasis={currentCostBasis}
+                unclaimedFees={unclaimedFees}
               />
             )}
 
