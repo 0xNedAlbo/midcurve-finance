@@ -238,10 +238,14 @@ export function StopLossButton({
     );
   }
 
-  // If active order exists, show display button (pink) with cancel X
+  // If active order exists, show display button (pink) - entire button clickable to cancel
   return (
     <>
-      <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-pink-300 bg-pink-900/20 border-pink-600/50">
+      <button
+        onClick={handleCancelClick}
+        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-pink-300 bg-pink-900/20 hover:bg-pink-800/30 border-pink-600/50 transition-colors cursor-pointer"
+        title="Click to cancel order"
+      >
         <span className="flex items-center gap-0.5">
           {buttonLabel!.prefix} @{buttonLabel!.priceDisplay}
           {buttonLabel!.hasSwap && (
@@ -251,14 +255,8 @@ export function StopLossButton({
             </>
           )}
         </span>
-        <button
-          onClick={handleCancelClick}
-          className="ml-1 p-0.5 hover:bg-pink-800/50 rounded transition-colors cursor-pointer"
-          title="Cancel order"
-        >
-          <XIcon className="w-3 h-3" />
-        </button>
-      </div>
+        <XIcon className="w-3 h-3 ml-1" />
+      </button>
 
       {/* Cancel Confirmation Modal */}
       <CancelOrderConfirmModal
@@ -269,6 +267,14 @@ export function StopLossButton({
         contractAddress={contractAddress}
         chainId={chainId}
         onSuccess={() => setShowCancelModal(false)}
+        // Position data for PnL simulation
+        liquidity={BigInt(positionState.liquidity)}
+        tickLower={positionConfig.tickLower}
+        tickUpper={positionConfig.tickUpper}
+        currentCostBasis={position.currentCostBasis}
+        unclaimedFees={position.unClaimedFees}
+        currentSqrtPriceX96={currentSqrtPriceX96}
+        isToken0Quote={isToken0Quote}
       />
     </>
   );
