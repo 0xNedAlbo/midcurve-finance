@@ -164,6 +164,12 @@ services:
       - RPC_URL_BSC=${RPC_URL_BSC}
       - RPC_URL_POLYGON=${RPC_URL_POLYGON}
       - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
+      # WebSocket RPC URLs (for OHLC data collection)
+      - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
+      - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
+      - WS_RPC_URL_BASE=${WS_RPC_URL_BASE:-}
+      - WS_RPC_URL_POLYGON=${WS_RPC_URL_POLYGON:-}
+      - WS_RPC_URL_OPTIMISM=${WS_RPC_URL_OPTIMISM:-}
       # External APIs (for position ledger sync)
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Signer service (for tx signing)
