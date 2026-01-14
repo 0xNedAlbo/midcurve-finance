@@ -164,6 +164,8 @@ services:
       - RPC_URL_BSC=${RPC_URL_BSC}
       - RPC_URL_POLYGON=${RPC_URL_POLYGON}
       - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
+      # External APIs (for position ledger sync)
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Signer service (for tx signing)
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
