@@ -99,7 +99,7 @@ services:
       evm:
         condition: service_started
       automation:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - frontend
@@ -175,6 +175,12 @@ services:
         condition: service_healthy
       signer:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     networks:
       - backend

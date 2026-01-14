@@ -37,8 +37,8 @@ ENV NODE_ENV=production
 ENV PORT=3004
 ENV HOSTNAME=0.0.0.0
 
-# Install required system packages
-RUN apk add --no-cache openssl
+# Install required system packages (wget for healthcheck)
+RUN apk add --no-cache openssl wget
 
 # Copy standalone build
 COPY --from=builder /app/apps/midcurve-automation/.next/standalone ./
