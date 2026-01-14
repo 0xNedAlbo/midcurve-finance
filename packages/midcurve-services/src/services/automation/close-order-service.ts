@@ -259,6 +259,67 @@ export class CloseOrderService {
     }
   }
 
+  /**
+   * Gets all unique pools (chainId + poolAddress) with active orders
+   * Used by OHLC trigger consumer to sync subscriptions
+   *
+   * @returns Array of pool info with chainId and poolAddress
+   */
+  async getPoolsWithActiveOrders(): Promise<
+    Array<{ chainId: number; poolAddress: string; poolId: string }>
+  > {
+    log.methodEntry(this.logger, 'getPoolsWithActiveOrders', {});
+
+    try {
+      const results = await this.prisma.automationCloseOrder.findMany({
+        where: { status: 'active' },
+        select: {
+          config: true,
+          position: {
+            select: {
+              pool: {
+                select: { id: true, config: true },
+              },
+            },
+          },
+        },
+      });
+
+      const poolsMap = new Map<
+        string,
+        { chainId: number; poolAddress: string; poolId: string }
+      >();
+
+      for (const r of results) {
+        const orderConfig = r.config as Record<string, unknown>;
+        const poolAddress = orderConfig.poolAddress as string;
+        const poolConfig = r.position?.pool?.config as Record<string, unknown>;
+        const chainId = poolConfig?.chainId as number;
+        const poolId = r.position?.pool?.id as string;
+
+        if (poolAddress && chainId && poolId) {
+          const key = `${chainId}-${poolAddress.toLowerCase()}`;
+          poolsMap.set(key, { chainId, poolAddress, poolId });
+        }
+      }
+
+      const pools = Array.from(poolsMap.values());
+
+      log.methodExit(this.logger, 'getPoolsWithActiveOrders', {
+        count: pools.length,
+      });
+      return pools;
+    } catch (error) {
+      log.methodError(
+        this.logger,
+        'getPoolsWithActiveOrders',
+        error as Error,
+        {}
+      );
+      throw error;
+    }
+  }
+
   // ============================================================================
   // LIFECYCLE OPERATIONS
   // ============================================================================

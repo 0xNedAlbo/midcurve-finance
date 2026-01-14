@@ -13,6 +13,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorkerManager } from '../../../../../workers';
 import { isSupportedChain } from '../../../../../lib/config';
 import { isWebSocketAvailable } from '../../../../../lib/evm-websocket';
+import { getCloseOrderService } from '../../../../../lib/services';
+import { automationLogger } from '../../../../../lib/logger';
+
+const log = automationLogger.child({ component: 'OhlcSubscriptionsAPI' });
 
 // =============================================================================
 // Types
@@ -57,6 +61,8 @@ interface UnsubscribeResponse {
     chainId: number;
     poolAddress: string;
     unsubscribed: boolean;
+    reason?: 'ACTIVE_ORDERS_EXIST';
+    activeOrderCount?: number;
   };
 }
 
@@ -292,8 +298,41 @@ export async function DELETE(
     );
   }
 
-  // Unsubscribe from pool
+  // Check if there are remaining active orders for this pool
+  // If so, keep the subscription active
+  const closeOrderService = getCloseOrderService();
+  const remainingOrders = await closeOrderService.findActiveOrdersForPool(
+    poolAddress.toLowerCase()
+  );
+
+  if (remainingOrders.length > 0) {
+    log.info({
+      chainId,
+      poolAddress: poolAddress.toLowerCase(),
+      activeOrderCount: remainingOrders.length,
+      msg: 'Keeping OHLC subscription - active orders still exist for pool',
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        chainId,
+        poolAddress: poolAddress.toLowerCase(),
+        unsubscribed: false,
+        reason: 'ACTIVE_ORDERS_EXIST',
+        activeOrderCount: remainingOrders.length,
+      },
+    });
+  }
+
+  // No remaining orders - safe to unsubscribe
   await ohlcWorker.unsubscribePool(chainId, poolAddress.toLowerCase());
+
+  log.info({
+    chainId,
+    poolAddress: poolAddress.toLowerCase(),
+    msg: 'Unsubscribed from OHLC - no more active orders for pool',
+  });
 
   return NextResponse.json({
     success: true,
