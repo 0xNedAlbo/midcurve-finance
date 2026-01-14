@@ -152,7 +152,9 @@ services:
       - HOSTNAME=0.0.0.0
       - DATABASE_URL=${DATABASE_URL}
       # RabbitMQ
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
       # RPC URLs (for reading pool prices)
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
@@ -161,7 +163,7 @@ services:
       - RPC_URL_POLYGON=${RPC_URL_POLYGON}
       - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
       # Signer service (for tx signing)
-      - SIGNER_SERVICE_URL=http://signer:3003
+      - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
       # Worker configuration
       - PRICE_POLL_INTERVAL_MS=${PRICE_POLL_INTERVAL_MS:-10000}
