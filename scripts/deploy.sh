@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - Docker and Docker Compose installed
-#   - .env.production file configured
+#   - .env file configured (copy from .env.example)
 #   - DNS records pointing to this server
 #   - Ports 80 and 443 open
 #
@@ -51,20 +51,13 @@ log_error() {
 }
 
 check_env_file() {
-    if [ ! -f ".env.production" ] && [ ! -f ".env" ]; then
-        log_error "No .env.production or .env file found!"
-        log_error "Copy .env.production.example to .env.production and configure it."
+    if [ ! -f ".env" ]; then
+        log_error "No .env file found!"
+        log_error "Copy .env.example to .env and configure it."
         exit 1
     fi
 
-    # Use .env.production if it exists, otherwise .env
-    if [ -f ".env.production" ]; then
-        ENV_FILE=".env.production"
-    else
-        ENV_FILE=".env"
-    fi
-
-    log_info "Using environment file: $ENV_FILE"
+    log_info "Using environment file: .env"
 
     # Export variables to suppress Docker Compose warnings
     # Filter out comments and empty lines, then export each variable
@@ -74,7 +67,7 @@ check_env_file() {
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
         # Export the variable
         export "$line"
-    done < "$ENV_FILE"
+    done < ".env"
 }
 
 check_docker() {
@@ -102,17 +95,17 @@ pull_latest() {
 
 build_images() {
     log_info "Building Docker images..."
-    docker compose --env-file "$ENV_FILE" build
+    docker compose build
 }
 
 start_services() {
     log_info "Starting services..."
-    docker compose --env-file "$ENV_FILE" up -d
+    docker compose up -d
 }
 
 run_migrations() {
     log_info "Running database migrations..."
-    docker compose --env-file "$ENV_FILE" exec -T api prisma migrate deploy --schema ./packages/midcurve-database/prisma/schema.prisma
+    docker compose exec -T api prisma migrate deploy --schema ./packages/midcurve-database/prisma/schema.prisma
 }
 
 health_check() {

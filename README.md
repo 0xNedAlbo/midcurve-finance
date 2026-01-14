@@ -221,8 +221,8 @@ git clone https://github.com/0xNedAlbo/midcurve-finance.git
 cd midcurve-finance
 
 # Set up environment
-cp .env.production.example .env.production
-# Edit .env.production with your configuration
+cp .env.example .env
+# Edit .env with your configuration
 
 # Deploy all services
 ./scripts/deploy.sh

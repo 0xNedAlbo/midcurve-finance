@@ -1436,7 +1436,7 @@ The primary deployment method is Docker Compose with a multi-service architectur
 - Docker & Docker Compose v2
 - External PostgreSQL database (AWS RDS recommended)
 - Domain names configured (app.midcurve.finance, api.midcurve.finance)
-- Environment variables in `.env.production`
+- Environment variables in `.env`
 
 **Service Overview:**
 ```
@@ -1460,12 +1460,12 @@ The primary deployment method is Docker Compose with a multi-service architectur
 git clone https://github.com/0xNedAlbo/midcurve-finance.git
 cd midcurve-finance
 
-# 2. Create production environment
-cp .env.example .env.production
-# Edit .env.production with all required values
+# 2. Create environment file
+cp .env.example .env
+# Edit .env with all required values
 
 # 3. Build and start services
-docker compose --env-file .env.production up -d --build
+docker compose up -d --build
 
 # 4. Apply database migrations
 docker compose exec api npx prisma migrate deploy
@@ -1474,7 +1474,7 @@ docker compose exec api npx prisma migrate deploy
 curl https://api.midcurve.finance/api/health
 ```
 
-**Environment Variables (.env.production):**
+**Environment Variables (.env):**
 
 ```bash
 # Database (AWS RDS)
