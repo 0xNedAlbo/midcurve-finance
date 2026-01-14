@@ -141,20 +141,33 @@ export function findClosestOrder(
 }
 
 /**
- * Generate button label for an existing order.
- *
- * Format: "SL @{price}" or "SL @{price} => {token}"
+ * Structured label data for order buttons.
+ * Allows components to render with icons instead of plain text.
+ */
+export interface OrderButtonLabel {
+  /** Order type prefix: "SL" or "TP" */
+  prefix: string;
+  /** Formatted trigger price */
+  priceDisplay: string;
+  /** Target token symbol (when swap is enabled) */
+  targetSymbol?: string;
+  /** Whether swap is enabled for this order */
+  hasSwap: boolean;
+}
+
+/**
+ * Generate button label data for an existing order.
  *
  * @param order - The close order
  * @param orderType - 'stopLoss' or 'takeProfit'
  * @param tokenConfig - Token configuration
- * @returns Button label string
+ * @returns Structured label data for rendering
  */
 export function getOrderButtonLabel(
   order: SerializedCloseOrder,
   orderType: 'stopLoss' | 'takeProfit',
   tokenConfig: TokenConfig
-): string {
+): OrderButtonLabel {
   const config = order.config as CloseOrderConfig;
   const prefix = orderType === 'stopLoss' ? 'SL' : 'TP';
 
@@ -170,10 +183,10 @@ export function getOrderButtonLabel(
     const targetSymbol = config.swapConfig.direction === 'BASE_TO_QUOTE'
       ? tokenConfig.quoteTokenSymbol
       : tokenConfig.baseTokenSymbol;
-    return `${prefix} @${priceDisplay} => ${targetSymbol}`;
+    return { prefix, priceDisplay, targetSymbol, hasSwap: true };
   }
 
-  return `${prefix} @${priceDisplay}`;
+  return { prefix, priceDisplay, hasSwap: false };
 }
 
 /**

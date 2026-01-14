@@ -11,7 +11,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, X as XIcon } from 'lucide-react';
+import { Plus, X as XIcon, ArrowRight } from 'lucide-react';
 import type { Address } from 'viem';
 import type { ListPositionData, TriggerMode } from '@midcurve/api-shared';
 import { useCloseOrders } from '@/hooks/automation';
@@ -218,7 +218,15 @@ export function TakeProfitButton({
   return (
     <>
       <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-pink-300 bg-pink-900/20 border-pink-600/50">
-        <span>{buttonLabel}</span>
+        <span className="flex items-center gap-0.5">
+          {buttonLabel!.prefix} @{buttonLabel!.priceDisplay}
+          {buttonLabel!.hasSwap && (
+            <>
+              <ArrowRight className="w-3 h-3 mx-0.5" />
+              {buttonLabel!.targetSymbol}
+            </>
+          )}
+        </span>
         <button
           onClick={handleCancelClick}
           className="ml-1 p-0.5 hover:bg-pink-800/50 rounded transition-colors cursor-pointer"
