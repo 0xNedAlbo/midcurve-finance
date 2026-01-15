@@ -16,6 +16,14 @@ export interface RabbitMQConfig {
 }
 
 /**
+ * Price trigger mode
+ * - polling: Use RPC polling (PriceMonitor) - original behavior
+ * - ohlc: Use OHLC candle consumer - event-driven
+ * - both: Run both systems in parallel (for testing/migration)
+ */
+export type PriceTriggerMode = 'polling' | 'ohlc' | 'both';
+
+/**
  * Worker configuration
  */
 export interface WorkerConfig {
@@ -25,6 +33,8 @@ export interface WorkerConfig {
   deployPollIntervalMs: number;
   /** Number of order executor instances (competing consumers) */
   orderExecutorPoolSize: number;
+  /** Price trigger mode: polling, ohlc, or both */
+  priceTriggerMode: PriceTriggerMode;
 }
 
 /**
@@ -75,10 +85,12 @@ export function getRabbitMQConfig(): RabbitMQConfig {
  * Get worker configuration from environment
  */
 export function getWorkerConfig(): WorkerConfig {
+  const priceTriggerMode = process.env.PRICE_TRIGGER_MODE as PriceTriggerMode | undefined;
   return {
     pricePollIntervalMs: parseInt(process.env.PRICE_POLL_INTERVAL_MS || '10000', 10),
     deployPollIntervalMs: parseInt(process.env.DEPLOY_POLL_INTERVAL_MS || '5000', 10),
     orderExecutorPoolSize: parseInt(process.env.ORDER_EXECUTOR_POOL_SIZE || '3', 10),
+    priceTriggerMode: priceTriggerMode || 'polling', // Default to polling for backward compatibility
   };
 }
 

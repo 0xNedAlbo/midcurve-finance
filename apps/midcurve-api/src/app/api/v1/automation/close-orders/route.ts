@@ -339,6 +339,25 @@ export async function POST(request: NextRequest): Promise<Response> {
       // Increment pool subscription order count
       await subscriptionService.incrementOrderCount(position.pool.id);
 
+      // Activate OHLC subscription for this pool (fire-and-forget, best-effort)
+      // This ensures the OHLC worker starts monitoring immediately when PRICE_TRIGGER_MODE=ohlc
+      const automationUrl = process.env.AUTOMATION_URL || 'http://localhost:3004';
+      fetch(`${automationUrl}/api/ohlc/uniswapv3/subscriptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chainId: (position.pool.config as { chainId: number }).chainId,
+          poolAddress: (position.pool.config as { address: string }).address,
+        }),
+      }).catch((err) => {
+        apiLogger.warn({
+          requestId,
+          poolId: position.pool.id,
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Failed to activate OHLC subscription (will retry on next sync)',
+        });
+      });
+
       // Serialize and return
       const serialized = serializeCloseOrder(order);
 

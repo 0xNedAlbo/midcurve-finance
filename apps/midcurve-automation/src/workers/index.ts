@@ -7,8 +7,17 @@
 
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
+import { getWorkerConfig, type PriceTriggerMode } from '../lib/config';
 import { PriceMonitor, type PriceMonitorStatus } from './price-monitor';
 import { OrderExecutor, type OrderExecutorStatus } from './order-executor';
+import {
+  OhlcTriggerConsumer,
+  type OhlcTriggerConsumerStatus,
+} from './ohlc-trigger-consumer';
+import {
+  UniswapV3OhlcWorker,
+  type UniswapV3OhlcWorkerStatus,
+} from './ohlc/uniswapv3/worker';
 import {
   OutboxPublisher,
   PositionClosedOrderCanceller,
@@ -32,11 +41,14 @@ export interface PositionClosedOrderCancellerStatus {
 export interface WorkerManagerStatus {
   status: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped';
   startedAt: string | null;
+  priceTriggerMode: PriceTriggerMode;
   workers: {
     priceMonitor: PriceMonitorStatus;
+    ohlcTriggerConsumer: OhlcTriggerConsumerStatus;
     orderExecutor: OrderExecutorStatus;
     outboxPublisher: OutboxPublisherStatus;
     positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
+    uniswapV3OhlcWorker: UniswapV3OhlcWorkerStatus;
   };
 }
 
@@ -47,14 +59,22 @@ export interface WorkerManagerStatus {
 class WorkerManager {
   private status: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' = 'idle';
   private startedAt: Date | null = null;
+  private priceTriggerMode: PriceTriggerMode = 'polling';
 
   private priceMonitor: PriceMonitor | null = null;
+  private ohlcTriggerConsumer: OhlcTriggerConsumer | null = null;
   private orderExecutor: OrderExecutor | null = null;
   private outboxPublisher: OutboxPublisher | null = null;
   private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
+  private uniswapV3OhlcWorker: UniswapV3OhlcWorker | null = null;
 
   /**
    * Start all workers
+   *
+   * Price trigger mode determines which price monitoring worker is started:
+   * - 'polling': Start only PriceMonitor (RPC polling)
+   * - 'ohlc': Start only OhlcTriggerConsumer (event-driven)
+   * - 'both': Start both (for testing/migration)
    */
   async start(): Promise<void> {
     if (this.status === 'running' || this.status === 'starting') {
@@ -66,6 +86,15 @@ class WorkerManager {
     autoLog.workerLifecycle(log, 'WorkerManager', 'starting');
 
     try {
+      // Get price trigger mode from config
+      const workerConfig = getWorkerConfig();
+      this.priceTriggerMode = workerConfig.priceTriggerMode;
+
+      log.info({
+        priceTriggerMode: this.priceTriggerMode,
+        msg: 'Price trigger mode configured',
+      });
+
       // Initialize RabbitMQ connection first
       const mq = getRabbitMQConnection();
       const channel = await mq.connect();
@@ -74,20 +103,39 @@ class WorkerManager {
       await setupDomainEventsTopology(channel);
       log.info({ msg: 'Domain events topology ready' });
 
-      // Create worker instances
-      this.priceMonitor = new PriceMonitor();
-      this.orderExecutor = new OrderExecutor();
-      this.outboxPublisher = new OutboxPublisher({ channel });
-      this.positionClosedOrderCanceller = new PositionClosedOrderCanceller();
+      // Create worker instances based on price trigger mode
+      const startPromises: Promise<void>[] = [];
 
-      // Start all workers in parallel
-      await Promise.all([
-        this.priceMonitor.start(),
-        this.orderExecutor.start(),
-      ]);
+      // Always start OrderExecutor
+      this.orderExecutor = new OrderExecutor();
+      startPromises.push(this.orderExecutor.start());
+
+      // Always start OHLC worker (produces candles)
+      this.uniswapV3OhlcWorker = new UniswapV3OhlcWorker();
+      startPromises.push(this.uniswapV3OhlcWorker.start());
+
+      // Conditionally start PriceMonitor based on mode
+      if (this.priceTriggerMode === 'polling' || this.priceTriggerMode === 'both') {
+        this.priceMonitor = new PriceMonitor();
+        startPromises.push(this.priceMonitor.start());
+        log.info({ msg: 'PriceMonitor enabled (RPC polling)' });
+      }
+
+      // Conditionally start OhlcTriggerConsumer based on mode
+      if (this.priceTriggerMode === 'ohlc' || this.priceTriggerMode === 'both') {
+        this.ohlcTriggerConsumer = new OhlcTriggerConsumer();
+        startPromises.push(this.ohlcTriggerConsumer.start());
+        log.info({ msg: 'OhlcTriggerConsumer enabled (event-driven)' });
+      }
+
+      // Start all selected workers in parallel
+      await Promise.all(startPromises);
 
       // Start domain events workers
+      this.outboxPublisher = new OutboxPublisher({ channel });
       this.outboxPublisher.start();
+
+      this.positionClosedOrderCanceller = new PositionClosedOrderCanceller();
       await this.positionClosedOrderCanceller.start(channel);
 
       this.status = 'running';
@@ -118,8 +166,10 @@ class WorkerManager {
       // Stop all workers in parallel
       await Promise.all([
         this.priceMonitor?.stop(),
+        this.ohlcTriggerConsumer?.stop(),
         this.orderExecutor?.stop(),
         this.positionClosedOrderCanceller?.stop(),
+        this.uniswapV3OhlcWorker?.stop(),
       ]);
 
       // Stop outbox publisher (synchronous)
@@ -146,6 +196,7 @@ class WorkerManager {
     return {
       status: this.status,
       startedAt: this.startedAt?.toISOString() || null,
+      priceTriggerMode: this.priceTriggerMode,
       workers: {
         priceMonitor: this.priceMonitor?.getStatus() || {
           status: 'idle',
@@ -153,6 +204,14 @@ class WorkerManager {
           lastPollAt: null,
           pollIntervalMs: 0,
           triggeredOrdersTotal: 0,
+        },
+        ohlcTriggerConsumer: this.ohlcTriggerConsumer?.getStatus() || {
+          status: 'idle',
+          candlesProcessed: 0,
+          triggersPublished: 0,
+          lastProcessedAt: null,
+          lastSyncAt: null,
+          poolsSubscribed: 0,
         },
         orderExecutor: this.orderExecutor?.getStatus() || {
           status: 'idle',
@@ -167,29 +226,70 @@ class WorkerManager {
         positionClosedOrderCanceller: {
           running: this.positionClosedOrderCanceller?.isRunning() ?? false,
         },
+        uniswapV3OhlcWorker: this.uniswapV3OhlcWorker?.getStatus() || {
+          status: 'idle',
+          poolsSubscribed: 0,
+          candlesPublished: 0,
+          lastPublishAt: null,
+        },
       },
     };
   }
 
   /**
    * Check if workers are healthy
+   *
+   * Health checks are mode-aware:
+   * - In 'polling' mode: Only PriceMonitor is checked
+   * - In 'ohlc' mode: Only OhlcTriggerConsumer is checked
+   * - In 'both' mode: Both are checked
    */
   isHealthy(): boolean {
     if (this.status !== 'running') {
       return false;
     }
 
-    const priceMonitorStatus = this.priceMonitor?.getStatus();
     const orderExecutorStatus = this.orderExecutor?.getStatus();
     const outboxPublisherRunning = this.outboxPublisher?.isRunning() ?? false;
     const orderCancellerRunning = this.positionClosedOrderCanceller?.isRunning() ?? false;
+    const ohlcWorkerStatus = this.uniswapV3OhlcWorker?.getStatus();
 
-    return (
-      priceMonitorStatus?.status === 'running' &&
+    // Base health checks (always required)
+    const baseHealthy =
       orderExecutorStatus?.status === 'running' &&
       outboxPublisherRunning &&
-      orderCancellerRunning
-    );
+      orderCancellerRunning &&
+      (ohlcWorkerStatus?.status === 'running' || ohlcWorkerStatus?.status === 'idle');
+
+    if (!baseHealthy) {
+      return false;
+    }
+
+    // Mode-specific health checks for price trigger workers
+    const priceMonitorStatus = this.priceMonitor?.getStatus();
+    const ohlcTriggerStatus = this.ohlcTriggerConsumer?.getStatus();
+
+    switch (this.priceTriggerMode) {
+      case 'polling':
+        return priceMonitorStatus?.status === 'running';
+      case 'ohlc':
+        return ohlcTriggerStatus?.status === 'running';
+      case 'both':
+        return (
+          priceMonitorStatus?.status === 'running' &&
+          ohlcTriggerStatus?.status === 'running'
+        );
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Get the Uniswap V3 OHLC worker instance
+   * Used by API routes to manage subscriptions
+   */
+  getUniswapV3OhlcWorker(): UniswapV3OhlcWorker | null {
+    return this.uniswapV3OhlcWorker;
   }
 }
 
@@ -230,4 +330,6 @@ export async function stopWorkers(): Promise<void> {
 
 // Re-export types
 export { PriceMonitor, type PriceMonitorStatus };
+export { OhlcTriggerConsumer, type OhlcTriggerConsumerStatus };
 export { OrderExecutor, type OrderExecutorStatus };
+export { UniswapV3OhlcWorker, type UniswapV3OhlcWorkerStatus };

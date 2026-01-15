@@ -318,8 +318,8 @@ export async function DELETE(
       const closeOrderService = getCloseOrderService();
       const cancelledOrder = await closeOrderService.cancel(id);
 
-      // Decrement pool subscription order count
-      // Get the position to access position.pool.id (database UUID)
+      // Decrement pool subscription order count and request OHLC unsubscription
+      // Get the position to access pool info
       try {
         const positionService = getUniswapV3PositionService();
         const position = await positionService.findById(cancelledOrder.positionId);
@@ -331,6 +331,28 @@ export async function DELETE(
             orderId: id,
             poolId: position.pool.id,
             msg: 'Decremented pool subscription order count on cancellation',
+          });
+
+          // Request OHLC unsubscription (fire-and-forget)
+          // The automation service will check if there are remaining active orders
+          const poolChainId = (position.pool.config as { chainId: number }).chainId;
+          const poolAddress = (position.pool.config as { address: string }).address;
+          const automationUrl = process.env.AUTOMATION_URL || 'http://localhost:3004';
+          fetch(`${automationUrl}/api/ohlc/uniswapv3/subscriptions`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chainId: poolChainId,
+              poolAddress: poolAddress,
+            }),
+          }).catch((err) => {
+            apiLogger.warn({
+              requestId,
+              orderId: id,
+              poolAddress,
+              error: err instanceof Error ? err.message : String(err),
+              msg: 'Failed to request OHLC unsubscription (will be cleaned up on next sync)',
+            });
           });
         }
       } catch (decrementError) {
