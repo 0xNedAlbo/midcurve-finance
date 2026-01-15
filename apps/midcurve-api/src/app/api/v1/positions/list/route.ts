@@ -17,8 +17,8 @@ import {
 import { ListPositionsQuerySchema } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import type { ListPositionsResponse, ListPositionData } from '@midcurve/api-shared';
-import { getPositionListService } from '@/lib/services';
+import type { ListPositionsResponse, ListPositionData, PnLCurveResponseData, PnLCurvePointData, PnLCurveOrderData } from '@midcurve/api-shared';
+import { getPositionListService, getPnLCurveService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -97,6 +97,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection: searchParams.get('sortDirection') ?? undefined,
         limit: searchParams.get('limit') ?? undefined,
         offset: searchParams.get('offset') ?? undefined,
+        includePnLCurve: searchParams.get('includePnLCurve') ?? undefined,
       };
 
       const validation = ListPositionsQuerySchema.safeParse(queryParams);
@@ -117,7 +118,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { protocols, status, sortBy, sortDirection, limit, offset } =
+      const { protocols, status, sortBy, sortDirection, limit, offset, includePnLCurve } =
         validation.data;
 
       apiLog.businessOperation(apiLogger, requestId, 'list', 'positions', user.id, {
@@ -127,6 +128,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection,
         limit,
         offset,
+        includePnLCurve,
       });
 
       // 2. Query positions from service (now includes aprPeriods in DB query)
@@ -143,14 +145,69 @@ export async function GET(request: NextRequest): Promise<Response> {
       // No need to fetch aprPeriods - totalApr is already calculated and stored in Position
       // This reduces payload size by 80-95% for APR data
 
-      const serializedPositions = result.positions
-        .map((position) => {
-          const serializedPosition = serializeBigInt(position);
-          if (!serializedPosition) return null;
+      const serializedPositions: ListPositionData[] = [];
 
-          return serializedPosition as unknown as ListPositionData;
-        })
-        .filter(Boolean) as ListPositionData[];
+      for (const position of result.positions) {
+        const serializedPosition = serializeBigInt(position);
+        if (!serializedPosition) continue;
+
+        const positionData = serializedPosition as unknown as ListPositionData;
+
+        // Generate PnL curve if requested
+        if (includePnLCurve) {
+          try {
+            const curveData = await getPnLCurveService().generate({
+              positionId: position.id,
+              numPoints: 100, // Compact curve for mini display
+              includeOrders: true,
+            });
+
+            // Serialize curve data for JSON response
+            const serializedCurve: PnLCurveResponseData = {
+              positionId: curveData.positionId,
+              tickLower: curveData.tickLower,
+              tickUpper: curveData.tickUpper,
+              liquidity: curveData.liquidity.toString(),
+              costBasis: curveData.costBasis.toString(),
+              baseToken: curveData.baseToken,
+              quoteToken: curveData.quoteToken,
+              currentPrice: curveData.currentPrice.toString(),
+              currentTick: curveData.currentTick,
+              lowerPrice: curveData.lowerPrice.toString(),
+              upperPrice: curveData.upperPrice.toString(),
+              orders: curveData.orders.map((order): PnLCurveOrderData => ({
+                type: order.type,
+                triggerPrice: order.triggerPrice.toString(),
+                triggerTick: order.triggerTick,
+                status: order.status,
+                valueAtTrigger: order.valueAtTrigger.toString(),
+              })),
+              curve: curveData.curve.map((point): PnLCurvePointData => ({
+                price: point.price.toString(),
+                positionValue: point.positionValue.toString(),
+                adjustedValue: point.adjustedValue.toString(),
+                pnl: point.pnl.toString(),
+                adjustedPnl: point.adjustedPnl.toString(),
+                pnlPercent: point.pnlPercent,
+                adjustedPnlPercent: point.adjustedPnlPercent,
+                phase: point.phase,
+                orderTriggered: point.orderTriggered,
+              })),
+            };
+
+            positionData.pnlCurve = serializedCurve;
+          } catch (curveError) {
+            // Log error but don't fail the entire request
+            apiLogger.warn(
+              { requestId, positionId: position.id, error: curveError },
+              'Failed to generate PnL curve for position'
+            );
+            // Leave pnlCurve undefined for this position
+          }
+        }
+
+        serializedPositions.push(positionData);
+      }
 
       // 4. Create paginated response
       const response: ListPositionsResponse = {
@@ -179,6 +236,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           limit: result.limit,
           offset: result.offset,
           hasMore: result.offset + result.limit < result.total,
+          includePnLCurve,
         },
         'Positions retrieved successfully'
       );

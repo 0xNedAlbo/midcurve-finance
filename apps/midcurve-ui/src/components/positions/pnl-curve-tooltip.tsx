@@ -17,10 +17,6 @@ export function PnLCurveTooltip({
   pnlPercent,
   quoteToken,
 }: PnLCurveTooltipProps) {
-  const isProfitable = pnl > 0;
-  const statusLabel = isProfitable ? "Profit (Fees)" : "Loss (IL)";
-  const statusColor = isProfitable ? "text-green-400" : "text-red-400";
-
   return (
     <div className="bg-slate-800/95 border border-slate-700 rounded-lg p-3 shadow-xl backdrop-blur-sm">
       <p className="text-slate-300 text-sm">
@@ -42,7 +38,6 @@ export function PnLCurveTooltip({
         {pnl.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
         {quoteToken.symbol} ({pnlPercent.toFixed(2)}%)
       </p>
-      <p className={`text-xs ${statusColor}`}>Status: {statusLabel}</p>
     </div>
   );
 }

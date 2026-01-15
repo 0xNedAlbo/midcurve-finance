@@ -325,7 +325,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">PnL Excluding Fees:</span>
+                  <span className="text-slate-400">PnL (Excluding Unclaimed Fees):</span>
                   <span
                     className={`${
                       positionStates.current.pnlExcludingFees > 0n
@@ -431,7 +431,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">PnL Excluding Fees:</span>
+                  <span className="text-slate-400">PnL (Excluding Unclaimed Fees):</span>
                   <span
                     className={`${
                       positionStates.lowerRange.pnlExcludingFees > 0n
@@ -543,7 +543,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">PnL Excluding Fees:</span>
+                  <span className="text-slate-400">PnL (Excluding Unclaimed Fees):</span>
                   <span
                     className={`${
                       positionStates.upperRange.pnlExcludingFees > 0n
