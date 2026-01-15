@@ -2,12 +2,14 @@
  * UniswapV3MiniPnLCurve - Protocol-specific mini PnL curve for Uniswap V3 positions
  *
  * Renders a compact SVG visualization of the position's PnL curve showing:
- * - Position value across price range (white line)
+ * - Position value across price range (white line) with order effects (SL/TP)
  * - Positive PnL area (green fill)
  * - Negative PnL area (red fill)
  * - Range boundaries (cyan dashed lines)
  * - Current price marker (blue circle)
  * - Zero line (gray horizontal)
+ *
+ * Uses embedded pnlCurve data from position list API response.
  */
 
 "use client";
@@ -15,7 +17,7 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ListPositionData } from "@midcurve/api-shared";
-import { generatePnLCurve, tickToPrice } from "@midcurve/shared";
+import { tickToPrice } from "@midcurve/shared";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
@@ -48,137 +50,76 @@ export function UniswapV3MiniPnLCurve({
   const [hoveredPoint, setHoveredPoint] = useState<CurvePoint | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
 
-  // Extract Uniswap V3 specific data from position
+  // Extract and transform curve data from embedded API response
   const curveData = useMemo(() => {
     try {
-      // Type assertion for Uniswap V3 specific fields
-      const config = position.config as {
-        tickLower: number;
-        tickUpper: number;
-      };
-
-      const state = position.state as {
-        liquidity: string;
-      };
-
-      const poolConfig = position.pool.config as {
-        tickSpacing: number;
-      };
-
-      const poolState = position.pool.state as {
-        currentTick: number;
-      };
-
-      // Validation
-      const liquidity = BigInt(state.liquidity);
-      if (liquidity === 0n) {
+      // Check if pnlCurve data is available
+      if (!position.pnlCurve) {
         return null;
       }
 
-      if (config.tickLower >= config.tickUpper) {
+      const pnlCurve = position.pnlCurve;
+
+      // Validate curve data
+      if (!pnlCurve.curve || pnlCurve.curve.length === 0) {
         return null;
       }
 
-      // Extract cost basis (already in quote token units)
-      const costBasis = BigInt(position.currentCostBasis);
+      // Get quote token decimals for number conversion
+      const quoteDecimals = pnlCurve.quoteToken.decimals;
+      const quoteDivisor = Math.pow(10, quoteDecimals);
 
-      // Determine base/quote tokens and extract addresses
-      const baseToken = position.isToken0Quote
-        ? position.pool.token1
-        : position.pool.token0;
-      const quoteToken = position.isToken0Quote
-        ? position.pool.token0
-        : position.pool.token1;
-
-      // Extract token addresses from config (ERC20 tokens)
-      const baseTokenConfig = baseToken.config as { address: string };
-      const quoteTokenConfig = quoteToken.config as { address: string };
-
-      // Calculate price range boundaries
-      // When isToken0Quote = true, tick-to-price relationship is inverted:
-      // - tickLower gives HIGHER price (more quote per base)
-      // - tickUpper gives LOWER price (fewer quote per base)
-      // So we need to swap them for correct display
-      const priceAtTickLower = tickToPrice(
-        config.tickLower,
-        baseTokenConfig.address,
-        quoteTokenConfig.address,
-        Number(baseToken.decimals)
-      );
-
-      const priceAtTickUpper = tickToPrice(
-        config.tickUpper,
-        baseTokenConfig.address,
-        quoteTokenConfig.address,
-        Number(baseToken.decimals)
-      );
-
-      // Swap prices when quote is token0 (inverted tick-price relationship)
-      const lowerPrice = position.isToken0Quote ? priceAtTickUpper : priceAtTickLower;
-      const upperPrice = position.isToken0Quote ? priceAtTickLower : priceAtTickUpper;
-
-      // Calculate ±50% buffer around position range
-      const rangeWidth = upperPrice - lowerPrice;
-      const buffer = rangeWidth / 2n;
-      const minPrice = lowerPrice > buffer ? lowerPrice - buffer : lowerPrice / 2n;
-      const maxPrice = upperPrice + buffer;
-
-      // Generate PnL curve with 100 points
-      const pnlPoints = generatePnLCurve(
-        liquidity,
-        config.tickLower,
-        config.tickUpper,
-        costBasis,
-        baseTokenConfig.address,
-        quoteTokenConfig.address,
-        Number(baseToken.decimals),
-        poolConfig.tickSpacing,
-        { min: minPrice, max: maxPrice },
-        100
-      );
-
-      // Transform bigint values to numbers for SVG rendering
-      const quoteDecimals = Number(quoteToken.decimals);
-      const quoteDivisor = Number(10n ** BigInt(quoteDecimals));
-
-      const points: CurvePoint[] = pnlPoints.map((point) => ({
-        price: Number(point.price) / quoteDivisor,
-        pnl: Number(point.pnl) / quoteDivisor,
-        positionValue: Number(point.positionValue) / quoteDivisor,
-        pnlPercent: point.pnlPercent,
-        phase: point.phase,
+      // Transform curve points - use adjustedPnl (includes order effects)
+      const points: CurvePoint[] = pnlCurve.curve.map((point) => ({
+        price: Number(BigInt(point.price)) / quoteDivisor,
+        pnl: Number(BigInt(point.adjustedPnl)) / quoteDivisor,
+        positionValue: Number(BigInt(point.adjustedValue)) / quoteDivisor,
+        pnlPercent: point.adjustedPnlPercent,
+        phase: point.phase as "below" | "in-range" | "above",
       }));
 
-      // Find current price index using current tick (or override tick for hypothetical scenarios)
-      // Convert tick to price for marker placement
-      const tickForMarker = overrideTick !== undefined ? overrideTick : poolState.currentTick;
-      const currentPriceBigInt = tickToPrice(
-        tickForMarker,
-        baseTokenConfig.address,
-        quoteTokenConfig.address,
-        Number(baseToken.decimals)
-      );
-      const currentPriceNumber = Number(currentPriceBigInt) / quoteDivisor;
-
-      // Calculate ranges for scaling (needed for bounds checking below)
+      // Calculate ranges for scaling
       const allPrices = points.map((p) => p.price);
       const allPnls = points.map((p) => p.pnl);
       const priceRangeMin = Math.min(...allPrices);
       const priceRangeMax = Math.max(...allPrices);
 
-      // Find current price index
-      // Handle prices outside curve range by using edge indices directly
-      // This is important when currentPriceNumber is astronomically outside the range
-      // (e.g., at MIN_TICK the price can be 340 quadrillion, far outside the curve)
+      // Calculate current price marker position
+      // Use overrideTick if provided, otherwise use currentTick from curve data
+      let currentPriceNumber: number;
+
+      if (overrideTick !== undefined) {
+        // Calculate price from override tick using tickToPrice
+        // Need base/quote token addresses for tick-to-price conversion
+        const baseTokenConfig = position.isToken0Quote
+          ? (position.pool.token1.config as { address: string })
+          : (position.pool.token0.config as { address: string });
+        const quoteTokenConfig = position.isToken0Quote
+          ? (position.pool.token0.config as { address: string })
+          : (position.pool.token1.config as { address: string });
+        const baseDecimals = position.isToken0Quote
+          ? Number(position.pool.token1.decimals)
+          : Number(position.pool.token0.decimals);
+
+        const overridePriceBigInt = tickToPrice(
+          overrideTick,
+          baseTokenConfig.address,
+          quoteTokenConfig.address,
+          baseDecimals
+        );
+        currentPriceNumber = Number(overridePriceBigInt) / quoteDivisor;
+      } else {
+        // Use current price from curve data
+        currentPriceNumber = Number(BigInt(pnlCurve.currentPrice)) / quoteDivisor;
+      }
+
+      // Find closest point in curve for marker placement
       let currentPriceIndex: number;
       if (currentPriceNumber >= priceRangeMax) {
-        // Price above range -> rightmost point (above range on curve)
         currentPriceIndex = points.length - 1;
       } else if (currentPriceNumber <= priceRangeMin) {
-        // Price below range -> leftmost point (below range on curve)
         currentPriceIndex = 0;
       } else {
-        // Price within range -> search for closest point
         currentPriceIndex = 0;
         let minDistance = Infinity;
         points.forEach((point, i) => {
@@ -189,6 +130,10 @@ export function UniswapV3MiniPnLCurve({
           }
         });
       }
+
+      // Get range prices for boundary lines
+      const lowerPrice = Number(BigInt(pnlCurve.lowerPrice)) / quoteDivisor;
+      const upperPrice = Number(BigInt(pnlCurve.upperPrice)) / quoteDivisor;
 
       return {
         points,
@@ -201,11 +146,11 @@ export function UniswapV3MiniPnLCurve({
           max: Math.max(...allPnls),
         },
         currentPriceIndex,
-        lowerPrice: Number(lowerPrice) / quoteDivisor,
-        upperPrice: Number(upperPrice) / quoteDivisor,
+        lowerPrice,
+        upperPrice,
       };
     } catch (error) {
-      console.error("Error generating Uniswap V3 PnL curve:", error);
+      console.error("Error processing PnL curve data:", error);
       return null;
     }
   }, [position, overrideTick]);

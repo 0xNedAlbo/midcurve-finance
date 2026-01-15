@@ -8,6 +8,7 @@
 import type { BigIntToString, PaginatedResponse } from '../../common/index.js';
 import type { AnyPosition } from '@midcurve/shared';
 import type { AprPeriodData } from './apr.js';
+import type { PnLCurveResponseData } from './pnl-curve.js';
 import { z } from 'zod';
 import { PaginationParamsSchema } from '../../common/pagination.js';
 
@@ -75,6 +76,13 @@ export interface ListPositionsParams {
    * @default 0
    */
   offset?: number;
+
+  /**
+   * Include PnL curve data in response
+   * When true, generates PnL curve with order effects for each position
+   * @default false (opt-in since curve generation is expensive)
+   */
+  includePnLCurve?: boolean;
 }
 
 /**
@@ -94,6 +102,13 @@ export type ListPositionData = BigIntToString<AnyPosition> & {
    * Optional - may be undefined for positions without historical data
    */
   aprPeriods?: AprPeriodData[];
+
+  /**
+   * PnL curve data with order effects (SL/TP)
+   * Included when `includePnLCurve=true` in request
+   * Contains curve points with adjusted values considering automation orders
+   */
+  pnlCurve?: PnLCurveResponseData;
 };
 
 /**
@@ -169,6 +184,12 @@ export const ListPositionsQuerySchema = PaginationParamsSchema.extend({
     .default('desc')
     .transform((val) => val as 'asc' | 'desc')
     .pipe(SortDirectionSchema),
+
+  includePnLCurve: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((val) => val === 'true'),
 });
 
 /**

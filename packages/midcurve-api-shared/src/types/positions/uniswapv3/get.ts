@@ -7,6 +7,7 @@
 
 import type { UniswapV3Position } from '@midcurve/shared';
 import type { BigIntToString } from '../../common/index.js';
+import type { PnLCurveResponseData } from '../common/pnl-curve.js';
 import { z } from 'zod';
 
 /**
@@ -24,8 +25,12 @@ export interface GetUniswapV3PositionParams {
  *
  * Returns the complete position data with all bigint fields converted to strings for JSON serialization.
  * The position state is refreshed from on-chain data before being returned.
+ * Includes PnL curve data with order effects (SL/TP) for visualization.
  */
-export type GetUniswapV3PositionResponse = BigIntToString<UniswapV3Position>;
+export type GetUniswapV3PositionResponse = BigIntToString<UniswapV3Position> & {
+  /** PnL curve data with order effects for visualization */
+  pnlCurve?: PnLCurveResponseData;
+};
 
 // =============================================================================
 // Zod Schemas

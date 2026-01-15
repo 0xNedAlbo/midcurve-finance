@@ -187,7 +187,7 @@ export async function POST(
       });
 
       // 6. Serialize bigints to strings for JSON
-      const serializedPosition = serializeBigInt(position) as GetUniswapV3PositionResponse;
+      const serializedPosition = serializeBigInt(position) as unknown as GetUniswapV3PositionResponse;
 
       const response = createSuccessResponse(serializedPosition);
 

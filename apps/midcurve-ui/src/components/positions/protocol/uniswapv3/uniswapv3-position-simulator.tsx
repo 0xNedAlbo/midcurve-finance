@@ -31,6 +31,7 @@ interface SimulatedState {
   poolPrice: bigint;
   positionValue: bigint;
   pnlExcludingFees: bigint;
+  adjustedPnlExcludingFees: bigint; // PnL adjusted for SL/TP orders
   tick: number;
 }
 
@@ -164,12 +165,34 @@ export function UniswapV3PositionSimulator({
       baseIsToken0
     );
 
-    // Calculate PnL excluding fees
+    // Calculate PnL excluding fees (raw, without order adjustments)
     const currentCostBasis = BigInt(position.currentCostBasis);
     const realizedPnL = BigInt(position.realizedPnl);
     const collectedFees = BigInt(position.collectedFees);
     const unrealizedPnL = positionValue - currentCostBasis;
     const pnlExcludingFees = realizedPnL + unrealizedPnL + collectedFees;
+
+    // Find adjusted PnL from curve data (accounts for SL/TP orders)
+    let adjustedPnlExcludingFees = pnlExcludingFees;
+    if (position.pnlCurve?.curve && position.pnlCurve.curve.length > 0) {
+      // Find the closest point in the curve to the simulated price
+      let closestPoint = position.pnlCurve.curve[0];
+      let minDiff = Math.abs(Number(BigInt(closestPoint.price) - poolPrice));
+
+      for (const point of position.pnlCurve.curve) {
+        const diff = Math.abs(Number(BigInt(point.price) - poolPrice));
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestPoint = point;
+        }
+      }
+
+      // Use adjusted PnL from curve (this accounts for SL/TP flattening)
+      // The curve's adjustedPnl is unrealized PnL with order effects
+      // We need to add realized PnL and collected fees to match our formula
+      const adjustedUnrealizedPnL = BigInt(closestPoint.adjustedPnl);
+      adjustedPnlExcludingFees = realizedPnL + adjustedUnrealizedPnL + collectedFees;
+    }
 
     return {
       baseTokenAmount,
@@ -177,6 +200,7 @@ export function UniswapV3PositionSimulator({
       poolPrice,
       positionValue,
       pnlExcludingFees,
+      adjustedPnlExcludingFees,
       tick: simulatedTick,
     };
   }, [
@@ -329,18 +353,18 @@ export function UniswapV3PositionSimulator({
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-slate-400">PnL Excluding Fees:</span>
+            <span className="text-slate-400">PnL (Excluding Unclaimed Fees):</span>
             <span
               className={`${
-                simulatedState.pnlExcludingFees > 0n
+                simulatedState.adjustedPnlExcludingFees > 0n
                   ? "text-green-400"
-                  : simulatedState.pnlExcludingFees < 0n
+                  : simulatedState.adjustedPnlExcludingFees < 0n
                   ? "text-red-400"
                   : "text-slate-400"
               }`}
             >
               {formatCompactValue(
-                simulatedState.pnlExcludingFees,
+                simulatedState.adjustedPnlExcludingFees,
                 quoteToken.decimals
               )}{" "}
               {quoteToken.symbol}

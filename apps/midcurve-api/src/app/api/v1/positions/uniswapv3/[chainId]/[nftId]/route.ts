@@ -30,12 +30,15 @@ import {
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
-import { getUniswapV3PositionService } from '@/lib/services';
+import { getUniswapV3PositionService, getPnLCurveService } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
   DeleteUniswapV3PositionResponse,
   CreateUniswapV3PositionData,
   UpdateUniswapV3PositionData,
+  PnLCurveResponseData,
+  PnLCurvePointData,
+  PnLCurveOrderData,
 } from '@midcurve/api-shared';
 
 export const runtime = 'nodejs';
@@ -162,10 +165,64 @@ export async function GET(
         unrealizedPnl: position.unrealizedPnl.toString(),
       });
 
-      // 4. Serialize bigints to strings for JSON
-      const serializedPosition = serializeBigInt(position) as GetUniswapV3PositionResponse;
+      // 4. Generate PnL curve (always included)
+      let pnlCurveData: PnLCurveResponseData | undefined;
+      try {
+        const curveData = await getPnLCurveService().generate({
+          positionId: position.id,
+          numPoints: 100,
+          includeOrders: true,
+        });
 
-      const response = createSuccessResponse(serializedPosition);
+        // Serialize curve data for JSON response
+        pnlCurveData = {
+          positionId: curveData.positionId,
+          tickLower: curveData.tickLower,
+          tickUpper: curveData.tickUpper,
+          liquidity: curveData.liquidity.toString(),
+          costBasis: curveData.costBasis.toString(),
+          baseToken: curveData.baseToken,
+          quoteToken: curveData.quoteToken,
+          currentPrice: curveData.currentPrice.toString(),
+          currentTick: curveData.currentTick,
+          lowerPrice: curveData.lowerPrice.toString(),
+          upperPrice: curveData.upperPrice.toString(),
+          orders: curveData.orders.map((order): PnLCurveOrderData => ({
+            type: order.type,
+            triggerPrice: order.triggerPrice.toString(),
+            triggerTick: order.triggerTick,
+            status: order.status,
+            valueAtTrigger: order.valueAtTrigger.toString(),
+          })),
+          curve: curveData.curve.map((point): PnLCurvePointData => ({
+            price: point.price.toString(),
+            positionValue: point.positionValue.toString(),
+            adjustedValue: point.adjustedValue.toString(),
+            pnl: point.pnl.toString(),
+            adjustedPnl: point.adjustedPnl.toString(),
+            pnlPercent: point.pnlPercent,
+            adjustedPnlPercent: point.adjustedPnlPercent,
+            phase: point.phase,
+            orderTriggered: point.orderTriggered,
+          })),
+        };
+      } catch (curveError) {
+        // Log error but don't fail the entire request
+        apiLogger.warn(
+          { requestId, positionId: position.id, error: curveError },
+          'Failed to generate PnL curve for position'
+        );
+        // pnlCurveData remains undefined - UI will show N/A
+      }
+
+      // 5. Serialize bigints to strings for JSON and build response with pnlCurve
+      const serializedPosition = serializeBigInt(position) as unknown as GetUniswapV3PositionResponse;
+      const responseData: GetUniswapV3PositionResponse = {
+        ...serializedPosition,
+        pnlCurve: pnlCurveData,
+      };
+
+      const response = createSuccessResponse(responseData);
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
 

@@ -40,6 +40,11 @@ export function usePositionsList(
         searchParams.set('offset', params.offset.toString());
       }
 
+      // Include PnL curve data by default for mini curve visualization
+      // Can be overridden by explicitly passing includePnLCurve: false
+      const includePnLCurve = params?.includePnLCurve ?? true;
+      searchParams.set('includePnLCurve', includePnLCurve.toString());
+
       const url = `/api/v1/positions/list${
         searchParams.toString() ? `?${searchParams}` : ''
       }`;
