@@ -22,6 +22,8 @@ export const EXCHANGES = {
   DEPLOYMENTS: 'automation.deployments',
   /** Direct exchange for Uniswap V3 OHLC data */
   OHLC_UNISWAPV3: 'automation.ohlc.uniswapv3',
+  /** Direct exchange for notification events */
+  NOTIFICATIONS: 'automation.notifications',
 } as const;
 
 /** Queue names */
@@ -34,6 +36,8 @@ export const QUEUES = {
   ORDERS_RETRY_DELAY: 'orders.retry-delay',
   /** Queue for Uniswap V3 1-minute OHLC candles */
   OHLC_UNISWAPV3_1M: 'ohlc.uniswapv3.1m',
+  /** Queue for pending notifications to be processed */
+  NOTIFICATIONS_PENDING: 'notifications.pending',
 } as const;
 
 /** Retry delay in milliseconds (60 seconds) */
@@ -47,6 +51,10 @@ export const ROUTING_KEYS = {
   CONTRACT_DEPLOY: 'deploy',
   /** Routing key for Uniswap V3 1-minute OHLC candles */
   OHLC_UNISWAPV3_1M: '1m',
+  /** Routing key for position range change notifications */
+  NOTIFICATION_RANGE_CHANGE: 'range.change',
+  /** Routing key for order execution result notifications */
+  NOTIFICATION_EXECUTION_RESULT: 'execution.result',
 } as const;
 
 // ============================================================
@@ -169,6 +177,47 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     msg: 'Queue bound to exchange',
   });
 
+  // Create notifications exchange
+  await channel.assertExchange(EXCHANGES.NOTIFICATIONS, 'direct', {
+    durable: true,
+    autoDelete: false,
+  });
+  log.info({ exchange: EXCHANGES.NOTIFICATIONS, type: 'direct', msg: 'Exchange declared' });
+
+  // Create notifications.pending queue
+  await channel.assertQueue(QUEUES.NOTIFICATIONS_PENDING, {
+    durable: true,
+    exclusive: false,
+    autoDelete: false,
+  });
+  log.info({ queue: QUEUES.NOTIFICATIONS_PENDING, msg: 'Queue declared' });
+
+  // Bind notifications.pending to notifications exchange for range changes
+  await channel.bindQueue(
+    QUEUES.NOTIFICATIONS_PENDING,
+    EXCHANGES.NOTIFICATIONS,
+    ROUTING_KEYS.NOTIFICATION_RANGE_CHANGE
+  );
+  log.info({
+    exchange: EXCHANGES.NOTIFICATIONS,
+    queue: QUEUES.NOTIFICATIONS_PENDING,
+    routingKey: ROUTING_KEYS.NOTIFICATION_RANGE_CHANGE,
+    msg: 'Queue bound to exchange',
+  });
+
+  // Bind notifications.pending to notifications exchange for execution results
+  await channel.bindQueue(
+    QUEUES.NOTIFICATIONS_PENDING,
+    EXCHANGES.NOTIFICATIONS,
+    ROUTING_KEYS.NOTIFICATION_EXECUTION_RESULT
+  );
+  log.info({
+    exchange: EXCHANGES.NOTIFICATIONS,
+    queue: QUEUES.NOTIFICATIONS_PENDING,
+    routingKey: ROUTING_KEYS.NOTIFICATION_EXECUTION_RESULT,
+    msg: 'Queue bound to exchange',
+  });
+
   log.info({ msg: 'Automation topology setup complete' });
 }
 
@@ -181,10 +230,12 @@ export async function verifyAutomationTopology(channel: Channel): Promise<boolea
     await channel.checkExchange(EXCHANGES.TRIGGERS);
     await channel.checkExchange(EXCHANGES.DEPLOYMENTS);
     await channel.checkExchange(EXCHANGES.OHLC_UNISWAPV3);
+    await channel.checkExchange(EXCHANGES.NOTIFICATIONS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
     await channel.checkQueue(QUEUES.ORDERS_RETRY_DELAY);
     await channel.checkQueue(QUEUES.CONTRACTS_PENDING);
     await channel.checkQueue(QUEUES.OHLC_UNISWAPV3_1M);
+    await channel.checkQueue(QUEUES.NOTIFICATIONS_PENDING);
     return true;
   } catch {
     return false;

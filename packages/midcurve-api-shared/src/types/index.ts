@@ -15,3 +15,4 @@ export * from './pools/index.js';
 export * from './positions/index.js';
 export * from './strategies/index.js';
 export * from './automation/index.js';
+export * from './notifications/index.js';

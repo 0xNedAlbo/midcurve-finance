@@ -18,6 +18,8 @@ import {
   UniswapV3OhlcWorker,
   type UniswapV3OhlcWorkerStatus,
 } from './ohlc/uniswapv3/worker';
+import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
+import { NotificationWorker, type NotificationWorkerStatus } from './notification-worker';
 import {
   OutboxPublisher,
   PositionClosedOrderCanceller,
@@ -49,6 +51,8 @@ export interface WorkerManagerStatus {
     outboxPublisher: OutboxPublisherStatus;
     positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
     uniswapV3OhlcWorker: UniswapV3OhlcWorkerStatus;
+    rangeMonitor: RangeMonitorStatus;
+    notificationWorker: NotificationWorkerStatus;
   };
 }
 
@@ -67,6 +71,8 @@ class WorkerManager {
   private outboxPublisher: OutboxPublisher | null = null;
   private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
   private uniswapV3OhlcWorker: UniswapV3OhlcWorker | null = null;
+  private rangeMonitor: RangeMonitor | null = null;
+  private notificationWorker: NotificationWorker | null = null;
 
   /**
    * Start all workers
@@ -128,6 +134,14 @@ class WorkerManager {
         log.info({ msg: 'OhlcTriggerConsumer enabled (event-driven)' });
       }
 
+      // Always start RangeMonitor (monitors all positions for range changes)
+      this.rangeMonitor = new RangeMonitor();
+      startPromises.push(this.rangeMonitor.start());
+
+      // Always start NotificationWorker (processes notification events)
+      this.notificationWorker = new NotificationWorker();
+      startPromises.push(this.notificationWorker.start());
+
       // Start all selected workers in parallel
       await Promise.all(startPromises);
 
@@ -170,6 +184,8 @@ class WorkerManager {
         this.orderExecutor?.stop(),
         this.positionClosedOrderCanceller?.stop(),
         this.uniswapV3OhlcWorker?.stop(),
+        this.rangeMonitor?.stop(),
+        this.notificationWorker?.stop(),
       ]);
 
       // Stop outbox publisher (synchronous)
@@ -231,6 +247,22 @@ class WorkerManager {
           poolsSubscribed: 0,
           candlesPublished: 0,
           lastPublishAt: null,
+        },
+        rangeMonitor: this.rangeMonitor?.getStatus() || {
+          status: 'idle',
+          poolsMonitored: 0,
+          positionsChecked: 0,
+          lastPollAt: null,
+          pollIntervalMs: 0,
+          rangeChangesDetected: 0,
+        },
+        notificationWorker: this.notificationWorker?.getStatus() || {
+          status: 'idle',
+          consumerCount: 0,
+          processedTotal: 0,
+          failedTotal: 0,
+          webhooksSentTotal: 0,
+          lastProcessedAt: null,
         },
       },
     };
@@ -333,3 +365,5 @@ export { PriceMonitor, type PriceMonitorStatus };
 export { OhlcTriggerConsumer, type OhlcTriggerConsumerStatus };
 export { OrderExecutor, type OrderExecutorStatus };
 export { UniswapV3OhlcWorker, type UniswapV3OhlcWorkerStatus };
+export { RangeMonitor, type RangeMonitorStatus };
+export { NotificationWorker, type NotificationWorkerStatus };

@@ -11,6 +11,9 @@ import {
   UniswapV3PoolService,
   AutomationLogService,
   UniswapV3PositionService,
+  PositionRangeTrackerService,
+  NotificationService,
+  WebhookDeliveryService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -19,6 +22,9 @@ let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
+let _positionRangeTrackerService: PositionRangeTrackerService | null = null;
+let _notificationService: NotificationService | null = null;
+let _webhookDeliveryService: WebhookDeliveryService | null = null;
 
 /**
  * Get singleton instance of CloseOrderService
@@ -68,4 +74,34 @@ export function getPositionService(): UniswapV3PositionService {
     _positionService = new UniswapV3PositionService();
   }
   return _positionService;
+}
+
+/**
+ * Get singleton instance of PositionRangeTrackerService
+ */
+export function getPositionRangeTrackerService(): PositionRangeTrackerService {
+  if (!_positionRangeTrackerService) {
+    _positionRangeTrackerService = new PositionRangeTrackerService();
+  }
+  return _positionRangeTrackerService;
+}
+
+/**
+ * Get singleton instance of NotificationService
+ */
+export function getNotificationService(): NotificationService {
+  if (!_notificationService) {
+    _notificationService = new NotificationService();
+  }
+  return _notificationService;
+}
+
+/**
+ * Get singleton instance of WebhookDeliveryService
+ */
+export function getWebhookDeliveryService(): WebhookDeliveryService {
+  if (!_webhookDeliveryService) {
+    _webhookDeliveryService = new WebhookDeliveryService();
+  }
+  return _webhookDeliveryService;
 }

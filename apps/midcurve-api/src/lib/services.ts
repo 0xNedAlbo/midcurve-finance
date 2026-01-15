@@ -25,6 +25,9 @@ import {
   PoolSubscriptionService,
   AutomationLogService,
   PnLCurveService,
+  NotificationService,
+  WebhookConfigService,
+  WebhookDeliveryService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -45,6 +48,9 @@ let _closeOrderService: CloseOrderService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _pnlCurveService: PnLCurveService | null = null;
+let _notificationService: NotificationService | null = null;
+let _webhookConfigService: WebhookConfigService | null = null;
+let _webhookDeliveryService: WebhookDeliveryService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -214,4 +220,34 @@ export function getPnLCurveService(): PnLCurveService {
     _pnlCurveService = new PnLCurveService();
   }
   return _pnlCurveService;
+}
+
+/**
+ * Get singleton instance of NotificationService
+ */
+export function getNotificationService(): NotificationService {
+  if (!_notificationService) {
+    _notificationService = new NotificationService();
+  }
+  return _notificationService;
+}
+
+/**
+ * Get singleton instance of WebhookConfigService
+ */
+export function getWebhookConfigService(): WebhookConfigService {
+  if (!_webhookConfigService) {
+    _webhookConfigService = new WebhookConfigService();
+  }
+  return _webhookConfigService;
+}
+
+/**
+ * Get singleton instance of WebhookDeliveryService
+ */
+export function getWebhookDeliveryService(): WebhookDeliveryService {
+  if (!_webhookDeliveryService) {
+    _webhookDeliveryService = new WebhookDeliveryService();
+  }
+  return _webhookDeliveryService;
 }

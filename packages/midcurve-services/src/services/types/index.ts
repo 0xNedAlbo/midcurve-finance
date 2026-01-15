@@ -110,3 +110,40 @@ export type {
   ActivateStrategyInput,
   FindStrategyOptions,
 } from './strategy/index.js';
+
+// Automation input types
+export type {
+  RegisterCloseOrderInput,
+  UpdateCloseOrderInput,
+  FindCloseOrderOptions,
+  MarkOrderRegisteredInput,
+  MarkOrderTriggeredInput,
+  MarkOrderExecutedInput,
+  UpdatePoolSubscriptionInput,
+  FindPoolSubscriptionOptions,
+  AutomationPlatform,
+  BaseLogContext,
+  EvmLogContext,
+  SolanaLogContext,
+  OrderCreatedContext,
+  OrderTriggeredContext,
+  OrderExecutingContext,
+  OrderExecutedContext,
+  OrderFailedContext,
+  OrderCancelledContext,
+  PreflightValidationContext,
+  SimulationFailedContext,
+  AutomationLogContext,
+  CreateAutomationLogInput,
+  ListAutomationLogsOptions,
+} from './automation/index.js';
+
+// Notification input types
+export type {
+  CreateNotificationInput,
+  ListNotificationsOptions,
+  UpdateWebhookConfigInput,
+  UpdateRangeStatusInput,
+  PositionRangeTrackingInfo,
+  RangeStatusChangeResult,
+} from './notifications/index.js';

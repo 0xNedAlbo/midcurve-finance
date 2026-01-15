@@ -190,6 +190,17 @@ import type {
   GetRefundStatusResponse,
   // Logs
   ListAutomationLogsResponse,
+  // Notifications
+  ListNotificationsResponseData,
+  UnreadCountResponseData,
+  NotificationData,
+  MarkAllReadResponseData,
+  DeleteNotificationResponseData,
+  BulkDeleteNotificationsResponseData,
+  // Webhook Config
+  WebhookConfigData,
+  UpdateWebhookConfigBody,
+  TestWebhookResponseData,
 } from '@midcurve/api-shared';
 
 /**
@@ -322,5 +333,99 @@ export const automationApi = {
   listLogs(params: { positionId: string; level?: number; limit?: number; cursor?: string }) {
     const qs = buildQueryString(params);
     return apiClient.get<ListAutomationLogsResponse['data']>(`/api/v1/automation/logs${qs}`);
+  },
+};
+
+// =============================================================================
+// NOTIFICATIONS API
+// =============================================================================
+
+/**
+ * Notifications API client for managing user notifications and webhook config
+ */
+export const notificationsApi = {
+  // ---------------------------------------------------------------------------
+  // Notifications
+  // ---------------------------------------------------------------------------
+
+  /**
+   * List notifications for the current user with pagination
+   */
+  listNotifications(params: {
+    limit?: number;
+    cursor?: string;
+    eventType?: string;
+    isRead?: string;
+  } = {}) {
+    const qs = buildQueryString(params);
+    return apiClient.get<ListNotificationsResponseData>(`/api/v1/notifications${qs}`);
+  },
+
+  /**
+   * Get unread notification count
+   */
+  getUnreadCount() {
+    return apiClient.get<UnreadCountResponseData>('/api/v1/notifications/unread-count');
+  },
+
+  /**
+   * Get a single notification by ID
+   */
+  getNotification(id: string) {
+    return apiClient.get<NotificationData>(`/api/v1/notifications/${id}`);
+  },
+
+  /**
+   * Mark a single notification as read
+   */
+  markAsRead(id: string) {
+    return apiClient.patch<NotificationData>(`/api/v1/notifications/${id}/read`, {});
+  },
+
+  /**
+   * Mark all notifications as read
+   */
+  markAllAsRead() {
+    return apiClient.post<MarkAllReadResponseData>('/api/v1/notifications/mark-all-read', {});
+  },
+
+  /**
+   * Delete a single notification
+   */
+  deleteNotification(id: string) {
+    return apiClient.delete<DeleteNotificationResponseData>(`/api/v1/notifications/${id}`);
+  },
+
+  /**
+   * Bulk delete notifications
+   */
+  bulkDelete(ids: string[]) {
+    // Note: DELETE with body - using request directly
+    return request<BulkDeleteNotificationsResponseData>('DELETE', '/api/v1/notifications', { ids });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Webhook Config
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get user's webhook configuration
+   */
+  getWebhookConfig() {
+    return apiClient.get<WebhookConfigData>('/api/v1/user/webhook-config');
+  },
+
+  /**
+   * Update user's webhook configuration
+   */
+  updateWebhookConfig(input: UpdateWebhookConfigBody) {
+    return apiClient.put<WebhookConfigData>('/api/v1/user/webhook-config', input);
+  },
+
+  /**
+   * Send a test webhook
+   */
+  testWebhook() {
+    return apiClient.post<TestWebhookResponseData>('/api/v1/user/webhook-config/test', {});
   },
 };

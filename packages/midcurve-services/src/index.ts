@@ -47,12 +47,14 @@ export * from './services/strategy-metrics/index.js';
 export * from './services/strategy-position-metrics/index.js';
 export * from './services/automation/index.js';
 export * from './services/pnl-curve/index.js';
+export * from './services/notifications/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';
 export * from './services/types/block/index.js';
 export * from './services/types/strategy/index.js';
 export * from './services/types/automation/index.js';
+export * from './services/types/notifications/index.js';
 
 // Export domain events
 export * from './events/index.js';
