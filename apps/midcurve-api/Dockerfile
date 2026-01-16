@@ -22,10 +22,10 @@ RUN pnpm install --frozen-lockfile
 # Generate Prisma client
 RUN pnpm --filter @midcurve/database db:generate
 
-# Build dependent packages (skip DTS for faster builds)
-RUN pnpm --filter @midcurve/shared build:docker
-RUN pnpm --filter @midcurve/api-shared build:docker
-RUN pnpm --filter @midcurve/services build:docker
+# Build dependent packages
+RUN pnpm --filter @midcurve/shared build
+RUN pnpm --filter @midcurve/api-shared build
+RUN pnpm --filter @midcurve/services build
 
 # Build the API (skip migrations - they run at deploy time)
 RUN cd apps/midcurve-api && npx next build
