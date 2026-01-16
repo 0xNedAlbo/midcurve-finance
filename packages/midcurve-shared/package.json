@@ -28,6 +28,7 @@
   "scripts": {
     "build-old": "tsc",
     "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --no-splitting",
+    "build:docker": "tsup src/index.ts --format esm,cjs --out-dir dist --no-splitting",
     "prepare": "npm run build",
     "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --no-splitting --watch",
     "clean": "rm -rf dist",

@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --out-dir dist",
+    "build:docker": "tsup src/index.ts --format esm,cjs --out-dir dist",
     "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --watch",
     "clean": "rm -rf dist",
     "type-check": "tsc --noEmit",
