@@ -34,6 +34,7 @@
     "@midcurve/services": "workspace:^",
     "@midcurve/shared": "workspace:^",
     "amqplib": "^0.10.7",
+    "jsbi": "^4.3.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "next": "15.5.2",

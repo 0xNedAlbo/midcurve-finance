@@ -114,6 +114,9 @@ importers:
       amqplib:
         specifier: ^0.10.7
         version: 0.10.9
+      jsbi:
+        specifier: ^4.3.2
+        version: 4.3.2
       next:
         specifier: 15.5.2
         version: 15.5.2(@playwright/test@1.56.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
