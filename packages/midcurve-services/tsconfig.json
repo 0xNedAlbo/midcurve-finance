@@ -10,6 +10,14 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
 
+    /* Path Mappings for Workspace Packages */
+    "baseUrl": ".",
+    "paths": {
+      "@midcurve/shared": ["../midcurve-shared/src/index.ts"],
+      "@midcurve/api-shared": ["../midcurve-api-shared/src/index.ts"],
+      "@midcurve/database": ["../midcurve-database/src/index.ts"]
+    },
+
     /* Emit */
     "declaration": true,
     "declarationMap": true,
