@@ -125,6 +125,7 @@ class DeploymentService {
    * Get the current state of a deployment from cache
    */
   async getDeploymentState(deploymentId: string): Promise<DeploymentState | null> {
+    if (!this.cache) return null;
     return this.cache.get<DeploymentState>(this.getCacheKey(deploymentId));
   }
 
@@ -135,6 +136,7 @@ class DeploymentService {
     deploymentId: string,
     updates: Partial<DeploymentState>
   ): Promise<void> {
+    if (!this.cache) return;
     const current = await this.cache.get<DeploymentState>(this.getCacheKey(deploymentId));
     if (current) {
       await this.cache.set(
