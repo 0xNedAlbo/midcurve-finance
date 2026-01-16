@@ -24,6 +24,7 @@ RUN pnpm --filter @midcurve/database db:generate
 
 # Build dependent packages first
 RUN pnpm --filter @midcurve/shared build
+RUN pnpm --filter @midcurve/api-shared build
 RUN pnpm --filter @midcurve/services build
 
 # Build the automation app
