@@ -63,6 +63,7 @@
     "yalc": "^1.0.0-pre.53"
   },
   "dependencies": {
+    "@midcurve/api-shared": "workspace:*",
     "@midcurve/database": "workspace:*",
     "@midcurve/shared": "workspace:*",
     "@paralleldrive/cuid2": "^3.0.6",
