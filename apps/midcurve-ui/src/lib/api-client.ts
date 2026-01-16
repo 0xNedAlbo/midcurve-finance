@@ -202,7 +202,7 @@ import type {
   UpdateWebhookConfigBody,
   TestWebhookResponseData,
   // Notification Types
-  type NotificationEventType,
+  NotificationEventType,
 } from '@midcurve/api-shared';
 
 /**
