@@ -13,6 +13,7 @@ import type {
   WebhookConfigData,
   UpdateWebhookConfigBody,
   TestWebhookResponseData,
+  NotificationEventType,
 } from '@midcurve/api-shared';
 import { notificationsApi } from '../../lib/api-client';
 
@@ -201,11 +202,12 @@ export function useUpdateWebhookConfig() {
 
 /**
  * Hook to send a test webhook
+ * @param eventType - Optional event type to test specific payloads
  */
 export function useTestWebhook() {
-  return useMutation<TestWebhookResponseData, Error, void>({
-    mutationFn: async () => {
-      const response = await notificationsApi.testWebhook();
+  return useMutation<TestWebhookResponseData, Error, NotificationEventType | undefined>({
+    mutationFn: async (eventType?: NotificationEventType) => {
+      const response = await notificationsApi.testWebhook(eventType);
       return response.data;
     },
   });

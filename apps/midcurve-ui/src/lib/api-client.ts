@@ -201,6 +201,8 @@ import type {
   WebhookConfigData,
   UpdateWebhookConfigBody,
   TestWebhookResponseData,
+  // Notification Types
+  type NotificationEventType,
 } from '@midcurve/api-shared';
 
 /**
@@ -424,8 +426,11 @@ export const notificationsApi = {
 
   /**
    * Send a test webhook
+   * @param eventType - Optional event type to test (defaults to POSITION_OUT_OF_RANGE)
    */
-  testWebhook() {
-    return apiClient.post<TestWebhookResponseData>('/api/v1/user/webhook-config/test', {});
+  testWebhook(eventType?: NotificationEventType) {
+    return apiClient.post<TestWebhookResponseData>('/api/v1/user/webhook-config/test', {
+      eventType,
+    });
   },
 };

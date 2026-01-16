@@ -81,6 +81,9 @@ export type TestWebhookResponse = ApiResponse<TestWebhookResponseData>;
 
 /**
  * Standard webhook payload sent to user's webhook URL
+ *
+ * Event-specific fields (quoteCurrency, baseCurrency, position, closeOrder, etc.)
+ * are included at the root level alongside the standard fields.
  */
 export interface WebhookDeliveryPayload {
   /** Unique event ID for deduplication */
@@ -95,6 +98,6 @@ export interface WebhookDeliveryPayload {
   message: string;
   /** Position identifier (if applicable) */
   positionId: string | null;
-  /** Event-specific data */
-  data: Record<string, unknown>;
+  /** Event-specific fields are included at root level */
+  [key: string]: unknown;
 }
