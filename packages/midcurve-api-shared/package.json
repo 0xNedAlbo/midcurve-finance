@@ -7,40 +7,40 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./types": {
-      "import": "./dist/types/index.js",
-      "types": "./dist/types/index.d.ts"
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
     },
     "./types/common": {
-      "import": "./dist/types/common/index.js",
-      "types": "./dist/types/common/index.d.ts"
+      "types": "./dist/types/common/index.d.ts",
+      "import": "./dist/types/common/index.js"
     },
     "./types/auth": {
-      "import": "./dist/types/auth/index.js",
-      "types": "./dist/types/auth/index.d.ts"
+      "types": "./dist/types/auth/index.d.ts",
+      "import": "./dist/types/auth/index.js"
     },
     "./types/health": {
-      "import": "./dist/types/health/index.js",
-      "types": "./dist/types/health/index.d.ts"
+      "types": "./dist/types/health/index.d.ts",
+      "import": "./dist/types/health/index.js"
     },
     "./types/tokens": {
-      "import": "./dist/types/tokens/index.js",
-      "types": "./dist/types/tokens/index.d.ts"
+      "types": "./dist/types/tokens/index.d.ts",
+      "import": "./dist/types/tokens/index.js"
     },
     "./types/pools": {
-      "import": "./dist/types/pools/index.js",
-      "types": "./dist/types/pools/index.d.ts"
+      "types": "./dist/types/pools/index.d.ts",
+      "import": "./dist/types/pools/index.js"
     },
     "./types/positions": {
-      "import": "./dist/types/positions/index.js",
-      "types": "./dist/types/positions/index.d.ts"
+      "types": "./dist/types/positions/index.d.ts",
+      "import": "./dist/types/positions/index.js"
     },
     "./types/positions/uniswapv3": {
-      "import": "./dist/types/positions/uniswapv3/index.js",
-      "types": "./dist/types/positions/uniswapv3/index.d.ts"
+      "types": "./dist/types/positions/uniswapv3/index.d.ts",
+      "import": "./dist/types/positions/uniswapv3/index.js"
     }
   },
   "files": [
