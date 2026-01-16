@@ -432,6 +432,9 @@ importers:
 
   packages/midcurve-services:
     dependencies:
+      '@midcurve/api-shared':
+        specifier: workspace:*
+        version: link:../midcurve-api-shared
       '@midcurve/database':
         specifier: workspace:*
         version: link:../midcurve-database
