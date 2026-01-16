@@ -2,6 +2,7 @@ import { useAuth } from '../providers/AuthProvider';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { UserDropdown } from '../components/auth/user-dropdown';
+import { NotificationBell } from '../components/notifications/notification-bell';
 import { CreatePositionDropdown } from '../components/positions/create-position-dropdown';
 import { CreateStrategyDropdown } from '../components/strategies/create-strategy-dropdown';
 import { PositionList } from '../components/positions/position-list';
@@ -58,6 +59,7 @@ export function DashboardPage() {
             <p className="text-lg text-slate-300">Dashboard</p>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell />
             <UserDropdown />
           </div>
         </header>

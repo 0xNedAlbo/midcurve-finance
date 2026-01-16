@@ -9,6 +9,7 @@ import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
 import { StrategyDetailPage } from './pages/StrategyDetailPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 
 // Automation
 import { AutowalletPage } from './components/automation';
@@ -34,6 +35,10 @@ export function App() {
                 <Route
                   path="/automation/wallet"
                   element={<AutowalletPage />}
+                />
+                <Route
+                  path="/notifications"
+                  element={<NotificationsPage />}
                 />
               </Routes>
             </BrowserRouter>

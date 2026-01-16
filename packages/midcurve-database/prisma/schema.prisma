@@ -320,6 +320,10 @@ model User {
   quoteTokenPreferences UserQuoteTokenPreference[]
   strategies            Strategy[]
 
+  // Notification relations
+  notifications   UserNotification[]
+  webhookConfig   UserWebhookConfig?
+
   // Indexes for efficient queries
   @@index([name])
   @@index([email])
@@ -465,6 +469,8 @@ model Position {
   syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
   automationOrders AutomationCloseOrder[] // Close orders linked to this position
   automationLogs   AutomationLog[] // Automation event logs for this position
+  notifications    UserNotification[] // Notifications related to this position
+  rangeStatus      PositionRangeStatus? // 1:1 range tracking for notifications
 
   @@unique([userId, positionHash]) // Same user can't import same position twice; allows multi-user watching
   // Indexes for efficient queries
@@ -868,4 +874,108 @@ model DomainEvent {
   @@index([eventType, createdAt]) // Query events by type over time
   @@index([userId, createdAt]) // Query events by user over time
   @@map("domain_events")
+}
+
+// =============================================================================
+// User Notification Models
+// =============================================================================
+
+// NotificationEventType - All supported notification event types
+enum NotificationEventType {
+  POSITION_OUT_OF_RANGE
+  POSITION_IN_RANGE
+  STOP_LOSS_EXECUTED
+  STOP_LOSS_FAILED
+  TAKE_PROFIT_EXECUTED
+  TAKE_PROFIT_FAILED
+}
+
+// UserNotification - Stores notification records for users
+model UserNotification {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // User association
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Event classification
+  eventType NotificationEventType
+
+  // Position reference (optional - some notifications may be general)
+  positionId String?
+  position   Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  // Content
+  title   String // Short headline (e.g., "Position Out of Range")
+  message String // Detailed message
+
+  // Read status
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  // Event-specific payload (JSON)
+  // Contains: prices, amounts, txHash, error details, etc.
+  payload Json
+
+  // Indexes
+  @@index([userId, createdAt])
+  @@index([userId, isRead, createdAt])
+  @@index([positionId])
+  @@index([eventType])
+  @@map("user_notifications")
+}
+
+// UserWebhookConfig - User's webhook delivery preferences
+model UserWebhookConfig {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User association (1:1 relationship)
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Webhook endpoint
+  webhookUrl String? // null = webhooks disabled
+
+  // Active status
+  isActive Boolean @default(false)
+
+  // Topic filtering (which events to send)
+  // JSON array of NotificationEventType values
+  enabledEvents Json // ["POSITION_OUT_OF_RANGE", "STOP_LOSS_EXECUTED", ...]
+
+  // Secret for header authentication (sent as X-Webhook-Secret header)
+  webhookSecret String?
+
+  // Last delivery status
+  lastDeliveryAt     DateTime?
+  lastDeliveryStatus String? // 'success' | 'failed'
+  lastDeliveryError  String?
+
+  @@map("user_webhook_configs")
+}
+
+// PositionRangeStatus - Tracks current in-range/out-of-range status per position
+// Used to detect status changes and emit notification events
+model PositionRangeStatus {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Position reference (1:1 relationship)
+  positionId String   @unique
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  // Current range status
+  isInRange Boolean
+
+  // Last price data when status was recorded
+  lastSqrtPriceX96 String // bigint as string
+  lastTick         Int
+  lastCheckedAt    DateTime
+
+  @@index([isInRange])
+  @@map("position_range_statuses")
 }
