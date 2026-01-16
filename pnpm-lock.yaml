@@ -93,6 +93,9 @@ importers:
 
   apps/midcurve-automation:
     dependencies:
+      '@midcurve/api-shared':
+        specifier: workspace:^
+        version: link:../../packages/midcurve-api-shared
       '@midcurve/database':
         specifier: workspace:^
         version: link:../../packages/midcurve-database

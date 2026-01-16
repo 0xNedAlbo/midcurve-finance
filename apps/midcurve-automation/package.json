@@ -29,6 +29,7 @@
     "local:setup": "tsx scripts/local-fork/setup.ts"
   },
   "dependencies": {
+    "@midcurve/api-shared": "workspace:^",
     "@midcurve/database": "workspace:^",
     "@midcurve/services": "workspace:^",
     "@midcurve/shared": "workspace:^",
