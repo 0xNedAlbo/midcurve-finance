@@ -51,6 +51,9 @@ Thumbs.db
 .settings/
 *.sublime-workspace
 
+# Claude Code
+.claude/
+
 # Yalc (local package development)
 .yalc/
 yalc.lock
