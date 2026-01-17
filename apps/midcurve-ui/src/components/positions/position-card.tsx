@@ -12,7 +12,7 @@ import { UniswapV3MiniPnLCurve } from "./protocol/uniswapv3/uniswapv3-mini-pnl-c
 import { PositionActionsMenu } from "./position-actions-menu";
 import { DeletePositionModal } from "./delete-position-modal";
 import { ReloadHistoryModal } from "./reload-history-modal";
-import { HedgeExpandedSection, MOCK_HEDGES } from "./hedges";
+// import { HedgeExpandedSection, MOCK_HEDGES } from "./hedges"; // Temporarily hidden
 import { useIsDeletingPosition } from "@/hooks/positions/useDeletePosition";
 import { useIsReloadingPositionHistory } from "@/hooks/positions/useReloadPositionHistory";
 import { useRefreshPosition } from "@/hooks/positions/useRefreshPosition";
@@ -27,7 +27,9 @@ interface PositionCardProps {
 export function PositionCard({ initialData, listIndex }: PositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
+  // Hedge state - temporarily disabled while feature is hidden
   const [isHedgeExpanded, setIsHedgeExpanded] = useState(false);
+  const _hedgeCount = 0; // Was: MOCK_HEDGES.length
 
   // Extract protocol-specific identifiers for detail query
   const protocol = initialData.protocol;
@@ -193,15 +195,15 @@ export function PositionCard({ initialData, listIndex }: PositionCardProps) {
           isInRange={isInRange}
           isHedgeExpanded={isHedgeExpanded}
           onToggleHedge={() => setIsHedgeExpanded(!isHedgeExpanded)}
-          hedgeCount={MOCK_HEDGES.length}
+          hedgeCount={_hedgeCount}
         />
       )}
       {/* Future: Orca, other protocols */}
 
-      {/* Hedge Expanded Section */}
-      {position.protocol === "uniswapv3" && isHedgeExpanded && (
+      {/* Hedge Expanded Section - temporarily hidden */}
+      {/* {position.protocol === "uniswapv3" && isHedgeExpanded && (
         <HedgeExpandedSection position={position} />
-      )}
+      )} */}
 
       {/* Reload History Modal */}
       <ReloadHistoryModal
