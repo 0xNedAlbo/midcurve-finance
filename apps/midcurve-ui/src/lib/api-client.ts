@@ -434,3 +434,42 @@ export const notificationsApi = {
     });
   },
 };
+
+// =============================================================================
+// HYPERLIQUID API
+// =============================================================================
+
+import type {
+  GetHyperliquidWalletResponseData,
+  ImportHyperliquidWalletRequest,
+  ImportHyperliquidWalletResponseData,
+  DeleteHyperliquidWalletResponseData,
+} from '@midcurve/api-shared';
+
+/**
+ * Hyperliquid API client for wallet management
+ */
+export const hyperliquidApi = {
+  /**
+   * Get user's Hyperliquid wallet info
+   * Returns null if no wallet exists
+   */
+  getWallet() {
+    return apiClient.get<GetHyperliquidWalletResponseData | null>('/api/v1/hyperliquid/wallet');
+  },
+
+  /**
+   * Import a Hyperliquid wallet from a user-provided private key
+   * The private key is created on hyperliquid.xyz
+   */
+  importWallet(input: ImportHyperliquidWalletRequest) {
+    return apiClient.post<ImportHyperliquidWalletResponseData>('/api/v1/hyperliquid/wallet', input);
+  },
+
+  /**
+   * Delete user's Hyperliquid wallet
+   */
+  deleteWallet() {
+    return apiClient.delete<DeleteHyperliquidWalletResponseData>('/api/v1/hyperliquid/wallet');
+  },
+};

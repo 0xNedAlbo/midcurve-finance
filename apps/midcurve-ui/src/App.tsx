@@ -14,6 +14,9 @@ import { NotificationsPage } from './pages/NotificationsPage';
 // Automation
 import { AutowalletPage } from './components/automation';
 
+// Hyperliquid
+import { HyperliquidWalletPage } from './components/hyperliquid';
+
 export function App() {
   return (
     <QueryProvider>
@@ -35,6 +38,10 @@ export function App() {
                 <Route
                   path="/automation/wallet"
                   element={<AutowalletPage />}
+                />
+                <Route
+                  path="/hyperliquid/wallet"
+                  element={<HyperliquidWalletPage />}
                 />
                 <Route
                   path="/notifications"

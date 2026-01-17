@@ -288,3 +288,12 @@ export {
   UniswapV3ContractState,
   UniswapV3AutomationContract,
 } from './automation/index.js';
+
+// ============================================================================
+// Hyperliquid Types
+// ============================================================================
+
+export type {
+  HyperliquidKeyProvider,
+  HyperliquidWalletConfig,
+} from './hyperliquid/index.js';
