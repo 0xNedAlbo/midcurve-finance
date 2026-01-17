@@ -58,7 +58,7 @@ model Strategy {
 
   // Ownership
   userId String
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Identification
   name         String // "ETH-USDC Delta Neutral"
@@ -413,7 +413,7 @@ model Position {
 
   // Data ownership
   userId String
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Position hash for fast lookups
   // Human-readable composite key: protocol/chainId/nftId (for UniswapV3)
