@@ -32,3 +32,18 @@ export type {
   CreateAutomationLogInput,
   ListAutomationLogsOptions,
 } from './automation-input.js';
+
+export type {
+  // Hedge vault types
+  HedgeVaultState,
+  HedgeVaultMonitoringStatus,
+  HedgeVaultExecutionStatus,
+  HedgeVaultTriggerType,
+  // Hedge vault inputs
+  RegisterHedgeVaultInput,
+  UpdateHedgeVaultStateInput,
+  RecordHedgeVaultExecutionInput,
+  MarkExecutionCompletedInput,
+  MarkExecutionFailedInput,
+  FindHedgeVaultsOptions,
+} from './hedge-vault-input.js';

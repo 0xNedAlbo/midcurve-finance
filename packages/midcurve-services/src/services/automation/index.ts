@@ -29,3 +29,9 @@ export type {
   LogLevelType,
   AutomationLogTypeValue,
 } from './automation-log-service.js';
+
+export { HedgeVaultService } from './hedge-vault-service.js';
+export type {
+  HedgeVaultServiceDependencies,
+  HedgeVaultWithExecutions,
+} from './hedge-vault-service.js';

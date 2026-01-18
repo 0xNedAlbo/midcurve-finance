@@ -38,6 +38,10 @@ export const QUEUES = {
   OHLC_UNISWAPV3_1M: 'ohlc.uniswapv3.1m',
   /** Queue for pending notifications to be processed */
   NOTIFICATIONS_PENDING: 'notifications.pending',
+  /** Queue for hedge vault triggers ready for execution */
+  HEDGE_VAULT_PENDING: 'hedge.vault.pending',
+  /** Delay queue for hedge vault retries (60s TTL, dead-letters back to hedge.vault.pending) */
+  HEDGE_VAULT_RETRY_DELAY: 'hedge.vault.retry-delay',
 } as const;
 
 /** Retry delay in milliseconds (60 seconds) */
@@ -55,6 +59,10 @@ export const ROUTING_KEYS = {
   NOTIFICATION_RANGE_CHANGE: 'range.change',
   /** Routing key for order execution result notifications */
   NOTIFICATION_EXECUTION_RESULT: 'execution.result',
+  /** Routing key for hedge vault triggers (SIL/TIP/Reopen) */
+  HEDGE_VAULT_TRIGGERED: 'hedge.triggered',
+  /** Routing key for hedge vault execution result notifications */
+  NOTIFICATION_HEDGE_VAULT_RESULT: 'hedge.result',
 } as const;
 
 // ============================================================
@@ -218,6 +226,60 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     msg: 'Queue bound to exchange',
   });
 
+  // Bind notifications.pending to notifications exchange for hedge vault results
+  await channel.bindQueue(
+    QUEUES.NOTIFICATIONS_PENDING,
+    EXCHANGES.NOTIFICATIONS,
+    ROUTING_KEYS.NOTIFICATION_HEDGE_VAULT_RESULT
+  );
+  log.info({
+    exchange: EXCHANGES.NOTIFICATIONS,
+    queue: QUEUES.NOTIFICATIONS_PENDING,
+    routingKey: ROUTING_KEYS.NOTIFICATION_HEDGE_VAULT_RESULT,
+    msg: 'Queue bound to exchange',
+  });
+
+  // Create hedge.vault.pending queue
+  await channel.assertQueue(QUEUES.HEDGE_VAULT_PENDING, {
+    durable: true,
+    exclusive: false,
+    autoDelete: false,
+  });
+  log.info({ queue: QUEUES.HEDGE_VAULT_PENDING, msg: 'Queue declared' });
+
+  // Bind hedge.vault.pending to triggers exchange
+  await channel.bindQueue(
+    QUEUES.HEDGE_VAULT_PENDING,
+    EXCHANGES.TRIGGERS,
+    ROUTING_KEYS.HEDGE_VAULT_TRIGGERED
+  );
+  log.info({
+    exchange: EXCHANGES.TRIGGERS,
+    queue: QUEUES.HEDGE_VAULT_PENDING,
+    routingKey: ROUTING_KEYS.HEDGE_VAULT_TRIGGERED,
+    msg: 'Queue bound to exchange',
+  });
+
+  // Create hedge.vault.retry-delay queue (for delayed retries)
+  // Messages in this queue will dead-letter back to hedge.vault.pending after TTL expires
+  await channel.assertQueue(QUEUES.HEDGE_VAULT_RETRY_DELAY, {
+    durable: true,
+    exclusive: false,
+    autoDelete: false,
+    arguments: {
+      'x-message-ttl': ORDER_RETRY_DELAY_MS,
+      'x-dead-letter-exchange': EXCHANGES.TRIGGERS,
+      'x-dead-letter-routing-key': ROUTING_KEYS.HEDGE_VAULT_TRIGGERED,
+    },
+  });
+  log.info({
+    queue: QUEUES.HEDGE_VAULT_RETRY_DELAY,
+    ttlMs: ORDER_RETRY_DELAY_MS,
+    deadLetterExchange: EXCHANGES.TRIGGERS,
+    deadLetterRoutingKey: ROUTING_KEYS.HEDGE_VAULT_TRIGGERED,
+    msg: 'Delay queue declared with TTL and dead-letter config',
+  });
+
   log.info({ msg: 'Automation topology setup complete' });
 }
 
@@ -236,6 +298,8 @@ export async function verifyAutomationTopology(channel: Channel): Promise<boolea
     await channel.checkQueue(QUEUES.CONTRACTS_PENDING);
     await channel.checkQueue(QUEUES.OHLC_UNISWAPV3_1M);
     await channel.checkQueue(QUEUES.NOTIFICATIONS_PENDING);
+    await channel.checkQueue(QUEUES.HEDGE_VAULT_PENDING);
+    await channel.checkQueue(QUEUES.HEDGE_VAULT_RETRY_DELAY);
     return true;
   } catch {
     return false;

@@ -102,6 +102,83 @@ export interface ExecutionResultNotificationMessage {
   timestamp: string;
 }
 
+// =============================================================================
+// HEDGE VAULT MESSAGES
+// =============================================================================
+
+/**
+ * Trigger type for hedge vault operations
+ */
+export type HedgeVaultTriggerType = 'sil' | 'tip' | 'reopen';
+
+/**
+ * Hedge vault trigger message - published when SIL/TIP/Reopen condition is met
+ */
+export interface HedgeVaultTriggerMessage {
+  /** Vault ID from database */
+  vaultId: string;
+  /** On-chain vault contract address */
+  vaultAddress: string;
+  /** Pool address where trigger occurred */
+  poolAddress: string;
+  /** Chain ID */
+  chainId: number;
+  /** Type of trigger (sil, tip, reopen) */
+  triggerType: HedgeVaultTriggerType;
+  /** Current sqrtPriceX96 at trigger time */
+  currentSqrtPriceX96: string;
+  /** SIL trigger threshold */
+  silSqrtPriceX96: string;
+  /** TIP trigger threshold */
+  tipSqrtPriceX96: string;
+  /** Whether token0 is the quote token (for trigger logic) */
+  token0IsQuote: boolean;
+  /** Current block number (for reopen cooldown check) */
+  currentBlock: string;
+  /** Timestamp of trigger detection */
+  triggeredAt: string;
+}
+
+/**
+ * Hedge vault execution result notification message
+ */
+export interface HedgeVaultExecutionResultMessage {
+  /** User ID to notify (if vault has associated position) */
+  userId?: string;
+  /** Vault ID */
+  vaultId: string;
+  /** Vault address */
+  vaultAddress: string;
+  /** Execution ID from database */
+  executionId: string;
+  /** Event type */
+  eventType:
+    | 'HEDGE_SIL_EXECUTED'
+    | 'HEDGE_SIL_FAILED'
+    | 'HEDGE_TIP_EXECUTED'
+    | 'HEDGE_TIP_FAILED'
+    | 'HEDGE_REOPEN_EXECUTED'
+    | 'HEDGE_REOPEN_FAILED';
+  /** Chain ID */
+  chainId: number;
+  /** For success: transaction hash */
+  txHash?: string;
+  /** For success: quote token amount */
+  quoteAmount?: string;
+  /** For success: base token amount */
+  baseAmount?: string;
+  /** Trigger sqrtPriceX96 */
+  triggerSqrtPriceX96: string;
+  /** For success: execution sqrtPriceX96 */
+  executionSqrtPriceX96?: string;
+  /** For failure: error message */
+  error?: string;
+  /** For failure: retry count */
+  retryCount?: number;
+  /** Timestamp */
+  timestamp: string;
+}
+
 /**
  * Serialize a message for publishing
  */

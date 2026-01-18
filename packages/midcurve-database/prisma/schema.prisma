@@ -321,8 +321,8 @@ model User {
   strategies            Strategy[]
 
   // Notification relations
-  notifications   UserNotification[]
-  webhookConfig   UserWebhookConfig?
+  notifications UserNotification[]
+  webhookConfig UserWebhookConfig?
 
   // Indexes for efficient queries
   @@index([name])
@@ -469,6 +469,7 @@ model Position {
   syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
   automationOrders AutomationCloseOrder[] // Close orders linked to this position
   automationLogs   AutomationLog[] // Automation event logs for this position
+  hedgeVaults      HedgeVault[] // Hedge vaults linked to this position
   notifications    UserNotification[] // Notifications related to this position
   rangeStatus      PositionRangeStatus? // 1:1 range tracking for notifications
 
@@ -699,6 +700,9 @@ model AutomationWallet {
   isActive   Boolean   @default(true)
   lastUsedAt DateTime?
 
+  // Relations
+  hedgeVaults HedgeVault[] // Hedge vaults using this wallet as operator
+
   // Indexes
   @@index([walletType])
   @@index([walletPurpose])
@@ -708,7 +712,6 @@ model AutomationWallet {
   @@index([userId, walletHash]) // Fast user-specific lookups by hash
   @@map("automation_wallets")
 }
-
 
 // =============================================================================
 // Position Automation Models
@@ -812,11 +815,107 @@ model AutomationLog {
   // Common: { triggerPrice, currentPrice, amounts, error, retryCount, ... }
   context Json?
 
+  // Optional: Link to specific hedge vault
+  hedgeVaultId String?
+  hedgeVault   HedgeVault? @relation(fields: [hedgeVaultId], references: [id], onDelete: SetNull)
+
   // Indexes for efficient queries
   @@index([positionId, createdAt])
   @@index([positionId, level, createdAt])
   @@index([closeOrderId])
+  @@index([hedgeVaultId])
   @@map("automation_logs")
+}
+
+// =============================================================================
+// Hedge Vault Models
+// =============================================================================
+
+// HedgeVault - ERC-4626 vault managing a Uniswap V3 LP position with SIL/TIP triggers
+model HedgeVault {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Contract identity
+  vaultAddress String @unique
+  chainId      Int
+
+  // Position link (optional - vault can exist before position is tracked)
+  positionId String?
+  position   Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  // Pool info (derived from position at init)
+  poolAddress   String
+  token0IsQuote Boolean
+
+  // Trigger thresholds (immutable after deployment)
+  silSqrtPriceX96      String // bigint as string
+  tipSqrtPriceX96      String // bigint as string
+  lossCapBps           Int
+  reopenCooldownBlocks String // bigint as string
+
+  // Vault state (synced from chain)
+  // UNINITIALIZED, IN_POSITION, OUT_OF_POSITION_QUOTE, OUT_OF_POSITION_BASE, DEAD
+  state          String  @default("UNINITIALIZED")
+  currentTokenId String? // Current NFT token ID (bigint as string)
+  lastCloseBlock String? // Block when position was last closed (bigint as string)
+  costBasis      String? // Total cost basis in quote tokens (bigint as string)
+
+  // Monitoring status
+  // pending: registered but not yet active
+  // active: being monitored for triggers
+  // paused: temporarily stopped
+  // stopped: permanently stopped
+  monitoringStatus String @default("pending")
+
+  // Operator wallet (for executing triggers)
+  operatorId String?
+  operator   AutomationWallet? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+
+  // Relations
+  executions HedgeVaultExecution[]
+  logs       AutomationLog[]
+
+  // Indexes
+  @@index([chainId, poolAddress])
+  @@index([state])
+  @@index([monitoringStatus])
+  @@index([operatorId])
+  @@map("hedge_vaults")
+}
+
+// HedgeVaultExecution - Individual execution attempts for hedge vault triggers
+model HedgeVaultExecution {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  vaultId String
+  vault   HedgeVault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  // Execution details
+  triggerType           String // sil, tip, reopen
+  triggerSqrtPriceX96   String // Price that triggered the execution (bigint as string)
+  executionSqrtPriceX96 String? // Price at execution time (bigint as string)
+
+  // Transaction details
+  txHash     String?
+  status     String  @default("pending") // pending, executing, completed, failed
+  error      String?
+  retryCount Int     @default(0)
+
+  // Result amounts (bigint as string)
+  quoteAmount String?
+  baseAmount  String?
+
+  // Timing
+  completedAt DateTime?
+
+  // Indexes
+  @@index([vaultId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("hedge_vault_executions")
 }
 
 // =============================================================================
