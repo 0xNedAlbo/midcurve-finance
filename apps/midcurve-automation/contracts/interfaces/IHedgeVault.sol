@@ -59,6 +59,17 @@ interface IHedgeVault {
     /// @notice Emitted when vault transitions to DEAD state
     event VaultDead(uint256 finalNav, uint256 costBasis, uint16 lossPercent);
 
+    /// @notice Emitted when fees are harvested from NFT position
+    event FeesHarvested(uint256 amount0, uint256 amount1);
+
+    /// @notice Emitted when a shareholder collects their pending fees
+    event FeesCollected(
+        address indexed user,
+        address indexed receiver,
+        uint256 quoteAmount,
+        uint256 baseAmount
+    );
+
     // ============ Errors ============
 
     error NotOperator();
@@ -172,4 +183,33 @@ interface IHedgeVault {
     /// @notice Check if reopen conditions are met
     /// @return True if cooldown expired AND price is between SIL and TIP
     function canExecuteReopen() external view returns (bool);
+
+    // ============ Fee Collection ============
+
+    /// @notice Collect pending fees for msg.sender (in-kind: both tokens)
+    /// @dev If IN_POSITION, harvests from NFT first to update accumulators
+    /// @param receiver Address to receive the fees
+    /// @return quoteAmount Quote token fees collected
+    /// @return baseAmount Base token fees collected
+    function collect(address receiver) external returns (uint256 quoteAmount, uint256 baseAmount);
+
+    /// @notice View pending fees for a user (both tokens)
+    /// @param user Address to check
+    /// @return pendingQuote Quote token fees claimable
+    /// @return pendingBase Base token fees claimable
+    function pendingFees(address user) external view returns (uint256 pendingQuote, uint256 pendingBase);
+
+    // ============ View Functions - Fee State ============
+
+    /// @notice Accumulated quote fees per share (scaled by 1e18)
+    function accQuoteFeesPerShare() external view returns (uint256);
+
+    /// @notice Accumulated base fees per share (scaled by 1e18)
+    function accBaseFeesPerShare() external view returns (uint256);
+
+    /// @notice Total unclaimed quote token fees held by vault
+    function totalUnclaimedQuoteFees() external view returns (uint256);
+
+    /// @notice Total unclaimed base token fees held by vault
+    function totalUnclaimedBaseFees() external view returns (uint256);
 }

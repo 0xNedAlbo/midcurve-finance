@@ -314,6 +314,18 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     uint256 public override costBasis;
     uint256 public override lastCloseBlock;
 
+    // Fee accumulators (scaled by 1e18 for precision)
+    uint256 public override accQuoteFeesPerShare;
+    uint256 public override accBaseFeesPerShare;
+
+    // Total unclaimed fees held by contract
+    uint256 public override totalUnclaimedQuoteFees;
+    uint256 public override totalUnclaimedBaseFees;
+
+    // Per-user fee debt (for calculating pending fees)
+    mapping(address => uint256) public userQuoteFeeDebt;
+    mapping(address => uint256) public userBaseFeeDebt;
+
     // Deployer (receives initial shares)
     address private immutable _deployer;
 
@@ -491,12 +503,38 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             }
         }
 
+        // Harvest fees from NFT first if in position
+        if (state == State.IN_POSITION) {
+            _harvestNftFees();
+        }
+
+        // Calculate pending fees BEFORE burning shares
+        uint256 pendingQuote = _pendingQuoteFees(owner);
+        uint256 pendingBase = _pendingBaseFees(owner);
+
         _burn(owner, shares);
+
+        // Update fee debts for remaining balance
+        userQuoteFeeDebt[owner] = (balanceOf[owner] * accQuoteFeesPerShare) / 1e18;
+        userBaseFeeDebt[owner] = (balanceOf[owner] * accBaseFeesPerShare) / 1e18;
 
         // Handle withdrawal based on state
         _processWithdrawal(assets, receiver);
 
+        // Transfer pending fees in-kind
+        if (pendingQuote > 0) {
+            totalUnclaimedQuoteFees -= pendingQuote;
+            _safeTransfer(asset, receiver, pendingQuote);
+        }
+        if (pendingBase > 0) {
+            totalUnclaimedBaseFees -= pendingBase;
+            _safeTransfer(baseToken, receiver, pendingBase);
+        }
+
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
+        if (pendingQuote > 0 || pendingBase > 0) {
+            emit FeesCollected(owner, receiver, pendingQuote, pendingBase);
+        }
     }
 
     function redeem(uint256 shares, address receiver, address owner) public nonReentrant whenInitialized returns (uint256 assets) {
@@ -509,12 +547,38 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
         assets = previewRedeem(shares);
 
+        // Harvest fees from NFT first if in position
+        if (state == State.IN_POSITION) {
+            _harvestNftFees();
+        }
+
+        // Calculate pending fees BEFORE burning shares
+        uint256 pendingQuote = _pendingQuoteFees(owner);
+        uint256 pendingBase = _pendingBaseFees(owner);
+
         _burn(owner, shares);
+
+        // Update fee debts for remaining balance
+        userQuoteFeeDebt[owner] = (balanceOf[owner] * accQuoteFeesPerShare) / 1e18;
+        userBaseFeeDebt[owner] = (balanceOf[owner] * accBaseFeesPerShare) / 1e18;
 
         // Handle withdrawal based on state
         _processWithdrawal(assets, receiver);
 
+        // Transfer pending fees in-kind
+        if (pendingQuote > 0) {
+            totalUnclaimedQuoteFees -= pendingQuote;
+            _safeTransfer(asset, receiver, pendingQuote);
+        }
+        if (pendingBase > 0) {
+            totalUnclaimedBaseFees -= pendingBase;
+            _safeTransfer(baseToken, receiver, pendingBase);
+        }
+
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
+        if (pendingQuote > 0 || pendingBase > 0) {
+            emit FeesCollected(owner, receiver, pendingQuote, pendingBase);
+        }
     }
 
     // ============ Transfer Override ============
@@ -524,7 +588,29 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         if (depositMode == DepositMode.CLOSED) {
             revert TransfersDisabled();
         }
+
+        // Calculate pending fees for sender BEFORE transfer
+        uint256 senderPendingQuote = _pendingQuoteFees(from);
+        uint256 senderPendingBase = _pendingBaseFees(from);
+
+        // Execute transfer
         super._transfer(from, to, amount);
+
+        // Sender keeps their pending fees (adjust debt so pending stays the same)
+        userQuoteFeeDebt[from] = (balanceOf[from] * accQuoteFeesPerShare / 1e18) - senderPendingQuote;
+        userBaseFeeDebt[from] = (balanceOf[from] * accBaseFeesPerShare / 1e18) - senderPendingBase;
+
+        // Receiver starts fresh (no historical fees for transferred shares)
+        userQuoteFeeDebt[to] = (balanceOf[to] * accQuoteFeesPerShare) / 1e18;
+        userBaseFeeDebt[to] = (balanceOf[to] * accBaseFeesPerShare) / 1e18;
+    }
+
+    function _mint(address to, uint256 amount) internal override {
+        super._mint(to, amount);
+
+        // Set fee debt so new minter has 0 pending fees for new shares
+        userQuoteFeeDebt[to] = (balanceOf[to] * accQuoteFeesPerShare) / 1e18;
+        userBaseFeeDebt[to] = (balanceOf[to] * accBaseFeesPerShare) / 1e18;
     }
 
     // ============ Operator Actions ============
@@ -540,7 +626,10 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             revert SilNotTriggered(currentPrice, silSqrtPriceX96, token0IsQuote);
         }
 
-        // Close position (withdraw all liquidity + collect fees)
+        // Harvest fees FIRST (updates accumulators before closing)
+        _harvestNftFees();
+
+        // Close position (withdraw liquidity + collect principal)
         _closePosition();
 
         // Swap Base → Quote
@@ -572,7 +661,10 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             revert TipNotTriggered(currentPrice, tipSqrtPriceX96, token0IsQuote);
         }
 
-        // Close position (withdraw all liquidity + collect fees)
+        // Harvest fees FIRST (updates accumulators before closing)
+        _harvestNftFees();
+
+        // Close position (withdraw liquidity + collect principal)
         _closePosition();
 
         // Swap Quote → Base
@@ -652,6 +744,102 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             return false;
         }
         return _isPriceInRange(_getCurrentSqrtPriceX96());
+    }
+
+    // ============ Fee Collection ============
+
+    /// @inheritdoc IHedgeVault
+    function collect(address receiver) external override nonReentrant whenInitialized returns (uint256 quoteAmount, uint256 baseAmount) {
+        // Harvest from NFT if in position (updates accumulators)
+        if (state == State.IN_POSITION) {
+            _harvestNftFees();
+        }
+
+        // Calculate pending fees for caller
+        uint256 shares = balanceOf[msg.sender];
+        quoteAmount = _pendingQuoteFees(msg.sender);
+        baseAmount = _pendingBaseFees(msg.sender);
+
+        // Update fee debts
+        userQuoteFeeDebt[msg.sender] = (shares * accQuoteFeesPerShare) / 1e18;
+        userBaseFeeDebt[msg.sender] = (shares * accBaseFeesPerShare) / 1e18;
+
+        // Transfer fees in-kind
+        if (quoteAmount > 0) {
+            totalUnclaimedQuoteFees -= quoteAmount;
+            _safeTransfer(asset, receiver, quoteAmount);
+        }
+        if (baseAmount > 0) {
+            totalUnclaimedBaseFees -= baseAmount;
+            _safeTransfer(baseToken, receiver, baseAmount);
+        }
+
+        emit FeesCollected(msg.sender, receiver, quoteAmount, baseAmount);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function pendingFees(address user) external view override returns (uint256 pendingQuote, uint256 pendingBase) {
+        pendingQuote = _pendingQuoteFees(user);
+        pendingBase = _pendingBaseFees(user);
+    }
+
+    // ============ Internal - Fee Logic ============
+
+    function _pendingQuoteFees(address user) internal view returns (uint256) {
+        uint256 shares = balanceOf[user];
+        if (shares == 0) return 0;
+        uint256 accumulated = (shares * accQuoteFeesPerShare) / 1e18;
+        uint256 debt = userQuoteFeeDebt[user];
+        return accumulated > debt ? accumulated - debt : 0;
+    }
+
+    function _pendingBaseFees(address user) internal view returns (uint256) {
+        uint256 shares = balanceOf[user];
+        if (shares == 0) return 0;
+        uint256 accumulated = (shares * accBaseFeesPerShare) / 1e18;
+        uint256 debt = userBaseFeeDebt[user];
+        return accumulated > debt ? accumulated - debt : 0;
+    }
+
+    /// @dev Harvest fees from NFT position and update accumulators
+    function _harvestNftFees() internal {
+        if (state != State.IN_POSITION || currentTokenId == 0) return;
+        if (totalSupply == 0) return;
+
+        // Collect fees from NFT (only tokensOwed, not liquidity)
+        (uint256 collected0, uint256 collected1) = positionManager.collect(
+            INonfungiblePositionManagerMinimal.CollectParams({
+                tokenId: currentTokenId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
+
+        if (collected0 == 0 && collected1 == 0) return;
+
+        // Separate into quote and base based on token ordering
+        uint256 quoteFees;
+        uint256 baseFees;
+        if (token0IsQuote) {
+            quoteFees = collected0;
+            baseFees = collected1;
+        } else {
+            quoteFees = collected1;
+            baseFees = collected0;
+        }
+
+        // Update accumulators
+        if (quoteFees > 0) {
+            accQuoteFeesPerShare += (quoteFees * 1e18) / totalSupply;
+            totalUnclaimedQuoteFees += quoteFees;
+        }
+        if (baseFees > 0) {
+            accBaseFeesPerShare += (baseFees * 1e18) / totalSupply;
+            totalUnclaimedBaseFees += baseFees;
+        }
+
+        emit FeesHarvested(collected0, collected1);
     }
 
     // ============ Internal - Trigger Logic ============
@@ -852,16 +1040,21 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         if (state == State.UNINITIALIZED) return 0;
 
         if (state == State.OUT_OF_POSITION_QUOTE || state == State.DEAD) {
-            return IERC20Minimal(asset).balanceOf(address(this));
+            // Quote balance minus unclaimed quote fees (fees belong to shareholders, not NAV)
+            uint256 balance = IERC20Minimal(asset).balanceOf(address(this));
+            return balance > totalUnclaimedQuoteFees ? balance - totalUnclaimedQuoteFees : 0;
         }
 
         if (state == State.OUT_OF_POSITION_BASE) {
-            // Convert Base balance to Quote value
+            // Base balance minus unclaimed base fees, converted to Quote value
             uint256 baseBalance = IERC20Minimal(baseToken).balanceOf(address(this));
-            return _convertBaseToQuote(baseBalance);
+            uint256 principalBase = baseBalance > totalUnclaimedBaseFees
+                ? baseBalance - totalUnclaimedBaseFees
+                : 0;
+            return _convertBaseToQuote(principalBase);
         }
 
-        // IN_POSITION: Calculate position value + fees
+        // IN_POSITION: Calculate position value (excludes tokensOwed which are fees)
         return _calculatePositionValue();
     }
 
