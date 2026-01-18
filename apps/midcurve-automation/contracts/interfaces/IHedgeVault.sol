@@ -91,10 +91,10 @@ interface IHedgeVault {
 
     // ============ Initialization ============
 
-    /// @notice Initialize vault with existing Uniswap V3 position
+    /// @notice Initialize vault with the Uniswap V3 position set at deployment
     /// @dev Transfers NFT from caller to vault. Caller must approve this contract first.
-    /// @param tokenId The NFT token ID to transfer to vault
-    function init(uint256 tokenId) external;
+    ///      The nftId is set in the constructor and cannot be changed.
+    function init() external;
 
     // ============ Operator Actions ============
 
@@ -135,6 +135,9 @@ interface IHedgeVault {
 
     /// @notice Number of blocks to wait after close before reopen is allowed
     function reopenCooldownBlocks() external view returns (uint256);
+
+    /// @notice NFT token ID that will be transferred on init (set at deployment)
+    function nftId() external view returns (uint256);
 
     // ============ View Functions - Position ============
 

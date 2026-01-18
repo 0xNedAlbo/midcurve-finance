@@ -287,6 +287,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
     INonfungiblePositionManagerMinimal public immutable positionManager;
     IAugustusRegistry public immutable augustusRegistry;
+    uint256 public immutable nftId;  // NFT to transfer on init (set at deployment)
 
     address public immutable override operator;
     uint160 public immutable override silSqrtPriceX96;
@@ -337,6 +338,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     constructor(
         address positionManager_,
         address augustusRegistry_,
+        uint256 nftId_,
         address quoteToken_,
         address operator_,
         uint160 silSqrtPriceX96_,
@@ -361,6 +363,29 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         reopenCooldownBlocks = reopenCooldownBlocks_;
         depositMode = depositMode_;
 
+        // Store NFT ID and validate compatibility
+        nftId = nftId_;
+
+        // Validate NFT compatibility with quote token (fail-fast on deployment)
+        (
+            ,
+            ,
+            address token0,
+            address token1,
+            ,  // fee
+            ,  // tickLower
+            ,  // tickUpper
+            ,  // liquidity
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManagerMinimal(positionManager_).positions(nftId_);
+
+        if (token0 != quoteToken_ && token1 != quoteToken_) {
+            revert IncompatiblePosition(token0, token1, quoteToken_);
+        }
+
         _deployer = msg.sender;
         state = State.UNINITIALIZED;
     }
@@ -379,8 +404,10 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
     // ============ Initialization ============
 
-    function init(uint256 tokenId) external override nonReentrant {
+    function init() external override nonReentrant {
         if (state != State.UNINITIALIZED) revert AlreadyInitialized();
+
+        uint256 tokenId = nftId;  // Use stored immutable
 
         // Read position data from NFT
         (
