@@ -71,22 +71,3 @@ export {
   type LifecycleOperationResponse,
 } from './evm/index.js';
 
-export {
-  HyperliquidClient,
-  HyperliquidApiError,
-  type HyperliquidClientDependencies,
-  type HyperliquidAccountState,
-  type HyperliquidMarginSummary,
-  type HyperliquidLeverage,
-  type HyperliquidPosition,
-  type HyperliquidOrder,
-  type HyperliquidOrderSide,
-  type HyperliquidOrderStatus,
-  type HyperliquidPerpsMeta,
-  type HyperliquidPerpAsset,
-  type HyperliquidSpotMeta,
-  type HyperliquidSpotToken,
-  type HyperliquidSpotPair,
-  type HyperliquidAssetContext,
-  type HyperliquidPerpsMetaAndAssetCtxs,
-} from './hyperliquid/index.js';

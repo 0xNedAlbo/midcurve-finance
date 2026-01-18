@@ -19,7 +19,6 @@ import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
 import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
-// import { HedgeButton } from "@/components/positions/hedges"; // Temporarily hidden
 import { useSharedContract, useAutowallet } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
@@ -27,19 +26,9 @@ import { formatTriggerPrice, type TokenConfig } from "@/components/positions/aut
 interface UniswapV3ActionsProps {
   position: ListPositionData;
   isInRange: boolean; // Future: May be used for range-specific actions
-  // Hedge section state (controlled by parent)
-  isHedgeExpanded: boolean;
-  onToggleHedge: () => void;
-  hedgeCount: number;
 }
 
-export function UniswapV3Actions({
-  position,
-  // Hedge props - temporarily unused while feature is hidden
-  isHedgeExpanded: _isHedgeExpanded,
-  onToggleHedge: _onToggleHedge,
-  hedgeCount: _hedgeCount,
-}: UniswapV3ActionsProps) {
+export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const { address: walletAddress, isConnected } = useAccount();
   const [showIncreaseModal, setShowIncreaseModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -202,13 +191,6 @@ export function UniswapV3Actions({
               }}
               isToken0Quote={position.isToken0Quote}
             />
-
-            {/* Hedge Button - temporarily hidden for initial release */}
-            {/* <HedgeButton
-              isExpanded={isHedgeExpanded}
-              onToggle={onToggleHedge}
-              hedgeCount={hedgeCount}
-            /> */}
           </>
         )}
       </div>
