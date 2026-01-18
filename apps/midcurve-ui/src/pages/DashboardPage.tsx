@@ -7,7 +7,8 @@ import { CreatePositionDropdown } from '../components/positions/create-position-
 import { CreateStrategyDropdown } from '../components/strategies/create-strategy-dropdown';
 import { PositionList } from '../components/positions/position-list';
 import { StrategyList } from '../components/strategies/strategy-list';
-import { DashboardTabs } from '../components/common/dashboard-tabs';
+import { DashboardTabs, type DashboardTab } from '../components/common/dashboard-tabs';
+import { HedgedPositionList } from '../components/positions/hedge/hedged-position-list';
 
 export function DashboardPage() {
   const { user, status } = useAuth();
@@ -15,11 +16,15 @@ export function DashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Read tab from URL, default to 'positions'
-  const activeTab = (
-    searchParams.get('tab') === 'strategies' ? 'strategies' : 'positions'
-  ) as 'positions' | 'strategies';
+  const tabParam = searchParams.get('tab');
+  const activeTab: DashboardTab =
+    tabParam === 'strategies'
+      ? 'strategies'
+      : tabParam === 'hedgedPositions'
+        ? 'hedgedPositions'
+        : 'positions';
 
-  const handleTabChange = (tab: 'positions' | 'strategies') => {
+  const handleTabChange = (tab: DashboardTab) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', tab);
     // Reset offset when switching tabs
@@ -70,12 +75,18 @@ export function DashboardPage() {
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold text-white mb-2">
-                {activeTab === 'positions' ? 'Your Positions' : 'Your Strategies'}
+                {activeTab === 'positions'
+                  ? 'Your Positions'
+                  : activeTab === 'hedgedPositions'
+                    ? 'Your Hedged Positions'
+                    : 'Your Strategies'}
               </h2>
               <p className="text-slate-300">
                 {activeTab === 'positions'
                   ? 'Manage and analyze your Uniswap V3 liquidity positions'
-                  : 'Manage your automated liquidity strategies'}
+                  : activeTab === 'hedgedPositions'
+                    ? 'Positions protected with SIL/TIP triggers'
+                    : 'Manage your automated liquidity strategies'}
               </p>
             </div>
 
@@ -90,7 +101,9 @@ export function DashboardPage() {
           <DashboardTabs activeTab={activeTab} onTabChange={handleTabChange} />
 
           {/* Content based on active tab */}
-          {activeTab === 'positions' ? <PositionList /> : <StrategyList />}
+          {activeTab === 'positions' && <PositionList />}
+          {activeTab === 'hedgedPositions' && <HedgedPositionList />}
+          {activeTab === 'strategies' && <StrategyList />}
         </div>
       </div>
     </div>

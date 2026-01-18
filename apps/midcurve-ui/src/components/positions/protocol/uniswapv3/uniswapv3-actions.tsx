@@ -18,7 +18,9 @@ import { WithdrawPositionModal } from "@/components/positions/withdraw-position-
 import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
+import { HedgeButton } from "@/components/positions/automation/HedgeButton";
 import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
+import { CreateHedgedPositionModal } from "@/components/positions/hedge/CreateHedgedPositionModal";
 import { useSharedContract, useAutowallet } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
@@ -33,6 +35,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const [showIncreaseModal, setShowIncreaseModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
+  const [showHedgeModal, setShowHedgeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unClaimedFees) > 0n;
 
   // Extract owner address from position state
@@ -191,6 +194,11 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
               }}
               isToken0Quote={position.isToken0Quote}
             />
+
+            {/* Divider between automation and hedge */}
+            <div className="w-px h-6 bg-slate-600/50 mx-1" />
+
+            <HedgeButton onClick={() => setShowHedgeModal(true)} />
           </>
         )}
       </div>
@@ -226,6 +234,13 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           // Don't auto-close - user will click Finish button
           // Cache invalidation is handled by useUpdatePositionWithEvents
         }}
+      />
+
+      {/* Create Hedged Position Modal */}
+      <CreateHedgedPositionModal
+        isOpen={showHedgeModal}
+        onClose={() => setShowHedgeModal(false)}
+        position={position}
       />
     </>
   );

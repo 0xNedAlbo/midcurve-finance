@@ -1,12 +1,14 @@
 /**
  * DashboardTabs - Tab navigation for Dashboard
  *
- * Allows switching between "Positions" and "Strategies" views.
+ * Allows switching between "Positions", "Hedged Positions", and "Strategies" views.
  */
 
+export type DashboardTab = 'positions' | 'hedgedPositions' | 'strategies';
+
 interface DashboardTabsProps {
-  activeTab: 'positions' | 'strategies';
-  onTabChange: (tab: 'positions' | 'strategies') => void;
+  activeTab: DashboardTab;
+  onTabChange: (tab: DashboardTab) => void;
 }
 
 export function DashboardTabs({ activeTab, onTabChange }: DashboardTabsProps) {
@@ -21,6 +23,16 @@ export function DashboardTabs({ activeTab, onTabChange }: DashboardTabsProps) {
         }`}
       >
         Positions
+      </button>
+      <button
+        onClick={() => onTabChange('hedgedPositions')}
+        className={`px-4 py-3 font-medium transition-colors cursor-pointer ${
+          activeTab === 'hedgedPositions'
+            ? 'text-blue-400 border-b-2 border-blue-400 -mb-px'
+            : 'text-slate-400 hover:text-slate-200'
+        }`}
+      >
+        Hedged Positions
       </button>
       {/* TODO: Re-enable Strategies tab when strategy feature is ready
       <button
