@@ -193,6 +193,47 @@ export const autoLog = {
       msg: `Order ${orderId} execution: ${phase}`,
     });
   },
+
+  /**
+   * Log hedge vault trigger
+   */
+  hedgeVaultTriggered(
+    logger: ServiceLogger,
+    vaultId: string,
+    vaultAddress: string,
+    poolAddress: string,
+    triggerType: 'sil' | 'tip' | 'reopen',
+    currentSqrtPriceX96: string
+  ): void {
+    logger.info({
+      vaultId,
+      vaultAddress,
+      poolAddress,
+      triggerType,
+      currentSqrtPriceX96,
+      msg: `Hedge vault ${vaultId} ${triggerType.toUpperCase()} triggered`,
+    });
+  },
+
+  /**
+   * Log hedge vault execution lifecycle
+   */
+  hedgeVaultExecution(
+    logger: ServiceLogger,
+    vaultId: string,
+    triggerType: 'sil' | 'tip' | 'reopen',
+    phase: 'signing' | 'broadcasting' | 'waiting' | 'completed' | 'failed',
+    metadata?: Record<string, unknown>
+  ): void {
+    const level = phase === 'failed' ? 'error' : 'info';
+    logger[level]({
+      vaultId,
+      triggerType,
+      phase,
+      ...metadata,
+      msg: `Hedge vault ${vaultId} ${triggerType.toUpperCase()} execution: ${phase}`,
+    });
+  },
 };
 
 /**

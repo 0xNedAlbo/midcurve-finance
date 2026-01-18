@@ -240,6 +240,33 @@ export class HedgeVaultService {
     }
   }
 
+  /**
+   * Finds all active vaults for monitoring (across all pools)
+   *
+   * @returns Array of all active vaults
+   */
+  async findActiveVaults(): Promise<HedgeVault[]> {
+    log.methodEntry(this.logger, 'findActiveVaults');
+
+    try {
+      const result = await this.prisma.hedgeVault.findMany({
+        where: {
+          monitoringStatus: 'active',
+          state: {
+            in: ['IN_POSITION', 'OUT_OF_POSITION_QUOTE', 'OUT_OF_POSITION_BASE'],
+          },
+        },
+        orderBy: { poolAddress: 'asc' },
+      });
+
+      log.methodExit(this.logger, 'findActiveVaults', { count: result.length });
+      return result;
+    } catch (error) {
+      log.methodError(this.logger, 'findActiveVaults', error as Error);
+      throw error;
+    }
+  }
+
   // ============================================================================
   // STATE MANAGEMENT
   // ============================================================================

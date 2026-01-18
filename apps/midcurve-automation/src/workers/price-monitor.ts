@@ -5,13 +5,13 @@
  * Publishes trigger events to RabbitMQ when price conditions are met.
  */
 
-import { getPoolSubscriptionService, getCloseOrderService, getUniswapV3PoolService, getPositionService } from '../lib/services';
-import { readPoolPrice, type SupportedChainId } from '../lib/evm';
+import { getPoolSubscriptionService, getCloseOrderService, getUniswapV3PoolService, getPositionService, getHedgeVaultService } from '../lib/services';
+import { readPoolPrice, readBlockNumber, type SupportedChainId } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
-import { serializeMessage, type OrderTriggerMessage } from '../mq/messages';
+import { serializeMessage, type OrderTriggerMessage, type HedgeVaultTriggerMessage, type HedgeVaultTriggerType } from '../mq/messages';
 import { pricePerToken0InToken1, pricePerToken1InToken0, formatCurrency } from '@midcurve/shared';
 
 const log = automationLogger.child({ component: 'PriceMonitor' });
@@ -53,6 +53,7 @@ export interface PriceMonitorStatus {
   lastPollAt: string | null;
   pollIntervalMs: number;
   triggeredOrdersTotal: number;
+  triggeredVaultsTotal: number;
 }
 
 // =============================================================================
@@ -66,6 +67,7 @@ export class PriceMonitor {
   private poolsMonitored = 0;
   private lastPollAt: Date | null = null;
   private triggeredOrdersTotal = 0;
+  private triggeredVaultsTotal = 0;
 
   constructor() {
     const config = getWorkerConfig();
@@ -122,6 +124,7 @@ export class PriceMonitor {
       lastPollAt: this.lastPollAt?.toISOString() || null,
       pollIntervalMs: this.pollIntervalMs,
       triggeredOrdersTotal: this.triggeredOrdersTotal,
+      triggeredVaultsTotal: this.triggeredVaultsTotal,
     };
   }
 
@@ -154,17 +157,28 @@ export class PriceMonitor {
     // Get pools with active orders
     const subscriptionService = getPoolSubscriptionService();
     const poolService = getUniswapV3PoolService();
+    const hedgeVaultService = getHedgeVaultService();
     const subscriptions = await subscriptionService.getSubscriptionsToMonitor();
 
-    this.poolsMonitored = subscriptions.length;
+    // Also get pools with active hedge vaults (may overlap with subscriptions)
+    const activeVaults = await hedgeVaultService.findActiveVaults();
+    const vaultPoolAddresses = new Set(activeVaults.map((v) => v.poolAddress.toLowerCase()));
 
-    if (subscriptions.length === 0) {
+    // Count unique pools monitored (subscriptions + vault pools)
+    const subscriptionPoolIds = new Set(subscriptions.map((s) => s.poolId));
+    this.poolsMonitored = subscriptionPoolIds.size + vaultPoolAddresses.size;
+
+    if (subscriptions.length === 0 && activeVaults.length === 0) {
       return;
     }
 
-    let triggeredCount = 0;
+    let triggeredOrderCount = 0;
+    let triggeredVaultCount = 0;
 
-    // Check each pool
+    // Track processed pool addresses to avoid duplicate price reads
+    const processedPools = new Map<string, { sqrtPriceX96: bigint; tick: number; chainId: number }>();
+
+    // Check pools from subscriptions (for close orders)
     for (const subscription of subscriptions) {
       try {
         // Get pool details (chainId and address) from the Pool table
@@ -196,6 +210,9 @@ export class PriceMonitor {
           poolAddress as `0x${string}`
         );
 
+        // Cache for vault checks
+        processedPools.set(poolAddress.toLowerCase(), { sqrtPriceX96, tick, chainId });
+
         // Update subscription with current price
         await subscriptionService.updatePrice(subscription.poolId, sqrtPriceX96, tick);
 
@@ -224,7 +241,7 @@ export class PriceMonitor {
           );
 
           if (triggered) {
-            triggeredCount++;
+            triggeredOrderCount++;
             this.triggeredOrdersTotal++;
           }
         }
@@ -235,10 +252,89 @@ export class PriceMonitor {
       }
     }
 
+    // Check hedge vaults (may need to read additional pools)
+    for (const vault of activeVaults) {
+      try {
+        const poolKey = vault.poolAddress.toLowerCase();
+        let priceData = processedPools.get(poolKey);
+
+        // If pool wasn't processed via subscription, read price now
+        if (!priceData) {
+          if (!isSupportedChain(vault.chainId)) {
+            log.warn({ chainId: vault.chainId, vaultId: vault.id, msg: 'Unsupported chain for vault' });
+            continue;
+          }
+
+          const { sqrtPriceX96, tick } = await readPoolPrice(
+            vault.chainId as SupportedChainId,
+            vault.poolAddress as `0x${string}`
+          );
+          priceData = { sqrtPriceX96, tick, chainId: vault.chainId };
+          processedPools.set(poolKey, priceData);
+        }
+
+        // Get current block number for reopen cooldown check
+        const currentBlock = await readBlockNumber(vault.chainId as SupportedChainId);
+
+        // Check hedge vault trigger
+        const triggerType = this.checkHedgeVaultTrigger(
+          priceData.sqrtPriceX96,
+          currentBlock,
+          vault
+        );
+
+        if (triggerType) {
+          // Verify vault is still in correct state before publishing
+          const currentVault = await hedgeVaultService.findById(vault.id);
+          if (!currentVault || currentVault.monitoringStatus !== 'active') {
+            log.debug({ vaultId: vault.id }, 'Vault no longer active, skipping trigger');
+            continue;
+          }
+
+          autoLog.hedgeVaultTriggered(
+            log,
+            vault.id,
+            vault.vaultAddress,
+            vault.poolAddress,
+            triggerType,
+            priceData.sqrtPriceX96.toString()
+          );
+
+          // Publish trigger message
+          await this.publishHedgeVaultTrigger({
+            vaultId: vault.id,
+            vaultAddress: vault.vaultAddress,
+            poolAddress: vault.poolAddress,
+            chainId: vault.chainId,
+            triggerType,
+            currentSqrtPriceX96: priceData.sqrtPriceX96.toString(),
+            silSqrtPriceX96: vault.silSqrtPriceX96,
+            tipSqrtPriceX96: vault.tipSqrtPriceX96,
+            token0IsQuote: vault.token0IsQuote,
+            currentBlock: currentBlock.toString(),
+            triggeredAt: new Date().toISOString(),
+          });
+
+          triggeredVaultCount++;
+          this.triggeredVaultsTotal++;
+        }
+      } catch (err) {
+        autoLog.methodError(log, 'poll.vault', err, {
+          vaultId: vault.id,
+        });
+      }
+    }
+
     this.lastPollAt = new Date();
     const durationMs = Date.now() - startTime;
 
-    autoLog.pricePoll(log, this.poolsMonitored, triggeredCount, durationMs);
+    log.info({
+      poolsMonitored: this.poolsMonitored,
+      triggeredOrders: triggeredOrderCount,
+      triggeredVaults: triggeredVaultCount,
+      durationMs,
+      msg: `Price poll: ${this.poolsMonitored} pools, ${triggeredOrderCount} orders triggered, ${triggeredVaultCount} vaults triggered (${durationMs}ms)`,
+    });
   }
 
   /**
@@ -362,6 +458,87 @@ export class PriceMonitor {
     autoLog.mqEvent(log, 'published', EXCHANGES.TRIGGERS, {
       orderId: message.orderId,
       routingKey: ROUTING_KEYS.ORDER_TRIGGERED,
+    });
+  }
+
+  // =============================================================================
+  // Hedge Vault Trigger Detection
+  // =============================================================================
+
+  /**
+   * Vault data interface for trigger checking
+   */
+  private checkHedgeVaultTrigger(
+    currentSqrtPrice: bigint,
+    currentBlock: bigint,
+    vault: {
+      state: string;
+      token0IsQuote: boolean;
+      silSqrtPriceX96: string;
+      tipSqrtPriceX96: string;
+      lastCloseBlock: string | null;
+      reopenCooldownBlocks: string;
+    }
+  ): HedgeVaultTriggerType | null {
+    const silSqrtPriceX96 = BigInt(vault.silSqrtPriceX96);
+    const tipSqrtPriceX96 = BigInt(vault.tipSqrtPriceX96);
+
+    // Check SIL/TIP triggers when IN_POSITION
+    if (vault.state === 'IN_POSITION') {
+      // Explicit inversion handling (same logic as contract)
+      if (vault.token0IsQuote) {
+        // sqrtPrice UP = actual price DOWN (price inversion)
+        // SIL = "Stop Impermanent Loss" = actual price dropped
+        if (currentSqrtPrice >= silSqrtPriceX96) return 'sil';
+        // sqrtPrice DOWN = actual price UP
+        // TIP = "Take Impermanent Profit" = actual price rose
+        if (currentSqrtPrice <= tipSqrtPriceX96) return 'tip';
+      } else {
+        // sqrtPrice DOWN = actual price DOWN (no inversion)
+        if (currentSqrtPrice <= silSqrtPriceX96) return 'sil';
+        // sqrtPrice UP = actual price UP
+        if (currentSqrtPrice >= tipSqrtPriceX96) return 'tip';
+      }
+    }
+
+    // Check reopen trigger when OUT_OF_POSITION
+    if (vault.state === 'OUT_OF_POSITION_QUOTE' || vault.state === 'OUT_OF_POSITION_BASE') {
+      const lastCloseBlock = vault.lastCloseBlock ? BigInt(vault.lastCloseBlock) : 0n;
+      const reopenCooldownBlocks = BigInt(vault.reopenCooldownBlocks);
+
+      // Check cooldown
+      const cooldownExpired = currentBlock >= lastCloseBlock + reopenCooldownBlocks;
+      if (!cooldownExpired) return null;
+
+      // Price must be between SIL and TIP (in actual price terms)
+      let priceInRange: boolean;
+      if (vault.token0IsQuote) {
+        // Inverted: SIL sqrtPrice > TIP sqrtPrice (in sqrtPrice space)
+        priceInRange = currentSqrtPrice < silSqrtPriceX96 && currentSqrtPrice > tipSqrtPriceX96;
+      } else {
+        // Normal: SIL sqrtPrice < TIP sqrtPrice
+        priceInRange = currentSqrtPrice > silSqrtPriceX96 && currentSqrtPrice < tipSqrtPriceX96;
+      }
+
+      if (priceInRange) return 'reopen';
+    }
+
+    return null;
+  }
+
+  /**
+   * Publish hedge vault trigger message to RabbitMQ
+   */
+  private async publishHedgeVaultTrigger(message: HedgeVaultTriggerMessage): Promise<void> {
+    const mq = getRabbitMQConnection();
+    const content = serializeMessage(message);
+
+    await mq.publish(EXCHANGES.TRIGGERS, ROUTING_KEYS.HEDGE_VAULT_TRIGGERED, content);
+
+    autoLog.mqEvent(log, 'published', EXCHANGES.TRIGGERS, {
+      vaultId: message.vaultId,
+      triggerType: message.triggerType,
+      routingKey: ROUTING_KEYS.HEDGE_VAULT_TRIGGERED,
     });
   }
 }

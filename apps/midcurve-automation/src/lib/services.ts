@@ -14,6 +14,7 @@ import {
   PositionRangeTrackerService,
   NotificationService,
   WebhookDeliveryService,
+  HedgeVaultService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -25,6 +26,7 @@ let _positionService: UniswapV3PositionService | null = null;
 let _positionRangeTrackerService: PositionRangeTrackerService | null = null;
 let _notificationService: NotificationService | null = null;
 let _webhookDeliveryService: WebhookDeliveryService | null = null;
+let _hedgeVaultService: HedgeVaultService | null = null;
 
 /**
  * Get singleton instance of CloseOrderService
@@ -104,4 +106,14 @@ export function getWebhookDeliveryService(): WebhookDeliveryService {
     _webhookDeliveryService = new WebhookDeliveryService();
   }
   return _webhookDeliveryService;
+}
+
+/**
+ * Get singleton instance of HedgeVaultService
+ */
+export function getHedgeVaultService(): HedgeVaultService {
+  if (!_hedgeVaultService) {
+    _hedgeVaultService = new HedgeVaultService();
+  }
+  return _hedgeVaultService;
 }

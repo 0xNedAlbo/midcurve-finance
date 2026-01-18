@@ -125,6 +125,14 @@ export async function readPoolPrice(
 }
 
 /**
+ * Read current block number for a chain
+ */
+export async function readBlockNumber(chainId: SupportedChainId): Promise<bigint> {
+  const client = getPublicClient(chainId);
+  return client.getBlockNumber();
+}
+
+/**
  * Broadcast a signed transaction
  */
 export async function broadcastTransaction(

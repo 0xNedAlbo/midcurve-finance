@@ -220,6 +220,7 @@ class WorkerManager {
           lastPollAt: null,
           pollIntervalMs: 0,
           triggeredOrdersTotal: 0,
+          triggeredVaultsTotal: 0,
         },
         ohlcTriggerConsumer: this.ohlcTriggerConsumer?.getStatus() || {
           status: 'idle',
