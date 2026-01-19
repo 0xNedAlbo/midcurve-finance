@@ -2,10 +2,15 @@
  * Mock ParaSwap Client
  *
  * Provides the same interface as ParaswapClient but for local blockchain testing.
- * Instead of calling the ParaSwap API (which doesn't know about local tokens),
- * this client reads pool prices directly and generates swap calldata for the MockAugustus contract.
+ * Uses Uniswap V3 QuoterV2 and SwapRouter02 for accurate quotes and execution
+ * on forked mainnet environments.
  *
- * Used only for chainId 31337 (local development chain).
+ * Key features:
+ * - Automatically finds the right pool for any token pair (tries multiple fee tiers)
+ * - Accurate quotes from QuoterV2 (accounts for liquidity depth and fees)
+ * - Real execution via SwapRouter02 (same path as production swaps)
+ *
+ * Used only for chainId 31337 (local development chain with forked mainnet).
  */
 
 import { type Address, type Hex, encodeFunctionData, parseAbi } from 'viem';
@@ -35,26 +40,33 @@ export interface MockParaswapQuoteRequest {
   amount: string; // Wei amount as string
   userAddress: Address; // Contract address that will execute the swap
   slippageBps: number; // 0-10000
+  side?: 'SELL' | 'BUY'; // SELL = fixed input, BUY = fixed output
 }
 
 interface MockParaswapConfig {
-  augustusAddress: Address;
-  poolAddress: Address;
+  // SwapRouter02 address - uses canonical mainnet address by default
+  swapRouterAddress?: Address;
 }
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const MOCK_AUGUSTUS_ABI = parseAbi([
-  'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) returns (uint256)',
-  'function getTokenTransferProxy() view returns (address)',
+// Uniswap V3 canonical addresses (same on all chains including mainnet forks)
+const QUOTER_V2_ADDRESS = '0x61fFE014bA17989E743c5F6cB21bF9697530B21e' as Address;
+const SWAP_ROUTER_ADDRESS = '0x68b3465833fb72A5BF767c15aA22Cbc16614626D' as Address;
+
+// Fee tiers to try in order of most common usage
+const FEE_TIERS = [3000, 500, 10000, 100] as const; // 0.3%, 0.05%, 1%, 0.01%
+
+const QUOTER_V2_ABI = parseAbi([
+  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+  'function quoteExactOutputSingle((address tokenIn, address tokenOut, uint256 amount, uint24 fee, uint160 sqrtPriceLimitX96)) external returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
 ]);
 
-const UNISWAP_V3_POOL_ABI = parseAbi([
-  'function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
-  'function token0() view returns (address)',
-  'function token1() view returns (address)',
+const SWAP_ROUTER_ABI = parseAbi([
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+  'function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)',
 ]);
 
 // =============================================================================
@@ -62,10 +74,10 @@ const UNISWAP_V3_POOL_ABI = parseAbi([
 // =============================================================================
 
 export class MockParaswapClient {
-  private config: MockParaswapConfig;
+  private swapRouterAddress: Address;
 
-  constructor(config: MockParaswapConfig) {
-    this.config = config;
+  constructor(config: MockParaswapConfig = {}) {
+    this.swapRouterAddress = config.swapRouterAddress ?? SWAP_ROUTER_ADDRESS;
   }
 
   /**
@@ -76,10 +88,10 @@ export class MockParaswapClient {
   }
 
   /**
-   * Get a swap quote (mimics ParaswapClient.getQuote)
+   * Get a swap quote using Uniswap V3 QuoterV2
    *
-   * Reads pool price directly and calculates expected output.
-   * Returns synthesized quote data suitable for the swap widget.
+   * Automatically finds the right pool by trying multiple fee tiers.
+   * Returns accurate quotes that account for liquidity depth and fees.
    */
   async getQuote(request: ParaswapQuoteRequest | MockParaswapQuoteRequest): Promise<ParaswapQuoteResult> {
     const chainId = request.chainId as number;
@@ -88,61 +100,66 @@ export class MockParaswapClient {
       throw new Error(`MockParaswapClient only supports chainId ${SupportedChainId.LOCAL}, got ${chainId}`);
     }
 
-    log.info({
-      chainId,
-      srcToken: request.srcToken,
-      destToken: request.destToken,
-      amount: request.amount,
-      slippageBps: request.slippageBps,
-      msg: 'Getting mock quote',
-    });
-
     // Get public client for local chain
     const publicClient = getEvmConfig().getPublicClient(chainId);
 
-    // Calculate expected output from pool price
-    const expectedOut = await this.getExpectedOutput(
+    // Determine swap side from request (default to SELL)
+    const side = ('side' in request && request.side) || 'SELL';
+
+    // Get quote from Uniswap V3 QuoterV2
+    const quoteResult = await this.getQuoteFromUniswap(
       publicClient,
-      request.srcToken,
-      request.destToken,
-      BigInt(request.amount)
+      request.srcToken as Address,
+      request.destToken as Address,
+      BigInt(request.amount),
+      side as 'SELL' | 'BUY'
     );
 
-    // Apply slippage for minDestAmount
+    // Apply slippage
     const slippageBps = request.slippageBps ?? 50; // Default 0.5%
     const slippageMultiplier = 10000n - BigInt(slippageBps);
-    const minDestAmount = (expectedOut * slippageMultiplier) / 10000n;
+
+    // For SELL: minDestAmount = output * (1 - slippage)
+    // For BUY: maxSrcAmount = input * (1 + slippage) - handled by frontend
+    const minDestAmount =
+      side === 'SELL'
+        ? (quoteResult.amountOut * slippageMultiplier) / 10000n
+        : quoteResult.amountOut; // For BUY, amountOut is exact
 
     log.info({
       chainId,
       srcToken: request.srcToken,
       destToken: request.destToken,
-      srcAmount: request.amount,
-      destAmount: expectedOut.toString(),
+      side,
+      srcAmount: quoteResult.amountIn.toString(),
+      destAmount: quoteResult.amountOut.toString(),
       minDestAmount: minDestAmount.toString(),
-      msg: 'Mock quote generated',
+      fee: quoteResult.fee,
+      msg: 'Mock quote generated via QuoterV2',
     });
 
     return {
-      priceRoute: {} as ParaswapPriceRoute, // Empty - not needed for mock execution
+      // Store fee tier and side in priceRoute for use in buildTransaction
+      priceRoute: { fee: quoteResult.fee, side } as unknown as ParaswapPriceRoute,
       srcToken: request.srcToken,
       destToken: request.destToken,
-      srcAmount: request.amount,
-      destAmount: expectedOut.toString(),
+      srcAmount: quoteResult.amountIn.toString(),
+      destAmount: quoteResult.amountOut.toString(),
       minDestAmount: minDestAmount.toString(),
-      priceImpact: 0, // Mock has no real price impact calculation
-      gasCostUSD: '0', // Mock doesn't charge gas in USD terms
-      gasCostWei: '0',
-      augustusAddress: this.config.augustusAddress,
-      tokenTransferProxy: this.config.augustusAddress, // MockAugustus is its own transfer proxy
+      priceImpact: 0, // QuoterV2 doesn't return price impact directly
+      gasCostUSD: '0', // Local chain doesn't charge real gas
+      gasCostWei: quoteResult.gasEstimate.toString(),
+      augustusAddress: this.swapRouterAddress, // SwapRouter02 is the "augustus" for mock
+      tokenTransferProxy: this.swapRouterAddress, // SwapRouter02 handles transfers
       expiresAt: new Date(Date.now() + 300_000).toISOString(), // 5 min expiry
     };
   }
 
   /**
-   * Build a swap transaction (mimics ParaswapClient.buildTransaction)
+   * Build a swap transaction using Uniswap V3 SwapRouter02
    *
-   * Generates calldata for the MockAugustus.swap() function.
+   * Generates calldata for the real Uniswap V3 SwapRouter02.
+   * Uses the same execution path as production swaps.
    */
   async buildTransaction(request: ParaswapBuildTxRequest): Promise<ParaswapTransactionResult> {
     const chainId = request.chainId as number;
@@ -157,44 +174,56 @@ export class MockParaswapClient {
       destToken: request.destToken,
       srcAmount: request.srcAmount,
       slippageBps: request.slippageBps,
-      msg: 'Building mock transaction',
+      msg: 'Building mock transaction for SwapRouter02',
     });
 
-    // Get public client to recalculate output (price may have changed)
+    // Get public client for local chain
     const publicClient = getEvmConfig().getPublicClient(chainId);
 
-    // Calculate expected output
-    const expectedOut = await this.getExpectedOutput(
+    // Get fresh quote to determine fee tier and current output
+    const quoteResult = await this.getQuoteFromUniswap(
       publicClient,
-      request.srcToken,
-      request.destToken,
-      BigInt(request.srcAmount)
+      request.srcToken as Address,
+      request.destToken as Address,
+      BigInt(request.srcAmount),
+      'SELL'
     );
 
     // Apply slippage
     const slippageMultiplier = 10000n - BigInt(request.slippageBps);
-    const minDestAmount = (expectedOut * slippageMultiplier) / 10000n;
+    const minAmountOut = (quoteResult.amountOut * slippageMultiplier) / 10000n;
 
-    // Encode swap calldata for MockAugustus
+    // Encode SwapRouter02 calldata
     const swapCalldata = encodeFunctionData({
-      abi: MOCK_AUGUSTUS_ABI,
-      functionName: 'swap',
-      args: [request.srcToken, request.destToken, BigInt(request.srcAmount), minDestAmount],
+      abi: SWAP_ROUTER_ABI,
+      functionName: 'exactInputSingle',
+      args: [
+        {
+          tokenIn: request.srcToken as Address,
+          tokenOut: request.destToken as Address,
+          fee: quoteResult.fee,
+          recipient: request.userAddress as Address,
+          amountIn: BigInt(request.srcAmount),
+          amountOutMinimum: minAmountOut,
+          sqrtPriceLimitX96: 0n, // No price limit
+        },
+      ],
     });
 
     log.info({
       chainId,
-      to: this.config.augustusAddress,
-      minDestAmount: minDestAmount.toString(),
-      msg: 'Mock transaction built',
+      to: this.swapRouterAddress,
+      minDestAmount: minAmountOut.toString(),
+      fee: quoteResult.fee,
+      msg: 'Mock transaction built for SwapRouter02',
     });
 
     return {
-      to: this.config.augustusAddress,
+      to: this.swapRouterAddress,
       data: swapCalldata as Hex,
       value: '0',
-      gasLimit: '500000', // Conservative estimate for local chain
-      minDestAmount: minDestAmount.toString(),
+      gasLimit: '300000', // Conservative estimate
+      minDestAmount: minAmountOut.toString(),
       deadline: Math.floor(Date.now() / 1000) + 300, // 5 min deadline
     };
   }
@@ -202,9 +231,7 @@ export class MockParaswapClient {
   /**
    * Get swap params (combined quote + transaction, used by automation)
    *
-   * This method mimics ParaswapClient.getSwapParams but:
-   * - Reads pool price directly instead of calling ParaSwap API
-   * - Generates calldata for MockAugustus.swap() instead of ParaSwap
+   * Uses Uniswap V3 QuoterV2 for quotes and SwapRouter02 for execution.
    */
   async getSwapParams(request: MockParaswapQuoteRequest): Promise<ParaswapSwapParams> {
     const { chainId, srcToken, destToken, amount, slippageBps } = request;
@@ -219,25 +246,40 @@ export class MockParaswapClient {
       destToken,
       amount,
       slippageBps,
-      poolAddress: this.config.poolAddress,
-      msg: 'Getting mock swap params',
+      msg: 'Getting mock swap params via QuoterV2',
     });
 
     // Get public client for local chain
     const publicClient = getEvmConfig().getPublicClient(chainId);
 
-    // Calculate expected output from pool price
-    const expectedOut = await this.getExpectedOutput(publicClient, srcToken, destToken, BigInt(amount));
+    // Get quote from Uniswap V3 QuoterV2
+    const quoteResult = await this.getQuoteFromUniswap(
+      publicClient,
+      srcToken,
+      destToken,
+      BigInt(amount),
+      'SELL'
+    );
 
     // Apply slippage
     const slippageMultiplier = 10000n - BigInt(slippageBps);
-    const minDestAmount = (expectedOut * slippageMultiplier) / 10000n;
+    const minDestAmount = (quoteResult.amountOut * slippageMultiplier) / 10000n;
 
-    // Encode swap calldata for MockAugustus
+    // Encode SwapRouter02 calldata
     const swapCalldata = encodeFunctionData({
-      abi: MOCK_AUGUSTUS_ABI,
-      functionName: 'swap',
-      args: [srcToken, destToken, BigInt(amount), minDestAmount],
+      abi: SWAP_ROUTER_ABI,
+      functionName: 'exactInputSingle',
+      args: [
+        {
+          tokenIn: srcToken,
+          tokenOut: destToken,
+          fee: quoteResult.fee,
+          recipient: request.userAddress,
+          amountIn: BigInt(amount),
+          amountOutMinimum: minDestAmount,
+          sqrtPriceLimitX96: 0n, // No price limit
+        },
+      ],
     });
 
     log.info({
@@ -245,76 +287,104 @@ export class MockParaswapClient {
       srcToken,
       destToken,
       srcAmount: amount,
-      destAmount: expectedOut.toString(),
+      destAmount: quoteResult.amountOut.toString(),
       minDestAmount: minDestAmount.toString(),
-      augustusAddress: this.config.augustusAddress,
-      msg: 'Mock swap params generated',
+      fee: quoteResult.fee,
+      msg: 'Mock swap params generated via QuoterV2',
     });
 
     return {
-      augustusAddress: this.config.augustusAddress,
-      spenderAddress: this.config.augustusAddress, // MockAugustus is its own transfer proxy
+      augustusAddress: this.swapRouterAddress,
+      spenderAddress: this.swapRouterAddress, // SwapRouter02 handles transfers
       swapCalldata: swapCalldata as Hex,
       srcToken,
       destToken,
       srcAmount: amount,
-      destAmount: expectedOut.toString(),
+      destAmount: quoteResult.amountOut.toString(),
       minDestAmount: minDestAmount.toString(),
-      swapAllBalanceOffset: 0, // Not used in mock
+      swapAllBalanceOffset: 0, // Not used
     };
   }
 
   /**
-   * Calculate expected output amount based on pool price
+   * Get quote from Uniswap V3 QuoterV2
    *
-   * This is a simplified calculation that uses the pool's sqrtPriceX96
-   * to estimate the output. It doesn't account for:
-   * - Price impact from the swap
-   * - Fees charged by the pool
-   *
-   * For local testing purposes, this is sufficient. The slippage tolerance
-   * will handle any small discrepancies.
+   * Tries multiple fee tiers to find a pool for the token pair.
+   * Returns the best quote found (first successful fee tier).
    */
-  private async getExpectedOutput(
+  private async getQuoteFromUniswap(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     publicClient: any,
     tokenIn: Address,
-    _tokenOut: Address, // Used for interface consistency, direction determined by token0
-    amountIn: bigint
-  ): Promise<bigint> {
-    // Read pool state
-    const [slot0Result, token0] = await Promise.all([
-      publicClient.readContract({
-        address: this.config.poolAddress,
-        abi: UNISWAP_V3_POOL_ABI,
-        functionName: 'slot0',
-      }),
-      publicClient.readContract({
-        address: this.config.poolAddress,
-        abi: UNISWAP_V3_POOL_ABI,
-        functionName: 'token0',
-      }),
-    ]);
+    tokenOut: Address,
+    amount: bigint,
+    side: 'SELL' | 'BUY' = 'SELL'
+  ): Promise<{ amountOut: bigint; amountIn: bigint; fee: number; gasEstimate: bigint }> {
+    // Try each fee tier until we find a working pool
+    for (const fee of FEE_TIERS) {
+      try {
 
-    const sqrtPriceX96 = slot0Result[0] as bigint;
-    const Q96 = 2n ** 96n;
+        if (side === 'SELL') {
+          // quoteExactInputSingle - fixed input, get output
+          const result = await publicClient.simulateContract({
+            address: QUOTER_V2_ADDRESS,
+            abi: QUOTER_V2_ABI,
+            functionName: 'quoteExactInputSingle',
+            args: [
+              {
+                tokenIn,
+                tokenOut,
+                amountIn: amount,
+                fee,
+                sqrtPriceLimitX96: 0n, // No price limit
+              },
+            ],
+          });
 
-    // Determine swap direction
-    const zeroForOne = tokenIn.toLowerCase() === (token0 as string).toLowerCase();
+          const [amountOut, , , gasEstimate] = result.result as [
+            bigint,
+            bigint,
+            number,
+            bigint,
+          ];
 
-    // Calculate output based on price
-    // Note: This is a simplified calculation without accounting for price impact
-    if (zeroForOne) {
-      // token0 → token1
-      // price = (sqrtPriceX96 / 2^96)^2 = token1/token0
-      // amountOut = amountIn * price
-      return (amountIn * sqrtPriceX96 * sqrtPriceX96) / (Q96 * Q96);
-    } else {
-      // token1 → token0
-      // price = (2^96 / sqrtPriceX96)^2 = token0/token1
-      // amountOut = amountIn / price = amountIn * (2^96 / sqrtPriceX96)^2
-      return (amountIn * Q96 * Q96) / (sqrtPriceX96 * sqrtPriceX96);
+          return { amountOut, amountIn: amount, fee, gasEstimate };
+        } else {
+          // quoteExactOutputSingle - fixed output, get input
+          const result = await publicClient.simulateContract({
+            address: QUOTER_V2_ADDRESS,
+            abi: QUOTER_V2_ABI,
+            functionName: 'quoteExactOutputSingle',
+            args: [
+              {
+                tokenIn,
+                tokenOut,
+                amount, // This is the desired output amount for BUY side
+                fee,
+                sqrtPriceLimitX96: 0n,
+              },
+            ],
+          });
+
+          const [amountIn, , , gasEstimate] = result.result as [
+            bigint,
+            bigint,
+            number,
+            bigint,
+          ];
+
+          return { amountOut: amount, amountIn, fee, gasEstimate };
+        }
+      } catch {
+        // Pool doesn't exist for this fee tier, try next
+        continue;
+      }
     }
+
+    throw new Error(
+      `No Uniswap V3 pool found for ${tokenIn} → ${tokenOut}. ` +
+        `Tried fee tiers: ${FEE_TIERS.join(', ')}`
+    );
   }
 }
 
@@ -325,27 +395,20 @@ export class MockParaswapClient {
 let _mockParaswapClient: MockParaswapClient | null = null;
 
 /**
- * Get MockParaswapClient singleton (requires environment variables)
+ * Get MockParaswapClient singleton
  *
- * Required environment variables:
- * - MOCK_AUGUSTUS_ADDRESS: Address of the MockAugustus contract
- * - POOL_ADDRESS: Address of the UniswapV3 pool to use for price calculations
+ * Uses Uniswap V3 QuoterV2 and SwapRouter02 at their canonical mainnet addresses.
+ * No environment variables required - works automatically on any mainnet fork.
+ *
+ * Optional environment variable:
+ * - MOCK_SWAP_ROUTER_ADDRESS: Override the SwapRouter02 address (for testing)
  */
 export function getMockParaswapClient(): MockParaswapClient {
   if (!_mockParaswapClient) {
-    const augustusAddress = process.env.MOCK_AUGUSTUS_ADDRESS;
-    const poolAddress = process.env.POOL_ADDRESS;
-
-    if (!augustusAddress) {
-      throw new Error('MOCK_AUGUSTUS_ADDRESS environment variable is required for MockParaswapClient');
-    }
-    if (!poolAddress) {
-      throw new Error('POOL_ADDRESS environment variable is required for MockParaswapClient');
-    }
+    const swapRouterOverride = process.env.MOCK_SWAP_ROUTER_ADDRESS;
 
     _mockParaswapClient = new MockParaswapClient({
-      augustusAddress: augustusAddress as Address,
-      poolAddress: poolAddress as Address,
+      swapRouterAddress: swapRouterOverride ? (swapRouterOverride as Address) : undefined,
     });
   }
   return _mockParaswapClient;
