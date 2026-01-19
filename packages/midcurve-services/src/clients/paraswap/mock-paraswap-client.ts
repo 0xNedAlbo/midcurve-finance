@@ -54,7 +54,7 @@ interface MockParaswapConfig {
 
 // Uniswap V3 canonical addresses (same on all chains including mainnet forks)
 const QUOTER_V2_ADDRESS = '0x61fFE014bA17989E743c5F6cB21bF9697530B21e' as Address;
-const SWAP_ROUTER_ADDRESS = '0x68b3465833fb72A5BF767c15aA22Cbc16614626D' as Address;
+const SWAP_ROUTER_ADDRESS = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45' as Address;
 
 // Fee tiers to try in order of most common usage
 const FEE_TIERS = [3000, 500, 10000, 100] as const; // 0.3%, 0.05%, 1%, 0.01%
@@ -138,9 +138,36 @@ export class MockParaswapClient {
       msg: 'Mock quote generated via QuoterV2',
     });
 
+    // Build a mock priceRoute that satisfies the validation schema
+    // Store fee tier in a custom field for use in buildTransaction
+    const mockPriceRoute: ParaswapPriceRoute = {
+      blockNumber: 0,
+      network: chainId,
+      srcToken: request.srcToken as string,
+      srcDecimals: request.srcDecimals,
+      srcAmount: quoteResult.amountIn.toString(),
+      destToken: request.destToken as string,
+      destDecimals: request.destDecimals,
+      destAmount: quoteResult.amountOut.toString(),
+      bestRoute: [],
+      gasCostUSD: '0',
+      gasCost: quoteResult.gasEstimate.toString(),
+      side: side,
+      tokenTransferProxy: this.swapRouterAddress,
+      contractAddress: this.swapRouterAddress,
+      contractMethod: 'exactInputSingle',
+      srcUSD: '0',
+      destUSD: '0',
+      partner: 'midcurve-mock',
+      partnerFee: 0,
+      maxImpactReached: false,
+      hmac: 'mock-hmac',
+      // Custom field for mock: store the fee tier
+      fee: quoteResult.fee,
+    } as ParaswapPriceRoute & { fee: number };
+
     return {
-      // Store fee tier and side in priceRoute for use in buildTransaction
-      priceRoute: { fee: quoteResult.fee, side } as unknown as ParaswapPriceRoute,
+      priceRoute: mockPriceRoute,
       srcToken: request.srcToken,
       destToken: request.destToken,
       srcAmount: quoteResult.amountIn.toString(),
