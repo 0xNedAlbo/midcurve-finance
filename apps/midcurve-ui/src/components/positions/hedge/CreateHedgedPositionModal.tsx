@@ -205,6 +205,7 @@ export function CreateHedgedPositionModal({
                 onCooldownChange={setCooldownBlocks}
                 baseTokenSymbol={baseToken.symbol}
                 quoteTokenSymbol={quoteToken.symbol}
+                nftId={(position.config as { nftId: number }).nftId}
               />
             )}
 

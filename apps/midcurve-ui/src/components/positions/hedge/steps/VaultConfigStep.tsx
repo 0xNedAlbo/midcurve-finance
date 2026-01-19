@@ -25,6 +25,7 @@ interface VaultConfigStepProps {
   onCooldownChange: (blocks: number) => void;
   baseTokenSymbol: string;
   quoteTokenSymbol: string;
+  nftId: number;
 }
 
 // Approximate block times by chain (could be extended)
@@ -41,12 +42,13 @@ export function VaultConfigStep({
   onCooldownChange,
   baseTokenSymbol,
   quoteTokenSymbol,
+  nftId,
 }: VaultConfigStepProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Suggested defaults
-  const suggestedName = `Hedged ${baseTokenSymbol}-${quoteTokenSymbol} LP`;
-  const suggestedSymbol = `h${baseTokenSymbol}${quoteTokenSymbol}`;
+  const suggestedName = `Hedged Position #${nftId}`;
+  const suggestedSymbol = `HEDGE${nftId}`;
 
   // Convert loss cap bps to percentage for display
   const lossCapPercent = lossCapBps / 100;
