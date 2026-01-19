@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import type { ApiResponse } from '../common/index.js';
-import { PARASWAP_SUPPORTED_CHAIN_IDS, type ParaswapSupportedChainId } from './tokens.js';
+import { isSwapSupportedChain, PARASWAP_SUPPORTED_CHAIN_IDS, LOCAL_CHAIN_ID } from './tokens.js';
 
 /**
  * Swap side determines which amount is fixed:
@@ -74,9 +74,9 @@ export const GetSwapQuoteQuerySchema = z.object({
     .int('Chain ID must be an integer')
     .positive('Chain ID must be positive')
     .refine(
-      (val) => PARASWAP_SUPPORTED_CHAIN_IDS.includes(val as ParaswapSupportedChainId),
+      (val) => isSwapSupportedChain(val),
       {
-        message: `Chain not supported for swaps. Supported chains: ${PARASWAP_SUPPORTED_CHAIN_IDS.join(', ')}`,
+        message: `Chain not supported for swaps. Supported chains: ${PARASWAP_SUPPORTED_CHAIN_IDS.join(', ')}, ${LOCAL_CHAIN_ID}`,
       }
     ),
   srcToken: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid source token address'),
