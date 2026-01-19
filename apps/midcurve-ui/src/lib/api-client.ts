@@ -168,7 +168,6 @@ export async function apiClientFn<TResponse>(
 
 import type {
   // Swap
-  GetSwapTokensData,
   SwapQuoteData,
   BuildSwapTransactionRequest,
   SwapTransactionData,
@@ -464,13 +463,6 @@ export interface SwapQuoteParams {
  * Swap API client for ParaSwap-based token swapping
  */
 export const swapApi = {
-  /**
-   * Get tokens available for swapping on a chain
-   */
-  getTokens(chainId: number) {
-    return apiClient.get<GetSwapTokensData>(`/api/v1/swap/tokens?chainId=${chainId}`);
-  },
-
   /**
    * Get a swap quote
    */

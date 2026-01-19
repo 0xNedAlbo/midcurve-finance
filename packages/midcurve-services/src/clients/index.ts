@@ -76,11 +76,18 @@ export {
   getParaswapClient,
   ParaswapApiError,
   ParaswapChainNotSupportedError,
-  type ParaswapToken,
   type ParaswapQuoteRequest,
   type ParaswapQuoteResult,
   type ParaswapBuildTxRequest,
   type ParaswapTransactionData,
   type ParaswapTransactionResult,
   type ParaswapSwapParams,
+  // Mock client for local chain testing
+  MockParaswapClient,
+  getMockParaswapClient,
+  resetMockParaswapClient,
+  type MockParaswapQuoteRequest,
+  // Swap client factory
+  getSwapClient,
+  type SwapClient,
 } from './paraswap/index.js';

@@ -35,29 +35,6 @@ const DEFAULT_SLIPPAGE_BPS = 50;
 // Types
 // =============================================================================
 
-/** Raw token from ParaSwap API */
-interface ParaswapTokenResponse {
-  symbol: string;
-  address: string;
-  decimals: number;
-  img?: string;
-  network: number;
-}
-
-/** Raw token list response from ParaSwap API */
-interface ParaswapTokenListResponse {
-  tokens: ParaswapTokenResponse[];
-}
-
-/** Token available for swapping via ParaSwap */
-export interface ParaswapToken {
-  address: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  logoUrl?: string;
-}
-
 /** Swap side: SELL = fixed input, BUY = fixed output */
 export type ParaswapSide = 'SELL' | 'BUY';
 
@@ -174,51 +151,6 @@ export class ParaswapClient {
    */
   isChainSupported(chainId: number): chainId is ParaswapSupportedChainId {
     return isParaswapSupportedChain(chainId);
-  }
-
-  /**
-   * Fetch available tokens for a chain from ParaSwap
-   */
-  async getTokens(chainId: ParaswapSupportedChainId): Promise<ParaswapToken[]> {
-    log.info({ chainId, msg: 'Fetching ParaSwap tokens' });
-
-    const url = `${PARASWAP_API_BASE}/tokens/${chainId}`;
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      log.error({
-        chainId,
-        status: response.status,
-        error: errorBody,
-        msg: 'ParaSwap token list request failed',
-      });
-      throw new ParaswapApiError(
-        `ParaSwap token list failed: ${response.status}`,
-        response.status,
-        errorBody
-      );
-    }
-
-    const data = (await response.json()) as ParaswapTokenListResponse;
-
-    // Transform to our token format
-    const tokens: ParaswapToken[] = data.tokens.map((t) => ({
-      address: t.address,
-      symbol: t.symbol,
-      name: t.symbol, // ParaSwap doesn't provide name, use symbol
-      decimals: t.decimals,
-      logoUrl: t.img,
-    }));
-
-    log.info({
-      chainId,
-      count: tokens.length,
-      msg: `Fetched ${tokens.length} tokens from ParaSwap`,
-    });
-
-    return tokens;
   }
 
   /**

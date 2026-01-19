@@ -16,10 +16,23 @@ export const PARASWAP_SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 10] as const;
 export type ParaswapSupportedChainId = (typeof PARASWAP_SUPPORTED_CHAIN_IDS)[number];
 
 /**
+ * Local chain ID for development/testing
+ */
+export const LOCAL_CHAIN_ID = 31337;
+
+/**
  * Check if a chain ID is supported by ParaSwap
  */
 export function isParaswapSupportedChain(chainId: number): chainId is ParaswapSupportedChainId {
   return PARASWAP_SUPPORTED_CHAIN_IDS.includes(chainId as ParaswapSupportedChainId);
+}
+
+/**
+ * Check if a chain ID supports swaps (ParaSwap or local mock)
+ * Includes local chain (31337) for development/testing with mock ParaSwap
+ */
+export function isSwapSupportedChain(chainId: number): boolean {
+  return isParaswapSupportedChain(chainId) || chainId === LOCAL_CHAIN_ID;
 }
 
 /**

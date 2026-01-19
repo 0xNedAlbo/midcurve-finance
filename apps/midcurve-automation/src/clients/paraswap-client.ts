@@ -1,35 +1,31 @@
 /**
  * Paraswap Client Re-exports
  *
- * Re-exports the shared ParaswapClient from @midcurve/services and provides
- * a factory function to select between real ParaSwap API and mock client
- * for local chain testing.
- *
- * The real ParaswapClient is implemented in @midcurve/services for sharing
- * between midcurve-api and midcurve-automation.
+ * Re-exports the shared ParaswapClient and MockParaswapClient from @midcurve/services.
+ * The services package provides:
+ * - ParaswapClient: Real ParaSwap API client for production chains
+ * - MockParaswapClient: Mock client for local chain testing
+ * - getSwapClient: Factory function that selects the appropriate client
  */
 
 import {
   getParaswapClient,
+  getSwapClient as getSwapClientFromServices,
+  getMockParaswapClient,
   type ParaswapSwapParams,
   type ParaswapQuoteRequest,
+  type SwapClient,
+  type MockParaswapClient,
 } from '@midcurve/services';
-import { PARASWAP_SUPPORTED_CHAIN_IDS } from '@midcurve/api-shared';
-import { getMockParaswapClient, type MockParaswapClient } from './mock-paraswap-client';
-
-const LOCAL_CHAIN_ID = 31337;
+import { PARASWAP_SUPPORTED_CHAIN_IDS, LOCAL_CHAIN_ID } from '@midcurve/api-shared';
 
 // Re-export types and constants from shared packages
 export { PARASWAP_SUPPORTED_CHAIN_IDS as PARASWAP_SUPPORTED_CHAINS };
-export type { ParaswapSwapParams };
+export { LOCAL_CHAIN_ID };
+export type { ParaswapSwapParams, ParaswapQuoteRequest, SwapClient, MockParaswapClient };
 
-/**
- * Interface that both ParaswapClient and MockParaswapClient implement
- */
-export interface SwapClient {
-  isChainSupported(chainId: number): boolean;
-  getSwapParams(request: ParaswapQuoteRequest): Promise<ParaswapSwapParams>;
-}
+// Re-export factory functions from services
+export { getParaswapClient, getMockParaswapClient };
 
 /**
  * Get the appropriate swap client for a chain
@@ -39,10 +35,5 @@ export interface SwapClient {
  * in production.
  */
 export function getSwapClient(chainId: number): SwapClient {
-  if (chainId === LOCAL_CHAIN_ID) {
-    return getMockParaswapClient() as SwapClient;
-  }
-  return getParaswapClient();
+  return getSwapClientFromServices(chainId);
 }
-
-export type { MockParaswapClient };

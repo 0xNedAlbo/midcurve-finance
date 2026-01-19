@@ -120,13 +120,6 @@ export const queryKeys = {
   swap: {
     all: ['swap'] as const,
 
-    // Token list by chain
-    tokens: {
-      all: ['swap', 'tokens'] as const,
-      byChain: (chainId: number) =>
-        [...queryKeys.swap.tokens.all, chainId] as const,
-    },
-
     // Quotes
     quotes: {
       all: ['swap', 'quotes'] as const,

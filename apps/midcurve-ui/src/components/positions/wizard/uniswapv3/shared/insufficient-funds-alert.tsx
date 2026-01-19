@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { isParaswapSupportedChain } from '@midcurve/api-shared';
+import { isSwapSupportedChain } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { getChainId } from '@/config/chains';
 import { formatCompactValue } from '@/lib/fraction-format';
@@ -68,8 +68,8 @@ export function InsufficientFundsAlert({
   // Get chain ID from slug
   const chainId = getChainId(chain);
 
-  // Check if chain is supported by ParaSwap
-  const isSwapSupported = isParaswapSupportedChain(chainId);
+  // Check if chain is supported for swaps (ParaSwap for production, mock for local)
+  const isSwapSupported = isSwapSupportedChain(chainId);
 
   const handleSwapClick = (tokenType: 'base' | 'quote') => {
     if (!pool) return;

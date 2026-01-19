@@ -10,7 +10,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { isParaswapSupportedChain, type SwapToken } from '@midcurve/api-shared';
+import { isSwapSupportedChain, type SwapToken } from '@midcurve/api-shared';
 
 import { useSwapQuote, useSwapApproval, useExecuteSwap } from '@/hooks/swap';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
@@ -107,7 +107,7 @@ export function SwapWidget({
   const [slippageBps, setSlippageBps] = useState(50); // 0.5% default
 
   // Check if chain is supported
-  const isChainSupported = isParaswapSupportedChain(chainId);
+  const isChainSupported = isSwapSupportedChain(chainId);
 
   // Get chain slug for token search
   const chainSlug = getChainSlugByChainId(chainId);

@@ -2,12 +2,12 @@
  * ParaSwap Client Exports
  */
 
+// Production ParaSwap client
 export {
   ParaswapClient,
   getParaswapClient,
   ParaswapApiError,
   ParaswapChainNotSupportedError,
-  type ParaswapToken,
   type ParaswapQuoteRequest,
   type ParaswapQuoteResult,
   type ParaswapBuildTxRequest,
@@ -15,3 +15,14 @@ export {
   type ParaswapTransactionResult,
   type ParaswapSwapParams,
 } from './paraswap-client.js';
+
+// Mock ParaSwap client for local chain testing
+export {
+  MockParaswapClient,
+  getMockParaswapClient,
+  resetMockParaswapClient,
+  type MockParaswapQuoteRequest,
+} from './mock-paraswap-client.js';
+
+// Swap client factory (selects real or mock based on chain)
+export { getSwapClient, type SwapClient } from './swap-client-factory.js';

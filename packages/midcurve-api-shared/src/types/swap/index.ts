@@ -9,7 +9,9 @@
 export {
   PARASWAP_SUPPORTED_CHAIN_IDS,
   type ParaswapSupportedChainId,
+  LOCAL_CHAIN_ID,
   isParaswapSupportedChain,
+  isSwapSupportedChain,
   type GetSwapTokensQuery,
   GetSwapTokensQuerySchema,
   type SwapToken,

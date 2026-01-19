@@ -16,11 +16,12 @@ import {
   ApiErrorCode,
   ErrorCodeToHttpStatus,
   BuildSwapTransactionRequestSchema,
-  isParaswapSupportedChain,
+  isSwapSupportedChain,
+  LOCAL_CHAIN_ID,
   type SwapTransactionData,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getParaswapClient } from '@midcurve/services';
+import { getSwapClient } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -80,11 +81,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       const { chainId, srcToken, destToken, srcAmount, destAmount, slippageBps, userAddress, priceRoute } =
         validation.data;
 
-      // Check if chain is supported by ParaSwap
-      if (!isParaswapSupportedChain(chainId)) {
+      // Check if chain is supported for swaps (ParaSwap or local mock)
+      if (!isSwapSupportedChain(chainId)) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.CHAIN_NOT_SUPPORTED,
-          `ParaSwap does not support chain ${chainId}. Supported chains: 1, 42161, 8453, 10`
+          `Swaps not supported for chain ${chainId}. Supported chains: 1, 42161, 8453, 10, ${LOCAL_CHAIN_ID}`
         );
 
         apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
@@ -94,10 +95,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // Build transaction via ParaSwap
-      const client = getParaswapClient();
+      // Build transaction via swap client (ParaSwap for production, mock for local)
+      // Note: chainId is validated above via isSwapSupportedChain(), safe to cast
+      const client = getSwapClient(chainId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const txResult = await client.buildTransaction({
-        chainId,
+        chainId: chainId as any, // Union type doesn't accept 31337, but it's validated above
         srcToken: srcToken as `0x${string}`,
         destToken: destToken as `0x${string}`,
         srcAmount,
