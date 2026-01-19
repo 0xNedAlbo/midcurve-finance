@@ -366,8 +366,8 @@ export function OpenPositionStep({
         chain={chain}
       />
 
-      {/* Insufficient Funds Alert with SwapWidget */}
-      {insufficientFunds && (
+      {/* Insufficient Funds Alert with SwapWidget - only show when position has liquidity */}
+      {liquidity > 0n && insufficientFunds && (
         <InsufficientFundsAlert
           insufficientFunds={insufficientFunds}
           pool={poolData}
@@ -378,23 +378,29 @@ export function OpenPositionStep({
         />
       )}
 
-      {/* Transaction Steps List */}
-      <TransactionStepsList
-        pool={poolData}
-        baseTokenAddress={baseToken.address}
-        quoteTokenAddress={quoteToken.address}
-        requiredBaseAmount={requiredBaseAmount}
-        requiredQuoteAmount={requiredQuoteAmount}
-        baseApproval={baseApproval}
-        quoteApproval={quoteApproval}
-        mintPosition={mintPosition}
-        createPositionAPI={createPositionAPI}
-        canExecuteTransactions={canExecuteTransactions}
-        isConnected={isConnected}
-        chain={chain}
-        onApproval={handleApproval}
-        onOpenPosition={handleOpenPosition}
-      />
+      {/* Transaction Steps List - only show when position has liquidity */}
+      {liquidity > 0n ? (
+        <TransactionStepsList
+          pool={poolData}
+          baseTokenAddress={baseToken.address}
+          quoteTokenAddress={quoteToken.address}
+          requiredBaseAmount={requiredBaseAmount}
+          requiredQuoteAmount={requiredQuoteAmount}
+          baseApproval={baseApproval}
+          quoteApproval={quoteApproval}
+          mintPosition={mintPosition}
+          createPositionAPI={createPositionAPI}
+          canExecuteTransactions={canExecuteTransactions}
+          isConnected={isConnected}
+          chain={chain}
+          onApproval={handleApproval}
+          onOpenPosition={handleOpenPosition}
+        />
+      ) : (
+        <div className="text-center text-slate-400 py-4">
+          Enter a position size to continue.
+        </div>
+      )}
 
       {/* API Error */}
       {createPositionAPI.isError && (

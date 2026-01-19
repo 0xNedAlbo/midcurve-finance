@@ -195,8 +195,7 @@ export function UniswapV3PositionWizard({
           quoteToken &&
           selectedPool &&
           tickLower !== null &&
-          tickUpper !== null &&
-          liquidity > 0n ? (
+          tickUpper !== null ? (
           <OpenPositionStep
             chain={selectedChain}
             baseToken={baseToken}
