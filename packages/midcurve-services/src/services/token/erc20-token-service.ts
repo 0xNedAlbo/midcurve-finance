@@ -289,15 +289,16 @@ export class Erc20TokenService extends TokenService<"erc20"> {
             };
 
             if (isLocalChain(chainId)) {
+                // Local chain is a mainnet fork - try CoinGecko with mainnet chainId,
+                // then fall back to symbol-based matching for local-only tokens
                 this.logger.debug(
                     { address: normalizedAddress, chainId },
-                    "Skipping CoinGecko enrichment for local chain"
+                    "Using local chain enrichment strategy (mainnet lookup + symbol fallback)"
                 );
-                enrichmentData = {
-                    coingeckoId: null,
-                    logoUrl: undefined,
-                    marketCap: undefined,
-                };
+                enrichmentData = await this.getLocalChainEnrichment(
+                    normalizedAddress,
+                    metadata.symbol
+                );
             } else {
                 this.logger.debug(
                     { address: normalizedAddress, chainId },
@@ -846,14 +847,33 @@ export class Erc20TokenService extends TokenService<"erc20"> {
 
             this.logger.debug(
                 { tokenId, address, chainId, symbol: existing.symbol },
-                "Fetching enrichment data from CoinGecko"
+                "Fetching enrichment data"
             );
 
-            // Fetch from CoinGecko (errors bubble up - enrichment is mandatory)
-            const enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
-                chainId,
-                address
-            );
+            // Fetch enrichment data - use local chain strategy for forked chains
+            let enrichmentData: {
+                coingeckoId: string | null;
+                logoUrl: string | null | undefined;
+                marketCap: number | null | undefined;
+            };
+
+            if (isLocalChain(chainId)) {
+                // Local chain is a mainnet fork - try mainnet lookup + symbol fallback
+                this.logger.debug(
+                    { tokenId, address, chainId },
+                    "Using local chain enrichment strategy"
+                );
+                enrichmentData = await this.getLocalChainEnrichment(
+                    address,
+                    existing.symbol
+                );
+            } else {
+                // Standard CoinGecko enrichment for production chains
+                enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
+                    chainId,
+                    address
+                );
+            }
 
             // Update token in database
             log.dbOperation(this.logger, "update", "Token", {
@@ -1259,6 +1279,128 @@ export class Erc20TokenService extends TokenService<"erc20"> {
         };
         return mapping[chainId] || null;
     }
+
+    // ============================================================================
+    // LOCAL CHAIN ENRICHMENT
+    // ============================================================================
+
+    /**
+     * Get enrichment data for tokens on local chain (mainnet fork).
+     *
+     * Strategy:
+     * 1. Try CoinGecko with chainId=1 (mainnet) - works for forked tokens like WETH
+     * 2. If not found, use symbol-based fallback mapping
+     *
+     * @param address - Token contract address
+     * @param symbol - Token symbol from on-chain metadata
+     * @returns Enrichment data (coingeckoId, logoUrl, marketCap)
+     */
+    private async getLocalChainEnrichment(
+        address: string,
+        symbol: string
+    ): Promise<{
+        coingeckoId: string | null;
+        logoUrl: string | null | undefined;
+        marketCap: number | null | undefined;
+    }> {
+        // Step 1: Try CoinGecko with mainnet chainId
+        // Local chain is a mainnet fork, so forked tokens have identical addresses
+        try {
+            const mainnetEnrichment =
+                await this.coinGeckoClient.getErc20EnrichmentData(
+                    1, // Ethereum mainnet
+                    address
+                );
+
+            if (mainnetEnrichment.coingeckoId) {
+                this.logger.info(
+                    {
+                        address,
+                        symbol,
+                        coingeckoId: mainnetEnrichment.coingeckoId,
+                    },
+                    "Local chain token found on CoinGecko via mainnet lookup"
+                );
+                return mainnetEnrichment;
+            }
+        } catch (error) {
+            this.logger.debug(
+                { address, symbol, error: (error as Error).message },
+                "CoinGecko mainnet lookup failed, trying symbol fallback"
+            );
+        }
+
+        // Step 2: Symbol-based fallback for local-only tokens
+        return this.getSymbolBasedFallback(symbol);
+    }
+
+    /**
+     * Fallback enrichment based on token symbol patterns.
+     * Uses well-known tokens as proxies for similar local tokens.
+     *
+     * @param symbol - Token symbol to match against patterns
+     * @returns Enrichment data from proxy token, or empty if no match
+     */
+    private async getSymbolBasedFallback(symbol: string): Promise<{
+        coingeckoId: string | null;
+        logoUrl: string | null | undefined;
+        marketCap: number | null | undefined;
+    }> {
+        const upperSymbol = symbol.toUpperCase();
+
+        // USD-like tokens → use USDC data
+        if (upperSymbol.includes("USD")) {
+            try {
+                const usdcData =
+                    await this.coinGeckoClient.getErc20EnrichmentData(
+                        1, // mainnet
+                        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" // USDC mainnet address
+                    );
+                this.logger.info(
+                    { symbol },
+                    "Using USDC fallback enrichment for USD-like token"
+                );
+                return usdcData;
+            } catch (error) {
+                this.logger.debug(
+                    { symbol, error: (error as Error).message },
+                    "USDC fallback lookup failed"
+                );
+            }
+        }
+
+        // ETH-like tokens → use cbETH data
+        if (upperSymbol.includes("ETH")) {
+            try {
+                const cbethData =
+                    await this.coinGeckoClient.getErc20EnrichmentData(
+                        1, // mainnet
+                        "0xBe9895146f7AF43049ca1c1AE358B0541Ea49704" // cbETH mainnet address
+                    );
+                this.logger.info(
+                    { symbol },
+                    "Using cbETH fallback enrichment for ETH-like token"
+                );
+                return cbethData;
+            } catch (error) {
+                this.logger.debug(
+                    { symbol, error: (error as Error).message },
+                    "cbETH fallback lookup failed"
+                );
+            }
+        }
+
+        // No fallback available
+        this.logger.debug(
+            { symbol },
+            "No symbol fallback available for local chain token"
+        );
+        return { coingeckoId: null, logoUrl: undefined, marketCap: undefined };
+    }
+
+    // ============================================================================
+    // BASIC CURRENCY MANAGEMENT
+    // ============================================================================
 
     /**
      * Ensure a basic currency exists, creating it if necessary.
