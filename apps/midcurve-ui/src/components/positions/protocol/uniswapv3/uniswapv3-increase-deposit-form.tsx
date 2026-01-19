@@ -362,7 +362,7 @@ export function UniswapV3IncreaseDepositForm({
         chain={chain}
       />
 
-      {/* Insufficient Funds Alert with CowSwap Widget */}
+      {/* Insufficient Funds Alert with SwapWidget */}
       {insufficientFunds && (
         <InsufficientFundsAlert
           insufficientFunds={insufficientFunds}

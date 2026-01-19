@@ -1,22 +1,14 @@
 /**
  * useErc20TokenBalance Hook
  *
- * React Query hook for fetching ERC-20 token balances with real-time event watching.
- * Uses the singleton Erc20TransferEventManager to efficiently share event subscriptions
- * across multiple components.
+ * React Query hook for fetching ERC-20 token balances via the backend API.
+ * Polls the API at regular intervals and supports manual refetch for immediate updates.
  *
  * Features:
- * - Fetches balance via backend API (initial load + manual refetch)
- * - Watches ERC-20 Transfer events in real-time via singleton manager
- * - Single RPC subscription per token (shared across all components)
- * - Automatically refetches balance when Transfer event detected
- * - Reference counting (auto-cleanup when no more watchers)
- *
- * Benefits over previous implementation:
- * - 75%+ reduction in RPC calls (singleton vs per-component subscriptions)
- * - No duplicate event watchers
- * - Better scalability (10 components = 1 subscription, not 10)
- * - Automatic memory management
+ * - Fetches balance via backend API (uses reliable RPC infrastructure)
+ * - Auto-refresh every 5 seconds
+ * - Manual refetch for immediate updates after user actions
+ * - Shared query cache across components
  *
  * @example
  * ```typescript
@@ -42,7 +34,6 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { TokenBalanceData } from '@midcurve/api-shared';
-import { useErc20TransferWatch } from '@/lib/events/use-erc20-transfer-watch';
 import { apiClient } from '@/lib/api-client';
 
 /**
@@ -121,17 +112,15 @@ export interface UseErc20TokenBalanceReturn {
 }
 
 /**
- * Hook to fetch ERC-20 token balance with real-time Transfer event watching
+ * Hook to fetch ERC-20 token balance via backend API
  *
- * Combines TanStack Query for data fetching with singleton event manager for
- * efficient real-time updates. Multiple components watching the same token
- * will share a single RPC subscription.
+ * Uses TanStack Query for data fetching with automatic polling.
+ * Multiple components watching the same token will share the same cached data.
  *
  * **Architecture:**
- * 1. Initial fetch via backend API (`GET /api/v1/tokens/erc20/balance`)
- * 2. Subscribe to singleton event manager for Transfer events
- * 3. When Transfer detected → auto-refetch balance from API
- * 4. On unmount → auto-unsubscribe (reference counting handles cleanup)
+ * - Polls backend API every 5 seconds for balance updates
+ * - Backend uses reliable RPC infrastructure (no public rate limits)
+ * - Call `refetch()` for immediate updates after user actions (swaps, approvals)
  *
  * @param options - Configuration options
  * @returns Balance data and query state
@@ -173,8 +162,8 @@ export function useErc20TokenBalance(
     queryKey,
     queryFn,
     enabled: enabled && !!walletAddress && !!tokenAddress,
-    staleTime: 4 * 1000, // Consider data fresh for 4 seconds
-    refetchInterval: 4 * 1000, // Auto-refetch every 4 seconds
+    staleTime: 5 * 1000, // Consider data fresh for 5 seconds
+    refetchInterval: 5 * 1000, // Auto-refetch every 5 seconds
     gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
     retry: (failureCount, error) => {
       // Don't retry validation errors (4xx)
@@ -189,19 +178,6 @@ export function useErc20TokenBalance(
 
       // Retry network errors and 502/503 up to 2 times
       return failureCount < 2;
-    },
-  });
-
-  // Subscribe to Transfer events via singleton manager
-  // This efficiently shares RPC subscriptions across all components
-  useErc20TransferWatch({
-    chainId,
-    tokenAddress,
-    walletAddress,
-    enabled: enabled && !!walletAddress && !!tokenAddress,
-    onTransfer: () => {
-      // Refetch balance when Transfer detected
-      query.refetch();
     },
   });
 

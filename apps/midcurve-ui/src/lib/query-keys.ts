@@ -115,6 +115,25 @@ export const queryKeys = {
   },
 
   // ============================================
+  // SWAP (ParaSwap integration)
+  // ============================================
+  swap: {
+    all: ['swap'] as const,
+
+    // Quotes
+    quotes: {
+      all: ['swap', 'quotes'] as const,
+      quote: (params: {
+        chainId: number;
+        srcToken: string;
+        destToken: string;
+        amount: string;
+        userAddress: string;
+      }) => [...queryKeys.swap.quotes.all, params] as const,
+    },
+  },
+
+  // ============================================
   // STRATEGIES
   // ============================================
   strategies: {
