@@ -152,10 +152,13 @@ function updateEnvFile(envPath: string, key: string, value: string): void {
 }
 
 /**
- * Update .env files with the deployed PositionCloser address.
+ * Update .env files with deployed local chain contract addresses.
  * Updates both automation and API .env files (gitignored).
  */
-function updateLocalChainConfig(positionCloserAddress: string): void {
+function updateLocalChainConfig(
+  mockUsdAddress: string,
+  positionCloserAddress?: string
+): void {
   const envPaths = [
     resolve(process.cwd(), '.env'), // automation
     resolve(process.cwd(), '../midcurve-api/.env'), // api
@@ -163,7 +166,10 @@ function updateLocalChainConfig(positionCloserAddress: string): void {
 
   for (const envPath of envPaths) {
     try {
-      updateEnvFile(envPath, 'POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
+      updateEnvFile(envPath, 'MOCK_USD_ADDRESS', mockUsdAddress);
+      if (positionCloserAddress) {
+        updateEnvFile(envPath, 'POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
+      }
       console.log(`Updated: ${envPath}`);
     } catch (error) {
       console.warn(`Warning: Could not update ${envPath}:`, error);
@@ -200,11 +206,9 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('MockUSD:', state.mockUsdAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
 
-  // Update .env files with deployed PositionCloser address (gitignored)
-  if (state.positionCloserAddress) {
-    console.log('\n--- Updating Configuration ---');
-    updateLocalChainConfig(state.positionCloserAddress);
-  }
+  // Update .env files with deployed addresses (gitignored)
+  console.log('\n--- Updating Configuration ---');
+  updateLocalChainConfig(state.mockUsdAddress, state.positionCloserAddress);
 }
 
 async function step2CreatePool(state: SetupState): Promise<void> {
