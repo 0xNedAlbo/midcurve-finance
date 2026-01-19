@@ -13,6 +13,7 @@ const CHAIN_NAMES: Record<number, string> = {
   56: "BSC",
   137: "Polygon",
   10: "Optimism",
+  31337: "Local",
 };
 
 interface UniswapV3ChainBadgeProps {

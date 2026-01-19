@@ -518,7 +518,7 @@ model PoolPrice {
 
   // Pool reference
   poolId String
-  pool   Pool   @relation(fields: [poolId], references: [id])
+  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
 
   // Timestamp when price was recorded
   timestamp DateTime

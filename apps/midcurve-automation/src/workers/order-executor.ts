@@ -32,7 +32,7 @@ import {
   type ExecutionResultNotificationMessage,
 } from '../mq/messages';
 import { getSignerClient } from '../clients/signer-client';
-import { getParaswapClient, type ParaswapSwapParams, PARASWAP_SUPPORTED_CHAINS } from '../clients/paraswap-client';
+import { getSwapClient, type ParaswapSwapParams, PARASWAP_SUPPORTED_CHAINS } from '../clients/paraswap-client';
 
 const log = automationLogger.child({ component: 'OrderExecutor' });
 
@@ -490,17 +490,17 @@ export class OrderExecutor {
     let swapParams: ParaswapSwapParams | undefined;
 
     if (swapEnabled) {
-      const paraswapClient = getParaswapClient();
+      const swapClient = getSwapClient(chainId);
 
-      // Check if chain supports Paraswap
-      if (!paraswapClient.isChainSupported(chainId)) {
+      // Check if chain supports swaps
+      if (!swapClient.isChainSupported(chainId)) {
         log.warn({
           orderId,
           positionId,
           chainId,
-          msg: 'Swap enabled on-chain but chain not supported by Paraswap - execution will fail',
+          msg: 'Swap enabled on-chain but chain not supported by swap client - execution will fail',
         });
-        throw new Error(`Swap enabled on-chain but Paraswap does not support chain ${chainId}`);
+        throw new Error(`Swap enabled on-chain but swap client does not support chain ${chainId}`);
       } else {
         log.info({
           orderId,
@@ -599,9 +599,9 @@ export class OrderExecutor {
           );
         }
 
-        // Get swap params from Paraswap using calculated amount
+        // Get swap params from swap client (Paraswap or MockParaswap for local chain)
         try {
-          swapParams = await paraswapClient.getSwapParams({
+          swapParams = await swapClient.getSwapParams({
             chainId: chainId as (typeof PARASWAP_SUPPORTED_CHAINS)[number],
             srcToken: srcToken as `0x${string}`,
             srcDecimals,
@@ -618,17 +618,17 @@ export class OrderExecutor {
             augustusAddress: swapParams.augustusAddress,
             srcToken: swapParams.srcToken,
             destToken: swapParams.destToken,
-            msg: 'Paraswap swap params obtained',
+            msg: 'Swap params obtained',
           });
         } catch (swapErr) {
           log.error({
             orderId,
             positionId,
             error: (swapErr as Error).message,
-            msg: 'Failed to get Paraswap swap params - on-chain swap required but API failed',
+            msg: 'Failed to get swap params - on-chain swap required but API failed',
           });
           // Throw error since on-chain swap is required but we can't get params
-          throw new Error(`Swap required on-chain but failed to get Paraswap params: ${(swapErr as Error).message}`);
+          throw new Error(`Swap required on-chain but failed to get swap params: ${(swapErr as Error).message}`);
         }
       }
     }
