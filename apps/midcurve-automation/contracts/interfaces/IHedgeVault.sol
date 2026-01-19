@@ -15,6 +15,11 @@ pragma solidity ^0.8.20;
  * sqrtPriceX96 Inversion:
  * - token0IsQuote = true:  sqrtPriceX96 ↑ means actual price ↓ (inverted)
  * - token0IsQuote = false: sqrtPriceX96 ↑ means actual price ↑ (normal)
+ *
+ * Roles:
+ * - Manager = Deployer of the contract, can modify SIL/TIP, pause/resume, manage whitelist
+ * - Operator = Automation wallet, executes SIL/TIP/Reopen when not paused
+ * - Shareholder = ERC-4626 share holders, can deposit/withdraw/collect fees
  */
 interface IHedgeVault {
     // ============ Enums ============
@@ -25,12 +30,6 @@ interface IHedgeVault {
         OUT_OF_POSITION_QUOTE,  // Holds only Quote token (after SIL)
         OUT_OF_POSITION_BASE,   // Holds only Base token (after TIP)
         DEAD                    // Permanently liquidated (loss cap breached)
-    }
-
-    enum DepositMode {
-        CLOSED,         // Only deployer can deposit, shares non-transferable
-        SEMI_PRIVATE,   // Only existing shareholders can deposit
-        PUBLIC          // Anyone can deposit
     }
 
     // ============ Events ============
@@ -59,21 +58,33 @@ interface IHedgeVault {
     /// @notice Emitted when vault transitions to DEAD state
     event VaultDead(uint256 finalNav, uint256 costBasis, uint16 lossPercent);
 
-    /// @notice Emitted when fees are harvested from NFT position
-    event FeesHarvested(uint256 amount0, uint256 amount1);
+    /// @notice Emitted when vault is paused by manager
+    event VaultPaused();
 
-    /// @notice Emitted when a shareholder collects their pending fees
-    event FeesCollected(
-        address indexed user,
-        address indexed receiver,
-        uint256 quoteAmount,
-        uint256 baseAmount
-    );
+    /// @notice Emitted when vault is resumed by manager with new tick range
+    event VaultResumed(int24 newTickLower, int24 newTickUpper);
+
+    /// @notice Emitted when SIL/TIP thresholds are updated by manager
+    event SilTipUpdated(uint160 newSil, uint160 newTip);
+
+    /// @notice Emitted when an address is added to or removed from whitelist
+    event WhitelistUpdated(address indexed account, bool whitelisted);
+
+    /// @notice Emitted when whitelist is enabled or disabled
+    event WhitelistEnabledChanged(bool enabled);
+
+    /// @notice Emitted when fees are collected from NFT position (Manager/Operator)
+    event FeesCollected(uint256 quoteAmount, uint256 baseSwapped);
+
+    /// @notice Emitted when a shareholder claims their accumulated fees
+    event FeesClaimed(address indexed user, address indexed receiver, uint256 quoteAmount);
 
     // ============ Errors ============
 
     error NotOperator();
-    error NotShareholder();
+    error NotManager();
+    error NotManagerOrOperator();
+    error NotWhitelisted(address account);
     error AlreadyInitialized();
     error NotInitialized();
     error InvalidState(State current, State required);
@@ -82,12 +93,14 @@ interface IHedgeVault {
     error SilNotTriggered(uint160 current, uint160 sil, bool token0IsQuote);
     error TipNotTriggered(uint160 current, uint160 tip, bool token0IsQuote);
     error LossCapBreached(uint256 nav, uint256 costBasis, uint16 lossCapBps);
-    error DepositsDisabled();
-    error TransfersDisabled();
+    error VaultPausedError();
+    error VaultNotPausedError();
     error IncompatiblePosition(address token0, address token1, address vaultAsset);
     error InvalidSwapDirection();
     error ZeroAddress();
     error InvalidSilTipRange();
+    error InvalidTickRange();
+    error NoFeesToClaim();
 
     // ============ Initialization ============
 
@@ -99,30 +112,93 @@ interface IHedgeVault {
     // ============ Operator Actions ============
 
     /// @notice Execute Stop Impermanent Loss - exit to Quote token
-    /// @dev Only callable by operator when canExecuteSil() returns true
+    /// @dev Only callable by operator when canExecuteSil() returns true and not paused
     /// @param swapData Paraswap calldata for Base → Quote swap
     function executeSil(bytes calldata swapData) external;
 
     /// @notice Execute Take Impermanent Profit - exit to Base token
-    /// @dev Only callable by operator when canExecuteTip() returns true
+    /// @dev Only callable by operator when canExecuteTip() returns true and not paused
     /// @param swapData Paraswap calldata for Quote → Base swap
     function executeTip(bytes calldata swapData) external;
 
     /// @notice Reopen position after cooldown when price is back in range
-    /// @dev Only callable by operator when canExecuteReopen() returns true
+    /// @dev Only callable by operator when canExecuteReopen() returns true and not paused
     /// @param swapData Paraswap calldata for token conversion before minting LP
     function executeReopen(bytes calldata swapData) external;
+
+    // ============ Manager Actions - Triggers ============
+
+    /// @notice Update SIL and TIP trigger thresholds
+    /// @dev Only callable by manager. Can be called in any state except DEAD.
+    /// @param newSilSqrtPriceX96 New SIL trigger price in sqrtPriceX96 format
+    /// @param newTipSqrtPriceX96 New TIP trigger price in sqrtPriceX96 format
+    function setSilTip(uint160 newSilSqrtPriceX96, uint160 newTipSqrtPriceX96) external;
+
+    /// @notice Pause the hedge - close position and exit to Quote
+    /// @dev Only callable by manager when IN_POSITION. Sets isPaused=true.
+    /// @param swapData Paraswap calldata for Base → Quote swap
+    function pause(bytes calldata swapData) external;
+
+    /// @notice Resume the hedge - open new position with specified tick range
+    /// @dev Only callable by manager when OUT_OF_POSITION_* and isPaused=true.
+    ///      If price > TIP: swaps to Base, stays OUT_OF_POSITION_BASE
+    ///      If price < SIL: stays OUT_OF_POSITION_QUOTE
+    ///      If SIL < price < TIP: opens new LP position
+    /// @param newTickLower New lower tick for LP position
+    /// @param newTickUpper New upper tick for LP position
+    /// @param swapData Paraswap calldata for token conversion
+    function resume(int24 newTickLower, int24 newTickUpper, bytes calldata swapData) external;
+
+    // ============ Manager Actions - Whitelist ============
+
+    /// @notice Enable or disable the whitelist
+    /// @dev Only callable by manager. When disabled, anyone can receive shares.
+    /// @param enabled True to enable whitelist, false to disable
+    function setWhitelistEnabled(bool enabled) external;
+
+    /// @notice Add addresses to the whitelist
+    /// @dev Only callable by manager. Addresses can receive shares via deposit/mint/transfer.
+    /// @param accounts Addresses to add to whitelist
+    function addToWhitelist(address[] calldata accounts) external;
+
+    /// @notice Remove addresses from the whitelist
+    /// @dev Only callable by manager. Removed addresses can still redeem/withdraw and transfer to whitelisted addresses.
+    /// @param accounts Addresses to remove from whitelist
+    function removeFromWhitelist(address[] calldata accounts) external;
+
+    // ============ Fee Collection ============
+
+    /// @notice Collect fees from NFT position and swap Base to Quote
+    /// @dev Only callable by manager or operator when IN_POSITION.
+    ///      Harvests fees from NFT, swaps Base fees to Quote, updates accumulators.
+    /// @param swapData Paraswap calldata for Base → Quote swap (empty = skip swap, only add Quote fees)
+    function collectFeesFromPosition(bytes calldata swapData) external;
+
+    /// @notice Claim accumulated Quote fees for msg.sender
+    /// @dev Does NOT harvest from NFT - only pays out already-accumulated fees.
+    ///      Can be called in any state including DEAD.
+    /// @param receiver Address to receive the fees
+    /// @return quoteAmount Quote token fees claimed
+    function collect(address receiver) external returns (uint256 quoteAmount);
+
+    /// @notice View pending fees for a user
+    /// @param user Address to check
+    /// @return pendingQuote Quote token fees claimable
+    function pendingFees(address user) external view returns (uint256 pendingQuote);
 
     // ============ View Functions - Config ============
 
     /// @notice Current vault state
     function state() external view returns (State);
 
-    /// @notice Deposit mode (CLOSED, SEMI_PRIVATE, PUBLIC)
-    function depositMode() external view returns (DepositMode);
+    /// @notice Manager address (deployer, has admin powers)
+    function manager() external view returns (address);
 
     /// @notice Operator address (automation wallet)
     function operator() external view returns (address);
+
+    /// @notice Whether the vault is paused (automation disabled)
+    function isPaused() external view returns (bool);
 
     /// @notice SIL trigger price in sqrtPriceX96 format
     function silSqrtPriceX96() external view returns (uint160);
@@ -138,6 +214,16 @@ interface IHedgeVault {
 
     /// @notice NFT token ID that will be transferred on init (set at deployment)
     function nftId() external view returns (uint256);
+
+    // ============ View Functions - Whitelist ============
+
+    /// @notice Whether the whitelist is enabled
+    function whitelistEnabled() external view returns (bool);
+
+    /// @notice Check if an address is whitelisted
+    /// @param account Address to check
+    /// @return True if address is on whitelist
+    function whitelist(address account) external view returns (bool);
 
     // ============ View Functions - Position ============
 
@@ -173,6 +259,9 @@ interface IHedgeVault {
     /// @notice Block number when position was last closed
     function lastCloseBlock() external view returns (uint256);
 
+    /// @notice Calculate current NAV in Quote tokens
+    function totalAssets() external view returns (uint256);
+
     // ============ View Functions - Trigger Conditions ============
 
     /// @notice Check if SIL trigger conditions are met
@@ -187,32 +276,11 @@ interface IHedgeVault {
     /// @return True if cooldown expired AND price is between SIL and TIP
     function canExecuteReopen() external view returns (bool);
 
-    // ============ Fee Collection ============
-
-    /// @notice Collect pending fees for msg.sender (in-kind: both tokens)
-    /// @dev If IN_POSITION, harvests from NFT first to update accumulators
-    /// @param receiver Address to receive the fees
-    /// @return quoteAmount Quote token fees collected
-    /// @return baseAmount Base token fees collected
-    function collect(address receiver) external returns (uint256 quoteAmount, uint256 baseAmount);
-
-    /// @notice View pending fees for a user (both tokens)
-    /// @param user Address to check
-    /// @return pendingQuote Quote token fees claimable
-    /// @return pendingBase Base token fees claimable
-    function pendingFees(address user) external view returns (uint256 pendingQuote, uint256 pendingBase);
-
     // ============ View Functions - Fee State ============
 
     /// @notice Accumulated quote fees per share (scaled by 1e18)
     function accQuoteFeesPerShare() external view returns (uint256);
 
-    /// @notice Accumulated base fees per share (scaled by 1e18)
-    function accBaseFeesPerShare() external view returns (uint256);
-
     /// @notice Total unclaimed quote token fees held by vault
     function totalUnclaimedQuoteFees() external view returns (uint256);
-
-    /// @notice Total unclaimed base token fees held by vault
-    function totalUnclaimedBaseFees() external view returns (uint256);
 }

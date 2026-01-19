@@ -290,17 +290,26 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     uint256 public immutable nftId;  // NFT to transfer on init (set at deployment)
 
     address public immutable override operator;
-    uint160 public immutable override silSqrtPriceX96;
-    uint160 public immutable override tipSqrtPriceX96;
+    address public immutable override manager;  // Deployer with admin powers
     uint16 public immutable override lossCapBps;
     uint256 public immutable override reopenCooldownBlocks;
-    DepositMode public immutable override depositMode;
 
     // ============ State Variables ============
 
     State public override state;
 
-    // Position info (set at init, immutable after)
+    // Mutable trigger thresholds (manager can update)
+    uint160 public override silSqrtPriceX96;
+    uint160 public override tipSqrtPriceX96;
+
+    // Pause state (automation disabled when true)
+    bool public override isPaused;
+
+    // Whitelist system (replaces DepositMode)
+    bool public override whitelistEnabled;
+    mapping(address => bool) public override whitelist;
+
+    // Position info (set at init, mutable for resume)
     address public override baseToken;
     address public override pool;
     bool public override token0IsQuote;
@@ -315,20 +324,14 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     uint256 public override costBasis;
     uint256 public override lastCloseBlock;
 
-    // Fee accumulators (scaled by 1e18 for precision)
+    // Fee accumulators (scaled by 1e18 for precision) - Quote only
     uint256 public override accQuoteFeesPerShare;
-    uint256 public override accBaseFeesPerShare;
 
-    // Total unclaimed fees held by contract
+    // Total unclaimed Quote fees held by contract
     uint256 public override totalUnclaimedQuoteFees;
-    uint256 public override totalUnclaimedBaseFees;
 
     // Per-user fee debt (for calculating pending fees)
     mapping(address => uint256) public userQuoteFeeDebt;
-    mapping(address => uint256) public userBaseFeeDebt;
-
-    // Deployer (receives initial shares)
-    address private immutable _deployer;
 
     // Transient storage for swap callback
     address private _expectedSwapPool;
@@ -345,7 +348,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         uint160 tipSqrtPriceX96_,
         uint16 lossCapBps_,
         uint256 reopenCooldownBlocks_,
-        DepositMode depositMode_,
+        bool whitelistEnabled_,
         string memory name_,
         string memory symbol_
     ) ERC4626Base(quoteToken_, name_, symbol_) {
@@ -357,11 +360,15 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         positionManager = INonfungiblePositionManagerMinimal(positionManager_);
         augustusRegistry = IAugustusRegistry(augustusRegistry_);
         operator = operator_;
+        manager = msg.sender;  // Deployer becomes manager
         silSqrtPriceX96 = silSqrtPriceX96_;
         tipSqrtPriceX96 = tipSqrtPriceX96_;
         lossCapBps = lossCapBps_;
         reopenCooldownBlocks = reopenCooldownBlocks_;
-        depositMode = depositMode_;
+        whitelistEnabled = whitelistEnabled_;
+
+        // Manager is always on whitelist
+        whitelist[msg.sender] = true;
 
         // Store NFT ID and validate compatibility
         nftId = nftId_;
@@ -386,7 +393,6 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             revert IncompatiblePosition(token0, token1, quoteToken_);
         }
 
-        _deployer = msg.sender;
         state = State.UNINITIALIZED;
     }
 
@@ -394,6 +400,21 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
     modifier onlyOperator() {
         if (msg.sender != operator) revert NotOperator();
+        _;
+    }
+
+    modifier onlyManager() {
+        if (msg.sender != manager) revert NotManager();
+        _;
+    }
+
+    modifier onlyManagerOrOperator() {
+        if (msg.sender != manager && msg.sender != operator) revert NotManagerOrOperator();
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (isPaused) revert VaultPausedError();
         _;
     }
 
@@ -457,32 +478,29 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         uint256 initialNav = _calculateNav();
         costBasis = initialNav;
 
-        // Mint shares to deployer
-        _mint(_deployer, initialNav);
+        // Mint shares to manager (deployer)
+        _mint(manager, initialNav);
 
         emit Initialized(tokenId, pool, tickLower_, tickUpper_, token0IsQuote);
     }
 
     // ============ ERC-4626 Core ============
 
-    function totalAssets() public view override returns (uint256) {
+    function totalAssets() public view override(ERC4626Base, IHedgeVault) returns (uint256) {
         if (state == State.UNINITIALIZED) return 0;
         return _calculateNav();
     }
 
     function deposit(uint256 assets, address receiver) public nonReentrant whenInitialized returns (uint256 shares) {
-        if (state == State.DEAD) revert DepositsDisabled();
+        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
 
-        // Check deposit permissions
-        if (depositMode == DepositMode.CLOSED) {
-            if (msg.sender != _deployer) revert DepositsDisabled();
-        } else if (depositMode == DepositMode.SEMI_PRIVATE) {
-            if (balanceOf[msg.sender] == 0 && msg.sender != _deployer) revert NotShareholder();
+        // Check whitelist if enabled (receiver must be whitelisted to receive shares)
+        if (whitelistEnabled && !whitelist[receiver]) {
+            revert NotWhitelisted(receiver);
         }
-        // PUBLIC mode: anyone can deposit
 
         shares = previewDeposit(assets);
-        if (shares == 0) revert DepositsDisabled();
+        if (shares == 0) revert InvalidState(state, State.IN_POSITION);
 
         // Transfer Quote tokens from sender
         _safeTransferFrom(asset, msg.sender, address(this), assets);
@@ -497,13 +515,11 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     }
 
     function mint(uint256 shares, address receiver) public nonReentrant whenInitialized returns (uint256 assets) {
-        if (state == State.DEAD) revert DepositsDisabled();
+        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
 
-        // Check deposit permissions (same as deposit)
-        if (depositMode == DepositMode.CLOSED) {
-            if (msg.sender != _deployer) revert DepositsDisabled();
-        } else if (depositMode == DepositMode.SEMI_PRIVATE) {
-            if (balanceOf[msg.sender] == 0 && msg.sender != _deployer) revert NotShareholder();
+        // Check whitelist if enabled (receiver must be whitelisted to receive shares)
+        if (whitelistEnabled && !whitelist[receiver]) {
+            revert NotWhitelisted(receiver);
         }
 
         assets = previewMint(shares);
@@ -530,38 +546,25 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             }
         }
 
-        // Harvest fees from NFT first if in position
-        if (state == State.IN_POSITION) {
-            _harvestNftFees();
-        }
-
         // Calculate pending fees BEFORE burning shares
         uint256 pendingQuote = _pendingQuoteFees(owner);
-        uint256 pendingBase = _pendingBaseFees(owner);
 
         _burn(owner, shares);
 
-        // Update fee debts for remaining balance
+        // Update fee debt for remaining balance
         userQuoteFeeDebt[owner] = (balanceOf[owner] * accQuoteFeesPerShare) / 1e18;
-        userBaseFeeDebt[owner] = (balanceOf[owner] * accBaseFeesPerShare) / 1e18;
 
         // Handle withdrawal based on state
         _processWithdrawal(assets, receiver);
 
-        // Transfer pending fees in-kind
+        // Transfer pending fees (Quote only)
         if (pendingQuote > 0) {
             totalUnclaimedQuoteFees -= pendingQuote;
             _safeTransfer(asset, receiver, pendingQuote);
-        }
-        if (pendingBase > 0) {
-            totalUnclaimedBaseFees -= pendingBase;
-            _safeTransfer(baseToken, receiver, pendingBase);
+            emit FeesClaimed(owner, receiver, pendingQuote);
         }
 
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
-        if (pendingQuote > 0 || pendingBase > 0) {
-            emit FeesCollected(owner, receiver, pendingQuote, pendingBase);
-        }
     }
 
     function redeem(uint256 shares, address receiver, address owner) public nonReentrant whenInitialized returns (uint256 assets) {
@@ -574,62 +577,46 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
         assets = previewRedeem(shares);
 
-        // Harvest fees from NFT first if in position
-        if (state == State.IN_POSITION) {
-            _harvestNftFees();
-        }
-
         // Calculate pending fees BEFORE burning shares
         uint256 pendingQuote = _pendingQuoteFees(owner);
-        uint256 pendingBase = _pendingBaseFees(owner);
 
         _burn(owner, shares);
 
-        // Update fee debts for remaining balance
+        // Update fee debt for remaining balance
         userQuoteFeeDebt[owner] = (balanceOf[owner] * accQuoteFeesPerShare) / 1e18;
-        userBaseFeeDebt[owner] = (balanceOf[owner] * accBaseFeesPerShare) / 1e18;
 
         // Handle withdrawal based on state
         _processWithdrawal(assets, receiver);
 
-        // Transfer pending fees in-kind
+        // Transfer pending fees (Quote only)
         if (pendingQuote > 0) {
             totalUnclaimedQuoteFees -= pendingQuote;
             _safeTransfer(asset, receiver, pendingQuote);
-        }
-        if (pendingBase > 0) {
-            totalUnclaimedBaseFees -= pendingBase;
-            _safeTransfer(baseToken, receiver, pendingBase);
+            emit FeesClaimed(owner, receiver, pendingQuote);
         }
 
         emit Withdraw(msg.sender, receiver, owner, assets, shares);
-        if (pendingQuote > 0 || pendingBase > 0) {
-            emit FeesCollected(owner, receiver, pendingQuote, pendingBase);
-        }
     }
 
     // ============ Transfer Override ============
 
     function _transfer(address from, address to, uint256 amount) internal override {
-        // Block transfers in CLOSED mode
-        if (depositMode == DepositMode.CLOSED) {
-            revert TransfersDisabled();
+        // Check whitelist if enabled (recipient must be whitelisted to receive shares)
+        if (whitelistEnabled && !whitelist[to]) {
+            revert NotWhitelisted(to);
         }
 
         // Calculate pending fees for sender BEFORE transfer
         uint256 senderPendingQuote = _pendingQuoteFees(from);
-        uint256 senderPendingBase = _pendingBaseFees(from);
 
         // Execute transfer
         super._transfer(from, to, amount);
 
         // Sender keeps their pending fees (adjust debt so pending stays the same)
         userQuoteFeeDebt[from] = (balanceOf[from] * accQuoteFeesPerShare / 1e18) - senderPendingQuote;
-        userBaseFeeDebt[from] = (balanceOf[from] * accBaseFeesPerShare / 1e18) - senderPendingBase;
 
         // Receiver starts fresh (no historical fees for transferred shares)
         userQuoteFeeDebt[to] = (balanceOf[to] * accQuoteFeesPerShare) / 1e18;
-        userBaseFeeDebt[to] = (balanceOf[to] * accBaseFeesPerShare) / 1e18;
     }
 
     function _mint(address to, uint256 amount) internal override {
@@ -637,12 +624,11 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
         // Set fee debt so new minter has 0 pending fees for new shares
         userQuoteFeeDebt[to] = (balanceOf[to] * accQuoteFeesPerShare) / 1e18;
-        userBaseFeeDebt[to] = (balanceOf[to] * accBaseFeesPerShare) / 1e18;
     }
 
     // ============ Operator Actions ============
 
-    function executeSil(bytes calldata swapData) external override onlyOperator nonReentrant {
+    function executeSil(bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
         if (state != State.IN_POSITION) {
             revert InvalidState(state, State.IN_POSITION);
         }
@@ -652,9 +638,6 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         if (!_isSilTriggered(currentPrice)) {
             revert SilNotTriggered(currentPrice, silSqrtPriceX96, token0IsQuote);
         }
-
-        // Harvest fees FIRST (updates accumulators before closing)
-        _harvestNftFees();
 
         // Close position (withdraw liquidity + collect principal)
         _closePosition();
@@ -677,7 +660,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         currentTokenId = 0;
     }
 
-    function executeTip(bytes calldata swapData) external override onlyOperator nonReentrant {
+    function executeTip(bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
         if (state != State.IN_POSITION) {
             revert InvalidState(state, State.IN_POSITION);
         }
@@ -687,9 +670,6 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         if (!_isTipTriggered(currentPrice)) {
             revert TipNotTriggered(currentPrice, tipSqrtPriceX96, token0IsQuote);
         }
-
-        // Harvest fees FIRST (updates accumulators before closing)
-        _harvestNftFees();
 
         // Close position (withdraw liquidity + collect principal)
         _closePosition();
@@ -712,7 +692,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         currentTokenId = 0;
     }
 
-    function executeReopen(bytes calldata swapData) external override onlyOperator nonReentrant {
+    function executeReopen(bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
         if (state != State.OUT_OF_POSITION_QUOTE && state != State.OUT_OF_POSITION_BASE) {
             revert InvalidState(state, State.OUT_OF_POSITION_QUOTE);
         }
@@ -773,65 +753,137 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         return _isPriceInRange(_getCurrentSqrtPriceX96());
     }
 
+    // ============ Manager Actions - Triggers ============
+
+    /// @inheritdoc IHedgeVault
+    function setSilTip(uint160 newSilSqrtPriceX96, uint160 newTipSqrtPriceX96) external override onlyManager {
+        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+
+        // Validate ordering based on token0IsQuote
+        // For token0IsQuote: SIL sqrtPrice > TIP sqrtPrice (inverted)
+        // For !token0IsQuote: SIL sqrtPrice < TIP sqrtPrice (normal)
+        if (token0IsQuote) {
+            if (newSilSqrtPriceX96 <= newTipSqrtPriceX96) revert InvalidSilTipRange();
+        } else {
+            if (newSilSqrtPriceX96 >= newTipSqrtPriceX96) revert InvalidSilTipRange();
+        }
+
+        silSqrtPriceX96 = newSilSqrtPriceX96;
+        tipSqrtPriceX96 = newTipSqrtPriceX96;
+
+        emit SilTipUpdated(newSilSqrtPriceX96, newTipSqrtPriceX96);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function pause(bytes calldata swapData) external override onlyManager nonReentrant {
+        if (state != State.IN_POSITION) {
+            revert InvalidState(state, State.IN_POSITION);
+        }
+
+        // Close position (withdraw liquidity + collect principal)
+        _closePosition();
+
+        // Swap Base → Quote
+        uint256 quoteBefore = IERC20Minimal(asset).balanceOf(address(this));
+        _executeSwap(swapData);
+        uint256 quoteAfter = IERC20Minimal(asset).balanceOf(address(this));
+
+        // Verify swap direction: Quote must not decrease
+        if (quoteAfter < quoteBefore) revert InvalidSwapDirection();
+
+        // Transition state
+        state = State.OUT_OF_POSITION_QUOTE;
+        lastCloseBlock = block.number;
+        isPaused = true;
+
+        emit PositionClosed(currentTokenId, state);
+        emit VaultPaused();
+
+        currentTokenId = 0;
+    }
+
+    /// @inheritdoc IHedgeVault
+    function resume(int24 newTickLower, int24 newTickUpper, bytes calldata swapData) external override onlyManager nonReentrant {
+        if (state != State.OUT_OF_POSITION_QUOTE && state != State.OUT_OF_POSITION_BASE) {
+            revert InvalidState(state, State.OUT_OF_POSITION_QUOTE);
+        }
+        if (!isPaused) revert VaultNotPausedError();
+        if (newTickLower >= newTickUpper) revert InvalidTickRange();
+
+        // Update tick range
+        tickLower = newTickLower;
+        tickUpper = newTickUpper;
+
+        // Clear paused flag
+        isPaused = false;
+
+        // Check current price vs SIL/TIP to determine action
+        uint160 currentPrice = _getCurrentSqrtPriceX96();
+
+        if (_isSilTriggered(currentPrice)) {
+            // Price < SIL (actual) - stay in Quote
+            // Already in OUT_OF_POSITION_QUOTE, nothing to do
+            emit VaultResumed(newTickLower, newTickUpper);
+            return;
+        }
+
+        if (_isTipTriggered(currentPrice)) {
+            // Price > TIP (actual) - swap to Base
+            _executeSwap(swapData);
+            state = State.OUT_OF_POSITION_BASE;
+            emit VaultResumed(newTickLower, newTickUpper);
+            return;
+        }
+
+        // Price is in range - open LP position
+        _executeSwap(swapData);
+        (uint256 newTokenId, uint128 liquidity) = _mintPosition();
+
+        // Update state
+        currentTokenId = newTokenId;
+        _tokenIdHistory.push(newTokenId);
+        state = State.IN_POSITION;
+
+        emit VaultResumed(newTickLower, newTickUpper);
+        emit Reopened(newTokenId, liquidity);
+    }
+
+    // ============ Manager Actions - Whitelist ============
+
+    /// @inheritdoc IHedgeVault
+    function setWhitelistEnabled(bool enabled) external override onlyManager {
+        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+        whitelistEnabled = enabled;
+        emit WhitelistEnabledChanged(enabled);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function addToWhitelist(address[] calldata accounts) external override onlyManager {
+        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+        for (uint256 i = 0; i < accounts.length; i++) {
+            whitelist[accounts[i]] = true;
+            emit WhitelistUpdated(accounts[i], true);
+        }
+    }
+
+    /// @inheritdoc IHedgeVault
+    function removeFromWhitelist(address[] calldata accounts) external override onlyManager {
+        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+        for (uint256 i = 0; i < accounts.length; i++) {
+            whitelist[accounts[i]] = false;
+            emit WhitelistUpdated(accounts[i], false);
+        }
+    }
+
     // ============ Fee Collection ============
 
     /// @inheritdoc IHedgeVault
-    function collect(address receiver) external override nonReentrant whenInitialized returns (uint256 quoteAmount, uint256 baseAmount) {
-        // Harvest from NFT if in position (updates accumulators)
-        if (state == State.IN_POSITION) {
-            _harvestNftFees();
+    /// @dev Collect fees from NFT position and swap Base to Quote. Manager/Operator only.
+    function collectFeesFromPosition(bytes calldata swapData) external override onlyManagerOrOperator nonReentrant {
+        if (state != State.IN_POSITION) {
+            revert InvalidState(state, State.IN_POSITION);
         }
-
-        // Calculate pending fees for caller
-        uint256 shares = balanceOf[msg.sender];
-        quoteAmount = _pendingQuoteFees(msg.sender);
-        baseAmount = _pendingBaseFees(msg.sender);
-
-        // Update fee debts
-        userQuoteFeeDebt[msg.sender] = (shares * accQuoteFeesPerShare) / 1e18;
-        userBaseFeeDebt[msg.sender] = (shares * accBaseFeesPerShare) / 1e18;
-
-        // Transfer fees in-kind
-        if (quoteAmount > 0) {
-            totalUnclaimedQuoteFees -= quoteAmount;
-            _safeTransfer(asset, receiver, quoteAmount);
-        }
-        if (baseAmount > 0) {
-            totalUnclaimedBaseFees -= baseAmount;
-            _safeTransfer(baseToken, receiver, baseAmount);
-        }
-
-        emit FeesCollected(msg.sender, receiver, quoteAmount, baseAmount);
-    }
-
-    /// @inheritdoc IHedgeVault
-    function pendingFees(address user) external view override returns (uint256 pendingQuote, uint256 pendingBase) {
-        pendingQuote = _pendingQuoteFees(user);
-        pendingBase = _pendingBaseFees(user);
-    }
-
-    // ============ Internal - Fee Logic ============
-
-    function _pendingQuoteFees(address user) internal view returns (uint256) {
-        uint256 shares = balanceOf[user];
-        if (shares == 0) return 0;
-        uint256 accumulated = (shares * accQuoteFeesPerShare) / 1e18;
-        uint256 debt = userQuoteFeeDebt[user];
-        return accumulated > debt ? accumulated - debt : 0;
-    }
-
-    function _pendingBaseFees(address user) internal view returns (uint256) {
-        uint256 shares = balanceOf[user];
-        if (shares == 0) return 0;
-        uint256 accumulated = (shares * accBaseFeesPerShare) / 1e18;
-        uint256 debt = userBaseFeeDebt[user];
-        return accumulated > debt ? accumulated - debt : 0;
-    }
-
-    /// @dev Harvest fees from NFT position and update accumulators
-    function _harvestNftFees() internal {
-        if (state != State.IN_POSITION || currentTokenId == 0) return;
-        if (totalSupply == 0) return;
+        if (currentTokenId == 0 || totalSupply == 0) return;
 
         // Collect fees from NFT (only tokensOwed, not liquidity)
         (uint256 collected0, uint256 collected1) = positionManager.collect(
@@ -856,17 +908,61 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             baseFees = collected0;
         }
 
-        // Update accumulators
+        // Swap Base fees → Quote (if swapData provided and baseFees > 0)
+        uint256 baseSwapped = 0;
+        if (baseFees > 0 && swapData.length > 0) {
+            uint256 quoteBefore = IERC20Minimal(asset).balanceOf(address(this));
+            _executeSwap(swapData);
+            uint256 quoteAfter = IERC20Minimal(asset).balanceOf(address(this));
+
+            // Verify swap direction: Quote must increase
+            if (quoteAfter > quoteBefore) {
+                baseSwapped = baseFees;
+                quoteFees += (quoteAfter - quoteBefore);
+            }
+        }
+
+        // Update accumulators (Quote only)
         if (quoteFees > 0) {
             accQuoteFeesPerShare += (quoteFees * 1e18) / totalSupply;
             totalUnclaimedQuoteFees += quoteFees;
         }
-        if (baseFees > 0) {
-            accBaseFeesPerShare += (baseFees * 1e18) / totalSupply;
-            totalUnclaimedBaseFees += baseFees;
-        }
 
-        emit FeesHarvested(collected0, collected1);
+        emit FeesCollected(quoteFees, baseSwapped);
+    }
+
+    /// @inheritdoc IHedgeVault
+    /// @dev Claim accumulated Quote fees. Shareholders only. Does NOT harvest from NFT.
+    function collect(address receiver) external override nonReentrant whenInitialized returns (uint256 quoteAmount) {
+        // Calculate pending fees for caller
+        uint256 shares = balanceOf[msg.sender];
+        quoteAmount = _pendingQuoteFees(msg.sender);
+
+        if (quoteAmount == 0) revert NoFeesToClaim();
+
+        // Update fee debt
+        userQuoteFeeDebt[msg.sender] = (shares * accQuoteFeesPerShare) / 1e18;
+
+        // Transfer Quote fees
+        totalUnclaimedQuoteFees -= quoteAmount;
+        _safeTransfer(asset, receiver, quoteAmount);
+
+        emit FeesClaimed(msg.sender, receiver, quoteAmount);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function pendingFees(address user) external view override returns (uint256 pendingQuote) {
+        pendingQuote = _pendingQuoteFees(user);
+    }
+
+    // ============ Internal - Fee Logic ============
+
+    function _pendingQuoteFees(address user) internal view returns (uint256) {
+        uint256 shares = balanceOf[user];
+        if (shares == 0) return 0;
+        uint256 accumulated = (shares * accQuoteFeesPerShare) / 1e18;
+        uint256 debt = userQuoteFeeDebt[user];
+        return accumulated > debt ? accumulated - debt : 0;
     }
 
     // ============ Internal - Trigger Logic ============
@@ -1073,12 +1169,9 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         }
 
         if (state == State.OUT_OF_POSITION_BASE) {
-            // Base balance minus unclaimed base fees, converted to Quote value
+            // All Base balance is principal (no Base fees accumulated), converted to Quote value
             uint256 baseBalance = IERC20Minimal(baseToken).balanceOf(address(this));
-            uint256 principalBase = baseBalance > totalUnclaimedBaseFees
-                ? baseBalance - totalUnclaimedBaseFees
-                : 0;
-            return _convertBaseToQuote(principalBase);
+            return _convertBaseToQuote(baseBalance);
         }
 
         // IN_POSITION: Calculate position value (excludes tokensOwed which are fees)
