@@ -13,7 +13,12 @@ import { PrismaClient } from './generated/prisma';
 
 const prismaClientSingleton = () => {
   return new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    // In development, only log errors and warnings (not queries)
+    // Set PRISMA_LOG_QUERIES=true to enable query logging when debugging
+    log:
+      process.env.PRISMA_LOG_QUERIES === 'true'
+        ? ['query', 'error', 'warn']
+        : ['error', 'warn'],
   });
 };
 

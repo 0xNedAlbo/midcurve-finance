@@ -40,7 +40,7 @@ interface OpenPositionStepProps {
  *
  * Final wizard step that handles:
  * 1. Position summary display
- * 2. Wallet balance validation with CowSwap top-up option
+ * 2. Wallet balance validation with ParaSwap top-up option
  * 3. Three-phase transaction execution (approve base, approve quote, mint)
  * 4. Database position creation via API
  * 5. Success state and navigation
@@ -366,7 +366,7 @@ export function OpenPositionStep({
         chain={chain}
       />
 
-      {/* Insufficient Funds Alert with CowSwap Widget */}
+      {/* Insufficient Funds Alert with SwapWidget */}
       {insufficientFunds && (
         <InsufficientFundsAlert
           insufficientFunds={insufficientFunds}

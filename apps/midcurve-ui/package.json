@@ -17,7 +17,6 @@
     "test:trace": "playwright show-trace"
   },
   "dependencies": {
-    "@cowprotocol/widget-react": "^0.11.0",
     "@midcurve/api-shared": "workspace:^",
     "@midcurve/shared": "workspace:^",
     "date-fns": "^3.6.0",

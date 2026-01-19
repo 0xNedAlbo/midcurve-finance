@@ -167,6 +167,11 @@ export async function apiClientFn<TResponse>(
 // =============================================================================
 
 import type {
+  // Swap
+  GetSwapTokensData,
+  SwapQuoteData,
+  BuildSwapTransactionRequest,
+  SwapTransactionData,
   // Close Orders
   ListCloseOrdersRequest,
   ListCloseOrdersResponse,
@@ -432,6 +437,53 @@ export const notificationsApi = {
     return apiClient.post<TestWebhookResponseData>('/api/v1/user/webhook-config/test', {
       eventType,
     });
+  },
+};
+
+// =============================================================================
+// SWAP API
+// =============================================================================
+
+/**
+ * Quote request parameters
+ */
+export interface SwapQuoteParams {
+  chainId: number;
+  srcToken: string;
+  srcDecimals: number;
+  destToken: string;
+  destDecimals: number;
+  amount: string;
+  userAddress: string;
+  /** SELL (default) = fixed input, BUY = fixed output */
+  side?: 'SELL' | 'BUY';
+  slippageBps?: number;
+}
+
+/**
+ * Swap API client for ParaSwap-based token swapping
+ */
+export const swapApi = {
+  /**
+   * Get tokens available for swapping on a chain
+   */
+  getTokens(chainId: number) {
+    return apiClient.get<GetSwapTokensData>(`/api/v1/swap/tokens?chainId=${chainId}`);
+  },
+
+  /**
+   * Get a swap quote
+   */
+  getQuote(params: SwapQuoteParams) {
+    const qs = buildQueryString(params);
+    return apiClient.get<SwapQuoteData>(`/api/v1/swap/quote${qs}`);
+  },
+
+  /**
+   * Build a swap transaction from a quote
+   */
+  buildTransaction(params: BuildSwapTransactionRequest) {
+    return apiClient.post<SwapTransactionData>('/api/v1/swap/transaction', params);
   },
 };
 

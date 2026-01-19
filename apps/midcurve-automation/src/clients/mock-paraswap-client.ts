@@ -10,7 +10,7 @@
 
 import { type Address, type Hex, encodeFunctionData, parseAbi } from 'viem';
 import { getPublicClient } from '../lib/evm';
-import type { ParaswapSwapParams } from './paraswap-client';
+import type { ParaswapSwapParams } from '@midcurve/services';
 import { automationLogger } from '../lib/logger';
 
 const log = automationLogger.child({ component: 'MockParaswapClient' });
