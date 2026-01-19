@@ -341,3 +341,35 @@ export function getParaswapClient(): ParaswapClient {
 }
 
 export { ParaswapClient };
+
+// =============================================================================
+// Unified Client Factory (for local chain support)
+// =============================================================================
+
+import { getMockParaswapClient, type MockParaswapClient } from './mock-paraswap-client';
+
+const LOCAL_CHAIN_ID = 31337;
+
+/**
+ * Interface that both ParaswapClient and MockParaswapClient implement
+ */
+export interface SwapClient {
+  isChainSupported(chainId: number): boolean;
+  getSwapParams(request: ParaswapQuoteRequest): Promise<ParaswapSwapParams>;
+}
+
+/**
+ * Get the appropriate swap client for a chain
+ *
+ * Returns MockParaswapClient for local chain (31337), ParaswapClient otherwise.
+ * This allows seamless local testing with mockUSD while using real Paraswap
+ * in production.
+ */
+export function getSwapClient(chainId: number): SwapClient {
+  if (chainId === LOCAL_CHAIN_ID) {
+    return getMockParaswapClient() as SwapClient;
+  }
+  return getParaswapClient();
+}
+
+export type { MockParaswapClient };
