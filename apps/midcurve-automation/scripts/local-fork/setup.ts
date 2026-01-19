@@ -55,6 +55,7 @@ const FOUNDRY_SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 interface SetupState {
   mockUsdAddress?: string;
   mockAugustusAddress?: string;
+  mockAugustusRegistryAddress?: string;
   positionCloserAddress?: string;
   poolAddress?: string;
   positionTokenId?: string;
@@ -154,20 +155,22 @@ function updateEnvFile(envPath: string, key: string, value: string): void {
 
 /**
  * Update .env files with deployed local chain contract addresses.
- * Updates both automation and API .env files (gitignored).
+ * Updates automation, API, and UI .env files (gitignored).
  */
 function updateLocalChainConfig(
   mockUsdAddress: string,
   mockAugustusAddress?: string,
+  mockAugustusRegistryAddress?: string,
   positionCloserAddress?: string,
   poolAddress?: string
 ): void {
-  const envPaths = [
+  // Backend .env files (automation and API)
+  const backendEnvPaths = [
     resolve(process.cwd(), '.env'), // automation
     resolve(process.cwd(), '../midcurve-api/.env'), // api
   ];
 
-  for (const envPath of envPaths) {
+  for (const envPath of backendEnvPaths) {
     try {
       updateEnvFile(envPath, 'MOCK_USD_ADDRESS', mockUsdAddress);
       if (mockAugustusAddress) {
@@ -183,6 +186,17 @@ function updateLocalChainConfig(
     } catch (error) {
       console.warn(`Warning: Could not update ${envPath}:`, error);
     }
+  }
+
+  // UI .env file (needs VITE_ prefix for Vite build-time variables)
+  const uiEnvPath = resolve(process.cwd(), '../midcurve-ui/.env');
+  try {
+    if (mockAugustusRegistryAddress) {
+      updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS', mockAugustusRegistryAddress);
+    }
+    console.log(`Updated: ${uiEnvPath}`);
+  } catch (error) {
+    console.warn(`Warning: Could not update ${uiEnvPath}:`, error);
   }
 }
 
@@ -206,6 +220,7 @@ async function step1Deploy(state: SetupState): Promise<void> {
   // Looking for patterns like "MockUSD deployed at: 0x..."
   state.mockUsdAddress = extractAddress(output, /MockUSD deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.mockAugustusAddress = extractAddress(output, /MockAugustus deployed at:\s*(0x[a-fA-F0-9]{40})/);
+  state.mockAugustusRegistryAddress = extractAddress(output, /MockAugustusRegistry deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.positionCloserAddress = extractAddress(output, /PositionCloser deployed at:\s*(0x[a-fA-F0-9]{40})/);
 
   if (!state.mockUsdAddress) {
@@ -214,10 +229,14 @@ async function step1Deploy(state: SetupState): Promise<void> {
   if (!state.mockAugustusAddress) {
     throw new Error('Failed to extract MockAugustus address from deploy output');
   }
+  if (!state.mockAugustusRegistryAddress) {
+    throw new Error('Failed to extract MockAugustusRegistry address from deploy output');
+  }
 
   console.log('\n--- Extracted Addresses ---');
   console.log('MockUSD:', state.mockUsdAddress);
   console.log('MockAugustus:', state.mockAugustusAddress);
+  console.log('MockAugustusRegistry:', state.mockAugustusRegistryAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
 }
 
@@ -375,6 +394,7 @@ async function main(): Promise<void> {
     updateLocalChainConfig(
       state.mockUsdAddress!,
       state.mockAugustusAddress,
+      state.mockAugustusRegistryAddress,
       state.positionCloserAddress,
       state.poolAddress
     );
@@ -389,6 +409,7 @@ async function main(): Promise<void> {
     console.log('Deployed Addresses:');
     console.log('  MockUSD:', state.mockUsdAddress);
     console.log('  MockAugustus:', state.mockAugustusAddress);
+    console.log('  MockAugustusRegistry:', state.mockAugustusRegistryAddress);
     console.log('  PositionCloser:', state.positionCloserAddress || '(not deployed)');
     console.log('  Pool:', state.poolAddress);
     console.log('');
@@ -397,6 +418,7 @@ async function main(): Promise<void> {
     console.log('Environment Variables for Manual Commands:');
     console.log(`  export MOCK_USD_ADDRESS="${state.mockUsdAddress}"`);
     console.log(`  export MOCK_AUGUSTUS_ADDRESS="${state.mockAugustusAddress}"`);
+    console.log(`  export MOCK_AUGUSTUS_REGISTRY_ADDRESS="${state.mockAugustusRegistryAddress}"`);
     console.log(`  export POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
     console.log('');
@@ -421,6 +443,7 @@ async function main(): Promise<void> {
     console.error('Current state:');
     console.error('  MockUSD:', state.mockUsdAddress || '(not deployed)');
     console.error('  MockAugustus:', state.mockAugustusAddress || '(not deployed)');
+    console.error('  MockAugustusRegistry:', state.mockAugustusRegistryAddress || '(not deployed)');
     console.error('  Pool:', state.poolAddress || '(not created)');
     console.error('');
     console.error('Make sure Anvil is running: pnpm local:anvil');
