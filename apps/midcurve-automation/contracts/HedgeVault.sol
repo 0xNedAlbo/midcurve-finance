@@ -15,6 +15,8 @@ import "./base/ERC4626Base.sol";
 import "./base/ReentrancyGuard.sol";
 import "./base/AllowlistBase.sol";
 import "./base/Multicall.sol";
+import "./base/ParaswapBase.sol";
+import "./base/TwapOracleBase.sol";
 
 /**
  * @title HedgeVault
@@ -34,11 +36,10 @@ import "./base/Multicall.sol";
  * - OUT_OF_POSITION_* → executeReopen() → IN_POSITION
  * - Any state → loss cap breached → DEAD
  */
-contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase, Multicall {
+contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase, Multicall, ParaswapBase, TwapOracleBase {
     // ============ Immutables ============
 
     INonfungiblePositionManagerMinimal public immutable positionManager;
-    IAugustusRegistry public immutable augustusRegistry;
     IUniswapV3Factory public immutable uniswapV3Factory;
 
     address public immutable override operator;
@@ -84,11 +85,6 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
     // Transient storage for swap callback
     address private _expectedSwapPool;
 
-    // Oracle configuration
-    address public override oraclePool;
-    uint32 public override oracleWindowSeconds;
-    uint16 public override maxPriceDeviationBps;
-
     // ============ Constructor ============
 
     constructor(
@@ -100,14 +96,13 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         uint256 reopenCooldownBlocks_,
         string memory name_,
         string memory symbol_
-    ) ERC4626Base(quoteToken_, name_, symbol_) {
+    ) ERC4626Base(quoteToken_, name_, symbol_) ParaswapBase(augustusRegistry_) {
         if (positionManager_ == address(0)) revert ZeroAddress();
         if (augustusRegistry_ == address(0)) revert ZeroAddress();
         if (operator_ == address(0)) revert ZeroAddress();
         if (quoteToken_ == address(0)) revert ZeroAddress();
 
         positionManager = INonfungiblePositionManagerMinimal(positionManager_);
-        augustusRegistry = IAugustusRegistry(augustusRegistry_);
         uniswapV3Factory = IUniswapV3Factory(positionManager.factory());
         operator = operator_;
         manager = msg.sender;  // Deployer becomes manager
@@ -700,43 +695,12 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         uint128 minOracleLiquidity,
         uint16 alphaBps
     ) external override onlyManagerOrOperator {
-        // 1) Resolve pool from factory (canonical validation)
-        address expected = uniswapV3Factory.getPool(tokenA, tokenB, fee);
-        if (expected == address(0)) revert PoolNotFromFactory();
-
-        // 2) Basic pair sanity
-        _requirePoolMatchesPair(expected, tokenA, tokenB);
-
-        // 3) Ensure observe(window) works for the chosen window (history available)
-        _requireObserveWindowAvailable(expected, windowSeconds);
-
-        // 4) Liquidity checks
-        uint128 oracleLiq = IUniswapV3PoolMinimal(expected).liquidity();
-        if (oracleLiq < minOracleLiquidity) revert OracleLiquidityTooLow(oracleLiq, minOracleLiquidity);
-
-        if (alphaBps != 0 && pool != address(0)) {
-            uint128 posLiq = IUniswapV3PoolMinimal(pool).liquidity();
-
-            // Require: oracleLiq >= posLiq * alphaBps / 10000
-            // Use 256-bit math to avoid overflow
-            uint256 rhs = (uint256(posLiq) * uint256(alphaBps)) / 10_000;
-
-            if (uint256(oracleLiq) < rhs) {
-                revert OracleLiquidityBelowPositionLiquidity(oracleLiq, posLiq, alphaBps);
-            }
-        }
-
-        // 5) Store config
-        oraclePool = expected;
-        oracleWindowSeconds = windowSeconds;
-
-        emit OraclePoolSet(expected, windowSeconds);
+        _setOraclePoolForPair(tokenA, tokenB, fee, windowSeconds, minOracleLiquidity, alphaBps);
     }
 
     /// @inheritdoc IHedgeVault
     function setMaxPriceDeviation(uint16 newMaxDeviationBps) external override onlyManager {
-        maxPriceDeviationBps = newMaxDeviationBps;
-        emit MaxPriceDeviationSet(newMaxDeviationBps);
+        _setMaxPriceDeviation(newMaxDeviationBps);
     }
 
     // ============ Manager/Operator Actions - Asset Allocation ============
@@ -854,27 +818,17 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         return accumulated > debt ? accumulated - debt : 0;
     }
 
-    // ============ Internal - Oracle Helpers ============
+    // ============ TwapOracleBase Hook ============
 
-    function _requirePoolMatchesPair(address poolAddr, address tokenA, address tokenB) internal view {
-        address t0 = IUniswapV3PoolMinimal(poolAddr).token0();
-        address t1 = IUniswapV3PoolMinimal(poolAddr).token1();
-
-        bool ok = (t0 == tokenA && t1 == tokenB) || (t0 == tokenB && t1 == tokenA);
-        if (!ok) revert PoolPairMismatch();
-    }
-
-    function _requireObserveWindowAvailable(address poolAddr, uint32 windowSeconds) internal view {
-        // Call observe([windowSeconds, 0]) and ensure it does not revert
-        uint32[] memory secs = new uint32[](2);
-        secs[0] = windowSeconds;
-        secs[1] = 0;
-
-        try IUniswapV3PoolMinimal(poolAddr).observe(secs) returns (int56[] memory, uint160[] memory) {
-            // ok
-        } catch {
-            revert ObserveWindowNotAvailable();
-        }
+    /// @dev Returns token info needed for oracle operations
+    function _getOracleTokenInfo() internal view override returns (
+        address quoteToken,
+        address baseToken_,
+        bool token0IsQuote_,
+        IUniswapV3Factory factory,
+        address positionPool
+    ) {
+        return (asset, baseToken, token0IsQuote, uniswapV3Factory, pool);
     }
 
     // ============ Internal - Trigger Logic ============
@@ -1275,133 +1229,20 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         // Here we just return them.
     }
 
-    // ============ Internal - Swap ============
+    // ============ Internal - Swap Hooks (ParaswapBase) ============
 
-    /// @notice Sell exact amount of a token via Paraswap
-    /// @param sellToken Token to sell
-    /// @param buyToken Token to receive
-    /// @param sellAmount Exact amount of sellToken to sell
-    /// @param minAmountReceived Minimum amount of buyToken to receive
-    /// @param swapData Paraswap calldata
-    /// @return amountReceived Actual amount of buyToken received
-    function _sellToken(
-        address sellToken,
+    /// @dev Post-swap hook to validate price against TWAP
+    function _afterSwap(
+        address,
         address buyToken,
         uint256 sellAmount,
-        uint256 minAmountReceived,
-        bytes calldata swapData
-    ) internal returns (uint256 amountReceived) {
-        if (sellAmount == 0) revert ZeroAmount();
-        if (swapData.length == 0) revert ZeroAmount();
-
-        // Record balance before
-        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
-
-        // Decode swap params: (augustus, calldata)
-        (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
-
-        // Validate Augustus
-        if (!augustusRegistry.isValidAugustus(augustus)) {
-            revert InvalidSwapDirection();
-        }
-
-        // Get spender and approve
-        address spender = IAugustus(augustus).getTokenTransferProxy();
-        _safeApprove(sellToken, spender, sellAmount);
-
-        // Execute swap
-        (bool success, bytes memory returnData) = augustus.call(swapCalldata);
-        if (!success) {
-            if (returnData.length > 0) {
-                assembly {
-                    revert(add(returnData, 32), mload(returnData))
-                }
-            }
-            revert InvalidSwapDirection();
-        }
-
-        // Reset approval
-        _safeApprove(sellToken, spender, 0);
-
-        // Calculate amount received
-        uint256 buyBalanceAfter = IERC20Minimal(buyToken).balanceOf(address(this));
-        amountReceived = buyBalanceAfter - buyBalanceBefore;
-
-        // Validate minimum received
-        if (amountReceived < minAmountReceived) {
-            revert InsufficientAmountReceived(amountReceived, minAmountReceived);
-        }
-
-        // Validate price against TWAP
-        _validatePriceAgainstTwap(sellAmount, amountReceived, buyToken == baseToken);
+        uint256 buyAmount
+    ) internal override {
+        bool isBuyingBase = buyToken == baseToken;
+        _validatePriceAgainstTwap(sellAmount, buyAmount, isBuyingBase);
     }
 
-    /// @notice Buy exact amount of a token via Paraswap
-    /// @param buyToken Token to buy
-    /// @param sellToken Token to spend
-    /// @param buyAmount Exact amount of buyToken to buy
-    /// @param maxAmountSold Maximum amount of sellToken to spend
-    /// @param swapData Paraswap calldata
-    /// @return amountSold Actual amount of sellToken spent
-    function _buyToken(
-        address buyToken,
-        address sellToken,
-        uint256 buyAmount,
-        uint256 maxAmountSold,
-        bytes calldata swapData
-    ) internal returns (uint256 amountSold) {
-        if (buyAmount == 0) revert ZeroAmount();
-        if (swapData.length == 0) revert ZeroAmount();
-
-        // Record balances before
-        uint256 sellBalanceBefore = IERC20Minimal(sellToken).balanceOf(address(this));
-        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
-
-        // Decode swap params: (augustus, calldata)
-        (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
-
-        // Validate Augustus
-        if (!augustusRegistry.isValidAugustus(augustus)) {
-            revert InvalidSwapDirection();
-        }
-
-        // Get spender and approve max amount
-        address spender = IAugustus(augustus).getTokenTransferProxy();
-        _safeApprove(sellToken, spender, maxAmountSold);
-
-        // Execute swap
-        (bool success, bytes memory returnData) = augustus.call(swapCalldata);
-        if (!success) {
-            if (returnData.length > 0) {
-                assembly {
-                    revert(add(returnData, 32), mload(returnData))
-                }
-            }
-            revert InvalidSwapDirection();
-        }
-
-        // Reset approval
-        _safeApprove(sellToken, spender, 0);
-
-        // Calculate amounts
-        uint256 sellBalanceAfter = IERC20Minimal(sellToken).balanceOf(address(this));
-        uint256 buyBalanceAfter = IERC20Minimal(buyToken).balanceOf(address(this));
-        amountSold = sellBalanceBefore - sellBalanceAfter;
-        uint256 amountBought = buyBalanceAfter - buyBalanceBefore;
-
-        // Validate we got enough
-        if (amountBought < buyAmount) {
-            revert InsufficientAmountReceived(amountBought, buyAmount);
-        }
-
-        // Validate we didn't spend too much
-        if (amountSold > maxAmountSold) {
-            revert ExcessiveAmountSpent(amountSold, maxAmountSold);
-        }
-
-        // Validate price against TWAP
-        _validatePriceAgainstTwap(amountSold, amountBought, buyToken == baseToken);
-    }
+    // ============ Internal - Pool Swap ============
 
     /// @notice Swap tokens directly through the position pool (for leftover handling)
     /// @param sellToken Token to sell
@@ -1455,134 +1296,6 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         // Pay the required amount
         uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
         _safeTransfer(tokenToPay, msg.sender, amountToPay);
-    }
-
-    // ============ Internal - TWAP Helpers ============
-
-    /// @notice Helper to compute 10^d safely
-    function _pow10(uint8 d) internal pure returns (uint256) {
-        uint256 result = 1;
-        for (uint8 i = 0; i < d; i++) {
-            result *= 10;
-        }
-        return result;
-    }
-
-    /// @notice Get arithmetic mean tick from oracle pool over the configured window
-    /// @param windowSeconds TWAP window in seconds
-    /// @return arithmeticMeanTick The time-weighted average tick
-    function _getArithmeticMeanTick(uint32 windowSeconds) internal view returns (int24 arithmeticMeanTick) {
-        uint32[] memory secondsAgos = new uint32[](2);
-        secondsAgos[0] = windowSeconds;
-        secondsAgos[1] = 0;
-
-        (int56[] memory tickCumulatives, ) = IUniswapV3PoolMinimal(oraclePool).observe(secondsAgos);
-
-        int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
-        arithmeticMeanTick = int24(tickCumulativesDelta / int56(int32(windowSeconds)));
-    }
-
-    /// @notice Get TWAP price from oracle pool as quote per base, scaled to 1e18
-    /// @dev Uses FullMath.mulDiv for overflow-safe 512-bit intermediate calculations
-    /// @return priceQuotePerBase1e18 Price as (quote per 1 base) * 1e18
-    function _getTwapPriceQuotePerBase1e18() internal view returns (uint256 priceQuotePerBase1e18) {
-        if (oraclePool == address(0)) return 0;
-
-        int24 arithmeticMeanTick = _getArithmeticMeanTick(oracleWindowSeconds);
-        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-
-        uint8 quoteDecimals = IERC20Minimal(asset).decimals();
-        uint8 baseDecimals = IERC20Minimal(baseToken).decimals();
-
-        // sqrtPriceX96 encodes sqrt(token1 / token0) * 2^96
-        // price_token1_per_token0 = (sqrtPriceX96)^2 / 2^192
-        //
-        // We need quote_per_base. Relationship to token0/token1 depends on token0IsQuote.
-
-        if (token0IsQuote) {
-            // token0 = quote, token1 = base
-            // sqrtPriceX96 = sqrt(base / quote) * 2^96
-            // price_base_per_quote = sqrtPriceX96^2 / 2^192
-            // price_quote_per_base = 2^192 / sqrtPriceX96^2
-            //
-            // Normalized: price_quote_per_base * 10^(baseDecimals - quoteDecimals) * 1e18
-            // = (2^192 * 1e18 * 10^baseDecimals) / (sqrtPriceX96^2 * 10^quoteDecimals)
-            //
-            // Use FullMath: mulDiv(2^192 * 10^baseDecimals, 1e18, sqrtPriceX96^2 * 10^quoteDecimals)
-            uint256 numerator = (uint256(1) << 192) * _pow10(baseDecimals);
-            uint256 denominator = uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * _pow10(quoteDecimals);
-            if (denominator == 0) return 0;
-            priceQuotePerBase1e18 = FullMath.mulDiv(numerator, 1e18, denominator);
-        } else {
-            // token0 = base, token1 = quote
-            // sqrtPriceX96 = sqrt(quote / base) * 2^96
-            // price_quote_per_base = sqrtPriceX96^2 / 2^192
-            //
-            // Normalized: price_quote_per_base * 10^(baseDecimals - quoteDecimals) * 1e18
-            // = (sqrtPriceX96^2 * 1e18 * 10^baseDecimals) / (2^192 * 10^quoteDecimals)
-            //
-            // Use FullMath: mulDiv(sqrtPriceX96^2 * 10^baseDecimals, 1e18, 2^192 * 10^quoteDecimals)
-            uint256 sqrtPriceSq = uint256(sqrtPriceX96) * uint256(sqrtPriceX96);
-            uint256 numerator = sqrtPriceSq * _pow10(baseDecimals);
-            uint256 denominator = (uint256(1) << 192) * _pow10(quoteDecimals);
-            priceQuotePerBase1e18 = FullMath.mulDiv(numerator, 1e18, denominator);
-        }
-    }
-
-    /// @notice Validate execution price against TWAP
-    /// @dev Uses FullMath for overflow-safe calculations with arbitrary token decimals
-    /// @param sellAmount Amount of token sold (in native decimals)
-    /// @param buyAmount Amount of token bought (in native decimals)
-    /// @param isBuyingBase True if buying base token (selling quote)
-    function _validatePriceAgainstTwap(
-        uint256 sellAmount,
-        uint256 buyAmount,
-        bool isBuyingBase
-    ) internal view {
-        if (oraclePool == address(0)) return;
-        if (maxPriceDeviationBps == 0) return;
-
-        uint256 twapPrice = _getTwapPriceQuotePerBase1e18();
-        if (twapPrice == 0) return;
-
-        uint8 quoteDecimals = IERC20Minimal(asset).decimals();
-        uint8 baseDecimals = IERC20Minimal(baseToken).decimals();
-
-        // Calculate execution price as quote_per_base * 1e18
-        uint256 executionPrice;
-        if (isBuyingBase) {
-            // Selling quote, buying base
-            // price = sellAmount(quote) / buyAmount(base) normalized
-            // = (sellAmount / 10^quoteDecimals) / (buyAmount / 10^baseDecimals) * 1e18
-            // = sellAmount * 10^baseDecimals * 1e18 / (buyAmount * 10^quoteDecimals)
-            executionPrice = FullMath.mulDiv(
-                sellAmount * _pow10(baseDecimals),
-                1e18,
-                buyAmount * _pow10(quoteDecimals)
-            );
-        } else {
-            // Selling base, buying quote
-            // price = buyAmount(quote) / sellAmount(base) normalized
-            // = (buyAmount / 10^quoteDecimals) / (sellAmount / 10^baseDecimals) * 1e18
-            // = buyAmount * 10^baseDecimals * 1e18 / (sellAmount * 10^quoteDecimals)
-            executionPrice = FullMath.mulDiv(
-                buyAmount * _pow10(baseDecimals),
-                1e18,
-                sellAmount * _pow10(quoteDecimals)
-            );
-        }
-
-        // Calculate deviation in basis points using FullMath
-        uint256 deviation;
-        if (executionPrice > twapPrice) {
-            deviation = FullMath.mulDiv(executionPrice - twapPrice, 10000, twapPrice);
-        } else {
-            deviation = FullMath.mulDiv(twapPrice - executionPrice, 10000, twapPrice);
-        }
-
-        if (deviation > maxPriceDeviationBps) {
-            revert PriceDeviationTooHigh(deviation, maxPriceDeviationBps);
-        }
     }
 
     // ============ Internal - Withdrawal ============
@@ -1753,7 +1466,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         require(success && (data.length == 0 || abi.decode(data, (bool))), "TRANSFER_FROM_FAILED");
     }
 
-    function _safeApprove(address token, address spender, uint256 amount) internal {
+    function _safeApprove(address token, address spender, uint256 amount) internal override {
         (bool success, bytes memory data) = token.call(
             abi.encodeWithSelector(IERC20Minimal.approve.selector, spender, amount)
         );

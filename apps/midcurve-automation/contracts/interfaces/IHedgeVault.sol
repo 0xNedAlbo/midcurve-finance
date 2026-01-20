@@ -76,11 +76,8 @@ interface IHedgeVault is IAllowlist, IMulticall {
     /// @notice Emitted when a shareholder claims their accumulated fees
     event FeesClaimed(address indexed user, address indexed receiver, uint256 quoteAmount);
 
-    /// @notice Emitted when oracle pool is configured
-    event OraclePoolSet(address indexed oraclePool, uint32 windowSeconds);
-
-    /// @notice Emitted when max price deviation is updated
-    event MaxPriceDeviationSet(uint16 newMaxDeviationBps);
+    // Note: Oracle-related events (OraclePoolSet, MaxPriceDeviationSet)
+    // are inherited from TwapOracleBase
 
     /// @notice Emitted when pending assets are allocated
     event PendingAssetsAllocated(uint256 amount, State state, uint256 baseReceived, uint128 liquidityAdded);
@@ -108,15 +105,9 @@ interface IHedgeVault is IAllowlist, IMulticall {
     error TriggerValueDisabled();
     error InvalidTickRange();
     error NoFeesToClaim();
-    error PoolNotFromFactory();
-    error PoolPairMismatch();
-    error ObserveWindowNotAvailable();
-    error OracleLiquidityTooLow(uint128 oracleLiq, uint128 minLiq);
-    error OracleLiquidityBelowPositionLiquidity(uint128 oracleLiq, uint128 positionLiq, uint16 alphaBps);
-    error PriceDeviationTooHigh(uint256 actualBps, uint256 maxAllowedBps);
-    error InsufficientAmountReceived(uint256 received, uint256 minimum);
-    error ExcessiveAmountSpent(uint256 spent, uint256 maximum);
-    error ZeroAmount();
+    // Note: Oracle-related errors (PoolNotFromFactory, PoolPairMismatch, ObserveWindowNotAvailable,
+    // OracleLiquidityTooLow, OracleLiquidityBelowPositionLiquidity, PriceDeviationTooHigh)
+    // are inherited from TwapOracleBase
 
     // ============ Initialization ============
 
@@ -342,16 +333,8 @@ interface IHedgeVault is IAllowlist, IMulticall {
     /// @return True if state is OUT_OF_POSITION_BASE AND cooldown expired AND price is in range
     function canReopenFromBase() external view returns (bool);
 
-    // ============ View Functions - Oracle ============
-
-    /// @notice Oracle pool address for TWAP price feeds
-    function oraclePool() external view returns (address);
-
-    /// @notice TWAP observation window in seconds
-    function oracleWindowSeconds() external view returns (uint32);
-
-    /// @notice Maximum allowed price deviation from TWAP in basis points
-    function maxPriceDeviationBps() external view returns (uint16);
+    // Note: Oracle view functions (oraclePool, oracleWindowSeconds, maxPriceDeviationBps)
+    // are inherited from TwapOracleBase
 
     // ============ View Functions - Fee State ============
 
