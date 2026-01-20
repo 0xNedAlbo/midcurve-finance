@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./IAllowlist.sol";
+import "./IMulticall.sol";
+
 /**
  * @title IHedgeVault
  * @notice Interface for the Hedge Vault - an ERC-4626 vault managing a single Uniswap V3 LP position
@@ -17,11 +20,11 @@ pragma solidity ^0.8.20;
  * - token0IsQuote = false: sqrtPriceX96 ↑ means actual price ↑ (normal)
  *
  * Roles:
- * - Manager = Deployer of the contract, can modify SIL/TIP, pause/resume, manage whitelist
+ * - Manager = Deployer of the contract, can modify SIL/TIP, pause/resume, manage allowlist
  * - Operator = Automation wallet, executes SIL/TIP/Reopen when not paused
  * - Shareholder = ERC-4626 share holders, can deposit/withdraw/collect fees
  */
-interface IHedgeVault {
+interface IHedgeVault is IAllowlist, IMulticall {
     // ============ Enums ============
 
     enum State {
@@ -56,7 +59,7 @@ interface IHedgeVault {
     event PositionClosed(uint256 indexed tokenId, State newState);
 
     /// @notice Emitted when vault transitions to DEAD state
-    event VaultDead(uint256 finalNav, uint256 costBasis, uint16 lossPercent);
+    event VaultDead(uint256 finalNav, uint16 lossPercent);
 
     /// @notice Emitted when vault is paused by manager
     event VaultPaused();
@@ -67,72 +70,117 @@ interface IHedgeVault {
     /// @notice Emitted when SIL/TIP thresholds are updated by manager
     event SilTipUpdated(uint160 newSil, uint160 newTip);
 
-    /// @notice Emitted when an address is added to or removed from whitelist
-    event WhitelistUpdated(address indexed account, bool whitelisted);
-
-    /// @notice Emitted when whitelist is enabled or disabled
-    event WhitelistEnabledChanged(bool enabled);
-
     /// @notice Emitted when fees are collected from NFT position (Manager/Operator)
     event FeesCollected(uint256 quoteAmount, uint256 baseSwapped);
 
     /// @notice Emitted when a shareholder claims their accumulated fees
     event FeesClaimed(address indexed user, address indexed receiver, uint256 quoteAmount);
 
+    /// @notice Emitted when oracle pool is configured
+    event OraclePoolSet(address indexed oraclePool, uint32 windowSeconds);
+
+    /// @notice Emitted when max price deviation is updated
+    event MaxPriceDeviationSet(uint16 newMaxDeviationBps);
+
+    /// @notice Emitted when pending assets are allocated
+    event PendingAssetsAllocated(uint256 amount, State state, uint256 baseReceived, uint128 liquidityAdded);
+
     // ============ Errors ============
 
     error NotOperator();
     error NotManager();
     error NotManagerOrOperator();
-    error NotWhitelisted(address account);
     error AlreadyInitialized();
     error NotInitialized();
     error InvalidState(State current, State required);
+    error VaultIsDead();
+    error ZeroShares();
     error CooldownNotExpired(uint256 currentBlock, uint256 requiredBlock);
     error PriceNotInRange(uint160 current, uint160 sil, uint160 tip);
     error SilNotTriggered(uint160 current, uint160 sil, bool token0IsQuote);
     error TipNotTriggered(uint160 current, uint160 tip, bool token0IsQuote);
-    error LossCapBreached(uint256 nav, uint256 costBasis, uint16 lossCapBps);
+    error LossCapBreached(uint256 nav, uint16 lossCapBps);
     error VaultPausedError();
     error VaultNotPausedError();
     error IncompatiblePosition(address token0, address token1, address vaultAsset);
     error InvalidSwapDirection();
     error ZeroAddress();
-    error InvalidSilTipRange();
+    error TriggerValueDisabled();
     error InvalidTickRange();
     error NoFeesToClaim();
+    error PoolNotFromFactory();
+    error PoolPairMismatch();
+    error ObserveWindowNotAvailable();
+    error OracleLiquidityTooLow(uint128 oracleLiq, uint128 minLiq);
+    error OracleLiquidityBelowPositionLiquidity(uint128 oracleLiq, uint128 positionLiq, uint16 alphaBps);
+    error PriceDeviationTooHigh(uint256 actualBps, uint256 maxAllowedBps);
+    error InsufficientAmountReceived(uint256 received, uint256 minimum);
+    error ExcessiveAmountSpent(uint256 spent, uint256 maximum);
+    error ZeroAmount();
 
     // ============ Initialization ============
 
-    /// @notice Initialize vault with the Uniswap V3 position set at deployment
+    /// @notice Initialize vault with a Uniswap V3 position
     /// @dev Transfers NFT from caller to vault. Caller must approve this contract first.
-    ///      The nftId is set in the constructor and cannot be changed.
-    function init() external;
+    ///      Only callable by manager. NFT must contain the vault's quote token.
+    /// @param tokenId The Uniswap V3 NFT position ID to initialize the vault with
+    function init(uint256 tokenId) external;
 
     // ============ Operator Actions ============
 
     /// @notice Execute Stop Impermanent Loss - exit to Quote token
     /// @dev Only callable by operator when canExecuteSil() returns true and not paused
+    /// @param minQuoteAmount Minimum quote tokens to receive (prevents sandwich attacks)
     /// @param swapData Paraswap calldata for Base → Quote swap
-    function executeSil(bytes calldata swapData) external;
+    function executeSil(uint256 minQuoteAmount, bytes calldata swapData) external;
 
     /// @notice Execute Take Impermanent Profit - exit to Base token
     /// @dev Only callable by operator when canExecuteTip() returns true and not paused
+    /// @param minBaseAmount Minimum base tokens to receive (prevents sandwich attacks)
     /// @param swapData Paraswap calldata for Quote → Base swap
-    function executeTip(bytes calldata swapData) external;
+    function executeTip(uint256 minBaseAmount, bytes calldata swapData) external;
 
-    /// @notice Reopen position after cooldown when price is back in range
-    /// @dev Only callable by operator when canExecuteReopen() returns true and not paused
-    /// @param swapData Paraswap calldata for token conversion before minting LP
-    function executeReopen(bytes calldata swapData) external;
+    /// @notice Reopen position when currently holding only quote tokens (after SIL)
+    /// @dev Only callable by operator when canReopenFromQuote() returns true and not paused
+    /// @param exactBaseAmount Exact amount of base tokens needed for LP
+    /// @param maxQuoteAmount Maximum quote tokens to spend
+    /// @param swapData Paraswap calldata for Quote → Base (buy exact base)
+    function reopenFromQuote(
+        uint256 exactBaseAmount,
+        uint256 maxQuoteAmount,
+        bytes calldata swapData
+    ) external;
+
+    /// @notice Reopen position when currently holding only base tokens (after TIP)
+    /// @dev Only callable by operator when canReopenFromBase() returns true and not paused
+    /// @param exactQuoteAmount Exact amount of quote tokens needed for LP
+    /// @param maxBaseAmount Maximum base tokens to spend
+    /// @param swapData Paraswap calldata for Base → Quote (buy exact quote)
+    function reopenFromBase(
+        uint256 exactQuoteAmount,
+        uint256 maxBaseAmount,
+        bytes calldata swapData
+    ) external;
 
     // ============ Manager Actions - Triggers ============
 
-    /// @notice Update SIL and TIP trigger thresholds
-    /// @dev Only callable by manager. Can be called in any state except DEAD.
+    /// @notice Set SIL (Stop Impermanent Loss) trigger threshold
+    /// @dev Only callable by manager after init(). Reverts if value would disable trigger.
     /// @param newSilSqrtPriceX96 New SIL trigger price in sqrtPriceX96 format
+    function setSil(uint160 newSilSqrtPriceX96) external;
+
+    /// @notice Set TIP (Take Impermanent Profit) trigger threshold
+    /// @dev Only callable by manager after init(). Reverts if value would disable trigger.
     /// @param newTipSqrtPriceX96 New TIP trigger price in sqrtPriceX96 format
-    function setSilTip(uint160 newSilSqrtPriceX96, uint160 newTipSqrtPriceX96) external;
+    function setTip(uint160 newTipSqrtPriceX96) external;
+
+    /// @notice Disable SIL trigger
+    /// @dev Only callable by manager after init(). Sets to value that never triggers.
+    function disableSil() external;
+
+    /// @notice Disable TIP trigger
+    /// @dev Only callable by manager after init(). Sets to value that never triggers.
+    function disableTip() external;
 
     /// @notice Pause the hedge - close position and exit to Quote
     /// @dev Only callable by manager when IN_POSITION. Sets isPaused=true.
@@ -149,30 +197,49 @@ interface IHedgeVault {
     /// @param swapData Paraswap calldata for token conversion
     function resume(int24 newTickLower, int24 newTickUpper, bytes calldata swapData) external;
 
-    // ============ Manager Actions - Whitelist ============
+    // ============ Manager/Operator Actions - Oracle ============
 
-    /// @notice Enable or disable the whitelist
-    /// @dev Only callable by manager. When disabled, anyone can receive shares.
-    /// @param enabled True to enable whitelist, false to disable
-    function setWhitelistEnabled(bool enabled) external;
+    /// @notice Set the oracle pool for TWAP price feeds
+    /// @dev Only callable by manager or operator.
+    /// @param tokenA One token of the pair (order doesn't matter)
+    /// @param tokenB The other token of the pair
+    /// @param fee Uniswap V3 fee tier for the oracle pool
+    /// @param windowSeconds TWAP window (e.g., 1800 for 30 minutes)
+    /// @param minOracleLiquidity Hard minimum active liquidity for oracle pool
+    /// @param alphaBps Require L(oracle) >= alphaBps/10000 * L(positionPool). Set 0 to disable.
+    function setOraclePoolForPair(
+        address tokenA,
+        address tokenB,
+        uint24 fee,
+        uint32 windowSeconds,
+        uint128 minOracleLiquidity,
+        uint16 alphaBps
+    ) external;
 
-    /// @notice Add addresses to the whitelist
-    /// @dev Only callable by manager. Addresses can receive shares via deposit/mint/transfer.
-    /// @param accounts Addresses to add to whitelist
-    function addToWhitelist(address[] calldata accounts) external;
+    /// @notice Set maximum allowed price deviation from TWAP for swaps
+    /// @dev Only callable by manager. Set to 0 to disable TWAP validation.
+    /// @param newMaxDeviationBps Maximum deviation in basis points (e.g., 100 = 1%)
+    function setMaxPriceDeviation(uint16 newMaxDeviationBps) external;
 
-    /// @notice Remove addresses from the whitelist
-    /// @dev Only callable by manager. Removed addresses can still redeem/withdraw and transfer to whitelisted addresses.
-    /// @param accounts Addresses to remove from whitelist
-    function removeFromWhitelist(address[] calldata accounts) external;
+    // ============ Manager/Operator Actions - Asset Allocation ============
+
+    /// @notice Allocate unused quote assets based on current vault state
+    /// @dev Only callable by manager or operator. Deploys unallocated deposit capital.
+    ///      IN_POSITION: Swaps portion to base and increases liquidity
+    ///      OUT_OF_POSITION_BASE: Swaps all to base
+    ///      OUT_OF_POSITION_QUOTE: No action needed
+    /// @param minAmountIn Minimum base tokens received from swap (slippage protection)
+    /// @param swapData Paraswap calldata (required for IN_POSITION and OUT_OF_POSITION_BASE)
+    function allocatePendingAssets(uint256 minAmountIn, bytes calldata swapData) external;
 
     // ============ Fee Collection ============
 
     /// @notice Collect fees from NFT position and swap Base to Quote
     /// @dev Only callable by manager or operator when IN_POSITION.
     ///      Harvests fees from NFT, swaps Base fees to Quote, updates accumulators.
+    /// @param minQuoteAmount Minimum quote tokens to receive from base fee swap
     /// @param swapData Paraswap calldata for Base → Quote swap (empty = skip swap, only add Quote fees)
-    function collectFeesFromPosition(bytes calldata swapData) external;
+    function collectFeesFromPosition(uint256 minQuoteAmount, bytes calldata swapData) external;
 
     /// @notice Claim accumulated Quote fees for msg.sender
     /// @dev Does NOT harvest from NFT - only pays out already-accumulated fees.
@@ -206,24 +273,19 @@ interface IHedgeVault {
     /// @notice TIP trigger price in sqrtPriceX96 format
     function tipSqrtPriceX96() external view returns (uint160);
 
+    /// @notice Check if SIL trigger is enabled
+    /// @return True if SIL is set to a value that can trigger
+    function silEnabled() external view returns (bool);
+
+    /// @notice Check if TIP trigger is enabled
+    /// @return True if TIP is set to a value that can trigger
+    function tipEnabled() external view returns (bool);
+
     /// @notice Maximum loss in basis points before DEAD state (e.g., 1000 = 10%)
     function lossCapBps() external view returns (uint16);
 
     /// @notice Number of blocks to wait after close before reopen is allowed
     function reopenCooldownBlocks() external view returns (uint256);
-
-    /// @notice NFT token ID that will be transferred on init (set at deployment)
-    function nftId() external view returns (uint256);
-
-    // ============ View Functions - Whitelist ============
-
-    /// @notice Whether the whitelist is enabled
-    function whitelistEnabled() external view returns (bool);
-
-    /// @notice Check if an address is whitelisted
-    /// @param account Address to check
-    /// @return True if address is on whitelist
-    function whitelist(address account) external view returns (bool);
 
     // ============ View Functions - Position ============
 
@@ -253,14 +315,14 @@ interface IHedgeVault {
 
     // ============ View Functions - Accounting ============
 
-    /// @notice Total cost basis in Quote tokens (sum of all deposits at deposit-time prices)
-    function costBasis() external view returns (uint256);
-
     /// @notice Block number when position was last closed
     function lastCloseBlock() external view returns (uint256);
 
     /// @notice Calculate current NAV in Quote tokens
     function totalAssets() external view returns (uint256);
+
+    /// @notice Unallocated quote assets from deposits (not yet deployed to position)
+    function pendingAssets() external view returns (uint256);
 
     // ============ View Functions - Trigger Conditions ============
 
@@ -272,9 +334,24 @@ interface IHedgeVault {
     /// @return True if price has crossed TIP threshold (actual price rose)
     function canExecuteTip() external view returns (bool);
 
-    /// @notice Check if reopen conditions are met
-    /// @return True if cooldown expired AND price is between SIL and TIP
-    function canExecuteReopen() external view returns (bool);
+    /// @notice Check if reopen from quote conditions are met
+    /// @return True if state is OUT_OF_POSITION_QUOTE AND cooldown expired AND price is in range
+    function canReopenFromQuote() external view returns (bool);
+
+    /// @notice Check if reopen from base conditions are met
+    /// @return True if state is OUT_OF_POSITION_BASE AND cooldown expired AND price is in range
+    function canReopenFromBase() external view returns (bool);
+
+    // ============ View Functions - Oracle ============
+
+    /// @notice Oracle pool address for TWAP price feeds
+    function oraclePool() external view returns (address);
+
+    /// @notice TWAP observation window in seconds
+    function oracleWindowSeconds() external view returns (uint32);
+
+    /// @notice Maximum allowed price deviation from TWAP in basis points
+    function maxPriceDeviationBps() external view returns (uint16);
 
     // ============ View Functions - Fee State ============
 

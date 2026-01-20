@@ -3,6 +3,18 @@ pragma solidity ^0.8.20;
 
 import "./interfaces/IHedgeVault.sol";
 import "./interfaces/IParaswap.sol";
+import "./interfaces/IERC20Minimal.sol";
+import "./interfaces/IERC721Minimal.sol";
+import "./interfaces/IUniswapV3PoolMinimal.sol";
+import "./interfaces/IUniswapV3Factory.sol";
+import "./interfaces/INonfungiblePositionManagerMinimal.sol";
+import "./libraries/FullMath.sol";
+import "./libraries/TickMath.sol";
+import "./libraries/UniswapV3Math.sol";
+import "./base/ERC4626Base.sol";
+import "./base/ReentrancyGuard.sol";
+import "./base/AllowlistBase.sol";
+import "./base/Multicall.sol";
 
 /**
  * @title HedgeVault
@@ -22,272 +34,12 @@ import "./interfaces/IParaswap.sol";
  * - OUT_OF_POSITION_* → executeReopen() → IN_POSITION
  * - Any state → loss cap breached → DEAD
  */
-
-// ============ Minimal Interfaces ============
-
-interface IERC20Minimal {
-    function transfer(address to, uint256 value) external returns (bool);
-    function transferFrom(address from, address to, uint256 value) external returns (bool);
-    function approve(address spender, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-    function decimals() external view returns (uint8);
-}
-
-interface IERC721Minimal {
-    function ownerOf(uint256 tokenId) external view returns (address);
-    function transferFrom(address from, address to, uint256 tokenId) external;
-    function getApproved(uint256 tokenId) external view returns (address);
-    function isApprovedForAll(address owner, address operator) external view returns (bool);
-}
-
-interface IUniswapV3PoolMinimal {
-    function slot0()
-        external
-        view
-        returns (
-            uint160 sqrtPriceX96,
-            int24 tick,
-            uint16 observationIndex,
-            uint16 observationCardinality,
-            uint16 observationCardinalityNext,
-            uint8 feeProtocol,
-            bool unlocked
-        );
-
-    function token0() external view returns (address);
-    function token1() external view returns (address);
-    function fee() external view returns (uint24);
-
-    function swap(
-        address recipient,
-        bool zeroForOne,
-        int256 amountSpecified,
-        uint160 sqrtPriceLimitX96,
-        bytes calldata data
-    ) external returns (int256 amount0, int256 amount1);
-}
-
-interface INonfungiblePositionManagerMinimal is IERC721Minimal {
-    struct MintParams {
-        address token0;
-        address token1;
-        uint24 fee;
-        int24 tickLower;
-        int24 tickUpper;
-        uint256 amount0Desired;
-        uint256 amount1Desired;
-        uint256 amount0Min;
-        uint256 amount1Min;
-        address recipient;
-        uint256 deadline;
-    }
-
-    struct DecreaseLiquidityParams {
-        uint256 tokenId;
-        uint128 liquidity;
-        uint256 amount0Min;
-        uint256 amount1Min;
-        uint256 deadline;
-    }
-
-    struct CollectParams {
-        uint256 tokenId;
-        address recipient;
-        uint128 amount0Max;
-        uint128 amount1Max;
-    }
-
-    struct IncreaseLiquidityParams {
-        uint256 tokenId;
-        uint256 amount0Desired;
-        uint256 amount1Desired;
-        uint256 amount0Min;
-        uint256 amount1Min;
-        uint256 deadline;
-    }
-
-    function positions(uint256 tokenId)
-        external
-        view
-        returns (
-            uint96 nonce,
-            address operator,
-            address token0,
-            address token1,
-            uint24 fee,
-            int24 tickLower,
-            int24 tickUpper,
-            uint128 liquidity,
-            uint256 feeGrowthInside0LastX128,
-            uint256 feeGrowthInside1LastX128,
-            uint128 tokensOwed0,
-            uint128 tokensOwed1
-        );
-
-    function mint(MintParams calldata params)
-        external
-        payable
-        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
-
-    function decreaseLiquidity(DecreaseLiquidityParams calldata params)
-        external
-        payable
-        returns (uint256 amount0, uint256 amount1);
-
-    function collect(CollectParams calldata params)
-        external
-        payable
-        returns (uint256 amount0, uint256 amount1);
-
-    function increaseLiquidity(IncreaseLiquidityParams calldata params)
-        external
-        payable
-        returns (uint128 liquidity, uint256 amount0, uint256 amount1);
-}
-
-// ============ ERC-4626 Base ============
-
-abstract contract ERC4626Base {
-    // ERC-20 state
-    string public name;
-    string public symbol;
-    uint8 public immutable decimals;
-
-    uint256 public totalSupply;
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-
-    // ERC-4626 asset
-    address public immutable asset;
-
-    event Transfer(address indexed from, address indexed to, uint256 amount);
-    event Approval(address indexed owner, address indexed spender, uint256 amount);
-    event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares);
-    event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares);
-
-    constructor(address asset_, string memory name_, string memory symbol_) {
-        asset = asset_;
-        name = name_;
-        symbol = symbol_;
-        decimals = IERC20Minimal(asset_).decimals();
-    }
-
-    // ============ ERC-20 ============
-
-    function approve(address spender, uint256 amount) public virtual returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
-        return true;
-    }
-
-    function transfer(address to, uint256 amount) public virtual returns (bool) {
-        _transfer(msg.sender, to, amount);
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) public virtual returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) {
-            allowance[from][msg.sender] = allowed - amount;
-        }
-        _transfer(from, to, amount);
-        return true;
-    }
-
-    function _transfer(address from, address to, uint256 amount) internal virtual {
-        balanceOf[from] -= amount;
-        unchecked {
-            balanceOf[to] += amount;
-        }
-        emit Transfer(from, to, amount);
-    }
-
-    function _mint(address to, uint256 amount) internal virtual {
-        totalSupply += amount;
-        unchecked {
-            balanceOf[to] += amount;
-        }
-        emit Transfer(address(0), to, amount);
-    }
-
-    function _burn(address from, uint256 amount) internal virtual {
-        balanceOf[from] -= amount;
-        unchecked {
-            totalSupply -= amount;
-        }
-        emit Transfer(from, address(0), amount);
-    }
-
-    // ============ ERC-4626 Views ============
-
-    function totalAssets() public view virtual returns (uint256);
-
-    function convertToShares(uint256 assets) public view virtual returns (uint256) {
-        uint256 supply = totalSupply;
-        return supply == 0 ? assets : (assets * supply) / totalAssets();
-    }
-
-    function convertToAssets(uint256 shares) public view virtual returns (uint256) {
-        uint256 supply = totalSupply;
-        return supply == 0 ? shares : (shares * totalAssets()) / supply;
-    }
-
-    function maxDeposit(address) public view virtual returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function maxMint(address) public view virtual returns (uint256) {
-        return type(uint256).max;
-    }
-
-    function maxWithdraw(address owner) public view virtual returns (uint256) {
-        return convertToAssets(balanceOf[owner]);
-    }
-
-    function maxRedeem(address owner) public view virtual returns (uint256) {
-        return balanceOf[owner];
-    }
-
-    function previewDeposit(uint256 assets) public view virtual returns (uint256) {
-        return convertToShares(assets);
-    }
-
-    function previewMint(uint256 shares) public view virtual returns (uint256) {
-        uint256 supply = totalSupply;
-        return supply == 0 ? shares : (shares * totalAssets() + supply - 1) / supply;
-    }
-
-    function previewWithdraw(uint256 assets) public view virtual returns (uint256) {
-        uint256 supply = totalSupply;
-        return supply == 0 ? assets : (assets * supply + totalAssets() - 1) / totalAssets();
-    }
-
-    function previewRedeem(uint256 shares) public view virtual returns (uint256) {
-        return convertToAssets(shares);
-    }
-}
-
-// ============ Reentrancy Guard ============
-
-abstract contract ReentrancyGuard {
-    uint256 private _locked = 1;
-
-    modifier nonReentrant() {
-        require(_locked == 1, "REENTRANCY");
-        _locked = 2;
-        _;
-        _locked = 1;
-    }
-}
-
-// ============ Main Contract ============
-
-contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
+contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase, Multicall {
     // ============ Immutables ============
 
     INonfungiblePositionManagerMinimal public immutable positionManager;
     IAugustusRegistry public immutable augustusRegistry;
-    uint256 public immutable nftId;  // NFT to transfer on init (set at deployment)
+    IUniswapV3Factory public immutable uniswapV3Factory;
 
     address public immutable override operator;
     address public immutable override manager;  // Deployer with admin powers
@@ -305,10 +57,6 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     // Pause state (automation disabled when true)
     bool public override isPaused;
 
-    // Whitelist system (replaces DepositMode)
-    bool public override whitelistEnabled;
-    mapping(address => bool) public override whitelist;
-
     // Position info (set at init, mutable for resume)
     address public override baseToken;
     address public override pool;
@@ -321,8 +69,8 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     uint256[] private _tokenIdHistory;
 
     // Accounting
-    uint256 public override costBasis;
     uint256 public override lastCloseBlock;
+    uint256 public override pendingAssets;
 
     // Fee accumulators (scaled by 1e18 for precision) - Quote only
     uint256 public override accQuoteFeesPerShare;
@@ -336,19 +84,20 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     // Transient storage for swap callback
     address private _expectedSwapPool;
 
+    // Oracle configuration
+    address public override oraclePool;
+    uint32 public override oracleWindowSeconds;
+    uint16 public override maxPriceDeviationBps;
+
     // ============ Constructor ============
 
     constructor(
         address positionManager_,
         address augustusRegistry_,
-        uint256 nftId_,
         address quoteToken_,
         address operator_,
-        uint160 silSqrtPriceX96_,
-        uint160 tipSqrtPriceX96_,
         uint16 lossCapBps_,
         uint256 reopenCooldownBlocks_,
-        bool whitelistEnabled_,
         string memory name_,
         string memory symbol_
     ) ERC4626Base(quoteToken_, name_, symbol_) {
@@ -359,40 +108,18 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
         positionManager = INonfungiblePositionManagerMinimal(positionManager_);
         augustusRegistry = IAugustusRegistry(augustusRegistry_);
+        uniswapV3Factory = IUniswapV3Factory(positionManager.factory());
         operator = operator_;
         manager = msg.sender;  // Deployer becomes manager
-        silSqrtPriceX96 = silSqrtPriceX96_;
-        tipSqrtPriceX96 = tipSqrtPriceX96_;
         lossCapBps = lossCapBps_;
         reopenCooldownBlocks = reopenCooldownBlocks_;
-        whitelistEnabled = whitelistEnabled_;
+        _allowlistEnabled = true;  // Allowlist enabled by default
 
-        // Manager is always on whitelist
-        whitelist[msg.sender] = true;
+        // Manager is always on allowlist
+        _allowlist[msg.sender] = true;
 
-        // Store NFT ID and validate compatibility
-        nftId = nftId_;
-
-        // Validate NFT compatibility with quote token (fail-fast on deployment)
-        (
-            ,
-            ,
-            address token0,
-            address token1,
-            ,  // fee
-            ,  // tickLower
-            ,  // tickUpper
-            ,  // liquidity
-            ,
-            ,
-            ,
-
-        ) = INonfungiblePositionManagerMinimal(positionManager_).positions(nftId_);
-
-        if (token0 != quoteToken_ && token1 != quoteToken_) {
-            revert IncompatiblePosition(token0, token1, quoteToken_);
-        }
-
+        // SIL/TIP start at 0 (disabled state for normal direction)
+        // Manager must call setSil()/setTip() after init() to configure triggers
         state = State.UNINITIALIZED;
     }
 
@@ -425,88 +152,59 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
     // ============ Initialization ============
 
-    function init() external override nonReentrant {
+    /// @inheritdoc IHedgeVault
+    function init(uint256 tokenId) external override onlyManager nonReentrant {
         if (state != State.UNINITIALIZED) revert AlreadyInitialized();
 
-        uint256 tokenId = nftId;  // Use stored immutable
+        // Transfer NFT to vault and set all position state
+        _transferPositionNft(tokenId);
 
-        // Read position data from NFT
-        (
-            ,
-            ,
-            address token0,
-            address token1,
-            uint24 fee,
-            int24 tickLower_,
-            int24 tickUpper_,
-            ,  // liquidity - not needed at init
-            ,
-            ,
-            ,
-
-        ) = positionManager.positions(tokenId);
-
-        // Determine Quote/Base based on vault asset
-        if (token0 == asset) {
-            token0IsQuote = true;
-            baseToken = token1;
-        } else if (token1 == asset) {
-            token0IsQuote = false;
-            baseToken = token0;
+        // Set SIL/TIP to correct disabled values for this direction
+        if (token0IsQuote) {
+            // Inverted: SIL triggers when currentPrice >= sil, so max disables it
+            // Inverted: TIP triggers when currentPrice <= tip, so 0 disables it
+            silSqrtPriceX96 = type(uint160).max;
+            tipSqrtPriceX96 = 0;
         } else {
-            revert IncompatiblePosition(token0, token1, asset);
+            // Normal: SIL triggers when currentPrice <= sil, so 0 disables it
+            // Normal: TIP triggers when currentPrice >= tip, so max disables it
+            silSqrtPriceX96 = 0;
+            tipSqrtPriceX96 = type(uint160).max;
         }
-
-        // Store position parameters
-        tickLower = tickLower_;
-        tickUpper = tickUpper_;
-
-        // Derive pool address
-        pool = _computePoolAddress(token0, token1, fee);
-
-        // Transfer NFT from caller to vault
-        positionManager.transferFrom(msg.sender, address(this), tokenId);
-
-        // Store token ID
-        currentTokenId = tokenId;
-        _tokenIdHistory.push(tokenId);
 
         // Transition to IN_POSITION
         state = State.IN_POSITION;
 
-        // Calculate initial NAV and set cost basis
+        // Calculate initial NAV
         uint256 initialNav = _calculateNav();
-        costBasis = initialNav;
 
         // Mint shares to manager (deployer)
         _mint(manager, initialNav);
 
-        emit Initialized(tokenId, pool, tickLower_, tickUpper_, token0IsQuote);
+        emit Initialized(tokenId, pool, tickLower, tickUpper, token0IsQuote);
     }
 
     // ============ ERC-4626 Core ============
 
     function totalAssets() public view override(ERC4626Base, IHedgeVault) returns (uint256) {
         if (state == State.UNINITIALIZED) return 0;
-        return _calculateNav();
+        return _calculateNav() + pendingAssets;
     }
 
     function deposit(uint256 assets, address receiver) public nonReentrant whenInitialized returns (uint256 shares) {
-        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+        if (state == State.DEAD) revert VaultIsDead();
 
-        // Check whitelist if enabled (receiver must be whitelisted to receive shares)
-        if (whitelistEnabled && !whitelist[receiver]) {
-            revert NotWhitelisted(receiver);
-        }
+        // Check allowlist if enabled (receiver must be allowlisted to receive shares)
+        _requireAllowlisted(receiver);
 
         shares = previewDeposit(assets);
-        if (shares == 0) revert InvalidState(state, State.IN_POSITION);
+        if (shares == 0) revert ZeroShares();
 
         // Transfer Quote tokens from sender
         _safeTransferFrom(asset, msg.sender, address(this), assets);
 
-        // Update cost basis
-        costBasis += assets;
+        // Track as pending (will be allocated by manager/operator)
+        pendingAssets += assets;
 
         // Mint shares
         _mint(receiver, shares);
@@ -515,20 +213,18 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     }
 
     function mint(uint256 shares, address receiver) public nonReentrant whenInitialized returns (uint256 assets) {
-        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+        if (state == State.DEAD) revert VaultIsDead();
 
-        // Check whitelist if enabled (receiver must be whitelisted to receive shares)
-        if (whitelistEnabled && !whitelist[receiver]) {
-            revert NotWhitelisted(receiver);
-        }
+        // Check allowlist if enabled (receiver must be allowlisted to receive shares)
+        _requireAllowlisted(receiver);
 
         assets = previewMint(shares);
 
         // Transfer Quote tokens from sender
         _safeTransferFrom(asset, msg.sender, address(this), assets);
 
-        // Update cost basis
-        costBasis += assets;
+        // Track as pending (will be allocated by manager/operator)
+        pendingAssets += assets;
 
         // Mint shares
         _mint(receiver, shares);
@@ -601,10 +297,8 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     // ============ Transfer Override ============
 
     function _transfer(address from, address to, uint256 amount) internal override {
-        // Check whitelist if enabled (recipient must be whitelisted to receive shares)
-        if (whitelistEnabled && !whitelist[to]) {
-            revert NotWhitelisted(to);
-        }
+        // Check allowlist if enabled (recipient must be allowlisted to receive shares)
+        _requireAllowlisted(to);
 
         // Calculate pending fees for sender BEFORE transfer
         uint256 senderPendingQuote = _pendingQuoteFees(from);
@@ -628,7 +322,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
     // ============ Operator Actions ============
 
-    function executeSil(bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
+    function executeSil(uint256 minQuoteAmount, bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
         if (state != State.IN_POSITION) {
             revert InvalidState(state, State.IN_POSITION);
         }
@@ -642,25 +336,21 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         // Close position (withdraw liquidity + collect principal)
         _closePosition();
 
-        // Swap Base → Quote
-        uint256 quoteBefore = IERC20Minimal(asset).balanceOf(address(this));
-        _executeSwap(swapData);
-        uint256 quoteAfter = IERC20Minimal(asset).balanceOf(address(this));
-
-        // Verify swap direction: Quote must not decrease
-        if (quoteAfter < quoteBefore) revert InvalidSwapDirection();
+        // Get base token balance and swap Base → Quote
+        uint256 baseBalance = IERC20Minimal(baseToken).balanceOf(address(this));
+        uint256 quoteReceived = _sellToken(baseToken, asset, baseBalance, minQuoteAmount, swapData);
 
         // Transition state
         state = State.OUT_OF_POSITION_QUOTE;
         lastCloseBlock = block.number;
 
         emit PositionClosed(currentTokenId, state);
-        emit SilTriggered(currentPrice, quoteAfter);
+        emit SilTriggered(currentPrice, quoteReceived);
 
         currentTokenId = 0;
     }
 
-    function executeTip(bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
+    function executeTip(uint256 minBaseAmount, bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
         if (state != State.IN_POSITION) {
             revert InvalidState(state, State.IN_POSITION);
         }
@@ -674,26 +364,27 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         // Close position (withdraw liquidity + collect principal)
         _closePosition();
 
-        // Swap Quote → Base
-        uint256 baseBefore = IERC20Minimal(baseToken).balanceOf(address(this));
-        _executeSwap(swapData);
-        uint256 baseAfter = IERC20Minimal(baseToken).balanceOf(address(this));
-
-        // Verify swap direction: Base must not decrease
-        if (baseAfter < baseBefore) revert InvalidSwapDirection();
+        // Get quote token balance and swap Quote → Base
+        uint256 quoteBalance = IERC20Minimal(asset).balanceOf(address(this));
+        uint256 baseReceived = _sellToken(asset, baseToken, quoteBalance, minBaseAmount, swapData);
 
         // Transition state
         state = State.OUT_OF_POSITION_BASE;
         lastCloseBlock = block.number;
 
         emit PositionClosed(currentTokenId, state);
-        emit TipTriggered(currentPrice, baseAfter);
+        emit TipTriggered(currentPrice, baseReceived);
 
         currentTokenId = 0;
     }
 
-    function executeReopen(bytes calldata swapData) external override onlyOperator whenNotPaused nonReentrant {
-        if (state != State.OUT_OF_POSITION_QUOTE && state != State.OUT_OF_POSITION_BASE) {
+    /// @inheritdoc IHedgeVault
+    function reopenFromQuote(
+        uint256 exactBaseAmount,
+        uint256 maxQuoteAmount,
+        bytes calldata swapData
+    ) external override onlyOperator whenNotPaused nonReentrant {
+        if (state != State.OUT_OF_POSITION_QUOTE) {
             revert InvalidState(state, State.OUT_OF_POSITION_QUOTE);
         }
 
@@ -709,11 +400,68 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             revert PriceNotInRange(currentPrice, silSqrtPriceX96, tipSqrtPriceX96);
         }
 
-        // Execute swap to get both tokens for LP
-        _executeSwap(swapData);
+        // Buy exact base amount using quote tokens
+        _buyToken(baseToken, asset, exactBaseAmount, maxQuoteAmount, swapData);
 
         // Mint new LP position
         (uint256 newTokenId, uint128 liquidity) = _mintPosition();
+
+        // Calculate leftover quote (not used in LP)
+        uint256 leftoverQuote = IERC20Minimal(asset).balanceOf(address(this));
+
+        // Add leftover quote to fee accumulator (if any)
+        if (leftoverQuote > 0 && totalSupply > 0) {
+            accQuoteFeesPerShare += (leftoverQuote * 1e18) / totalSupply;
+            totalUnclaimedQuoteFees += leftoverQuote;
+        }
+
+        // Update state
+        currentTokenId = newTokenId;
+        _tokenIdHistory.push(newTokenId);
+        state = State.IN_POSITION;
+
+        emit Reopened(newTokenId, liquidity);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function reopenFromBase(
+        uint256 exactQuoteAmount,
+        uint256 maxBaseAmount,
+        bytes calldata swapData
+    ) external override onlyOperator whenNotPaused nonReentrant {
+        if (state != State.OUT_OF_POSITION_BASE) {
+            revert InvalidState(state, State.OUT_OF_POSITION_BASE);
+        }
+
+        // Check cooldown
+        uint256 requiredBlock = lastCloseBlock + reopenCooldownBlocks;
+        if (block.number < requiredBlock) {
+            revert CooldownNotExpired(block.number, requiredBlock);
+        }
+
+        // Check price is in range
+        uint160 currentPrice = _getCurrentSqrtPriceX96();
+        if (!_isPriceInRange(currentPrice)) {
+            revert PriceNotInRange(currentPrice, silSqrtPriceX96, tipSqrtPriceX96);
+        }
+
+        // Buy exact quote amount using base tokens
+        _buyToken(asset, baseToken, exactQuoteAmount, maxBaseAmount, swapData);
+
+        // Mint new LP position
+        (uint256 newTokenId, uint128 liquidity) = _mintPosition();
+
+        // Calculate leftover base (not used in LP)
+        uint256 leftoverBase = IERC20Minimal(baseToken).balanceOf(address(this));
+
+        // Swap leftover base to quote via pool and add to fee accumulator
+        if (leftoverBase > 0) {
+            uint256 quoteDumped = _swapViaPool(baseToken, leftoverBase);
+            if (quoteDumped > 0 && totalSupply > 0) {
+                accQuoteFeesPerShare += (quoteDumped * 1e18) / totalSupply;
+                totalUnclaimedQuoteFees += quoteDumped;
+            }
+        }
 
         // Update state
         currentTokenId = newTokenId;
@@ -733,6 +481,16 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         return _tokenIdHistory.length;
     }
 
+    /// @inheritdoc IHedgeVault
+    function silEnabled() public view override returns (bool) {
+        return _isSilEnabled();
+    }
+
+    /// @inheritdoc IHedgeVault
+    function tipEnabled() public view override returns (bool) {
+        return _isTipEnabled();
+    }
+
     function canExecuteSil() external view override returns (bool) {
         if (state != State.IN_POSITION) return false;
         return _isSilTriggered(_getCurrentSqrtPriceX96());
@@ -743,8 +501,18 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         return _isTipTriggered(_getCurrentSqrtPriceX96());
     }
 
-    function canExecuteReopen() external view override returns (bool) {
-        if (state != State.OUT_OF_POSITION_QUOTE && state != State.OUT_OF_POSITION_BASE) {
+    function canReopenFromQuote() external view override returns (bool) {
+        if (state != State.OUT_OF_POSITION_QUOTE) {
+            return false;
+        }
+        if (block.number < lastCloseBlock + reopenCooldownBlocks) {
+            return false;
+        }
+        return _isPriceInRange(_getCurrentSqrtPriceX96());
+    }
+
+    function canReopenFromBase() external view override returns (bool) {
+        if (state != State.OUT_OF_POSITION_BASE) {
             return false;
         }
         if (block.number < lastCloseBlock + reopenCooldownBlocks) {
@@ -756,25 +524,73 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     // ============ Manager Actions - Triggers ============
 
     /// @inheritdoc IHedgeVault
-    function setSilTip(uint160 newSilSqrtPriceX96, uint160 newTipSqrtPriceX96) external override onlyManager {
-        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
+    function setSil(uint160 newSilSqrtPriceX96) external override onlyManager {
+        if (state == State.UNINITIALIZED) revert NotInitialized();
+        if (state == State.DEAD) revert VaultIsDead();
 
-        // Validate ordering based on token0IsQuote
-        // For token0IsQuote: SIL sqrtPrice > TIP sqrtPrice (inverted)
-        // For !token0IsQuote: SIL sqrtPrice < TIP sqrtPrice (normal)
-        if (token0IsQuote) {
-            if (newSilSqrtPriceX96 <= newTipSqrtPriceX96) revert InvalidSilTipRange();
-        } else {
-            if (newSilSqrtPriceX96 >= newTipSqrtPriceX96) revert InvalidSilTipRange();
+        // Revert if trying to set disabled value (must use disableSil())
+        if (newSilSqrtPriceX96 == 0 || newSilSqrtPriceX96 == type(uint160).max) {
+            revert TriggerValueDisabled();
         }
 
         silSqrtPriceX96 = newSilSqrtPriceX96;
-        tipSqrtPriceX96 = newTipSqrtPriceX96;
-
-        emit SilTipUpdated(newSilSqrtPriceX96, newTipSqrtPriceX96);
+        emit SilTipUpdated(silSqrtPriceX96, tipSqrtPriceX96);
     }
 
     /// @inheritdoc IHedgeVault
+    function setTip(uint160 newTipSqrtPriceX96) external override onlyManager {
+        if (state == State.UNINITIALIZED) revert NotInitialized();
+        if (state == State.DEAD) revert VaultIsDead();
+
+        // Revert if trying to set disabled value (must use disableTip())
+        if (newTipSqrtPriceX96 == 0 || newTipSqrtPriceX96 == type(uint160).max) {
+            revert TriggerValueDisabled();
+        }
+
+        tipSqrtPriceX96 = newTipSqrtPriceX96;
+        emit SilTipUpdated(silSqrtPriceX96, tipSqrtPriceX96);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function disableSil() external override onlyManager {
+        if (state == State.UNINITIALIZED) revert NotInitialized();
+        if (state == State.DEAD) revert VaultIsDead();
+
+        // Set to value that can never trigger based on direction
+        if (token0IsQuote) {
+            // Inverted: SIL triggers when currentPrice >= sil
+            // Set to max so currentPrice can never be >= max
+            silSqrtPriceX96 = type(uint160).max;
+        } else {
+            // Normal: SIL triggers when currentPrice <= sil
+            // Set to 0 so currentPrice can never be <= 0
+            silSqrtPriceX96 = 0;
+        }
+
+        emit SilTipUpdated(silSqrtPriceX96, tipSqrtPriceX96);
+    }
+
+    /// @inheritdoc IHedgeVault
+    function disableTip() external override onlyManager {
+        if (state == State.UNINITIALIZED) revert NotInitialized();
+        if (state == State.DEAD) revert VaultIsDead();
+
+        // Set to value that can never trigger based on direction
+        if (token0IsQuote) {
+            // Inverted: TIP triggers when currentPrice <= tip
+            // Set to 0 so currentPrice can never be <= 0
+            tipSqrtPriceX96 = 0;
+        } else {
+            // Normal: TIP triggers when currentPrice >= tip
+            // Set to max so currentPrice can never be >= max
+            tipSqrtPriceX96 = type(uint160).max;
+        }
+
+        emit SilTipUpdated(silSqrtPriceX96, tipSqrtPriceX96);
+    }
+
+    /// @inheritdoc IHedgeVault
+    // TODO: Refactor to accept minQuoteAmount parameter for sandwich attack protection
     function pause(bytes calldata swapData) external override onlyManager nonReentrant {
         if (state != State.IN_POSITION) {
             revert InvalidState(state, State.IN_POSITION);
@@ -784,12 +600,11 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         _closePosition();
 
         // Swap Base → Quote
-        uint256 quoteBefore = IERC20Minimal(asset).balanceOf(address(this));
-        _executeSwap(swapData);
-        uint256 quoteAfter = IERC20Minimal(asset).balanceOf(address(this));
-
-        // Verify swap direction: Quote must not decrease
-        if (quoteAfter < quoteBefore) revert InvalidSwapDirection();
+        // TODO: Add minQuoteAmount parameter to function signature for proper protection
+        uint256 baseBalance = IERC20Minimal(baseToken).balanceOf(address(this));
+        if (baseBalance > 0 && swapData.length > 0) {
+            _sellToken(baseToken, asset, baseBalance, 0, swapData);
+        }
 
         // Transition state
         state = State.OUT_OF_POSITION_QUOTE;
@@ -803,6 +618,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     }
 
     /// @inheritdoc IHedgeVault
+    // TODO: Refactor to use explicit _sellToken()/_buyToken() with min/max parameters
     function resume(int24 newTickLower, int24 newTickUpper, bytes calldata swapData) external override onlyManager nonReentrant {
         if (state != State.OUT_OF_POSITION_QUOTE && state != State.OUT_OF_POSITION_BASE) {
             revert InvalidState(state, State.OUT_OF_POSITION_QUOTE);
@@ -829,14 +645,31 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
         if (_isTipTriggered(currentPrice)) {
             // Price > TIP (actual) - swap to Base
-            _executeSwap(swapData);
+            // TODO: Add minBaseAmount parameter for proper protection
+            uint256 quoteBalance = IERC20Minimal(asset).balanceOf(address(this));
+            if (quoteBalance > 0 && swapData.length > 0) {
+                _sellToken(asset, baseToken, quoteBalance, 0, swapData);
+            }
             state = State.OUT_OF_POSITION_BASE;
             emit VaultResumed(newTickLower, newTickUpper);
             return;
         }
 
         // Price is in range - open LP position
-        _executeSwap(swapData);
+        // TODO: Refactor to use _buyToken() with proper exact amounts
+        // For now, use the swap to get base tokens, then mint position
+        if (swapData.length > 0) {
+            // Decode and execute swap to get base tokens for LP
+            (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
+            if (augustusRegistry.isValidAugustus(augustus)) {
+                uint256 quoteBalance = IERC20Minimal(asset).balanceOf(address(this));
+                address spender = IAugustus(augustus).getTokenTransferProxy();
+                _safeApprove(asset, spender, quoteBalance);
+                augustus.call(swapCalldata);
+                _safeApprove(asset, spender, 0);
+                // Continue even if swap fails - will mint with available balances
+            }
+        }
         (uint256 newTokenId, uint128 liquidity) = _mintPosition();
 
         // Update state
@@ -848,38 +681,99 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         emit Reopened(newTokenId, liquidity);
     }
 
-    // ============ Manager Actions - Whitelist ============
+    // ============ AllowlistBase Hook ============
+
+    /// @dev Access control hook for allowlist management - only manager when not DEAD
+    function _checkAllowlistAccess() internal view override {
+        if (msg.sender != manager) revert NotManager();
+        if (state == State.DEAD) revert VaultIsDead();
+    }
+
+    // ============ Manager/Operator Actions - Oracle ============
 
     /// @inheritdoc IHedgeVault
-    function setWhitelistEnabled(bool enabled) external override onlyManager {
-        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
-        whitelistEnabled = enabled;
-        emit WhitelistEnabledChanged(enabled);
+    function setOraclePoolForPair(
+        address tokenA,
+        address tokenB,
+        uint24 fee,
+        uint32 windowSeconds,
+        uint128 minOracleLiquidity,
+        uint16 alphaBps
+    ) external override onlyManagerOrOperator {
+        // 1) Resolve pool from factory (canonical validation)
+        address expected = uniswapV3Factory.getPool(tokenA, tokenB, fee);
+        if (expected == address(0)) revert PoolNotFromFactory();
+
+        // 2) Basic pair sanity
+        _requirePoolMatchesPair(expected, tokenA, tokenB);
+
+        // 3) Ensure observe(window) works for the chosen window (history available)
+        _requireObserveWindowAvailable(expected, windowSeconds);
+
+        // 4) Liquidity checks
+        uint128 oracleLiq = IUniswapV3PoolMinimal(expected).liquidity();
+        if (oracleLiq < minOracleLiquidity) revert OracleLiquidityTooLow(oracleLiq, minOracleLiquidity);
+
+        if (alphaBps != 0 && pool != address(0)) {
+            uint128 posLiq = IUniswapV3PoolMinimal(pool).liquidity();
+
+            // Require: oracleLiq >= posLiq * alphaBps / 10000
+            // Use 256-bit math to avoid overflow
+            uint256 rhs = (uint256(posLiq) * uint256(alphaBps)) / 10_000;
+
+            if (uint256(oracleLiq) < rhs) {
+                revert OracleLiquidityBelowPositionLiquidity(oracleLiq, posLiq, alphaBps);
+            }
+        }
+
+        // 5) Store config
+        oraclePool = expected;
+        oracleWindowSeconds = windowSeconds;
+
+        emit OraclePoolSet(expected, windowSeconds);
     }
 
     /// @inheritdoc IHedgeVault
-    function addToWhitelist(address[] calldata accounts) external override onlyManager {
-        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
-        for (uint256 i = 0; i < accounts.length; i++) {
-            whitelist[accounts[i]] = true;
-            emit WhitelistUpdated(accounts[i], true);
-        }
+    function setMaxPriceDeviation(uint16 newMaxDeviationBps) external override onlyManager {
+        maxPriceDeviationBps = newMaxDeviationBps;
+        emit MaxPriceDeviationSet(newMaxDeviationBps);
     }
 
+    // ============ Manager/Operator Actions - Asset Allocation ============
+
     /// @inheritdoc IHedgeVault
-    function removeFromWhitelist(address[] calldata accounts) external override onlyManager {
-        if (state == State.DEAD) revert InvalidState(state, State.IN_POSITION);
-        for (uint256 i = 0; i < accounts.length; i++) {
-            whitelist[accounts[i]] = false;
-            emit WhitelistUpdated(accounts[i], false);
+    function allocatePendingAssets(
+        uint256 minAmountIn,
+        bytes calldata swapData
+    ) external override onlyManagerOrOperator nonReentrant {
+        if (state == State.DEAD) revert VaultIsDead();
+
+        uint256 amount = pendingAssets;
+        if (amount == 0) revert ZeroAmount();
+
+        // Clear pending before allocation (reentrancy protection)
+        pendingAssets = 0;
+
+        uint256 baseReceived;
+        uint128 liquidityAdded;
+
+        if (state == State.IN_POSITION) {
+            // Swap portion to base and increase liquidity
+            (baseReceived, liquidityAdded) = _allocateToPosition(amount, minAmountIn, swapData);
+        } else if (state == State.OUT_OF_POSITION_BASE) {
+            // Swap all quote → base
+            baseReceived = _sellToken(asset, baseToken, amount, minAmountIn, swapData);
         }
+        // OUT_OF_POSITION_QUOTE: no action needed (already holding quote)
+
+        emit PendingAssetsAllocated(amount, state, baseReceived, liquidityAdded);
     }
 
     // ============ Fee Collection ============
 
     /// @inheritdoc IHedgeVault
     /// @dev Collect fees from NFT position and swap Base to Quote. Manager/Operator only.
-    function collectFeesFromPosition(bytes calldata swapData) external override onlyManagerOrOperator nonReentrant {
+    function collectFeesFromPosition(uint256 minQuoteAmount, bytes calldata swapData) external override onlyManagerOrOperator nonReentrant {
         if (state != State.IN_POSITION) {
             revert InvalidState(state, State.IN_POSITION);
         }
@@ -911,15 +805,9 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         // Swap Base fees → Quote (if swapData provided and baseFees > 0)
         uint256 baseSwapped = 0;
         if (baseFees > 0 && swapData.length > 0) {
-            uint256 quoteBefore = IERC20Minimal(asset).balanceOf(address(this));
-            _executeSwap(swapData);
-            uint256 quoteAfter = IERC20Minimal(asset).balanceOf(address(this));
-
-            // Verify swap direction: Quote must increase
-            if (quoteAfter > quoteBefore) {
-                baseSwapped = baseFees;
-                quoteFees += (quoteAfter - quoteBefore);
-            }
+            uint256 quoteFromBase = _sellToken(baseToken, asset, baseFees, minQuoteAmount, swapData);
+            baseSwapped = baseFees;
+            quoteFees += quoteFromBase;
         }
 
         // Update accumulators (Quote only)
@@ -965,9 +853,56 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         return accumulated > debt ? accumulated - debt : 0;
     }
 
+    // ============ Internal - Oracle Helpers ============
+
+    function _requirePoolMatchesPair(address poolAddr, address tokenA, address tokenB) internal view {
+        address t0 = IUniswapV3PoolMinimal(poolAddr).token0();
+        address t1 = IUniswapV3PoolMinimal(poolAddr).token1();
+
+        bool ok = (t0 == tokenA && t1 == tokenB) || (t0 == tokenB && t1 == tokenA);
+        if (!ok) revert PoolPairMismatch();
+    }
+
+    function _requireObserveWindowAvailable(address poolAddr, uint32 windowSeconds) internal view {
+        // Call observe([windowSeconds, 0]) and ensure it does not revert
+        uint32[] memory secs = new uint32[](2);
+        secs[0] = windowSeconds;
+        secs[1] = 0;
+
+        try IUniswapV3PoolMinimal(poolAddr).observe(secs) returns (int56[] memory, uint160[] memory) {
+            // ok
+        } catch {
+            revert ObserveWindowNotAvailable();
+        }
+    }
+
     // ============ Internal - Trigger Logic ============
 
+    /// @dev Check if SIL trigger is enabled (not set to disabled value)
+    function _isSilEnabled() internal view returns (bool) {
+        if (token0IsQuote) {
+            // Inverted: disabled when sil == type(uint160).max
+            return silSqrtPriceX96 != type(uint160).max;
+        } else {
+            // Normal: disabled when sil == 0
+            return silSqrtPriceX96 != 0;
+        }
+    }
+
+    /// @dev Check if TIP trigger is enabled (not set to disabled value)
+    function _isTipEnabled() internal view returns (bool) {
+        if (token0IsQuote) {
+            // Inverted: disabled when tip == 0
+            return tipSqrtPriceX96 != 0;
+        } else {
+            // Normal: disabled when tip == type(uint160).max
+            return tipSqrtPriceX96 != type(uint160).max;
+        }
+    }
+
     function _isSilTriggered(uint160 currentPrice) internal view returns (bool) {
+        if (!_isSilEnabled()) return false;
+
         if (token0IsQuote) {
             // sqrtPrice UP = actual price DOWN = SIL triggered
             return currentPrice >= silSqrtPriceX96;
@@ -978,6 +913,8 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     }
 
     function _isTipTriggered(uint160 currentPrice) internal view returns (bool) {
+        if (!_isTipEnabled()) return false;
+
         if (token0IsQuote) {
             // sqrtPrice DOWN = actual price UP = TIP triggered
             return currentPrice <= tipSqrtPriceX96;
@@ -998,6 +935,55 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     }
 
     // ============ Internal - Position Management ============
+
+    /// @dev Transfer NFT to vault, validate it, and set all position state
+    /// @param tokenId The NFT position ID to transfer
+    function _transferPositionNft(uint256 tokenId) internal {
+        // Read position data from NFT
+        (
+            ,
+            ,
+            address token0,
+            address token1,
+            uint24 fee,
+            int24 tickLower_,
+            int24 tickUpper_,
+            ,  // liquidity - not needed here
+            ,
+            ,
+            ,
+
+        ) = positionManager.positions(tokenId);
+
+        // Validate position contains vault's quote token
+        if (token0 != asset && token1 != asset) {
+            revert IncompatiblePosition(token0, token1, asset);
+        }
+
+        // Determine Quote/Base based on vault asset
+        if (token0 == asset) {
+            token0IsQuote = true;
+            baseToken = token1;
+        } else {
+            // token1 == asset (guaranteed by validation above)
+            token0IsQuote = false;
+            baseToken = token0;
+        }
+
+        // Store position parameters
+        tickLower = tickLower_;
+        tickUpper = tickUpper_;
+
+        // Derive and store pool address
+        pool = _computePoolAddress(token0, token1, fee);
+
+        // Store token ID
+        currentTokenId = tokenId;
+        _tokenIdHistory.push(tokenId);
+
+        // Transfer NFT from caller to vault
+        positionManager.transferFrom(msg.sender, address(this), tokenId);
+    }
 
     function _closePosition() internal {
         uint256 tokenId = currentTokenId;
@@ -1078,51 +1064,102 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         _safeApprove(token1, address(positionManager), 0);
     }
 
+    /// @dev Allocate quote assets to the current LP position
+    /// @param quoteAmount Amount of quote tokens to allocate
+    /// @param minAmountIn Minimum output for swap (slippage protection)
+    /// @param swapData Paraswap calldata for quote → base swap
+    /// @return baseReceived Amount of base tokens received from swap
+    /// @return liquidityAdded Amount of liquidity added to position
+    function _allocateToPosition(
+        uint256 quoteAmount,
+        uint256 minAmountIn,
+        bytes calldata swapData
+    ) internal returns (uint256 baseReceived, uint128 liquidityAdded) {
+        // Swap portion of quote → base (approximately half for balanced position)
+        // The exact ratio depends on current price vs tick range, but Uniswap will
+        // return unused tokens which we handle as leftovers
+        if (swapData.length > 0) {
+            baseReceived = _sellToken(asset, baseToken, quoteAmount / 2, minAmountIn, swapData);
+        }
+
+        // Get available balances for both tokens
+        address token0 = token0IsQuote ? asset : baseToken;
+        address token1 = token0IsQuote ? baseToken : asset;
+
+        uint256 amount0 = IERC20Minimal(token0).balanceOf(address(this));
+        uint256 amount1 = IERC20Minimal(token1).balanceOf(address(this));
+
+        // Subtract totalUnclaimedQuoteFees from quote balance (don't use fee reserves)
+        if (token0IsQuote) {
+            amount0 = amount0 > totalUnclaimedQuoteFees ? amount0 - totalUnclaimedQuoteFees : 0;
+        } else {
+            amount1 = amount1 > totalUnclaimedQuoteFees ? amount1 - totalUnclaimedQuoteFees : 0;
+        }
+
+        if (amount0 == 0 && amount1 == 0) return (baseReceived, 0);
+
+        // Approve position manager
+        _safeApprove(token0, address(positionManager), amount0);
+        _safeApprove(token1, address(positionManager), amount1);
+
+        // Increase liquidity in existing position
+        (liquidityAdded, , ) = positionManager.increaseLiquidity(
+            INonfungiblePositionManagerMinimal.IncreaseLiquidityParams({
+                tokenId: currentTokenId,
+                amount0Desired: amount0,
+                amount1Desired: amount1,
+                amount0Min: 0,
+                amount1Min: 0,
+                deadline: block.timestamp
+            })
+        );
+
+        // Reset approvals
+        _safeApprove(token0, address(positionManager), 0);
+        _safeApprove(token1, address(positionManager), 0);
+
+        // Handle leftover quote tokens - add to fee accumulator
+        uint256 leftoverQuote = IERC20Minimal(asset).balanceOf(address(this));
+        if (leftoverQuote > totalUnclaimedQuoteFees && totalSupply > 0) {
+            uint256 excessQuote = leftoverQuote - totalUnclaimedQuoteFees;
+            accQuoteFeesPerShare += (excessQuote * 1e18) / totalSupply;
+            totalUnclaimedQuoteFees += excessQuote;
+        }
+    }
+
     // ============ Internal - Swap ============
 
-    function _executeSwap(bytes calldata swapData) internal {
-        if (swapData.length == 0) return;
+    /// @notice Sell exact amount of a token via Paraswap
+    /// @param sellToken Token to sell
+    /// @param buyToken Token to receive
+    /// @param sellAmount Exact amount of sellToken to sell
+    /// @param minAmountReceived Minimum amount of buyToken to receive
+    /// @param swapData Paraswap calldata
+    /// @return amountReceived Actual amount of buyToken received
+    function _sellToken(
+        address sellToken,
+        address buyToken,
+        uint256 sellAmount,
+        uint256 minAmountReceived,
+        bytes calldata swapData
+    ) internal returns (uint256 amountReceived) {
+        if (sellAmount == 0) revert ZeroAmount();
+        if (swapData.length == 0) revert ZeroAmount();
+
+        // Record balance before
+        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
 
         // Decode swap params: (augustus, calldata)
         (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
 
         // Validate Augustus
         if (!augustusRegistry.isValidAugustus(augustus)) {
-            revert InvalidSwapDirection(); // Reuse error for invalid swap
+            revert InvalidSwapDirection();
         }
 
-        // Get spender
+        // Get spender and approve
         address spender = IAugustus(augustus).getTokenTransferProxy();
-
-        // Determine which token to swap based on state
-        address tokenIn;
-        if (state == State.IN_POSITION) {
-            // Closing position - we have both tokens, need to check what we're converting to
-            // For SIL: swap Base → Quote
-            // For TIP: swap Quote → Base
-            // The caller (executeSil/executeTip) determines this by checking balance changes
-            tokenIn = baseToken; // For SIL
-            uint256 quoteBalance = IERC20Minimal(asset).balanceOf(address(this));
-            uint256 baseBalance = IERC20Minimal(baseToken).balanceOf(address(this));
-
-            // If we're doing TIP, we swap Quote
-            // We determine this by looking at what the swap data is trying to swap
-            // For now, approve both and let the swap calldata determine
-            if (baseBalance > 0) {
-                _safeApprove(baseToken, spender, baseBalance);
-            }
-            if (quoteBalance > 0) {
-                _safeApprove(asset, spender, quoteBalance);
-            }
-        } else if (state == State.OUT_OF_POSITION_QUOTE) {
-            // Reopening from Quote - swap Quote → get both tokens
-            uint256 balance = IERC20Minimal(asset).balanceOf(address(this));
-            _safeApprove(asset, spender, balance);
-        } else if (state == State.OUT_OF_POSITION_BASE) {
-            // Reopening from Base - swap Base → get both tokens
-            uint256 balance = IERC20Minimal(baseToken).balanceOf(address(this));
-            _safeApprove(baseToken, spender, balance);
-        }
+        _safeApprove(sellToken, spender, sellAmount);
 
         // Execute swap
         (bool success, bytes memory returnData) = augustus.call(swapCalldata);
@@ -1135,9 +1172,269 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             revert InvalidSwapDirection();
         }
 
-        // Reset approvals
-        _safeApprove(asset, spender, 0);
-        _safeApprove(baseToken, spender, 0);
+        // Reset approval
+        _safeApprove(sellToken, spender, 0);
+
+        // Calculate amount received
+        uint256 buyBalanceAfter = IERC20Minimal(buyToken).balanceOf(address(this));
+        amountReceived = buyBalanceAfter - buyBalanceBefore;
+
+        // Validate minimum received
+        if (amountReceived < minAmountReceived) {
+            revert InsufficientAmountReceived(amountReceived, minAmountReceived);
+        }
+
+        // Validate price against TWAP
+        _validatePriceAgainstTwap(sellAmount, amountReceived, buyToken == baseToken);
+    }
+
+    /// @notice Buy exact amount of a token via Paraswap
+    /// @param buyToken Token to buy
+    /// @param sellToken Token to spend
+    /// @param buyAmount Exact amount of buyToken to buy
+    /// @param maxAmountSold Maximum amount of sellToken to spend
+    /// @param swapData Paraswap calldata
+    /// @return amountSold Actual amount of sellToken spent
+    function _buyToken(
+        address buyToken,
+        address sellToken,
+        uint256 buyAmount,
+        uint256 maxAmountSold,
+        bytes calldata swapData
+    ) internal returns (uint256 amountSold) {
+        if (buyAmount == 0) revert ZeroAmount();
+        if (swapData.length == 0) revert ZeroAmount();
+
+        // Record balances before
+        uint256 sellBalanceBefore = IERC20Minimal(sellToken).balanceOf(address(this));
+        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
+
+        // Decode swap params: (augustus, calldata)
+        (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
+
+        // Validate Augustus
+        if (!augustusRegistry.isValidAugustus(augustus)) {
+            revert InvalidSwapDirection();
+        }
+
+        // Get spender and approve max amount
+        address spender = IAugustus(augustus).getTokenTransferProxy();
+        _safeApprove(sellToken, spender, maxAmountSold);
+
+        // Execute swap
+        (bool success, bytes memory returnData) = augustus.call(swapCalldata);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
+                }
+            }
+            revert InvalidSwapDirection();
+        }
+
+        // Reset approval
+        _safeApprove(sellToken, spender, 0);
+
+        // Calculate amounts
+        uint256 sellBalanceAfter = IERC20Minimal(sellToken).balanceOf(address(this));
+        uint256 buyBalanceAfter = IERC20Minimal(buyToken).balanceOf(address(this));
+        amountSold = sellBalanceBefore - sellBalanceAfter;
+        uint256 amountBought = buyBalanceAfter - buyBalanceBefore;
+
+        // Validate we got enough
+        if (amountBought < buyAmount) {
+            revert InsufficientAmountReceived(amountBought, buyAmount);
+        }
+
+        // Validate we didn't spend too much
+        if (amountSold > maxAmountSold) {
+            revert ExcessiveAmountSpent(amountSold, maxAmountSold);
+        }
+
+        // Validate price against TWAP
+        _validatePriceAgainstTwap(amountSold, amountBought, buyToken == baseToken);
+    }
+
+    /// @notice Swap tokens directly through the position pool (for leftover handling)
+    /// @param sellToken Token to sell
+    /// @param sellAmount Amount to sell
+    /// @return amountReceived Amount of other token received
+    function _swapViaPool(
+        address sellToken,
+        uint256 sellAmount
+    ) internal returns (uint256 amountReceived) {
+        if (sellAmount == 0) return 0;
+
+        // Determine swap direction
+        bool zeroForOne = sellToken == IUniswapV3PoolMinimal(pool).token0();
+        address buyToken = zeroForOne ? IUniswapV3PoolMinimal(pool).token1() : IUniswapV3PoolMinimal(pool).token0();
+
+        // Record balance before
+        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
+
+        // Set expected pool for callback validation
+        _expectedSwapPool = pool;
+
+        // Execute swap via pool
+        // Negative amountSpecified = exact input swap
+        IUniswapV3PoolMinimal(pool).swap(
+            address(this),
+            zeroForOne,
+            int256(sellAmount),
+            zeroForOne ? 4295128740 : 1461446703485210103287273052203988822378723970341, // Min/max sqrt price
+            abi.encode(sellToken)
+        );
+
+        // Clear expected pool
+        _expectedSwapPool = address(0);
+
+        // Calculate amount received
+        amountReceived = IERC20Minimal(buyToken).balanceOf(address(this)) - buyBalanceBefore;
+    }
+
+    /// @notice Uniswap V3 swap callback
+    function uniswapV3SwapCallback(
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes calldata data
+    ) external {
+        // Validate caller is the expected pool
+        if (msg.sender != _expectedSwapPool) revert InvalidSwapDirection();
+
+        // Decode the token we need to pay
+        address tokenToPay = abi.decode(data, (address));
+
+        // Pay the required amount
+        uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
+        _safeTransfer(tokenToPay, msg.sender, amountToPay);
+    }
+
+    // ============ Internal - TWAP Helpers ============
+
+    /// @notice Helper to compute 10^d safely
+    function _pow10(uint8 d) internal pure returns (uint256) {
+        uint256 result = 1;
+        for (uint8 i = 0; i < d; i++) {
+            result *= 10;
+        }
+        return result;
+    }
+
+    /// @notice Get arithmetic mean tick from oracle pool over the configured window
+    /// @param windowSeconds TWAP window in seconds
+    /// @return arithmeticMeanTick The time-weighted average tick
+    function _getArithmeticMeanTick(uint32 windowSeconds) internal view returns (int24 arithmeticMeanTick) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = windowSeconds;
+        secondsAgos[1] = 0;
+
+        (int56[] memory tickCumulatives, ) = IUniswapV3PoolMinimal(oraclePool).observe(secondsAgos);
+
+        int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+        arithmeticMeanTick = int24(tickCumulativesDelta / int56(int32(windowSeconds)));
+    }
+
+    /// @notice Get TWAP price from oracle pool as quote per base, scaled to 1e18
+    /// @dev Uses FullMath.mulDiv for overflow-safe 512-bit intermediate calculations
+    /// @return priceQuotePerBase1e18 Price as (quote per 1 base) * 1e18
+    function _getTwapPriceQuotePerBase1e18() internal view returns (uint256 priceQuotePerBase1e18) {
+        if (oraclePool == address(0)) return 0;
+
+        int24 arithmeticMeanTick = _getArithmeticMeanTick(oracleWindowSeconds);
+        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
+
+        uint8 quoteDecimals = IERC20Minimal(asset).decimals();
+        uint8 baseDecimals = IERC20Minimal(baseToken).decimals();
+
+        // sqrtPriceX96 encodes sqrt(token1 / token0) * 2^96
+        // price_token1_per_token0 = (sqrtPriceX96)^2 / 2^192
+        //
+        // We need quote_per_base. Relationship to token0/token1 depends on token0IsQuote.
+
+        if (token0IsQuote) {
+            // token0 = quote, token1 = base
+            // sqrtPriceX96 = sqrt(base / quote) * 2^96
+            // price_base_per_quote = sqrtPriceX96^2 / 2^192
+            // price_quote_per_base = 2^192 / sqrtPriceX96^2
+            //
+            // Normalized: price_quote_per_base * 10^(baseDecimals - quoteDecimals) * 1e18
+            // = (2^192 * 1e18 * 10^baseDecimals) / (sqrtPriceX96^2 * 10^quoteDecimals)
+            //
+            // Use FullMath: mulDiv(2^192 * 10^baseDecimals, 1e18, sqrtPriceX96^2 * 10^quoteDecimals)
+            uint256 numerator = (uint256(1) << 192) * _pow10(baseDecimals);
+            uint256 denominator = uint256(sqrtPriceX96) * uint256(sqrtPriceX96) * _pow10(quoteDecimals);
+            if (denominator == 0) return 0;
+            priceQuotePerBase1e18 = FullMath.mulDiv(numerator, 1e18, denominator);
+        } else {
+            // token0 = base, token1 = quote
+            // sqrtPriceX96 = sqrt(quote / base) * 2^96
+            // price_quote_per_base = sqrtPriceX96^2 / 2^192
+            //
+            // Normalized: price_quote_per_base * 10^(baseDecimals - quoteDecimals) * 1e18
+            // = (sqrtPriceX96^2 * 1e18 * 10^baseDecimals) / (2^192 * 10^quoteDecimals)
+            //
+            // Use FullMath: mulDiv(sqrtPriceX96^2 * 10^baseDecimals, 1e18, 2^192 * 10^quoteDecimals)
+            uint256 sqrtPriceSq = uint256(sqrtPriceX96) * uint256(sqrtPriceX96);
+            uint256 numerator = sqrtPriceSq * _pow10(baseDecimals);
+            uint256 denominator = (uint256(1) << 192) * _pow10(quoteDecimals);
+            priceQuotePerBase1e18 = FullMath.mulDiv(numerator, 1e18, denominator);
+        }
+    }
+
+    /// @notice Validate execution price against TWAP
+    /// @dev Uses FullMath for overflow-safe calculations with arbitrary token decimals
+    /// @param sellAmount Amount of token sold (in native decimals)
+    /// @param buyAmount Amount of token bought (in native decimals)
+    /// @param isBuyingBase True if buying base token (selling quote)
+    function _validatePriceAgainstTwap(
+        uint256 sellAmount,
+        uint256 buyAmount,
+        bool isBuyingBase
+    ) internal view {
+        if (oraclePool == address(0)) return;
+        if (maxPriceDeviationBps == 0) return;
+
+        uint256 twapPrice = _getTwapPriceQuotePerBase1e18();
+        if (twapPrice == 0) return;
+
+        uint8 quoteDecimals = IERC20Minimal(asset).decimals();
+        uint8 baseDecimals = IERC20Minimal(baseToken).decimals();
+
+        // Calculate execution price as quote_per_base * 1e18
+        uint256 executionPrice;
+        if (isBuyingBase) {
+            // Selling quote, buying base
+            // price = sellAmount(quote) / buyAmount(base) normalized
+            // = (sellAmount / 10^quoteDecimals) / (buyAmount / 10^baseDecimals) * 1e18
+            // = sellAmount * 10^baseDecimals * 1e18 / (buyAmount * 10^quoteDecimals)
+            executionPrice = FullMath.mulDiv(
+                sellAmount * _pow10(baseDecimals),
+                1e18,
+                buyAmount * _pow10(quoteDecimals)
+            );
+        } else {
+            // Selling base, buying quote
+            // price = buyAmount(quote) / sellAmount(base) normalized
+            // = (buyAmount / 10^quoteDecimals) / (sellAmount / 10^baseDecimals) * 1e18
+            // = buyAmount * 10^baseDecimals * 1e18 / (sellAmount * 10^quoteDecimals)
+            executionPrice = FullMath.mulDiv(
+                buyAmount * _pow10(baseDecimals),
+                1e18,
+                sellAmount * _pow10(quoteDecimals)
+            );
+        }
+
+        // Calculate deviation in basis points using FullMath
+        uint256 deviation;
+        if (executionPrice > twapPrice) {
+            deviation = FullMath.mulDiv(executionPrice - twapPrice, 10000, twapPrice);
+        } else {
+            deviation = FullMath.mulDiv(twapPrice - executionPrice, 10000, twapPrice);
+        }
+
+        if (deviation > maxPriceDeviationBps) {
+            revert PriceDeviationTooHigh(deviation, maxPriceDeviationBps);
+        }
     }
 
     // ============ Internal - Withdrawal ============
@@ -1182,7 +1479,7 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         uint256 tokenId = currentTokenId;
         if (tokenId == 0) return 0;
 
-        // Get position data
+        // Get position data (tokensOwed excluded - fees tracked separately via accQuoteFeesPerShare)
         (
             ,
             ,
@@ -1194,24 +1491,20 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
             uint128 liquidity,
             ,
             ,
-            uint128 tokensOwed0,
-            uint128 tokensOwed1
+            ,  // tokensOwed0 - excluded (fees)
+               // tokensOwed1 - excluded (fees)
         ) = positionManager.positions(tokenId);
 
         // Get current price
         uint160 sqrtPriceX96 = _getCurrentSqrtPriceX96();
 
-        // Calculate amounts from liquidity
-        (uint256 amount0, uint256 amount1) = _getAmountsForLiquidity(
+        // Calculate principal value from liquidity (excludes uncollected fees)
+        (uint256 amount0, uint256 amount1) = UniswapV3Math.getAmountsForLiquidity(
             sqrtPriceX96,
             tickLower_,
             tickUpper_,
             liquidity
         );
-
-        // Add owed tokens (uncollected fees)
-        amount0 += tokensOwed0;
-        amount1 += tokensOwed1;
 
         // Convert to Quote value
         if (token0IsQuote) {
@@ -1226,27 +1519,45 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
     function _convertBaseToQuote(uint256 baseAmount) internal view returns (uint256) {
         if (baseAmount == 0) return 0;
 
-        // Get current sqrtPriceX96
+        // Prefer TWAP if configured (more manipulation-resistant)
+        uint256 twapPrice = _getTwapPriceQuotePerBase1e18();
+        if (twapPrice > 0) {
+            // quoteAmount = baseAmount * (quote/base) where twapPrice is (quote/base) scaled by 1e18
+            return FullMath.mulDiv(baseAmount, twapPrice, 1e18);
+        }
+
+        // Spot fallback (Uniswap V3 math, overflow-safe)
+        // sqrtPriceX96 = sqrt(token1/token0) * 2^96
         uint160 sqrtPriceX96 = _getCurrentSqrtPriceX96();
 
-        // price = (sqrtPriceX96 / 2^96)^2
-        // For token0IsQuote: price = token1/token0 = Base/Quote
-        // For !token0IsQuote: price = token0/token1 = Base/Quote (after inversion)
-
-        // Simplified calculation
-        uint256 price;
+        // We want quoteAmountRaw given baseAmountRaw, respecting pool token ordering.
+        // token0IsQuote:
+        //   token0 = quote, token1 = base, so token1/token0 = base/quote => quote/base = 1/(base/quote)
+        // !token0IsQuote:
+        //   token0 = base,  token1 = quote, so token1/token0 = quote/base => quote/base directly
         if (token0IsQuote) {
-            // sqrtPrice = sqrt(token1/token0) = sqrt(Base/Quote)
-            // price = Base/Quote
-            // quoteAmount = baseAmount / price = baseAmount * Quote/Base
-            price = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) >> 192;
-            if (price == 0) return 0;
-            return (baseAmount << 96) / price;
+            // quote/base = (2^192) / (sqrtPriceX96^2)
+            // quoteAmount = baseAmount * quote/base
+            // = baseAmount * 2^192 / sqrtPriceX96^2
+            //
+            // Compute sqrtPriceX96^2 / 2^192 as a Q0 rational via FullMath without overflow:
+            // quoteAmount = FullMath.mulDiv(baseAmount, 2^192, sqrtPriceX96^2)
+            // But sqrtPriceX96^2 may overflow 256; avoid squaring directly:
+            //
+            // Use: baseAmount * 2^192 / (sqrtPrice^2)
+            //     = baseAmount * 2^96 / sqrtPrice  * 2^96 / sqrtPrice
+            // Do it in two mulDiv steps to avoid overflow.
+            uint256 q = FullMath.mulDiv(baseAmount, uint256(1) << 96, uint256(sqrtPriceX96));
+            return FullMath.mulDiv(q, uint256(1) << 96, uint256(sqrtPriceX96));
         } else {
-            // sqrtPrice = sqrt(token0/token1) = sqrt(Base/Quote)
-            // price = Base/Quote
-            price = (uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) >> 192;
-            return (baseAmount * price) >> 96;
+            // quote/base = sqrtPriceX96^2 / 2^192
+            // quoteAmount = baseAmount * sqrtPriceX96^2 / 2^192
+            //
+            // Avoid squaring directly by splitting:
+            // baseAmount * sqrtPrice^2 / 2^192
+            // = baseAmount * sqrtPrice / 2^96 * sqrtPrice / 2^96
+            uint256 q = FullMath.mulDiv(baseAmount, uint256(sqrtPriceX96), uint256(1) << 96);
+            return FullMath.mulDiv(q, uint256(sqrtPriceX96), uint256(1) << 96);
         }
     }
 
@@ -1257,96 +1568,10 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
         return sqrtPriceX96;
     }
 
-    function _getAmountsForLiquidity(
-        uint160 sqrtRatioX96,
-        int24 tickLower_,
-        int24 tickUpper_,
-        uint128 liquidity
-    ) internal pure returns (uint256 amount0, uint256 amount1) {
-        uint160 sqrtRatioAX96 = _getSqrtRatioAtTick(tickLower_);
-        uint160 sqrtRatioBX96 = _getSqrtRatioAtTick(tickUpper_);
-
-        if (sqrtRatioAX96 > sqrtRatioBX96) {
-            (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
-        }
-
-        if (sqrtRatioX96 <= sqrtRatioAX96) {
-            amount0 = _getAmount0ForLiquidity(sqrtRatioAX96, sqrtRatioBX96, liquidity);
-        } else if (sqrtRatioX96 < sqrtRatioBX96) {
-            amount0 = _getAmount0ForLiquidity(sqrtRatioX96, sqrtRatioBX96, liquidity);
-            amount1 = _getAmount1ForLiquidity(sqrtRatioAX96, sqrtRatioX96, liquidity);
-        } else {
-            amount1 = _getAmount1ForLiquidity(sqrtRatioAX96, sqrtRatioBX96, liquidity);
-        }
-    }
-
-    function _getAmount0ForLiquidity(uint160 sqrtRatioAX96, uint160 sqrtRatioBX96, uint128 liquidity)
-        internal
-        pure
-        returns (uint256)
-    {
-        if (sqrtRatioAX96 > sqrtRatioBX96) {
-            (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
-        }
-        uint256 intermediate = (uint256(liquidity) << 96) / sqrtRatioAX96;
-        return (intermediate * (sqrtRatioBX96 - sqrtRatioAX96)) / sqrtRatioBX96;
-    }
-
-    function _getAmount1ForLiquidity(uint160 sqrtRatioAX96, uint160 sqrtRatioBX96, uint128 liquidity)
-        internal
-        pure
-        returns (uint256)
-    {
-        if (sqrtRatioAX96 > sqrtRatioBX96) {
-            (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
-        }
-        return (uint256(liquidity) * (sqrtRatioBX96 - sqrtRatioAX96)) / (1 << 96);
-    }
-
-    int24 internal constant MIN_TICK = -887272;
-    int24 internal constant MAX_TICK = 887272;
-
-    function _getSqrtRatioAtTick(int24 tick) internal pure returns (uint160 sqrtPriceX96) {
-        unchecked {
-            require(tick >= MIN_TICK && tick <= MAX_TICK, "TICK_OOR");
-
-            uint256 absTick = tick < 0 ? uint256(uint24(-tick)) : uint256(uint24(tick));
-            uint256 ratio = absTick & 0x1 != 0
-                ? 0xfffcb933bd6fad37aa2d162d1a594001
-                : 0x100000000000000000000000000000000;
-
-            if (absTick & 0x2 != 0) ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128;
-            if (absTick & 0x4 != 0) ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128;
-            if (absTick & 0x8 != 0) ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128;
-            if (absTick & 0x10 != 0) ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128;
-            if (absTick & 0x20 != 0) ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128;
-            if (absTick & 0x40 != 0) ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128;
-            if (absTick & 0x80 != 0) ratio = (ratio * 0xfe5dee046a99a2a811c461f1969c3053) >> 128;
-            if (absTick & 0x100 != 0) ratio = (ratio * 0xfcbe86c7900a88aedcffc83b479aa3a4) >> 128;
-            if (absTick & 0x200 != 0) ratio = (ratio * 0xf987a7253ac413176f2b074cf7815e54) >> 128;
-            if (absTick & 0x400 != 0) ratio = (ratio * 0xf3392b0822b70005940c7a398e4b70f3) >> 128;
-            if (absTick & 0x800 != 0) ratio = (ratio * 0xe7159475a2c29b7443b29c7fa6e889d9) >> 128;
-            if (absTick & 0x1000 != 0) ratio = (ratio * 0xd097f3bdfd2022b8845ad8f792aa5825) >> 128;
-            if (absTick & 0x2000 != 0) ratio = (ratio * 0xa9f746462d870fdf8a65dc1f90e061e5) >> 128;
-            if (absTick & 0x4000 != 0) ratio = (ratio * 0x70d869a156d2a1b890bb3df62baf32f7) >> 128;
-            if (absTick & 0x8000 != 0) ratio = (ratio * 0x31be135f97d08fd981231505542fcfa6) >> 128;
-            if (absTick & 0x10000 != 0) ratio = (ratio * 0x9aa508b5b7a84e1c677de54f3e99bc9) >> 128;
-            if (absTick & 0x20000 != 0) ratio = (ratio * 0x5d6af8dedb81196699c329225ee604) >> 128;
-            if (absTick & 0x40000 != 0) ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128;
-            if (absTick & 0x80000 != 0) ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128;
-
-            if (tick > 0) ratio = type(uint256).max / ratio;
-
-            sqrtPriceX96 = uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
-        }
-    }
-
     // ============ Internal - Pool Address ============
 
-    function _computePoolAddress(address token0, address token1, uint24 fee) internal pure returns (address) {
-        // Use the factory from position manager
-        // For now, just read from slot0 of a known pool or use CREATE2
-        // This is a simplified version - in production, compute via CREATE2
+    function _computePoolAddress(address token0, address token1, uint24 fee) internal view returns (address) {
+        // Uniswap V3 pool init code hash (same across all chains for official Uniswap V3)
         bytes32 POOL_INIT_CODE_HASH = 0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54;
 
         // Ensure token0 < token1
@@ -1356,12 +1581,9 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard {
 
         bytes32 salt = keccak256(abi.encode(token0, token1, fee));
 
-        // Get factory address (hardcoded for Uniswap V3)
-        address factory = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
-
         return address(uint160(uint256(keccak256(abi.encodePacked(
             bytes1(0xff),
-            factory,
+            address(uniswapV3Factory),
             salt,
             POOL_INIT_CODE_HASH
         )))));
