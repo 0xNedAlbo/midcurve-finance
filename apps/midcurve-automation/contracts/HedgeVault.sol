@@ -759,7 +759,8 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
 
         if (state == State.IN_POSITION) {
             // Swap portion to base and increase liquidity
-            (baseReceived, liquidityAdded) = _allocateToPosition(amount, minAmountIn, swapData);
+            // Note: baseRefund/quoteRefund currently ignored - skeleton doesn't do swaps yet
+            (liquidityAdded, , ) = _allocateToPosition(amount, minAmountIn, swapData);
         } else if (state == State.OUT_OF_POSITION_BASE) {
             // Swap all quote → base
             baseReceived = _sellToken(asset, baseToken, amount, minAmountIn, swapData);
@@ -1064,67 +1065,214 @@ contract HedgeVault is IHedgeVault, ERC4626Base, ReentrancyGuard, AllowlistBase,
         _safeApprove(token1, address(positionManager), 0);
     }
 
-    /// @dev Allocate quote assets to the current LP position
-    /// @param quoteAmount Amount of quote tokens to allocate
-    /// @param minAmountIn Minimum output for swap (slippage protection)
+    /// @dev Allocate exactly `quoteAmount` (already held by the vault) into an existing Uniswap V3 position.
+    ///      Swap is modeled as **exact-out**: we request a target `baseOut`, and cap quote spent by `maxQuoteIn`.
+    ///
+    ///      This skeleton:
+    ///      - DOES NOT use vault balances as "available amounts" (fees may be mixed in).
+    ///      - Treats `quoteAmount` as the full budget for *this* allocation.
+    ///      - Computes an *ideal* split at current pool price to derive:
+    ///          (a) maxQuoteIn to swap
+    ///          (b) target baseOut to buy (exact-out)
+    ///      - After swap (omitted), uses actual deltas (quoteSpent, baseReceived) to compute max addable liquidity,
+    ///        calls `increaseLiquidity`, and returns leftovers as refunds (baseRefund, quoteRefund).
+    ///
+    /// @param quoteAmount FULL budget to allocate (swap + add liquidity)
+    /// @param minAmountIn Minimum base tokens to receive from swap (slippage protection)
     /// @param swapData Paraswap calldata for quote → base swap
-    /// @return baseReceived Amount of base tokens received from swap
     /// @return liquidityAdded Amount of liquidity added to position
+    /// @return baseRefund Unused base tokens returned to caller
+    /// @return quoteRefund Unused quote tokens returned to caller
     function _allocateToPosition(
         uint256 quoteAmount,
         uint256 minAmountIn,
         bytes calldata swapData
-    ) internal returns (uint256 baseReceived, uint128 liquidityAdded) {
-        // Swap portion of quote → base (approximately half for balanced position)
-        // The exact ratio depends on current price vs tick range, but Uniswap will
-        // return unused tokens which we handle as leftovers
-        if (swapData.length > 0) {
-            baseReceived = _sellToken(asset, baseToken, quoteAmount / 2, minAmountIn, swapData);
+    ) internal returns (uint128 liquidityAdded, uint256 baseRefund, uint256 quoteRefund) {
+        // Early return if nothing to allocate
+        if (quoteAmount == 0) {
+            return (0, 0, 0);
         }
 
-        // Get available balances for both tokens
+        // Determine token addresses
         address token0 = token0IsQuote ? asset : baseToken;
         address token1 = token0IsQuote ? baseToken : asset;
 
-        uint256 amount0 = IERC20Minimal(token0).balanceOf(address(this));
-        uint256 amount1 = IERC20Minimal(token1).balanceOf(address(this));
+        // -------------------------
+        // 1) Read pool price + bounds
+        // -------------------------
+        (uint160 sqrtRatioX96, , , , , , ) = IUniswapV3PoolMinimal(pool).slot0();
 
-        // Subtract totalUnclaimedQuoteFees from quote balance (don't use fee reserves)
-        if (token0IsQuote) {
-            amount0 = amount0 > totalUnclaimedQuoteFees ? amount0 - totalUnclaimedQuoteFees : 0;
+        uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(tickLower);
+        uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
+        if (sqrtRatioAX96 > sqrtRatioBX96) (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
+
+        // -------------------------
+        // 2) Compute ideal maxQuoteIn and targetBaseOut (EXACT-OUT swap intent)
+        // -------------------------
+        // maxQuoteInIdeal = how much of quoteAmount we are willing to spend in the swap (cap).
+        // baseOutTargetIdeal = how much base we try to buy for that cap, under constant-price assumption.
+        uint256 maxQuoteInIdeal;
+        uint256 baseOutTargetIdeal;
+
+        if (sqrtRatioX96 <= sqrtRatioAX96) {
+            // Below range: position is token0-only
+            // If quote is token0 -> no swap
+            // If quote is token1 -> we need token0 => swap (ideally) all quote into token0
+            maxQuoteInIdeal = token0IsQuote ? 0 : quoteAmount;
+            baseOutTargetIdeal = UniswapV3Math.quoteToBaseAtPrice(maxQuoteInIdeal, sqrtRatioX96, token0IsQuote);
+
+        } else if (sqrtRatioX96 >= sqrtRatioBX96) {
+            // Above range: position is token1-only
+            // If quote is token1 -> no swap
+            // If quote is token0 -> we need token1 => swap all quote into token1
+            maxQuoteInIdeal = token0IsQuote ? quoteAmount : 0;
+            baseOutTargetIdeal = UniswapV3Math.quoteToBaseAtPrice(maxQuoteInIdeal, sqrtRatioX96, token0IsQuote);
+
         } else {
-            amount1 = amount1 > totalUnclaimedQuoteFees ? amount1 - totalUnclaimedQuoteFees : 0;
+            // In-range: compute ideal swap cap to get roughly balanced amounts
+            maxQuoteInIdeal = UniswapV3Math.computeIdealInRangeSwapQuote(
+                quoteAmount,
+                sqrtRatioX96,
+                sqrtRatioAX96,
+                sqrtRatioBX96,
+                token0IsQuote
+            );
+
+            // For exact-out, we also need a target base-out.
+            // We approximate baseOutTarget from constant-price conversion.
+            baseOutTargetIdeal = UniswapV3Math.quoteToBaseAtPrice(maxQuoteInIdeal, sqrtRatioX96, token0IsQuote);
         }
 
-        if (amount0 == 0 && amount1 == 0) return (baseReceived, 0);
+        // -------------------------
+        // 3) Execute swap EXACT-OUT + measure deltas
+        // -------------------------
+        // quoteAmount is already in the vault and includes *only* what should be allocated.
+        // Therefore, the swap + mint must be constrained to this budget, not to global vault balances.
+        //
+        // We compute what actually happened via balance deltas after the swap.
+        uint256 quoteSpent;
+        uint256 baseReceived;
 
-        // Approve position manager
-        _safeApprove(token0, address(positionManager), amount0);
-        _safeApprove(token1, address(positionManager), amount1);
+        if (swapData.length > 0 && maxQuoteInIdeal > 0) {
+            // Execute swap and measure actual amounts via balance deltas
+            uint256 quoteBefore = IERC20Minimal(asset).balanceOf(address(this));
+            uint256 baseBefore = IERC20Minimal(baseToken).balanceOf(address(this));
 
-        // Increase liquidity in existing position
-        (liquidityAdded, , ) = positionManager.increaseLiquidity(
+            _sellToken(asset, baseToken, maxQuoteInIdeal, minAmountIn, swapData);
+
+            uint256 quoteAfter = IERC20Minimal(asset).balanceOf(address(this));
+            uint256 baseAfter = IERC20Minimal(baseToken).balanceOf(address(this));
+
+            quoteSpent = quoteBefore - quoteAfter;
+            baseReceived = baseAfter - baseBefore;
+        } else {
+            // No swap needed
+            quoteSpent = 0;
+            baseReceived = 0;
+        }
+
+        // Silence unused variable warning for skeleton
+        baseOutTargetIdeal;
+
+        // Budget remainder after swap:
+        // - For exact-out, quoteSpent should be <= maxQuoteInIdeal (and <= quoteAmount).
+        // - If the swap spends LESS than the cap, quoteLeft increases, which is fine;
+        //   the LiquidityAmounts step will take the min side and refund leftovers.
+        uint256 quoteLeft = quoteAmount - quoteSpent;
+
+        // -------------------------
+        // 4) Map budget-derived amounts into token0/token1 for Liquidity math
+        // -------------------------
+        // token0IsQuote:
+        // - true  => quote=token0, base=token1
+        // - false => quote=token1, base=token0
+        uint256 amount0Avail;
+        uint256 amount1Avail;
+
+        if (token0IsQuote) {
+            amount0Avail = quoteLeft;    // token0
+            amount1Avail = baseReceived; // token1
+        } else {
+            amount0Avail = baseReceived; // token0
+            amount1Avail = quoteLeft;    // token1
+        }
+
+        // -------------------------
+        // 5) Compute max-addable liquidity (and corresponding used amounts)
+        // -------------------------
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+
+        if (sqrtRatioX96 <= sqrtRatioAX96) {
+            // token0-only
+            amount0Desired = amount0Avail;
+            amount1Desired = 0;
+
+        } else if (sqrtRatioX96 >= sqrtRatioBX96) {
+            // token1-only
+            amount0Desired = 0;
+            amount1Desired = amount1Avail;
+
+        } else {
+            uint128 L0 = UniswapV3Math.getLiquidityForAmount0(sqrtRatioX96, sqrtRatioBX96, amount0Avail);
+            uint128 L1 = UniswapV3Math.getLiquidityForAmount1(sqrtRatioAX96, sqrtRatioX96, amount1Avail);
+            uint128 L = L0 < L1 ? L0 : L1;
+
+            amount0Desired = UniswapV3Math.getAmount0ForLiquidity(sqrtRatioX96, sqrtRatioBX96, L);
+            amount1Desired = UniswapV3Math.getAmount1ForLiquidity(sqrtRatioAX96, sqrtRatioX96, L);
+        }
+
+        // Early return if nothing to add
+        if (amount0Desired == 0 && amount1Desired == 0) {
+            if (token0IsQuote) {
+                quoteRefund = amount0Avail;
+                baseRefund = amount1Avail;
+            } else {
+                quoteRefund = amount1Avail;
+                baseRefund = amount0Avail;
+            }
+            return (0, baseRefund, quoteRefund);
+        }
+
+        // -------------------------
+        // 6) increaseLiquidity
+        // -------------------------
+        _safeApprove(token0, address(positionManager), amount0Desired);
+        _safeApprove(token1, address(positionManager), amount1Desired);
+
+        uint256 amount0Consumed;
+        uint256 amount1Consumed;
+        (liquidityAdded, amount0Consumed, amount1Consumed) = positionManager.increaseLiquidity(
             INonfungiblePositionManagerMinimal.IncreaseLiquidityParams({
                 tokenId: currentTokenId,
-                amount0Desired: amount0,
-                amount1Desired: amount1,
+                amount0Desired: amount0Desired,
+                amount1Desired: amount1Desired,
                 amount0Min: 0,
                 amount1Min: 0,
                 deadline: block.timestamp
             })
         );
 
-        // Reset approvals
         _safeApprove(token0, address(positionManager), 0);
         _safeApprove(token1, address(positionManager), 0);
 
-        // Handle leftover quote tokens - add to fee accumulator
-        uint256 leftoverQuote = IERC20Minimal(asset).balanceOf(address(this));
-        if (leftoverQuote > totalUnclaimedQuoteFees && totalSupply > 0) {
-            uint256 excessQuote = leftoverQuote - totalUnclaimedQuoteFees;
-            accQuoteFeesPerShare += (excessQuote * 1e18) / totalSupply;
-            totalUnclaimedQuoteFees += excessQuote;
+        // -------------------------
+        // 7) Compute refunds relative to the BUDGET amounts (not global vault balances)
+        // -------------------------
+        uint256 refund0 = amount0Avail > amount0Consumed ? (amount0Avail - amount0Consumed) : 0;
+        uint256 refund1 = amount1Avail > amount1Consumed ? (amount1Avail - amount1Consumed) : 0;
+
+        if (token0IsQuote) {
+            quoteRefund = refund0; // token0
+            baseRefund = refund1;  // token1
+        } else {
+            quoteRefund = refund1; // token1
+            baseRefund = refund0;  // token0
         }
+
+        // NOTE:
+        // Whether you transfer refunds out or keep them internally is vault-accounting specific.
+        // Here we just return them.
     }
 
     // ============ Internal - Swap ============
