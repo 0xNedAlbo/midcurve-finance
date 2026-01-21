@@ -104,6 +104,19 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
     /// @notice Fee debt for token1 per account (scaled by ACC_PRECISION)
     mapping(address => uint256) public feeDebt1;
 
+    // ============ ERC20 Metadata ============
+
+    /// @notice Token name (ERC20)
+    string private _name;
+
+    /// @notice Token symbol (ERC20)
+    string private _symbol;
+
+    // ============ ERC20 Allowances ============
+
+    /// @notice Allowances for transferFrom (ERC20)
+    mapping(address => mapping(address => uint256)) private _allowances;
+
     // ============ Modifiers ============
 
     modifier whenInitialized() {
@@ -113,12 +126,19 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
 
     // ============ Constructor ============
 
-    constructor(address positionManager_, uint256 positionId_) {
+    constructor(
+        address positionManager_,
+        uint256 positionId_,
+        string memory name_,
+        string memory symbol_
+    ) {
         if (positionManager_ == address(0)) revert ZeroAddress();
 
         positionManager = positionManager_;
         positionId = positionId_;
         manager = msg.sender;
+        _name = name_;
+        _symbol = symbol_;
 
         INonfungiblePositionManager pm = INonfungiblePositionManager(
             positionManager_
@@ -167,6 +187,38 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         return _asset1;
     }
 
+    // ============ ERC20 View Functions ============
+
+    /// @notice Returns the name of the token (ERC20)
+    function name() external view virtual returns (string memory) {
+        return _name;
+    }
+
+    /// @notice Returns the symbol of the token (ERC20)
+    function symbol() external view virtual returns (string memory) {
+        return _symbol;
+    }
+
+    /// @notice Returns the number of decimals (ERC20)
+    function decimals() external pure returns (uint8) {
+        return 18;
+    }
+
+    /// @notice Returns total supply of shares (ERC20 totalSupply)
+    function totalSupply() external view returns (uint256) {
+        return totalShares;
+    }
+
+    /// @notice Returns share balance of account (ERC20 balanceOf)
+    function balanceOf(address account) external view returns (uint256) {
+        return shares[account];
+    }
+
+    /// @notice Returns allowance for spender (ERC20)
+    function allowance(address owner, address spender) external view returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
     // ============ Manager Functions ============
 
     function init(uint256 initialShares) public virtual {
@@ -182,10 +234,7 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         );
         initialized = true;
 
-        totalShares = initialShares;
-        shares[msg.sender] = initialShares;
-        feeDebt0[msg.sender] = 0;
-        feeDebt1[msg.sender] = 0;
+        _mint(msg.sender, initialShares);
     }
 
     /// @notice Get the deposit slippage for a shareholder
@@ -285,12 +334,43 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         }
     }
 
-    /// @notice Transfer shares to another address
+    // ============ ERC20 State-Changing Functions ============
+
+    /// @notice Transfer shares to another address (ERC20)
     /// @param to Recipient address
     /// @param amount Amount of shares to transfer
-    function transfer(address to, uint256 amount) external virtual nonReentrant {
+    /// @return True on success
+    function transfer(address to, uint256 amount) external virtual nonReentrant returns (bool) {
         _transfer(msg.sender, to, amount);
+        return true;
     }
+
+    /// @notice Approve spender to transfer shares (ERC20)
+    /// @param spender Address to approve
+    /// @param amount Amount to approve
+    /// @return True on success
+    function approve(address spender, uint256 amount) external virtual returns (bool) {
+        _allowances[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+        return true;
+    }
+
+    /// @notice Transfer shares from one address to another (ERC20)
+    /// @param from Source address
+    /// @param to Destination address
+    /// @param amount Amount to transfer
+    /// @return True on success
+    function transferFrom(address from, address to, uint256 amount) external virtual nonReentrant returns (bool) {
+        uint256 currentAllowance = _allowances[from][msg.sender];
+        if (currentAllowance != type(uint256).max) {
+            require(currentAllowance >= amount, "Insufficient allowance");
+            _allowances[from][msg.sender] = currentAllowance - amount;
+        }
+        _transfer(from, to, amount);
+        return true;
+    }
+
+    // ============ Internal Share Functions ============
 
     /// @dev Internal transfer logic
     /// @param from Sender address
@@ -309,6 +389,40 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         feeDebt1[from] = (accFeePerShare1 * shares[from]) / ACC_PRECISION;
         feeDebt0[to] = (accFeePerShare0 * shares[to]) / ACC_PRECISION;
         feeDebt1[to] = (accFeePerShare1 * shares[to]) / ACC_PRECISION;
+
+        emit Transfer(from, to, amount);
+    }
+
+    /// @dev Mint shares to an account (emits Transfer from address(0))
+    /// @param to Recipient address
+    /// @param amount Amount of shares to mint
+    function _mint(address to, uint256 amount) internal virtual {
+        require(to != address(0), "Mint to zero address");
+
+        totalShares += amount;
+        shares[to] += amount;
+
+        // Add fee debt for new shares
+        feeDebt0[to] += (accFeePerShare0 * amount) / ACC_PRECISION;
+        feeDebt1[to] += (accFeePerShare1 * amount) / ACC_PRECISION;
+
+        emit Transfer(address(0), to, amount);
+    }
+
+    /// @dev Burn shares from an account (emits Transfer to address(0))
+    /// @param from Source address
+    /// @param amount Amount of shares to burn
+    function _burn(address from, uint256 amount) internal virtual {
+        require(shares[from] >= amount, "Insufficient shares");
+
+        shares[from] -= amount;
+        totalShares -= amount;
+
+        // Update fee debt to match remaining shares
+        feeDebt0[from] = (accFeePerShare0 * shares[from]) / ACC_PRECISION;
+        feeDebt1[from] = (accFeePerShare1 * shares[from]) / ACC_PRECISION;
+
+        emit Transfer(from, address(0), amount);
     }
 
     // ============ Accounting ============
@@ -519,13 +633,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
             (uint256(liquidityAdded) * totalShares) /
             uint256(liquidityBefore);
 
-        // Update share accounting
-        totalShares += sharesOut;
-        shares[receiver] += sharesOut;
-
-        // Add fee debt for new shares (preserves pending fees from existing shares)
-        feeDebt0[receiver] += (accFeePerShare0 * sharesOut) / ACC_PRECISION;
-        feeDebt1[receiver] += (accFeePerShare1 * sharesOut) / ACC_PRECISION;
+        // Mint shares to receiver
+        _mint(receiver, sharesOut);
 
         // Return unused tokens
         uint256 refund0 = amount0 - used0;
@@ -613,11 +722,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         IERC20(_asset0).safeApprove(positionManager, 0);
         IERC20(_asset1).safeApprove(positionManager, 0);
 
-        // Issue exact requested shares
-        totalShares += sharesToMint;
-        shares[receiver] += sharesToMint;
-        feeDebt0[receiver] += (accFeePerShare0 * sharesToMint) / ACC_PRECISION;
-        feeDebt1[receiver] += (accFeePerShare1 * sharesToMint) / ACC_PRECISION;
+        // Mint exact requested shares
+        _mint(receiver, sharesToMint);
 
         // Refund unused
         uint256 refund0 = amount0WithBuffer - used0;
@@ -871,12 +977,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
             amount1Min
         );
 
-        // ===== STEP 5: Burn shares and update fee debt =====
-        shares[owner] -= sharesBurned;
-        totalShares -= sharesBurned;
-        // Update fee debt: reset to match remaining shares
-        feeDebt0[owner] = (accFeePerShare0 * shares[owner]) / ACC_PRECISION;
-        feeDebt1[owner] = (accFeePerShare1 * shares[owner]) / ACC_PRECISION;
+        // ===== STEP 5: Burn shares =====
+        _burn(owner, sharesBurned);
 
         // ===== STEP 6: Transfer assets =====
         // Transfer pending fees to receiver
@@ -959,11 +1061,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
             amount1Min
         );
 
-        // ===== STEP 5: Burn shares and update fee debt =====
-        shares[owner] -= sharesToRedeem;
-        totalShares -= sharesToRedeem;
-        feeDebt0[owner] = (accFeePerShare0 * shares[owner]) / ACC_PRECISION;
-        feeDebt1[owner] = (accFeePerShare1 * shares[owner]) / ACC_PRECISION;
+        // ===== STEP 5: Burn shares =====
+        _burn(owner, sharesToRedeem);
 
         // ===== STEP 6: Transfer assets =====
         // Transfer pending fees to receiver

@@ -94,8 +94,10 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         address positionManager_,
         uint256 positionId_,
         address operator_,
-        address augustusRegistry_
-    ) UniswapV3PositionVault(positionManager_, positionId_) ParaswapHelper(augustusRegistry_) {
+        address augustusRegistry_,
+        string memory name_,
+        string memory symbol_
+    ) UniswapV3PositionVault(positionManager_, positionId_, name_, symbol_) ParaswapHelper(augustusRegistry_) {
         if (operator_ == address(0)) revert ZeroAddress();
         operator = operator_;
     }
@@ -155,13 +157,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         // Calculate shares: newShares = amount0 * totalShares / balanceBefore
         sharesOut = (amount0 * totalShares) / balanceBefore;
 
-        // Update share accounting
-        totalShares += sharesOut;
-        shares[receiver] += sharesOut;
-
-        // Add fee debt for new shares (preserves pending fees from existing shares)
-        feeDebt0[receiver] += (accFeePerShare0 * sharesOut) / ACC_PRECISION;
-        feeDebt1[receiver] += (accFeePerShare1 * sharesOut) / ACC_PRECISION;
+        // Mint shares to receiver
+        _mint(receiver, sharesOut);
     }
 
     function _depositInAsset1(
@@ -179,13 +176,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         // Calculate shares: newShares = amount1 * totalShares / balanceBefore
         sharesOut = (amount1 * totalShares) / balanceBefore;
 
-        // Update share accounting
-        totalShares += sharesOut;
-        shares[receiver] += sharesOut;
-
-        // Add fee debt for new shares
-        feeDebt0[receiver] += (accFeePerShare0 * sharesOut) / ACC_PRECISION;
-        feeDebt1[receiver] += (accFeePerShare1 * sharesOut) / ACC_PRECISION;
+        // Mint shares to receiver
+        _mint(receiver, sharesOut);
     }
 
     // ============ Internal Mint Helpers (Asset-Only States) ============
@@ -199,10 +191,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
 
         IERC20(_asset0).safeTransferFrom(msg.sender, address(this), amount0);
 
-        totalShares += sharesToMint;
-        shares[receiver] += sharesToMint;
-        feeDebt0[receiver] += (accFeePerShare0 * sharesToMint) / ACC_PRECISION;
-        feeDebt1[receiver] += (accFeePerShare1 * sharesToMint) / ACC_PRECISION;
+        _mint(receiver, sharesToMint);
     }
 
     function _mintInAsset1(
@@ -214,10 +203,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
 
         IERC20(_asset1).safeTransferFrom(msg.sender, address(this), amount1);
 
-        totalShares += sharesToMint;
-        shares[receiver] += sharesToMint;
-        feeDebt0[receiver] += (accFeePerShare0 * sharesToMint) / ACC_PRECISION;
-        feeDebt1[receiver] += (accFeePerShare1 * sharesToMint) / ACC_PRECISION;
+        _mint(receiver, sharesToMint);
     }
 
     // ============ Internal Preview Helpers (Asset-Only States) ============
@@ -300,10 +286,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         (uint256 balance, ) = _getVaultBalances(); // Excludes reserved fees
         sharesBurned = (amount0 * totalShares) / balance;
 
-        require(shares[owner] >= sharesBurned, "Insufficient shares");
-
-        shares[owner] -= sharesBurned;
-        totalShares -= sharesBurned;
+        _burn(owner, sharesBurned);
 
         IERC20(_asset0).safeTransfer(receiver, amount0);
     }
@@ -316,10 +299,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         (, uint256 balance) = _getVaultBalances(); // Excludes reserved fees
         sharesBurned = (amount1 * totalShares) / balance;
 
-        require(shares[owner] >= sharesBurned, "Insufficient shares");
-
-        shares[owner] -= sharesBurned;
-        totalShares -= sharesBurned;
+        _burn(owner, sharesBurned);
 
         IERC20(_asset1).safeTransfer(receiver, amount1);
     }
@@ -336,8 +316,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         (uint256 balance, ) = _getVaultBalances();
         amount0 = (sharesToRedeem * balance) / totalShares;
 
-        shares[owner] -= sharesToRedeem;
-        totalShares -= sharesToRedeem;
+        _burn(owner, sharesToRedeem);
 
         IERC20(_asset0).safeTransfer(receiver, amount0);
     }
@@ -352,8 +331,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         (, uint256 balance) = _getVaultBalances();
         amount1 = (sharesToRedeem * balance) / totalShares;
 
-        shares[owner] -= sharesToRedeem;
-        totalShares -= sharesToRedeem;
+        _burn(owner, sharesToRedeem);
 
         IERC20(_asset1).safeTransfer(receiver, amount1);
     }

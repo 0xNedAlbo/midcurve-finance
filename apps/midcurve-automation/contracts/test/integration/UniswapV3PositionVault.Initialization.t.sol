@@ -39,7 +39,7 @@ contract UniswapV3PositionVaultInitializationTest is UniswapV3PositionVaultInteg
 
     function test_constructor_revertsOnZeroAddress() public {
         vm.expectRevert(UniswapV3PositionVault.ZeroAddress.selector);
-        new UniswapV3PositionVault(address(0), positionId);
+        new UniswapV3PositionVault(address(0), positionId, "Test Vault", "TVAULT");
     }
 
     // ============ Init Tests ============
@@ -157,7 +157,7 @@ contract UniswapV3PositionVaultInitializationTest is UniswapV3PositionVaultInteg
         );
 
         // Deploy vault for empty position
-        UniswapV3PositionVault emptyVault = new UniswapV3PositionVault(NFPM, newPositionId);
+        UniswapV3PositionVault emptyVault = new UniswapV3PositionVault(NFPM, newPositionId, "Test Vault", "TVAULT");
 
         // Try to init - should fail with EmptyPosition
         IERC721(NFPM).approve(address(emptyVault), newPositionId);

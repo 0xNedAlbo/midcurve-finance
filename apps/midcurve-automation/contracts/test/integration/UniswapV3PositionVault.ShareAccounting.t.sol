@@ -34,7 +34,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
     function test_previewDeposit_returnsZeroBeforeInit() public {
         // Deploy new uninitialized vault
         vm.prank(manager);
-        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId);
+        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId, "Test Vault", "TVAULT");
 
         (uint256 amount0, uint256 amount1) = _getDepositAmounts(1 ether, 3000 * 1e6);
         uint256 preview = uninitVault.previewDeposit(amount0, amount1);
@@ -69,7 +69,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
 
     function test_previewMint_returnsZeroBeforeInit() public {
         vm.prank(manager);
-        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId);
+        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId, "Test Vault", "TVAULT");
 
         (uint256 amount0, uint256 amount1) = uninitVault.previewMint(1e18);
 
@@ -101,7 +101,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
 
     function test_previewWithdraw_returnsZeroBeforeInit() public {
         vm.prank(manager);
-        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId);
+        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId, "Test Vault", "TVAULT");
 
         (uint256 amount0, uint256 amount1) = _getDepositAmounts(1 ether, 3000 * 1e6);
         uint256 preview = uninitVault.previewWithdraw(amount0, amount1);
@@ -128,7 +128,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
 
     function test_previewRedeem_returnsZeroBeforeInit() public {
         vm.prank(manager);
-        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId);
+        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId, "Test Vault", "TVAULT");
 
         (uint256 amount0, uint256 amount1) = uninitVault.previewRedeem(1e18);
 

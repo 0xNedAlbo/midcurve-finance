@@ -117,7 +117,7 @@ abstract contract UniswapV3PositionVaultIntegrationBase is Test {
 
         // Deploy vault (but don't initialize - tests control this)
         vm.prank(manager);
-        vault = new UniswapV3PositionVault(NFPM, positionId);
+        vault = new UniswapV3PositionVault(NFPM, positionId, "Test Vault", "TVAULT");
     }
 
     // ============ Internal Setup Helpers ============

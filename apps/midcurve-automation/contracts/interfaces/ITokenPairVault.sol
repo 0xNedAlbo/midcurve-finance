@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {IERC20} from "./IERC20.sol";
+
 /**
  * @title ITokenPairVault
  * @notice Interface for a dual-asset vault, similar to ERC4626 but with two assets
  * @dev Manages shares backed by a pair of tokens (asset0 and asset1)
+ *      Shares are ERC20 compliant tokens.
  *
  * Key differences from ERC4626:
  * - Two assets instead of one (asset0, asset1)
  * - All asset-related functions use (amount0, amount1) tuples
  * - Deposit/withdraw operations require both token amounts
  */
-interface ITokenPairVault {
+interface ITokenPairVault is IERC20 {
     // ============ Events ============
 
     /**

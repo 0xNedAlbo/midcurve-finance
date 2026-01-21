@@ -34,8 +34,10 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
         address positionManager_,
         uint256 positionId_,
         address operator_,
-        address augustusRegistry_
-    ) HedgeVault(positionManager_, positionId_, operator_, augustusRegistry_) {
+        address augustusRegistry_,
+        string memory name_,
+        string memory symbol_
+    ) HedgeVault(positionManager_, positionId_, operator_, augustusRegistry_, name_, symbol_) {
         // Enable allowlist by default
         _allowlistEnabled = true;
         // Add manager to allowlist
@@ -103,9 +105,11 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
     /// @dev If allowlist is enabled, recipient must be allowlisted
     /// @param to Recipient address
     /// @param amount Amount of shares to transfer
-    function transfer(address to, uint256 amount) external override nonReentrant {
+    /// @return True if transfer succeeded
+    function transfer(address to, uint256 amount) external override nonReentrant returns (bool) {
         _requireAllowlisted(to);
         _transfer(msg.sender, to, amount);
+        return true;
     }
 
     // ============ Internal Helpers ============

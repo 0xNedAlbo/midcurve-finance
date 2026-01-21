@@ -91,7 +91,7 @@ contract UniswapV3PositionVaultDepositWithdrawTest is UniswapV3PositionVaultInte
     function test_deposit_revertsWhenNotInitialized() public {
         // Deploy new vault without initializing
         vm.prank(manager);
-        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId);
+        UniswapV3PositionVault uninitVault = new UniswapV3PositionVault(NFPM, positionId, "Test Vault", "TVAULT");
 
         _fundAccountWithTokens(alice, 1 ether, 3000 * 1e6);
 
