@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Test, console} from "forge-std/Test.sol";
 import {UniswapV3PositionVaultIntegrationBase} from "./UniswapV3PositionVault.Base.t.sol";
-import {UniswapV3PositionVault} from "../../UniswapV3PositionVault.sol";
-import {INonfungiblePositionManager} from "../../interfaces/INonfungiblePositionManager.sol";
 import {IERC20} from "../../interfaces/IERC20.sol";
 
 /// @title Fee Distribution Integration Tests for UniswapV3PositionVault
@@ -73,7 +70,7 @@ contract UniswapV3PositionVaultFeeDistributionTest is UniswapV3PositionVaultInte
         // Manager is sole shareholder, should get 100% of fees
         // First call collectFees to update accumulators
         vm.prank(manager);
-        (uint256 collected0, uint256 collected1) = vault.collectFees();
+        vault.collectFees();
 
         // After collection, pending should be 0
         (uint256 pending0, uint256 pending1) = vault.pendingFees(manager);
@@ -134,17 +131,16 @@ contract UniswapV3PositionVaultFeeDistributionTest is UniswapV3PositionVaultInte
 
         uint256 aliceShares = vault.shares(alice);
         uint256 managerShares = vault.shares(manager);
-        uint256 totalShares = vault.totalShares();
 
         // Generate fees
         _generateFees(3, 10000 * 1e6);
 
         // Both collect fees
         vm.prank(manager);
-        (uint256 managerFee0, uint256 managerFee1) = vault.collectFees();
+        (uint256 managerFee0,) = vault.collectFees();
 
         vm.prank(alice);
-        (uint256 aliceFee0, uint256 aliceFee1) = vault.collectFees();
+        (uint256 aliceFee0,) = vault.collectFees();
 
         // Fees should be proportional to share ownership
         if (managerFee0 > 0 && aliceFee0 > 0) {

@@ -16,6 +16,13 @@ line_length = 120
 tab_width = 4
 bracket_spacing = true
 
+[lint]
+# Enable linting during build (show same warnings as IDE)
+lint_on_build = true
+
+# Severity threshold - show all issues including info-level
+severity = ["high", "med", "low", "info"]
+
 [etherscan]
 arbitrum = { key = "${ETHERSCAN_API_KEY}" }
 base = { key = "${ETHERSCAN_API_KEY}" }
