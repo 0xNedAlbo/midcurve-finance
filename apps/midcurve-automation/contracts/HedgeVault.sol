@@ -509,7 +509,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         uint256 amount0,
         uint256 amount1,
         address receiver
-    ) external override nonReentrant whenNotPaused returns (uint256 sharesOut) {
+    ) external virtual override nonReentrant whenNotPaused returns (uint256 sharesOut) {
         if (
             currentState == VaultState.UNINITIALIZED ||
             currentState == VaultState.CLOSED
@@ -531,6 +531,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         address receiver
     )
         external
+        virtual
         override
         nonReentrant
         whenNotPaused
@@ -560,6 +561,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         address owner
     )
         external
+        virtual
         override
         nonReentrant
         whenNotPaused
@@ -595,6 +597,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         address owner
     )
         external
+        virtual
         override
         nonReentrant
         whenNotPaused

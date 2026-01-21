@@ -285,6 +285,32 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         }
     }
 
+    /// @notice Transfer shares to another address
+    /// @param to Recipient address
+    /// @param amount Amount of shares to transfer
+    function transfer(address to, uint256 amount) external virtual nonReentrant {
+        _transfer(msg.sender, to, amount);
+    }
+
+    /// @dev Internal transfer logic
+    /// @param from Sender address
+    /// @param to Recipient address
+    /// @param amount Amount of shares to transfer
+    function _transfer(address from, address to, uint256 amount) internal virtual {
+        require(to != address(0), "Transfer to zero address");
+        require(shares[from] >= amount, "Insufficient shares");
+
+        // Update share balances
+        shares[from] -= amount;
+        shares[to] += amount;
+
+        // Update fee debts to match new share balances
+        feeDebt0[from] = (accFeePerShare0 * shares[from]) / ACC_PRECISION;
+        feeDebt1[from] = (accFeePerShare1 * shares[from]) / ACC_PRECISION;
+        feeDebt0[to] = (accFeePerShare0 * shares[to]) / ACC_PRECISION;
+        feeDebt1[to] = (accFeePerShare1 * shares[to]) / ACC_PRECISION;
+    }
+
     // ============ Accounting ============
 
     function totalAssets()
