@@ -21,7 +21,11 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
     // ============ Errors ============
 
     error InvalidTokenPair();
-    error VaultBalanceDecreased(address token, uint256 expected, uint256 actual);
+    error VaultBalanceDecreased(
+        address token,
+        uint256 expected,
+        uint256 actual
+    );
 
     // ============ Events ============
 
@@ -57,7 +61,16 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
         address augustusRegistry_,
         string memory name_,
         string memory symbol_
-    ) HedgeVault(positionManager_, positionId_, operator_, augustusRegistry_, name_, symbol_) {
+    )
+        HedgeVault(
+            positionManager_,
+            positionId_,
+            operator_,
+            augustusRegistry_,
+            name_,
+            symbol_
+        )
+    {
         // Enable allowlist by default
         _allowlistEnabled = true;
         // Add manager to allowlist
@@ -94,7 +107,9 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
 
     /// @notice Remove addresses from the allowlist
     /// @param accounts Addresses to remove
-    function removeFromAllowlist(address[] calldata accounts) external onlyManager {
+    function removeFromAllowlist(
+        address[] calldata accounts
+    ) external onlyManager {
         _removeFromAllowlist(accounts);
     }
 
@@ -116,7 +131,13 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
     function mint(
         uint256 sharesToMint,
         address receiver
-    ) external override nonReentrant whenNotPaused returns (uint256 amount0, uint256 amount1) {
+    )
+        external
+        override
+        nonReentrant
+        whenNotPaused
+        returns (uint256 amount0, uint256 amount1)
+    {
         _requireAllowlisted(receiver);
         (amount0, amount1) = _mint(sharesToMint, receiver);
     }
@@ -126,7 +147,10 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
     /// @param to Recipient address
     /// @param amount Amount of shares to transfer
     /// @return True if transfer succeeded
-    function transfer(address to, uint256 amount) external override nonReentrant returns (bool) {
+    function transfer(
+        address to,
+        uint256 amount
+    ) external override nonReentrant returns (bool) {
         _requireAllowlisted(to);
         _transfer(msg.sender, to, amount);
         return true;
@@ -227,7 +251,11 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
         if (sellToken == _asset0) {
             // Selling asset0 → buying asset1
             if (totalAfter1 < totalBefore1) {
-                revert VaultBalanceDecreased(_asset1, totalBefore1, totalAfter1);
+                revert VaultBalanceDecreased(
+                    _asset1,
+                    totalBefore1,
+                    totalAfter1
+                );
             }
             if (totalAfter0 < totalBefore0 - sellAmount) {
                 revert VaultBalanceDecreased(
@@ -239,7 +267,11 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
         } else {
             // Selling asset1 → buying asset0
             if (totalAfter0 < totalBefore0) {
-                revert VaultBalanceDecreased(_asset0, totalBefore0, totalAfter0);
+                revert VaultBalanceDecreased(
+                    _asset0,
+                    totalBefore0,
+                    totalAfter0
+                );
             }
             if (totalAfter1 < totalBefore1 - sellAmount) {
                 revert VaultBalanceDecreased(
@@ -250,7 +282,13 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
             }
         }
 
-        emit TokenSold(msg.sender, sellToken, buyToken, sellAmount, amountReceived);
+        emit TokenSold(
+            msg.sender,
+            sellToken,
+            buyToken,
+            sellAmount,
+            amountReceived
+        );
     }
 
     /// @notice Buy exact amount of a token via Paraswap (for multicall UX)
@@ -300,7 +338,11 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
         if (sellToken == _asset0) {
             // Selling asset0 → buying asset1
             if (totalAfter1 < totalBefore1) {
-                revert VaultBalanceDecreased(_asset1, totalBefore1, totalAfter1);
+                revert VaultBalanceDecreased(
+                    _asset1,
+                    totalBefore1,
+                    totalAfter1
+                );
             }
             if (totalAfter0 < totalBefore0 - amountSold) {
                 revert VaultBalanceDecreased(
@@ -312,7 +354,11 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
         } else {
             // Selling asset1 → buying asset0
             if (totalAfter0 < totalBefore0) {
-                revert VaultBalanceDecreased(_asset0, totalBefore0, totalAfter0);
+                revert VaultBalanceDecreased(
+                    _asset0,
+                    totalBefore0,
+                    totalAfter0
+                );
             }
             if (totalAfter1 < totalBefore1 - amountSold) {
                 revert VaultBalanceDecreased(
@@ -323,6 +369,12 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
             }
         }
 
-        emit TokenBought(msg.sender, buyToken, sellToken, buyAmount, amountSold);
+        emit TokenBought(
+            msg.sender,
+            buyToken,
+            sellToken,
+            buyAmount,
+            amountSold
+        );
     }
 }
