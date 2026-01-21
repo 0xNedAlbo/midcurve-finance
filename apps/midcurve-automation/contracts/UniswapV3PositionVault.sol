@@ -105,11 +105,6 @@ contract UniswapV3PositionVault is ITokenPairVault {
 
     // ============ Modifiers ============
 
-    modifier onlyManager() {
-        if (msg.sender != manager) revert Unauthorized();
-        _;
-    }
-
     modifier whenInitialized() {
         if (!initialized) revert NotInitialized();
         _;
@@ -124,7 +119,9 @@ contract UniswapV3PositionVault is ITokenPairVault {
         positionId = positionId_;
         manager = msg.sender;
 
-        INonfungiblePositionManager pm = INonfungiblePositionManager(positionManager_);
+        INonfungiblePositionManager pm = INonfungiblePositionManager(
+            positionManager_
+        );
 
         address factory_ = pm.factory();
         if (factory_ == address(0)) revert ZeroAddress();
@@ -150,7 +147,11 @@ contract UniswapV3PositionVault is ITokenPairVault {
         tickLower = tickLower_;
         tickUpper = tickUpper_;
 
-        address pool_ = IUniswapV3Factory(factory_).getPool(token0, token1, fee);
+        address pool_ = IUniswapV3Factory(factory_).getPool(
+            token0,
+            token1,
+            fee
+        );
         if (pool_ == address(0)) revert ZeroAddress();
         pool = pool_;
     }
@@ -173,7 +174,11 @@ contract UniswapV3PositionVault is ITokenPairVault {
         (uint256 amount0, uint256 amount1) = _getPositionAmounts();
         if (amount0 == 0 && amount1 == 0) revert EmptyPosition();
 
-        INonfungiblePositionManager(positionManager).transferFrom(msg.sender, address(this), positionId);
+        INonfungiblePositionManager(positionManager).transferFrom(
+            msg.sender,
+            address(this),
+            positionId
+        );
         initialized = true;
 
         totalShares = initialShares;
@@ -185,7 +190,9 @@ contract UniswapV3PositionVault is ITokenPairVault {
     /// @notice Get the deposit slippage for a shareholder
     /// @param shareholder Address to check
     /// @return slippageBps The effective slippage in basis points
-    function getDepositSlippageBps(address shareholder) public view returns (uint256 slippageBps) {
+    function getDepositSlippageBps(
+        address shareholder
+    ) public view returns (uint256 slippageBps) {
         slippageBps = _shareholderDepositSlippageBps[shareholder];
         if (slippageBps == 0) {
             slippageBps = DEFAULT_DEPOSIT_SLIPPAGE_BPS;
@@ -202,7 +209,9 @@ contract UniswapV3PositionVault is ITokenPairVault {
     /// @notice Get the withdrawal slippage for a shareholder
     /// @param shareholder Address to check
     /// @return slippageBps The effective slippage in basis points
-    function getWithdrawSlippageBps(address shareholder) public view returns (uint256 slippageBps) {
+    function getWithdrawSlippageBps(
+        address shareholder
+    ) public view returns (uint256 slippageBps) {
         slippageBps = _shareholderWithdrawSlippageBps[shareholder];
         if (slippageBps == 0) {
             slippageBps = DEFAULT_WITHDRAW_SLIPPAGE_BPS;
@@ -222,18 +231,28 @@ contract UniswapV3PositionVault is ITokenPairVault {
     /// @param account The account to check
     /// @return pending0 Pending token0 fees
     /// @return pending1 Pending token1 fees
-    function pendingFees(address account) external view returns (uint256 pending0, uint256 pending1) {
+    function pendingFees(
+        address account
+    ) external view returns (uint256 pending0, uint256 pending1) {
         uint256 userShares = shares[account];
         if (userShares > 0) {
-            pending0 = (accFeePerShare0 * userShares / ACC_PRECISION) - feeDebt0[account];
-            pending1 = (accFeePerShare1 * userShares / ACC_PRECISION) - feeDebt1[account];
+            pending0 =
+                ((accFeePerShare0 * userShares) / ACC_PRECISION) -
+                feeDebt0[account];
+            pending1 =
+                ((accFeePerShare1 * userShares) / ACC_PRECISION) -
+                feeDebt1[account];
         }
     }
 
     /// @notice Collect fees for the caller
     /// @return collected0 Amount of token0 fees collected
     /// @return collected1 Amount of token1 fees collected
-    function collectFees() external virtual returns (uint256 collected0, uint256 collected1) {
+    function collectFees()
+        external
+        virtual
+        returns (uint256 collected0, uint256 collected1)
+    {
         uint256 userShares = shares[msg.sender];
         require(userShares > 0, "No shares");
 
@@ -244,12 +263,16 @@ contract UniswapV3PositionVault is ITokenPairVault {
         _updateFeeAccumulators(positionFees0, positionFees1);
 
         // Calculate user's pending fees
-        collected0 = (accFeePerShare0 * userShares / ACC_PRECISION) - feeDebt0[msg.sender];
-        collected1 = (accFeePerShare1 * userShares / ACC_PRECISION) - feeDebt1[msg.sender];
+        collected0 =
+            ((accFeePerShare0 * userShares) / ACC_PRECISION) -
+            feeDebt0[msg.sender];
+        collected1 =
+            ((accFeePerShare1 * userShares) / ACC_PRECISION) -
+            feeDebt1[msg.sender];
 
         // Update user's fee debt
-        feeDebt0[msg.sender] = accFeePerShare0 * userShares / ACC_PRECISION;
-        feeDebt1[msg.sender] = accFeePerShare1 * userShares / ACC_PRECISION;
+        feeDebt0[msg.sender] = (accFeePerShare0 * userShares) / ACC_PRECISION;
+        feeDebt1[msg.sender] = (accFeePerShare1 * userShares) / ACC_PRECISION;
 
         // Transfer fees to user
         if (collected0 > 0) {
@@ -273,14 +296,32 @@ contract UniswapV3PositionVault is ITokenPairVault {
         amount1 += balance1;
     }
 
-    function _getPositionAmounts() internal view returns (uint256 amount0, uint256 amount1) {
+    function _getPositionAmounts()
+        internal
+        view
+        returns (uint256 amount0, uint256 amount1)
+    {
         // Get liquidity from position (may fail if position was burned)
-        try INonfungiblePositionManager(positionManager).positions(positionId) returns (
-            uint96, address, address, address, uint24, int24, int24, uint128 liquidity, uint256, uint256, uint128, uint128
+        try
+            INonfungiblePositionManager(positionManager).positions(positionId)
+        returns (
+            uint96,
+            address,
+            address,
+            address,
+            uint24,
+            int24,
+            int24,
+            uint128 liquidity,
+            uint256,
+            uint256,
+            uint128,
+            uint128
         ) {
             // Calculate amounts in position if liquidity exists
             if (liquidity > 0) {
-                (uint160 sqrtPriceX96,,,,,, ) = IUniswapV3PoolMinimal(pool).slot0();
+                (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3PoolMinimal(pool)
+                    .slot0();
                 (amount0, amount1) = UniswapV3Math.getAmountsForLiquidity(
                     sqrtPriceX96,
                     tickLower,
@@ -291,7 +332,11 @@ contract UniswapV3PositionVault is ITokenPairVault {
         } catch {}
     }
 
-    function _getVaultBalances() internal view returns (uint256 balance0, uint256 balance1) {
+    function _getVaultBalances()
+        internal
+        view
+        returns (uint256 balance0, uint256 balance1)
+    {
         balance0 = IERC20(_asset0).balanceOf(address(this));
         balance1 = IERC20(_asset1).balanceOf(address(this));
 
@@ -312,18 +357,25 @@ contract UniswapV3PositionVault is ITokenPairVault {
         }
     }
 
-    function _collectPositionFees() internal returns (uint256 collected0, uint256 collected1) {
-        (collected0, collected1) = INonfungiblePositionManager(positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: positionId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
+    function _collectPositionFees()
+        internal
+        returns (uint256 collected0, uint256 collected1)
+    {
+        (collected0, collected1) = INonfungiblePositionManager(positionManager)
+            .collect(
+                INonfungiblePositionManager.CollectParams({
+                    tokenId: positionId,
+                    recipient: address(this),
+                    amount0Max: type(uint128).max,
+                    amount1Max: type(uint128).max
+                })
+            );
     }
 
-    function _updateFeeAccumulators(uint256 collected0, uint256 collected1) internal {
+    function _updateFeeAccumulators(
+        uint256 collected0,
+        uint256 collected1
+    ) internal {
         if (totalShares > 0) {
             accFeePerShare0 += (collected0 * ACC_PRECISION) / totalShares;
             accFeePerShare1 += (collected1 * ACC_PRECISION) / totalShares;
@@ -332,15 +384,42 @@ contract UniswapV3PositionVault is ITokenPairVault {
 
     // ============ Internal Deposit Helper ============
 
-    function _depositInPosition(uint256 amount0, uint256 amount1, address receiver) internal returns (uint256 sharesOut) {
+    function _depositInPosition(
+        uint256 amount0,
+        uint256 amount1,
+        address receiver
+    ) internal returns (uint256 sharesOut) {
         if (amount0 == 0 && amount1 == 0) revert ZeroAmount();
 
         // Transfer tokens from user
-        if (amount0 > 0) IERC20(_asset0).safeTransferFrom(msg.sender, address(this), amount0);
-        if (amount1 > 0) IERC20(_asset1).safeTransferFrom(msg.sender, address(this), amount1);
+        if (amount0 > 0)
+            IERC20(_asset0).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amount0
+            );
+        if (amount1 > 0)
+            IERC20(_asset1).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amount1
+            );
 
         // Get current liquidity before
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
 
         // Approve position manager
         IERC20(_asset0).safeApprove(positionManager, amount0);
@@ -348,35 +427,43 @@ contract UniswapV3PositionVault is ITokenPairVault {
 
         // Calculate min amounts with slippage (use depositor's slippage setting)
         uint256 slippageBps = getDepositSlippageBps(msg.sender);
-        uint256 amount0Min = amount0 * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
-        uint256 amount1Min = amount1 * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
+        uint256 amount0Min = (amount0 * (BPS_DENOMINATOR - slippageBps)) /
+            BPS_DENOMINATOR;
+        uint256 amount1Min = (amount1 * (BPS_DENOMINATOR - slippageBps)) /
+            BPS_DENOMINATOR;
 
         // Increase liquidity
-        (uint128 liquidityAdded, uint256 used0, uint256 used1) = INonfungiblePositionManager(positionManager).increaseLiquidity(
-            INonfungiblePositionManager.IncreaseLiquidityParams({
-                tokenId: positionId,
-                amount0Desired: amount0,
-                amount1Desired: amount1,
-                amount0Min: amount0Min,
-                amount1Min: amount1Min,
-                deadline: block.timestamp
-            })
-        );
+        (
+            uint128 liquidityAdded,
+            uint256 used0,
+            uint256 used1
+        ) = INonfungiblePositionManager(positionManager).increaseLiquidity(
+                INonfungiblePositionManager.IncreaseLiquidityParams({
+                    tokenId: positionId,
+                    amount0Desired: amount0,
+                    amount1Desired: amount1,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: block.timestamp
+                })
+            );
 
         // Reset approvals
         IERC20(_asset0).safeApprove(positionManager, 0);
         IERC20(_asset1).safeApprove(positionManager, 0);
 
         // Calculate shares: newShares = liquidityAdded * totalShares / liquidityBefore
-        sharesOut = uint256(liquidityAdded) * totalShares / uint256(liquidityBefore);
+        sharesOut =
+            (uint256(liquidityAdded) * totalShares) /
+            uint256(liquidityBefore);
 
         // Update share accounting
         totalShares += sharesOut;
         shares[receiver] += sharesOut;
 
         // Add fee debt for new shares (preserves pending fees from existing shares)
-        feeDebt0[receiver] += accFeePerShare0 * sharesOut / ACC_PRECISION;
-        feeDebt1[receiver] += accFeePerShare1 * sharesOut / ACC_PRECISION;
+        feeDebt0[receiver] += (accFeePerShare0 * sharesOut) / ACC_PRECISION;
+        feeDebt1[receiver] += (accFeePerShare1 * sharesOut) / ACC_PRECISION;
 
         // Return unused tokens
         uint256 refund0 = amount0 - used0;
@@ -387,44 +474,78 @@ contract UniswapV3PositionVault is ITokenPairVault {
 
     // ============ Internal Mint Helper ============
 
-    function _mintInPosition(uint256 sharesToMint, address receiver) internal returns (uint256 amount0, uint256 amount1) {
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+    function _mintInPosition(
+        uint256 sharesToMint,
+        address receiver
+    ) internal returns (uint256 amount0, uint256 amount1) {
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
 
         // Calculate target liquidity for exact shares
-        uint128 liquidityRequired = uint128(sharesToMint * uint256(liquidityBefore) / totalShares);
+        uint128 liquidityRequired = uint128(
+            (sharesToMint * uint256(liquidityBefore)) / totalShares
+        );
 
         // Get amounts for that liquidity
-        (uint160 sqrtPriceX96,,,,,, ) = IUniswapV3PoolMinimal(pool).slot0();
-        (uint256 amount0Needed, uint256 amount1Needed) = UniswapV3Math.getAmountsForLiquidity(
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            liquidityRequired
-        );
+        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3PoolMinimal(pool)
+            .slot0();
+        (uint256 amount0Needed, uint256 amount1Needed) = UniswapV3Math
+            .getAmountsForLiquidity(
+                sqrtPriceX96,
+                tickLower,
+                tickUpper,
+                liquidityRequired
+            );
 
         // Add buffer for rounding (use depositor's slippage setting)
         uint256 slippageBps = getDepositSlippageBps(msg.sender);
-        uint256 amount0WithBuffer = amount0Needed * (BPS_DENOMINATOR + slippageBps) / BPS_DENOMINATOR;
-        uint256 amount1WithBuffer = amount1Needed * (BPS_DENOMINATOR + slippageBps) / BPS_DENOMINATOR;
+        uint256 amount0WithBuffer = (amount0Needed *
+            (BPS_DENOMINATOR + slippageBps)) / BPS_DENOMINATOR;
+        uint256 amount1WithBuffer = (amount1Needed *
+            (BPS_DENOMINATOR + slippageBps)) / BPS_DENOMINATOR;
 
         // Transfer buffered amounts
-        if (amount0WithBuffer > 0) IERC20(_asset0).safeTransferFrom(msg.sender, address(this), amount0WithBuffer);
-        if (amount1WithBuffer > 0) IERC20(_asset1).safeTransferFrom(msg.sender, address(this), amount1WithBuffer);
+        if (amount0WithBuffer > 0)
+            IERC20(_asset0).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amount0WithBuffer
+            );
+        if (amount1WithBuffer > 0)
+            IERC20(_asset1).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amount1WithBuffer
+            );
 
         // Approve and increase liquidity
         IERC20(_asset0).safeApprove(positionManager, amount0WithBuffer);
         IERC20(_asset1).safeApprove(positionManager, amount1WithBuffer);
 
-        (, uint256 used0, uint256 used1) = INonfungiblePositionManager(positionManager).increaseLiquidity(
-            INonfungiblePositionManager.IncreaseLiquidityParams({
-                tokenId: positionId,
-                amount0Desired: amount0WithBuffer,
-                amount1Desired: amount1WithBuffer,
-                amount0Min: amount0Needed,
-                amount1Min: amount1Needed,
-                deadline: block.timestamp
-            })
-        );
+        (, uint256 used0, uint256 used1) = INonfungiblePositionManager(
+            positionManager
+        ).increaseLiquidity(
+                INonfungiblePositionManager.IncreaseLiquidityParams({
+                    tokenId: positionId,
+                    amount0Desired: amount0WithBuffer,
+                    amount1Desired: amount1WithBuffer,
+                    amount0Min: amount0Needed,
+                    amount1Min: amount1Needed,
+                    deadline: block.timestamp
+                })
+            );
 
         // Reset approvals
         IERC20(_asset0).safeApprove(positionManager, 0);
@@ -433,8 +554,8 @@ contract UniswapV3PositionVault is ITokenPairVault {
         // Issue exact requested shares
         totalShares += sharesToMint;
         shares[receiver] += sharesToMint;
-        feeDebt0[receiver] += accFeePerShare0 * sharesToMint / ACC_PRECISION;
-        feeDebt1[receiver] += accFeePerShare1 * sharesToMint / ACC_PRECISION;
+        feeDebt0[receiver] += (accFeePerShare0 * sharesToMint) / ACC_PRECISION;
+        feeDebt1[receiver] += (accFeePerShare1 * sharesToMint) / ACC_PRECISION;
 
         // Refund unused
         uint256 refund0 = amount0WithBuffer - used0;
@@ -448,14 +569,31 @@ contract UniswapV3PositionVault is ITokenPairVault {
 
     // ============ Internal Preview Helpers ============
 
-    function _previewDepositInPosition(uint256 amount0, uint256 amount1) internal view returns (uint256 sharesOut) {
+    function _previewDepositInPosition(
+        uint256 amount0,
+        uint256 amount1
+    ) internal view returns (uint256 sharesOut) {
         if (amount0 == 0 && amount1 == 0) return 0;
 
         // Get current pool price
-        (uint160 sqrtPriceX96,,,,,, ) = IUniswapV3PoolMinimal(pool).slot0();
+        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3PoolMinimal(pool)
+            .slot0();
 
         // Get current position liquidity
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
         if (liquidityBefore == 0) return 0;
 
         // Estimate liquidity that would be added
@@ -468,17 +606,37 @@ contract UniswapV3PositionVault is ITokenPairVault {
         );
 
         // Calculate shares
-        sharesOut = uint256(expectedLiquidity) * totalShares / uint256(liquidityBefore);
+        sharesOut =
+            (uint256(expectedLiquidity) * totalShares) /
+            uint256(liquidityBefore);
     }
 
-    function _previewMintInPosition(uint256 sharesToMint) internal view returns (uint256 amount0, uint256 amount1) {
+    function _previewMintInPosition(
+        uint256 sharesToMint
+    ) internal view returns (uint256 amount0, uint256 amount1) {
         if (sharesToMint == 0 || totalShares == 0) return (0, 0);
 
-        (uint160 sqrtPriceX96,,,,,, ) = IUniswapV3PoolMinimal(pool).slot0();
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3PoolMinimal(pool)
+            .slot0();
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
         if (liquidityBefore == 0) return (0, 0);
 
-        uint128 liquidityRequired = uint128(sharesToMint * uint256(liquidityBefore) / totalShares);
+        uint128 liquidityRequired = uint128(
+            (sharesToMint * uint256(liquidityBefore)) / totalShares
+        );
 
         (amount0, amount1) = UniswapV3Math.getAmountsForLiquidity(
             sqrtPriceX96,
@@ -488,37 +646,85 @@ contract UniswapV3PositionVault is ITokenPairVault {
         );
     }
 
-    function _previewWithdrawInPosition(uint256 amount0, uint256 amount1) internal view returns (uint256 sharesNeeded) {
+    function _previewWithdrawInPosition(
+        uint256 amount0,
+        uint256 amount1
+    ) internal view returns (uint256 sharesNeeded) {
         if (amount0 == 0 && amount1 == 0) return 0;
 
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
         if (liquidityBefore == 0 || totalShares == 0) return 0;
 
         uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(tickLower);
         uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
 
         // Calculate liquidity for each asset
-        uint128 L0 = amount0 > 0 ? UniswapV3Math.getLiquidityForAmount0(sqrtRatioAX96, sqrtRatioBX96, amount0) : 0;
-        uint128 L1 = amount1 > 0 ? UniswapV3Math.getLiquidityForAmount1(sqrtRatioAX96, sqrtRatioBX96, amount1) : 0;
+        uint128 L0 = amount0 > 0
+            ? UniswapV3Math.getLiquidityForAmount0(
+                sqrtRatioAX96,
+                sqrtRatioBX96,
+                amount0
+            )
+            : 0;
+        uint128 L1 = amount1 > 0
+            ? UniswapV3Math.getLiquidityForAmount1(
+                sqrtRatioAX96,
+                sqrtRatioBX96,
+                amount1
+            )
+            : 0;
 
         // Take max
         uint128 liquidityNeeded = L0 > L1 ? L0 : L1;
 
         // Convert liquidity to shares
-        sharesNeeded = uint256(liquidityNeeded) * totalShares / uint256(liquidityBefore);
+        sharesNeeded =
+            (uint256(liquidityNeeded) * totalShares) /
+            uint256(liquidityBefore);
     }
 
-    function _previewRedeemInPosition(uint256 sharesToRedeem) internal view returns (uint256 amount0, uint256 amount1) {
+    function _previewRedeemInPosition(
+        uint256 sharesToRedeem
+    ) internal view returns (uint256 amount0, uint256 amount1) {
         if (sharesToRedeem == 0 || totalShares == 0) return (0, 0);
 
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
         if (liquidityBefore == 0) return (0, 0);
 
         // Calculate pro-rata liquidity
-        uint128 liquidityToRedeem = uint128(sharesToRedeem * uint256(liquidityBefore) / totalShares);
+        uint128 liquidityToRedeem = uint128(
+            (sharesToRedeem * uint256(liquidityBefore)) / totalShares
+        );
 
         // Get amounts for that liquidity
-        (uint160 sqrtPriceX96,,,,,, ) = IUniswapV3PoolMinimal(pool).slot0();
+        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3PoolMinimal(pool)
+            .slot0();
         (amount0, amount1) = UniswapV3Math.getAmountsForLiquidity(
             sqrtPriceX96,
             tickLower,
@@ -542,39 +748,72 @@ contract UniswapV3PositionVault is ITokenPairVault {
 
         // ===== STEP 2: Calculate and pay out pending fees for owner =====
         uint256 ownerShares = shares[owner];
-        uint256 pendingFee0 = (accFeePerShare0 * ownerShares / ACC_PRECISION) - feeDebt0[owner];
-        uint256 pendingFee1 = (accFeePerShare1 * ownerShares / ACC_PRECISION) - feeDebt1[owner];
+        uint256 pendingFee0 = ((accFeePerShare0 * ownerShares) /
+            ACC_PRECISION) - feeDebt0[owner];
+        uint256 pendingFee1 = ((accFeePerShare1 * ownerShares) /
+            ACC_PRECISION) - feeDebt1[owner];
 
         // ===== STEP 3: Calculate liquidity needed =====
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
 
         uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(tickLower);
         uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
 
-        uint128 L0 = amount0 > 0 ? UniswapV3Math.getLiquidityForAmount0(sqrtRatioAX96, sqrtRatioBX96, amount0) : 0;
-        uint128 L1 = amount1 > 0 ? UniswapV3Math.getLiquidityForAmount1(sqrtRatioAX96, sqrtRatioBX96, amount1) : 0;
+        uint128 L0 = amount0 > 0
+            ? UniswapV3Math.getLiquidityForAmount0(
+                sqrtRatioAX96,
+                sqrtRatioBX96,
+                amount0
+            )
+            : 0;
+        uint128 L1 = amount1 > 0
+            ? UniswapV3Math.getLiquidityForAmount1(
+                sqrtRatioAX96,
+                sqrtRatioBX96,
+                amount1
+            )
+            : 0;
         uint128 liquidityToWithdraw = L0 > L1 ? L0 : L1;
 
         // Calculate shares to burn
-        sharesBurned = uint256(liquidityToWithdraw) * totalShares / uint256(liquidityBefore);
+        sharesBurned =
+            (uint256(liquidityToWithdraw) * totalShares) /
+            uint256(liquidityBefore);
 
         // Verify owner has enough shares
         require(ownerShares >= sharesBurned, "Insufficient shares");
 
         // ===== STEP 4: Decrease liquidity =====
         uint256 slippageBps = getWithdrawSlippageBps(owner);
-        uint256 amount0Min = amount0 * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
-        uint256 amount1Min = amount1 * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
+        uint256 amount0Min = (amount0 * (BPS_DENOMINATOR - slippageBps)) /
+            BPS_DENOMINATOR;
+        uint256 amount1Min = (amount1 * (BPS_DENOMINATOR - slippageBps)) /
+            BPS_DENOMINATOR;
 
-        (uint256 decreased0, uint256 decreased1) = INonfungiblePositionManager(positionManager).decreaseLiquidity(
-            INonfungiblePositionManager.DecreaseLiquidityParams({
-                tokenId: positionId,
-                liquidity: liquidityToWithdraw,
-                amount0Min: amount0Min,
-                amount1Min: amount1Min,
-                deadline: block.timestamp
-            })
-        );
+        (uint256 decreased0, uint256 decreased1) = INonfungiblePositionManager(
+            positionManager
+        ).decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                    tokenId: positionId,
+                    liquidity: liquidityToWithdraw,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: block.timestamp
+                })
+            );
 
         // Collect withdrawn liquidity tokens
         INonfungiblePositionManager(positionManager).collect(
@@ -590,21 +829,25 @@ contract UniswapV3PositionVault is ITokenPairVault {
         shares[owner] -= sharesBurned;
         totalShares -= sharesBurned;
         // Update fee debt: reset to match remaining shares
-        feeDebt0[owner] = accFeePerShare0 * shares[owner] / ACC_PRECISION;
-        feeDebt1[owner] = accFeePerShare1 * shares[owner] / ACC_PRECISION;
+        feeDebt0[owner] = (accFeePerShare0 * shares[owner]) / ACC_PRECISION;
+        feeDebt1[owner] = (accFeePerShare1 * shares[owner]) / ACC_PRECISION;
 
         // ===== STEP 6: Transfer assets =====
         // Transfer pending fees to receiver
-        if (pendingFee0 > 0) IERC20(_asset0).safeTransfer(receiver, pendingFee0);
-        if (pendingFee1 > 0) IERC20(_asset1).safeTransfer(receiver, pendingFee1);
+        if (pendingFee0 > 0)
+            IERC20(_asset0).safeTransfer(receiver, pendingFee0);
+        if (pendingFee1 > 0)
+            IERC20(_asset1).safeTransfer(receiver, pendingFee1);
 
         // Transfer requested principal amounts to receiver
         if (amount0 > 0) IERC20(_asset0).safeTransfer(receiver, amount0);
         if (amount1 > 0) IERC20(_asset1).safeTransfer(receiver, amount1);
 
         // Refund excess principal (decreased - requested) to owner
-        if (decreased0 > amount0) IERC20(_asset0).safeTransfer(owner, decreased0 - amount0);
-        if (decreased1 > amount1) IERC20(_asset1).safeTransfer(owner, decreased1 - amount1);
+        if (decreased0 > amount0)
+            IERC20(_asset0).safeTransfer(owner, decreased0 - amount0);
+        if (decreased1 > amount1)
+            IERC20(_asset1).safeTransfer(owner, decreased1 - amount1);
     }
 
     // ============ Internal Redeem Helper ============
@@ -622,36 +865,58 @@ contract UniswapV3PositionVault is ITokenPairVault {
         uint256 ownerShares = shares[owner];
         require(ownerShares >= sharesToRedeem, "Insufficient shares");
 
-        uint256 pendingFee0 = (accFeePerShare0 * ownerShares / ACC_PRECISION) - feeDebt0[owner];
-        uint256 pendingFee1 = (accFeePerShare1 * ownerShares / ACC_PRECISION) - feeDebt1[owner];
+        uint256 pendingFee0 = ((accFeePerShare0 * ownerShares) /
+            ACC_PRECISION) - feeDebt0[owner];
+        uint256 pendingFee1 = ((accFeePerShare1 * ownerShares) /
+            ACC_PRECISION) - feeDebt1[owner];
 
         // ===== STEP 3: Calculate pro-rata liquidity =====
-        (,,,,,,, uint128 liquidityBefore,,,,) = INonfungiblePositionManager(positionManager).positions(positionId);
-        uint128 liquidityToRedeem = uint128(sharesToRedeem * uint256(liquidityBefore) / totalShares);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidityBefore,
+            ,
+            ,
+            ,
+
+        ) = INonfungiblePositionManager(positionManager).positions(positionId);
+        uint128 liquidityToRedeem = uint128(
+            (sharesToRedeem * uint256(liquidityBefore)) / totalShares
+        );
 
         // ===== STEP 4: Decrease liquidity =====
         // Get expected amounts for slippage calculation
-        (uint160 sqrtPriceX96,,,,,, ) = IUniswapV3PoolMinimal(pool).slot0();
-        (uint256 expectedAmount0, uint256 expectedAmount1) = UniswapV3Math.getAmountsForLiquidity(
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            liquidityToRedeem
-        );
+        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3PoolMinimal(pool)
+            .slot0();
+        (uint256 expectedAmount0, uint256 expectedAmount1) = UniswapV3Math
+            .getAmountsForLiquidity(
+                sqrtPriceX96,
+                tickLower,
+                tickUpper,
+                liquidityToRedeem
+            );
 
         uint256 slippageBps = getWithdrawSlippageBps(owner);
-        uint256 amount0Min = expectedAmount0 * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
-        uint256 amount1Min = expectedAmount1 * (BPS_DENOMINATOR - slippageBps) / BPS_DENOMINATOR;
+        uint256 amount0Min = (expectedAmount0 *
+            (BPS_DENOMINATOR - slippageBps)) / BPS_DENOMINATOR;
+        uint256 amount1Min = (expectedAmount1 *
+            (BPS_DENOMINATOR - slippageBps)) / BPS_DENOMINATOR;
 
-        (amount0, amount1) = INonfungiblePositionManager(positionManager).decreaseLiquidity(
-            INonfungiblePositionManager.DecreaseLiquidityParams({
-                tokenId: positionId,
-                liquidity: liquidityToRedeem,
-                amount0Min: amount0Min,
-                amount1Min: amount1Min,
-                deadline: block.timestamp
-            })
-        );
+        (amount0, amount1) = INonfungiblePositionManager(positionManager)
+            .decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                    tokenId: positionId,
+                    liquidity: liquidityToRedeem,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: block.timestamp
+                })
+            );
 
         // Collect tokens
         INonfungiblePositionManager(positionManager).collect(
@@ -666,13 +931,15 @@ contract UniswapV3PositionVault is ITokenPairVault {
         // ===== STEP 5: Burn shares and update fee debt =====
         shares[owner] -= sharesToRedeem;
         totalShares -= sharesToRedeem;
-        feeDebt0[owner] = accFeePerShare0 * shares[owner] / ACC_PRECISION;
-        feeDebt1[owner] = accFeePerShare1 * shares[owner] / ACC_PRECISION;
+        feeDebt0[owner] = (accFeePerShare0 * shares[owner]) / ACC_PRECISION;
+        feeDebt1[owner] = (accFeePerShare1 * shares[owner]) / ACC_PRECISION;
 
         // ===== STEP 6: Transfer assets =====
         // Transfer pending fees to receiver
-        if (pendingFee0 > 0) IERC20(_asset0).safeTransfer(receiver, pendingFee0);
-        if (pendingFee1 > 0) IERC20(_asset1).safeTransfer(receiver, pendingFee1);
+        if (pendingFee0 > 0)
+            IERC20(_asset0).safeTransfer(receiver, pendingFee0);
+        if (pendingFee1 > 0)
+            IERC20(_asset1).safeTransfer(receiver, pendingFee1);
 
         // Transfer redeemed amounts to receiver
         if (amount0 > 0) IERC20(_asset0).safeTransfer(receiver, amount0);
@@ -707,7 +974,9 @@ contract UniswapV3PositionVault is ITokenPairVault {
         return (type(uint256).max, type(uint256).max);
     }
 
-    function maxMint(address) external view virtual returns (uint256 maxShares) {
+    function maxMint(
+        address
+    ) external view virtual returns (uint256 maxShares) {
         if (!initialized) {
             return 0;
         }
@@ -727,7 +996,9 @@ contract UniswapV3PositionVault is ITokenPairVault {
         (amount0, amount1) = _previewMintInPosition(ownerShares);
     }
 
-    function maxRedeem(address owner) external view virtual returns (uint256 maxShares) {
+    function maxRedeem(
+        address owner
+    ) external view virtual returns (uint256 maxShares) {
         if (!initialized) {
             return 0;
         }
@@ -781,7 +1052,12 @@ contract UniswapV3PositionVault is ITokenPairVault {
     function mint(
         uint256 sharesToMint,
         address receiver
-    ) external virtual whenInitialized returns (uint256 amount0, uint256 amount1) {
+    )
+        external
+        virtual
+        whenInitialized
+        returns (uint256 amount0, uint256 amount1)
+    {
         if (sharesToMint == 0) revert ZeroAmount();
         (amount0, amount1) = _mintInPosition(sharesToMint, receiver);
     }
@@ -806,7 +1082,12 @@ contract UniswapV3PositionVault is ITokenPairVault {
         uint256 sharesToRedeem,
         address receiver,
         address owner
-    ) external virtual whenInitialized returns (uint256 amount0, uint256 amount1) {
+    )
+        external
+        virtual
+        whenInitialized
+        returns (uint256 amount0, uint256 amount1)
+    {
         if (sharesToRedeem == 0) revert ZeroAmount();
 
         // Check approval if caller is not owner

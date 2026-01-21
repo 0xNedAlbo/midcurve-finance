@@ -61,6 +61,11 @@ contract HedgeVault is UniswapV3PositionVault {
         _;
     }
 
+    modifier onlyManager() {
+        if (msg.sender != manager) revert Unauthorized();
+        _;
+    }
+
     // ============ Constructor ============
 
     constructor(
