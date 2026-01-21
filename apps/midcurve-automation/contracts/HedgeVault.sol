@@ -416,10 +416,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     function maxWithdraw(
         address owner
     ) external view override returns (uint256 amount0, uint256 amount1) {
-        if (
-            currentState == VaultState.UNINITIALIZED ||
-            currentState == VaultState.CLOSED
-        ) {
+        if (currentState == VaultState.UNINITIALIZED) {
             return (0, 0);
         }
 
@@ -428,7 +425,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
 
         if (currentState == VaultState.IN_POSITION) {
             (amount0, amount1) = _previewMintInPosition(ownerShares);
-        } else if (currentState == VaultState.IN_ASSET0) {
+        } else if (currentState == VaultState.IN_ASSET0 || currentState == VaultState.CLOSED) {
             amount0 = _previewMintInAsset0(ownerShares);
         } else if (currentState == VaultState.IN_ASSET1) {
             amount1 = _previewMintInAsset1(ownerShares);
@@ -438,10 +435,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     function maxRedeem(
         address owner
     ) external view override returns (uint256 maxShares) {
-        if (
-            currentState == VaultState.UNINITIALIZED ||
-            currentState == VaultState.CLOSED
-        ) {
+        if (currentState == VaultState.UNINITIALIZED) {
             return 0;
         }
         return shares[owner];
@@ -488,12 +482,12 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     ) external view override returns (uint256 sharesNeeded) {
         if (currentState == VaultState.IN_POSITION) {
             sharesNeeded = _previewWithdrawInPosition(amount0, amount1);
-        } else if (currentState == VaultState.IN_ASSET0) {
+        } else if (currentState == VaultState.IN_ASSET0 || currentState == VaultState.CLOSED) {
             sharesNeeded = _previewWithdrawInAsset0(amount0);
         } else if (currentState == VaultState.IN_ASSET1) {
             sharesNeeded = _previewWithdrawInAsset1(amount1);
         }
-        // Returns 0 for UNINITIALIZED/CLOSED
+        // Returns 0 for UNINITIALIZED
     }
 
     function previewRedeem(
@@ -501,12 +495,12 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     ) external view override returns (uint256 amount0, uint256 amount1) {
         if (currentState == VaultState.IN_POSITION) {
             (amount0, amount1) = _previewRedeemInPosition(sharesToRedeem);
-        } else if (currentState == VaultState.IN_ASSET0) {
+        } else if (currentState == VaultState.IN_ASSET0 || currentState == VaultState.CLOSED) {
             amount0 = _previewRedeemInAsset0(sharesToRedeem);
         } else if (currentState == VaultState.IN_ASSET1) {
             amount1 = _previewRedeemInAsset1(sharesToRedeem);
         }
-        // Returns (0,0) for UNINITIALIZED/CLOSED
+        // Returns (0,0) for UNINITIALIZED
     }
 
     // ============ Actions (Override with state routing) ============
@@ -571,10 +565,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         whenNotPaused
         returns (uint256 sharesBurned)
     {
-        if (
-            currentState == VaultState.UNINITIALIZED ||
-            currentState == VaultState.CLOSED
-        ) {
+        if (currentState == VaultState.UNINITIALIZED) {
             revert InvalidState();
         }
         if (amount0 == 0 && amount1 == 0) revert ZeroAmount();
@@ -591,7 +582,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
                 receiver,
                 owner
             );
-        } else if (currentState == VaultState.IN_ASSET0) {
+        } else if (currentState == VaultState.IN_ASSET0 || currentState == VaultState.CLOSED) {
             sharesBurned = _withdrawInAsset0(amount0, receiver, owner);
         } else if (currentState == VaultState.IN_ASSET1) {
             sharesBurned = _withdrawInAsset1(amount1, receiver, owner);
@@ -609,10 +600,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         whenNotPaused
         returns (uint256 amount0, uint256 amount1)
     {
-        if (
-            currentState == VaultState.UNINITIALIZED ||
-            currentState == VaultState.CLOSED
-        ) {
+        if (currentState == VaultState.UNINITIALIZED) {
             revert InvalidState();
         }
         if (sharesToRedeem == 0) revert ZeroAmount();
@@ -628,7 +616,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
                 receiver,
                 owner
             );
-        } else if (currentState == VaultState.IN_ASSET0) {
+        } else if (currentState == VaultState.IN_ASSET0 || currentState == VaultState.CLOSED) {
             amount0 = _redeemInAsset0(sharesToRedeem, receiver, owner);
         } else if (currentState == VaultState.IN_ASSET1) {
             amount1 = _redeemInAsset1(sharesToRedeem, receiver, owner);
@@ -977,5 +965,19 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         }
     }
 
-    // NOTE: closeVault state transition will be added later.
+    /// @notice Close the vault permanently
+    /// @dev Can only be called from IN_ASSET0 state. Sweeps any asset1 dust into fees.
+    function closeVault() external onlyManager nonReentrant {
+        if (currentState != VaultState.IN_ASSET0) {
+            revert InvalidState();
+        }
+
+        // Check for any asset1 dust (swap residue) and add to fees
+        (, uint256 dust1) = _getVaultBalances();
+        if (dust1 > 0) {
+            _updateFeeAccumulators(0, dust1);
+        }
+
+        currentState = VaultState.CLOSED;
+    }
 }
