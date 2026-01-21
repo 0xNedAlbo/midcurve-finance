@@ -46,7 +46,7 @@ abstract contract ParaswapHelper {
 
     // ============ Errors ============
 
-    error ZeroAmount();
+    error ZeroSwapAmount();
     error InvalidAugustus();
     error InsufficientAmountReceived(uint256 received, uint256 minimum);
     error ExcessiveAmountSpent(uint256 spent, uint256 maximum);
@@ -78,8 +78,8 @@ abstract contract ParaswapHelper {
         uint256 minAmountReceived,
         bytes calldata swapData
     ) internal virtual returns (uint256 amountReceived) {
-        if (sellAmount == 0) revert ZeroAmount();
-        if (swapData.length == 0) revert ZeroAmount();
+        if (sellAmount == 0) revert ZeroSwapAmount();
+        if (swapData.length == 0) revert ZeroSwapAmount();
 
         // Record balance before
         uint256 buyBalanceBefore = IERC20(buyToken).balanceOf(address(this));
@@ -134,8 +134,8 @@ abstract contract ParaswapHelper {
         uint256 maxAmountSold,
         bytes calldata swapData
     ) internal virtual returns (uint256 amountSold) {
-        if (buyAmount == 0) revert ZeroAmount();
-        if (swapData.length == 0) revert ZeroAmount();
+        if (buyAmount == 0) revert ZeroSwapAmount();
+        if (swapData.length == 0) revert ZeroSwapAmount();
 
         // Record balances before
         uint256 sellBalanceBefore = IERC20(sellToken).balanceOf(address(this));

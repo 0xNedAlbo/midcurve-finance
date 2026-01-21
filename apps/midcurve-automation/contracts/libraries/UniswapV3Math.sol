@@ -141,73 +141,80 @@ library UniswapV3Math {
 
     // ============ Swap Amount Calculations ============
 
-    /// @notice Compute ideal in-range swap cap in QUOTE units (no fee/impact), derived from Uniswap V3 geometry.
-    /// @dev Returns how much QUOTE we are willing to spend in an exact-out swap (maxQuoteIn).
-    /// @param quoteAmount Total quote budget to allocate
-    /// @param sqrtRatioX96 Current pool sqrt price
-    /// @param sqrtRatioAX96 Lower tick sqrt price (must be < sqrtRatioBX96)
-    /// @param sqrtRatioBX96 Upper tick sqrt price (must be > sqrtRatioAX96)
-    /// @param token0IsQuote True if token0 is the quote token, false if token1 is quote
-    /// @return maxQuoteIn Ideal amount of quote to swap
-    function computeIdealInRangeSwapQuote(
-        uint256 quoteAmount,
+    /// @dev Indicates which token the vault currently holds 100% (ignoring dust).
+    enum SingleSidedInput {
+        TOKEN0_ONLY,
+        TOKEN1_ONLY
+    }
+
+    /// @notice Computes how much of the single-sided `inputAmount` should be swapped
+    ///         into the other token so that, at the current pool price, the resulting
+    ///         (token0, token1) mix matches the *in-range* Uniswap V3 geometry for
+    ///         the range [sqrtRatioAX96, sqrtRatioBX96].
+    ///
+    /// @dev Out-of-range handling:
+    ///      - If sqrtP <= sqrtA: ideal holdings for this position are 100% token0.
+    ///          * TOKEN0_ONLY -> swap 0
+    ///          * TOKEN1_ONLY -> swap all (token1 -> token0)
+    ///      - If sqrtP >= sqrtB: ideal holdings are 100% token1.
+    ///          * TOKEN1_ONLY -> swap 0
+    ///          * TOKEN0_ONLY -> swap all (token0 -> token1)
+    ///
+    /// @param inputAmount      Amount of the token you currently hold
+    /// @param sqrtRatioX96     Current pool sqrtPriceX96
+    /// @param sqrtRatioAX96    Lower bound sqrtPriceX96 (range lower)
+    /// @param sqrtRatioBX96    Upper bound sqrtPriceX96 (range upper)
+    /// @param inputType        Which token you hold: TOKEN0_ONLY or TOKEN1_ONLY
+    /// @return swapAmountIn    Amount of the input token to swap into the other token
+    function computeIdealSwapAmountSingleSided(
+        uint256 inputAmount,
         uint160 sqrtRatioX96,
         uint160 sqrtRatioAX96,
         uint160 sqrtRatioBX96,
-        bool token0IsQuote
-    ) internal pure returns (uint256 maxQuoteIn) {
-        // Compute R = amount1/amount0 from V3 geometry (in-range):
-        // R = ((sqrtP - sqrtA) * sqrtP * sqrtB) / (sqrtB - sqrtP)
+        SingleSidedInput inputType
+    ) internal pure returns (uint256 swapAmountIn) {
         uint256 sqrtP = uint256(sqrtRatioX96);
         uint256 sqrtA = uint256(sqrtRatioAX96);
         uint256 sqrtB = uint256(sqrtRatioBX96);
 
-        uint256 num1 = sqrtP - sqrtA;
-        uint256 num2 = FullMath.mulDiv(num1, sqrtP, 1);
-        uint256 num3 = FullMath.mulDiv(num2, sqrtB, 1);
-        uint256 den = sqrtB - sqrtP;
+        // Basic config guard
+        require(sqrtA < sqrtB, "INVALID_RANGE");
 
-        uint256 R = FullMath.mulDiv(num3, 1, den);
+        // ---------- Out-of-range cases ----------
+        // Below range: position wants only token0
+        if (sqrtP <= sqrtA) {
+            return (inputType == SingleSidedInput.TOKEN1_ONLY) ? inputAmount : 0;
+        }
 
-        // P = token1 per token0 at current price (raw, no decimals adjustment)
-        uint256 P = FullMath.mulDiv(sqrtP, sqrtP, 2 ** 192);
+        // Above range: position wants only token1
+        if (sqrtP >= sqrtB) {
+            return (inputType == SingleSidedInput.TOKEN0_ONLY) ? inputAmount : 0;
+        }
 
-        uint256 denom = R + P;
+        // ---------- In-range case ----------
+        uint256 Q96_VAL = Q96;
+
+        // P_Q96 = sqrtP^2 / 2^96 (Q96-scaled)
+        uint256 P_Q96 = FullMath.mulDiv(sqrtP, sqrtP, Q96_VAL);
+
+        // R = ((sqrtP - sqrtA) * sqrtP * sqrtB) / (sqrtB - sqrtP)
+        // R_Q96 computed as: t = (sqrtP * sqrtB) / Q96, R_Q96 = (sqrtP - sqrtA) * t / (sqrtB - sqrtP)
+        uint256 t_Q96 = FullMath.mulDiv(sqrtP, sqrtB, Q96_VAL);
+        uint256 R_Q96 = FullMath.mulDiv(sqrtP - sqrtA, t_Q96, sqrtB - sqrtP);
+
+        // denom = R_Q96 + P_Q96 (both Q96)
+        require(R_Q96 <= type(uint256).max - P_Q96, "OVERFLOW");
+        uint256 denom = R_Q96 + P_Q96;
         if (denom == 0) return 0;
 
-        // If quote is token0: swap cap = quoteAmount * R / (R + P)
-        // If quote is token1: swap cap = quoteAmount * P / (R + P)
-        if (token0IsQuote) {
-            maxQuoteIn = FullMath.mulDiv(quoteAmount, R, denom);
+        if (inputType == SingleSidedInput.TOKEN0_ONLY) {
+            // swap token0 -> token1
+            swapAmountIn = FullMath.mulDiv(inputAmount, R_Q96, denom);
         } else {
-            maxQuoteIn = FullMath.mulDiv(quoteAmount, P, denom);
+            // swap token1 -> token0
+            swapAmountIn = FullMath.mulDiv(inputAmount, P_Q96, denom);
         }
 
-        if (maxQuoteIn > quoteAmount) maxQuoteIn = quoteAmount;
-    }
-
-    /// @notice Convert quote->base at current pool price (no fee/impact).
-    /// @dev Used to derive an *ideal* baseOut target for exact-out swaps.
-    ///      In production you should rely on actual deltas after executing the swap.
-    /// @param quoteIn Amount of quote tokens to convert
-    /// @param sqrtRatioX96 Current pool sqrt price
-    /// @param token0IsQuote True if token0 is the quote token, false if token1 is quote
-    /// @return baseOut Estimated base tokens received
-    function quoteToBaseAtPrice(
-        uint256 quoteIn,
-        uint160 sqrtRatioX96,
-        bool token0IsQuote
-    ) internal pure returns (uint256 baseOut) {
-        uint256 sqrtP = uint256(sqrtRatioX96);
-        uint256 P = FullMath.mulDiv(sqrtP, sqrtP, 2 ** 192); // token1 per token0
-
-        if (token0IsQuote) {
-            // quote=token0, base=token1 => baseOut ≈ quoteIn * P
-            baseOut = FullMath.mulDiv(quoteIn, P, 1);
-        } else {
-            // quote=token1, base=token0 => baseOut ≈ quoteIn / P
-            if (P == 0) return 0;
-            baseOut = FullMath.mulDiv(quoteIn, 1, P);
-        }
+        if (swapAmountIn > inputAmount) swapAmountIn = inputAmount;
     }
 }

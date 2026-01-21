@@ -384,6 +384,40 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         }
     }
 
+    // ============ Internal Liquidity Helper ============
+
+    /// @notice Decrease liquidity and collect tokens to vault
+    /// @param liquidity Amount of liquidity to remove
+    /// @param amount0Min Minimum amount of token0 to receive (slippage protection)
+    /// @param amount1Min Minimum amount of token1 to receive (slippage protection)
+    /// @return amount0 Actual amount of token0 received
+    /// @return amount1 Actual amount of token1 received
+    function _decreaseLiquidity(
+        uint128 liquidity,
+        uint256 amount0Min,
+        uint256 amount1Min
+    ) internal returns (uint256 amount0, uint256 amount1) {
+        (amount0, amount1) = INonfungiblePositionManager(positionManager)
+            .decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                    tokenId: positionId,
+                    liquidity: liquidity,
+                    amount0Min: amount0Min,
+                    amount1Min: amount1Min,
+                    deadline: block.timestamp
+                })
+            );
+
+        INonfungiblePositionManager(positionManager).collect(
+            INonfungiblePositionManager.CollectParams({
+                tokenId: positionId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
+    }
+
     // ============ Internal Deposit Helper ============
 
     function _depositInPosition(
@@ -805,26 +839,10 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         uint256 amount1Min = (amount1 * (BPS_DENOMINATOR - slippageBps)) /
             BPS_DENOMINATOR;
 
-        (uint256 decreased0, uint256 decreased1) = INonfungiblePositionManager(
-            positionManager
-        ).decreaseLiquidity(
-                INonfungiblePositionManager.DecreaseLiquidityParams({
-                    tokenId: positionId,
-                    liquidity: liquidityToWithdraw,
-                    amount0Min: amount0Min,
-                    amount1Min: amount1Min,
-                    deadline: block.timestamp
-                })
-            );
-
-        // Collect withdrawn liquidity tokens
-        INonfungiblePositionManager(positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: positionId,
-                recipient: address(this),
-                amount0Max: uint128(decreased0),
-                amount1Max: uint128(decreased1)
-            })
+        (uint256 decreased0, uint256 decreased1) = _decreaseLiquidity(
+            liquidityToWithdraw,
+            amount0Min,
+            amount1Min
         );
 
         // ===== STEP 5: Burn shares and update fee debt =====
@@ -909,25 +927,10 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         uint256 amount1Min = (expectedAmount1 *
             (BPS_DENOMINATOR - slippageBps)) / BPS_DENOMINATOR;
 
-        (amount0, amount1) = INonfungiblePositionManager(positionManager)
-            .decreaseLiquidity(
-                INonfungiblePositionManager.DecreaseLiquidityParams({
-                    tokenId: positionId,
-                    liquidity: liquidityToRedeem,
-                    amount0Min: amount0Min,
-                    amount1Min: amount1Min,
-                    deadline: block.timestamp
-                })
-            );
-
-        // Collect tokens
-        INonfungiblePositionManager(positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: positionId,
-                recipient: address(this),
-                amount0Max: uint128(amount0),
-                amount1Max: uint128(amount1)
-            })
+        (amount0, amount1) = _decreaseLiquidity(
+            liquidityToRedeem,
+            amount0Min,
+            amount1Min
         );
 
         // ===== STEP 5: Burn shares and update fee debt =====
