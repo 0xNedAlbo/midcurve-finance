@@ -65,6 +65,35 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     /// @notice Slippage tolerance for entering position (in basis points, 100 = 1%)
     uint256 public enterPositionSlippageBps = 100;
 
+    // ============ Events ============
+
+    /// @notice Emitted when vault exits position to hold only asset0
+    event ExitedToAsset0(VaultState indexed previousState, uint256 balance0);
+
+    /// @notice Emitted when vault exits position to hold only asset1
+    event ExitedToAsset1(VaultState indexed previousState, uint256 balance1);
+
+    /// @notice Emitted when vault returns to LP position from single-asset state
+    event ReturnedToPosition(VaultState indexed previousState, uint128 liquidity);
+
+    /// @notice Emitted when vault is permanently closed
+    event VaultClosed(uint256 finalBalance0, uint256 dustSweptToFees);
+
+    /// @notice Emitted when upper trigger price is changed
+    event TriggerPriceUpperChanged(uint160 oldPrice, uint160 newPrice);
+
+    /// @notice Emitted when lower trigger price is changed
+    event TriggerPriceLowerChanged(uint160 oldPrice, uint160 newPrice);
+
+    /// @notice Emitted when vault pause state is changed
+    event PausedChanged(bool paused);
+
+    /// @notice Emitted when exit position slippage is changed
+    event ExitPositionSlippageChanged(uint256 oldSlippageBps, uint256 newSlippageBps);
+
+    /// @notice Emitted when enter position slippage is changed
+    event EnterPositionSlippageChanged(uint256 oldSlippageBps, uint256 newSlippageBps);
+
     // ============ Modifiers ============
 
     modifier onlyOperator() {
@@ -115,29 +144,38 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     }
 
     function setTriggerPriceUpper(uint160 price) external onlyManager {
+        uint160 oldPrice = triggerPriceUpper;
         triggerPriceUpper = price;
+        emit TriggerPriceUpperChanged(oldPrice, price);
     }
 
     function setTriggerPriceLower(uint160 price) external onlyManager {
+        uint160 oldPrice = triggerPriceLower;
         triggerPriceLower = price;
+        emit TriggerPriceLowerChanged(oldPrice, price);
     }
 
     function setPaused(bool _paused) external onlyManager {
         paused = _paused;
+        emit PausedChanged(_paused);
     }
 
     /// @notice Set the slippage tolerance for exiting positions
     /// @param slippageBps Slippage in basis points (100 = 1%, max 1000 = 10%)
     function setExitPositionSlippageBps(uint256 slippageBps) external onlyManager {
         require(slippageBps <= 1000, "Slippage too high");
+        uint256 oldSlippageBps = exitPositionSlippageBps;
         exitPositionSlippageBps = slippageBps;
+        emit ExitPositionSlippageChanged(oldSlippageBps, slippageBps);
     }
 
     /// @notice Set the slippage tolerance for entering positions
     /// @param slippageBps Slippage in basis points (100 = 1%, max 1000 = 10%)
     function setEnterPositionSlippageBps(uint256 slippageBps) external onlyManager {
         require(slippageBps <= 1000, "Slippage too high");
+        uint256 oldSlippageBps = enterPositionSlippageBps;
         enterPositionSlippageBps = slippageBps;
+        emit EnterPositionSlippageChanged(oldSlippageBps, slippageBps);
     }
 
     // ============ Internal Deposit Helpers (Asset-Only States) ============
@@ -666,6 +704,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
             revert InvalidState();
         }
 
+        VaultState previousState = currentState;
+
         // If in position, exit the position first
         if (currentState == VaultState.IN_POSITION) {
             // Calculate min amounts with slippage protection
@@ -688,6 +728,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         }
 
         currentState = VaultState.IN_ASSET0;
+        (uint256 balance0, ) = _getVaultBalances();
+        emit ExitedToAsset0(previousState, balance0);
     }
 
     /// @notice Preview the sellAmount (token1) that would be swapped in exitToAsset0
@@ -729,6 +771,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
             revert InvalidState();
         }
 
+        VaultState previousState = currentState;
+
         // If in position, exit the position first
         if (currentState == VaultState.IN_POSITION) {
             // Calculate min amounts with slippage protection
@@ -751,6 +795,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         }
 
         currentState = VaultState.IN_ASSET1;
+        (, uint256 balance1) = _getVaultBalances();
+        emit ExitedToAsset1(previousState, balance1);
     }
 
     /// @notice Preview the sellAmount (token0) that would be swapped in exitToAsset1
@@ -908,6 +954,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
     function returnToPosition(
         SwapSellParams calldata swapParams
     ) external onlyManagerOrOperator nonReentrant whenNotPaused {
+        VaultState previousState = currentState;
+
         if (currentState == VaultState.IN_ASSET0) {
             _returnToPositionFromAsset0(swapParams);
         } else if (currentState == VaultState.IN_ASSET1) {
@@ -917,6 +965,10 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         }
 
         currentState = VaultState.IN_POSITION;
+        (, , , , , , , uint128 liquidity, , , , ) = INonfungiblePositionManager(
+            positionManager
+        ).positions(positionId);
+        emit ReturnedToPosition(previousState, liquidity);
     }
 
     /// @notice Preview the swap details for returnToPosition
@@ -976,5 +1028,7 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         }
 
         currentState = VaultState.CLOSED;
+        (uint256 finalBalance0, ) = _getVaultBalances();
+        emit VaultClosed(finalBalance0, dust1);
     }
 }

@@ -28,6 +28,18 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
 
     // ============ Events ============
 
+    /// @notice Emitted when the vault is initialized with a position
+    /// @param positionId The Uniswap V3 NFT position ID
+    /// @param initialShares The initial shares minted to the manager
+    /// @param amount0 The amount of token0 in the position
+    /// @param amount1 The amount of token1 in the position
+    event VaultInitialized(
+        uint256 indexed positionId,
+        uint256 initialShares,
+        uint256 amount0,
+        uint256 amount1
+    );
+
     /// @notice Emitted when fees are collected for an account
     /// @param account The account that received the fees
     /// @param amount0 The amount of token0 fees collected
@@ -37,6 +49,12 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         uint256 amount0,
         uint256 amount1
     );
+
+    /// @notice Emitted when a shareholder changes their deposit slippage
+    event DepositSlippageChanged(address indexed shareholder, uint256 oldSlippageBps, uint256 newSlippageBps);
+
+    /// @notice Emitted when a shareholder changes their withdraw slippage
+    event WithdrawSlippageChanged(address indexed shareholder, uint256 oldSlippageBps, uint256 newSlippageBps);
 
     // ============ Immutables ============
 
@@ -247,6 +265,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         initialized = true;
 
         _mint(msg.sender, initialShares);
+
+        emit VaultInitialized(positionId, initialShares, amount0, amount1);
     }
 
     /// @notice Get the deposit slippage for a shareholder
@@ -265,7 +285,9 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
     /// @param slippageBps Slippage in basis points (1-10000), or 0 to use default
     function setDepositSlippage(uint256 slippageBps) external {
         require(slippageBps <= BPS_DENOMINATOR, "Invalid slippage");
+        uint256 oldSlippageBps = _shareholderDepositSlippageBps[msg.sender];
         _shareholderDepositSlippageBps[msg.sender] = slippageBps;
+        emit DepositSlippageChanged(msg.sender, oldSlippageBps, slippageBps);
     }
 
     /// @notice Get the withdrawal slippage for a shareholder
@@ -284,7 +306,9 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
     /// @param slippageBps Slippage in basis points (1-10000), or 0 to use default
     function setWithdrawSlippage(uint256 slippageBps) external {
         require(slippageBps <= BPS_DENOMINATOR, "Invalid slippage");
+        uint256 oldSlippageBps = _shareholderWithdrawSlippageBps[msg.sender];
         _shareholderWithdrawSlippageBps[msg.sender] = slippageBps;
+        emit WithdrawSlippageChanged(msg.sender, oldSlippageBps, slippageBps);
     }
 
     // ============ Fee Collection ============

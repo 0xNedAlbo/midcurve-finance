@@ -23,6 +23,26 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
     error InvalidTokenPair();
     error VaultBalanceDecreased(address token, uint256 expected, uint256 actual);
 
+    // ============ Events ============
+
+    /// @notice Emitted when a token sell is performed via performTokenSell
+    event TokenSold(
+        address indexed caller,
+        address indexed sellToken,
+        address indexed buyToken,
+        uint256 sellAmount,
+        uint256 amountReceived
+    );
+
+    /// @notice Emitted when a token buy is performed via performTokenBuy
+    event TokenBought(
+        address indexed caller,
+        address indexed buyToken,
+        address indexed sellToken,
+        uint256 buyAmount,
+        uint256 amountSold
+    );
+
     // ============ Constants ============
 
     /// @notice Interface version (semantic versioning)
@@ -229,6 +249,8 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
                 );
             }
         }
+
+        emit TokenSold(msg.sender, sellToken, buyToken, sellAmount, amountReceived);
     }
 
     /// @notice Buy exact amount of a token via Paraswap (for multicall UX)
@@ -300,5 +322,7 @@ contract MidcurveHedgeVaultV1 is HedgeVault, Multicall, AllowlistBase {
                 );
             }
         }
+
+        emit TokenBought(msg.sender, buyToken, sellToken, buyAmount, amountSold);
     }
 }
