@@ -26,6 +26,18 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
     error AlreadyInitialized();
     error ZeroAmount();
 
+    // ============ Events ============
+
+    /// @notice Emitted when fees are collected for an account
+    /// @param account The account that received the fees
+    /// @param amount0 The amount of token0 fees collected
+    /// @param amount1 The amount of token1 fees collected
+    event CollectFees(
+        address indexed account,
+        uint256 amount0,
+        uint256 amount1
+    );
+
     // ============ Immutables ============
 
     /// @notice The Uniswap V3 NonfungiblePositionManager address
@@ -332,6 +344,10 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         if (collected1 > 0) {
             IERC20(_asset1).safeTransfer(msg.sender, collected1);
         }
+
+        if (collected0 > 0 || collected1 > 0) {
+            emit CollectFees(msg.sender, collected0, collected1);
+        }
     }
 
     // ============ ERC20 State-Changing Functions ============
@@ -636,6 +652,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         // Mint shares to receiver
         _mint(receiver, sharesOut);
 
+        emit Deposit(msg.sender, receiver, used0, used1, sharesOut);
+
         // Return unused tokens
         uint256 refund0 = amount0 - used0;
         uint256 refund1 = amount1 - used1;
@@ -724,6 +742,8 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
 
         // Mint exact requested shares
         _mint(receiver, sharesToMint);
+
+        emit Deposit(msg.sender, receiver, used0, used1, sharesToMint);
 
         // Refund unused
         uint256 refund0 = amount0WithBuffer - used0;
@@ -996,6 +1016,12 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
             IERC20(_asset0).safeTransfer(owner, decreased0 - amount0);
         if (decreased1 > amount1)
             IERC20(_asset1).safeTransfer(owner, decreased1 - amount1);
+
+        // Emit events: fees and principal separately for proper accounting
+        if (pendingFee0 > 0 || pendingFee1 > 0) {
+            emit CollectFees(owner, pendingFee0, pendingFee1);
+        }
+        emit Withdraw(msg.sender, receiver, owner, amount0, amount1, sharesBurned);
     }
 
     // ============ Internal Redeem Helper ============
@@ -1074,6 +1100,12 @@ contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
         // Transfer redeemed amounts to receiver
         if (amount0 > 0) IERC20(_asset0).safeTransfer(receiver, amount0);
         if (amount1 > 0) IERC20(_asset1).safeTransfer(receiver, amount1);
+
+        // Emit events: fees and principal separately for proper accounting
+        if (pendingFee0 > 0 || pendingFee1 > 0) {
+            emit CollectFees(owner, pendingFee0, pendingFee1);
+        }
+        emit Withdraw(msg.sender, receiver, owner, amount0, amount1, sharesToRedeem);
     }
 
     // ============ Conversions ============

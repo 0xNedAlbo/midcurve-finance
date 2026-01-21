@@ -159,6 +159,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
 
         // Mint shares to receiver
         _mint(receiver, sharesOut);
+
+        emit Deposit(msg.sender, receiver, amount0, 0, sharesOut);
     }
 
     function _depositInAsset1(
@@ -178,6 +180,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
 
         // Mint shares to receiver
         _mint(receiver, sharesOut);
+
+        emit Deposit(msg.sender, receiver, 0, amount1, sharesOut);
     }
 
     // ============ Internal Mint Helpers (Asset-Only States) ============
@@ -192,6 +196,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         IERC20(_asset0).safeTransferFrom(msg.sender, address(this), amount0);
 
         _mint(receiver, sharesToMint);
+
+        emit Deposit(msg.sender, receiver, amount0, 0, sharesToMint);
     }
 
     function _mintInAsset1(
@@ -204,6 +210,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         IERC20(_asset1).safeTransferFrom(msg.sender, address(this), amount1);
 
         _mint(receiver, sharesToMint);
+
+        emit Deposit(msg.sender, receiver, 0, amount1, sharesToMint);
     }
 
     // ============ Internal Preview Helpers (Asset-Only States) ============
@@ -289,6 +297,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         _burn(owner, sharesBurned);
 
         IERC20(_asset0).safeTransfer(receiver, amount0);
+
+        emit Withdraw(msg.sender, receiver, owner, amount0, 0, sharesBurned);
     }
 
     function _withdrawInAsset1(
@@ -302,6 +312,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         _burn(owner, sharesBurned);
 
         IERC20(_asset1).safeTransfer(receiver, amount1);
+
+        emit Withdraw(msg.sender, receiver, owner, 0, amount1, sharesBurned);
     }
 
     // ============ Internal Redeem Helpers (Asset-Only States) ============
@@ -319,6 +331,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         _burn(owner, sharesToRedeem);
 
         IERC20(_asset0).safeTransfer(receiver, amount0);
+
+        emit Withdraw(msg.sender, receiver, owner, amount0, 0, sharesToRedeem);
     }
 
     function _redeemInAsset1(
@@ -334,6 +348,8 @@ contract HedgeVault is UniswapV3PositionVault, ParaswapHelper {
         _burn(owner, sharesToRedeem);
 
         IERC20(_asset1).safeTransfer(receiver, amount1);
+
+        emit Withdraw(msg.sender, receiver, owner, 0, amount1, sharesToRedeem);
     }
 
     // ============ Conversions (Override with state routing) ============
