@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Test, console} from "forge-std/Test.sol";
 import {UniswapV3PositionVaultIntegrationBase} from "./UniswapV3PositionVault.Base.t.sol";
 import {UniswapV3PositionVault} from "../../UniswapV3PositionVault.sol";
-import {INonfungiblePositionManager} from "../../interfaces/INonfungiblePositionManager.sol";
-import {IERC20} from "../../interfaces/IERC20.sol";
 
 /// @title Share Accounting Integration Tests for UniswapV3PositionVault
 /// @notice Tests preview functions, share calculations, and max functions
@@ -149,7 +146,6 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
 
     function test_shares_proportionalToLiquidityAdded() public {
         uint128 initialLiquidity = _getPositionLiquidity();
-        uint256 managerShares = vault.shares(manager);
 
         // Alice adds roughly the same amount as initial
         _fundAccountWithTokens(alice, 10 ether, 30000 * 1e6);
@@ -224,7 +220,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
         assertEq(maxMint, type(uint256).max, "maxMint should be max");
     }
 
-    function test_maxWithdraw_returnsOwnerAssets() public {
+    function test_maxWithdraw_returnsOwnerAssets() public view {
         // Manager has all shares, maxWithdraw should return position value
         (uint256 totalAmount0, uint256 totalAmount1) = vault.totalAssets();
         (uint256 max0, uint256 max1) = vault.maxWithdraw(manager);
@@ -252,7 +248,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
 
     // ============ TotalAssets Tests ============
 
-    function test_totalAssets_includesPositionAndVaultBalances() public {
+    function test_totalAssets_includesPositionAndVaultBalances() public view {
         (uint256 totalAmount0, uint256 totalAmount1) = vault.totalAssets();
 
         // Should have non-zero value from position
@@ -275,10 +271,6 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
         (uint256 total0, uint256 total1) = vault.totalAssets();
 
         // Vault balance includes fees, but totalAssets subtracts reserved
-        uint256 vaultBalance0 = IERC20(vault.asset0()).balanceOf(address(vault));
-        uint256 vaultBalance1 = IERC20(vault.asset1()).balanceOf(address(vault));
-
-        // If we have collected fees, vault balance > what totalAssets reports for buffer
         // This is hard to test precisely, but we verify totalAssets doesn't explode
         assertTrue(total0 >= 0 && total1 >= 0, "totalAssets should be non-negative");
     }
@@ -330,7 +322,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
 
     // ============ Edge Cases ============
 
-    function test_preview_largeAmounts() public {
+    function test_preview_largeAmounts() public view {
         // Very large amounts
         (uint256 amount0, uint256 amount1) = _getDepositAmounts(1000 ether, 3_000_000 * 1e6);
 
@@ -339,7 +331,7 @@ contract UniswapV3PositionVaultShareAccountingTest is UniswapV3PositionVaultInte
         assertGt(preview, 0, "Preview for large amounts should work");
     }
 
-    function test_preview_smallAmounts() public {
+    function test_preview_smallAmounts() public view {
         // Very small amounts
         (uint256 amount0, uint256 amount1) = _getDepositAmounts(1 wei, 1);
 
