@@ -23,7 +23,7 @@ contract AccessControlHarness {
 
     // ============ State ============
 
-    address public immutable manager;
+    address public immutable MANAGER;
     bool public initialized;
 
     mapping(address => uint256) public shares;
@@ -33,13 +33,13 @@ contract AccessControlHarness {
     // ============ Constructor ============
 
     constructor() {
-        manager = msg.sender;
+        MANAGER = msg.sender;
     }
 
     // ============ Modifiers ============
 
     modifier onlyManager() {
-        if (msg.sender != manager) revert Unauthorized();
+        if (msg.sender != MANAGER) revert Unauthorized();
         _;
     }
 
@@ -50,11 +50,11 @@ contract AccessControlHarness {
 
     // ============ Functions Under Test ============
 
-    function managerOnlyFunction() external onlyManager returns (bool) {
+    function managerOnlyFunction() external view onlyManager returns (bool) {
         return true;
     }
 
-    function initializedOnlyFunction() external whenInitialized returns (bool) {
+    function initializedOnlyFunction() external view whenInitialized returns (bool) {
         return true;
     }
 
@@ -94,7 +94,7 @@ contract AccessControlHarness {
 
     // ============ Simulated Withdraw/Redeem Authorization ============
 
-    function withdraw(uint256 amount0, uint256 amount1, address receiver, address owner) external whenInitialized {
+    function withdraw(uint256 amount0, uint256 amount1, address /* receiver */, address owner) external view whenInitialized {
         if (amount0 == 0 && amount1 == 0) revert ZeroAmount();
         if (msg.sender != owner) {
             revert Unauthorized();
@@ -102,7 +102,7 @@ contract AccessControlHarness {
         // Would do actual withdrawal here
     }
 
-    function redeem(uint256 sharesToRedeem, address receiver, address owner) external whenInitialized {
+    function redeem(uint256 sharesToRedeem, address /* receiver */, address owner) external view whenInitialized {
         if (sharesToRedeem == 0) revert ZeroAmount();
         if (msg.sender != owner) {
             revert Unauthorized();
@@ -125,7 +125,7 @@ contract AccessControlTest is Test {
 
     // ============ onlyManager modifier tests ============
 
-    function test_onlyManager_allowsManager() public {
+    function test_onlyManager_allowsManager() public view {
         bool result = harness.managerOnlyFunction();
         assertTrue(result);
     }

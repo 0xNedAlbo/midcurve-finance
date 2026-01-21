@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "forge:build": "forge build",
     "forge:test": "forge test",
+    "forge:test:unit": "forge test --match-path 'contracts/test/unit/**' -vvv",
+    "forge:test:integration": "forge test --match-path 'contracts/test/integration/**' -vvv --fork-url $RPC_URL_ETHEREUM",
     "forge:deploy:arbitrum": "forge script script/Deploy.s.sol --rpc-url arbitrum --broadcast --verify",
     "forge:deploy:base": "forge script script/Deploy.s.sol --rpc-url base --broadcast --verify",
     "forge:deploy:ethereum": "forge script script/Deploy.s.sol --rpc-url mainnet --broadcast --verify",
