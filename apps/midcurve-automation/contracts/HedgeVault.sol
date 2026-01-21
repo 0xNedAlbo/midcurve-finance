@@ -415,7 +415,7 @@ contract HedgeVault is UniswapV3PositionVault {
         uint256 amount0,
         uint256 amount1,
         address receiver
-    ) external override whenNotPaused returns (uint256 sharesOut) {
+    ) external override nonReentrant whenNotPaused returns (uint256 sharesOut) {
         if (currentState == VaultState.UNINITIALIZED || currentState == VaultState.CLOSED) {
             revert InvalidState();
         }
@@ -432,7 +432,7 @@ contract HedgeVault is UniswapV3PositionVault {
     function mint(
         uint256 sharesToMint,
         address receiver
-    ) external override whenNotPaused returns (uint256 amount0, uint256 amount1) {
+    ) external override nonReentrant whenNotPaused returns (uint256 amount0, uint256 amount1) {
         if (currentState == VaultState.UNINITIALIZED || currentState == VaultState.CLOSED) {
             revert InvalidState();
         }
@@ -452,7 +452,7 @@ contract HedgeVault is UniswapV3PositionVault {
         uint256 amount1,
         address receiver,
         address owner
-    ) external override whenNotPaused returns (uint256 sharesBurned) {
+    ) external override nonReentrant whenNotPaused returns (uint256 sharesBurned) {
         if (currentState == VaultState.UNINITIALIZED || currentState == VaultState.CLOSED) {
             revert InvalidState();
         }
@@ -476,7 +476,7 @@ contract HedgeVault is UniswapV3PositionVault {
         uint256 sharesToRedeem,
         address receiver,
         address owner
-    ) external override whenNotPaused returns (uint256 amount0, uint256 amount1) {
+    ) external override nonReentrant whenNotPaused returns (uint256 amount0, uint256 amount1) {
         if (currentState == VaultState.UNINITIALIZED || currentState == VaultState.CLOSED) {
             revert InvalidState();
         }

@@ -9,11 +9,12 @@ import {IERC20} from "./interfaces/IERC20.sol";
 import {UniswapV3Math} from "./libraries/UniswapV3Math.sol";
 import {TickMath} from "./libraries/TickMath.sol";
 import {SafeERC20} from "./libraries/SafeERC20.sol";
+import {ReentrancyGuard} from "./base/ReentrancyGuard.sol";
 
 /// @title UniswapV3PositionVault
 /// @notice A dual-asset vault managing a single Uniswap V3 position
 /// @dev Base vault contract - always operates with liquidity in position
-contract UniswapV3PositionVault is ITokenPairVault {
+contract UniswapV3PositionVault is ITokenPairVault, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ============ Errors ============
@@ -251,6 +252,7 @@ contract UniswapV3PositionVault is ITokenPairVault {
     function collectFees()
         external
         virtual
+        nonReentrant
         returns (uint256 collected0, uint256 collected1)
     {
         uint256 userShares = shares[msg.sender];
@@ -1045,7 +1047,7 @@ contract UniswapV3PositionVault is ITokenPairVault {
         uint256 amount0,
         uint256 amount1,
         address receiver
-    ) external virtual whenInitialized returns (uint256 sharesOut) {
+    ) external virtual nonReentrant whenInitialized returns (uint256 sharesOut) {
         sharesOut = _depositInPosition(amount0, amount1, receiver);
     }
 
@@ -1055,6 +1057,7 @@ contract UniswapV3PositionVault is ITokenPairVault {
     )
         external
         virtual
+        nonReentrant
         whenInitialized
         returns (uint256 amount0, uint256 amount1)
     {
@@ -1067,7 +1070,7 @@ contract UniswapV3PositionVault is ITokenPairVault {
         uint256 amount1,
         address receiver,
         address owner
-    ) external virtual whenInitialized returns (uint256 sharesBurned) {
+    ) external virtual nonReentrant whenInitialized returns (uint256 sharesBurned) {
         if (amount0 == 0 && amount1 == 0) revert ZeroAmount();
 
         // Check approval if caller is not owner
@@ -1085,6 +1088,7 @@ contract UniswapV3PositionVault is ITokenPairVault {
     )
         external
         virtual
+        nonReentrant
         whenInitialized
         returns (uint256 amount0, uint256 amount1)
     {
