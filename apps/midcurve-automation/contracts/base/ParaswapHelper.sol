@@ -1,13 +1,49 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../interfaces/IParaswap.sol";
-import "../interfaces/IERC20Minimal.sol";
+import { IERC20 } from "../interfaces/IERC20.sol";
+import { SafeERC20 } from "../libraries/SafeERC20.sol";
 
-/// @title ParaswapBase
+/**
+ * @title IAugustusRegistry
+ * @notice Interface for Paraswap's AugustusRegistry contract
+ * @dev Used to verify that an Augustus swapper address is legitimate
+ *
+ * Registry addresses by chain:
+ * - Ethereum (1):    0xa68bEA62Dc4034A689AA0F58A76681433caCa663
+ * - Arbitrum (42161): 0xdC6E2b14260F972ad4e5a31c68294Fba7E720701
+ * - Base (8453):     0x7e31b336f9e8ba52ba3c4ac861b033ba90900bb3
+ * - Optimism (10):   0x6e7bE86000dF697facF4396efD2aE2C322165dC3
+ */
+interface IAugustusRegistry {
+    /**
+     * @notice Check if an address is a valid Augustus swapper
+     * @param augustus The address to check
+     * @return True if the address is a valid Augustus swapper
+     */
+    function isValidAugustus(address augustus) external view returns (bool);
+}
+
+/**
+ * @title IAugustus
+ * @notice Interface for Paraswap's Augustus swapper contract (V5)
+ * @dev Used to get the TokenTransferProxy address for approvals
+ */
+interface IAugustus {
+    /**
+     * @notice Get the TokenTransferProxy address
+     * @dev This is the address that needs token approval for swaps
+     * @return The TokenTransferProxy address
+     */
+    function getTokenTransferProxy() external view returns (address);
+}
+
+/// @title ParaswapHelper
 /// @notice Abstract base contract for Paraswap swap functionality
-/// @dev Provides _sellToken and _buyToken with hooks for post-swap validation
-abstract contract ParaswapBase {
+/// @dev Provides _sellToken and _buyToken internal functions
+abstract contract ParaswapHelper {
+    using SafeERC20 for IERC20;
+
     // ============ Errors ============
 
     error ZeroAmount();
@@ -46,7 +82,7 @@ abstract contract ParaswapBase {
         if (swapData.length == 0) revert ZeroAmount();
 
         // Record balance before
-        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
+        uint256 buyBalanceBefore = IERC20(buyToken).balanceOf(address(this));
 
         // Decode swap params: (augustus, calldata)
         (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
@@ -58,7 +94,7 @@ abstract contract ParaswapBase {
 
         // Get spender and approve
         address spender = IAugustus(augustus).getTokenTransferProxy();
-        _safeApprove(sellToken, spender, sellAmount);
+        IERC20(sellToken).safeApprove(spender, sellAmount);
 
         // Execute swap
         (bool success, bytes memory returnData) = augustus.call(swapCalldata);
@@ -72,19 +108,16 @@ abstract contract ParaswapBase {
         }
 
         // Reset approval
-        _safeApprove(sellToken, spender, 0);
+        IERC20(sellToken).safeApprove(spender, 0);
 
         // Calculate amount received
-        uint256 buyBalanceAfter = IERC20Minimal(buyToken).balanceOf(address(this));
+        uint256 buyBalanceAfter = IERC20(buyToken).balanceOf(address(this));
         amountReceived = buyBalanceAfter - buyBalanceBefore;
 
         // Validate minimum received
         if (amountReceived < minAmountReceived) {
             revert InsufficientAmountReceived(amountReceived, minAmountReceived);
         }
-
-        // Post-swap hook for additional validation (e.g., TWAP check)
-        _afterSwap(sellToken, buyToken, sellAmount, amountReceived);
     }
 
     /// @notice Buy exact amount of a token via Paraswap
@@ -105,8 +138,8 @@ abstract contract ParaswapBase {
         if (swapData.length == 0) revert ZeroAmount();
 
         // Record balances before
-        uint256 sellBalanceBefore = IERC20Minimal(sellToken).balanceOf(address(this));
-        uint256 buyBalanceBefore = IERC20Minimal(buyToken).balanceOf(address(this));
+        uint256 sellBalanceBefore = IERC20(sellToken).balanceOf(address(this));
+        uint256 buyBalanceBefore = IERC20(buyToken).balanceOf(address(this));
 
         // Decode swap params: (augustus, calldata)
         (address augustus, bytes memory swapCalldata) = abi.decode(swapData, (address, bytes));
@@ -118,7 +151,7 @@ abstract contract ParaswapBase {
 
         // Get spender and approve max amount
         address spender = IAugustus(augustus).getTokenTransferProxy();
-        _safeApprove(sellToken, spender, maxAmountSold);
+        IERC20(sellToken).safeApprove(spender, maxAmountSold);
 
         // Execute swap
         (bool success, bytes memory returnData) = augustus.call(swapCalldata);
@@ -132,11 +165,11 @@ abstract contract ParaswapBase {
         }
 
         // Reset approval
-        _safeApprove(sellToken, spender, 0);
+        IERC20(sellToken).safeApprove(spender, 0);
 
         // Calculate amounts
-        uint256 sellBalanceAfter = IERC20Minimal(sellToken).balanceOf(address(this));
-        uint256 buyBalanceAfter = IERC20Minimal(buyToken).balanceOf(address(this));
+        uint256 sellBalanceAfter = IERC20(sellToken).balanceOf(address(this));
+        uint256 buyBalanceAfter = IERC20(buyToken).balanceOf(address(this));
         amountSold = sellBalanceBefore - sellBalanceAfter;
         uint256 amountBought = buyBalanceAfter - buyBalanceBefore;
 
@@ -149,30 +182,5 @@ abstract contract ParaswapBase {
         if (amountSold > maxAmountSold) {
             revert ExcessiveAmountSpent(amountSold, maxAmountSold);
         }
-
-        // Post-swap hook for additional validation (e.g., TWAP check)
-        _afterSwap(sellToken, buyToken, amountSold, amountBought);
     }
-
-    // ============ Hooks ============
-
-    /// @dev Override to add post-swap validation (e.g., TWAP price check)
-    /// @param sellToken Token that was sold
-    /// @param buyToken Token that was bought
-    /// @param sellAmount Amount of sellToken spent
-    /// @param buyAmount Amount of buyToken received
-    function _afterSwap(
-        address sellToken,
-        address buyToken,
-        uint256 sellAmount,
-        uint256 buyAmount
-    ) internal virtual {}
-
-    // ============ Internal Helpers (abstract) ============
-
-    /// @dev Must be implemented by inheriting contract
-    /// @param token Token to approve
-    /// @param spender Address to approve
-    /// @param amount Amount to approve
-    function _safeApprove(address token, address spender, uint256 amount) internal virtual;
 }

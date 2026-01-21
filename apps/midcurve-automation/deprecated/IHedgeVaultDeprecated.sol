@@ -24,7 +24,7 @@ import "./IMulticall.sol";
  * - Operator = Automation wallet, executes SIL/TIP/Reopen when not paused
  * - Shareholder = ERC-4626 share holders, can deposit/withdraw/collect fees
  */
-interface IHedgeVault is IAllowlist, IMulticall {
+interface IHedgeVaultDeprecated is IAllowlist, IMulticall {
     // ============ Enums ============
 
     enum State {

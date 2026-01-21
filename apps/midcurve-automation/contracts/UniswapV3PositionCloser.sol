@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./interfaces/IParaswap.sol";
+import "./base/ParaswapHelper.sol";
 
 /**
  * UniswapV3PositionCloser.sol

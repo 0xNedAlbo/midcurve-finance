@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "../interfaces/IUniswapV3PoolMinimal.sol";
 import "../interfaces/IUniswapV3Factory.sol";
-import "../interfaces/IERC20Minimal.sol";
+import "../interfaces/IERC20.sol";
 import "../libraries/FullMath.sol";
 import "../libraries/TickMath.sol";
 
@@ -119,8 +119,8 @@ abstract contract TwapOracleBase {
         int24 arithmeticMeanTick = _getArithmeticMeanTick(oracleWindowSeconds);
         uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
 
-        uint8 quoteDecimals = IERC20Minimal(quoteToken).decimals();
-        uint8 baseDecimals = IERC20Minimal(baseToken).decimals();
+        uint8 quoteDecimals = IERC20(quoteToken).decimals();
+        uint8 baseDecimals = IERC20(baseToken).decimals();
 
         // sqrtPriceX96 encodes sqrt(token1 / token0) * 2^96
         // price_token1_per_token0 = (sqrtPriceX96)^2 / 2^192
@@ -175,8 +175,8 @@ abstract contract TwapOracleBase {
 
         (address quoteToken, address baseToken, , , ) = _getOracleTokenInfo();
 
-        uint8 quoteDecimals = IERC20Minimal(quoteToken).decimals();
-        uint8 baseDecimals = IERC20Minimal(baseToken).decimals();
+        uint8 quoteDecimals = IERC20(quoteToken).decimals();
+        uint8 baseDecimals = IERC20(baseToken).decimals();
 
         // Calculate execution price as quote_per_base * 1e18
         uint256 executionPrice;

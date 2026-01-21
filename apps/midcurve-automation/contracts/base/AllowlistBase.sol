@@ -1,61 +1,70 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../interfaces/IAllowlist.sol";
-
 /// @title AllowlistBase
-/// @notice Base contract for allowlist-gated share transfers
-/// @dev Provides state variables, management functions, and internal check function for allowlist logic
-abstract contract AllowlistBase is IAllowlist {
+/// @notice Internal helper for allowlist-gated functionality
+/// @dev All methods are internal - implementer creates public wrappers with appropriate access control
+abstract contract AllowlistBase {
+    // ============ Events ============
+
+    event AddedToAllowlist(address indexed account);
+    event RemovedFromAllowlist(address indexed account);
+    event AllowlistEnabledChanged(bool enabled);
+
+    // ============ Errors ============
+
+    error NotAllowlisted(address account);
+
     // ============ State ============
 
     bool internal _allowlistEnabled;
     mapping(address => bool) internal _allowlist;
 
-    // ============ View Functions ============
+    // ============ Internal View Functions ============
 
-    function allowlistEnabled() public view virtual override returns (bool) {
+    /// @notice Check if allowlist is enabled
+    /// @return True if allowlist is enabled
+    function _isAllowlistEnabled() internal view virtual returns (bool) {
         return _allowlistEnabled;
     }
 
-    function allowlist(address account) public view virtual override returns (bool) {
+    /// @notice Check if an address is on the allowlist
+    /// @param account Address to check
+    /// @return True if address is allowlisted
+    function _isAllowlisted(address account) internal view virtual returns (bool) {
         return _allowlist[account];
     }
 
-    // ============ Management Functions ============
+    // ============ Internal Management Functions ============
 
-    /// @inheritdoc IAllowlist
-    function setAllowlistEnabled(bool enabled) external virtual override {
-        _checkAllowlistAccess();
+    /// @notice Enable or disable the allowlist
+    /// @param enabled True to enable, false to disable
+    function _setAllowlistEnabled(bool enabled) internal virtual {
         _allowlistEnabled = enabled;
         emit AllowlistEnabledChanged(enabled);
     }
 
-    /// @inheritdoc IAllowlist
-    function addToAllowlist(address[] calldata accounts) external virtual override {
-        _checkAllowlistAccess();
+    /// @notice Add addresses to the allowlist
+    /// @param accounts Addresses to add
+    function _addToAllowlist(address[] calldata accounts) internal virtual {
         for (uint256 i = 0; i < accounts.length; i++) {
             _allowlist[accounts[i]] = true;
             emit AddedToAllowlist(accounts[i]);
         }
     }
 
-    /// @inheritdoc IAllowlist
-    function removeFromAllowlist(address[] calldata accounts) external virtual override {
-        _checkAllowlistAccess();
+    /// @notice Remove addresses from the allowlist
+    /// @param accounts Addresses to remove
+    function _removeFromAllowlist(address[] calldata accounts) internal virtual {
         for (uint256 i = 0; i < accounts.length; i++) {
             _allowlist[accounts[i]] = false;
             emit RemovedFromAllowlist(accounts[i]);
         }
     }
 
-    // ============ Internal ============
+    // ============ Internal Checks ============
 
-    /// @notice Hook for access control - override to add restrictions
-    /// @dev Called before any allowlist modification. Override to add onlyManager or similar checks.
-    function _checkAllowlistAccess() internal view virtual;
-
-    /// @notice Check if account is allowlisted (reverts if not)
+    /// @notice Revert if account is not allowlisted (when allowlist is enabled)
     /// @param account Address to check
     function _requireAllowlisted(address account) internal view {
         if (_allowlistEnabled && !_allowlist[account]) {

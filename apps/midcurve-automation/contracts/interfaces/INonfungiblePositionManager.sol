@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "./IERC721Minimal.sol";
 
-interface INonfungiblePositionManagerMinimal is IERC721Minimal {
+interface INonfungiblePositionManager is IERC721Minimal {
     struct MintParams {
         address token0;
         address token1;
@@ -42,7 +42,9 @@ interface INonfungiblePositionManagerMinimal is IERC721Minimal {
         uint256 deadline;
     }
 
-    function positions(uint256 tokenId)
+    function positions(
+        uint256 tokenId
+    )
         external
         view
         returns (
@@ -60,22 +62,29 @@ interface INonfungiblePositionManagerMinimal is IERC721Minimal {
             uint128 tokensOwed1
         );
 
-    function mint(MintParams calldata params)
+    function mint(
+        MintParams calldata params
+    )
         external
         payable
-        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+        returns (
+            uint256 tokenId,
+            uint128 liquidity,
+            uint256 amount0,
+            uint256 amount1
+        );
 
-    function decreaseLiquidity(DecreaseLiquidityParams calldata params)
-        external
-        payable
-        returns (uint256 amount0, uint256 amount1);
+    function decreaseLiquidity(
+        DecreaseLiquidityParams calldata params
+    ) external payable returns (uint256 amount0, uint256 amount1);
 
-    function collect(CollectParams calldata params)
-        external
-        payable
-        returns (uint256 amount0, uint256 amount1);
+    function collect(
+        CollectParams calldata params
+    ) external payable returns (uint256 amount0, uint256 amount1);
 
-    function increaseLiquidity(IncreaseLiquidityParams calldata params)
+    function increaseLiquidity(
+        IncreaseLiquidityParams calldata params
+    )
         external
         payable
         returns (uint128 liquidity, uint256 amount0, uint256 amount1);
