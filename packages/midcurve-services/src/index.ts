@@ -59,6 +59,9 @@ export * from './services/types/notifications/index.js';
 // Export domain events
 export * from './events/index.js';
 
+// Export message queue utilities
+export * from './mq/index.js';
+
 // Export auth utilities (specific exports to avoid conflicts)
 export {
   validateAndNormalizeAddress,
