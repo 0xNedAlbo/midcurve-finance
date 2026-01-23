@@ -49,6 +49,9 @@ export type PoolPriceSubscriberState =
  * Options for creating a pool price subscriber.
  */
 export interface PoolPriceSubscriberOptions {
+  /** Database subscriber record ID (required for queue name registration) */
+  subscriberId: string;
+
   /** Chain ID of the pool (e.g., 1 for Ethereum) */
   chainId: number;
 

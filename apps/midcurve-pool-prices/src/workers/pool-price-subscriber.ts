@@ -18,6 +18,7 @@ import {
   createSubscriptionBatches,
   type PoolInfo,
 } from '../ws/providers/uniswap-v3';
+import { getRabbitMQConnection } from '../mq/connection-manager';
 
 const log = poolPricesLogger.child({ component: 'PoolPriceSubscriber' });
 
@@ -429,14 +430,15 @@ export class PoolPriceSubscriber {
   /**
    * Prune subscribers that have been inactive for 24+ hours.
    *
-   * This permanently deletes records from the database to prevent
-   * unbounded table growth from abandoned subscriptions.
+   * This permanently deletes records from the database and their
+   * associated RabbitMQ queues to prevent unbounded growth.
    */
   private async pruneStaleSubscribers(): Promise<void> {
     const config = getWorkerConfig();
     const pruneThreshold = new Date(Date.now() - config.pruneThresholdMs);
 
-    const result = await prisma.poolPriceSubscribers.deleteMany({
+    // 1. Find subscribers to prune (with queue names)
+    const toPrune = await prisma.poolPriceSubscribers.findMany({
       where: {
         isActive: false,
         OR: [
@@ -449,16 +451,66 @@ export class PoolPriceSubscriber {
           },
         ],
       },
+      select: { id: true, queueName: true },
+    });
+
+    if (toPrune.length === 0) return;
+
+    // 2. Delete RabbitMQ queues (skip null - shouldn't happen if start() succeeded)
+    const queueNames = toPrune
+      .map((s) => s.queueName)
+      .filter((name): name is string => name !== null);
+
+    if (queueNames.length > 0) {
+      await this.deleteQueues(queueNames);
+    }
+
+    // Log warning for records without queueName (start() never completed)
+    const nullCount = toPrune.filter((s) => s.queueName === null).length;
+    if (nullCount > 0) {
+      log.warn({ count: nullCount }, 'Pruning subscribers without queueName (start never completed)');
+    }
+
+    // 3. Delete database records
+    const result = await prisma.poolPriceSubscribers.deleteMany({
+      where: { id: { in: toPrune.map((s) => s.id) } },
     });
 
     if (result.count > 0) {
       log.info(
         {
           prunedCount: result.count,
+          queuesDeleted: queueNames.length,
           thresholdHours: config.pruneThresholdMs / (1000 * 60 * 60),
         },
-        'Pruned stale subscribers from database'
+        'Pruned stale subscribers and queues'
       );
+    }
+  }
+
+  /**
+   * Delete RabbitMQ queues by name.
+   *
+   * Logs warnings for queues that can't be deleted (may already be gone due to autoDelete).
+   */
+  private async deleteQueues(queueNames: string[]): Promise<void> {
+    const mqConnection = getRabbitMQConnection();
+    const channel = await mqConnection.getChannel();
+
+    for (const queueName of queueNames) {
+      try {
+        await channel.deleteQueue(queueName);
+        log.debug({ queueName }, 'Deleted RabbitMQ queue');
+      } catch (err) {
+        // Queue might already be deleted (autoDelete) - log and continue
+        log.warn(
+          {
+            queueName,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          'Failed to delete queue (may already be gone)'
+        );
+      }
     }
   }
 

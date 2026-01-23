@@ -31,6 +31,7 @@
  */
 
 import amqplib, { type Channel, type ChannelModel, type ConsumeMessage } from 'amqplib';
+import { prisma } from '@midcurve/database';
 import { createServiceLogger, LogPatterns } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import {
@@ -57,6 +58,7 @@ import type {
  */
 export class PoolPriceSubscriber {
   // Configuration
+  private readonly subscriberId: string;
   private readonly chainId: number;
   private readonly poolAddress: string;
   private readonly routingKey: string;
@@ -81,6 +83,7 @@ export class PoolPriceSubscriber {
   private readonly logger: ServiceLogger;
 
   constructor(options: PoolPriceSubscriberOptions) {
+    this.subscriberId = options.subscriberId;
     this.chainId = options.chainId;
     this.poolAddress = options.poolAddress.toLowerCase();
     this.messageHandler = options.messageHandler;
@@ -104,6 +107,7 @@ export class PoolPriceSubscriber {
 
     this.logger.debug(
       {
+        subscriberId: this.subscriberId,
         chainId: this.chainId,
         poolAddress: this.poolAddress,
         routingKey: this.routingKey,
@@ -154,16 +158,24 @@ export class PoolPriceSubscriber {
       // 3. Set prefetch for fair dispatch
       await this.channel.prefetch(this.prefetch);
 
-      // 4. Create exclusive queue (auto-deletes when consumer disconnects)
+      // 4. Create queue (non-exclusive to allow cleanup, auto-deletes when consumer disconnects)
       await this.channel.assertQueue(this.queueName, {
-        exclusive: true, // Only this consumer can access
-        autoDelete: true, // Delete when consumer disconnects
+        exclusive: false, // Non-exclusive to allow external cleanup during pruning
+        autoDelete: true, // Delete when last consumer disconnects
         durable: false, // No persistence needed for ephemeral subscriptions
       });
 
-      this.logger.debug({ queueName: this.queueName }, 'Exclusive queue declared');
+      this.logger.debug({ queueName: this.queueName }, 'Queue declared');
 
-      // 5. Bind queue to pool-prices exchange with routing key
+      // 5. Update database with queue name (for cleanup during pruning)
+      await prisma.poolPriceSubscribers.update({
+        where: { id: this.subscriberId },
+        data: { queueName: this.queueName },
+      });
+
+      this.logger.debug({ subscriberId: this.subscriberId, queueName: this.queueName }, 'Queue name registered in database');
+
+      // 6. Bind queue to pool-prices exchange with routing key
       // Note: We assume the exchange already exists (created by midcurve-pool-prices)
       await this.channel.bindQueue(this.queueName, EXCHANGE_POOL_PRICES, this.routingKey);
 
@@ -172,7 +184,7 @@ export class PoolPriceSubscriber {
         'Queue bound to exchange'
       );
 
-      // 6. Start consuming
+      // 7. Start consuming
       const result = await this.channel.consume(
         this.queueName,
         (msg) => this.onMessage(msg),
@@ -304,6 +316,16 @@ export class PoolPriceSubscriber {
    */
   isRunning(): boolean {
     return this.state === 'running';
+  }
+
+  /**
+   * Get the queue name.
+   *
+   * This is available immediately after construction (before start()).
+   * Useful for registering the queue name in the database.
+   */
+  getQueueName(): string {
+    return this.queueName;
   }
 
   // ============================================================================

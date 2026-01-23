@@ -808,10 +808,14 @@ model PoolPriceSubscribers {
   isActive    Boolean   @default(true)
   lastAliveAt DateTime? // Last heartbeat from subscriber (updated by consumer every 15s)
 
+  // RabbitMQ queue tracking (set by PoolPriceSubscriber.start())
+  queueName String? // Queue name in RabbitMQ - used for cleanup during pruning
+
   // Indexes
   @@index([poolId])
   @@index([isActive])
   @@index([subscriptionTag])
+  @@index([queueName])
   @@map("pool_price_subscribers")
 }
 
