@@ -10,8 +10,7 @@ via_ir = true
 
 # Remappings for dependencies
 remappings = [
-    "forge-std/=../../lib/forge-std/src/",
-    "diamond-3/=../../lib/diamond-3/contracts/"
+    "forge-std/=../../lib/forge-std/src/"
 ]
 
 [profile.default.fmt]
