@@ -421,6 +421,45 @@ export class PoolPriceSubscriber {
 
     // Check all subscribed pools for orphans (handles both stale cleanup and manual unsubscription)
     await this.removeOrphanedPoolsFromAllBatches();
+
+    // Prune subscribers that have been inactive for extended period
+    await this.pruneStaleSubscribers();
+  }
+
+  /**
+   * Prune subscribers that have been inactive for 24+ hours.
+   *
+   * This permanently deletes records from the database to prevent
+   * unbounded table growth from abandoned subscriptions.
+   */
+  private async pruneStaleSubscribers(): Promise<void> {
+    const config = getWorkerConfig();
+    const pruneThreshold = new Date(Date.now() - config.pruneThresholdMs);
+
+    const result = await prisma.poolPriceSubscribers.deleteMany({
+      where: {
+        isActive: false,
+        OR: [
+          // Subscribers that went stale and have old lastAliveAt
+          { lastAliveAt: { lt: pruneThreshold } },
+          // Subscribers that were never alive (lastAliveAt is null) and are old
+          {
+            lastAliveAt: null,
+            updatedAt: { lt: pruneThreshold },
+          },
+        ],
+      },
+    });
+
+    if (result.count > 0) {
+      log.info(
+        {
+          prunedCount: result.count,
+          thresholdHours: config.pruneThresholdMs / (1000 * 60 * 60),
+        },
+        'Pruned stale subscribers from database'
+      );
+    }
   }
 
   /**

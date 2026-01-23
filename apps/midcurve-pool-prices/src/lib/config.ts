@@ -39,6 +39,8 @@ export interface WorkerConfig {
   cleanupIntervalMs: number;
   /** Threshold for considering a subscriber stale (milliseconds behind MAX lastMessageAck) */
   staleThresholdMs: number;
+  /** Threshold for pruning inactive subscribers from database (milliseconds, default: 24 hours) */
+  pruneThresholdMs: number;
 }
 
 /**
@@ -74,6 +76,7 @@ export function getWorkerConfig(): WorkerConfig {
     pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '5000', 10),
     cleanupIntervalMs: parseInt(process.env.CLEANUP_INTERVAL_MS || '60000', 10),
     staleThresholdMs: parseInt(process.env.STALE_THRESHOLD_MS || '60000', 10),
+    pruneThresholdMs: parseInt(process.env.PRUNE_THRESHOLD_MS || '86400000', 10), // 24 hours
   };
 }
 
