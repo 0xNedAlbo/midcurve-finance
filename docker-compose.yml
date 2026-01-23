@@ -5,7 +5,8 @@
 # - UI (Vite SPA served via nginx)
 # - API (Next.js backend)
 # - EVM (Strategy orchestrator)
-# - Automation (Price monitoring & close order execution)
+# - Pool Prices (Real-time Swap event subscriptions)
+# - Automation (Close order execution)
 # - Signer (Private signing service)
 # - Geth (Private EVM node)
 # - RabbitMQ (Message broker)
@@ -137,9 +138,50 @@ services:
       - database
 
   # ============================================
+  # POOL PRICES SERVICE
+  # - Real-time Swap event subscriptions via WebSocket
+  # - Publishes to RabbitMQ pool-prices exchange
+  # ============================================
+  pool-prices:
+    build:
+      context: .
+      dockerfile: apps/midcurve-pool-prices/Dockerfile
+    container_name: midcurve-pool-prices
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # RabbitMQ
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+      # WebSocket RPC URLs (for Swap event subscriptions)
+      - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
+      - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
+      - WS_RPC_URL_BASE=${WS_RPC_URL_BASE:-}
+      - WS_RPC_URL_BSC=${WS_RPC_URL_BSC:-}
+      - WS_RPC_URL_POLYGON=${WS_RPC_URL_POLYGON:-}
+      - WS_RPC_URL_OPTIMISM=${WS_RPC_URL_OPTIMISM:-}
+      # Worker configuration (optional, has sensible defaults)
+      - MAX_POOLS_PER_CONNECTION=${MAX_POOLS_PER_CONNECTION:-1000}
+      - RECONNECT_DELAY_MS=${RECONNECT_DELAY_MS:-5000}
+      - MAX_RECONNECT_ATTEMPTS=${MAX_RECONNECT_ATTEMPTS:-10}
+      - POLL_INTERVAL_MS=${POLL_INTERVAL_MS:-5000}
+      - CLEANUP_INTERVAL_MS=${CLEANUP_INTERVAL_MS:-60000}
+      - STALE_THRESHOLD_MS=${STALE_THRESHOLD_MS:-60000}
+      - PRUNE_THRESHOLD_MS=${PRUNE_THRESHOLD_MS:-86400000}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+      - database
+
+  # ============================================
   # AUTOMATION SERVICE
   # - Contract bytecode serving (compiled Solidity contracts)
-  # - Price monitoring & close order execution
+  # - Close order execution (consumes from pool-prices via RabbitMQ)
   # ============================================
   automation:
     build:
@@ -157,27 +199,19 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASS=${RABBITMQ_PASS}
-      # RPC URLs (for reading pool prices)
+      # RPC URLs (for reading pool prices, position data)
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
       - RPC_URL_BASE=${RPC_URL_BASE}
       - RPC_URL_BSC=${RPC_URL_BSC}
       - RPC_URL_POLYGON=${RPC_URL_POLYGON}
       - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
-      # WebSocket RPC URLs (for OHLC data collection)
-      - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
-      - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
-      - WS_RPC_URL_BASE=${WS_RPC_URL_BASE:-}
-      - WS_RPC_URL_POLYGON=${WS_RPC_URL_POLYGON:-}
-      - WS_RPC_URL_OPTIMISM=${WS_RPC_URL_OPTIMISM:-}
       # External APIs (for position ledger sync)
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Signer service (for tx signing)
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
       # Worker configuration
-      - PRICE_TRIGGER_MODE=${PRICE_TRIGGER_MODE:-polling}
-      - PRICE_POLL_INTERVAL_MS=${PRICE_POLL_INTERVAL_MS:-10000}
       - DEPLOY_POLL_INTERVAL_MS=${DEPLOY_POLL_INTERVAL_MS:-5000}
       - ORDER_EXECUTOR_POOL_SIZE=${ORDER_EXECUTOR_POOL_SIZE:-3}
       # Fee configuration
@@ -186,6 +220,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      pool-prices:
+        condition: service_started
       signer:
         condition: service_started
     healthcheck:
