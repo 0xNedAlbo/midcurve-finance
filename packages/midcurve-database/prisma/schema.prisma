@@ -393,6 +393,8 @@ model Pool {
   positions         Position[]
   poolPrices        PoolPrice[]
   priceSubscription PoolPriceSubscription? // 1:1 relation for automation price monitoring
+  priceSubscribers  PoolPriceSubscribers[] @relation("PoolPriceSubscribers") // 1:N relation for WebSocket price subscriptions
+  pricesUniswapV3   PoolPricesUniswapV3[]  @relation("PoolPricesUniswapV3") // Historical prices from Swap events
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -787,6 +789,32 @@ model PoolPriceSubscription {
   @@map("pool_price_subscriptions")
 }
 
+// PoolPriceSubscribers - Tracks WebSocket subscriptions for pool price monitoring
+// Used by midcurve-pool-prices service to manage real-time price feeds
+// Relationship: 1 Pool -> N Subscribers (one pool can have multiple subscribers)
+model PoolPriceSubscribers {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Subscription identification
+  subscriptionTag String // Unique tag for WebSocket subscription management
+
+  // Pool reference (N:1 relation with cascading delete)
+  poolId String
+  pool   Pool   @relation("PoolPriceSubscribers", fields: [poolId], references: [id], onDelete: Cascade)
+
+  // Subscription state
+  isActive    Boolean   @default(true)
+  lastAliveAt DateTime? // Last heartbeat from subscriber (updated by consumer every 15s)
+
+  // Indexes
+  @@index([poolId])
+  @@index([isActive])
+  @@index([subscriptionTag])
+  @@map("pool_price_subscribers")
+}
+
 // AutomationLog - User-facing automation event logs
 // Scoped to positions, tracks lifecycle events for close orders
 model AutomationLog {
@@ -1077,4 +1105,52 @@ model PositionRangeStatus {
 
   @@index([isInRange])
   @@map("position_range_statuses")
+}
+
+// =============================================================================
+// Pool Price History Models
+// =============================================================================
+
+// PoolPricesUniswapV3 - Historical pool prices from Swap events
+// Prices are sourced by subscribing to Swap events the pool contract emits
+// Events with removed=true (chain reorgs) should delete corresponding entries
+model PoolPricesUniswapV3 {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Chain identification
+  chainId Int
+
+  // Transaction identification (for uniqueness and ordering)
+  blockHash        String
+  transactionHash  String
+  transactionIndex Int
+  logIndex         Int    // Position of log within the block (not transaction)
+  blockNumber      Int
+  blockTimestamp   DateTime
+
+  // Pool reference (cascade delete when pool is deleted)
+  poolId String
+  pool   Pool   @relation("PoolPricesUniswapV3", fields: [poolId], references: [id], onDelete: Cascade)
+
+  // Price data (stored as string for bigint precision)
+  sqrtPriceX96         String // bigint as string
+  token1PricePerToken0 String // bigint as string
+  token0PricePerToken1 String // bigint as string
+
+  // Finality flag (false until confirmed)
+  isFinal Boolean @default(false)
+
+  // Unique constraint for deduplication
+  @@unique([chainId, blockHash, transactionHash, logIndex])
+
+  // Indexes for efficient querying
+  // Ordering (latest first): blockNumber DESC, logIndex DESC
+  // Ordering (earliest first): blockNumber ASC, logIndex ASC
+  @@index([poolId, blockNumber(sort: Desc), logIndex(sort: Desc)], map: "pool_prices_uniswapv3_latest_first_idx")
+  @@index([poolId, blockNumber(sort: Asc), logIndex(sort: Asc)], map: "pool_prices_uniswapv3_earliest_first_idx")
+  @@index([chainId])
+  @@index([isFinal])
+  @@map("pool_prices_uniswapv3")
 }
