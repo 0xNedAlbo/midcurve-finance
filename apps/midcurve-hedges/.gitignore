@@ -2,20 +2,9 @@
 node_modules/
 .pnpm-store/
 
-# Next.js
-.next/
-out/
-.vercel
-
-# Build output
-dist/
-build/
-
-# Compiled contract artifacts (regenerated on build)
-artifacts/
-
 # Foundry
 cache/
+out/
 broadcast/
 
 # Deployment results (contain deployed addresses)
@@ -44,7 +33,3 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts

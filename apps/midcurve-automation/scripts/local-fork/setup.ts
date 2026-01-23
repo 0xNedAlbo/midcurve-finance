@@ -57,6 +57,7 @@ interface SetupState {
   mockAugustusAddress?: string;
   mockAugustusRegistryAddress?: string;
   positionCloserAddress?: string;
+  diamondFactoryAddress?: string;
   poolAddress?: string;
   positionTokenId?: string;
 }
@@ -162,6 +163,7 @@ function updateLocalChainConfig(
   mockAugustusAddress?: string,
   mockAugustusRegistryAddress?: string,
   positionCloserAddress?: string,
+  diamondFactoryAddress?: string,
   poolAddress?: string
 ): void {
   // Backend .env files (automation and API)
@@ -179,6 +181,9 @@ function updateLocalChainConfig(
       if (positionCloserAddress) {
         updateEnvFile(envPath, 'POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
       }
+      if (diamondFactoryAddress) {
+        updateEnvFile(envPath, 'DIAMOND_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
+      }
       if (poolAddress) {
         updateEnvFile(envPath, 'POOL_ADDRESS', poolAddress);
       }
@@ -193,6 +198,9 @@ function updateLocalChainConfig(
   try {
     if (mockAugustusRegistryAddress) {
       updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS', mockAugustusRegistryAddress);
+    }
+    if (diamondFactoryAddress) {
+      updateEnvFile(uiEnvPath, 'VITE_DIAMOND_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
     }
     console.log(`Updated: ${uiEnvPath}`);
   } catch (error) {
@@ -222,6 +230,7 @@ async function step1Deploy(state: SetupState): Promise<void> {
   state.mockAugustusAddress = extractAddress(output, /MockAugustus deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.mockAugustusRegistryAddress = extractAddress(output, /MockAugustusRegistry deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.positionCloserAddress = extractAddress(output, /PositionCloser deployed at:\s*(0x[a-fA-F0-9]{40})/);
+  state.diamondFactoryAddress = extractAddress(output, /MidcurveHedgeVaultDiamondFactory deployed at:\s*(0x[a-fA-F0-9]{40})/);
 
   if (!state.mockUsdAddress) {
     throw new Error('Failed to extract MockUSD address from deploy output');
@@ -238,6 +247,7 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('MockAugustus:', state.mockAugustusAddress);
   console.log('MockAugustusRegistry:', state.mockAugustusRegistryAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
+  console.log('DiamondFactory:', state.diamondFactoryAddress || '(not found)');
 }
 
 async function step2CreatePool(state: SetupState): Promise<void> {
@@ -372,7 +382,7 @@ async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('');
   console.log('This script will:');
-  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, and PositionCloser');
+  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, PositionCloser, Diamond Facets, and Factory');
   console.log('2. Create a WETH/MockUSD Uniswap V3 pool');
   console.log('2b. Configure MockAugustus with pool address');
   console.log('3. Add initial liquidity to the pool');
@@ -396,6 +406,7 @@ async function main(): Promise<void> {
       state.mockAugustusAddress,
       state.mockAugustusRegistryAddress,
       state.positionCloserAddress,
+      state.diamondFactoryAddress,
       state.poolAddress
     );
 
@@ -411,6 +422,7 @@ async function main(): Promise<void> {
     console.log('  MockAugustus:', state.mockAugustusAddress);
     console.log('  MockAugustusRegistry:', state.mockAugustusRegistryAddress);
     console.log('  PositionCloser:', state.positionCloserAddress || '(not deployed)');
+    console.log('  DiamondFactory:', state.diamondFactoryAddress || '(not deployed)');
     console.log('  Pool:', state.poolAddress);
     console.log('');
     console.log('Position NFT Token ID:', state.positionTokenId || '(not minted)');
@@ -421,6 +433,7 @@ async function main(): Promise<void> {
     console.log(`  export MOCK_AUGUSTUS_REGISTRY_ADDRESS="${state.mockAugustusRegistryAddress}"`);
     console.log(`  export POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
+    console.log(`  export DIAMOND_FACTORY_ADDRESS="${state.diamondFactoryAddress}"`);
     console.log('');
     console.log('Next Steps:');
     console.log('1. Check pool price:');
@@ -444,6 +457,7 @@ async function main(): Promise<void> {
     console.error('  MockUSD:', state.mockUsdAddress || '(not deployed)');
     console.error('  MockAugustus:', state.mockAugustusAddress || '(not deployed)');
     console.error('  MockAugustusRegistry:', state.mockAugustusRegistryAddress || '(not deployed)');
+    console.error('  DiamondFactory:', state.diamondFactoryAddress || '(not deployed)');
     console.error('  Pool:', state.poolAddress || '(not created)');
     console.error('');
     console.error('Make sure Anvil is running: pnpm local:anvil');
