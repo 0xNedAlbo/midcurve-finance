@@ -20,8 +20,6 @@ export const EXCHANGES = {
   TRIGGERS: 'automation.triggers',
   /** Direct exchange for contract deployment events */
   DEPLOYMENTS: 'automation.deployments',
-  /** Direct exchange for Uniswap V3 OHLC data */
-  OHLC_UNISWAPV3: 'automation.ohlc.uniswapv3',
   /** Direct exchange for notification events */
   NOTIFICATIONS: 'automation.notifications',
 } as const;
@@ -34,8 +32,6 @@ export const QUEUES = {
   CONTRACTS_PENDING: 'contracts.pending',
   /** Delay queue for order retries (60s TTL, dead-letters back to orders.pending) */
   ORDERS_RETRY_DELAY: 'orders.retry-delay',
-  /** Queue for Uniswap V3 1-minute OHLC candles */
-  OHLC_UNISWAPV3_1M: 'ohlc.uniswapv3.1m',
   /** Queue for pending notifications to be processed */
   NOTIFICATIONS_PENDING: 'notifications.pending',
   /** Queue for hedge vault triggers ready for execution */
@@ -53,8 +49,6 @@ export const ROUTING_KEYS = {
   ORDER_TRIGGERED: 'triggered',
   /** Routing key for contract deployment */
   CONTRACT_DEPLOY: 'deploy',
-  /** Routing key for Uniswap V3 1-minute OHLC candles */
-  OHLC_UNISWAPV3_1M: '1m',
   /** Routing key for position range change notifications */
   NOTIFICATION_RANGE_CHANGE: 'range.change',
   /** Routing key for order execution result notifications */
@@ -154,34 +148,6 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     exchange: EXCHANGES.DEPLOYMENTS,
     queue: QUEUES.CONTRACTS_PENDING,
     routingKey: ROUTING_KEYS.CONTRACT_DEPLOY,
-    msg: 'Queue bound to exchange',
-  });
-
-  // Create OHLC Uniswap V3 exchange
-  await channel.assertExchange(EXCHANGES.OHLC_UNISWAPV3, 'direct', {
-    durable: true,
-    autoDelete: false,
-  });
-  log.info({ exchange: EXCHANGES.OHLC_UNISWAPV3, type: 'direct', msg: 'Exchange declared' });
-
-  // Create ohlc.uniswapv3.1m queue
-  await channel.assertQueue(QUEUES.OHLC_UNISWAPV3_1M, {
-    durable: true,
-    exclusive: false,
-    autoDelete: false,
-  });
-  log.info({ queue: QUEUES.OHLC_UNISWAPV3_1M, msg: 'Queue declared' });
-
-  // Bind ohlc.uniswapv3.1m to OHLC Uniswap V3 exchange
-  await channel.bindQueue(
-    QUEUES.OHLC_UNISWAPV3_1M,
-    EXCHANGES.OHLC_UNISWAPV3,
-    ROUTING_KEYS.OHLC_UNISWAPV3_1M
-  );
-  log.info({
-    exchange: EXCHANGES.OHLC_UNISWAPV3,
-    queue: QUEUES.OHLC_UNISWAPV3_1M,
-    routingKey: ROUTING_KEYS.OHLC_UNISWAPV3_1M,
     msg: 'Queue bound to exchange',
   });
 
@@ -291,12 +257,10 @@ export async function verifyAutomationTopology(channel: Channel): Promise<boolea
   try {
     await channel.checkExchange(EXCHANGES.TRIGGERS);
     await channel.checkExchange(EXCHANGES.DEPLOYMENTS);
-    await channel.checkExchange(EXCHANGES.OHLC_UNISWAPV3);
     await channel.checkExchange(EXCHANGES.NOTIFICATIONS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
     await channel.checkQueue(QUEUES.ORDERS_RETRY_DELAY);
     await channel.checkQueue(QUEUES.CONTRACTS_PENDING);
-    await channel.checkQueue(QUEUES.OHLC_UNISWAPV3_1M);
     await channel.checkQueue(QUEUES.NOTIFICATIONS_PENDING);
     await channel.checkQueue(QUEUES.HEDGE_VAULT_PENDING);
     await channel.checkQueue(QUEUES.HEDGE_VAULT_RETRY_DELAY);
