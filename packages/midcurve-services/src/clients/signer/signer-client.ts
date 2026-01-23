@@ -5,7 +5,7 @@
  * This is used by backend services to trigger signing operations.
  *
  * Environment Variables:
- * - SIGNER_SERVICE_URL: Base URL of the signer service (default: http://localhost:3001)
+ * - SIGNER_URL: Base URL of the signer service (default: http://localhost:3003)
  * - SIGNER_INTERNAL_API_KEY: Shared secret for authenticating with the signer service
  */
 
@@ -52,7 +52,7 @@ export class SignerClient {
    * Get configuration from environment variables
    */
   private getConfigFromEnv(): SignerConfig {
-    const baseUrl = process.env.SIGNER_SERVICE_URL || 'http://localhost:3001';
+    const baseUrl = process.env.SIGNER_URL || 'http://localhost:3003';
     const apiKey = process.env.SIGNER_INTERNAL_API_KEY;
 
     if (!apiKey) {

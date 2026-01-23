@@ -260,9 +260,9 @@ class LifecycleService {
       const rpcUrl = process.env.SEMSEE_RPC_URL || 'http://localhost:8555';
       const chainId = strategy.chainId ?? 31337;
 
-      // Determine signing mode: use signer API if SIGNER_SERVICE_URL is set
+      // Determine signing mode: use signer API if SIGNER_URL is set
       // Otherwise fall back to local private key (development mode)
-      const signerServiceUrl = process.env.SIGNER_SERVICE_URL;
+      const signerServiceUrl = process.env.SIGNER_URL;
       const operatorPrivateKey = process.env.OPERATOR_PRIVATE_KEY;
 
       let loop: StrategyLoop;
@@ -305,7 +305,7 @@ class LifecycleService {
         this.log.info({ contractAddress, msg: 'Using local private key for transaction signing' });
       } else {
         throw new LifecycleError(
-          'Neither SIGNER_SERVICE_URL nor OPERATOR_PRIVATE_KEY configured',
+          'Neither SIGNER_URL nor OPERATOR_PRIVATE_KEY configured',
           'CONFIG_ERROR',
           500
         );

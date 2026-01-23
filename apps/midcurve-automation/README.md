@@ -123,7 +123,7 @@ RPC_URL_POLYGON="https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY"
 RABBITMQ_URL="amqp://guest:guest@localhost:5672"
 
 # Signer service
-SIGNER_SERVICE_URL="http://localhost:3003"
+SIGNER_URL="http://localhost:3003"
 
 # Fee configuration
 PROTOCOL_FEE_BPS=50

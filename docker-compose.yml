@@ -85,9 +85,8 @@ services:
       - RPC_URL_POLYGON=${RPC_URL_POLYGON}
       - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
       # Internal services
-      - SIGNER_SERVICE_URL=http://signer:3003
-      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
       - SIGNER_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
       - EVM_SERVICE_URL=http://evm:3002
       - AUTOMATION_URL=http://automation:3004
       # External APIs
@@ -125,7 +124,7 @@ services:
       - GETH_HTTP_URL=http://geth:8555
       - GETH_WS_URL=ws://geth:8556
       - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
-      - SIGNER_SERVICE_URL=http://signer:3003
+      - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
     depends_on:
       geth:

@@ -4,3 +4,12 @@
 [submodule "apps/midcurve-evm/contracts/lib/openzeppelin-contracts"]
 	path = apps/midcurve-evm/contracts/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "lib/diamond-3"]
+	path = lib/diamond-3
+	url = https://github.com/mudgen/diamond-3
+[submodule "apps/midcurve-hedges/lib/openzeppelin-contracts"]
+	path = apps/midcurve-hedges/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "apps/midcurve-hedges/lib/forge-std"]
+	path = apps/midcurve-hedges/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std

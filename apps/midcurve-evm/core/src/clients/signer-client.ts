@@ -392,9 +392,9 @@ const globalForSignerClient = globalThis as unknown as {
  */
 export function getSignerClient(): SignerClient {
   if (!globalForSignerClient.signerClient) {
-    const baseUrl = process.env.SIGNER_SERVICE_URL;
+    const baseUrl = process.env.SIGNER_URL;
     if (!baseUrl) {
-      throw new Error('SIGNER_SERVICE_URL environment variable is required');
+      throw new Error('SIGNER_URL environment variable is required');
     }
 
     globalForSignerClient.signerClient = new SignerClient({
