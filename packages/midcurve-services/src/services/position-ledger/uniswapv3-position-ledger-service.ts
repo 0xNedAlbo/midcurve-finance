@@ -496,12 +496,12 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
         throw error;
       }
 
-      // Get previous state
+      // Get previous state (use typedConfig for actual bigint values)
       const previousState: PreviousEventState = lastEvent
         ? {
-            uncollectedPrincipal0: (lastEvent.config as unknown as UniswapV3LedgerEventConfig).uncollectedPrincipal0After,
-            uncollectedPrincipal1: (lastEvent.config as unknown as UniswapV3LedgerEventConfig).uncollectedPrincipal1After,
-            liquidity: (lastEvent.config as unknown as UniswapV3LedgerEventConfig).liquidityAfter,
+            uncollectedPrincipal0: lastEvent.typedConfig.uncollectedPrincipal0After,
+            uncollectedPrincipal1: lastEvent.typedConfig.uncollectedPrincipal1After,
+            liquidity: lastEvent.typedConfig.liquidityAfter,
             costBasis: lastEvent.costBasisAfter,
             pnl: lastEvent.pnlAfter,
           }
@@ -723,9 +723,10 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
       );
 
       // Sort existing events by blockchain order (ascending) for state calculation
+      // Use typedConfig to get actual bigint values (not JSON-serialized strings)
       const sortedExisting = [...existingEvents].sort((a, b) => {
-        const configA = a.config as unknown as UniswapV3LedgerEventConfig;
-        const configB = b.config as unknown as UniswapV3LedgerEventConfig;
+        const configA = a.typedConfig;
+        const configB = b.typedConfig;
         if (configA.blockNumber !== configB.blockNumber) return Number(configA.blockNumber - configB.blockNumber);
 
         if (configA.txIndex !== configB.txIndex) return configA.txIndex - configB.txIndex;
@@ -749,7 +750,8 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
         if (!lastEvent) {
           throw new Error('Expected last event but got undefined');
         }
-        const lastEventConfig = lastEvent.config as unknown as UniswapV3LedgerEventConfig;
+        // Use typedConfig to get actual bigint values (not JSON-serialized strings)
+        const lastEventConfig = lastEvent.typedConfig;
         previousEventId = lastEvent.id;
         lastBlockNumber = lastEventConfig.blockNumber;
         lastTxIndex = lastEventConfig.txIndex;
@@ -1311,15 +1313,16 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
         },
       });
 
-      // Map to typed events
+      // Map to typed events (cast to concrete type since all events in this service are UniswapV3)
       const events = results.map((r) =>
-        this.mapToLedgerEvent(r as LedgerEventDbResult)
+        this.mapToLedgerEvent(r as LedgerEventDbResult) as UniswapV3PositionLedgerEvent
       );
 
       // Sort by blockchain coordinates (descending - newest first)
+      // Use typedConfig to get actual bigint values (not JSON-serialized strings)
       events.sort((a, b) => {
-        const configA = a.config as unknown as UniswapV3LedgerEventConfig;
-        const configB = b.config as unknown as UniswapV3LedgerEventConfig;
+        const configA = a.typedConfig;
+        const configB = b.typedConfig;
 
         // Compare block numbers (descending)
         if (configA.blockNumber > configB.blockNumber) return -1;

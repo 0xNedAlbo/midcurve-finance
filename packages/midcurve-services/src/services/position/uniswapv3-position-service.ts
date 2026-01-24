@@ -1215,7 +1215,11 @@ export class UniswapV3PositionService extends PositionService {
                                       positionData[10] === 0n && // tokensOwed0
                                       positionData[11] === 0n;   // tokensOwed1
 
-                if (allFieldsZero && existingPosition.liquidity > 0n) {
+                // Defensive BigInt conversion in case state was deserialized from JSON
+                const existingLiquidity = typeof existingPosition.liquidity === 'bigint'
+                    ? existingPosition.liquidity
+                    : BigInt(existingPosition.liquidity);
+                if (allFieldsZero && existingLiquidity > 0n) {
                     const error = new Error(
                         `Position NFT ${nftId} on chain ${chainId} appears to have been deleted (all state fields are zero but position previously had liquidity)`
                     );
@@ -1444,8 +1448,8 @@ export class UniswapV3PositionService extends PositionService {
                     const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
 
                     if (lastLedgerEvent) {
-                        const typedEventConfig = lastLedgerEvent.config as unknown as { liquidityAfter?: bigint };
-                        const ledgerLiquidity = typedEventConfig.liquidityAfter ?? 0n;
+                        // Use typedConfig to get actual bigint values (not JSON-serialized strings)
+                        const ledgerLiquidity = lastLedgerEvent.typedConfig.liquidityAfter;
                         const currentStateLiquidity = syncedPosition.liquidity;
 
                         // Check if we need to update position.state.liquidity
@@ -1707,8 +1711,8 @@ export class UniswapV3PositionService extends PositionService {
                     // Get last ledger event to extract calculated liquidity
                     const lastEvents = await this.ledgerService.findAllItems(id);
                     const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
-                    const typedLedgerConfig = lastLedgerEvent?.config as unknown as { liquidityAfter?: bigint } | undefined;
-                    const ledgerLiquidity = typedLedgerConfig?.liquidityAfter ?? 0n;
+                    // Use typedConfig to get actual bigint values (not JSON-serialized strings)
+                    const ledgerLiquidity = lastLedgerEvent?.typedConfig?.liquidityAfter ?? 0n;
                     const onChainLiquidity = updatedState.liquidity;
 
                     const liquidityMismatch = ledgerLiquidity !== onChainLiquidity;
@@ -1771,12 +1775,14 @@ export class UniswapV3PositionService extends PositionService {
                         // ========================================================================
 
                         // Check if on-chain state has changed (indicates new events)
+                        // Use typedState to get actual bigint values (not JSON-serialized strings)
+                        const existingState = existingPosition.typedState;
                         const stateChanged = (
-                            updatedState.liquidity !== existingPosition.state.liquidity ||
-                            updatedState.tokensOwed0 !== existingPosition.state.tokensOwed0 ||
-                            updatedState.tokensOwed1 !== existingPosition.state.tokensOwed1 ||
-                            updatedState.feeGrowthInside0LastX128 !== existingPosition.state.feeGrowthInside0LastX128 ||
-                            updatedState.feeGrowthInside1LastX128 !== existingPosition.state.feeGrowthInside1LastX128
+                            updatedState.liquidity !== existingState.liquidity ||
+                            updatedState.tokensOwed0 !== existingState.tokensOwed0 ||
+                            updatedState.tokensOwed1 !== existingState.tokensOwed1 ||
+                            updatedState.feeGrowthInside0LastX128 !== existingState.feeGrowthInside0LastX128 ||
+                            updatedState.feeGrowthInside1LastX128 !== existingState.feeGrowthInside1LastX128
                         );
 
                         if (stateChanged) {
@@ -1843,8 +1849,8 @@ export class UniswapV3PositionService extends PositionService {
             let positionClosureInfo: { shouldClose: boolean; closedAt: Date } | null = null;
 
             if (lastLedgerEventBeforeSave) {
-                const typedEventConfigBeforeSave = lastLedgerEventBeforeSave.config as unknown as { liquidityAfter?: bigint };
-                const ledgerLiquidityBeforeSave = typedEventConfigBeforeSave.liquidityAfter ?? 0n;
+                // Use typedConfig to get actual bigint values (not JSON-serialized strings)
+                const ledgerLiquidityBeforeSave = lastLedgerEventBeforeSave.typedConfig.liquidityAfter;
 
                 // Update updatedState with ledger's liquidity (so it gets saved correctly)
                 if (ledgerLiquidityBeforeSave !== updatedState.liquidity) {

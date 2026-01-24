@@ -9,7 +9,12 @@ import { Info, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import type { CloseOrderFormData, SwapDirection } from '../CloseOrderModal';
 
 // Chains supported for Paraswap swap integration
-const PARASWAP_SUPPORTED_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
+const PARASWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
+
+// In development, also support local test chain
+const PARASWAP_SUPPORTED_CHAINS = import.meta.env.DEV
+  ? [...PARASWAP_PRODUCTION_CHAINS, 31337] // Include Hardhat local chain in dev
+  : PARASWAP_PRODUCTION_CHAINS;
 
 const SWAP_SLIPPAGE_OPTIONS = [
   { value: 50, label: '0.5%' },
@@ -43,9 +48,7 @@ export function SwapConfigSection({
   chainId,
 }: SwapConfigSectionProps) {
   // Check if chain supports Paraswap
-  const isChainSupported = PARASWAP_SUPPORTED_CHAINS.includes(
-    chainId as (typeof PARASWAP_SUPPORTED_CHAINS)[number]
-  );
+  const isChainSupported = (PARASWAP_SUPPORTED_CHAINS as readonly number[]).includes(chainId);
 
   // If chain doesn't support swap, don't show the section
   if (!isChainSupported) {

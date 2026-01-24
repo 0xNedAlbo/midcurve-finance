@@ -41,7 +41,7 @@ import {
 } from '@midcurve/api-shared';
 import { LedgerPathParamsSchema } from '@midcurve/api-shared';
 import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
-import { serializeBigInt } from '@/lib/serializers';
+import { serializeUniswapV3Position } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { getUniswapV3PositionService, getUniswapV3PositionLedgerService } from '@/lib/services';
@@ -187,7 +187,7 @@ export async function POST(
       });
 
       // 6. Serialize bigints to strings for JSON
-      const serializedPosition = serializeBigInt(position) as unknown as GetUniswapV3PositionResponse;
+      const serializedPosition = serializeUniswapV3Position(position) as GetUniswapV3PositionResponse;
 
       const response = createSuccessResponse(serializedPosition);
 

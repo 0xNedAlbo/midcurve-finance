@@ -233,20 +233,20 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       eventType: row.eventType as EventType,
       inputHash: row.inputHash,
 
-      // Financial data
-      poolPrice: row.poolPrice,
-      token0Amount: row.token0Amount,
-      token1Amount: row.token1Amount,
-      tokenValue: row.tokenValue,
+      // Financial data (convert from string stored in DB to bigint)
+      poolPrice: typeof row.poolPrice === 'bigint' ? row.poolPrice : BigInt(row.poolPrice),
+      token0Amount: typeof row.token0Amount === 'bigint' ? row.token0Amount : BigInt(row.token0Amount),
+      token1Amount: typeof row.token1Amount === 'bigint' ? row.token1Amount : BigInt(row.token1Amount),
+      tokenValue: typeof row.tokenValue === 'bigint' ? row.tokenValue : BigInt(row.tokenValue),
       rewards: rewardsJSON.map(rewardFromJSON),
 
-      // Cost basis tracking
-      deltaCostBasis: row.deltaCostBasis,
-      costBasisAfter: row.costBasisAfter,
+      // Cost basis tracking (convert from string stored in DB to bigint)
+      deltaCostBasis: typeof row.deltaCostBasis === 'bigint' ? row.deltaCostBasis : BigInt(row.deltaCostBasis),
+      costBasisAfter: typeof row.costBasisAfter === 'bigint' ? row.costBasisAfter : BigInt(row.costBasisAfter),
 
-      // PnL tracking
-      deltaPnl: row.deltaPnl,
-      pnlAfter: row.pnlAfter,
+      // PnL tracking (convert from string stored in DB to bigint)
+      deltaPnl: typeof row.deltaPnl === 'bigint' ? row.deltaPnl : BigInt(row.deltaPnl),
+      pnlAfter: typeof row.pnlAfter === 'bigint' ? row.pnlAfter : BigInt(row.pnlAfter),
 
       // Protocol-specific
       config: ledgerEventConfigFromJSON(configJSON),

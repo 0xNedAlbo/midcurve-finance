@@ -15,7 +15,8 @@ import {
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
 import { ListPositionsQuerySchema } from '@midcurve/api-shared';
-import { serializeBigInt } from '@/lib/serializers';
+import type { UniswapV3Position } from '@midcurve/shared';
+import { serializeUniswapV3Position } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { ListPositionsResponse, ListPositionData, PnLCurveResponseData, PnLCurvePointData, PnLCurveOrderData } from '@midcurve/api-shared';
 import { getPositionListService, getPnLCurveService } from '@/lib/services';
@@ -148,8 +149,9 @@ export async function GET(request: NextRequest): Promise<Response> {
       const serializedPositions: ListPositionData[] = [];
 
       for (const position of result.positions) {
-        const serializedPosition = serializeBigInt(position);
-        if (!serializedPosition) continue;
+        // Currently only Uniswap V3 is supported
+        // Cast to UniswapV3Position for proper serialization
+        const serializedPosition = serializeUniswapV3Position(position as UniswapV3Position);
 
         const positionData = serializedPosition as unknown as ListPositionData;
 

@@ -92,7 +92,14 @@ export function serializeUniswapV3Pool(pool: UniswapV3Pool) {
     token0: serializeErc20Token(pool.token0),
     token1: serializeErc20Token(pool.token1),
     feeBps: pool.feeBps,
-    config: pool.config, // No bigints in config
+    config: {
+      chainId: pool.typedConfig.chainId,
+      address: pool.typedConfig.address,
+      token0: pool.typedConfig.token0,
+      token1: pool.typedConfig.token1,
+      feeBps: pool.typedConfig.feeBps,
+      tickSpacing: pool.typedConfig.tickSpacing,
+    },
     state: serializeUniswapV3PoolState(pool.typedState),
     createdAt: pool.createdAt.toISOString(),
     updatedAt: pool.updatedAt.toISOString(),
@@ -136,7 +143,10 @@ export function serializeErc20Token(token: Erc20Token) {
     logoUrl: token.logoUrl,
     coingeckoId: token.coingeckoId,
     marketCap: token.marketCap,
-    config: token.config,
+    config: {
+      address: token.typedConfig.address,
+      chainId: token.typedConfig.chainId,
+    },
     createdAt: token.createdAt.toISOString(),
     updatedAt: token.updatedAt.toISOString(),
   };
@@ -183,6 +193,8 @@ export function serializeUniswapV3PositionState(state: UniswapV3PositionState) {
     feeGrowthInside1LastX128: state.feeGrowthInside1LastX128.toString(),
     tokensOwed0: state.tokensOwed0.toString(),
     tokensOwed1: state.tokensOwed1.toString(),
+    unclaimedFees0: state.unclaimedFees0.toString(),
+    unclaimedFees1: state.unclaimedFees1.toString(),
   };
 }
 
@@ -211,11 +223,14 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     currentCostBasis: position.currentCostBasis.toString(),
     realizedPnl: position.realizedPnl.toString(),
     unrealizedPnl: position.unrealizedPnl.toString(),
+    realizedCashflow: position.realizedCashflow.toString(),
+    unrealizedCashflow: position.unrealizedCashflow.toString(),
 
     // Fee fields (bigint → string)
     collectedFees: position.collectedFees.toString(),
     unClaimedFees: position.unClaimedFees.toString(),
     lastFeesCollectedAt: position.lastFeesCollectedAt.toISOString(),
+    totalApr: position.totalApr,
 
     // Price range (bigint → string)
     priceRangeLower: position.priceRangeLower.toString(),
@@ -233,7 +248,13 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     isActive: position.isActive,
 
     // Protocol-specific (config has no bigints, state has bigints)
-    config: position.config,
+    config: {
+      chainId: position.typedConfig.chainId,
+      nftId: position.typedConfig.nftId,
+      poolAddress: position.typedConfig.poolAddress,
+      tickUpper: position.typedConfig.tickUpper,
+      tickLower: position.typedConfig.tickLower,
+    },
     state: serializeUniswapV3PositionState(position.typedState),
 
     // Timestamps

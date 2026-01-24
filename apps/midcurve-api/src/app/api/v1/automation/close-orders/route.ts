@@ -27,7 +27,12 @@ import { isChainSupported } from '@/config/shared-contracts';
 import type { UniswapV3Position } from '@midcurve/shared';
 
 // Chains supported for Paraswap swap integration
-const PARASWAP_SUPPORTED_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
+const PARASWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
+
+// In development, also support local test chain
+const PARASWAP_SUPPORTED_CHAINS: readonly number[] = process.env.NODE_ENV === 'development'
+  ? [...PARASWAP_PRODUCTION_CHAINS, 31337] // Include Hardhat local chain in dev
+  : PARASWAP_PRODUCTION_CHAINS;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -162,7 +167,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       // Validate swap chain support if swap is enabled
       if (data.swapConfig?.enabled) {
         const chainId = data.automationContractConfig.chainId;
-        if (!PARASWAP_SUPPORTED_CHAINS.includes(chainId as typeof PARASWAP_SUPPORTED_CHAINS[number])) {
+        if (!PARASWAP_SUPPORTED_CHAINS.includes(chainId)) {
           const errorResponse = createErrorResponse(
             ApiErrorCode.VALIDATION_ERROR,
             `Post-close swap is not supported on chain ${chainId}. Supported chains: Ethereum, Arbitrum, Base, Optimism`

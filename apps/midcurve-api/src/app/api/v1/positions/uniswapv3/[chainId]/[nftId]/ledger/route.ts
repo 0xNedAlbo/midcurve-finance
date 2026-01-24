@@ -32,7 +32,6 @@ import {
   LedgerPathParamsSchema,
 } from '@midcurve/api-shared';
 import type { LedgerEventsResponse, LedgerEventData } from '@midcurve/api-shared';
-import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUniswapV3PositionService, getUniswapV3PositionLedgerService } from '@/lib/services';
 
@@ -170,8 +169,8 @@ export async function GET(
         eventCount: ledgerEvents.length,
       });
 
-      // 4. Serialize bigints to strings for JSON
-      const serializedEvents = serializeBigInt(ledgerEvents) as unknown as LedgerEventData[];
+      // 4. Serialize events using built-in toJSON() method (handles bigint → string conversion)
+      const serializedEvents = ledgerEvents.map(event => event.toJSON()) as unknown as LedgerEventData[];
 
       const response: LedgerEventsResponse = {
         ...createSuccessResponse(serializedEvents),

@@ -19,9 +19,13 @@ import {
   tickToPrice,
   getTickSpacing,
   calculatePositionValue,
-  type UniswapV3PositionConfig,
+  UniswapV3PositionConfig,
+  positionStateFromJSON,
+  stateFromJSON as poolStateFromJSON,
   type UniswapV3PositionState,
-  type UniswapV3PoolState,
+  type UniswapV3PositionConfigJSON,
+  type UniswapV3PositionStateJSON,
+  type UniswapV3PoolStateJSON,
   type Erc20TokenConfig,
   type TriggerMode,
 } from '@midcurve/shared';
@@ -79,10 +83,16 @@ export class PnLCurveService {
         throw new Error(`Unsupported protocol: ${position.protocol}. Only 'uniswapv3' is supported.`);
       }
 
-      // 2. Parse position and pool data
-      const positionConfig = position.config as unknown as UniswapV3PositionConfig;
-      const positionState = position.state as unknown as UniswapV3PositionState;
-      const poolState = position.pool.state as unknown as UniswapV3PoolState;
+      // 2. Parse position and pool data (convert JSON strings to bigint values)
+      const positionConfig = UniswapV3PositionConfig.fromJSON(
+        position.config as unknown as UniswapV3PositionConfigJSON
+      );
+      const positionState = positionStateFromJSON(
+        position.state as unknown as UniswapV3PositionStateJSON
+      );
+      const poolState = poolStateFromJSON(
+        position.pool.state as unknown as UniswapV3PoolStateJSON
+      );
 
       // 3. Determine base and quote tokens
       const { baseToken, quoteToken } = this.resolveTokenRoles(
