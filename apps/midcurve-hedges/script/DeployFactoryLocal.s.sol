@@ -2,10 +2,6 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
-import {UniswapV3PositionCloser} from "../contracts/UniswapV3PositionCloser.sol";
-import {MockUSD} from "../contracts/MockUSD.sol";
-import {MockAugustus} from "../contracts/mocks/MockAugustus.sol";
-import {MockAugustusRegistry} from "../contracts/mocks/MockAugustusRegistry.sol";
 
 // Diamond facets
 import {DiamondCutFacet} from "../contracts/facets/DiamondCutFacet.sol";
@@ -21,53 +17,42 @@ import {ERC20Facet} from "../contracts/facets/ERC20Facet.sol";
 import {MidcurveHedgeVaultDiamondFactory} from "../contracts/MidcurveHedgeVaultDiamondFactory.sol";
 
 /**
- * @title DeployLocalScript
- * @notice Deploys all contracts for local Anvil fork including Diamond factory and facets
+ * @title DeployFactoryLocalScript
+ * @notice Deploys the Diamond factory and facets to local Anvil fork
  * @dev Usage:
- *   pnpm local:deploy
+ *   pnpm deploy:local
  *
- * This uses the Foundry default account #0 which is pre-funded with ETH.
- * The MockAugustus contract is used instead of real Paraswap since Paraswap API
- * cannot price custom tokens like mockUSD.
+ * Prerequisites:
+ *   - Anvil running on port 8545 (pnpm local:anvil in midcurve-automation)
+ *   - MOCK_AUGUSTUS_ADDRESS set in root .env (deployed by midcurve-automation local:setup)
+ *
+ * This script deploys ONLY the Diamond factory infrastructure:
+ *   - 10 Diamond facets (shared implementations)
+ *   - MidcurveHedgeVaultDiamondFactory
+ *
+ * It does NOT deploy mock infrastructure (MockUSD, MockAugustus, etc.) -
+ * those are deployed by midcurve-automation's local:setup script.
  */
-contract DeployLocalScript is Script {
-    // Mainnet NFPM address (available in fork)
+contract DeployFactoryLocalScript is Script {
+    // Mainnet NFPM address (available in Anvil fork)
     address constant NFPM = 0xC36442b4a4522E871399CD717aBDD847Ab11FE88;
 
     function run() public {
-        console.log("=== Local Fork Deployment ===");
+        // Read Augustus address from environment
+        address augustus = vm.envAddress("MOCK_AUGUSTUS_ADDRESS");
+
+        console.log("========================================");
+        console.log("=== Local Diamond Factory Deployment ===");
+        console.log("========================================");
         console.log("Chain ID:", block.chainid);
         console.log("NFPM (forked):", NFPM);
+        console.log("Augustus:", augustus);
         console.log("");
 
         vm.startBroadcast();
 
         // ========================================
-        // 1. Deploy Mock Infrastructure
-        // ========================================
-        console.log("--- Deploying Mock Infrastructure ---");
-
-        // Deploy MockUSD token
-        MockUSD mockUSD = new MockUSD();
-        console.log("MockUSD deployed at:", address(mockUSD));
-
-        // Deploy MockAugustus (for local swap execution)
-        MockAugustus mockAugustus = new MockAugustus();
-        console.log("MockAugustus deployed at:", address(mockAugustus));
-
-        // Deploy MockAugustusRegistry and register MockAugustus
-        MockAugustusRegistry mockRegistry = new MockAugustusRegistry();
-        mockRegistry.setValidAugustus(address(mockAugustus), true);
-        console.log("MockAugustusRegistry deployed at:", address(mockRegistry));
-
-        // Deploy UniswapV3PositionCloser with mock registry
-        UniswapV3PositionCloser closer = new UniswapV3PositionCloser(NFPM, address(mockRegistry));
-        console.log("PositionCloser deployed at:", address(closer));
-
-        console.log("");
-
-        // ========================================
-        // 2. Deploy Diamond Facets
+        // 1. Deploy Diamond Facets
         // ========================================
         console.log("--- Deploying Diamond Facets ---");
 
@@ -104,7 +89,7 @@ contract DeployLocalScript is Script {
         console.log("");
 
         // ========================================
-        // 3. Deploy Diamond Factory
+        // 2. Deploy Diamond Factory
         // ========================================
         console.log("--- Deploying Diamond Factory ---");
 
@@ -123,7 +108,7 @@ contract DeployLocalScript is Script {
 
         MidcurveHedgeVaultDiamondFactory factory = new MidcurveHedgeVaultDiamondFactory(
             NFPM,
-            address(mockRegistry),
+            augustus,
             facets
         );
         console.log("MidcurveHedgeVaultDiamondFactory deployed at:", address(factory));
@@ -134,12 +119,6 @@ contract DeployLocalScript is Script {
         console.log("========================================");
         console.log("=== Deployment Summary ===");
         console.log("========================================");
-        console.log("");
-        console.log("--- Mock Infrastructure ---");
-        console.log("MockUSD:", address(mockUSD));
-        console.log("MockAugustus:", address(mockAugustus));
-        console.log("MockAugustusRegistry:", address(mockRegistry));
-        console.log("PositionCloser:", address(closer));
         console.log("");
         console.log("--- Diamond Facets ---");
         console.log("DiamondCutFacet:", address(diamondCutFacet));
@@ -154,7 +133,7 @@ contract DeployLocalScript is Script {
         console.log("ERC20Facet:", address(erc20Facet));
         console.log("");
         console.log("--- Factory ---");
-        console.log("MidcurveHedgeVaultDiamondFactory:", address(factory));
+        console.log("MidcurveHedgeVaultDiamondFactory deployed at:", address(factory));
         console.log("");
         console.log("========================================");
         console.log("To create a new hedge vault diamond:");

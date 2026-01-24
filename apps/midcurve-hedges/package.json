@@ -15,7 +15,8 @@
     "deploy:production:dry-run": "DRY_RUN=true ./script/deploy-production.sh",
     "deploy:arbitrum": "forge script script/Deploy.s.sol --rpc-url arbitrum --broadcast --verify",
     "deploy:base": "forge script script/Deploy.s.sol --rpc-url base --broadcast --verify",
-    "deploy:ethereum": "forge script script/Deploy.s.sol --rpc-url mainnet --broadcast --verify"
+    "deploy:ethereum": "forge script script/Deploy.s.sol --rpc-url mainnet --broadcast --verify",
+    "deploy:local": "./script/deploy-local.sh"
   },
   "keywords": [
     "ethereum",

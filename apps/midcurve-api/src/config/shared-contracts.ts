@@ -24,7 +24,7 @@ const DEFAULT_POSITION_MANAGER = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88';
  * Used for development to avoid committing local contract addresses to git.
  */
 function getLocalChainConfig(): SharedContractConfig | null {
-  const contractAddress = process.env.POSITION_CLOSER_ADDRESS_LOCAL;
+  const contractAddress = process.env.UNISWAPV3_POSITION_CLOSER_ADDRESS_LOCAL;
   if (!contractAddress) return null;
 
   const positionManager =

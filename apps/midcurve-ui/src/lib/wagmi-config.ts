@@ -36,7 +36,7 @@ const localAnvil = defineChain({
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
     default: {
-      http: [import.meta.env.VITE_LOCAL_RPC_URL || 'http://localhost:8545'],
+      http: [import.meta.env.VITE_RPC_URL_LOCAL || 'http://localhost:8545'],
     },
   },
   testnet: true,
@@ -105,7 +105,7 @@ const transports = isLocalChainEnabled
   ? {
       ...productionTransports,
       [localAnvil.id]: http(
-        import.meta.env.VITE_LOCAL_RPC_URL || 'http://localhost:8545'
+        import.meta.env.VITE_RPC_URL_LOCAL || 'http://localhost:8545'
       ),
     }
   : productionTransports;

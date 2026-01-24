@@ -175,17 +175,17 @@ function updateLocalChainConfig(
   for (const envPath of backendEnvPaths) {
     try {
       updateEnvFile(envPath, 'MOCK_USD_ADDRESS', mockUsdAddress);
-      if (mockAugustusAddress) {
-        updateEnvFile(envPath, 'MOCK_AUGUSTUS_ADDRESS', mockAugustusAddress);
+      if (mockAugustusRegistryAddress) {
+        updateEnvFile(envPath, 'MOCK_AUGUSTUS_ADDRESS', mockAugustusRegistryAddress);
       }
       if (positionCloserAddress) {
-        updateEnvFile(envPath, 'POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
+        updateEnvFile(envPath, 'UNISWAPV3_POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
       }
       if (diamondFactoryAddress) {
-        updateEnvFile(envPath, 'DIAMOND_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
+        updateEnvFile(envPath, 'HEDGE_VAULT_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
       }
       if (poolAddress) {
-        updateEnvFile(envPath, 'POOL_ADDRESS', poolAddress);
+        updateEnvFile(envPath, 'MOCK_USD_WETH_POOL_ADDRESS', poolAddress);
       }
       console.log(`Updated: ${envPath}`);
     } catch (error) {
@@ -197,10 +197,10 @@ function updateLocalChainConfig(
   const uiEnvPath = resolve(process.cwd(), '../midcurve-ui/.env');
   try {
     if (mockAugustusRegistryAddress) {
-      updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS', mockAugustusRegistryAddress);
+      updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_ADDRESS', mockAugustusRegistryAddress);
     }
     if (diamondFactoryAddress) {
-      updateEnvFile(uiEnvPath, 'VITE_DIAMOND_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
+      updateEnvFile(uiEnvPath, 'VITE_HEDGE_VAULT_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
     }
     console.log(`Updated: ${uiEnvPath}`);
   } catch (error) {
@@ -247,7 +247,6 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('MockAugustus:', state.mockAugustusAddress);
   console.log('MockAugustusRegistry:', state.mockAugustusRegistryAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
-  console.log('DiamondFactory:', state.diamondFactoryAddress || '(not found)');
 }
 
 async function step2CreatePool(state: SetupState): Promise<void> {
@@ -337,7 +336,7 @@ async function step3AddLiquidity(state: SetupState): Promise<void> {
     ],
     {
       MOCK_USD_ADDRESS: state.mockUsdAddress,
-      POOL_ADDRESS: state.poolAddress,
+      MOCK_USD_WETH_POOL_ADDRESS: state.poolAddress,
     }
   );
 
@@ -382,7 +381,7 @@ async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('');
   console.log('This script will:');
-  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, PositionCloser, Diamond Facets, and Factory');
+  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, and PositionCloser');
   console.log('2. Create a WETH/MockUSD Uniswap V3 pool');
   console.log('2b. Configure MockAugustus with pool address');
   console.log('3. Add initial liquidity to the pool');
@@ -431,20 +430,20 @@ async function main(): Promise<void> {
     console.log(`  export MOCK_USD_ADDRESS="${state.mockUsdAddress}"`);
     console.log(`  export MOCK_AUGUSTUS_ADDRESS="${state.mockAugustusAddress}"`);
     console.log(`  export MOCK_AUGUSTUS_REGISTRY_ADDRESS="${state.mockAugustusRegistryAddress}"`);
-    console.log(`  export POOL_ADDRESS="${state.poolAddress}"`);
+    console.log(`  export MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
     console.log(`  export DIAMOND_FACTORY_ADDRESS="${state.diamondFactoryAddress}"`);
     console.log('');
     console.log('Next Steps:');
     console.log('1. Check pool price:');
-    console.log(`   POOL_ADDRESS="${state.poolAddress}" pnpm local:check-price`);
+    console.log(`   MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}" pnpm local:check-price`);
     console.log('');
     console.log('2. Manipulate ETH price UP (buy ETH with MockUSD - makes ETH more expensive):');
-    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up`);
+    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}" DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up`);
     console.log('   (Note: SWAP_AMOUNT=1000000000 = 1000 MockUSD. Use smaller amounts to avoid draining liquidity)');
     console.log('');
     console.log('3. Manipulate ETH price DOWN (sell ETH for MockUSD - makes ETH cheaper):');
-    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" POOL_ADDRESS="${state.poolAddress}" DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down`);
+    console.log(`   MOCK_USD_ADDRESS="${state.mockUsdAddress}" MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}" DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down`);
     console.log('   (Note: SWAP_AMOUNT=300000000000000000 = 0.3 ETH. Use smaller amounts to avoid draining liquidity)');
   } catch (error) {
     console.error('\n' + '='.repeat(60));

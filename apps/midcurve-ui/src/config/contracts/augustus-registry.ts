@@ -22,7 +22,7 @@ const LOCAL_CHAIN_ID = 31337;
 
 /**
  * Get the Paraswap AugustusRegistry address for a given chain
- * For local chain (31337), reads from VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS env var
+ * For local chain (31337), reads from VITE_MOCK_AUGUSTUS_ADDRESS env var
  * @param chainId - The chain ID
  * @returns The AugustusRegistry address or null if not supported
  */
@@ -31,7 +31,7 @@ export function getAugustusRegistryAddress(
 ): `0x${string}` | null {
   // Check env var for local chain first
   if (chainId === LOCAL_CHAIN_ID && isLocalChainEnabled) {
-    const localAddress = import.meta.env.VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS;
+    const localAddress = import.meta.env.VITE_MOCK_AUGUSTUS_ADDRESS;
     if (localAddress) {
       return localAddress as `0x${string}`;
     }

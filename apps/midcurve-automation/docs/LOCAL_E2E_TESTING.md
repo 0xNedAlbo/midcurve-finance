@@ -129,13 +129,13 @@ Use the price manipulation scripts to move the pool price toward your trigger:
 
 ```bash
 # Check current price
-POOL_ADDRESS="0x..." pnpm local:check-price
+MOCK_USD_WETH_POOL_ADDRESS="0x..." pnpm local:check-price
 
 # Move price UP (buy ETH with MockUSD)
-MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." pnpm local:price-up
+MOCK_USD_ADDRESS="0x..." MOCK_USD_WETH_POOL_ADDRESS="0x..." pnpm local:price-up
 
 # Move price DOWN (sell ETH for MockUSD)
-MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." pnpm local:price-down
+MOCK_USD_ADDRESS="0x..." MOCK_USD_WETH_POOL_ADDRESS="0x..." pnpm local:price-down
 ```
 
 ### Step 4: Monitor Execution
@@ -192,7 +192,7 @@ docker compose ps
 
 ```bash
 # Check pool price
-POOL_ADDRESS="0x..." pnpm local:check-price
+MOCK_USD_WETH_POOL_ADDRESS="0x..." pnpm local:check-price
 
 # Database queries (check orders)
 PGPASSWORD=devpass psql -h localhost -U devuser -d midcurve_dev \

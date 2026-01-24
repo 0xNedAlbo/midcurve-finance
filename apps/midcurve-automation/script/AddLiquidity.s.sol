@@ -61,7 +61,7 @@ interface IUniswapV3Pool {
  * @notice Adds liquidity to the WETH/MockUSD pool and mints a position NFT
  * @dev Usage:
  *   export MOCK_USD_ADDRESS="0x..."
- *   export POOL_ADDRESS="0x..."
+ *   export MOCK_USD_WETH_POOL_ADDRESS="0x..."
  *   pnpm local:add-liquidity
  *
  * Requires sending ETH with the transaction (--value 10ether).
@@ -72,9 +72,9 @@ contract AddLiquidityScript is Script {
 
     function run() public {
         address mockUSD = vm.envAddress("MOCK_USD_ADDRESS");
-        address pool = vm.envAddress("POOL_ADDRESS");
+        address pool = vm.envAddress("MOCK_USD_WETH_POOL_ADDRESS");
         require(mockUSD != address(0), "MOCK_USD_ADDRESS required");
-        require(pool != address(0), "POOL_ADDRESS required");
+        require(pool != address(0), "MOCK_USD_WETH_POOL_ADDRESS required");
 
         console.log("=== Add Liquidity ===");
         console.log("Pool:", pool);

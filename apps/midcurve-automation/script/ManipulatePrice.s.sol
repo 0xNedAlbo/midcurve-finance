@@ -74,12 +74,12 @@ contract ManipulatePriceScript is Script {
 
     function run() public {
         address mockUSD = vm.envAddress("MOCK_USD_ADDRESS");
-        address pool = vm.envAddress("POOL_ADDRESS");
+        address pool = vm.envAddress("MOCK_USD_WETH_POOL_ADDRESS");
         string memory direction = vm.envString("DIRECTION");
         uint256 amount = vm.envUint("SWAP_AMOUNT");
 
         require(mockUSD != address(0), "MOCK_USD_ADDRESS required");
-        require(pool != address(0), "POOL_ADDRESS required");
+        require(pool != address(0), "MOCK_USD_WETH_POOL_ADDRESS required");
         require(bytes(direction).length > 0, "DIRECTION required (up or down)");
         require(amount > 0, "SWAP_AMOUNT required");
 

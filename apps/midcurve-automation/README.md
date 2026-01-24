@@ -72,7 +72,7 @@ The setup script will output environment variables to export for subsequent comm
 
 ```bash
 export MOCK_USD_ADDRESS="0x..."
-export POOL_ADDRESS="0x..."
+export MOCK_USD_WETH_POOL_ADDRESS="0x..."
 export POSITION_CLOSER_ADDRESS="0x..."
 ```
 
@@ -96,13 +96,13 @@ After setup, manipulate prices to test trigger conditions:
 
 ```bash
 # Check current price
-POOL_ADDRESS="0x..." pnpm local:check-price
+MOCK_USD_WETH_POOL_ADDRESS="0x..." pnpm local:check-price
 
 # Push price down (sell 0.3 ETH)
-MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down
+MOCK_USD_ADDRESS="0x..." MOCK_USD_WETH_POOL_ADDRESS="0x..." DIRECTION=down SWAP_AMOUNT=300000000000000000 pnpm local:price-down
 
 # Push price up (buy ETH with 1000 MockUSD)
-MOCK_USD_ADDRESS="0x..." POOL_ADDRESS="0x..." DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up
+MOCK_USD_ADDRESS="0x..." MOCK_USD_WETH_POOL_ADDRESS="0x..." DIRECTION=up SWAP_AMOUNT=1000000000 pnpm local:price-up
 ```
 
 ## Environment Variables

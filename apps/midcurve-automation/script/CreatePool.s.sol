@@ -120,7 +120,7 @@ contract CreatePoolScript is Script {
         console.log("");
         console.log("=== Next Steps ===");
         console.log("1. Export the pool address:");
-        console.log('   export POOL_ADDRESS="%s"', pool);
+        console.log('   export MOCK_USD_WETH_POOL_ADDRESS="%s"', pool);
         console.log("");
         console.log("2. Add liquidity to the pool:");
         console.log("   pnpm local:add-liquidity");

@@ -206,13 +206,13 @@ let _mockParaswapClient: MockParaswapClient | null = null;
 export function getMockParaswapClient(): MockParaswapClient {
   if (!_mockParaswapClient) {
     const augustusAddress = process.env.MOCK_AUGUSTUS_ADDRESS;
-    const poolAddress = process.env.POOL_ADDRESS;
+    const poolAddress = process.env.MOCK_USD_WETH_POOL_ADDRESS;
 
     if (!augustusAddress) {
       throw new Error('MOCK_AUGUSTUS_ADDRESS environment variable is required for MockParaswapClient');
     }
     if (!poolAddress) {
-      throw new Error('POOL_ADDRESS environment variable is required for MockParaswapClient');
+      throw new Error('MOCK_USD_WETH_POOL_ADDRESS environment variable is required for MockParaswapClient');
     }
 
     _mockParaswapClient = new MockParaswapClient({

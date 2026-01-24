@@ -5,7 +5,7 @@
  * Useful for verifying price manipulation results.
  *
  * Usage:
- *   POOL_ADDRESS="0x..." pnpm local:check-price
+ *   MOCK_USD_WETH_POOL_ADDRESS="0x..." pnpm local:check-price
  */
 
 import { createPublicClient, http } from 'viem';
@@ -51,13 +51,13 @@ const LOCAL_RPC = 'http://localhost:8545';
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
 
 async function main(): Promise<void> {
-  const poolAddress = process.env.POOL_ADDRESS;
+  const poolAddress = process.env.MOCK_USD_WETH_POOL_ADDRESS;
 
   if (!poolAddress) {
-    console.error('ERROR: POOL_ADDRESS environment variable is required');
+    console.error('ERROR: MOCK_USD_WETH_POOL_ADDRESS environment variable is required');
     console.error('');
     console.error('Usage:');
-    console.error('  export POOL_ADDRESS="0x..."');
+    console.error('  export MOCK_USD_WETH_POOL_ADDRESS="0x..."');
     console.error('  pnpm local:check-price');
     process.exit(1);
   }
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     console.error('');
     console.error('Make sure:');
     console.error('1. Anvil is running on port 8546');
-    console.error('2. POOL_ADDRESS is correct');
+    console.error('2. MOCK_USD_WETH_POOL_ADDRESS is correct');
     process.exit(1);
   }
 }
