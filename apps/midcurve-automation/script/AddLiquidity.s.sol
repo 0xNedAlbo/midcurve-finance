@@ -98,7 +98,9 @@ contract AddLiquidityScript is Script {
         // Set wide range around current price (+/- 2000 ticks)
         // This gives approximately +/- 22% price range
         int24 tickSpacing = 60; // For 0.3% fee tier
+        // forge-lint: disable-next-line(divide-before-multiply)
         int24 tickLower = ((currentTick - 2000) / tickSpacing) * tickSpacing;
+        // forge-lint: disable-next-line(divide-before-multiply)
         int24 tickUpper = ((currentTick + 2000) / tickSpacing) * tickSpacing;
         console.log("Tick lower:", tickLower);
         console.log("Tick upper:", tickUpper);

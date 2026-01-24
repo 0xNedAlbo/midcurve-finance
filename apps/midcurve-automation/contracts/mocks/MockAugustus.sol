@@ -82,7 +82,7 @@ contract MockAugustus {
         require(pool != address(0), "Pool not configured");
 
         // Transfer tokens from caller to this contract
-        IERC20Minimal(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        require(IERC20Minimal(tokenIn).transferFrom(msg.sender, address(this), amountIn), "TransferFrom failed");
 
         // Determine swap direction
         address token0 = IUniswapV3PoolMinimal(pool).token0();
@@ -103,6 +103,7 @@ contract MockAugustus {
         IUniswapV3PoolMinimal(pool).swap(
             address(this),
             zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             int256(amountIn),
             sqrtPriceLimitX96,
             ""
@@ -116,7 +117,7 @@ contract MockAugustus {
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
         // Transfer output to caller
-        IERC20Minimal(tokenOut).transfer(msg.sender, amountOut);
+        require(IERC20Minimal(tokenOut).transfer(msg.sender, amountOut), "Transfer failed");
     }
 
     /**
@@ -133,11 +134,13 @@ contract MockAugustus {
         // Pay the pool the tokens it requested
         if (amount0Delta > 0) {
             address token0 = IUniswapV3PoolMinimal(msg.sender).token0();
-            IERC20Minimal(token0).transfer(msg.sender, uint256(amount0Delta));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            require(IERC20Minimal(token0).transfer(msg.sender, uint256(amount0Delta)), "Transfer failed");
         }
         if (amount1Delta > 0) {
             address token1 = IUniswapV3PoolMinimal(msg.sender).token1();
-            IERC20Minimal(token1).transfer(msg.sender, uint256(amount1Delta));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            require(IERC20Minimal(token1).transfer(msg.sender, uint256(amount1Delta)), "Transfer failed");
         }
     }
 }

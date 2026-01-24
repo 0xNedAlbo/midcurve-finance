@@ -197,7 +197,7 @@ function updateLocalChainConfig(
   const uiEnvPath = resolve(process.cwd(), '../midcurve-ui/.env');
   try {
     if (mockAugustusRegistryAddress) {
-      updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_ADDRESS', mockAugustusRegistryAddress);
+      updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS', mockAugustusRegistryAddress);
     }
     if (diamondFactoryAddress) {
       updateEnvFile(uiEnvPath, 'VITE_HEDGE_VAULT_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);

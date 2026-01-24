@@ -25,6 +25,9 @@ lint_on_build = true
 # Severity threshold - show all issues including info-level
 severity = ["high", "med", "low", "info"]
 
+# Exclude naming convention lints (legacy code / Uniswap style)
+exclude_lints = ["screaming-snake-case-const", "screaming-snake-case-immutable", "mixed-case-variable"]
+
 [etherscan]
 arbitrum = { key = "${ETHERSCAN_API_KEY}" }
 base = { key = "${ETHERSCAN_API_KEY}" }

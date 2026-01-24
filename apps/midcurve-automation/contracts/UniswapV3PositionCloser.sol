@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./base/ParaswapHelper.sol";
+import {IAugustusRegistry, IAugustus} from "./base/ParaswapHelper.sol";
 
 /**
  * UniswapV3PositionCloser.sol
@@ -975,10 +975,12 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         // Transfer the required tokens to the pool
         if (amount0Delta > 0) {
             address token0 = IUniswapV3PoolMinimal(msg.sender).token0();
+            // forge-lint: disable-next-line(unsafe-typecast)
             _safeErc20Transfer(token0, msg.sender, uint256(amount0Delta));
         }
         if (amount1Delta > 0) {
             address token1 = IUniswapV3PoolMinimal(msg.sender).token1();
+            // forge-lint: disable-next-line(unsafe-typecast)
             _safeErc20Transfer(token1, msg.sender, uint256(amount1Delta));
         }
     }
@@ -1023,6 +1025,7 @@ contract UniswapV3PositionCloser is IUniswapV3PositionCloser, ReentrancyGuardMin
         IUniswapV3PoolMinimal(pool).swap(
             address(this),  // recipient
             zeroForOne,
+            // forge-lint: disable-next-line(unsafe-typecast)
             int256(dustAmount),  // exact input amount
             sqrtPriceLimitX96,
             ""  // no callback data needed
@@ -1053,6 +1056,7 @@ library TickMath {
         unchecked {
             if (tick < MIN_TICK || tick > MAX_TICK) revert TickOutOfRange();
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 absTick = tick < 0 ? uint256(uint24(-tick)) : uint256(uint24(tick));
             uint256 ratio =
                 absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
@@ -1078,6 +1082,7 @@ library TickMath {
 
             if (tick > 0) ratio = type(uint256).max / ratio;
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             sqrtPriceX96 = uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
         }
     }

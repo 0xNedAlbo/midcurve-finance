@@ -175,6 +175,7 @@ contract ManipulatePriceScript is Script {
         // Each tick represents ~0.01% price change
         // 100 ticks = ~1% price change
         bool priceWentUp = isQuoteToken0 ? (tickChange < 0) : (tickChange > 0);
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint256 percentChange = tickChange > 0 ? uint256(tickChange) / 100 : uint256(-tickChange) / 100;
 
         if (tickChange == 0) {
