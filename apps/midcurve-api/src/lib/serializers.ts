@@ -93,7 +93,7 @@ export function serializeUniswapV3Pool(pool: UniswapV3Pool) {
     token1: serializeErc20Token(pool.token1),
     feeBps: pool.feeBps,
     config: pool.config, // No bigints in config
-    state: serializeUniswapV3PoolState(pool.state),
+    state: serializeUniswapV3PoolState(pool.typedState),
     createdAt: pool.createdAt.toISOString(),
     updatedAt: pool.updatedAt.toISOString(),
   };
@@ -234,7 +234,7 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
 
     // Protocol-specific (config has no bigints, state has bigints)
     config: position.config,
-    state: serializeUniswapV3PositionState(position.state),
+    state: serializeUniswapV3PositionState(position.typedState),
 
     // Timestamps
     createdAt: position.createdAt.toISOString(),

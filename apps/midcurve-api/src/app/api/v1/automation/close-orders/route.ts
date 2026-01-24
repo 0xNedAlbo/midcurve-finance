@@ -222,7 +222,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       // Check if position is closed (liquidity = 0)
-      const positionLiquidity = position.state?.liquidity ?? 0n;
+      const positionLiquidity = position.liquidity;
       if (positionLiquidity === 0n) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.VALIDATION_ERROR,
