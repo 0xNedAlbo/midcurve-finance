@@ -17,11 +17,16 @@
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { BasicCurrencyToken, BasicCurrencyConfig } from '@midcurve/shared';
-import { BASIC_CURRENCY_DECIMALS } from '@midcurve/shared';
+import {
+  BasicCurrencyToken,
+  BasicCurrencyConfig,
+  BASIC_CURRENCY_DECIMALS,
+} from '@midcurve/shared';
+import type { BasicCurrencyConfigData } from '@midcurve/shared';
 import { TokenService } from './token-service.js';
 import type { TokenServiceDependencies } from './token-service.js';
 import type {
+  CreateBasicCurrencyTokenInput,
   BasicCurrencyDiscoverInput,
   BasicCurrencySearchInput,
   BasicCurrencySearchCandidate,
@@ -66,7 +71,8 @@ export interface BasicCurrencyTokenServiceDependencies
  * - All use 18 decimals for precision
  * - findOrCreateBySymbol() for idempotent creation with CoinGecko validation
  */
-export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
+export class BasicCurrencyTokenService extends TokenService {
+  protected readonly tokenType = 'basic-currency' as const;
   private readonly coinGeckoClient: CoinGeckoClient;
 
   constructor(dependencies: BasicCurrencyTokenServiceDependencies = {}) {
@@ -75,29 +81,46 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
   }
 
   // ============================================================================
-  // ABSTRACT METHOD IMPLEMENTATIONS
+  // HELPER METHODS
   // ============================================================================
 
   /**
-   * Parse config from database JSON to application type
+   * Convert database result to BasicCurrencyToken class instance.
+   *
+   * @param dbResult - Raw database result from Prisma
+   * @returns BasicCurrencyToken class instance
    */
-  parseConfig(configDB: unknown): BasicCurrencyConfig {
-    const db = configDB as { currencyCode: string; coingeckoCurrency: string };
-    return {
-      currencyCode: db.currencyCode,
-      coingeckoCurrency: db.coingeckoCurrency,
-    };
+  private mapToBasicCurrencyToken(dbResult: {
+    id: string;
+    tokenType: string;
+    name: string;
+    symbol: string;
+    decimals: number;
+    logoUrl: string | null;
+    coingeckoId: string | null;
+    marketCap: number | null;
+    config: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  }): BasicCurrencyToken {
+    return BasicCurrencyToken.fromDB({
+      id: dbResult.id,
+      tokenType: 'basic-currency',
+      name: dbResult.name,
+      symbol: dbResult.symbol,
+      decimals: dbResult.decimals,
+      logoUrl: dbResult.logoUrl,
+      coingeckoId: dbResult.coingeckoId,
+      marketCap: dbResult.marketCap,
+      config: dbResult.config as Record<string, unknown>,
+      createdAt: dbResult.createdAt,
+      updatedAt: dbResult.updatedAt,
+    });
   }
 
-  /**
-   * Serialize config from application type to database JSON
-   */
-  serializeConfig(config: BasicCurrencyConfig): unknown {
-    return {
-      currencyCode: config.currencyCode,
-      coingeckoCurrency: config.coingeckoCurrency,
-    };
-  }
+  // ============================================================================
+  // DISCOVERY & SEARCH
+  // ============================================================================
 
   /**
    * Discover a basic currency token
@@ -134,10 +157,10 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
 
     const candidates = tokens
       .filter(
-        (t) => !input.currencyCode || t.config.currencyCode === input.currencyCode
+        (t) => !input.currencyCode || t.typedConfig.currencyCode === input.currencyCode
       )
       .map((t) => ({
-        currencyCode: t.config.currencyCode,
+        currencyCode: t.typedConfig.currencyCode,
         name: t.name,
         symbol: t.symbol,
       }));
@@ -188,7 +211,7 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
         return null;
       }
 
-      const token = this.mapToToken(result);
+      const token = this.mapToBasicCurrencyToken(result);
 
       this.logger.debug(
         { id: token.id, currencyCode: normalizedCode },
@@ -223,7 +246,7 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
         },
       });
 
-      const tokens = results.map((r) => this.mapToToken(r));
+      const tokens = results.map((r) => this.mapToBasicCurrencyToken(r));
 
       this.logger.debug({ count: tokens.length }, 'Found basic currencies');
       log.methodExit(this.logger, 'findAll', { count: tokens.length });
@@ -309,6 +332,114 @@ export class BasicCurrencyTokenService extends TokenService<'basic-currency'> {
       log.methodError(this.logger, 'findOrCreateBySymbol', error as Error, {
         symbol,
       });
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // CRUD OPERATIONS
+  // ============================================================================
+
+  /**
+   * Create a new basic currency token
+   *
+   * @param input - Basic currency token data to create
+   * @returns The created token
+   */
+  async create(input: CreateBasicCurrencyTokenInput): Promise<BasicCurrencyToken> {
+    log.methodEntry(this.logger, 'create', {
+      tokenType: input.tokenType,
+      symbol: input.symbol,
+      name: input.name,
+    });
+
+    try {
+      // Create config class for serialization
+      const config = new BasicCurrencyConfig(input.config);
+
+      log.dbOperation(this.logger, 'create', 'Token', {
+        tokenType: 'basic-currency',
+        symbol: input.symbol,
+      });
+
+      const result = await this.prisma.token.create({
+        data: {
+          tokenType: 'basic-currency',
+          name: input.name,
+          symbol: input.symbol,
+          decimals: input.decimals,
+          logoUrl: input.logoUrl,
+          coingeckoId: input.coingeckoId,
+          marketCap: input.marketCap,
+          config: config.toJSON() as object,
+        },
+      });
+
+      const token = this.mapToBasicCurrencyToken(result);
+
+      this.logger.info(
+        {
+          id: token.id,
+          tokenType: token.tokenType,
+          symbol: token.symbol,
+          name: token.name,
+        },
+        'Basic currency token created successfully'
+      );
+
+      log.methodExit(this.logger, 'create', { id: token.id });
+      return token;
+    } catch (error) {
+      log.methodError(this.logger, 'create', error as Error, {
+        tokenType: input.tokenType,
+        symbol: input.symbol,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Find a basic currency token by its database ID
+   *
+   * @param id - Token database ID
+   * @returns The token if found and is basic-currency type, null otherwise
+   */
+  override async findById(id: string): Promise<BasicCurrencyToken | null> {
+    log.methodEntry(this.logger, 'findById', { id });
+
+    try {
+      log.dbOperation(this.logger, 'findUnique', 'Token', { id });
+
+      const result = await this.prisma.token.findUnique({
+        where: { id },
+      });
+
+      if (!result) {
+        this.logger.debug({ id }, 'Token not found');
+        log.methodExit(this.logger, 'findById', { found: false });
+        return null;
+      }
+
+      // Type filter: Only return if it's a basic-currency token
+      if (result.tokenType !== 'basic-currency') {
+        this.logger.debug(
+          { id, tokenType: result.tokenType },
+          'Token is not basic-currency type'
+        );
+        log.methodExit(this.logger, 'findById', {
+          found: false,
+          wrongType: true,
+        });
+        return null;
+      }
+
+      const token = this.mapToBasicCurrencyToken(result);
+
+      this.logger.debug({ id, symbol: token.symbol }, 'Basic currency token found');
+      log.methodExit(this.logger, 'findById', { id });
+      return token;
+    } catch (error) {
+      log.methodError(this.logger, 'findById', error as Error, { id });
       throw error;
     }
   }

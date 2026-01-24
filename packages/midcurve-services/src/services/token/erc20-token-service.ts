@@ -6,12 +6,16 @@
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { Token } from '@midcurve/shared';
-import type { Erc20TokenConfig } from '@midcurve/shared';
-import { isValidAddress, normalizeAddress } from '@midcurve/shared';
+import {
+    Erc20Token,
+    Erc20TokenConfig,
+    isValidAddress,
+    normalizeAddress,
+} from '@midcurve/shared';
+import type { Erc20TokenConfigData } from '@midcurve/shared';
 import type {
-    CreateTokenInput,
-    UpdateTokenInput,
+    CreateErc20TokenInput,
+    UpdateErc20TokenInput,
     Erc20TokenDiscoverInput,
     Erc20TokenSearchInput,
     Erc20TokenSearchCandidate,
@@ -53,9 +57,10 @@ export interface Erc20TokenServiceDependencies {
  * Erc20TokenService
  *
  * Provides token management for ERC-20 tokens.
- * Implements serialization methods for ERC-20 config type.
+ * Returns Erc20Token class instances for type-safe config access.
  */
-export class Erc20TokenService extends TokenService<"erc20"> {
+export class Erc20TokenService extends TokenService {
+    protected readonly tokenType = 'erc20' as const;
     private readonly _evmConfig: EvmConfig;
     private readonly _coinGeckoClient: CoinGeckoClient;
 
@@ -89,61 +94,45 @@ export class Erc20TokenService extends TokenService<"erc20"> {
     }
 
     // ============================================================================
-    // ABSTRACT METHOD IMPLEMENTATIONS
+    // HELPER METHODS
     // ============================================================================
 
     /**
-     * Parse config from database JSON to application type
+     * Convert database result to Erc20Token class instance.
      *
-     * For ERC-20, config contains address, chainId, and optional basicCurrencyId.
-     *
-     * @param configDB - Config object from database (JSON)
-     * @returns Parsed ERC-20 config
+     * @param dbResult - Raw database result from Prisma
+     * @returns Erc20Token class instance
      */
-    parseConfig(configDB: unknown): Erc20TokenConfig {
-        const db = configDB as {
-            address: string;
-            chainId: number;
-            basicCurrencyId?: string;
-        };
-
-        const config: Erc20TokenConfig = {
-            address: db.address,
-            chainId: db.chainId,
-        };
-
-        // Only include basicCurrencyId if it exists
-        if (db.basicCurrencyId) {
-            config.basicCurrencyId = db.basicCurrencyId;
-        }
-
-        return config;
-    }
-
-    /**
-     * Serialize config from application type to database JSON
-     *
-     * For ERC-20, config contains address, chainId, and optional basicCurrencyId.
-     *
-     * @param config - Application config
-     * @returns Serialized config for database storage (JSON-serializable)
-     */
-    serializeConfig(config: Erc20TokenConfig): unknown {
-        const serialized: Record<string, unknown> = {
-            address: config.address,
-            chainId: config.chainId,
-        };
-
-        // Only include basicCurrencyId if it exists
-        if (config.basicCurrencyId) {
-            serialized.basicCurrencyId = config.basicCurrencyId;
-        }
-
-        return serialized;
+    private mapToErc20Token(dbResult: {
+        id: string;
+        tokenType: string;
+        name: string;
+        symbol: string;
+        decimals: number;
+        logoUrl: string | null;
+        coingeckoId: string | null;
+        marketCap: number | null;
+        config: unknown;
+        createdAt: Date;
+        updatedAt: Date;
+    }): Erc20Token {
+        return Erc20Token.fromDB({
+            id: dbResult.id,
+            tokenType: 'erc20',
+            name: dbResult.name,
+            symbol: dbResult.symbol,
+            decimals: dbResult.decimals,
+            logoUrl: dbResult.logoUrl,
+            coingeckoId: dbResult.coingeckoId,
+            marketCap: dbResult.marketCap,
+            config: dbResult.config as Record<string, unknown>,
+            createdAt: dbResult.createdAt,
+            updatedAt: dbResult.updatedAt,
+        });
     }
 
     // ============================================================================
-    // ABSTRACT METHOD IMPLEMENTATION - DISCOVERY
+    // DISCOVERY
     // ============================================================================
 
     /**
@@ -163,7 +152,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * @throws TokenMetadataError if contract doesn't implement ERC-20 metadata
      * @throws CoinGeckoApiError if CoinGecko API request fails
      */
-    override async discover(params: Erc20TokenDiscoverInput): Promise<Token<"erc20">> {
+    async discover(params: Erc20TokenDiscoverInput): Promise<Erc20Token> {
         const { address, chainId } = params;
         log.methodEntry(this.logger, "discover", { address, chainId });
 
@@ -393,7 +382,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * @param id - Token database ID
      * @returns The token if found and is ERC-20 type, null otherwise
      */
-    override async findById(id: string): Promise<Token<"erc20"> | null> {
+    override async findById(id: string): Promise<Erc20Token | null> {
         log.methodEntry(this.logger, "findById", { id });
 
         try {
@@ -422,7 +411,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 return null;
             }
 
-            const token = this.mapToToken(result);
+            const token = this.mapToErc20Token(result);
 
             this.logger.debug({ id, symbol: token.symbol }, "ERC-20 token found");
             log.methodExit(this.logger, "findById", { id });
@@ -444,9 +433,9 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * @returns The created or existing token with all fields populated
      * @throws Error if the address format is invalid
      */
-    override async create(
-        input: CreateTokenInput<"erc20">
-    ): Promise<Token<"erc20">> {
+    async create(
+        input: CreateErc20TokenInput
+    ): Promise<Erc20Token> {
         log.methodEntry(this.logger, "create", {
             address: input.config.address,
             chainId: input.config.chainId,
@@ -512,19 +501,36 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                     id: existing.id,
                     duplicate: true,
                 });
-                return this.mapToToken(existing);
+                return this.mapToErc20Token(existing);
             }
 
-            // Create new token with normalized address
-            const normalizedInput: CreateTokenInput<"erc20"> = {
-                ...input,
-                config: {
-                    ...input.config,
-                    address: normalizedAddress,
-                },
+            // Create config class for serialization
+            const configData: Erc20TokenConfigData = {
+                ...input.config,
+                address: normalizedAddress,
             };
+            const config = new Erc20TokenConfig(configData);
 
-            const token = await super.create(normalizedInput);
+            // Create new token in database
+            log.dbOperation(this.logger, "create", "Token", {
+                tokenType: "erc20",
+                symbol: input.symbol,
+            });
+
+            const result = await this.prisma.token.create({
+                data: {
+                    tokenType: "erc20",
+                    name: input.name,
+                    symbol: input.symbol,
+                    decimals: input.decimals,
+                    logoUrl: input.logoUrl,
+                    coingeckoId: input.coingeckoId,
+                    marketCap: input.marketCap,
+                    config: config.toJSON() as object,
+                },
+            });
+
+            const token = this.mapToErc20Token(result);
 
             this.logger.info(
                 {
@@ -567,10 +573,10 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * @throws Error if token not found or not ERC-20 type
      * @throws Error if address format is invalid (when updating address)
      */
-    override async update(
+    async update(
         id: string,
-        input: UpdateTokenInput<"erc20">
-    ): Promise<Token<"erc20">> {
+        input: UpdateErc20TokenInput
+    ): Promise<Erc20Token> {
         log.methodEntry(this.logger, "update", {
             id,
             fields: Object.keys(input),
@@ -602,7 +608,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
             }
 
             // If updating address, validate and normalize it
-            let normalizedInput: UpdateTokenInput<"erc20"> = input;
+            let normalizedConfig = input.config;
             if (input.config?.address) {
                 if (!isValidAddress(input.config.address)) {
                     const error = new Error(
@@ -622,17 +628,44 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                     },
                     "Address normalized for update"
                 );
-                normalizedInput = {
-                    ...input,
-                    config: {
-                        ...input.config,
-                        address: normalizedAddress,
-                    },
+                normalizedConfig = {
+                    ...input.config,
+                    address: normalizedAddress,
                 };
             }
 
-            // Delegate to base class for update
-            const token = await super.update(id, normalizedInput);
+            // Build update data
+            const existingConfig = existing.config as { address: string; chainId: number; basicCurrencyId?: string };
+            const updateData: Record<string, unknown> = {};
+            if (input.name !== undefined) updateData.name = input.name;
+            if (input.symbol !== undefined) updateData.symbol = input.symbol;
+            if (input.decimals !== undefined) updateData.decimals = input.decimals;
+            if (input.logoUrl !== undefined) updateData.logoUrl = input.logoUrl;
+            if (input.coingeckoId !== undefined) updateData.coingeckoId = input.coingeckoId;
+            if (input.marketCap !== undefined) updateData.marketCap = input.marketCap;
+
+            // Serialize config if provided
+            if (normalizedConfig) {
+                const mergedConfig = new Erc20TokenConfig({
+                    address: normalizedConfig.address ?? existingConfig.address,
+                    chainId: normalizedConfig.chainId ?? existingConfig.chainId,
+                    basicCurrencyId: normalizedConfig.basicCurrencyId ?? existingConfig.basicCurrencyId,
+                });
+                updateData.config = mergedConfig.toJSON() as object;
+            }
+
+            // Update in database
+            log.dbOperation(this.logger, "update", "Token", {
+                id,
+                fields: Object.keys(updateData),
+            });
+
+            const result = await this.prisma.token.update({
+                where: { id },
+                data: updateData,
+            });
+
+            const token = this.mapToErc20Token(result);
 
             this.logger.info(
                 { id, symbol: token.symbol },
@@ -731,7 +764,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
     async findByAddressAndChain(
         address: string,
         chainId: number
-    ): Promise<Token<"erc20"> | null> {
+    ): Promise<Erc20Token | null> {
         log.methodEntry(this.logger, "findByAddressAndChain", { address, chainId });
 
         try {
@@ -776,7 +809,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 "Token found"
             );
             log.methodExit(this.logger, "findByAddressAndChain", { id: result.id });
-            return this.mapToToken(result);
+            return this.mapToErc20Token(result);
         } catch (error) {
             if (!(error instanceof Error && error.message.includes("Invalid Ethereum address"))) {
                 log.methodError(this.logger, "findByAddressAndChain", error as Error, {
@@ -803,7 +836,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * @throws Error if token is not ERC-20 type
      * @throws CoinGeckoApiError if CoinGecko API request fails
      */
-    async enrichToken(tokenId: string): Promise<Token<"erc20">> {
+    async enrichToken(tokenId: string): Promise<Erc20Token> {
         log.methodEntry(this.logger, "enrichToken", { tokenId });
 
         try {
@@ -838,7 +871,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                     "Token already enriched, skipping CoinGecko API call"
                 );
                 log.methodExit(this.logger, "enrichToken", { tokenId, alreadyEnriched: true });
-                return this.mapToToken(existing);
+                return this.mapToErc20Token(existing);
             }
 
             // Extract config
@@ -904,7 +937,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                 tokenId,
                 coingeckoId: enrichmentData.coingeckoId,
             });
-            return this.mapToToken(updated);
+            return this.mapToErc20Token(updated);
         } catch (error) {
             // Only log if not already logged
             if (
@@ -961,7 +994,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * });
      * ```
      */
-    override async searchTokens(
+    async searchTokens(
         input: Erc20TokenSearchInput
     ): Promise<Erc20TokenSearchCandidate[]> {
         const { chainId, symbol, name, address } = input;
@@ -1197,13 +1230,12 @@ export class Erc20TokenService extends TokenService<"erc20"> {
                     });
 
                     // Convert discovered token to search candidate format
-                    const config = discovered.config as { address: string; chainId: number };
                     candidates.push({
                         coingeckoId: discovered.coingeckoId || "",
                         symbol: discovered.symbol,
                         name: discovered.name,
-                        address: config.address,
-                        chainId: config.chainId,
+                        address: discovered.address,  // Convenience accessor from Erc20Token
+                        chainId: discovered.chainId,  // Convenience accessor from Erc20Token
                         logoUrl: discovered.logoUrl || undefined,
                         marketCap: discovered.marketCap || undefined,
                     });
@@ -1485,7 +1517,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
     async linkToBasicCurrency(
         tokenId: string,
         basicCurrencyId: string
-    ): Promise<Token<"erc20">> {
+    ): Promise<Erc20Token> {
         log.methodEntry(this.logger, "linkToBasicCurrency", {
             tokenId,
             basicCurrencyId,
@@ -1531,8 +1563,9 @@ export class Erc20TokenService extends TokenService<"erc20"> {
             }
 
             // Update config with basicCurrencyId
-            const updatedConfig: Erc20TokenConfig = {
-                ...existing.config,
+            const updatedConfig: Erc20TokenConfigData = {
+                address: existing.typedConfig.address,
+                chainId: existing.typedConfig.chainId,
                 basicCurrencyId,
             };
 
@@ -1576,7 +1609,7 @@ export class Erc20TokenService extends TokenService<"erc20"> {
      * @returns The updated token without basicCurrencyId
      * @throws Error if token not found or not ERC-20
      */
-    async unlinkFromBasicCurrency(tokenId: string): Promise<Token<"erc20">> {
+    async unlinkFromBasicCurrency(tokenId: string): Promise<Erc20Token> {
         log.methodEntry(this.logger, "unlinkFromBasicCurrency", { tokenId });
 
         try {
@@ -1588,10 +1621,14 @@ export class Erc20TokenService extends TokenService<"erc20"> {
             }
 
             // Remove basicCurrencyId from config
-            const { basicCurrencyId: _, ...restConfig } = existing.config;
+            const updatedConfig: Erc20TokenConfigData = {
+                address: existing.typedConfig.address,
+                chainId: existing.typedConfig.chainId,
+                // basicCurrencyId intentionally omitted
+            };
 
             const updated = await this.update(tokenId, {
-                config: restConfig as Erc20TokenConfig,
+                config: updatedConfig,
             });
 
             this.logger.info(

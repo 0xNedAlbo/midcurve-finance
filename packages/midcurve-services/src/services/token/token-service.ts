@@ -2,24 +2,20 @@
  * Abstract Token Service
  *
  * Base class for token-type-specific services.
- * Handles serialization/deserialization of config between
- * database JSON format and application types.
+ * Provides shared infrastructure (Prisma client, logging) and common patterns.
  *
- * Token type implementations (e.g., Erc20TokenService) must implement
- * abstract serialization methods.
+ * Subclasses (Erc20TokenService, BasicCurrencyTokenService) implement:
+ * - Type-specific CRUD operations returning concrete class instances
+ * - Discovery and search methods
+ * - Config serialization using the class-based pattern from @midcurve/shared
  *
- * Note: Unlike Position, Token has no mutable state - only immutable config.
+ * Design: Services return class instances (Erc20Token, BasicCurrencyToken)
+ * for type-safe config access via .typedConfig and convenience accessors.
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { Token, TokenConfigMap } from '@midcurve/shared';
-import type {
-  CreateTokenInput,
-  UpdateTokenInput,
-  TokenDiscoverInput,
-  TokenSearchInput,
-  TokenSearchCandidate,
-} from '../types/token/token-input.js';
+import type { TokenInterface, TokenType } from '@midcurve/shared';
+import { TokenFactory } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -36,9 +32,10 @@ export interface TokenServiceDependencies {
 }
 
 /**
- * Generic token result from database (before deserialization)
+ * Generic token result from database (before conversion to class instance)
+ * Matches Prisma Token model output
  */
-interface TokenDbResult {
+export interface TokenDbResult {
   id: string;
   createdAt: Date;
   updatedAt: Date;
@@ -56,14 +53,18 @@ interface TokenDbResult {
  * Abstract TokenService
  *
  * Provides base functionality for token management.
- * Token-type-specific services must extend this class and implement
- * serialization methods for config.
- *
- * @template T - Token type key from TokenConfigMap ('erc20', etc.)
+ * Token-type-specific services extend this class and implement
+ * their own CRUD, discovery, and search methods.
  */
-export abstract class TokenService<T extends keyof TokenConfigMap> {
+export abstract class TokenService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
+
+  /**
+   * Token type discriminator for this service
+   * Must be implemented by subclasses
+   */
+  protected abstract readonly tokenType: TokenType;
 
   /**
    * Creates a new TokenService instance
@@ -84,117 +85,51 @@ export abstract class TokenService<T extends keyof TokenConfigMap> {
   }
 
   // ============================================================================
-  // ABSTRACT SERIALIZATION METHODS
-  // Token type implementations MUST implement these methods
+  // POLYMORPHIC HELPERS
   // ============================================================================
 
   /**
-   * Parse config from database JSON to application type
+   * Convert database result to TokenInterface using the factory pattern.
    *
-   * Converts serialized values (if any) to native types.
-   * For configs with only primitives, this may be a pass-through.
+   * This method uses TokenFactory.fromDB() which routes to the correct
+   * concrete class (Erc20Token or BasicCurrencyToken) based on tokenType.
    *
-   * @param configDB - Config object from database (JSON)
-   * @returns Parsed config with native types
+   * Subclasses should override findById/create/update to return their
+   * specific type using their own factory method (e.g., Erc20Token.fromDB).
+   *
+   * @param dbResult - Raw database result from Prisma
+   * @returns Token class instance implementing TokenInterface
    */
-  abstract parseConfig(configDB: unknown): TokenConfigMap[T];
-
-  /**
-   * Serialize config from application type to database JSON
-   *
-   * Converts native values (if any) to serializable types.
-   * For configs with only primitives, this may be a pass-through.
-   *
-   * @param config - Application config with native types
-   * @returns Serialized config for database storage
-   */
-  abstract serializeConfig(config: TokenConfigMap[T]): unknown;
-
-  // ============================================================================
-  // ABSTRACT DISCOVERY METHOD
-  // Protocol implementations MUST implement this method
-  // ============================================================================
-
-  /**
-   * Discover and create a token from on-chain data
-   *
-   * Checks the database first for an existing token. If not found, reads
-   * token metadata from on-chain sources and creates a new token entry.
-   *
-   * Implementation note: Each protocol defines its own discovery input type
-   * via TokenDiscoverInputMap. For example, ERC-20 uses { address: string, chainId: number }.
-   *
-   * @param params - Discovery parameters (type-safe via TokenDiscoverInputMap[T])
-   * @returns The discovered or existing token
-   * @throws Error if discovery fails (protocol-specific errors)
-   */
-  abstract discover(params: TokenDiscoverInput<T>): Promise<Token<T>>;
-
-  // ============================================================================
-  // ABSTRACT SEARCH METHOD
-  // Protocol implementations MUST implement this method
-  // ============================================================================
-
-  /**
-   * Search for tokens in external catalogs (e.g., CoinGecko) by criteria
-   *
-   * Searches external data sources for tokens matching the specified criteria.
-   * Returns lightweight candidate objects (not full Token objects from database).
-   *
-   * Implementation note: Each protocol defines its own search input type
-   * via TokenSearchInputMap. For example, ERC-20 uses { chainId: number, symbol?: string, name?: string }.
-   *
-   * The search results are candidates that can be discovered/added to the database
-   * using the discover() method.
-   *
-   * @param input - Search parameters (type-safe via TokenSearchInputMap[T])
-   * @returns Array of matching token candidates (max 10)
-   * @throws Error if search fails (protocol-specific errors)
-   */
-  abstract searchTokens(input: TokenSearchInput<T>): Promise<TokenSearchCandidate<T>[]>;
-
-  // ============================================================================
-  // PROTECTED HELPERS
-  // ============================================================================
-
-  /**
-   * Map database result to Token type
-   *
-   * Calls parseConfig for config deserialization.
-   *
-   * @param dbResult - Raw database result
-   * @returns Token with native types
-   */
-  protected mapToToken(dbResult: TokenDbResult): Token<T> {
-    return {
+  protected mapToToken(dbResult: TokenDbResult): TokenInterface {
+    return TokenFactory.fromDB({
       id: dbResult.id,
-      createdAt: dbResult.createdAt,
-      updatedAt: dbResult.updatedAt,
-      tokenType: dbResult.tokenType as T,
+      tokenType: dbResult.tokenType,
       name: dbResult.name,
       symbol: dbResult.symbol,
       decimals: dbResult.decimals,
-      logoUrl: dbResult.logoUrl ?? undefined,
-      coingeckoId: dbResult.coingeckoId ?? undefined,
-      marketCap: dbResult.marketCap ?? undefined,
-      config: this.parseConfig(dbResult.config),
-    };
+      logoUrl: dbResult.logoUrl,
+      coingeckoId: dbResult.coingeckoId,
+      marketCap: dbResult.marketCap,
+      config: dbResult.config as Record<string, unknown>,
+      createdAt: dbResult.createdAt,
+      updatedAt: dbResult.updatedAt,
+    });
   }
 
   // ============================================================================
-  // CRUD OPERATIONS
+  // BASE CRUD OPERATIONS
   // ============================================================================
 
   /**
-   * Find a token by its database ID
+   * Find a token by its database ID (polymorphic)
    *
-   * Base implementation that retrieves from database.
-   * Derived classes should override to add type filtering.
+   * Returns a TokenInterface that can be narrowed based on tokenType.
+   * Subclasses override this to return their specific type.
    *
    * @param id - Token database ID
    * @returns The token if found, null otherwise
    */
-  async findById(id: string): Promise<Token<T> | null> {
+  async findById(id: string): Promise<TokenInterface | null> {
     log.methodEntry(this.logger, 'findById', { id });
 
     try {
@@ -225,148 +160,11 @@ export abstract class TokenService<T extends keyof TokenConfigMap> {
   }
 
   /**
-   * Create a new token
-   *
-   * Base implementation that handles database operations.
-   * Derived classes should override this method to add validation,
-   * normalization, and duplicate checking logic.
-   *
-   * @param input - Token data to create (omits id, createdAt, updatedAt)
-   * @returns The created token with generated id and timestamps
-   */
-  async create(input: CreateTokenInput<T>): Promise<Token<T>> {
-    log.methodEntry(this.logger, 'create', {
-      tokenType: input.tokenType,
-      symbol: input.symbol,
-      name: input.name,
-    });
-
-    try {
-      // Serialize config for database storage
-      const configDB = this.serializeConfig(input.config);
-
-      log.dbOperation(this.logger, 'create', 'Token', {
-        tokenType: input.tokenType,
-        symbol: input.symbol,
-      });
-
-      const result = await this.prisma.token.create({
-        data: {
-          tokenType: input.tokenType,
-          name: input.name,
-          symbol: input.symbol,
-          decimals: input.decimals,
-          logoUrl: input.logoUrl,
-          coingeckoId: input.coingeckoId,
-          marketCap: input.marketCap,
-          config: configDB as object,
-        },
-      });
-
-      const token = this.mapToToken(result);
-
-      this.logger.info(
-        {
-          id: token.id,
-          tokenType: token.tokenType,
-          symbol: token.symbol,
-          name: token.name,
-        },
-        'Token created successfully'
-      );
-
-      log.methodExit(this.logger, 'create', { id: token.id });
-      return token;
-    } catch (error) {
-      log.methodError(this.logger, 'create', error as Error, {
-        tokenType: input.tokenType,
-        symbol: input.symbol,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Update an existing token
-   *
-   * Base implementation that handles database operations.
-   * Derived classes should override this method to add validation
-   * and type-specific checks.
-   *
-   * @param id - Token database ID
-   * @param input - Partial token data to update
-   * @returns The updated token
-   * @throws Error if token not found
-   */
-  async update(id: string, input: UpdateTokenInput<T>): Promise<Token<T>> {
-    log.methodEntry(this.logger, 'update', {
-      id,
-      fields: Object.keys(input),
-    });
-
-    try {
-      // Verify token exists
-      log.dbOperation(this.logger, 'findUnique', 'Token', { id });
-
-      const existing = await this.prisma.token.findUnique({
-        where: { id },
-      });
-
-      if (!existing) {
-        const error = new Error(`Token with id ${id} not found`);
-        log.methodError(this.logger, 'update', error, { id });
-        throw error;
-      }
-
-      // Serialize config if provided
-      const configDB = input.config ? this.serializeConfig(input.config) : undefined;
-
-      // Update token
-      log.dbOperation(this.logger, 'update', 'Token', {
-        id,
-        fields: Object.keys(input),
-      });
-
-      const result = await this.prisma.token.update({
-        where: { id },
-        data: {
-          name: input.name,
-          symbol: input.symbol,
-          decimals: input.decimals,
-          logoUrl: input.logoUrl,
-          coingeckoId: input.coingeckoId,
-          marketCap: input.marketCap,
-          config: configDB as object | undefined,
-        },
-      });
-
-      const token = this.mapToToken(result);
-
-      this.logger.info(
-        {
-          id: token.id,
-          symbol: token.symbol,
-        },
-        'Token updated successfully'
-      );
-
-      log.methodExit(this.logger, 'update', { id });
-      return token;
-    } catch (error) {
-      // Only log if not already logged
-      if (!(error instanceof Error && error.message.includes('not found'))) {
-        log.methodError(this.logger, 'update', error as Error, { id });
-      }
-      throw error;
-    }
-  }
-
-  /**
    * Delete a token
    *
    * Base implementation that handles database operations.
-   * Derived classes should override this method to add type-specific
-   * safeguards.
+   * Subclasses should override this method to add type-specific
+   * safeguards and validation.
    *
    * This operation is idempotent - deleting a non-existent token
    * returns silently without error.
