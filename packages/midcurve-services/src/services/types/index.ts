@@ -103,14 +103,6 @@ export type {
   UniswapV3PoolDiscoveryInput,
 } from './pool-discovery/index.js';
 
-// Strategy input types
-export type {
-  CreateStrategyInput,
-  UpdateStrategyInput,
-  ActivateStrategyInput,
-  FindStrategyOptions,
-} from './strategy/index.js';
-
 // Automation input types
 export type {
   RegisterCloseOrderInput,

@@ -19,8 +19,6 @@ import {
   UniswapV3PositionLedgerService,
   PositionListService,
   PositionAprService,
-  StrategyService,
-  StrategyMetricsService,
   CloseOrderService,
   PoolSubscriptionService,
   AutomationLogService,
@@ -42,8 +40,6 @@ let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _uniswapV3PositionLedgerService: UniswapV3PositionLedgerService | null = null;
 let _positionListService: PositionListService | null = null;
 let _positionAprService: PositionAprService | null = null;
-let _strategyService: StrategyService | null = null;
-let _strategyMetricsService: StrategyMetricsService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
@@ -160,26 +156,6 @@ export function getPositionListService(): PositionListService {
     _positionListService = new PositionListService();
   }
   return _positionListService;
-}
-
-/**
- * Get singleton instance of StrategyService
- */
-export function getStrategyService(): StrategyService {
-  if (!_strategyService) {
-    _strategyService = new StrategyService();
-  }
-  return _strategyService;
-}
-
-/**
- * Get singleton instance of StrategyMetricsService
- */
-export function getStrategyMetricsService(): StrategyMetricsService {
-  if (!_strategyMetricsService) {
-    _strategyMetricsService = new StrategyMetricsService();
-  }
-  return _strategyMetricsService;
 }
 
 /**

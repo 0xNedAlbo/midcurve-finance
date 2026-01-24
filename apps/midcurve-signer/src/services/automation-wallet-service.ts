@@ -236,7 +236,6 @@ class AutomationWalletServiceImpl {
         walletType: WALLET_TYPE,
         walletPurpose: WALLET_PURPOSE,
         userId,
-        strategyId: null,
         label,
         walletHash,
         config: config as unknown as Prisma.InputJsonValue,

@@ -9,7 +9,7 @@
  * fine-grained cache invalidation and updates.
  */
 
-import type { ListPositionsParams, ListStrategiesParams, ListCloseOrdersRequest } from '@midcurve/api-shared';
+import type { ListPositionsParams, ListCloseOrdersRequest } from '@midcurve/api-shared';
 
 export const queryKeys = {
   // ============================================
@@ -130,53 +130,6 @@ export const queryKeys = {
         amount: string;
         userAddress: string;
       }) => [...queryKeys.swap.quotes.all, params] as const,
-    },
-  },
-
-  // ============================================
-  // STRATEGIES
-  // ============================================
-  strategies: {
-    all: ['strategies'] as const,
-
-    // Strategy list (deployed strategies for current user)
-    lists: () => [...queryKeys.strategies.all, 'list'] as const,
-    list: (params?: ListStrategiesParams) =>
-      [...queryKeys.strategies.lists(), params ?? {}] as const,
-
-    // Single strategy detail (by ID)
-    details: () => [...queryKeys.strategies.all, 'detail'] as const,
-    detail: (strategyId: string) =>
-      [...queryKeys.strategies.details(), strategyId] as const,
-
-    // Single strategy by contract address
-    byAddresses: () => [...queryKeys.strategies.all, 'byAddress'] as const,
-    byAddress: (contractAddress: string) =>
-      [...queryKeys.strategies.byAddresses(), contractAddress] as const,
-
-    // Strategy logs
-    logs: (strategyId: string) =>
-      [...queryKeys.strategies.all, 'logs', strategyId] as const,
-    logsWithParams: (strategyId: string, params?: { level?: number; cursor?: string }) =>
-      [...queryKeys.strategies.logs(strategyId), params ?? {}] as const,
-
-    // Strategy manifests (templates for deployment)
-    manifests: {
-      all: ['strategies', 'manifests'] as const,
-      lists: () => [...queryKeys.strategies.manifests.all, 'list'] as const,
-      list: (params?: { isActive?: boolean; tags?: string[] }) =>
-        [...queryKeys.strategies.manifests.lists(), params ?? {}] as const,
-    },
-
-    // Mutation keys
-    mutations: {
-      deploy: ['strategies', 'deploy'] as const,
-    },
-
-    // Vault operations
-    vault: {
-      prepare: (strategyId: string) =>
-        [...queryKeys.strategies.all, 'vault', 'prepare', strategyId] as const,
     },
   },
 

@@ -16,227 +16,6 @@ datasource db {
 // Supporting: Uniswap V3 (Ethereum), Orca (Solana), Raydium (Solana), PancakeSwap (BSC)
 
 // =============================================================================
-// Strategy Models
-// =============================================================================
-
-// Strategy lifecycle states (aligned with on-chain LifecycleMixin)
-// - pending: Created in DB, not yet deployed on-chain
-// - deploying: Deployment in progress (contract being deployed)
-// - deployed: Contract deployed, not started (on-chain: DEPLOYED)
-// - starting: START event sent, processing (on-chain: STARTING)
-// - active: Fully running (on-chain: ACTIVE)
-// - shutting_down: SHUTDOWN event sent, cleanup in progress (on-chain: SHUTTING_DOWN)
-// - shutdown: Final state (on-chain: SHUTDOWN)
-enum StrategyStatus {
-  pending
-  deploying
-  deployed
-  starting
-  active
-  shutting_down
-  shutdown
-}
-
-// Strategy position lifecycle states
-// - pending: Created in DB, not yet active
-// - active: Position is active
-// - paused: Position is temporarily paused
-// - closed: Position has been closed
-enum StrategyPositionStatus {
-  pending
-  active
-  paused
-  closed
-}
-
-// Strategy - Automated trading/liquidity management unit
-// Can manage multiple positions across different protocols
-model Strategy {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Ownership
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Identification
-  name         String // "ETH-USDC Delta Neutral"
-  strategyType String // "delta-neutral", "yield-optimizer"
-  status       StrategyStatus @default(pending)
-
-  // On-chain identification (nullable until deployed)
-  // Contract address is the primary lookup field (strategies always have EVM addresses)
-  contractAddress String? @unique
-  chainId         Int?
-
-  // Quote token reference (all positions must use same quote token)
-  // Required for meaningful metrics aggregation
-  // All positions in this strategy must use the same quote token
-  quoteTokenId String
-  quoteToken   Token  @relation(fields: [quoteTokenId], references: [id])
-
-  // NOTE: Metrics are NOT stored - computed on-demand by StrategyMetricsService
-  // from StrategyLedgerEvent aggregations and position state
-  // See: StrategyMetrics, StrategyPositionMetrics types in midcurve-shared
-
-  // Free-form config (JSON)
-  config Json
-
-  // Embedded manifest used for deployment (nullable for manually created strategies)
-  // Contains: name, version, description, author, abi, bytecode, constructorParams, tags
-  // See StrategyManifest type in @midcurve/shared for structure
-  manifest Json?
-
-  // Vault deployment info (nullable until vault deployed)
-  // Platform-independent config stored as JSON: { type: 'evm', chainId: number, vaultAddress: string }
-  // See VaultConfig type in midcurve-evm for structure
-  vaultConfig     Json?
-  vaultTokenId    String? // Reference to Token record for funding token (separate for easy lookup)
-  vaultDeployedAt DateTime?
-
-  // Vault token relation
-  vaultToken Token? @relation("StrategyVaultToken", fields: [vaultTokenId], references: [id])
-
-  // Relations
-  automationWallets    AutomationWallet[]
-  strategyPositions    StrategyPosition[]
-  strategyLedgerEvents StrategyLedgerEvent[]
-  logs                 StrategyLog[]
-
-  // Indexes
-  @@index([userId])
-  @@index([status])
-  @@index([strategyType])
-  @@index([quoteTokenId])
-  @@index([vaultTokenId])
-  @@map("strategies")
-}
-
-// StrategyPosition - Position owned by a Strategy (not User)
-// Supports multiple position types: treasury, uniswapv3, hyperliquid, etc.
-model StrategyPosition {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Parent strategy
-  strategyId String
-  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-
-  // Type discriminator
-  positionType String // 'treasury', 'uniswapv3', 'hyperliquid'
-
-  // Lifecycle
-  status   StrategyPositionStatus @default(pending)
-  openedAt DateTime?
-  closedAt DateTime?
-
-  // Type-specific data (JSON)
-  // Config: Immutable configuration (wallets, addresses, etc.)
-  // State: Mutable state (balances, holdings, etc.)
-  config Json
-  state  Json
-
-  // Relations
-  ledgerEvents StrategyLedgerEvent[]
-
-  // Indexes
-  @@index([strategyId])
-  @@index([positionType])
-  @@index([status])
-  @@map("strategy_positions")
-}
-
-// StrategyLedgerEvent - Financial events for Strategy positions
-// Unified event taxonomy for all strategy position types
-model StrategyLedgerEvent {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Parent references
-  strategyId         String
-  strategy           Strategy         @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  strategyPositionId String
-  strategyPosition   StrategyPosition @relation(fields: [strategyPositionId], references: [id], onDelete: Cascade)
-
-  // Grouping & Ordering
-  // groupId: UUID that groups related events atomically (e.g., SWAP = BUY + SELL + FEE_PAID + GAS_PAID)
-  // sequenceNumber: Order within same timestamp (0, 1, 2...) - resets per timestamp
-  groupId        String
-  timestamp      DateTime
-  sequenceNumber Int
-
-  // Event identification
-  // Types: INVESTOR_DEPOSIT, INVESTOR_WITHDRAW, BUY, SELL, POSITION_ENTER, POSITION_INCREASE,
-  //        POSITION_DECREASE, POSITION_EXIT, FEE_EARNED, YIELD_EARNED, FUNDING_RECEIVED,
-  //        FUNDING_PAID, FEE_PAID, GAS_PAID, ALLOCATION_TO_POSITION, ALLOCATION_FROM_POSITION
-  eventType String
-
-  // Asset
-  tokenId      String
-  token        Token  @relation(fields: [tokenId], references: [id])
-  tokenHash    String // "erc20:chainId:address" for readability/logging
-  amount       String // bigint as string (+ inflow, - outflow)
-  valueInQuote String // bigint as string - Value in strategy's quote token
-
-  // Financial tracking (deltas only - aggregate for totals)
-  // See StrategyMetrics in midcurve-shared for aggregation semantics
-  deltaCostBasis           String @default("0") // bigint as string - Change in cost basis
-  deltaRealizedCapitalGain String @default("0") // bigint as string - Capital gain/loss from sales
-  deltaRealizedIncome      String @default("0") // bigint as string - Realized income (fees, yield)
-  deltaExpense             String @default("0") // bigint as string - Expenses (gas, protocol fees)
-
-  // Protocol-specific data (JSON)
-  config Json // Immutable event metadata
-  state  Json // Event-specific data
-
-  // Indexes
-  @@index([strategyId])
-  @@index([strategyPositionId])
-  @@index([groupId])
-  @@index([timestamp, sequenceNumber])
-  @@index([tokenId])
-  @@index([eventType])
-  @@map("strategy_ledger_events")
-}
-
-// StrategyLog - Durable log messages from strategy execution
-// Logs are emitted via LoggingMixin and persisted by the LogEffectHandler
-model StrategyLog {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  // Strategy reference
-  strategyId String
-  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-
-  // Denormalized for display (avoids join for simple log viewing)
-  contractAddress String // 0x... checksummed address
-
-  // Execution context
-  epoch         BigInt // Strategy epoch when log was emitted
-  correlationId String // Distributed tracing ID
-
-  // Log content
-  level       Int // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-  topic       String // bytes32 hash (hex string)
-  topicName   String? // Human-readable topic name (if known)
-  data        String // bytes hex string (raw encoded data)
-  dataDecoded String? // Human-readable decoded data (if possible)
-
-  // Timing
-  timestamp DateTime // When the log was created (from requestedAt)
-
-  // Indexes for efficient querying
-  @@index([strategyId, timestamp])
-  @@index([strategyId, level, timestamp])
-  @@index([timestamp])
-  @@map("strategy_logs")
-}
-
-// =============================================================================
 // Authentication Models
 // =============================================================================
 
@@ -318,7 +97,6 @@ model User {
   // Midcurve position relations
   positions             Position[]
   quoteTokenPreferences UserQuoteTokenPreference[]
-  strategies            Strategy[]
 
   // Notification relations
   notifications UserNotification[]
@@ -351,11 +129,8 @@ model Token {
   config Json
 
   // Relations
-  poolsAsToken0          Pool[]                @relation("PoolToken0")
-  poolsAsToken1          Pool[]                @relation("PoolToken1")
-  strategies             Strategy[]
-  strategiesAsVaultToken Strategy[]            @relation("StrategyVaultToken")
-  strategyLedgerEvents   StrategyLedgerEvent[]
+  poolsAsToken0 Pool[] @relation("PoolToken0")
+  poolsAsToken1 Pool[] @relation("PoolToken1")
 
   // Indexes for efficient queries
   @@index([tokenType])
@@ -667,33 +442,24 @@ model AutomationWallet {
   walletType String // 'evm', 'solana', 'hyperliquid'
 
   // Wallet purpose discriminator
-  // - 'strategy': Wallet linked to a specific strategy (has strategyId)
-  // - 'automation': Standalone automation wallet (shared across positions)
-  walletPurpose String @default("strategy") // 'strategy' | 'automation'
+  walletPurpose String @default("automation") // 'automation'
 
   // Owner reference (for authorization, NOT unique - one user can have many wallets)
   userId String
 
-  // Optional strategy reference (one strategy can have multiple wallets)
-  // Required when walletPurpose='strategy', null when walletPurpose='automation'
-  strategyId String?
-  strategy   Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
-
   // User-friendly label
-  label String // "Strategy Automation Wallet", "Hyperliquid Trading Wallet", etc.
+  label String // "Automation Wallet", "Hyperliquid Trading Wallet", etc.
 
   // Wallet hash for fast lookups and uniqueness
   // Human-readable composite key, format is platform-specific:
   // - EVM: "evm/{walletAddress}" (the actual signing wallet address)
   // - Solana: "solana/{programId}/{walletPubkey}"
   // - Hyperliquid: "hyperliquid/{userId}/{vaultAddress}"
-  // For EVM strategy wallets, use the strategyId relation for lookups by contract address:
-  //   Strategy.contractAddress → strategyId → AutomationWallet
   // Generated by createWalletHash() method in each platform service
   walletHash String @unique
 
   // Platform-specific configuration (JSON)
-  // EVM: { strategyAddress, walletAddress, kmsKeyId, keyProvider }
+  // EVM: { walletAddress, kmsKeyId, keyProvider }
   // Solana: { programId, walletPubkey, ... }
   // Hyperliquid: { apiKey, apiSecret (encrypted), ... }
   config Json
@@ -709,7 +475,6 @@ model AutomationWallet {
   @@index([walletType])
   @@index([walletPurpose])
   @@index([userId])
-  @@index([strategyId])
   @@index([isActive])
   @@index([userId, walletHash]) // Fast user-specific lookups by hash
   @@map("automation_wallets")

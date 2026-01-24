@@ -160,7 +160,7 @@ function updateEnvFile(envPath: string, key: string, value: string): void {
  */
 function updateLocalChainConfig(
   mockUsdAddress: string,
-  mockAugustusAddress?: string,
+  _mockAugustusAddress?: string,
   mockAugustusRegistryAddress?: string,
   positionCloserAddress?: string,
   diamondFactoryAddress?: string,

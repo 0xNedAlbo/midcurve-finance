@@ -8,7 +8,6 @@ import { Erc20TransferEventProvider } from './lib/events/erc20-transfer-event-co
 import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
-import { StrategyDetailPage } from './pages/StrategyDetailPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 
 // Automation
@@ -27,10 +26,6 @@ export function App() {
                 <Route
                   path="/positions/:protocol/:chain/:nftId"
                   element={<PositionDetailPage />}
-                />
-                <Route
-                  path="/strategies/:strategyId"
-                  element={<StrategyDetailPage />}
                 />
                 <Route
                   path="/automation/wallet"

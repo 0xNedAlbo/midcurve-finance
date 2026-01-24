@@ -43,10 +43,10 @@ The platform runs as a **multi-service Docker Compose stack** with separate fron
 │  BACKEND NETWORK (internal, isolated) ──────────────────────────    │
 │  │                                                                   │
 │  │  ┌─────────────────────────┐  ┌─────────────────────────┐       │
-│  │  │   midcurve-api          │  │   midcurve-evm          │       │
-│  │  │   Port 3001             │  │   Port 3002             │       │
-│  │  │   Next.js REST API      │  │   Strategy Orchestrator │       │
-│  │  │   SIWE Auth, Sessions   │  │   RabbitMQ Consumer     │       │
+│  │  │   midcurve-api          │  │   midcurve-pool-prices  │       │
+│  │  │   Port 3001             │  │   (no HTTP port)        │       │
+│  │  │   Next.js REST API      │  │   WebSocket Subscriber  │       │
+│  │  │   SIWE Auth, Sessions   │  │   RabbitMQ Publisher    │       │
 │  │  └───────────┬─────────────┘  └───────────┬─────────────┘       │
 │  │              │                            │                       │
 │  │  ┌───────────▼─────────────┐  ┌───────────▼─────────────┐       │
@@ -56,12 +56,12 @@ The platform runs as a **multi-service Docker Compose stack** with separate fron
 │  │  │   Order Execution       │  │   Key Management        │       │
 │  │  └─────────────────────────┘  └─────────────────────────┘       │
 │  │                                                                   │
-│  │  ┌─────────────────────────┐  ┌─────────────────────────┐       │
-│  │  │   geth                  │  │   rabbitmq              │       │
-│  │  │   Ports 8555/8556       │  │   Port 5672             │       │
-│  │  │   Private EVM Node      │  │   Message broker        │       │
-│  │  │   Clique PoA            │  │   RabbitMQ 3.13         │       │
-│  │  └─────────────────────────┘  └─────────────────────────┘       │
+│  │  ┌─────────────────────────┐                                     │
+│  │  │   rabbitmq              │                                     │
+│  │  │   Port 5672             │                                     │
+│  │  │   Message broker        │                                     │
+│  │  │   RabbitMQ 3.13         │                                     │
+│  │  └─────────────────────────┘                                     │
 │  │                                                                   │
 │  EXTERNAL ──────────────────────────────────────────────────────    │
 │  │                                                                   │
@@ -77,8 +77,7 @@ The platform runs as a **multi-service Docker Compose stack** with separate fron
 - **Separate UI and API** - Cross-origin architecture with CORS
 - **Network isolation** - Backend services not exposed to internet
 - **Auto SSL** - Caddy handles Let's Encrypt certificates
-- **Private EVM node** - Geth for strategy contract execution
-- **Message queue** - RabbitMQ for async strategy orchestration
+- **Message queue** - RabbitMQ for pool price events and automation
 
 ## Repository Structure
 
@@ -87,8 +86,8 @@ midcurve-finance/
 ├── apps/
 │   ├── midcurve-ui/          # Vite SPA - React frontend
 │   ├── midcurve-api/         # Next.js REST API backend
-│   ├── midcurve-evm/         # Strategy orchestrator + Geth node
 │   ├── midcurve-automation/  # Price monitoring & order execution
+│   ├── midcurve-pool-prices/ # Real-time pool price subscriptions
 │   └── midcurve-signer/      # Transaction signing service
 ├── packages/
 │   ├── midcurve-shared/      # @midcurve/shared - Domain types & utilities
@@ -268,7 +267,8 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 
 **Consumed by:**
 - API (midcurve-api)
-- EVM service (midcurve-evm)
+- Automation service (midcurve-automation)
+- Pool prices service (midcurve-pool-prices)
 - Signer service (midcurve-signer)
 
 **Contains:**
@@ -283,7 +283,7 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 - **Models:**
   - User, Session, AuthWalletAddress
   - Token, Pool, Position
-  - Strategy, AutomationWallet
+  - AutomationWallet, CloseOrder, AutomationContract
   - PositionLedgerEvent, AprPeriod
   - Cache (for distributed caching)
 
@@ -324,7 +324,7 @@ const user = await prisma.user.findUnique({
 - Dashboard with position overview
 - Position management (import, view, analyze)
 - SIWE authentication flow
-- Strategy deployment wizard
+- Close order automation (SIL/TIP triggers)
 - Risk analytics visualizations
 
 **Key Characteristics:**
@@ -380,7 +380,7 @@ docker build -t midcurve-ui .
 - `/api/v1/tokens/erc20/*` - Token discovery and enrichment
 - `/api/v1/pools/uniswapv3/*` - Pool data and pricing
 - `/api/v1/positions/*` - Position CRUD, history, APR
-- `/api/v1/strategies/*` - Strategy deployment and lifecycle
+- `/api/v1/automation/*` - Close orders and position automation
 
 **Key Characteristics:**
 - ✅ **Session-based auth** - Custom session middleware with cookies
@@ -397,7 +397,7 @@ midcurve-api/
 │   │   ├── v1/
 │   │   │   ├── auth/
 │   │   │   ├── positions/
-│   │   │   ├── strategies/
+│   │   │   ├── automation/
 │   │   │   └── ...
 │   │   └── health/
 │   ├── lib/                  # Utilities (cors, logger, session)
@@ -409,42 +409,11 @@ midcurve-api/
 
 ---
 
-### @midcurve/evm - Strategy Orchestrator
-
-**Location:** `apps/midcurve-evm/`
-
-**Purpose:** Executes automated trading strategies on EVM chains. Coordinates between private Geth node, RabbitMQ, and the signer service.
-
-**Components:**
-- **Next.js API** (port 3002) - Internal endpoints for strategy control
-- **Core Orchestrator** - TypeScript strategy execution engine
-- **Geth Node** - Private EVM for strategy contract execution
-- **RabbitMQ Consumer** - Processes strategy events
-
-**Key Characteristics:**
-- ✅ **Private EVM** - Clique PoA for instant transactions
-- ✅ **Event-driven** - RabbitMQ for async orchestration
-- ✅ **Internal only** - Not exposed to internet
-
-**Directory Structure:**
-```
-midcurve-evm/
-├── src/
-│   ├── app/api/              # Internal API endpoints
-│   └── core/                 # Strategy orchestrator
-├── genesis/                  # Geth genesis configuration
-├── Dockerfile                # EVM service
-├── Dockerfile.geth           # Private Geth node
-└── start-geth.sh             # Geth initialization script
-```
-
----
-
 ### @midcurve/signer - Transaction Signing Service
 
 **Location:** `apps/midcurve-signer/`
 
-**Purpose:** Secure transaction signing service. Manages private keys and signs transactions for automated strategies.
+**Purpose:** Secure transaction signing service. Manages private keys and signs transactions for automated position management.
 
 **Key Features:**
 - **Local encrypted keys** - For development
@@ -512,14 +481,14 @@ midcurve-automation/
 ### Languages & Runtimes
 - **TypeScript 5.3+** - Strict mode, ESM modules
 - **Node.js 20.19.x** - Server-side runtime
-- **Solidity 0.8.20** - Smart contracts (strategy vaults, position closer)
+- **Solidity 0.8.20** - Smart contracts (position closer, hedge vaults)
 
 ### Build Tools
 - **Vite** - Frontend build tool (midcurve-ui)
-- **Next.js 15** - Backend API framework (api, evm, automation, signer)
+- **Next.js 15** - Backend API framework (api, automation, signer)
 - **Turborepo** - Monorepo build orchestration
 - **pnpm 9.12.0** - Package manager
-- **Foundry** - Smart contract development (midcurve-automation)
+- **Foundry** - Smart contract development (midcurve-automation, midcurve-hedges)
 
 ### Frontend
 - **React 19** - UI framework
@@ -541,8 +510,7 @@ midcurve-automation/
 - **Caddy** - Reverse proxy with auto SSL
 - **nginx** - Static file serving (UI)
 - **PostgreSQL** - Primary database (AWS RDS)
-- **RabbitMQ 3.13** - Message broker for strategy orchestration
-- **Geth** - Private EVM node (Clique PoA)
+- **RabbitMQ 3.13** - Message broker for pool price events and automation
 
 ### Testing
 - **Vitest 3.2+** - Unit and API testing
@@ -863,156 +831,6 @@ API adds CORS headers to all responses:
           │                               │
 └─────────┴───────────────────────────────┘
 ```
-
-### 7. REST Async Operation Pattern (Polling)
-
-For long-running operations (e.g., strategy start/shutdown, deployments), the API uses the standard REST async pattern with polling.
-
-**Pattern Overview:**
-
-```
-┌─────────┐     POST /resource/action     ┌─────────┐
-│  Client │ ─────────────────────────────▶│  Server │
-│         │◀───────────────────────────── │         │
-│         │     202 Accepted              │         │
-│         │     Location: /resource/status│         │
-│         │     Body: { pollUrl, status } │         │
-│         │                               │         │
-│         │     GET /resource/status      │         │
-│         │ ─────────────────────────────▶│         │
-│         │◀───────────────────────────── │         │
-│         │     200 OK                    │         │
-│         │     Body: { operationStatus } │         │
-│         │          (repeat until done)  │         │
-└─────────┘                               └─────────┘
-```
-
-**1. Initiate Operation (POST):**
-
-```typescript
-// POST /api/v1/strategies/lifecycle/start
-// Request:
-{ "contractAddress": "0x..." }
-
-// Response: 202 Accepted
-// Headers:
-//   Location: /api/v1/strategies/status/0x...
-// Body:
-{
-  "success": true,
-  "data": {
-    "contractAddress": "0x...",
-    "operation": "start",
-    "operationStatus": "pending",
-    "pollUrl": "/api/v1/strategies/status/0x..."
-  }
-}
-```
-
-**2. Poll for Status (GET):**
-
-```typescript
-// GET /api/v1/strategies/status/0x...
-// Response: 200 OK (ALWAYS 200, check body for status)
-{
-  "success": true,
-  "data": {
-    "id": "...",
-    "contractAddress": "0x...",
-    "status": "deployed",              // Database status
-    "operation": "start",              // Current operation type
-    "operationStatus": "starting_loop", // Operation progress
-    "operationStartedAt": "2024-01-15T10:30:00Z"
-  }
-}
-```
-
-**3. Completion States:**
-
-```typescript
-// Success - operationStatus: "completed"
-{
-  "operationStatus": "completed",
-  "operationCompletedAt": "2024-01-15T10:30:05Z"
-}
-
-// Failure - operationStatus: "failed"
-{
-  "operationStatus": "failed",
-  "operationError": "STRATEGY_NOT_FOUND: Strategy does not exist",
-  "operationCompletedAt": "2024-01-15T10:30:02Z"
-}
-```
-
-**Key Rules:**
-
-1. **POST returns 202 Accepted** - Operation started, not completed
-2. **POST includes Location header** - Points to status endpoint
-3. **POST includes pollUrl in body** - Convenience for clients
-4. **GET always returns 200** - Unless network/server error
-5. **Check operationStatus field** - Not HTTP status code
-6. **Poll until terminal state** - `completed` or `failed`
-
-**Operation Status Values:**
-
-| Status | Meaning |
-|--------|---------|
-| `pending` | Operation queued, not started |
-| `starting_loop` | Starting strategy execution loop |
-| `publishing_event` | Publishing lifecycle event to queue |
-| `waiting_for_transition` | Waiting for on-chain state change |
-| `stopping_loop` | Stopping strategy execution loop |
-| `teardown_topology` | Cleaning up message queue topology |
-| `completed` | ✅ Operation finished successfully |
-| `failed` | ❌ Operation failed (check `operationError`) |
-
-**Frontend Polling Implementation:**
-
-```typescript
-async function pollForCompletion(
-  pollUrl: string,
-  maxAttempts = 60,
-  intervalMs = 1000
-): Promise<OperationResult> {
-  for (let i = 0; i < maxAttempts; i++) {
-    await sleep(intervalMs);
-
-    const response = await apiClient.get(pollUrl);
-
-    // Check operation status in response body (NOT HTTP status)
-    if (response.operationStatus === 'completed') {
-      return response;
-    }
-
-    if (response.operationStatus === 'failed') {
-      throw new Error(response.operationError || 'Operation failed');
-    }
-
-    // Fallback: check database status if operation cleared
-    if (!response.operationStatus && response.status === 'active') {
-      return response; // Completed, operation state was cleared
-    }
-  }
-
-  throw new Error('Operation timed out');
-}
-```
-
-**Why This Pattern?**
-
-- ✅ **Non-blocking** - Client doesn't wait for long operations
-- ✅ **Resilient** - Client can reconnect and resume polling
-- ✅ **Transparent** - Progress visible during operation
-- ✅ **Error handling** - Errors surfaced through polling, not lost
-- ✅ **RESTful** - Standard HTTP semantics (202 for async)
-
-**Endpoints Using This Pattern:**
-
-- `POST /api/v1/strategies/lifecycle/start` - Start a strategy
-- `POST /api/v1/strategies/lifecycle/shutdown` - Shutdown a strategy
-- `POST /api/v1/strategies/deploy` - Deploy a new strategy (future)
-
----
 
 ## Project Philosophy & Risk Management Approach
 
@@ -1384,12 +1202,6 @@ cd apps/midcurve-api
 pnpm dev  # Next.js dev server on http://localhost:3001
 ```
 
-**Working on EVM Orchestrator:**
-```bash
-cd apps/midcurve-evm
-pnpm dev  # Development server on http://localhost:3002
-```
-
 **Database migrations:**
 ```bash
 cd packages/midcurve-database
@@ -1446,9 +1258,9 @@ The primary deployment method is Docker Compose with a multi-service architectur
 │  caddy         │ Reverse proxy, SSL termination (80/443)    │
 │  ui            │ Vite SPA + nginx (3000)                    │
 │  api           │ Next.js REST API (3001)                    │
-│  evm           │ Strategy orchestrator (3002)               │
+│  pool-prices   │ WebSocket pool price subscriptions         │
+│  automation    │ Order execution (3004)                     │
 │  signer        │ Transaction signing (3003)                 │
-│  geth          │ Private EVM node (8555/8556)               │
 │  rabbitmq      │ Message broker (5672/15672)                │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -1496,14 +1308,7 @@ COINGECKO_API_KEY="your-coingecko-key"
 # Signer (internal service)
 SIGNER_INTERNAL_API_KEY="your-32-char-hex-key"
 SIGNER_USE_LOCAL_KEYS="true"
-SIGNER_KEY_ENCRYPTION_PASSWORD="your-encryption-password"
-
-# EVM Orchestrator
-CORE_PRIVATE_KEY="your-deployer-private-key"
-CORE_ADDRESS="your-deployer-address"
-GETH_HTTP_URL="http://geth:8555"
-GETH_WS_URL="ws://geth:8556"
-RABBITMQ_URL="amqp://midcurve:password@rabbitmq:5672"
+SIGNER_LOCAL_ENCRYPTION_KEY="your-encryption-key"
 
 # RabbitMQ
 RABBITMQ_USER="midcurve"
@@ -1532,8 +1337,9 @@ api.midcurve.finance {
 ```
 
 **Service Dependencies:**
-- `api` depends on: PostgreSQL (external)
-- `evm` depends on: api, geth, rabbitmq, signer
+- `api` depends on: PostgreSQL (external), signer, automation
+- `automation` depends on: rabbitmq, pool-prices, signer
+- `pool-prices` depends on: rabbitmq, PostgreSQL
 - `signer` depends on: (standalone)
 - `ui` depends on: (standalone, calls api via Caddy)
 
@@ -1542,7 +1348,7 @@ api.midcurve.finance {
 ```bash
 # View logs
 docker compose logs -f api
-docker compose logs -f evm
+docker compose logs -f automation
 
 # Restart a service
 docker compose restart api

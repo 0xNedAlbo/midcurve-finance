@@ -4,11 +4,9 @@
 # - Caddy (reverse proxy with auto SSL)
 # - UI (Vite SPA served via nginx)
 # - API (Next.js backend)
-# - EVM (Strategy orchestrator)
 # - Pool Prices (Real-time Swap event subscriptions)
 # - Automation (Close order execution)
 # - Signer (Private signing service)
-# - Geth (Private EVM node)
 # - RabbitMQ (Message broker)
 #
 # Database: External PostgreSQL (AWS RDS recommended)
@@ -87,7 +85,6 @@ services:
       # Internal services
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
-      - EVM_SERVICE_URL=http://evm:3002
       - AUTOMATION_URL=http://automation:3004
       # External APIs
       - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
@@ -96,43 +93,11 @@ services:
     depends_on:
       signer:
         condition: service_started
-      evm:
-        condition: service_started
       automation:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - frontend
-      - backend
-      - database
-
-  # ============================================
-  # EVM STRATEGY ENGINE
-  # ============================================
-  evm:
-    build:
-      context: .
-      dockerfile: apps/midcurve-evm/Dockerfile
-    container_name: midcurve-evm
-    expose:
-      - "3002"
-    environment:
-      - NODE_ENV=production
-      - PORT=3002
-      - HOSTNAME=0.0.0.0
-      - DATABASE_URL=${DATABASE_URL}
-      - GETH_HTTP_URL=http://geth:8555
-      - GETH_WS_URL=ws://geth:8556
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
-      - SIGNER_URL=http://signer:3003
-      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
-    depends_on:
-      geth:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
       - backend
       - database
 
@@ -235,29 +200,6 @@ services:
       - database
 
   # ============================================
-  # PRIVATE GETH NODE
-  # ============================================
-  geth:
-    build:
-      context: ./apps/midcurve-evm
-      dockerfile: Dockerfile.geth
-    container_name: midcurve-geth
-    expose:
-      - "8555"
-      - "8556"
-    volumes:
-      - geth-data:/data
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8555"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - backend
-
-  # ============================================
   # MESSAGE BROKER
   # ============================================
   rabbitmq:
@@ -328,8 +270,6 @@ volumes:
   caddy-data:
     driver: local
   caddy-config:
-    driver: local
-  geth-data:
     driver: local
   rabbitmq-data:
     driver: local

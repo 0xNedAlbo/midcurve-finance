@@ -39,12 +39,6 @@ export * from './services/quote-token/index.js';
 export * from './services/pool-discovery/index.js';
 export * from './services/cache/index.js';
 export * from './services/block/index.js';
-export * from './services/strategy/index.js';
-export * from './services/manifest-verification/index.js';
-export * from './services/strategy-position/index.js';
-export * from './services/strategy-ledger/index.js';
-export * from './services/strategy-metrics/index.js';
-export * from './services/strategy-position-metrics/index.js';
 export * from './services/automation/index.js';
 export * from './services/pnl-curve/index.js';
 export * from './services/notifications/index.js';
@@ -52,7 +46,6 @@ export * from './services/notifications/index.js';
 // Export service types
 export * from './services/types/auth/index.js';
 export * from './services/types/block/index.js';
-export * from './services/types/strategy/index.js';
 export * from './services/types/automation/index.js';
 export * from './services/types/notifications/index.js';
 

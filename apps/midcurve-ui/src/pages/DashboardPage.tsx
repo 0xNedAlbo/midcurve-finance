@@ -4,9 +4,7 @@ import { useEffect } from 'react';
 import { UserDropdown } from '../components/auth/user-dropdown';
 import { NotificationBell } from '../components/notifications/notification-bell';
 import { CreatePositionDropdown } from '../components/positions/create-position-dropdown';
-import { CreateStrategyDropdown } from '../components/strategies/create-strategy-dropdown';
 import { PositionList } from '../components/positions/position-list';
-import { StrategyList } from '../components/strategies/strategy-list';
 import { DashboardTabs, type DashboardTab } from '../components/common/dashboard-tabs';
 import { HedgedPositionList } from '../components/positions/hedge/hedged-position-list';
 
@@ -18,18 +16,13 @@ export function DashboardPage() {
   // Read tab from URL, default to 'positions'
   const tabParam = searchParams.get('tab');
   const activeTab: DashboardTab =
-    tabParam === 'strategies'
-      ? 'strategies'
-      : tabParam === 'hedgedPositions'
-        ? 'hedgedPositions'
-        : 'positions';
+    tabParam === 'hedgedPositions' ? 'hedgedPositions' : 'positions';
 
   const handleTabChange = (tab: DashboardTab) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', tab);
     // Reset offset when switching tabs
     params.set('offset', '0');
-    params.set('strategyOffset', '0');
     setSearchParams(params);
   };
 
@@ -77,22 +70,17 @@ export function DashboardPage() {
               <h2 className="text-2xl font-bold text-white mb-2">
                 {activeTab === 'positions'
                   ? 'Your Positions'
-                  : activeTab === 'hedgedPositions'
-                    ? 'Your Hedged Positions'
-                    : 'Your Strategies'}
+                  : 'Your Hedged Positions'}
               </h2>
               <p className="text-slate-300">
                 {activeTab === 'positions'
                   ? 'Manage and analyze your Uniswap V3 liquidity positions'
-                  : activeTab === 'hedgedPositions'
-                    ? 'Positions protected with SIL/TIP triggers'
-                    : 'Manage your automated liquidity strategies'}
+                  : 'Positions protected with SIL/TIP triggers'}
               </p>
             </div>
 
             {/* Action Buttons - show different buttons based on tab */}
             <div className="flex items-center gap-3">
-              <CreateStrategyDropdown />
               {activeTab === 'positions' && <CreatePositionDropdown />}
             </div>
           </div>
@@ -103,7 +91,6 @@ export function DashboardPage() {
           {/* Content based on active tab */}
           {activeTab === 'positions' && <PositionList />}
           {activeTab === 'hedgedPositions' && <HedgedPositionList />}
-          {activeTab === 'strategies' && <StrategyList />}
         </div>
       </div>
     </div>

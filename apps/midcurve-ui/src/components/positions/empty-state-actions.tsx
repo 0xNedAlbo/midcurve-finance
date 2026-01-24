@@ -1,11 +1,8 @@
 "use client";
 
-// TODO: Re-add Zap import when Deploy Strategy is re-enabled
 import { Wand2, FileText, ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
-// TODO: Re-enable Deploy Strategy when strategy feature is ready
-// import { StrategyDeployWizard } from "../strategies/wizard/strategy-deploy-wizard";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
 import {
   getAllUniswapV3Chains,
@@ -33,8 +30,6 @@ export function EmptyStateActions({
 
   // Wizard state
   const [isWizardOpen, setIsWizardOpen] = useState(false);
-  // TODO: Re-enable Deploy Strategy when strategy feature is ready
-  // const [isStrategyWizardOpen, setIsStrategyWizardOpen] = useState(false);
 
   // Real import handler using API
   const handleImportNft = () => {
@@ -85,7 +80,6 @@ export function EmptyStateActions({
       </div>
 
       {/* Action Cards */}
-      {/* TODO: Change back to md:grid-cols-3 when Deploy Strategy is re-enabled */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Wizard Card */}
         <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:border-blue-500/50 transition-all hover:shadow-lg hover:shadow-blue-500/10">
@@ -222,34 +216,6 @@ export function EmptyStateActions({
             )}
           </div>
         </div>
-
-        {/* TODO: Re-enable Deploy Strategy Card when strategy feature is ready
-        <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:border-green-500/50 transition-all hover:shadow-lg hover:shadow-green-500/10">
-          <div className="flex flex-col h-full">
-            <div className="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center mb-4">
-              <Zap className="w-6 h-6 text-green-400" />
-            </div>
-
-            <div className="flex-grow">
-              <h3 className="text-xl font-semibold text-white mb-2">
-                Deploy Strategy
-              </h3>
-              <p className="text-sm text-slate-400 mb-6">
-                Deploy an automated liquidity management strategy to optimize
-                your positions
-              </p>
-            </div>
-
-            <button
-              onClick={() => setIsStrategyWizardOpen(true)}
-              className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
-            >
-              Deploy Strategy
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-        */}
       </div>
 
       {/* Wizard Modal */}
@@ -261,16 +227,6 @@ export function EmptyStateActions({
           onImportSuccess?.(position);
         }}
       />
-
-      {/* TODO: Re-enable Strategy Deploy Wizard Modal when strategy feature is ready
-      <StrategyDeployWizard
-        isOpen={isStrategyWizardOpen}
-        onClose={() => setIsStrategyWizardOpen(false)}
-        onStrategyDeployed={(response) => {
-          console.log("Strategy deployed:", response.deployment.contractAddress);
-        }}
-      />
-      */}
     </div>
   );
 }
