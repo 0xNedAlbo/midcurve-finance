@@ -5,12 +5,7 @@
 export type {
   // Discovery input types
   UniswapV3PoolPriceDiscoverInput,
-  PoolPriceDiscoverInputMap,
-  PoolPriceDiscoverInput,
-  AnyPoolPriceDiscoverInput,
-  // Create input types
-  CreatePoolPriceInput,
-  UpdatePoolPriceInput,
+  // Create/update input types
   CreateUniswapV3PoolPriceInput,
   UpdateUniswapV3PoolPriceInput,
   CreateAnyPoolPriceInput,

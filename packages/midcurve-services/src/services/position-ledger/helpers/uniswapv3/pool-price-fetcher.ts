@@ -66,7 +66,7 @@ export async function getHistoricPoolPrice(
     blockNumber: Number(blockNumber),
   });
 
-  const sqrtPriceX96 = poolPrice.state.sqrtPriceX96;
+  const sqrtPriceX96 = poolPrice.sqrtPriceX96;
 
   logger.debug(
     {

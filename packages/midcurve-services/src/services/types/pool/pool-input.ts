@@ -1,9 +1,57 @@
 /**
  * Service layer pool input types
  * Database-specific types for pool discovery and update operations
+ *
+ * Note: Uses data interfaces (UniswapV3PoolConfigData) not classes for inputs.
+ * Services create class instances internally for serialization.
  */
 
-import type { Pool, PoolConfigMap } from '@midcurve/shared';
+import type {
+  Protocol,
+  PoolType,
+  UniswapV3PoolConfigData,
+  UniswapV3PoolState,
+} from '@midcurve/shared';
+
+// =============================================================================
+// BASE INPUT INTERFACES
+// =============================================================================
+
+/**
+ * Base input interface for creating any pool
+ * Subtype inputs extend this with their specific config and state types
+ */
+interface BaseCreatePoolInput {
+  /** Protocol discriminator */
+  protocol: Protocol;
+  /** Pool type discriminator */
+  poolType: PoolType;
+  /** Fee in basis points */
+  feeBps: number;
+  /**
+   * Database ID of token0
+   * Token must already exist in database
+   */
+  token0Id: string;
+  /**
+   * Database ID of token1
+   * Token must already exist in database
+   */
+  token1Id: string;
+}
+
+/**
+ * Base input interface for updating any pool
+ * All fields are optional except those that identify the pool
+ */
+interface BaseUpdatePoolInput {
+  /** Fee in basis points */
+  feeBps?: number;
+}
+
+// =============================================================================
+// UNISWAP V3 POOL INPUT TYPES
+// =============================================================================
 
 /**
  * Uniswap V3 Pool Discovery Input
@@ -25,6 +73,28 @@ export interface UniswapV3PoolDiscoverInput {
 }
 
 /**
+ * Input for creating a new Uniswap V3 pool
+ */
+export interface CreateUniswapV3PoolInput extends BaseCreatePoolInput {
+  protocol: 'uniswapv3';
+  poolType: 'CL_TICKS';
+  config: UniswapV3PoolConfigData;
+  state: UniswapV3PoolState;
+}
+
+/**
+ * Input for updating an existing Uniswap V3 pool
+ */
+export interface UpdateUniswapV3PoolInput extends BaseUpdatePoolInput {
+  config?: Partial<UniswapV3PoolConfigData>;
+  state?: Partial<UniswapV3PoolState>;
+}
+
+// =============================================================================
+// POOL DISCOVERY INPUT MAP
+// =============================================================================
+
+/**
  * Pool Discovery Input Map
  *
  * Maps protocol identifiers to their corresponding discovery input types.
@@ -36,15 +106,6 @@ export interface UniswapV3PoolDiscoverInput {
  */
 export interface PoolDiscoverInputMap {
   uniswapv3: UniswapV3PoolDiscoverInput;
-
-  /**
-   * Treasury pool discover input (placeholder)
-   *
-   * Treasury pools are virtual and don't require on-chain discovery.
-   * They are created inline when a Treasury position is created.
-   * This placeholder ensures type compatibility with PoolConfigMap.
-   */
-  treasury: never; // Treasury pools don't use pool discovery
 
   // Future protocols:
   // orca: OrcaPoolDiscoverInput;
@@ -64,61 +125,16 @@ export type PoolDiscoverInput<P extends keyof PoolDiscoverInputMap> =
  */
 export type AnyPoolDiscoverInput = PoolDiscoverInput<keyof PoolDiscoverInputMap>;
 
-/**
- * Input type for creating a new pool
- *
- * Omits database-generated fields (id, createdAt, updatedAt) and full Token objects.
- * Instead of full Token objects, requires token0Id and token1Id for database foreign keys.
- *
- * Note: This is a manual creation helper. For creating pools from on-chain data,
- * use discover() which handles token discovery and pool state fetching.
- *
- * @template P - Protocol key from PoolConfigMap ('uniswapv3', etc.)
- */
-export type CreatePoolInput<P extends keyof PoolConfigMap> = Omit<
-  Pool<P>,
-  'id' | 'createdAt' | 'updatedAt' | 'token0' | 'token1'
-> & {
-  /**
-   * Database ID of token0
-   * Token must already exist in database
-   */
-  token0Id: string;
-
-  /**
-   * Database ID of token1
-   * Token must already exist in database
-   */
-  token1Id: string;
-};
+// =============================================================================
+// UNION TYPES
+// =============================================================================
 
 /**
- * Input type aliases for creating pools
+ * Union type for any pool create input
  */
-export type CreateUniswapV3PoolInput = CreatePoolInput<'uniswapv3'>;
-export type CreateAnyPoolInput = CreatePoolInput<keyof PoolConfigMap>;
+export type CreateAnyPoolInput = CreateUniswapV3PoolInput;
 
 /**
- * Input type for updating an existing pool
- *
- * Partial updates, cannot change id, protocol, poolType, tokens, or timestamps.
- *
- * Note: This is a basic helper for rare manual updates.
- * - Config updates are rare (pool parameters are immutable on-chain)
- * - State updates should typically use refresh() method
- * - Tokens (token0, token1) are immutable - set at discovery
- *
- * @template P - Protocol key from PoolConfigMap ('uniswapv3', etc.)
+ * Union type for any pool update input
  */
-export type UpdatePoolInput<P extends keyof PoolConfigMap> = Partial<
-  Omit<
-    Pool<P>,
-    'id' | 'protocol' | 'poolType' | 'createdAt' | 'updatedAt' | 'token0' | 'token1'
-  >
->;
-
-/**
- * Input type aliases for updating pools
- */
-export type UpdateUniswapV3PoolInput = UpdatePoolInput<'uniswapv3'>;
-export type UpdateAnyPoolInput = UpdatePoolInput<keyof PoolConfigMap>;
+export type UpdateAnyPoolInput = UpdateUniswapV3PoolInput;

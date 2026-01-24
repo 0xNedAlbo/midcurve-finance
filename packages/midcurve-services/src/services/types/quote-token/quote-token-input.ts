@@ -5,29 +5,6 @@
  * NOT shared with UI/API (they receive QuoteTokenResult).
  */
 
-import type { PoolConfigMap } from '@midcurve/shared';
-
-/**
- * Quote token determination input map
- * Maps protocol identifier to its input type
- */
-export interface QuoteTokenInputMap {
-  uniswapv3: UniswapV3QuoteTokenInput;
-
-  /**
-   * Treasury quote token determination (placeholder)
-   *
-   * Treasury positions use user-provided quote token directly.
-   * They don't need quote token determination logic.
-   * This placeholder ensures type compatibility with PoolConfigMap.
-   */
-  treasury: never; // Treasury uses direct quote token selection
-
-  // Future protocols:
-  // orca: OrcaQuoteTokenInput;
-  // raydium: RaydiumQuoteTokenInput;
-}
-
 /**
  * Uniswap V3 quote token determination input
  */
@@ -54,18 +31,13 @@ export interface UniswapV3QuoteTokenInput {
 }
 
 /**
- * Example: Orca (Solana) quote token determination input
- * Uncomment when implementing Orca support
+ * Map of protocol to input type
  */
-// export interface OrcaQuoteTokenInput {
-//   userId: string;
-//   token0Mint: string;     // Solana mint address (base58)
-//   token1Mint: string;     // Solana mint address (base58)
-// }
+export interface QuoteTokenInputMap {
+  uniswapv3: UniswapV3QuoteTokenInput;
+}
 
 /**
- * Generic quote token determination input
- * Constrains to valid protocol keys from PoolConfigMap
+ * Union of all quote token inputs
  */
-export type QuoteTokenInput<P extends keyof PoolConfigMap> =
-  QuoteTokenInputMap[P];
+export type QuoteTokenInput = UniswapV3QuoteTokenInput;

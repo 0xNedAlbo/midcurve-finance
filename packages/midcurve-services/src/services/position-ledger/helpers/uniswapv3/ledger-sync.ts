@@ -639,10 +639,14 @@ async function processAndSaveEvents(
       poolPrice: poolPriceValue,
     });
 
-    // 6d. Save event to database
-    const updatedEvents = await ledgerService.addItem(positionId, eventInput);
+    // 6d. Serialize config and state for database
+    const configDB = ledgerService.serializeConfig(eventInput.config) as Record<string, unknown>;
+    const stateDB = ledgerService.serializeState(eventInput.state) as Record<string, unknown>;
 
-    // 6e. Update state for next iteration
+    // 6e. Save event to database
+    const updatedEvents = await ledgerService.addItem(positionId, eventInput, configDB, stateDB);
+
+    // 6f. Update state for next iteration
     const justAddedEvent = updatedEvents[0]; // Newest first (just added)
     if (!justAddedEvent) {
       throw new Error(`Failed to save event for position ${positionId}`);

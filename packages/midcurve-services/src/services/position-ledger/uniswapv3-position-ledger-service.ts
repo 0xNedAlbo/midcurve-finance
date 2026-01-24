@@ -19,10 +19,10 @@ import type {
   LedgerEventDbResult,
 } from './position-ledger-service.js';
 import type {
-  UniswapV3LedgerEvent,
   UniswapV3LedgerEventConfig,
   UniswapV3LedgerEventState,
 } from '@midcurve/shared';
+import { UniswapV3PositionLedgerEvent } from '@midcurve/shared';
 import type {
   CreateUniswapV3LedgerEventInput,
   UniswapV3EventDiscoverInput,
@@ -142,7 +142,8 @@ interface PreviousEventState {
  * Extends PositionLedgerService with Uniswap V3-specific implementation.
  * Fetches events from Etherscan and calculates financial data using historic pool prices.
  */
-export class UniswapV3PositionLedgerService extends PositionLedgerService<'uniswapv3'> {
+export class UniswapV3PositionLedgerService extends PositionLedgerService {
+  protected readonly protocol = 'uniswapv3' as const;
   private readonly _etherscanClient: EtherscanClient;
   private readonly _positionService: UniswapV3PositionService;
   private readonly _poolService: UniswapV3PoolService;
@@ -296,7 +297,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
    * @returns Complete event history, sorted descending by timestamp (newest first)
    * @throws Error if position/pool not found or discovery fails
    */
-  async discoverAllEvents(positionId: string): Promise<UniswapV3LedgerEvent[]> {
+  async discoverAllEvents(positionId: string): Promise<UniswapV3PositionLedgerEvent[]> {
     log.methodEntry(this.logger, 'discoverAllEvents', { positionId });
 
     try {
@@ -373,7 +374,9 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
         });
 
         // Save event
-        const savedEvents = await this.addItem(positionId, eventInput);
+        const configDB = this.serializeConfig(eventInput.config) as Record<string, unknown>;
+        const stateDB = this.serializeState(eventInput.state) as Record<string, unknown>;
+        const savedEvents = await this.addItem(positionId, eventInput, configDB, stateDB);
 
         // Update state for next iteration
         previousEventId = savedEvents[0]!.id; // Newest event is first (descending order)
@@ -449,7 +452,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
   async discoverEvent(
     positionId: string,
     input: UniswapV3EventDiscoverInput
-  ): Promise<UniswapV3LedgerEvent[]> {
+  ): Promise<UniswapV3PositionLedgerEvent[]> {
     log.methodEntry(this.logger, 'discoverEvent', {
       positionId,
       eventType: input.eventType,
@@ -496,9 +499,9 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       // Get previous state
       const previousState: PreviousEventState = lastEvent
         ? {
-            uncollectedPrincipal0: lastEvent.config.uncollectedPrincipal0After,
-            uncollectedPrincipal1: lastEvent.config.uncollectedPrincipal1After,
-            liquidity: lastEvent.config.liquidityAfter,
+            uncollectedPrincipal0: (lastEvent.config as unknown as UniswapV3LedgerEventConfig).uncollectedPrincipal0After,
+            uncollectedPrincipal1: (lastEvent.config as unknown as UniswapV3LedgerEventConfig).uncollectedPrincipal1After,
+            liquidity: (lastEvent.config as unknown as UniswapV3LedgerEventConfig).liquidityAfter,
             costBasis: lastEvent.costBasisAfter,
             pnl: lastEvent.pnlAfter,
           }
@@ -533,7 +536,9 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       });
 
       // 8. Save event and refresh APR calculations
-      const allEvents = await this.addItem(positionId, eventInput);
+      const configDB = this.serializeConfig(eventInput.config) as Record<string, unknown>;
+      const stateDB = this.serializeState(eventInput.state) as Record<string, unknown>;
+      const allEvents = await this.addItem(positionId, eventInput, configDB, stateDB);
 
       this.logger.info(
         {
@@ -551,7 +556,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       await this.aprService.refresh(positionId);
 
       log.methodExit(this.logger, 'discoverEvent', { count: allEvents.length });
-      return allEvents;
+      return allEvents as UniswapV3PositionLedgerEvent[];
     } catch (error) {
       log.methodError(this.logger, 'discoverEvent', error as Error, {
         positionId,
@@ -719,15 +724,13 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
 
       // Sort existing events by blockchain order (ascending) for state calculation
       const sortedExisting = [...existingEvents].sort((a, b) => {
-        const aBlock = a.config.blockNumber;
-        const bBlock = b.config.blockNumber;
-        if (aBlock !== bBlock) return Number(aBlock - bBlock);
+        const configA = a.config as unknown as UniswapV3LedgerEventConfig;
+        const configB = b.config as unknown as UniswapV3LedgerEventConfig;
+        if (configA.blockNumber !== configB.blockNumber) return Number(configA.blockNumber - configB.blockNumber);
 
-        const aTx = a.config.txIndex;
-        const bTx = b.config.txIndex;
-        if (aTx !== bTx) return aTx - bTx;
+        if (configA.txIndex !== configB.txIndex) return configA.txIndex - configB.txIndex;
 
-        return a.config.logIndex - b.config.logIndex;
+        return configA.logIndex - configB.logIndex;
       });
 
       // Extract previous state from last event (or defaults if no events)
@@ -746,15 +749,16 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
         if (!lastEvent) {
           throw new Error('Expected last event but got undefined');
         }
+        const lastEventConfig = lastEvent.config as unknown as UniswapV3LedgerEventConfig;
         previousEventId = lastEvent.id;
-        lastBlockNumber = lastEvent.config.blockNumber;
-        lastTxIndex = lastEvent.config.txIndex;
-        lastLogIndex = lastEvent.config.logIndex;
-        liquidity = lastEvent.config.liquidityAfter;
+        lastBlockNumber = lastEventConfig.blockNumber;
+        lastTxIndex = lastEventConfig.txIndex;
+        lastLogIndex = lastEventConfig.logIndex;
+        liquidity = lastEventConfig.liquidityAfter;
         costBasis = lastEvent.costBasisAfter;
         pnl = lastEvent.pnlAfter;
-        uncollectedPrincipal0 = lastEvent.config.uncollectedPrincipal0After;
-        uncollectedPrincipal1 = lastEvent.config.uncollectedPrincipal1After;
+        uncollectedPrincipal0 = lastEventConfig.uncollectedPrincipal0After;
+        uncollectedPrincipal1 = lastEventConfig.uncollectedPrincipal1After;
 
         this.logger.debug(
           {
@@ -920,7 +924,9 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
         );
 
         // Add event to database
-        await this.addItem(positionId, eventInput);
+        const configDB = this.serializeConfig(eventInput.config) as Record<string, unknown>;
+        const stateDB = this.serializeState(eventInput.state) as Record<string, unknown>;
+        await this.addItem(positionId, eventInput, configDB, stateDB);
 
         // Update state for next iteration
         // Note: We get the actual event ID from the returned events
@@ -994,7 +1000,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
       blockNumber: Number(blockNumber),
     });
 
-    const sqrtPriceX96 = poolPrice.state.sqrtPriceX96;
+    const sqrtPriceX96 = poolPrice.state.sqrtPriceX96 as bigint;
 
     this.logger.debug(
       {
@@ -1289,7 +1295,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
    * @param positionId - Position database ID
    * @returns Array of events, sorted descending by blockchain coordinates (newest first)
    */
-  override async findAllItems(positionId: string): Promise<UniswapV3LedgerEvent[]> {
+  override async findAllItems(positionId: string): Promise<UniswapV3PositionLedgerEvent[]> {
     log.methodEntry(this.logger, 'findAllItems (Uniswap V3 override)', { positionId });
 
     try {
@@ -1312,8 +1318,8 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
 
       // Sort by blockchain coordinates (descending - newest first)
       events.sort((a, b) => {
-        const configA = a.config as UniswapV3LedgerEventConfig;
-        const configB = b.config as UniswapV3LedgerEventConfig;
+        const configA = a.config as unknown as UniswapV3LedgerEventConfig;
+        const configB = b.config as unknown as UniswapV3LedgerEventConfig;
 
         // Compare block numbers (descending)
         if (configA.blockNumber > configB.blockNumber) return -1;
@@ -1342,7 +1348,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService<'unisw
         positionId,
         count: events.length,
       });
-      return events;
+      return events as UniswapV3PositionLedgerEvent[];
     } catch (error) {
       log.methodError(this.logger, 'findAllItems', error as Error, {
         positionId,

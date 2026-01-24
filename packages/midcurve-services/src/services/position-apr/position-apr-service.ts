@@ -20,7 +20,7 @@
 import { PrismaClient } from '@midcurve/database';
 import type { PositionAprPeriod, AprSummary } from '@midcurve/shared';
 import type { CreateAprPeriodInput } from '../types/position-apr/position-apr-input.js';
-import type { AnyLedgerEvent } from '@midcurve/shared';
+import type { PositionLedgerEventInterface, Reward } from '@midcurve/shared';
 import {
   calculateAprBps,
   calculateDurationSeconds,
@@ -545,12 +545,12 @@ export class PositionAprService {
    * @param events - Ledger events sorted chronologically (ascending)
    * @returns Array of period data with start/end times and events
    */
-  private divideEventsIntoPeriods(events: AnyLedgerEvent[]): Array<{
+  private divideEventsIntoPeriods(events: PositionLedgerEventInterface[]): Array<{
     periodStart: Date;
     periodEnd: Date;
-    events: AnyLedgerEvent[];
+    events: PositionLedgerEventInterface[];
   }> {
-    const periods: Array<{ periodStart: Date; periodEnd: Date; events: AnyLedgerEvent[] }> = [];
+    const periods: Array<{ periodStart: Date; periodEnd: Date; events: PositionLedgerEventInterface[] }> = [];
 
     // Find all COLLECT events
     const collectEvents = events.filter(e => e.eventType === 'COLLECT');
@@ -604,7 +604,7 @@ export class PositionAprService {
    */
   private buildAprPeriodFromEvents(
     positionId: string,
-    events: AnyLedgerEvent[],
+    events: PositionLedgerEventInterface[],
     periodStart: Date,
     periodEnd: Date
   ): CreateAprPeriodInput {
@@ -629,7 +629,7 @@ export class PositionAprService {
     const collectedFeeValue = events
       .filter((e) => e.eventType === 'COLLECT')
       .reduce((sum, e) => {
-        const feeSum = e.rewards.reduce((acc, reward) => acc + reward.tokenValue, 0n);
+        const feeSum = e.rewards.reduce((acc: bigint, reward: Reward) => acc + reward.tokenValue, 0n);
         return sum + feeSum;
       }, 0n);
 
@@ -677,7 +677,7 @@ export class PositionAprService {
    *
    * Converts string fields (bigint) to native bigint for application use.
    */
-  private deserializeEvent(dbEvent: any): AnyLedgerEvent {
+  private deserializeEvent(dbEvent: any): PositionLedgerEventInterface {
     return {
       ...dbEvent,
       poolPrice: BigInt(dbEvent.poolPrice),
@@ -693,7 +693,7 @@ export class PositionAprService {
         tokenAmount: BigInt(r.tokenAmount),
         tokenValue: BigInt(r.tokenValue),
       })),
-    } as AnyLedgerEvent;
+    } as PositionLedgerEventInterface;
   }
 
   /**

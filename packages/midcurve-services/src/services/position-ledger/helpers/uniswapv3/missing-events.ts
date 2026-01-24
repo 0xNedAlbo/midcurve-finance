@@ -7,7 +7,7 @@
 
 import type { UniswapV3SyncEventDB } from '../../../types/uniswapv3/position-sync-state-db.js';
 import type { RawPositionEvent } from '../../../../clients/etherscan/types.js';
-import type { PositionLedgerEvent } from '@midcurve/shared';
+import type { UniswapV3PositionLedgerEvent } from '@midcurve/shared';
 
 /**
  * Convert sync state event format to raw event format for processing
@@ -108,17 +108,16 @@ export function deduplicateEvents(
  */
 export function findConfirmedMissingEvents(
   missingEvents: UniswapV3SyncEventDB[],
-  ledgerEvents: PositionLedgerEvent<'uniswapv3'>[]
+  ledgerEvents: UniswapV3PositionLedgerEvent[]
 ): string[] {
   const confirmedTxHashes = new Set<string>();
 
   for (const missingEvent of missingEvents) {
     // Check if ledger has ANY event from this transaction
     const found = ledgerEvents.some((ledgerEvent) => {
-      const config = ledgerEvent.config;
       return (
-        config.blockNumber === BigInt(missingEvent.blockNumber) &&
-        config.txIndex === missingEvent.transactionIndex
+        ledgerEvent.blockNumber === BigInt(missingEvent.blockNumber) &&
+        ledgerEvent.txIndex === missingEvent.transactionIndex
         // NOTE: Not checking logIndex - transaction is atomic!
       );
     });

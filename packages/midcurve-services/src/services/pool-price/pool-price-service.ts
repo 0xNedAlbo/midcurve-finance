@@ -2,23 +2,22 @@
  * Abstract Pool Price Service
  *
  * Base class for protocol-specific pool price services.
- * Handles serialization/deserialization of config and state between
- * database JSON format and application types.
  *
  * Pool prices are historic snapshots used for PnL calculations and
  * historical analysis. They are typically write-once records.
  *
  * Protocol implementations (e.g., UniswapV3PoolPriceService) must implement
- * all abstract serialization methods.
+ * the abstract discover() method and can override CRUD methods for
+ * type-specific behavior.
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { PoolPrice, PoolPriceConfigMap } from '@midcurve/shared';
 import type {
-  CreatePoolPriceInput,
-  UpdatePoolPriceInput,
-  PoolPriceDiscoverInput,
-} from '../types/pool-price/pool-price-input.js';
+  PoolPriceInterface,
+  PoolPriceProtocol,
+  PoolPriceRow,
+} from '@midcurve/shared';
+import { PoolPriceFactory } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { EvmConfig } from '../../config/evm.js';
@@ -43,19 +42,21 @@ export interface PoolPriceServiceDependencies {
 }
 
 /**
- * Generic pool price result from database (before deserialization)
+ * Database result interface for pool price queries.
+ * Note: Prisma stores bigint as string in the database, so we use string here.
+ * The factory methods handle conversion to native bigint.
  */
-interface PoolPriceDbResult {
+export interface PoolPriceDbResult {
   id: string;
   createdAt: Date;
   updatedAt: Date;
   protocol: string;
   poolId: string;
   timestamp: Date;
-  token1PricePerToken0: string; // bigint as string
-  token0PricePerToken1: string; // bigint as string
-  config: unknown;
-  state: unknown;
+  token1PricePerToken0: string; // Prisma returns bigint as string
+  token0PricePerToken1: string; // Prisma returns bigint as string
+  config: Record<string, unknown>;
+  state: Record<string, unknown>;
 }
 
 /**
@@ -63,14 +64,18 @@ interface PoolPriceDbResult {
  *
  * Provides base functionality for pool price management.
  * Protocol-specific services must extend this class and implement
- * serialization methods for config and state.
- *
- * @template P - Protocol key from PoolPriceConfigMap ('uniswapv3', etc.)
+ * the abstract discover() method.
  */
-export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
+export abstract class PoolPriceService {
   protected readonly _prisma: PrismaClient;
   protected readonly _evmConfig: EvmConfig;
   protected readonly logger: ServiceLogger;
+
+  /**
+   * Protocol identifier for this service
+   * Concrete classes must define this (e.g., 'uniswapv3')
+   */
+  protected abstract readonly protocol: PoolPriceProtocol;
 
   /**
    * Creates a new PoolPriceService instance
@@ -100,53 +105,6 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
   }
 
   // ============================================================================
-  // ABSTRACT SERIALIZATION METHODS
-  // Protocol implementations MUST implement these methods
-  // ============================================================================
-
-  /**
-   * Parse config from database JSON to application type
-   *
-   * Converts serialized values (if any) to native types.
-   * For configs with only primitives, this may be a pass-through.
-   *
-   * @param configDB - Config object from database (JSON)
-   * @returns Parsed config with native types
-   */
-  abstract parseConfig(configDB: unknown): PoolPriceConfigMap[P]['config'];
-
-  /**
-   * Serialize config from application type to database JSON
-   *
-   * Converts native values (if any) to serializable types.
-   * For configs with only primitives, this may be a pass-through.
-   *
-   * @param config - Application config with native types
-   * @returns Serialized config for database storage
-   */
-  abstract serializeConfig(config: PoolPriceConfigMap[P]['config']): unknown;
-
-  /**
-   * Parse state from database JSON to application type
-   *
-   * Converts serialized values (e.g., bigint strings) to native types.
-   *
-   * @param stateDB - State object from database (JSON with string values)
-   * @returns Parsed state with native types (bigint, etc.)
-   */
-  abstract parseState(stateDB: unknown): PoolPriceConfigMap[P]['state'];
-
-  /**
-   * Serialize state from application type to database JSON
-   *
-   * Converts native values (e.g., bigint) to serializable types (strings).
-   *
-   * @param state - Application state with native types
-   * @returns Serialized state for database storage
-   */
-  abstract serializeState(state: PoolPriceConfigMap[P]['state']): unknown;
-
-  // ============================================================================
   // ABSTRACT DISCOVERY METHOD
   // Protocol implementations MUST implement this method
   // ============================================================================
@@ -158,95 +116,21 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
    * If not found, fetches the pool state from on-chain at the specified block,
    * calculates prices, and stores in database.
    *
-   * Implementation note: Each protocol defines its own discovery input type
-   * via PoolPriceDiscoverInputMap. For example, Uniswap V3 uses { blockNumber: number }.
-   *
-   * Discovery should:
-   * 1. Fetch pool from database (to get pool config and token info)
-   * 2. Check database for existing price at block (idempotent)
-   * 3. Validate chain support
-   * 4. Fetch block info (timestamp) from blockchain
-   * 5. Read pool state (e.g., slot0) at specific block
-   * 6. Calculate token prices from pool state
-   * 7. Save to database and return PoolPrice
-   *
    * @param poolId - Pool ID (common parameter for all protocols)
-   * @param params - Discovery parameters (type-safe via PoolPriceDiscoverInputMap[P])
+   * @param params - Discovery parameters (protocol-specific)
    * @returns The discovered or existing pool price snapshot
    * @throws Error if discovery fails (protocol-specific errors)
    */
   abstract discover(
     poolId: string,
-    params: PoolPriceDiscoverInput<P>
-  ): Promise<PoolPrice<P>>;
+    params: unknown
+  ): Promise<PoolPriceInterface>;
 
   // ============================================================================
   // CRUD OPERATIONS
   // Base implementations for pool price management
   // Protocol implementations SHOULD override to add type filtering and validation
   // ============================================================================
-
-  /**
-   * Create a new pool price snapshot
-   *
-   * Base implementation that handles database operations.
-   * Derived classes should override this method to add validation.
-   *
-   * Note: Pool prices are typically created via a discovery/fetch mechanism
-   * that reads historic blockchain data. This method is a low-level helper.
-   *
-   * @param input - Pool price data to create (omits id, createdAt, updatedAt)
-   * @returns The created pool price with generated id and timestamps
-   */
-  async create(input: CreatePoolPriceInput<P>): Promise<PoolPrice<P>> {
-    log.methodEntry(this.logger, 'create', {
-      protocol: input.protocol,
-      poolId: input.poolId,
-      timestamp: input.timestamp,
-    });
-
-    try {
-      // Serialize config and state for database storage
-      const configDB = this.serializeConfig(input.config);
-      const stateDB = this.serializeState(input.state);
-
-      log.dbOperation(this.logger, 'create', 'PoolPrice', {
-        protocol: input.protocol,
-        poolId: input.poolId,
-      });
-
-      const result = await this.prisma.poolPrice.create({
-        data: {
-          protocol: input.protocol,
-          poolId: input.poolId,
-          timestamp: input.timestamp,
-          token1PricePerToken0: input.token1PricePerToken0.toString(),
-          token0PricePerToken1: input.token0PricePerToken1.toString(),
-          config: configDB as object,
-          state: stateDB as object,
-        },
-      });
-
-      const poolPrice = this.mapToPoolPrice(result as PoolPriceDbResult);
-
-      this.logger.info(
-        {
-          id: poolPrice.id,
-          protocol: poolPrice.protocol,
-          poolId: poolPrice.poolId,
-          timestamp: poolPrice.timestamp,
-        },
-        'Pool price created'
-      );
-      log.methodExit(this.logger, 'create', { id: poolPrice.id });
-      return poolPrice;
-    } catch (error) {
-      log.methodError(this.logger, 'create', error as Error, {
-        protocol: input.protocol,
-      });
-      throw error;
-    }
-  }
 
   /**
    * Find pool price by ID
@@ -257,7 +141,7 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
    * @param id - Pool price ID
    * @returns Pool price if found, null otherwise
    */
-  async findById(id: string): Promise<PoolPrice<P> | null> {
+  async findById(id: string): Promise<PoolPriceInterface | null> {
     log.methodEntry(this.logger, 'findById', { id });
 
     try {
@@ -290,7 +174,7 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
    * @param poolId - Pool ID
    * @returns Array of pool prices, ordered by timestamp (newest first)
    */
-  async findByPoolId(poolId: string): Promise<PoolPrice<P>[]> {
+  async findByPoolId(poolId: string): Promise<PoolPriceInterface[]> {
     log.methodEntry(this.logger, 'findByPoolId', { poolId });
 
     try {
@@ -333,7 +217,7 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
     poolId: string,
     startTime: Date,
     endTime: Date
-  ): Promise<PoolPrice<P>[]> {
+  ): Promise<PoolPriceInterface[]> {
     log.methodEntry(this.logger, 'findByPoolIdAndTimeRange', {
       poolId,
       startTime,
@@ -370,67 +254,6 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
       log.methodError(this.logger, 'findByPoolIdAndTimeRange', error as Error, {
         poolId,
       });
-      throw error;
-    }
-  }
-
-  /**
-   * Update pool price
-   *
-   * Generic helper for rare manual updates.
-   * Pool prices are typically immutable historical records, so updates are rare.
-   * This might be used for corrections or re-calculations.
-   *
-   * Base implementation performs the update and returns the result.
-   * Protocol-specific implementations should override to add validation.
-   *
-   * @param id - Pool price ID
-   * @param input - Update input with optional fields
-   * @returns Updated pool price
-   * @throws Error if pool price not found
-   */
-  async update(id: string, input: UpdatePoolPriceInput<P>): Promise<PoolPrice<P>> {
-    log.methodEntry(this.logger, 'update', { id, input });
-
-    try {
-      const data: any = {};
-
-      if (input.timestamp !== undefined) {
-        data.timestamp = input.timestamp;
-      }
-
-      if (input.token1PricePerToken0 !== undefined) {
-        data.token1PricePerToken0 = input.token1PricePerToken0.toString();
-      }
-
-      if (input.token0PricePerToken1 !== undefined) {
-        data.token0PricePerToken1 = input.token0PricePerToken1.toString();
-      }
-
-      if (input.config !== undefined) {
-        data.config = this.serializeConfig(input.config) as object;
-      }
-
-      if (input.state !== undefined) {
-        data.state = this.serializeState(input.state) as object;
-      }
-
-      log.dbOperation(this.logger, 'update', 'PoolPrice', {
-        id,
-        fields: Object.keys(data),
-      });
-
-      const result = await this.prisma.poolPrice.update({
-        where: { id },
-        data,
-      });
-
-      const poolPrice = this.mapToPoolPrice(result as PoolPriceDbResult);
-
-      log.methodExit(this.logger, 'update', { id });
-      return poolPrice;
-    } catch (error) {
-      log.methodError(this.logger, 'update', error as Error, { id });
       throw error;
     }
   }
@@ -473,26 +296,22 @@ export abstract class PoolPriceService<P extends keyof PoolPriceConfigMap> {
   // ============================================================================
 
   /**
-   * Map database result to PoolPrice type
+   * Map database result to PoolPriceInterface using factory
    *
-   * Converts string values to bigint for price fields and calls
-   * parseConfig/parseState for config/state deserialization.
+   * Uses PoolPriceFactory to create protocol-specific instances.
+   * Converts string price fields to bigint for factory compatibility.
+   * Concrete services should override for type-specific returns.
    *
    * @param dbResult - Raw database result
-   * @returns PoolPrice with native types
+   * @returns PoolPriceInterface instance
    */
-  protected mapToPoolPrice(dbResult: PoolPriceDbResult): PoolPrice<P> {
-    return {
-      id: dbResult.id,
-      createdAt: dbResult.createdAt,
-      updatedAt: dbResult.updatedAt,
-      protocol: dbResult.protocol as P,
-      poolId: dbResult.poolId,
-      timestamp: dbResult.timestamp,
+  protected mapToPoolPrice(dbResult: PoolPriceDbResult): PoolPriceInterface {
+    // Convert string price fields to bigint for PoolPriceRow compatibility
+    const rowWithBigInt: PoolPriceRow = {
+      ...dbResult,
       token1PricePerToken0: BigInt(dbResult.token1PricePerToken0),
       token0PricePerToken1: BigInt(dbResult.token0PricePerToken1),
-      config: this.parseConfig(dbResult.config),
-      state: this.parseState(dbResult.state),
     };
+    return PoolPriceFactory.fromDB(rowWithBigInt);
   }
 }

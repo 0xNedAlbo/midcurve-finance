@@ -8,7 +8,7 @@
  */
 
 import { QuoteTokenService } from './quote-token-service.js';
-import type { QuoteTokenResult } from '@midcurve/shared';
+import type { QuoteTokenResult, QuoteTokenResultProtocol } from '@midcurve/shared';
 import type { UniswapV3QuoteTokenInput } from '../types/quote-token/quote-token-input.js';
 import { normalizeAddress } from '@midcurve/shared';
 import { getDefaultQuoteTokens } from '../../config/quote-tokens.js';
@@ -22,7 +22,9 @@ import { log } from '../../logging/index.js';
  * 2. Default preferences for chain (stablecoins > WETH > token0)
  * 3. Fallback: token0 (Uniswap convention)
  */
-export class UniswapV3QuoteTokenService extends QuoteTokenService<'uniswapv3'> {
+export class UniswapV3QuoteTokenService extends QuoteTokenService {
+  protected readonly protocol: QuoteTokenResultProtocol = 'uniswapv3';
+
   /**
    * Determine quote token for a Uniswap V3 pool
    *
@@ -31,7 +33,7 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService<'uniswapv3'> {
    */
   async determineQuoteToken(
     input: UniswapV3QuoteTokenInput
-  ): Promise<QuoteTokenResult<'uniswapv3'>> {
+  ): Promise<QuoteTokenResult> {
     const { userId, chainId, token0Address, token1Address } = input;
 
     log.methodEntry(this.logger, 'determineQuoteToken', {
@@ -160,15 +162,6 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService<'uniswapv3'> {
   }
 
   /**
-   * Get protocol identifier
-   *
-   * @returns Protocol identifier 'uniswapv3'
-   */
-  protected getProtocol(): 'uniswapv3' {
-    return 'uniswapv3';
-  }
-
-  /**
    * Match tokens against preference list
    * Returns result if match found, null otherwise
    *
@@ -186,7 +179,7 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService<'uniswapv3'> {
     token0: string,
     token1: string,
     preferences: string[]
-  ): Omit<QuoteTokenResult<'uniswapv3'>, 'matchedBy' | 'protocol'> | null {
+  ): Omit<QuoteTokenResult, 'matchedBy' | 'protocol'> | null {
     const token0Matches = preferences.some((pref) =>
       this.compareTokenIds(pref, token0)
     );

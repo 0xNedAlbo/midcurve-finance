@@ -7,16 +7,17 @@
 
 import { PrismaClient } from '@midcurve/database';
 import type {
-    UniswapV3PositionConfig,
+    UniswapV3PositionConfigData,
     UniswapV3PositionState,
-    UniswapV3Position,
+    PositionProtocol,
 } from "@midcurve/shared";
+import { UniswapV3Position } from "@midcurve/shared";
 import type { UnclaimedFeesResult } from "./helpers/uniswapv3/position-calculations.js";
 import { calculateUnclaimedFees } from "./helpers/uniswapv3/position-calculations.js";
 import type { UniswapV3Pool } from "@midcurve/shared";
 import type {
     UniswapV3PositionDiscoverInput,
-    CreatePositionInput,
+    CreateUniswapV3PositionInput,
 } from "../types/position/position-input.js";
 import { PositionService } from "./position-service.js";
 import { log } from "../../logging/index.js";
@@ -120,7 +121,8 @@ export interface UniswapV3PositionServiceDependencies {
  * Provides position management for Uniswap V3 concentrated liquidity positions.
  * Implements serialization methods for Uniswap V3-specific config and state types.
  */
-export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
+export class UniswapV3PositionService extends PositionService {
+    protected readonly protocol: PositionProtocol = 'uniswapv3';
     private readonly _evmConfig: EvmConfig;
     private readonly _poolService: UniswapV3PoolService;
     private readonly _etherscanClient: EtherscanClient;
@@ -238,7 +240,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
      * @param configDB - Config object from database (JSON)
      * @returns Parsed Uniswap V3 config
      */
-    parseConfig(configDB: unknown): UniswapV3PositionConfig {
+    parseConfig(configDB: unknown): UniswapV3PositionConfigData {
         const db = configDB as {
             chainId: number | string;
             nftId: number | string;
@@ -272,7 +274,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
      * @param config - Application config
      * @returns Serialized config for database storage (JSON-serializable)
      */
-    serializeConfig(config: UniswapV3PositionConfig): unknown {
+    serializeConfig(config: UniswapV3PositionConfigData): unknown {
         return {
             chainId: config.chainId,
             nftId: config.nftId,
@@ -353,8 +355,9 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
      * @param config - UniswapV3 position configuration
      * @returns Position hash string in format "uniswapv3/{chainId}/{nftId}"
      */
-    override createPositionHash(config: UniswapV3PositionConfig): string {
-        return `uniswapv3/${config.chainId}/${config.nftId}`;
+    override createPositionHash(config: Record<string, unknown>): string {
+        const typedConfig = config as unknown as UniswapV3PositionConfigData;
+        return `uniswapv3/${typedConfig.chainId}/${typedConfig.nftId}`;
     }
 
     // ============================================================================
@@ -645,27 +648,27 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 // EXPLICIT MODE: User provided quoteTokenAddress
                 const token0Matches =
                     compareAddresses(
-                        pool.token0.config.address,
+                        pool.token0.address,
                         normalizedQuoteAddress
                     ) === 0;
                 const token1Matches =
                     compareAddresses(
-                        pool.token1.config.address,
+                        pool.token1.address,
                         normalizedQuoteAddress
                     ) === 0;
 
                 if (!token0Matches && !token1Matches) {
                     const error = new Error(
                         `Quote token address ${normalizedQuoteAddress} does not match either pool token. ` +
-                            `Pool token0: ${pool.token0.config.address}, token1: ${pool.token1.config.address}`
+                            `Pool token0: ${pool.token0.address}, token1: ${pool.token1.address}`
                     );
                     log.methodError(this.logger, "discover", error, {
                         userId,
                         chainId,
                         nftId,
                         quoteTokenAddress: normalizedQuoteAddress,
-                        poolToken0: pool.token0.config.address,
-                        poolToken1: pool.token1.config.address,
+                        poolToken0: pool.token0.address,
+                        poolToken1: pool.token1.address,
                     });
                     throw error;
                 }
@@ -691,8 +694,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     await this.quoteTokenService.determineQuoteToken({
                         userId,
                         chainId,
-                        token0Address: pool.token0.config.address,
-                        token1Address: pool.token1.config.address,
+                        token0Address: pool.token0.address,
+                        token1Address: pool.token1.address,
                     });
 
                 isToken0Quote = quoteResult.isToken0Quote;
@@ -722,7 +725,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             );
 
             // 8. Create position config (without token0IsQuote, now at position level)
-            const config: UniswapV3PositionConfig = {
+            const config: UniswapV3PositionConfigData = {
                 chainId,
                 nftId,
                 poolAddress,
@@ -753,6 +756,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             );
 
             // 10. Create position via create() method
+            const configDB = this.serializeConfig(config) as Record<string, unknown>;
+            const stateDB = this.serializeState(state) as Record<string, unknown>;
             const createdPosition = await this.create({
                 protocol: "uniswapv3",
                 positionType: "CL_TICKS",
@@ -762,7 +767,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 config,
                 state,
                 positionOpenedAt, // Blockchain timestamp from first event (if available)
-            });
+            }, configDB, stateDB);
 
             this.logger.info(
                 {
@@ -788,8 +793,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 const syncResult = await syncLedgerEvents(
                     {
                         positionId: createdPosition.id,
-                        chainId: createdPosition.config.chainId,
-                        nftId: BigInt(createdPosition.config.nftId),
+                        chainId: createdPosition.chainId,
+                        nftId: BigInt(createdPosition.nftId),
                         forceFullResync: true,  // New position - full sync
                     },
                     {
@@ -834,21 +839,22 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         const finalLiquidity = typeof eventConfig.liquidityAfter === "string" ? BigInt(eventConfig.liquidityAfter) : eventConfig.liquidityAfter;
 
                         if (finalLiquidity !== undefined) {
-                            currentPosition.state.liquidity = finalLiquidity;
+                            // Build updated state (state is read-only, so create new object)
+                            const currentState = currentPosition.typedState;
+                            const updatedState: UniswapV3PositionState = {
+                                ...currentState,
+                                liquidity: finalLiquidity,
+                            };
+
+                            // Update position state in database
+                            const stateDB = this.serializeState(updatedState);
+                            await this.prisma.position.update({
+                                where: { id: createdPosition.id },
+                                data: { state: stateDB as object },
+                            });
                         } else {
                             this.logger.warn({ positionId: createdPosition.id, eventType: mostRecentEvent.eventType }, "Most recent event has no liquidityAfter - skipping update");
                         }
-
-                        // Update position state in database
-                        const stateDB = this.serializeState(currentPosition.state);
-
-                        await this.prisma.position.update({
-                            where: { id: createdPosition.id },
-                            data: { state: stateDB as object },
-                        });
-
-                        // Update the createdPosition reference with new state
-                        createdPosition.state.liquidity = currentPosition.state.liquidity;
                     }
                 }
             } catch (error) {
@@ -886,12 +892,16 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     pool
                 );
 
-                // Update position state with individual fee amounts
-                createdPosition.state.unclaimedFees0 = fees.unclaimedFees0;
-                createdPosition.state.unclaimedFees1 = fees.unclaimedFees1;
+                // Update position state with individual fee amounts (state is read-only, create new object)
+                const currentState = createdPosition.typedState;
+                const updatedState: UniswapV3PositionState = {
+                    ...currentState,
+                    unclaimedFees0: fees.unclaimedFees0,
+                    unclaimedFees1: fees.unclaimedFees1,
+                };
 
                 // Serialize and save updated state
-                const stateDB = this.serializeState(createdPosition.state);
+                const stateDB = this.serializeState(updatedState);
                 await this.prisma.position.update({
                     where: { id: createdPosition.id },
                     data: { state: stateDB as object },
@@ -1115,13 +1125,14 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             this.logger.debug(
                 {
                     id,
-                    chainId: existingPosition.config.chainId,
-                    nftId: existingPosition.config.nftId,
+                    chainId: existingPosition.chainId,
+                    nftId: existingPosition.nftId,
                 },
                 "Position found, proceeding with state refresh"
             );
 
-            const { chainId, nftId } = existingPosition.config;
+            const chainId = existingPosition.chainId;
+            const nftId = existingPosition.nftId;
 
             // 2. Verify chain is supported
             if (!this.evmConfig.isChainSupported(chainId)) {
@@ -1204,7 +1215,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                                       positionData[10] === 0n && // tokensOwed0
                                       positionData[11] === 0n;   // tokensOwed1
 
-                if (allFieldsZero && existingPosition.state.liquidity > 0n) {
+                if (allFieldsZero && existingPosition.liquidity > 0n) {
                     const error = new Error(
                         `Position NFT ${nftId} on chain ${chainId} appears to have been deleted (all state fields are zero but position previously had liquidity)`
                     );
@@ -1406,7 +1417,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         {
                             id,
                             poolId: pool.id,
-                            sqrtPriceX96: pool.state.sqrtPriceX96.toString(),
+                            sqrtPriceX96: pool.sqrtPriceX96.toString(),
                             currentTick: pool.state.currentTick
                         },
                         "Position re-fetched after missing events sync, pool state refreshed - proceeding to value calculation"
@@ -1433,8 +1444,9 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
 
                     if (lastLedgerEvent) {
-                        const ledgerLiquidity = lastLedgerEvent.config.liquidityAfter ?? 0n;
-                        const currentStateLiquidity = syncedPosition.state.liquidity;
+                        const typedEventConfig = lastLedgerEvent.config as unknown as { liquidityAfter?: bigint };
+                        const ledgerLiquidity = typedEventConfig.liquidityAfter ?? 0n;
+                        const currentStateLiquidity = syncedPosition.liquidity;
 
                         // Check if we need to update position.state.liquidity
                         if (ledgerLiquidity !== currentStateLiquidity) {
@@ -1448,8 +1460,9 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                             );
 
                             // Update position state with new liquidity
+                            const currentTypedState = syncedPosition.typedState;
                             const updatedState: UniswapV3PositionState = {
-                                ...syncedPosition.state,
+                                ...currentTypedState,
                                 liquidity: ledgerLiquidity,
                             };
 
@@ -1463,9 +1476,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                                     state: stateDB as object,
                                 },
                             });
-
-                            // Update in-memory object
-                            syncedPosition.state.liquidity = ledgerLiquidity;
+                            // Note: in-memory state not updated - position will be re-read if needed
                         }
 
                         // ========================================================================
@@ -1516,16 +1527,17 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                                 >,
                             ]);
 
+                            const syncedTypedState = syncedPosition.typedState;
                             this.logger.debug(
                                 {
                                     id,
-                                    oldCheckpoint0: syncedPosition.state.feeGrowthInside0LastX128.toString(),
+                                    oldCheckpoint0: syncedTypedState.feeGrowthInside0LastX128.toString(),
                                     newCheckpoint0: freshPositionData[8].toString(),
-                                    oldCheckpoint1: syncedPosition.state.feeGrowthInside1LastX128.toString(),
+                                    oldCheckpoint1: syncedTypedState.feeGrowthInside1LastX128.toString(),
                                     newCheckpoint1: freshPositionData[9].toString(),
-                                    oldTokensOwed0: syncedPosition.state.tokensOwed0.toString(),
+                                    oldTokensOwed0: syncedTypedState.tokensOwed0.toString(),
                                     newTokensOwed0: freshPositionData[10].toString(),
-                                    oldTokensOwed1: syncedPosition.state.tokensOwed1.toString(),
+                                    oldTokensOwed1: syncedTypedState.tokensOwed1.toString(),
                                     newTokensOwed1: freshPositionData[11].toString(),
                                 },
                                 "Fee growth checkpoints comparison (old vs new)"
@@ -1533,7 +1545,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
 
                             // Update position state with fresh checkpoint values
                             const refreshedState: UniswapV3PositionState = {
-                                ...syncedPosition.state,
+                                ...syncedTypedState,
                                 feeGrowthInside0LastX128: freshPositionData[8],
                                 feeGrowthInside1LastX128: freshPositionData[9],
                                 tokensOwed0: freshPositionData[10],
@@ -1596,10 +1608,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                                     positionClosedAt: closedAt,
                                 },
                             });
-
-                            // Update in-memory object
-                            syncedPosition.isActive = false;
-                            syncedPosition.positionClosedAt = closedAt;
+                            // Note: in-memory state not updated - position will be re-read if needed
                         }
                     }
 
@@ -1622,12 +1631,16 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         pool
                     );
 
-                    // Update position state with individual fee amounts
-                    syncedPosition.state.unclaimedFees0 = fees.unclaimedFees0;
-                    syncedPosition.state.unclaimedFees1 = fees.unclaimedFees1;
+                    // Update position state with individual fee amounts (state is read-only)
+                    const syncedTypedStateForFees = syncedPosition.typedState;
+                    const feeUpdatedState: UniswapV3PositionState = {
+                        ...syncedTypedStateForFees,
+                        unclaimedFees0: fees.unclaimedFees0,
+                        unclaimedFees1: fees.unclaimedFees1,
+                    };
 
                     // Serialize and save updated state
-                    const feeStateDB = this.serializeState(syncedPosition.state);
+                    const feeStateDB = this.serializeState(feeUpdatedState);
                     await this.prisma.position.update({
                         where: { id },
                         data: { state: feeStateDB as object },
@@ -1694,7 +1707,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     // Get last ledger event to extract calculated liquidity
                     const lastEvents = await this.ledgerService.findAllItems(id);
                     const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
-                    const ledgerLiquidity = lastLedgerEvent?.config.liquidityAfter ?? 0n;
+                    const typedLedgerConfig = lastLedgerEvent?.config as unknown as { liquidityAfter?: bigint } | undefined;
+                    const ledgerLiquidity = typedLedgerConfig?.liquidityAfter ?? 0n;
                     const onChainLiquidity = updatedState.liquidity;
 
                     const liquidityMismatch = ledgerLiquidity !== onChainLiquidity;
@@ -1829,7 +1843,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             let positionClosureInfo: { shouldClose: boolean; closedAt: Date } | null = null;
 
             if (lastLedgerEventBeforeSave) {
-                const ledgerLiquidityBeforeSave = lastLedgerEventBeforeSave.config.liquidityAfter ?? 0n;
+                const typedEventConfigBeforeSave = lastLedgerEventBeforeSave.config as unknown as { liquidityAfter?: bigint };
+                const ledgerLiquidityBeforeSave = typedEventConfigBeforeSave.liquidityAfter ?? 0n;
 
                 // Update updatedState with ledger's liquidity (so it gets saved correctly)
                 if (ledgerLiquidityBeforeSave !== updatedState.liquidity) {
@@ -1922,10 +1937,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         positionClosedAt: positionClosureInfo.closedAt,
                     },
                 });
-
-                // Update in-memory object
-                refreshedPosition.isActive = false;
-                refreshedPosition.positionClosedAt = positionClosureInfo.closedAt;
+                // Note: in-memory state not updated - position will be re-read if needed
             }
 
             // 7. Recalculate and update common fields
@@ -1945,7 +1957,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             this.logger.debug(
                 {
                     poolId: pool.id,
-                    sqrtPriceX96: pool.state.sqrtPriceX96.toString(),
+                    sqrtPriceX96: pool.sqrtPriceX96.toString(),
                     currentTick: pool.state.currentTick
                 },
                 "Pool state refreshed with current on-chain price"
@@ -1969,12 +1981,16 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 pool
             );
 
-            // Update position state with individual fee amounts
-            refreshedPosition.state.unclaimedFees0 = fees.unclaimedFees0;
-            refreshedPosition.state.unclaimedFees1 = fees.unclaimedFees1;
+            // Update position state with individual fee amounts (state is read-only)
+            const refreshedTypedState = refreshedPosition.typedState;
+            const feeUpdatedState: UniswapV3PositionState = {
+                ...refreshedTypedState,
+                unclaimedFees0: fees.unclaimedFees0,
+                unclaimedFees1: fees.unclaimedFees1,
+            };
 
             // Serialize and save updated state
-            const feeUpdatedStateDB = this.serializeState(refreshedPosition.state);
+            const feeUpdatedStateDB = this.serializeState(feeUpdatedState);
             await this.prisma.position.update({
                 where: { id },
                 data: { state: feeUpdatedStateDB as object },
@@ -2094,8 +2110,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             const syncResult = await syncLedgerEvents(
                 {
                     positionId: id,
-                    chainId: existingPosition.config.chainId,
-                    nftId: BigInt(existingPosition.config.nftId),
+                    chainId: existingPosition.chainId,
+                    nftId: BigInt(existingPosition.nftId),
                     forceFullResync: true,  // Full reset - resync from NFPM deployment
                 },
                 {
@@ -2251,7 +2267,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     id: existing.id,
                     duplicate: true,
                 });
-                return existing;
+                return existing as UniswapV3Position;
             }
 
             // 2. Verify chain is supported
@@ -2358,19 +2374,19 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 // EXPLICIT MODE: User provided quoteTokenAddress
                 const token0Matches =
                     compareAddresses(
-                        pool.token0.config.address,
+                        pool.token0.address,
                         normalizedQuoteAddress
                     ) === 0;
                 const token1Matches =
                     compareAddresses(
-                        pool.token1.config.address,
+                        pool.token1.address,
                         normalizedQuoteAddress
                     ) === 0;
 
                 if (!token0Matches && !token1Matches) {
                     const error = new Error(
                         `Quote token address ${normalizedQuoteAddress} does not match either pool token. ` +
-                            `Pool token0: ${pool.token0.config.address}, token1: ${pool.token1.config.address}`
+                            `Pool token0: ${pool.token0.address}, token1: ${pool.token1.address}`
                     );
                     log.methodError(
                         this.logger,
@@ -2378,8 +2394,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                         error,
                         {
                             quoteTokenAddress: normalizedQuoteAddress,
-                            poolToken0: pool.token0.config.address,
-                            poolToken1: pool.token1.config.address,
+                            poolToken0: pool.token0.address,
+                            poolToken1: pool.token1.address,
                         }
                     );
                     throw error;
@@ -2406,8 +2422,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     await this.quoteTokenService.determineQuoteToken({
                         userId,
                         chainId,
-                        token0Address: pool.token0.config.address,
-                        token1Address: pool.token1.config.address,
+                        token0Address: pool.token0.address,
+                        token1Address: pool.token1.address,
                     });
 
                 isToken0Quote = quoteResult.isToken0Quote;
@@ -2437,7 +2453,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             );
 
             // 6. Create position config
-            const config: UniswapV3PositionConfig = {
+            const config: UniswapV3PositionConfigData = {
                 chainId,
                 nftId,
                 poolAddress,
@@ -2586,6 +2602,8 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             );
 
             // 9. Create position via create() method
+            const configDB = this.serializeConfig(config) as Record<string, unknown>;
+            const stateDB = this.serializeState(state) as Record<string, unknown>;
             const createdPosition = await this.create({
                 protocol: "uniswapv3",
                 positionType: "CL_TICKS",
@@ -2594,7 +2612,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                 isToken0Quote,
                 config,
                 state,
-            });
+            }, configDB, stateDB);
 
             this.logger.info(
                 {
@@ -2631,13 +2649,13 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             this.logger.debug(
                 {
                     positionId: createdPosition.id,
-                    sqrtPriceX96: poolPrice.state.sqrtPriceX96.toString(),
+                    sqrtPriceX96: poolPrice.sqrtPriceX96.toString(),
                 },
                 "Historic pool price fetched"
             );
 
             // 11. Calculate pool price (quote per base) from historic sqrtPriceX96
-            const sqrtPriceX96 = poolPrice.state.sqrtPriceX96;
+            const sqrtPriceX96 = poolPrice.sqrtPriceX96;
 
             // Use the correct utility function that handles precision properly
             const poolPriceValue = calculatePoolPriceInQuoteToken(
@@ -2912,7 +2930,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
             this.logger.info(
                 {
                     positionId: existingPosition.id,
-                    liquidity: updatedPosition.state.liquidity.toString(),
+                    liquidity: updatedPosition.liquidity.toString(),
                     realizedPnl: updatedPosition.realizedPnl.toString(),
                     unrealizedPnl: updatedPosition.unrealizedPnl.toString(),
                 },
@@ -2959,7 +2977,9 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
      * @returns The created position, or existing position if duplicate found
      */
     override async create(
-        input: CreatePositionInput<"uniswapv3">
+        input: CreateUniswapV3PositionInput,
+        configDB: Record<string, unknown>,
+        stateDB: Record<string, unknown>
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "create", {
             userId: input.userId,
@@ -2969,7 +2989,7 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
 
         try {
             // Check for existing position by positionHash (fast indexed lookup)
-            const positionHash = this.createPositionHash(input.config);
+            const positionHash = this.createPositionHash(input.config as unknown as Record<string, unknown>);
             const existing = await this.findByPositionHash(
                 input.userId,
                 positionHash
@@ -2990,11 +3010,11 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     id: existing.id,
                     duplicate: true,
                 });
-                return existing;
+                return existing as UniswapV3Position;
             }
 
             // No duplicate found, create new position
-            const position = await super.create(input);
+            const position = await super.create(input, configDB, stateDB);
 
             log.methodExit(this.logger, "create", {
                 id: position.id,
@@ -3247,9 +3267,10 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
         position: UniswapV3Position,
         pool: UniswapV3Pool
     ): bigint {
-        const { tickLower, tickUpper } = position.config;
-        const { liquidity } = position.state;
-        const { sqrtPriceX96 } = pool.state;
+        const tickLower = position.tickLower;
+        const tickUpper = position.tickUpper;
+        const liquidity = position.liquidity;
+        const sqrtPriceX96 = pool.sqrtPriceX96;
 
         if (liquidity === 0n) {
             return 0n;
@@ -3284,13 +3305,14 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
         position: UniswapV3Position,
         pool: UniswapV3Pool
     ): { priceRangeLower: bigint; priceRangeUpper: bigint } {
-        const { tickLower, tickUpper } = position.config;
+        const tickLower = position.tickLower;
+        const tickUpper = position.tickUpper;
 
         // Determine token addresses and decimals based on token roles
         const baseToken = position.isToken0Quote ? pool.token1 : pool.token0;
         const quoteToken = position.isToken0Quote ? pool.token0 : pool.token1;
-        const baseTokenAddress = baseToken.config.address;
-        const quoteTokenAddress = quoteToken.config.address;
+        const baseTokenAddress = baseToken.address;
+        const quoteTokenAddress = quoteToken.address;
         const baseTokenDecimals = baseToken.decimals;
 
         // Convert ticks to prices (quote per base)

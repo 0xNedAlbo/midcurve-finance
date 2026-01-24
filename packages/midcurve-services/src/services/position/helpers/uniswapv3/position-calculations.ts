@@ -216,13 +216,14 @@ export async function calculateUnclaimedFees(
   logger: Logger
 ): Promise<UnclaimedFeesResult> {
   try {
-    const { chainId, poolAddress, tickLower, tickUpper } =
-      position.config;
-    const {
-      liquidity,
-      feeGrowthInside0LastX128,
-      feeGrowthInside1LastX128,
-    } = position.state;
+    // Access config and state via getters
+    const chainId = position.chainId;
+    const poolAddress = position.poolAddress;
+    const tickLower = position.tickLower;
+    const tickUpper = position.tickUpper;
+    const liquidity = position.liquidity;
+    const feeGrowthInside0LastX128 = position.feeGrowthInside0LastX128;
+    const feeGrowthInside1LastX128 = position.feeGrowthInside1LastX128;
 
     // If no liquidity, no fees
     if (liquidity === 0n) {
@@ -296,7 +297,7 @@ export async function calculateUnclaimedFees(
 
     // Calculate fee growth inside using pool's current tick
     const feeGrowthInside = computeFeeGrowthInside(
-      pool.state.currentTick,
+      pool.currentTick,
       tickLower,
       tickUpper,
       feeGrowthGlobal0X128,
@@ -320,8 +321,8 @@ export async function calculateUnclaimedFees(
     );
 
     // STEP 2: Get tokensOwed from position state (checkpointed fees + uncollected principal)
-    const tokensOwed0 = position.state.tokensOwed0;
-    const tokensOwed1 = position.state.tokensOwed1;
+    const tokensOwed0 = position.tokensOwed0;
+    const tokensOwed1 = position.tokensOwed1;
 
     // STEP 3: Get uncollected principal from latest ledger event
     const uncollectedPrincipal = await getUncollectedPrincipalFromLedger(
@@ -351,7 +352,7 @@ export async function calculateUnclaimedFees(
     const unclaimedFeesValue = calculateTokenValueInQuote(
       totalClaimable0,
       totalClaimable1,
-      pool.state.sqrtPriceX96,
+      pool.sqrtPriceX96,
       position.isToken0Quote,
       pool.token0.decimals,
       pool.token1.decimals
@@ -406,9 +407,10 @@ export function calculateCurrentPositionValue(
   position: UniswapV3Position,
   pool: UniswapV3Pool
 ): bigint {
-  const { tickLower, tickUpper } = position.config;
-  const { liquidity } = position.state;
-  const { sqrtPriceX96 } = pool.state;
+  const tickLower = position.tickLower;
+  const tickUpper = position.tickUpper;
+  const liquidity = position.liquidity;
+  const sqrtPriceX96 = pool.sqrtPriceX96;
 
   if (liquidity === 0n) {
     return 0n;
@@ -443,13 +445,14 @@ export function calculatePriceRange(
   position: UniswapV3Position,
   pool: UniswapV3Pool
 ): { priceRangeLower: bigint; priceRangeUpper: bigint } {
-  const { tickLower, tickUpper } = position.config;
+  const tickLower = position.tickLower;
+  const tickUpper = position.tickUpper;
 
   // Determine token addresses and decimals based on token roles
   const baseToken = position.isToken0Quote ? pool.token1 : pool.token0;
   const quoteToken = position.isToken0Quote ? pool.token0 : pool.token1;
-  const baseTokenAddress = baseToken.config.address;
-  const quoteTokenAddress = quoteToken.config.address;
+  const baseTokenAddress = baseToken.address;
+  const quoteTokenAddress = quoteToken.address;
   const baseTokenDecimals = baseToken.decimals;
 
   // Convert ticks to prices (quote per base)

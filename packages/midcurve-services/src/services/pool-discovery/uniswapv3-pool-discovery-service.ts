@@ -8,7 +8,7 @@
 import { PrismaClient } from '@midcurve/database';
 import type { Address } from 'viem';
 import { PoolDiscoveryService } from './pool-discovery-service.js';
-import type { PoolDiscoveryResult } from '@midcurve/shared';
+import type { PoolDiscoveryResult, Protocol } from '@midcurve/shared';
 import type { UniswapV3PoolDiscoveryInput } from '../types/pool-discovery/pool-discovery-input.js';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import { UniswapV3PoolService } from '../pool/uniswapv3-pool-service.js';
@@ -93,7 +93,8 @@ export interface UniswapV3PoolDiscoveryServiceDependencies {
  * // ]
  * ```
  */
-export class UniswapV3PoolDiscoveryService extends PoolDiscoveryService<'uniswapv3'> {
+export class UniswapV3PoolDiscoveryService extends PoolDiscoveryService {
+  protected readonly protocol: Protocol = 'uniswapv3';
   private readonly _poolService: UniswapV3PoolService;
   private readonly _subgraphClient: UniswapV3SubgraphClient;
   private readonly _evmConfig: EvmConfig;
@@ -367,7 +368,7 @@ export class UniswapV3PoolDiscoveryService extends PoolDiscoveryService<'uniswap
     try {
       // Query subgraph for all pools in parallel
       const metricsPromises = results.map(async (result) => {
-        const poolAddress = result.pool.config.address;
+        const poolAddress = result.pool.address;
 
         try {
           // Use getPoolFeeData() instead of getPoolMetrics() to get token-specific volumes

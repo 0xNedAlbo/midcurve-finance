@@ -8,45 +8,6 @@
  * The UI/API receives PoolDiscoveryResult objects with full data.
  */
 
-import type { PoolConfigMap } from '@midcurve/shared';
-
-/**
- * Pool discovery input map
- *
- * Maps protocol identifier to its discovery input type.
- * Each protocol defines what parameters are needed to discover pools.
- *
- * @example
- * ```typescript
- * // Uniswap V3 requires chainId and two token addresses
- * type UniswapV3Input = PoolDiscoveryInputMap['uniswapv3'];
- *
- * // Future Solana protocols might require different parameters
- * // type OrcaInput = PoolDiscoveryInputMap['orca'];
- * ```
- */
-export interface PoolDiscoveryInputMap {
-  /**
-   * Uniswap V3 pool discovery input
-   *
-   * Discovers all pools for a token pair across all fee tiers on a specific chain.
-   */
-  uniswapv3: UniswapV3PoolDiscoveryInput;
-
-  /**
-   * Treasury pool discovery input (placeholder)
-   *
-   * Treasury pools are virtual and don't require traditional discovery.
-   * They are created inline when a Treasury position is created.
-   * This placeholder ensures type compatibility with PoolConfigMap.
-   */
-  treasury: never; // Treasury pools don't use pool discovery
-
-  // Future protocols:
-  // orca: OrcaPoolDiscoveryInput;
-  // raydium: RaydiumPoolDiscoveryInput;
-}
-
 /**
  * Uniswap V3 pool discovery input
  *
@@ -94,25 +55,6 @@ export interface UniswapV3PoolDiscoveryInput {
 }
 
 /**
- * Generic pool discovery input
- *
- * Type-safe accessor for protocol-specific discovery inputs.
- * Uses the discriminated union pattern for type narrowing.
- *
- * @template P - Protocol key from PoolConfigMap
- *
- * @example
- * ```typescript
- * function discoverPools<P extends keyof PoolConfigMap>(
- *   protocol: P,
- *   input: PoolDiscoveryInput<P>
- * ) {
- *   if (protocol === 'uniswapv3') {
- *     // input is UniswapV3PoolDiscoveryInput
- *     console.log(input.chainId);
- *   }
- * }
- * ```
+ * Union of all pool discovery inputs
  */
-export type PoolDiscoveryInput<P extends keyof PoolConfigMap> =
-  PoolDiscoveryInputMap[P];
+export type PoolDiscoveryInput = UniswapV3PoolDiscoveryInput;

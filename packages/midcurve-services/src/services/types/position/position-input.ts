@@ -3,11 +3,18 @@
  *
  * Input types for Position CRUD operations.
  * These types are NOT shared with UI/API - they're specific to the service layer.
- *
- * Uses mapped types to ensure type-safe protocol-specific operations.
  */
 
-import type { Position, PositionConfigMap } from '@midcurve/shared';
+import type {
+  PositionProtocol,
+  PositionType,
+  UniswapV3PositionConfigData,
+  UniswapV3PositionState,
+} from '@midcurve/shared';
+
+// =============================================================================
+// DISCOVERY INPUTS
+// =============================================================================
 
 /**
  * Uniswap V3 Position Discovery Input
@@ -38,116 +45,65 @@ export interface UniswapV3PositionDiscoverInput {
    * If omitted:
    * - Quote token will be determined automatically using QuoteTokenService
    * - Respects user preferences → chain defaults → token0 fallback
-   *
-   * @example
-   * // For ETH/USDC position with USDC as quote (explicit)
-   * quoteTokenAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-   *
-   * @example
-   * // Auto-detect quote token (recommended for API endpoints)
-   * quoteTokenAddress = undefined
    */
   quoteTokenAddress?: string;
 }
 
+// =============================================================================
+// BASE INPUT INTERFACES
+// =============================================================================
+
 /**
- * Position Discovery Input Map
- *
- * Maps protocol identifiers to their corresponding discovery input types.
- * Ensures type safety: discover() for protocol 'uniswapv3' requires UniswapV3PositionDiscoverInput.
- *
- * When adding a new protocol:
- * 1. Create the discovery input interface (e.g., OrcaPositionDiscoverInput)
- * 2. Add entry to this mapping
+ * Base interface for creating any position
  */
-export interface PositionDiscoverInputMap {
-  uniswapv3: UniswapV3PositionDiscoverInput;
-  // Future protocols:
-  // orca: OrcaPositionDiscoverInput;
-  // raydium: RaydiumPositionDiscoverInput;
-  // pancakeswapv3: PancakeSwapV3PositionDiscoverInput;
+interface BaseCreatePositionInput {
+  protocol: PositionProtocol;
+  positionType: PositionType;
+  userId: string;
+  poolId: string;
+  isToken0Quote: boolean;
+  positionOpenedAt?: Date;
 }
 
 /**
- * Generic position discovery input type
- * Type-safe based on protocol parameter
+ * Base interface for updating any position
+ * Note: Most position fields are immutable. Use refresh() for state updates.
  */
-export type PositionDiscoverInput<P extends keyof PositionDiscoverInputMap> =
-  PositionDiscoverInputMap[P];
+interface BaseUpdatePositionInput {
+  // Currently no mutable fields - positions are updated via refresh()
+}
+
+// =============================================================================
+// UNISWAP V3 INPUT TYPES
+// =============================================================================
 
 /**
- * Union type for any position discovery input
+ * Input for creating a Uniswap V3 position
  */
-export type AnyPositionDiscoverInput =
-  PositionDiscoverInput<keyof PositionDiscoverInputMap>;
+export interface CreateUniswapV3PositionInput extends BaseCreatePositionInput {
+  protocol: 'uniswapv3';
+  positionType: 'CL_TICKS';
+  config: UniswapV3PositionConfigData;
+  state: UniswapV3PositionState;
+}
 
 /**
- * Input type for creating a new position
- *
- * Omits all calculated fields (which are computed by the service):
- * - currentValue, currentCostBasis, realizedPnl, unrealizedPnl
- * - collectedFees, unClaimedFees, lastFeesCollectedAt
- * - priceRangeLower, priceRangeUpper
- * - positionOpenedAt, positionClosedAt, isActive
- * - pool (replaced with poolId for database FK)
- *
- * Also omits database-generated fields: id, createdAt, updatedAt
- *
- * State is required - typically provided by discover() method from on-chain data.
- *
- * Note: This is primarily used by discover() which handles pool discovery,
- * token role determination, and state fetching from on-chain data.
- *
- * @template P - Protocol key from PositionConfigMap ('uniswapv3', etc.)
+ * Input for updating a Uniswap V3 position
  */
-export type CreatePositionInput<P extends keyof PositionConfigMap> = Pick<
-  Position<P>,
-  | 'protocol'
-  | 'positionType'
-  | 'userId'
-  | 'isToken0Quote'
-  | 'config'
-  | 'state'
-> & {
-  /** Pool ID for database foreign key (service maps this to full Pool object) */
-  poolId: string;
-  /**
-   * Optional: Actual timestamp when position was opened on blockchain
-   * If omitted, will default to current time (discovery time)
-   * Should be extracted from first blockchain event for accuracy
-   */
-  positionOpenedAt?: Date;
-};
+export interface UpdateUniswapV3PositionInput extends BaseUpdatePositionInput {
+  // Currently no mutable fields - positions are updated via refresh()
+}
+
+// =============================================================================
+// UNION TYPES
+// =============================================================================
 
 /**
- * Input type aliases for creating positions
+ * Union type for any position create input
  */
-export type CreateUniswapV3PositionInput = CreatePositionInput<'uniswapv3'>;
-export type CreateAnyPositionInput = CreatePositionInput<keyof PositionConfigMap>;
+export type CreateAnyPositionInput = CreateUniswapV3PositionInput;
 
 /**
- * Input type for updating an existing position
- *
- * All fields are optional (partial update).
- * Calculated fields are omitted (recomputed by service).
- * Immutable fields are omitted: id, userId, pool, isToken0Quote, config, state, createdAt, updatedAt
- *
- * Note: This is a basic helper for rare manual updates.
- * - Config updates are rare (position parameters are immutable on-chain)
- * - State updates should typically use refresh() method
- * - Token roles (isToken0Quote) and pool are immutable - set at discovery
- *
- * Currently, there are no mutable fields that can be updated directly.
- * Most updates should use the refresh() method instead.
- *
- * @template P - Protocol key from PositionConfigMap ('uniswapv3', etc.)
+ * Union type for any position update input
  */
-export type UpdatePositionInput<P extends keyof PositionConfigMap> = Partial<
-  Pick<Position<P>, never>
->;
-
-/**
- * Input type aliases for updating positions
- */
-export type UpdateUniswapV3PositionInput = UpdatePositionInput<'uniswapv3'>;
-export type UpdateAnyPositionInput = UpdatePositionInput<keyof PositionConfigMap>;
+export type UpdateAnyPositionInput = UpdateUniswapV3PositionInput;

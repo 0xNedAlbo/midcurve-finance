@@ -6,8 +6,7 @@
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { Pool, PoolConfigMap } from '@midcurve/shared';
-import type { PoolDiscoveryResult } from '@midcurve/shared';
+import type { PoolInterface, Protocol, PoolDiscoveryResult } from '@midcurve/shared';
 import type { PoolDiscoveryInput } from '../types/pool-discovery/pool-discovery-input.js';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -38,12 +37,12 @@ export interface PoolDiscoveryServiceDependencies {
  * - findPoolsForTokenPair() - Discover and return pools with metrics
  * - createPoolName() - Generate human-readable pool names
  *
- * @template P - Protocol key from PoolConfigMap ('uniswapv3', etc.)
- *
  * @example
  * ```typescript
  * // Uniswap V3 implementation
- * class UniswapV3PoolDiscoveryService extends PoolDiscoveryService<'uniswapv3'> {
+ * class UniswapV3PoolDiscoveryService extends PoolDiscoveryService {
+ *   protected readonly protocol: Protocol = 'uniswapv3';
+ *
  *   async findPoolsForTokenPair(
  *     input: UniswapV3PoolDiscoveryInput
  *   ): Promise<PoolDiscoveryResult<'uniswapv3'>[]> {
@@ -55,14 +54,15 @@ export interface PoolDiscoveryServiceDependencies {
  *   }
  *
  *   createPoolName(pool: UniswapV3Pool): string {
- *     return `CL${pool.config.tickSpacing}-${pool.token0.symbol}/${pool.token1.symbol}`;
+ *     return `CL${pool.tickSpacing}-${pool.token0.symbol}/${pool.token1.symbol}`;
  *   }
  * }
  * ```
  */
-export abstract class PoolDiscoveryService<P extends keyof PoolConfigMap> {
+export abstract class PoolDiscoveryService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
+  protected abstract readonly protocol: Protocol;
 
   /**
    * Creates a new PoolDiscoveryService instance
@@ -131,8 +131,8 @@ export abstract class PoolDiscoveryService<P extends keyof PoolConfigMap> {
    * ```
    */
   abstract findPoolsForTokenPair(
-    input: PoolDiscoveryInput<P>
-  ): Promise<PoolDiscoveryResult<P>[]>;
+    input: PoolDiscoveryInput
+  ): Promise<PoolDiscoveryResult[]>;
 
   /**
    * Create protocol-specific pool name
@@ -152,11 +152,11 @@ export abstract class PoolDiscoveryService<P extends keyof PoolConfigMap> {
    * ```typescript
    * // Uniswap V3
    * createPoolName(pool) {
-   *   const tickSpacing = pool.config.tickSpacing;
+   *   const tickSpacing = pool.tickSpacing;
    *   return `CL${tickSpacing}-${pool.token0.symbol}/${pool.token1.symbol}`;
    * }
    * // Returns: "CL10-WETH/USDC", "CL60-DAI/USDC", etc.
    * ```
    */
-  abstract createPoolName(pool: Pool<P>): string;
+  abstract createPoolName(pool: PoolInterface): string;
 }

@@ -14,7 +14,9 @@
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { AnyPosition } from '@midcurve/shared';
+import type { PositionInterface, PositionRow } from '@midcurve/shared';
+import type { Erc20TokenRow, UniswapV3PoolRow } from '@midcurve/shared';
+import { PositionFactory, PoolFactory, Erc20Token, UniswapV3Pool } from '@midcurve/shared';
 import type {
   PositionListFilters,
   PositionListResult,
@@ -64,10 +66,8 @@ export class PositionListService {
   /**
    * List positions for a user with filtering, sorting, and pagination
    *
-   * Returns lightweight AnyPosition objects with config/state as unknown.
-   * No protocol-specific parsing is performed - this is optimized for list views.
-   *
-   * For fully-typed positions with parsed config/state, use protocol-specific
+   * Returns PositionInterface instances using the factory pattern.
+   * For fully-typed positions with protocol-specific accessors, use protocol-specific
    * services (e.g., UniswapV3PositionService).
    *
    * @param userId - User ID who owns the positions
@@ -165,8 +165,8 @@ export class PositionListService {
         this.prisma.position.count({ where }),
       ]);
 
-      // Map database results to AnyPosition
-      const positions = results.map((result) => this.mapToPosition(result));
+      // Map database results to PositionInterface using factory
+      const positions = results.map((result) => this.mapToPosition(result as any));
 
       this.logger.info(
         {
@@ -202,32 +202,74 @@ export class PositionListService {
   }
 
   /**
-   * Map database result to AnyPosition
+   * Map database result to PositionInterface using factory
    *
-   * Converts database types to application types:
-   * - String bigints → native bigint
-   * - Includes full pool object (not poolId)
-   * - Config/state remain as unknown (no parsing)
+   * Creates token and pool instances, then uses PositionFactory
+   * to create the protocol-specific position class.
    *
    * @param dbResult - Raw database result from Prisma
-   * @returns AnyPosition with unknown config/state
+   * @returns PositionInterface instance
    */
-  private mapToPosition(dbResult: any): AnyPosition {
-    return {
-      // Identity
+  private mapToPosition(dbResult: {
+    id: string;
+    positionHash: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    protocol: string;
+    positionType: string;
+    userId: string;
+    currentValue: string;
+    currentCostBasis: string;
+    realizedPnl: string;
+    unrealizedPnl: string;
+    realizedCashflow: string;
+    unrealizedCashflow: string;
+    collectedFees: string;
+    unClaimedFees: string;
+    lastFeesCollectedAt: Date;
+    totalApr: number | null;
+    priceRangeLower: string;
+    priceRangeUpper: string;
+    poolId: string;
+    isToken0Quote: boolean;
+    positionOpenedAt: Date;
+    positionClosedAt: Date | null;
+    isActive: boolean;
+    config: Record<string, unknown>;
+    state: Record<string, unknown>;
+    pool: {
+      id: string;
+      protocol: string;
+      poolType: string;
+      feeBps: number;
+      config: Record<string, unknown>;
+      state: Record<string, unknown>;
+      createdAt: Date;
+      updatedAt: Date;
+      token0: Erc20TokenRow;
+      token1: Erc20TokenRow;
+    };
+  }): PositionInterface {
+    // Create token instances
+    const token0 = Erc20Token.fromDB(dbResult.pool.token0);
+    const token1 = Erc20Token.fromDB(dbResult.pool.token1);
+
+    // Create pool instance
+    const pool = PoolFactory.fromDB(
+      dbResult.pool as unknown as UniswapV3PoolRow,
+      token0,
+      token1
+    ) as UniswapV3Pool;
+
+    // Convert string bigint fields to native bigint
+    const positionRow: PositionRow = {
       id: dbResult.id,
       positionHash: dbResult.positionHash ?? '',
-      createdAt: dbResult.createdAt,
-      updatedAt: dbResult.updatedAt,
-
-      // Protocol identification
-      protocol: dbResult.protocol as any,
-      positionType: dbResult.positionType as any,
-
-      // Ownership
       userId: dbResult.userId,
-
-      // Financial fields (string → bigint)
+      protocol: dbResult.protocol,
+      positionType: dbResult.positionType,
+      poolId: dbResult.poolId,
+      isToken0Quote: dbResult.isToken0Quote,
       currentValue: BigInt(dbResult.currentValue),
       currentCostBasis: BigInt(dbResult.currentCostBasis),
       realizedPnl: BigInt(dbResult.realizedPnl),
@@ -238,70 +280,22 @@ export class PositionListService {
       unClaimedFees: BigInt(dbResult.unClaimedFees),
       lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
       totalApr: dbResult.totalApr,
-
-      // Price range (string → bigint)
       priceRangeLower: BigInt(dbResult.priceRangeLower),
       priceRangeUpper: BigInt(dbResult.priceRangeUpper),
-
-      // Pool (full object, not poolId - matches @midcurve/shared)
-      pool: this.mapPool(dbResult.pool),
-      isToken0Quote: dbResult.isToken0Quote,
-
-      // Status
       positionOpenedAt: dbResult.positionOpenedAt,
       positionClosedAt: dbResult.positionClosedAt,
       isActive: dbResult.isActive,
-
-      // Protocol-specific data (NO parsing - returned as-is)
-      config: dbResult.config as any,
-      state: dbResult.state as any,
+      config: dbResult.config,
+      state: dbResult.state,
+      createdAt: dbResult.createdAt,
+      updatedAt: dbResult.updatedAt,
+      pool: dbResult.pool as unknown as UniswapV3PoolRow & {
+        token0: Erc20TokenRow;
+        token1: Erc20TokenRow;
+      },
     };
-  }
 
-  /**
-   * Map database pool to Pool object
-   *
-   * Returns pool with config/state as unknown (no parsing).
-   *
-   * @param dbPool - Raw database pool from Prisma
-   * @returns Pool with unknown config/state
-   */
-  private mapPool(dbPool: any): any {
-    return {
-      id: dbPool.id,
-      createdAt: dbPool.createdAt,
-      updatedAt: dbPool.updatedAt,
-      protocol: dbPool.protocol,
-      poolType: dbPool.poolType,
-      feeBps: dbPool.feeBps,
-      token0: this.mapToken(dbPool.token0),
-      token1: this.mapToken(dbPool.token1),
-      config: dbPool.config, // No parsing
-      state: dbPool.state, // No parsing
-    };
-  }
-
-  /**
-   * Map database token to Token object
-   *
-   * Returns token with config as unknown (no parsing).
-   *
-   * @param dbToken - Raw database token from Prisma
-   * @returns Token with unknown config
-   */
-  private mapToken(dbToken: any): any {
-    return {
-      id: dbToken.id,
-      createdAt: dbToken.createdAt,
-      updatedAt: dbToken.updatedAt,
-      tokenType: dbToken.tokenType,
-      name: dbToken.name,
-      symbol: dbToken.symbol,
-      decimals: dbToken.decimals,
-      logoUrl: dbToken.logoUrl ?? undefined,
-      coingeckoId: dbToken.coingeckoId ?? undefined,
-      marketCap: dbToken.marketCap ?? undefined,
-      config: dbToken.config, // No parsing
-    };
+    // Use factory to create protocol-specific position class
+    return PositionFactory.fromDB(positionRow, pool);
   }
 }

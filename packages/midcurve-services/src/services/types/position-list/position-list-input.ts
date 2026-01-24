@@ -5,7 +5,7 @@
  * Used by PositionListService for cross-protocol position queries.
  */
 
-import type { AnyPosition } from '@midcurve/shared';
+import type { PositionInterface } from '@midcurve/shared';
 
 /**
  * Filters for listing positions
@@ -88,10 +88,10 @@ export interface PositionListResult {
   /**
    * Array of positions matching the filter criteria
    *
-   * Positions are returned as AnyPosition with config/state as unknown.
-   * For fully-typed positions, use protocol-specific services.
+   * Positions are returned as PositionInterface.
+   * For fully-typed positions with protocol-specific accessors, use protocol-specific services.
    */
-  positions: AnyPosition[];
+  positions: PositionInterface[];
 
   /**
    * Total count of positions matching the filter (ignoring pagination)

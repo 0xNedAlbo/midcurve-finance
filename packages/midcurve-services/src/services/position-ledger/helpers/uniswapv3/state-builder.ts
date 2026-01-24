@@ -4,7 +4,7 @@
  * Provides functions for building and managing financial state during event processing.
  */
 
-import type { UniswapV3LedgerEvent } from '@midcurve/shared';
+import type { UniswapV3PositionLedgerEvent } from '@midcurve/shared';
 
 /**
  * Previous event state used for calculating cumulative financial metrics.
@@ -47,7 +47,7 @@ export interface PreviousEventState {
  * ```
  */
 export function buildInitialState(
-  lastEvent: UniswapV3LedgerEvent | undefined
+  lastEvent: UniswapV3PositionLedgerEvent | undefined
 ): PreviousEventState {
   if (!lastEvent) {
     // No previous events - start with zero state
@@ -60,11 +60,11 @@ export function buildInitialState(
     };
   }
 
-  // Extract final state from last event
+  // Extract final state from last event using getters
   return {
-    uncollectedPrincipal0: lastEvent.config.uncollectedPrincipal0After,
-    uncollectedPrincipal1: lastEvent.config.uncollectedPrincipal1After,
-    liquidity: lastEvent.config.liquidityAfter,
+    uncollectedPrincipal0: lastEvent.uncollectedPrincipal0After,
+    uncollectedPrincipal1: lastEvent.uncollectedPrincipal1After,
+    liquidity: lastEvent.liquidityAfter,
     costBasis: lastEvent.costBasisAfter,
     pnl: lastEvent.pnlAfter,
   };
@@ -86,7 +86,7 @@ export function buildInitialState(
  * ```
  */
 export function extractPreviousEventId(
-  lastEvent: UniswapV3LedgerEvent | undefined
+  lastEvent: UniswapV3PositionLedgerEvent | undefined
 ): string | null {
   return lastEvent?.id ?? null;
 }

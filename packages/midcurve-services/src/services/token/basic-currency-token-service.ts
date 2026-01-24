@@ -22,7 +22,6 @@ import {
   BasicCurrencyConfig,
   BASIC_CURRENCY_DECIMALS,
 } from '@midcurve/shared';
-import type { BasicCurrencyConfigData } from '@midcurve/shared';
 import { TokenService } from './token-service.js';
 import type { TokenServiceDependencies } from './token-service.js';
 import type {

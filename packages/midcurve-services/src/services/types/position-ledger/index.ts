@@ -4,7 +4,6 @@
  */
 
 export type {
-  CreatePositionLedgerEventInput,
   CreateUniswapV3LedgerEventInput,
   CreateAnyLedgerEventInput,
   UniswapV3LedgerEventDiscoverInput,

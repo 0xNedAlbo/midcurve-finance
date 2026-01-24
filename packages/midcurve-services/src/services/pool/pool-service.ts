@@ -2,20 +2,25 @@
  * Abstract Pool Service
  *
  * Base class for protocol-specific pool services.
- * Handles serialization/deserialization of config and state between
- * database JSON format and application types.
+ * Provides shared infrastructure (Prisma client, logging) and common patterns.
  *
- * Protocol implementations (e.g., UniswapV3PoolService) must implement
- * all abstract serialization and discovery methods.
+ * Subclasses (UniswapV3PoolService) implement:
+ * - Type-specific CRUD operations returning concrete class instances
+ * - Discovery methods
+ * - Config/state serialization using the class-based pattern from @midcurve/shared
+ *
+ * Design: Services return class instances (UniswapV3Pool)
+ * for type-safe config access via .typedConfig and convenience accessors.
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { Pool, PoolConfigMap } from '@midcurve/shared';
 import type {
-  PoolDiscoverInput,
-  CreatePoolInput,
-  UpdatePoolInput,
-} from '../types/pool/pool-input.js';
+  PoolInterface,
+  Protocol,
+  PoolRow,
+  Erc20Token,
+} from '@midcurve/shared';
+import { PoolFactory } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -32,22 +37,69 @@ export interface PoolServiceDependencies {
 }
 
 /**
+ * Generic pool result from database (before conversion to class instance)
+ * Matches Prisma Pool model output with included token relations
+ */
+export interface PoolDbResult {
+  id: string;
+  protocol: string;
+  poolType: string;
+  token0Id: string;
+  token1Id: string;
+  feeBps: number;
+  config: unknown;
+  state: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+  token0?: {
+    id: string;
+    tokenType: string;
+    name: string;
+    symbol: string;
+    decimals: number;
+    logoUrl: string | null;
+    coingeckoId: string | null;
+    marketCap: number | null;
+    config: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  token1?: {
+    id: string;
+    tokenType: string;
+    name: string;
+    symbol: string;
+    decimals: number;
+    logoUrl: string | null;
+    coingeckoId: string | null;
+    marketCap: number | null;
+    config: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+}
+
+/**
  * Abstract PoolService
  *
  * Provides base functionality for pool management.
- * Protocol-specific services must extend this class and implement
- * serialization methods for config and state.
+ * Protocol-specific services extend this class and implement
+ * their own CRUD, discovery, and search methods.
  *
- * Key difference from Token/Position services:
+ * Key difference from TokenService:
  * - Pool contains full Token objects in TypeScript
  * - Database stores only token IDs (token0Id, token1Id)
  * - Derived classes must fetch and populate full Token objects
- *
- * @template P - Protocol key from PoolConfigMap ('uniswapv3', etc.)
  */
-export abstract class PoolService<P extends keyof PoolConfigMap> {
+export abstract class PoolService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
+
+  /**
+   * Protocol discriminator for this service
+   * Must be implemented by subclasses
+   */
+  protected abstract readonly protocol: Protocol;
 
   /**
    * Creates a new PoolService instance
@@ -68,179 +120,65 @@ export abstract class PoolService<P extends keyof PoolConfigMap> {
   }
 
   // ============================================================================
-  // ABSTRACT SERIALIZATION METHODS
-  // Protocol implementations MUST implement these methods
+  // POLYMORPHIC HELPERS
   // ============================================================================
 
   /**
-   * Parse config from database JSON to application type
+   * Convert database result to PoolInterface using the factory pattern.
    *
-   * Converts serialized values (if any) to native types.
-   * For configs with only primitives, this may be a pass-through.
+   * This method uses PoolFactory.fromDB() which routes to the correct
+   * concrete class (UniswapV3Pool) based on protocol.
    *
-   * @param configDB - Config object from database (JSON)
-   * @returns Parsed config with native types
+   * Subclasses should override findById/create/update to return their
+   * specific type using their own factory method (e.g., UniswapV3Pool.fromDB).
+   *
+   * @param dbResult - Raw database result from Prisma (with included tokens)
+   * @param token0 - Pre-fetched Erc20Token for token0
+   * @param token1 - Pre-fetched Erc20Token for token1
+   * @returns Pool class instance implementing PoolInterface
    */
-  abstract parseConfig(configDB: unknown): PoolConfigMap[P]['config'];
-
-  /**
-   * Serialize config from application type to database JSON
-   *
-   * Converts native values (if any) to serializable types.
-   * For configs with only primitives, this may be a pass-through.
-   *
-   * @param config - Application config with native types
-   * @returns Serialized config for database storage
-   */
-  abstract serializeConfig(config: PoolConfigMap[P]['config']): unknown;
-
-  /**
-   * Parse state from database JSON to application type
-   *
-   * Converts serialized values (e.g., bigint strings) to native types.
-   *
-   * @param stateDB - State object from database (JSON with string values)
-   * @returns Parsed state with native types (bigint, etc.)
-   */
-  abstract parseState(stateDB: unknown): PoolConfigMap[P]['state'];
-
-  /**
-   * Serialize state from application type to database JSON
-   *
-   * Converts native values (e.g., bigint) to serializable types (strings).
-   *
-   * @param state - Application state with native types
-   * @returns Serialized state for database storage
-   */
-  abstract serializeState(state: PoolConfigMap[P]['state']): unknown;
-
-  // ============================================================================
-  // ABSTRACT DISCOVERY METHOD
-  // Protocol implementations MUST implement this method
-  // ============================================================================
-
-  /**
-   * Discover and create a pool from on-chain data
-   *
-   * Checks the database first for an existing pool. If not found, reads
-   * pool configuration from on-chain sources, discovers/fetches tokens,
-   * and creates a new pool entry with full Token objects.
-   *
-   * Implementation note: Each protocol defines its own discovery input type
-   * via PoolDiscoverInputMap. For example, Uniswap V3 uses { poolAddress: string, chainId: number }.
-   *
-   * Discovery should:
-   * 1. Check database first (idempotent)
-   * 2. Read immutable pool config from on-chain (token addresses, fee, tickSpacing)
-   * 3. Discover/fetch Token objects for token0 and token1
-   * 4. Create zero-default state (actual state fetched via refresh() later)
-   * 5. Save to database and return Pool with full Token objects
-   *
-   * @param params - Discovery parameters (type-safe via PoolDiscoverInputMap[P])
-   * @returns The discovered or existing pool with full Token objects
-   * @throws Error if discovery fails (protocol-specific errors)
-   */
-  abstract discover(params: PoolDiscoverInput<P>): Promise<Pool<P>>;
-
-  // ============================================================================
-  // CRUD OPERATIONS
-  // Base implementations without Token population
-  // Protocol implementations SHOULD override to add type filtering and Token population
-  // ============================================================================
-
-  /**
-   * Create a new pool
-   *
-   * Base implementation that handles database operations.
-   * Derived classes should override this method to add validation,
-   * normalization, and to populate full Token objects in the result.
-   *
-   * Note: This is a manual creation helper. For creating pools from on-chain data,
-   * use discover() which handles token discovery and pool state fetching.
-   *
-   * @param input - Pool data to create (omits id, createdAt, updatedAt, and full Token objects)
-   * @returns The created pool with generated id and timestamps (without full Token objects in base)
-   */
-  async create(input: CreatePoolInput<P>): Promise<Pool<P>> {
-    log.methodEntry(this.logger, 'create', {
-      protocol: input.protocol,
-      token0Id: input.token0Id,
-      token1Id: input.token1Id,
-    });
-
-    try {
-      // Serialize config and state for database storage
-      const configDB = this.serializeConfig(input.config);
-      const stateDB = this.serializeState(input.state);
-
-      log.dbOperation(this.logger, 'create', 'Pool', {
-        protocol: input.protocol,
-        poolType: input.poolType,
-      });
-
-      const result = await this.prisma.pool.create({
-        data: {
-          protocol: input.protocol,
-          poolType: input.poolType,
-          token0Id: input.token0Id,
-          token1Id: input.token1Id,
-          feeBps: input.feeBps,
-          config: configDB as object,
-          state: stateDB as object,
-        },
-        include: {
-          token0: true,
-          token1: true,
-        },
-      });
-
-      // Parse config and state
-      const config = this.parseConfig(result.config);
-      const state = this.parseState(result.state);
-
-      const pool = {
-        id: result.id,
-        createdAt: result.createdAt,
-        updatedAt: result.updatedAt,
-        protocol: result.protocol as P,
-        poolType: result.poolType,
-        token0: result.token0 as any, // Base class doesn't know token type
-        token1: result.token1 as any,
-        feeBps: result.feeBps,
-        config,
-        state,
-      } as Pool<P>;
-
-      this.logger.info(
-        {
-          id: pool.id,
-          protocol: pool.protocol,
-          poolType: pool.poolType,
-        },
-        'Pool created'
-      );
-      log.methodExit(this.logger, 'create', { id: pool.id });
-      return pool;
-    } catch (error) {
-      log.methodError(this.logger, 'create', error as Error, {
-        protocol: input.protocol,
-      });
-      throw error;
-    }
+  protected mapToPool(
+    dbResult: PoolDbResult,
+    token0: Erc20Token,
+    token1: Erc20Token
+  ): PoolInterface {
+    return PoolFactory.fromDB(
+      {
+        id: dbResult.id,
+        protocol: dbResult.protocol,
+        poolType: dbResult.poolType,
+        token0Id: dbResult.token0Id,
+        token1Id: dbResult.token1Id,
+        feeBps: dbResult.feeBps,
+        config: dbResult.config as Record<string, unknown>,
+        state: dbResult.state as Record<string, unknown>,
+        createdAt: dbResult.createdAt,
+        updatedAt: dbResult.updatedAt,
+      } as PoolRow,
+      token0,
+      token1
+    );
   }
 
+  // ============================================================================
+  // BASE CRUD OPERATIONS
+  // ============================================================================
+
   /**
-   * Find pool by ID
+   * Find a pool by its database ID (polymorphic)
    *
-   * Base implementation returns pool data without populating full Token objects.
-   * Protocol-specific implementations should override to:
-   * - Filter by protocol type
-   * - Populate full Token objects
+   * Returns a PoolInterface that can be narrowed based on protocol.
+   * Subclasses override this to return their specific type with proper
+   * token population.
    *
-   * @param id - Pool ID
-   * @returns Pool if found, null otherwise
+   * Note: Base implementation relies on included token relations.
+   * If tokens are not included, this will fail. Subclasses should
+   * handle token fetching appropriately.
+   *
+   * @param id - Pool database ID
+   * @returns The pool if found, null otherwise
    */
-  async findById(id: string): Promise<Pool<P> | null> {
+  async findById(id: string): Promise<PoolInterface | null> {
     log.methodEntry(this.logger, 'findById', { id });
 
     try {
@@ -255,31 +193,23 @@ export abstract class PoolService<P extends keyof PoolConfigMap> {
       });
 
       if (!result) {
-        log.methodExit(this.logger, 'findById', { id, found: false });
+        this.logger.debug({ id }, 'Pool not found');
+        log.methodExit(this.logger, 'findById', { found: false });
         return null;
       }
 
-      // Parse config and state
-      const config = this.parseConfig(result.config);
-      const state = this.parseState(result.state);
+      // Note: This base implementation assumes token relations are included
+      // Subclasses should handle token conversion properly
+      this.logger.debug(
+        { id, protocol: result.protocol, poolType: result.poolType },
+        'Pool found'
+      );
+      log.methodExit(this.logger, 'findById', { id });
 
-      // Note: Token objects are returned as-is from database
-      // Derived classes should override to map to proper Token<T> types
-      const pool = {
-        id: result.id,
-        createdAt: result.createdAt,
-        updatedAt: result.updatedAt,
-        protocol: result.protocol as P,
-        poolType: result.poolType,
-        token0: result.token0 as any, // Base class doesn't know token type
-        token1: result.token1 as any,
-        feeBps: result.feeBps,
-        config,
-        state,
-      } as Pool<P>;
-
-      log.methodExit(this.logger, 'findById', { id, found: true });
-      return pool;
+      // Subclasses must override to handle token conversion and mapping
+      throw new Error(
+        'Base PoolService.findById should be overridden by subclasses'
+      );
     } catch (error) {
       log.methodError(this.logger, 'findById', error as Error, { id });
       throw error;
@@ -287,105 +217,52 @@ export abstract class PoolService<P extends keyof PoolConfigMap> {
   }
 
   /**
-   * Update pool
+   * Delete a pool
    *
-   * Generic helper for rare manual updates.
-   * - Config updates are rare (pool parameters are immutable on-chain)
-   * - State updates should typically use refresh() method
+   * Base implementation that handles database operations.
+   * Subclasses should override this method to add protocol-specific
+   * safeguards and validation (e.g., checking for dependent positions).
    *
-   * Base implementation performs the update and returns the result.
-   * Protocol-specific implementations should override to add validation.
+   * This operation is idempotent - deleting a non-existent pool
+   * returns silently without error.
    *
-   * @param id - Pool ID
-   * @param input - Update input with optional fields
-   * @returns Updated pool with full Token objects
-   * @throws Error if pool not found
-   */
-  async update(id: string, input: UpdatePoolInput<P>): Promise<Pool<P>> {
-    log.methodEntry(this.logger, 'update', { id, input });
-
-    try {
-      // Serialize config and state if provided
-      const data: any = {};
-
-      if (input.feeBps !== undefined) {
-        data.feeBps = input.feeBps;
-      }
-
-      if (input.config !== undefined) {
-        data.config = this.serializeConfig(input.config) as object;
-      }
-
-      if (input.state !== undefined) {
-        data.state = this.serializeState(input.state) as object;
-      }
-
-      log.dbOperation(this.logger, 'update', 'Pool', { id, fields: Object.keys(data) });
-
-      const result = await this.prisma.pool.update({
-        where: { id },
-        data,
-        include: {
-          token0: true,
-          token1: true,
-        },
-      });
-
-      // Parse config and state
-      const config = this.parseConfig(result.config);
-      const state = this.parseState(result.state);
-
-      const pool = {
-        id: result.id,
-        createdAt: result.createdAt,
-        updatedAt: result.updatedAt,
-        protocol: result.protocol as P,
-        poolType: result.poolType,
-        token0: result.token0 as any,
-        token1: result.token1 as any,
-        feeBps: result.feeBps,
-        config,
-        state,
-      } as Pool<P>;
-
-      log.methodExit(this.logger, 'update', { id });
-      return pool;
-    } catch (error) {
-      log.methodError(this.logger, 'update', error as Error, { id });
-      throw error;
-    }
-  }
-
-  /**
-   * Delete pool
-   *
-   * Base implementation silently succeeds if pool doesn't exist.
-   * Protocol-specific implementations should override to:
-   * - Verify protocol type (error if wrong protocol)
-   * - Check for dependent positions (prevent deletion if positions exist)
-   *
-   * @param id - Pool ID
-   * @returns Promise that resolves when deletion is complete
+   * @param id - Pool database ID
    */
   async delete(id: string): Promise<void> {
     log.methodEntry(this.logger, 'delete', { id });
 
     try {
+      // Verify pool exists
+      log.dbOperation(this.logger, 'findUnique', 'Pool', { id });
+
+      const existing = await this.prisma.pool.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        this.logger.debug({ id }, 'Pool not found, nothing to delete');
+        log.methodExit(this.logger, 'delete', { id, found: false });
+        return; // Idempotent: silently return if pool doesn't exist
+      }
+
+      // Delete pool
       log.dbOperation(this.logger, 'delete', 'Pool', { id });
 
       await this.prisma.pool.delete({
         where: { id },
       });
 
-      log.methodExit(this.logger, 'delete', { id, deleted: true });
-    } catch (error: any) {
-      // P2025 = Record not found
-      if (error.code === 'P2025') {
-        this.logger.debug({ id }, 'Pool not found, delete operation is no-op');
-        log.methodExit(this.logger, 'delete', { id, deleted: false });
-        return;
-      }
+      this.logger.info(
+        {
+          id,
+          protocol: existing.protocol,
+          poolType: existing.poolType,
+        },
+        'Pool deleted successfully'
+      );
 
+      log.methodExit(this.logger, 'delete', { id });
+    } catch (error) {
       log.methodError(this.logger, 'delete', error as Error, { id });
       throw error;
     }

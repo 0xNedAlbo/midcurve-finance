@@ -6,8 +6,7 @@
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { PoolConfigMap } from '@midcurve/shared';
-import type { QuoteTokenResult } from '@midcurve/shared';
+import type { QuoteTokenResult, QuoteTokenResultProtocol } from '@midcurve/shared';
 import type { QuoteTokenInput } from '../types/quote-token/quote-token-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -24,12 +23,11 @@ export interface QuoteTokenServiceDependencies {
  *
  * Base class for protocol-specific quote token determination services.
  * Handles user preferences, default configurations, and fallback logic.
- *
- * @template P - Protocol key from PoolConfigMap ('uniswapv3', etc.)
  */
-export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
+export abstract class QuoteTokenService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
+  protected abstract readonly protocol: QuoteTokenResultProtocol;
 
   constructor(dependencies: QuoteTokenServiceDependencies = {}) {
     this._prisma = dependencies.prisma ?? new PrismaClient();
@@ -58,9 +56,7 @@ export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
    * @param input - Quote token determination input (protocol-specific)
    * @returns Quote token determination result
    */
-  abstract determineQuoteToken(
-    input: QuoteTokenInput<P>
-  ): Promise<QuoteTokenResult<P>>;
+  abstract determineQuoteToken(input: QuoteTokenInput): Promise<QuoteTokenResult>;
 
   /**
    * Get default quote token identifiers for this protocol
@@ -131,7 +127,7 @@ export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
         where: {
           userId_protocol: {
             userId,
-            protocol: this.getProtocol(),
+            protocol: this.protocol,
           },
         },
         update: {
@@ -139,7 +135,7 @@ export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
         },
         create: {
           userId,
-          protocol: this.getProtocol(),
+          protocol: this.protocol,
           preferredQuoteTokens: normalized,
         },
       });
@@ -165,7 +161,7 @@ export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
       where: {
         userId_protocol: {
           userId,
-          protocol: this.getProtocol(),
+          protocol: this.protocol,
         },
       },
     });
@@ -186,7 +182,7 @@ export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
         where: {
           userId_protocol: {
             userId,
-            protocol: this.getProtocol(),
+            protocol: this.protocol,
           },
         },
       });
@@ -210,12 +206,4 @@ export abstract class QuoteTokenService<P extends keyof PoolConfigMap> {
       throw error;
     }
   }
-
-  /**
-   * Get protocol identifier for this service
-   * Implemented by concrete classes
-   *
-   * @returns Protocol identifier
-   */
-  protected abstract getProtocol(): P;
 }

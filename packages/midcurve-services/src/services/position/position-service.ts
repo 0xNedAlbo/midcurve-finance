@@ -2,19 +2,25 @@
  * Abstract Position Service
  *
  * Base class for protocol-specific position services.
- * Handles serialization/deserialization of config and state between
- * database JSON format and application types.
  *
  * Protocol implementations (e.g., UniswapV3PositionService) must implement
- * all abstract serialization and discovery methods.
+ * the abstract discover(), refresh(), reset(), and createPositionHash() methods.
+ * They should also override CRUD methods to add protocol filtering and use
+ * protocol-specific class factories.
+ *
+ * Uses the OOP inheritance pattern from @midcurve/shared:
+ * - PositionInterface for polymorphic handling
+ * - PositionFactory for creating instances from database rows
+ * - Concrete classes (UniswapV3Position) for type-safe config/state access
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { Position, PositionConfigMap } from '@midcurve/shared';
+import type { PositionInterface, PositionProtocol, PositionRow } from '@midcurve/shared';
+import { PositionFactory, UniswapV3Pool, PoolFactory, Erc20Token } from '@midcurve/shared';
+import type { Erc20TokenRow, UniswapV3PoolRow } from '@midcurve/shared';
 import type {
-  PositionDiscoverInput,
-  CreatePositionInput,
-  UpdatePositionInput,
+  CreateAnyPositionInput,
+  UpdateAnyPositionInput,
 } from '../types/position/position-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -32,9 +38,11 @@ export interface PositionServiceDependencies {
 }
 
 /**
- * Generic position result from database (before deserialization)
+ * Database result interface for position queries.
+ * Note: Prisma stores bigint as string in the database, so we use string here.
+ * The mapToPosition method handles conversion to native bigint for PositionRow.
  */
-interface PositionDbResult {
+export interface PositionDbResult {
   id: string;
   positionHash: string | null;
   createdAt: Date;
@@ -42,12 +50,12 @@ interface PositionDbResult {
   protocol: string;
   positionType: string;
   userId: string;
-  currentValue: string; // bigint as string
+  currentValue: string; // Prisma returns bigint as string
   currentCostBasis: string;
   realizedPnl: string;
   unrealizedPnl: string;
-  realizedCashflow: string; // bigint as string - cash flow for non-AMM protocols
-  unrealizedCashflow: string; // bigint as string - cash flow for non-AMM protocols
+  realizedCashflow: string;
+  unrealizedCashflow: string;
   collectedFees: string;
   unClaimedFees: string;
   lastFeesCollectedAt: Date;
@@ -60,8 +68,8 @@ interface PositionDbResult {
   positionOpenedAt: Date;
   positionClosedAt: Date | null;
   isActive: boolean;
-  config: unknown;
-  state: unknown;
+  config: Record<string, unknown>;
+  state: Record<string, unknown>;
 }
 
 /**
@@ -69,13 +77,17 @@ interface PositionDbResult {
  *
  * Provides base functionality for position management.
  * Protocol-specific services must extend this class and implement
- * serialization methods for config and state.
- *
- * @template P - Protocol key from PositionConfigMap ('uniswapv3', etc.)
+ * the abstract methods.
  */
-export abstract class PositionService<P extends keyof PositionConfigMap> {
+export abstract class PositionService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
+
+  /**
+   * Protocol identifier for this service
+   * Concrete classes must define this (e.g., 'uniswapv3')
+   */
+  protected abstract readonly protocol: PositionProtocol;
 
   /**
    * Creates a new PositionService instance
@@ -96,51 +108,9 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
   }
 
   // ============================================================================
-  // ABSTRACT SERIALIZATION METHODS
+  // ABSTRACT METHODS
   // Protocol implementations MUST implement these methods
   // ============================================================================
-
-  /**
-   * Parse config from database JSON to application type
-   *
-   * Converts serialized values (if any) to native types.
-   * For configs with only primitives, this may be a pass-through.
-   *
-   * @param configDB - Config object from database (JSON)
-   * @returns Parsed config with native types
-   */
-  abstract parseConfig(configDB: unknown): PositionConfigMap[P]['config'];
-
-  /**
-   * Serialize config from application type to database JSON
-   *
-   * Converts native values (if any) to serializable types.
-   * For configs with only primitives, this may be a pass-through.
-   *
-   * @param config - Application config with native types
-   * @returns Serialized config for database storage
-   */
-  abstract serializeConfig(config: PositionConfigMap[P]['config']): unknown;
-
-  /**
-   * Parse state from database JSON to application type
-   *
-   * Converts serialized values (e.g., bigint strings) to native types.
-   *
-   * @param stateDB - State object from database (JSON with string values)
-   * @returns Parsed state with native types (bigint, etc.)
-   */
-  abstract parseState(stateDB: unknown): PositionConfigMap[P]['state'];
-
-  /**
-   * Serialize state from application type to database JSON
-   *
-   * Converts native values (e.g., bigint) to serializable types (strings).
-   *
-   * @param state - Application state with native types
-   * @returns Serialized state for database storage
-   */
-  abstract serializeState(state: PositionConfigMap[P]['state']): unknown;
 
   /**
    * Create position hash for database lookups
@@ -167,7 +137,7 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * createPositionHash({ chainId: 1, nftId: 123456, poolAddress: '0x...', tickLower: -1000, tickUpper: 1000 })
    * // Returns: "uniswapv3/1/123456"
    */
-  abstract createPositionHash(config: PositionConfigMap[P]['config']): string;
+  abstract createPositionHash(config: Record<string, unknown>): string;
 
   // ============================================================================
   // ABSTRACT DISCOVERY METHOD
@@ -182,9 +152,6 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * discovers/fetches the pool and tokens, determines token roles (base/quote),
    * and creates a new position entry.
    *
-   * Implementation note: Each protocol defines its own discovery input type
-   * via PositionDiscoverInputMap. For example, Uniswap V3 uses { chainId, nftId, quoteTokenAddress }.
-   *
    * Discovery should:
    * 1. Check database first (idempotent)
    * 2. Read immutable position config from on-chain (NFT ID, ticks, pool address)
@@ -195,14 +162,14 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * 7. Save to database and return Position
    *
    * @param userId - User ID who owns this position (database foreign key to User.id)
-   * @param params - Discovery parameters (type-safe via PositionDiscoverInputMap[P])
+   * @param params - Discovery parameters (protocol-specific)
    * @returns The discovered or existing position
    * @throws Error if discovery fails (protocol-specific errors)
    */
   abstract discover(
     userId: string,
-    params: PositionDiscoverInput<P>
-  ): Promise<Position<P>>;
+    params: unknown
+  ): Promise<PositionInterface>;
 
   // ============================================================================
   // ABSTRACT REFRESH METHOD
@@ -226,7 +193,7 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * @throws Error if chain is not supported
    * @throws Error if on-chain read fails
    */
-  abstract refresh(id: string): Promise<Position<P>>;
+  abstract refresh(id: string): Promise<PositionInterface>;
 
   /**
    * Reset position by rediscovering all ledger events from blockchain
@@ -254,7 +221,7 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * @throws Error if chain is not supported
    * @throws Error if blockchain data fetch fails
    */
-  abstract reset(id: string): Promise<Position<P>>;
+  abstract reset(id: string): Promise<PositionInterface>;
 
   // ============================================================================
   // CRUD OPERATIONS
@@ -266,20 +233,26 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * Create a new position
    *
    * Base implementation that handles database operations.
-   * Derived classes should override this method to add validation.
+   * Derived classes should override this method to add validation
+   * and protocol-specific serialization.
    *
    * Note: This is a manual creation helper. For creating positions from on-chain data,
    * use discover() which handles pool discovery, token role determination, and state fetching.
    *
    * Implementation handles:
-   * - Serialization of config and state to JSON
    * - Conversion of bigint fields to strings for database storage
    * - Default values for calculated fields (PnL, fees, price range)
    *
    * @param input - Position data to create (omits id, createdAt, updatedAt, calculated fields)
+   * @param configDB - Serialized config for database storage
+   * @param stateDB - Serialized state for database storage
    * @returns The created position with generated id and timestamps
    */
-  async create(input: CreatePositionInput<P>): Promise<Position<P>> {
+  async create(
+    input: CreateAnyPositionInput,
+    configDB: Record<string, unknown>,
+    stateDB: Record<string, unknown>
+  ): Promise<PositionInterface> {
     log.methodEntry(this.logger, 'create', {
       protocol: input.protocol,
       userId: input.userId,
@@ -287,23 +260,11 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
     });
 
     try {
-      // Serialize config for database storage
-      const configDB = this.serializeConfig(input.config);
-
-      // State is required for position creation
-      // discover() method provides state from on-chain data
-      if (!input.state) {
-        const error = new Error(
-          'state is required for position creation. Use discover() to create from on-chain data.'
-        );
-        log.methodError(this.logger, 'create', error, { input });
-        throw error;
-      }
-
-      const stateDB = this.serializeState(input.state);
-
       // Generate position hash for fast lookups
-      const positionHash = this.createPositionHash(input.config);
+      // Cast config to generic Record for createPositionHash which is protocol-agnostic
+      const positionHash = this.createPositionHash(
+        input.config as unknown as Record<string, unknown>
+      );
 
       // Default calculated values (will be computed properly in discover())
       const now = new Date();
@@ -381,11 +342,12 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * Base implementation returns position data.
    * Protocol-specific implementations should override to:
    * - Filter by protocol type
+   * - Return protocol-specific position class
    *
    * @param id - Position ID
    * @returns Position if found, null otherwise
    */
-  async findById(id: string): Promise<Position<P> | null> {
+  async findById(id: string): Promise<PositionInterface | null> {
     log.methodEntry(this.logger, 'findById', { id });
 
     try {
@@ -429,7 +391,7 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * @param positionHash - Position hash (generated by createPositionHash)
    * @returns Position if found, null otherwise
    */
-  async findByPositionHash(userId: string, positionHash: string): Promise<Position<P> | null> {
+  async findByPositionHash(userId: string, positionHash: string): Promise<PositionInterface | null> {
     log.methodEntry(this.logger, 'findByPositionHash', { userId, positionHash });
 
     try {
@@ -482,13 +444,13 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
    * @returns Updated position
    * @throws Error if position not found
    */
-  async update(id: string, input: UpdatePositionInput<P>): Promise<Position<P>> {
+  async update(id: string, input: UpdateAnyPositionInput): Promise<PositionInterface> {
     log.methodEntry(this.logger, 'update', { id, input });
 
     try {
-      // Currently, UpdatePositionInput<P> has no mutable fields
+      // Currently, UpdateAnyPositionInput has no mutable fields
       // All updates should use refresh() method for state updates
-      const data: any = {};
+      const data: Record<string, unknown> = {};
 
       log.dbOperation(this.logger, 'update', 'Position', {
         id,
@@ -558,23 +520,32 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
   // ============================================================================
 
   /**
-   * Map database result to Position type
+   * Map database result to PositionInterface using factory
    *
-   * Converts string values to bigint for numeric fields and calls
-   * parseConfig/parseState for config/state deserialization.
+   * Converts string values to bigint for numeric fields, creates pool instance,
+   * and uses PositionFactory to create protocol-specific position class.
    *
-   * @param dbResult - Raw database result
-   * @returns Position with native types
+   * @param dbResult - Raw database result from Prisma
+   * @returns PositionInterface instance
    */
-  protected mapToPosition(dbResult: PositionDbResult): Position<P> {
-    return {
+  protected mapToPosition(dbResult: PositionDbResult): PositionInterface {
+    // Create token instances from included pool data
+    const token0 = Erc20Token.fromDB(dbResult.pool.token0 as Erc20TokenRow);
+    const token1 = Erc20Token.fromDB(dbResult.pool.token1 as Erc20TokenRow);
+
+    // Create pool instance from included pool data
+    const poolRow = dbResult.pool as UniswapV3PoolRow;
+    const pool = PoolFactory.fromDB(poolRow, token0, token1) as UniswapV3Pool;
+
+    // Convert string bigint fields to native bigint
+    const rowWithBigInt: PositionRow = {
       id: dbResult.id,
       positionHash: dbResult.positionHash ?? '',
-      createdAt: dbResult.createdAt,
-      updatedAt: dbResult.updatedAt,
-      protocol: dbResult.protocol as P,
-      positionType: dbResult.positionType as Position<P>['positionType'],
       userId: dbResult.userId,
+      protocol: dbResult.protocol,
+      positionType: dbResult.positionType,
+      poolId: dbResult.poolId,
+      isToken0Quote: dbResult.isToken0Quote,
       currentValue: BigInt(dbResult.currentValue),
       currentCostBasis: BigInt(dbResult.currentCostBasis),
       realizedPnl: BigInt(dbResult.realizedPnl),
@@ -587,13 +558,17 @@ export abstract class PositionService<P extends keyof PositionConfigMap> {
       totalApr: dbResult.totalApr,
       priceRangeLower: BigInt(dbResult.priceRangeLower),
       priceRangeUpper: BigInt(dbResult.priceRangeUpper),
-      pool: dbResult.pool as any, // Pool with token0, token1 from include
-      isToken0Quote: dbResult.isToken0Quote,
       positionOpenedAt: dbResult.positionOpenedAt,
       positionClosedAt: dbResult.positionClosedAt,
       isActive: dbResult.isActive,
-      config: this.parseConfig(dbResult.config),
-      state: this.parseState(dbResult.state),
+      config: dbResult.config,
+      state: dbResult.state,
+      createdAt: dbResult.createdAt,
+      updatedAt: dbResult.updatedAt,
+      pool: dbResult.pool,
     };
+
+    // Use factory to create protocol-specific position class
+    return PositionFactory.fromDB(rowWithBigInt, pool);
   }
 }

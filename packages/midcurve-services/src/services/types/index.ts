@@ -8,14 +8,10 @@ export type { CreateUserInput, UpdateUserInput } from './user/index.js';
 
 // Token input types
 export type {
-  CreateTokenInput,
-  UpdateTokenInput,
   CreateErc20TokenInput,
   CreateAnyTokenInput,
   UpdateErc20TokenInput,
   UpdateAnyTokenInput,
-  TokenDiscoverInputMap,
-  TokenDiscoverInput,
   Erc20TokenDiscoverInput,
   AnyTokenDiscoverInput,
 } from './token/index.js';
@@ -24,12 +20,9 @@ export type {
 export type {
   UniswapV3PoolDiscoverInput,
   PoolDiscoverInputMap,
-  PoolDiscoverInput,
   AnyPoolDiscoverInput,
-  CreatePoolInput,
   CreateUniswapV3PoolInput,
   CreateAnyPoolInput,
-  UpdatePoolInput,
   UpdateUniswapV3PoolInput,
   UpdateAnyPoolInput,
 } from './pool/index.js';
@@ -37,11 +30,6 @@ export type {
 // Pool price input types
 export type {
   UniswapV3PoolPriceDiscoverInput,
-  PoolPriceDiscoverInputMap,
-  PoolPriceDiscoverInput,
-  AnyPoolPriceDiscoverInput,
-  CreatePoolPriceInput,
-  UpdatePoolPriceInput,
   CreateUniswapV3PoolPriceInput,
   UpdateUniswapV3PoolPriceInput,
   CreateAnyPoolPriceInput,
@@ -68,8 +56,10 @@ export {
 
 // Position input types
 export type {
-  CreatePositionInput,
-  UpdatePositionInput,
+  CreateUniswapV3PositionInput,
+  UpdateUniswapV3PositionInput,
+  CreateAnyPositionInput,
+  UpdateAnyPositionInput,
   UniswapV3PositionDiscoverInput,
   PositionDiscoverInput,
 } from './position/index.js';
@@ -79,7 +69,6 @@ export type { PositionListFilters, PositionListResult } from './position-list/in
 
 // Position Ledger Event input types
 export type {
-  CreatePositionLedgerEventInput,
   CreateUniswapV3LedgerEventInput,
   CreateAnyLedgerEventInput,
   UniswapV3LedgerEventDiscoverInput,
@@ -98,7 +87,6 @@ export type {
 
 // Pool Discovery input types
 export type {
-  PoolDiscoveryInputMap,
   PoolDiscoveryInput,
   UniswapV3PoolDiscoveryInput,
 } from './pool-discovery/index.js';

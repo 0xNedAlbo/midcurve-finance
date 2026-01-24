@@ -3,29 +3,30 @@
  *
  * Specialized service for Uniswap V3 pool management.
  * Handles address validation, normalization, token discovery, and pool state serialization.
+ *
+ * Returns UniswapV3Pool class instances for type-safe config/state access.
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type {
-  UniswapV3PoolConfig,
-  UniswapV3PoolState,
+import {
   UniswapV3Pool,
+  UniswapV3PoolConfig,
+  isValidAddress,
+  normalizeAddress,
+  stateToJSON,
+} from '@midcurve/shared';
+import type {
+  UniswapV3PoolRow,
+  UniswapV3PoolState,
+  Erc20TokenRow,
 } from '@midcurve/shared';
 import type {
   UniswapV3PoolDiscoverInput,
-  CreatePoolInput,
-  UpdatePoolInput,
+  CreateUniswapV3PoolInput,
+  UpdateUniswapV3PoolInput,
 } from '../types/pool/pool-input.js';
-import {
-  toPoolState,
-  toPoolStateDB,
-  type UniswapV3PoolStateDB,
-} from '../types/uniswapv3/pool-db.js';
 import { PoolService } from './pool-service.js';
-import {
-  isValidAddress,
-  normalizeAddress,
-} from '@midcurve/shared';
+import type { PoolDbResult } from './pool-service.js';
 import {
   readPoolConfig,
   readPoolState,
@@ -35,7 +36,6 @@ import {
 import { EvmConfig } from '../../config/evm.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
 import { log } from '../../logging/index.js';
-import type { Erc20Token } from '@midcurve/shared';
 
 /**
  * Dependencies for UniswapV3PoolService
@@ -65,9 +65,11 @@ export interface UniswapV3PoolServiceDependencies {
  * UniswapV3PoolService
  *
  * Provides pool management for Uniswap V3 concentrated liquidity pools.
- * Implements serialization methods for Uniswap V3-specific config and state types.
+ * Returns UniswapV3Pool class instances for type-safe config/state access.
  */
-export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
+export class UniswapV3PoolService extends PoolService {
+  protected readonly protocol = 'uniswapv3' as const;
+
   private readonly _evmConfig: EvmConfig;
   private readonly _erc20TokenService: Erc20TokenService;
 
@@ -102,84 +104,46 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
   }
 
   // ============================================================================
-  // ABSTRACT METHOD IMPLEMENTATIONS
+  // HELPER METHODS
   // ============================================================================
 
   /**
-   * Parse config from database JSON to application type
+   * Convert database result to UniswapV3Pool class instance.
    *
-   * For Uniswap V3, config contains only primitive types (no bigint),
-   * so this is essentially a pass-through with type casting.
+   * Uses UniswapV3Pool.fromDBWithTokens() which handles:
+   * - Config deserialization via UniswapV3PoolConfig.fromJSON()
+   * - State deserialization via stateFromJSON()
+   * - Token conversion via Erc20Token.fromDB()
    *
-   * @param configDB - Config object from database (JSON)
-   * @returns Parsed Uniswap V3 config
+   * @param dbResult - Raw database result from Prisma (with included tokens)
+   * @returns UniswapV3Pool class instance
    */
-  parseConfig(configDB: unknown): UniswapV3PoolConfig {
-    const db = configDB as {
-      chainId: number;
-      address: string;
-      token0: string;
-      token1: string;
-      feeBps: number;
-      tickSpacing: number;
-    };
+  private mapToUniswapV3Pool(dbResult: PoolDbResult): UniswapV3Pool {
+    // UniswapV3Pool.fromDBWithTokens expects token relations to be included
+    if (!dbResult.token0 || !dbResult.token1) {
+      throw new Error(
+        'UniswapV3PoolService.mapToUniswapV3Pool requires token0 and token1 to be included'
+      );
+    }
 
-    return {
-      chainId: db.chainId,
-      address: db.address,
-      token0: db.token0,
-      token1: db.token1,
-      feeBps: db.feeBps,
-      tickSpacing: db.tickSpacing,
-    };
-  }
-
-  /**
-   * Serialize config from application type to database JSON
-   *
-   * For Uniswap V3, config contains only primitive types (no bigint),
-   * so this is essentially a pass-through.
-   *
-   * @param config - Application config
-   * @returns Serialized config for database storage (JSON-serializable)
-   */
-  serializeConfig(config: UniswapV3PoolConfig): unknown {
-    return {
-      chainId: config.chainId,
-      address: config.address,
-      token0: config.token0,
-      token1: config.token1,
-      feeBps: config.feeBps,
-      tickSpacing: config.tickSpacing,
-    };
-  }
-
-  /**
-   * Parse state from database JSON to application type
-   *
-   * Converts string values to bigint for Uniswap V3 state fields.
-   *
-   * @param stateDB - State object from database (JSON with string values)
-   * @returns Parsed state with native bigint values
-   */
-  parseState(stateDB: unknown): UniswapV3PoolState {
-    return toPoolState(stateDB as UniswapV3PoolStateDB);
-  }
-
-  /**
-   * Serialize state from application type to database JSON
-   *
-   * Converts bigint values to strings for database storage.
-   *
-   * @param state - Application state with native bigint values
-   * @returns Serialized state for database storage
-   */
-  serializeState(state: UniswapV3PoolState): unknown {
-    return toPoolStateDB(state);
+    return UniswapV3Pool.fromDBWithTokens({
+      id: dbResult.id,
+      protocol: 'uniswapv3',
+      poolType: dbResult.poolType,
+      token0Id: dbResult.token0Id,
+      token1Id: dbResult.token1Id,
+      feeBps: dbResult.feeBps,
+      config: dbResult.config as Record<string, unknown>,
+      state: dbResult.state as Record<string, unknown>,
+      createdAt: dbResult.createdAt,
+      updatedAt: dbResult.updatedAt,
+      token0: dbResult.token0 as Erc20TokenRow,
+      token1: dbResult.token1 as Erc20TokenRow,
+    } as UniswapV3PoolRow);
   }
 
   // ============================================================================
-  // ABSTRACT METHOD IMPLEMENTATION - DISCOVERY
+  // DISCOVERY
   // ============================================================================
 
   /**
@@ -205,7 +169,7 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
    * @throws Error if chain ID is not supported
    * @throws PoolConfigError if contract doesn't implement Uniswap V3 pool interface
    */
-  override async discover(
+  async discover(
     params: UniswapV3PoolDiscoverInput
   ): Promise<UniswapV3Pool> {
     const { poolAddress, chainId } = params;
@@ -399,16 +363,16 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
   }
 
   // ============================================================================
-  // CRUD OPERATIONS OVERRIDES
+  // CRUD OPERATIONS
   // ============================================================================
 
   /**
    * Create a new Uniswap V3 pool
    *
-   * Overrides base implementation to add:
+   * Adds:
    * - Address validation and normalization (pool address in config)
    * - Token address validation and normalization (token0, token1 in config)
-   * - Populate full Token<'erc20'> objects in the result
+   * - Returns UniswapV3Pool class instance
    *
    * Note: This is a manual creation helper. For creating pools from on-chain data,
    * use discover() which handles token discovery and pool state fetching.
@@ -417,8 +381,8 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
    * @returns The created pool with full Token objects
    * @throws Error if address format is invalid
    */
-  override async create(
-    input: CreatePoolInput<'uniswapv3'>
+  async create(
+    input: CreateUniswapV3PoolInput
   ): Promise<UniswapV3Pool> {
     log.methodEntry(this.logger, 'create', {
       address: input.config.address,
@@ -454,37 +418,51 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
         throw error;
       }
 
-      // Normalize addresses
-      const normalizedInput: CreatePoolInput<'uniswapv3'> = {
-        ...input,
-        config: {
-          ...input.config,
-          address: normalizeAddress(input.config.address),
-          token0: normalizeAddress(input.config.token0),
-          token1: normalizeAddress(input.config.token1),
-        },
+      // Create config class for serialization with normalized addresses
+      const configData = {
+        ...input.config,
+        address: normalizeAddress(input.config.address),
+        token0: normalizeAddress(input.config.token0),
+        token1: normalizeAddress(input.config.token1),
       };
+      const config = new UniswapV3PoolConfig(configData);
 
-      // Call base implementation
-      await super.create(normalizedInput);
+      // Serialize state
+      const stateDB = stateToJSON(input.state);
 
-      // Re-fetch with full Token objects
-      // We need to find by address+chain since we don't have the ID yet from base.create()
-      const created = await this.findByAddressAndChain(
-        normalizedInput.config.address,
-        normalizedInput.config.chainId
+      log.dbOperation(this.logger, 'create', 'Pool', {
+        protocol: input.protocol,
+        poolType: input.poolType,
+      });
+
+      const result = await this.prisma.pool.create({
+        data: {
+          protocol: input.protocol,
+          poolType: input.poolType,
+          token0Id: input.token0Id,
+          token1Id: input.token1Id,
+          feeBps: input.feeBps,
+          config: config.toJSON() as object,
+          state: stateDB as object,
+        },
+        include: {
+          token0: true,
+          token1: true,
+        },
+      });
+
+      const pool = this.mapToUniswapV3Pool(result);
+
+      this.logger.info(
+        {
+          id: pool.id,
+          protocol: pool.protocol,
+          poolType: pool.poolType,
+        },
+        'Pool created'
       );
-
-      if (!created) {
-        const error = new Error(
-          `Pool not found after creation: ${normalizedInput.config.address}`
-        );
-        log.methodError(this.logger, 'create', error, { input });
-        throw error;
-      }
-
-      log.methodExit(this.logger, 'create', { id: created.id });
-      return created;
+      log.methodExit(this.logger, 'create', { id: pool.id });
+      return pool;
     } catch (error) {
       // Only log if not already logged
       if (!(error instanceof Error && error.message.includes('Invalid'))) {
@@ -497,9 +475,9 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
   /**
    * Find pool by ID
    *
-   * Overrides base implementation to:
-   * - Filter by protocol type (returns null if not uniswapv3)
-   * - Populate full Token<'erc20'> objects
+   * Returns null if:
+   * - Pool not found
+   * - Pool is not uniswapv3 protocol
    *
    * @param id - Pool ID
    * @returns Pool if found and is uniswapv3 protocol, null otherwise
@@ -534,7 +512,7 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
       }
 
       // Map to UniswapV3Pool with full Token objects
-      const pool = this.mapDbResultToPool(result);
+      const pool = this.mapToUniswapV3Pool(result);
 
       log.methodExit(this.logger, 'findById', { id, found: true });
       return pool;
@@ -547,70 +525,113 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
   /**
    * Update pool
    *
-   * Overrides base implementation to add address normalization and
-   * populate full Token objects in the result.
+   * Handles address normalization and returns UniswapV3Pool class instance.
    *
    * @param id - Pool ID
    * @param input - Update input with optional fields
    * @returns Updated pool with full Token objects
    * @throws Error if pool not found or not uniswapv3 protocol
    */
-  override async update(
+  async update(
     id: string,
-    input: UpdatePoolInput<'uniswapv3'>
+    input: UpdateUniswapV3PoolInput
   ): Promise<UniswapV3Pool> {
     log.methodEntry(this.logger, 'update', { id, input });
 
     try {
-      // Normalize address in config if provided
-      if (input.config?.address) {
-        if (!isValidAddress(input.config.address)) {
-          const error = new Error(
-            `Invalid pool address format: ${input.config.address}`
-          );
-          log.methodError(this.logger, 'update', error, { id, input });
+      // Build update data
+      const data: Record<string, unknown> = {};
+
+      if (input.feeBps !== undefined) {
+        data.feeBps = input.feeBps;
+      }
+
+      // Handle config update with address normalization
+      if (input.config !== undefined) {
+        // Get existing pool to merge with partial config
+        const existing = await this.findById(id);
+        if (!existing) {
+          const error = new Error(`Pool ${id} not found`);
+          log.methodError(this.logger, 'update', error, { id });
           throw error;
         }
-        input.config.address = normalizeAddress(input.config.address);
+
+        const mergedConfig = {
+          ...existing.typedConfig.toJSON(),
+          ...input.config,
+        };
+
+        // Normalize addresses if provided
+        if (input.config.address) {
+          if (!isValidAddress(input.config.address)) {
+            const error = new Error(
+              `Invalid pool address format: ${input.config.address}`
+            );
+            log.methodError(this.logger, 'update', error, { id, input });
+            throw error;
+          }
+          mergedConfig.address = normalizeAddress(input.config.address);
+        }
+
+        if (input.config.token0) {
+          if (!isValidAddress(input.config.token0)) {
+            const error = new Error(
+              `Invalid token0 address format: ${input.config.token0}`
+            );
+            log.methodError(this.logger, 'update', error, { id, input });
+            throw error;
+          }
+          mergedConfig.token0 = normalizeAddress(input.config.token0);
+        }
+
+        if (input.config.token1) {
+          if (!isValidAddress(input.config.token1)) {
+            const error = new Error(
+              `Invalid token1 address format: ${input.config.token1}`
+            );
+            log.methodError(this.logger, 'update', error, { id, input });
+            throw error;
+          }
+          mergedConfig.token1 = normalizeAddress(input.config.token1);
+        }
+
+        const config = new UniswapV3PoolConfig(mergedConfig);
+        data.config = config.toJSON() as object;
       }
 
-      // Normalize token addresses in config if provided
-      if (input.config?.token0) {
-        if (!isValidAddress(input.config.token0)) {
-          const error = new Error(
-            `Invalid token0 address format: ${input.config.token0}`
-          );
-          log.methodError(this.logger, 'update', error, { id, input });
+      // Handle state update
+      if (input.state !== undefined) {
+        // Get existing pool to merge with partial state
+        const existing = await this.findById(id);
+        if (!existing) {
+          const error = new Error(`Pool ${id} not found`);
+          log.methodError(this.logger, 'update', error, { id });
           throw error;
         }
-        input.config.token0 = normalizeAddress(input.config.token0);
+
+        const mergedState: UniswapV3PoolState = {
+          ...existing.typedState,
+          ...input.state,
+        };
+
+        data.state = stateToJSON(mergedState) as object;
       }
 
-      if (input.config?.token1) {
-        if (!isValidAddress(input.config.token1)) {
-          const error = new Error(
-            `Invalid token1 address format: ${input.config.token1}`
-          );
-          log.methodError(this.logger, 'update', error, { id, input });
-          throw error;
-        }
-        input.config.token1 = normalizeAddress(input.config.token1);
-      }
+      log.dbOperation(this.logger, 'update', 'Pool', { id, fields: Object.keys(data) });
 
-      // Call base implementation
-      await super.update(id, input);
+      const result = await this.prisma.pool.update({
+        where: { id },
+        data,
+        include: {
+          token0: true,
+          token1: true,
+        },
+      });
 
-      // Re-fetch with full Token objects
-      const updated = await this.findById(id);
-
-      if (!updated) {
-        const error = new Error(`Pool ${id} not found after update`);
-        log.methodError(this.logger, 'update', error, { id });
-        throw error;
-      }
+      const pool = this.mapToUniswapV3Pool(result);
 
       log.methodExit(this.logger, 'update', { id });
-      return updated;
+      return pool;
     } catch (error) {
       // Only log if not already logged
       if (!(error instanceof Error && error.message.includes('Invalid'))) {
@@ -623,10 +644,8 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
   /**
    * Delete pool
    *
-   * Overrides base implementation to:
-   * - Verify protocol type (error if pool exists but is not uniswapv3)
-   * - Check for dependent positions (prevent deletion if positions exist)
-   * - Silently succeed if pool doesn't exist (idempotent)
+   * Verifies protocol type and checks for dependent positions.
+   * Silently succeeds if pool doesn't exist (idempotent).
    *
    * @param id - Pool ID
    * @returns Promise that resolves when deletion is complete
@@ -718,42 +737,42 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
       this.logger.debug(
         {
           id,
-          address: existing.config.address,
-          chainId: existing.config.chainId,
+          address: existing.address,
+          chainId: existing.chainId,
         },
         'Refreshing pool state from on-chain data'
       );
 
       // 2. Verify chain is supported
-      if (!this.evmConfig.isChainSupported(existing.config.chainId)) {
+      if (!this.evmConfig.isChainSupported(existing.chainId)) {
         const error = new Error(
-          `Chain ${existing.config.chainId} is not supported or not configured. Please configure RPC_URL_* environment variable.`
+          `Chain ${existing.chainId} is not supported or not configured. Please configure RPC_URL_* environment variable.`
         );
-        log.methodError(this.logger, 'refresh', error, { id, chainId: existing.config.chainId });
+        log.methodError(this.logger, 'refresh', error, { id, chainId: existing.chainId });
         throw error;
       }
 
       // 3. Read fresh state from on-chain
-      const client = this.evmConfig.getPublicClient(existing.config.chainId);
+      const client = this.evmConfig.getPublicClient(existing.chainId);
 
       this.logger.debug(
-        { id, address: existing.config.address, chainId: existing.config.chainId },
+        { id, address: existing.address, chainId: existing.chainId },
         'Reading fresh pool state from contract'
       );
 
       let freshState: UniswapV3PoolState;
       try {
-        freshState = await readPoolState(client, existing.config.address);
+        freshState = await readPoolState(client, existing.address);
       } catch (error) {
         const wrappedError = new Error(
-          `Failed to read pool state from contract at ${existing.config.address} on chain ${existing.config.chainId}: ${
+          `Failed to read pool state from contract at ${existing.address} on chain ${existing.chainId}: ${
             error instanceof Error ? error.message : String(error)
           }`
         );
         log.methodError(this.logger, 'refresh', wrappedError, {
           id,
-          address: existing.config.address,
-          chainId: existing.config.chainId,
+          address: existing.address,
+          chainId: existing.chainId,
         });
         throw wrappedError;
       }
@@ -761,8 +780,8 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
       this.logger.info(
         {
           id,
-          address: existing.config.address,
-          chainId: existing.config.chainId,
+          address: existing.address,
+          chainId: existing.chainId,
           sqrtPriceX96: freshState.sqrtPriceX96.toString(),
           liquidity: freshState.liquidity.toString(),
           currentTick: freshState.currentTick,
@@ -778,8 +797,8 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
       this.logger.info(
         {
           id,
-          address: existing.config.address,
-          chainId: existing.config.chainId,
+          address: existing.address,
+          chainId: existing.chainId,
         },
         'Pool state refreshed successfully'
       );
@@ -801,55 +820,8 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
   }
 
   // ============================================================================
-  // HELPER METHODS
+  // QUERY METHODS
   // ============================================================================
-
-  /**
-   * Map database result to UniswapV3Pool
-   *
-   * Converts database Pool record with included Token relations
-   * to a fully-typed UniswapV3Pool with Erc20Token objects.
-   *
-   * @param result - Database result with token0 and token1 included
-   * @returns Fully-typed UniswapV3Pool
-   */
-  private mapDbResultToPool(result: any): UniswapV3Pool {
-    const config = this.parseConfig(result.config);
-    const state = this.parseState(result.state);
-
-    return {
-      id: result.id,
-      createdAt: result.createdAt,
-      updatedAt: result.updatedAt,
-      protocol: 'uniswapv3',
-      poolType: 'CL_TICKS',
-      token0: this.mapDbTokenToErc20Token(result.token0),
-      token1: this.mapDbTokenToErc20Token(result.token1),
-      feeBps: config.feeBps,
-      config,
-      state,
-    };
-  }
-
-  /**
-   * Map database token to Erc20Token
-   *
-   * @param dbToken - Database Token record
-   * @returns Fully-typed Erc20Token
-   */
-  private mapDbTokenToErc20Token(dbToken: any): Erc20Token {
-    return {
-      ...dbToken,
-      tokenType: 'erc20',
-      logoUrl: dbToken.logoUrl ?? undefined,
-      coingeckoId: dbToken.coingeckoId ?? undefined,
-      marketCap: dbToken.marketCap ?? undefined,
-      config: {
-        address: (dbToken.config as { address: string }).address,
-        chainId: (dbToken.config as { chainId: number }).chainId,
-      },
-    };
-  }
 
   /**
    * Get current pool price from on-chain data
@@ -983,13 +955,14 @@ export class UniswapV3PoolService extends PoolService<'uniswapv3'> {
       return null;
     }
 
+    // Map to UniswapV3Pool
+    const pool = this.mapToUniswapV3Pool(result);
+
     // Verify chainId matches (additional safeguard)
-    const config = this.parseConfig(result.config);
-    if (config.chainId !== chainId) {
+    if (pool.chainId !== chainId) {
       return null;
     }
 
-    // Map to UniswapV3Pool with full Token objects
-    return this.mapDbResultToPool(result);
+    return pool;
   }
 }

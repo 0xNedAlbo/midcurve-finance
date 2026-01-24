@@ -2,30 +2,30 @@
  * Abstract Position Ledger Service
  *
  * Base class for protocol-specific position ledger services.
- * Handles serialization/deserialization of config and state between
- * database JSON format and application types.
  *
  * Position ledger events are immutable and form a linked list (via previousId).
  * Events track PnL, cost basis, and cash flows for concentrated liquidity positions.
  *
  * Protocol implementations (e.g., UniswapV3PositionLedgerService) must implement:
- * - Config/State serialization methods
  * - Input hash generation
  * - Discovery methods (fetching events from blockchain)
+ *
+ * Uses the OOP inheritance pattern from @midcurve/shared:
+ * - PositionLedgerEventInterface for polymorphic handling
+ * - PositionLedgerEventFactory for creating instances from database rows
+ * - Concrete classes (UniswapV3PositionLedgerEvent) for type-safe config/state access
  */
 
 import { PrismaClient } from '@midcurve/database';
 import type {
-  PositionLedgerEvent,
-  PositionLedgerEventConfigMap,
-  PositionLedgerEventStateMap,
+  PositionLedgerEventInterface,
+  LedgerEventProtocol,
+  PositionLedgerEventRow,
   EventType,
   Reward,
 } from '@midcurve/shared';
-import type {
-  CreatePositionLedgerEventInput,
-  PositionLedgerEventDiscoverInput,
-} from '../types/position-ledger/position-ledger-event-input.js';
+import { PositionLedgerEventFactory } from '@midcurve/shared';
+import type { CreateAnyLedgerEventInput } from '../types/position-ledger/position-ledger-event-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { PositionAprService } from '../position-apr/position-apr-service.js';
@@ -80,16 +80,18 @@ export interface LedgerEventDbResult {
  *
  * Provides base functionality for position ledger event management.
  * Protocol-specific services must extend this class and implement
- * serialization and discovery methods.
- *
- * @template P - Protocol key from PositionLedgerEventConfigMap ('uniswapv3', etc.)
+ * discovery methods.
  */
-export abstract class PositionLedgerService<
-  P extends keyof PositionLedgerEventConfigMap,
-> {
+export abstract class PositionLedgerService {
   protected readonly _prisma: PrismaClient;
   protected readonly _aprService: PositionAprService;
   protected readonly logger: ServiceLogger;
+
+  /**
+   * Protocol identifier for this service
+   * Concrete classes must define this (e.g., 'uniswapv3')
+   */
+  protected abstract readonly protocol: LedgerEventProtocol;
 
   /**
    * Creates a new PositionLedgerService instance
@@ -119,61 +121,8 @@ export abstract class PositionLedgerService<
   }
 
   // ============================================================================
-  // ABSTRACT SERIALIZATION METHODS
+  // ABSTRACT METHODS
   // Protocol implementations MUST implement these methods
-  // ============================================================================
-
-  /**
-   * Parse config from database JSON to application type
-   *
-   * Converts serialized values (bigint as strings) to native types.
-   *
-   * @param configDB - Config object from database (JSON)
-   * @returns Parsed config with native types
-   */
-  abstract parseConfig(
-    configDB: unknown
-  ): PositionLedgerEventConfigMap[P]['config'];
-
-  /**
-   * Serialize config from application type to database JSON
-   *
-   * Converts native values (bigint) to serializable types (strings).
-   *
-   * @param config - Application config with native types
-   * @returns Serialized config for database storage
-   */
-  abstract serializeConfig(
-    config: PositionLedgerEventConfigMap[P]['config']
-  ): unknown;
-
-  /**
-   * Parse state from database JSON to application type
-   *
-   * Converts serialized values (bigint as strings) to native types.
-   *
-   * @param stateDB - State object from database (JSON)
-   * @returns Parsed state with native types
-   */
-  abstract parseState(
-    stateDB: unknown
-  ): PositionLedgerEventStateMap[P]['state'];
-
-  /**
-   * Serialize state from application type to database JSON
-   *
-   * Converts native values (bigint) to serializable types (strings).
-   *
-   * @param state - Application state with native types
-   * @returns Serialized state for database storage
-   */
-  abstract serializeState(
-    state: PositionLedgerEventStateMap[P]['state']
-  ): unknown;
-
-  // ============================================================================
-  // ABSTRACT HASH GENERATION
-  // Protocol implementations MUST implement this method
   // ============================================================================
 
   /**
@@ -185,7 +134,7 @@ export abstract class PositionLedgerService<
    * @param input - Event creation input
    * @returns Unique hash string (e.g., MD5 of coordinates)
    */
-  abstract generateInputHash(input: CreatePositionLedgerEventInput<P>): string;
+  abstract generateInputHash(input: CreateAnyLedgerEventInput): string;
 
   // ============================================================================
   // ABSTRACT DISCOVERY METHODS
@@ -213,7 +162,7 @@ export abstract class PositionLedgerService<
    */
   abstract discoverAllEvents(
     positionId: string
-  ): Promise<PositionLedgerEvent<P>[]>;
+  ): Promise<PositionLedgerEventInterface[]>;
 
   /**
    * Discover and add a single event to position ledger
@@ -229,31 +178,31 @@ export abstract class PositionLedgerService<
    * 5. Return complete history (descending order by timestamp)
    *
    * @param positionId - Position database ID
-   * @param input - Discovery input with raw event data
+   * @param input - Discovery input with raw event data (protocol-specific)
    * @returns Complete event history, sorted descending by timestamp (newest first)
    * @throws Error if event cannot be added or discovery fails
    */
   abstract discoverEvent(
     positionId: string,
-    input: PositionLedgerEventDiscoverInput<P>
-  ): Promise<PositionLedgerEvent<P>[]>;
+    input: unknown
+  ): Promise<PositionLedgerEventInterface[]>;
 
   // ============================================================================
   // PROTECTED HELPERS
   // ============================================================================
 
   /**
-   * Map database result to PositionLedgerEvent type
+   * Map database result to PositionLedgerEventInterface using factory
    *
-   * Calls parseConfig/parseState for deserialization.
-   * Converts string values to bigint for financial fields.
+   * Converts string values to bigint for financial fields and uses
+   * PositionLedgerEventFactory to create protocol-specific class.
    *
-   * @param dbResult - Raw database result
-   * @returns PositionLedgerEvent with native types
+   * @param dbResult - Raw database result from Prisma
+   * @returns PositionLedgerEventInterface instance
    */
   protected mapToLedgerEvent(
     dbResult: LedgerEventDbResult
-  ): PositionLedgerEvent<P> {
+  ): PositionLedgerEventInterface {
     // Parse rewards array
     const rewardsDB = dbResult.rewards as Array<{
       tokenId: string;
@@ -261,18 +210,19 @@ export abstract class PositionLedgerService<
       tokenValue: string;
     }>;
 
-    const rewards: Reward[] = rewardsDB.map((r) => ({
+    const rewards: Reward[] = rewardsDB.map((r: { tokenId: string; tokenAmount: string; tokenValue: string }) => ({
       tokenId: r.tokenId,
       tokenAmount: BigInt(r.tokenAmount),
       tokenValue: BigInt(r.tokenValue),
     }));
 
-    return {
+    // Convert string bigint fields to native bigint
+    const rowWithBigInt: PositionLedgerEventRow = {
       id: dbResult.id,
       createdAt: dbResult.createdAt,
       updatedAt: dbResult.updatedAt,
       positionId: dbResult.positionId,
-      protocol: dbResult.protocol as P,
+      protocol: dbResult.protocol,
       previousId: dbResult.previousId,
       timestamp: dbResult.timestamp,
       eventType: dbResult.eventType as EventType,
@@ -286,9 +236,12 @@ export abstract class PositionLedgerService<
       costBasisAfter: BigInt(dbResult.costBasisAfter),
       deltaPnl: BigInt(dbResult.deltaPnl),
       pnlAfter: BigInt(dbResult.pnlAfter),
-      config: this.parseConfig(dbResult.config),
-      state: this.parseState(dbResult.state),
+      config: dbResult.config as Record<string, unknown>,
+      state: dbResult.state as Record<string, unknown>,
     };
+
+    // Use factory to create protocol-specific event class
+    return PositionLedgerEventFactory.fromDB(rowWithBigInt);
   }
 
   /**
@@ -417,7 +370,7 @@ export abstract class PositionLedgerService<
    * @param positionId - Position database ID
    * @returns Array of events, sorted descending by timestamp
    */
-  async findAllItems(positionId: string): Promise<PositionLedgerEvent<P>[]> {
+  async findAllItems(positionId: string): Promise<PositionLedgerEventInterface[]> {
     log.methodEntry(this.logger, 'findAllItems', { positionId });
 
     try {
@@ -478,7 +431,7 @@ export abstract class PositionLedgerService<
    */
   async getMostRecentEvent(
     positionId: string
-  ): Promise<PositionLedgerEvent<P> | null> {
+  ): Promise<PositionLedgerEventInterface | null> {
     log.methodEntry(this.logger, 'getMostRecentEvent', { positionId });
 
     try {
@@ -524,8 +477,10 @@ export abstract class PositionLedgerService<
    */
   async addItem(
     positionId: string,
-    input: CreatePositionLedgerEventInput<P>
-  ): Promise<PositionLedgerEvent<P>[]> {
+    input: CreateAnyLedgerEventInput,
+    configDB: Record<string, unknown>,
+    stateDB: Record<string, unknown>
+  ): Promise<PositionLedgerEventInterface[]> {
     log.methodEntry(this.logger, 'addItem', {
       positionId,
       eventType: input.eventType,
@@ -561,10 +516,6 @@ export abstract class PositionLedgerService<
         // Return complete history without inserting duplicate
         return this.findAllItems(positionId);
       }
-
-      // Serialize config and state
-      const configDB = this.serializeConfig(input.config);
-      const stateDB = this.serializeState(input.state);
 
       // Serialize rewards
       const rewardsDB = input.rewards.map((r) => ({
