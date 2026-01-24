@@ -5,8 +5,7 @@
  * and refreshes its state from on-chain data.
  */
 
-import type { UniswapV3Position } from '@midcurve/shared';
-import type { BigIntToString } from '../../common/index.js';
+import type { UniswapV3PositionResponse } from './typed-response.js';
 import type { PnLCurveResponseData } from '../common/pnl-curve.js';
 import { z } from 'zod';
 
@@ -27,7 +26,7 @@ export interface GetUniswapV3PositionParams {
  * The position state is refreshed from on-chain data before being returned.
  * Includes PnL curve data with order effects (SL/TP) for visualization.
  */
-export type GetUniswapV3PositionResponse = BigIntToString<UniswapV3Position> & {
+export type GetUniswapV3PositionResponse = UniswapV3PositionResponse & {
   /** PnL curve data with order effects for visualization */
   pnlCurve?: PnLCurveResponseData;
 };

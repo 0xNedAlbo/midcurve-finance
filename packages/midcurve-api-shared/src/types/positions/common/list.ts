@@ -5,8 +5,8 @@
  * filtering, and sorting.
  */
 
-import type { BigIntToString, PaginatedResponse } from '../../common/index.js';
-import type { AnyPosition } from '@midcurve/shared';
+import type { PaginatedResponse } from '../../common/index.js';
+import type { UniswapV3PositionResponse } from '../uniswapv3/typed-response.js';
 import type { AprPeriodData } from './apr.js';
 import type { PnLCurveResponseData } from './pnl-curve.js';
 import { z } from 'zod';
@@ -88,14 +88,16 @@ export interface ListPositionsParams {
 /**
  * Position data for API response
  *
- * Based on AnyPosition from @midcurve/shared with:
- * - bigint fields converted to strings (for JSON serialization)
+ * Currently only supports UniswapV3. When additional protocols are added,
+ * this should become a discriminated union:
+ * type ListPositionData = UniswapV3PositionResponse | OrcaPositionResponse;
+ *
+ * All fields are JSON-safe:
+ * - bigint fields converted to strings
  * - Date fields converted to ISO 8601 strings
- * - Fully nested pool and token objects
- * - Config and state as unknown (not protocol-specific)
- * - APR periods array (for accurate APR calculation in UI)
+ * - Fully nested pool and token objects with typed config/state
  */
-export type ListPositionData = BigIntToString<AnyPosition> & {
+export type ListPositionData = UniswapV3PositionResponse & {
   /**
    * APR periods for the position (sorted descending by startTimestamp)
    * Used for accurate APR calculation in UI components

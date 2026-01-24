@@ -9,8 +9,8 @@
  * Uses shared types from @midcurve/shared with bigint → string conversion for JSON.
  */
 
-import type { ApiResponse, BigIntToString } from '../../common/index.js';
-import type { UniswapV3Position } from '@midcurve/shared';
+import type { ApiResponse } from '../../common/index.js';
+import type { UniswapV3PositionResponse } from './typed-response.js';
 import { z } from 'zod';
 
 /**
@@ -139,12 +139,10 @@ export interface UpdateUniswapV3PositionRequest {
 /**
  * Position data for API response
  *
- * Based on UniswapV3Position from @midcurve/shared with:
- * - bigint fields converted to strings (for JSON serialization)
- * - Date fields converted to ISO 8601 strings
- * - Fully nested pool and token objects
+ * Uses the strongly-typed UniswapV3PositionResponse for full type safety
+ * with typed config/state fields.
  */
-export type UpdateUniswapV3PositionData = BigIntToString<UniswapV3Position>;
+export type UpdateUniswapV3PositionData = UniswapV3PositionResponse;
 
 /**
  * PATCH /api/v1/positions/uniswapv3/{chainId}/{nftId} - Response

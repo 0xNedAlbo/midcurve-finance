@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { PencilLine, PencilOff, TrendingUp } from "lucide-react";
-import type { UniswapV3Pool, Erc20Token } from "@midcurve/shared";
+import type { UniswapV3PoolResponse, Erc20TokenResponse } from "@midcurve/api-shared";
 import {
   tickToPrice,
   priceToTick,
@@ -21,9 +21,9 @@ interface SliderBounds {
 }
 
 interface PositionRangeConfigProps {
-  pool: UniswapV3Pool;
-  baseToken: Erc20Token;
-  quoteToken: Erc20Token;
+  pool: UniswapV3PoolResponse;
+  baseToken: Erc20TokenResponse;
+  quoteToken: Erc20TokenResponse;
   tickLower: number;
   tickUpper: number;
   liquidity?: bigint;

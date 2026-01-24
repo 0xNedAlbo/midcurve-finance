@@ -1,11 +1,11 @@
 /**
  * Position Import Endpoint Types
  *
- * Uses shared types from @midcurve/shared with bigint → string conversion for JSON.
+ * Uses typed response types for full type safety in UI components.
  */
 
-import type { ApiResponse, BigIntToString } from '../../common/index.js';
-import type { UniswapV3Position } from '@midcurve/shared';
+import type { ApiResponse } from '../../common/index.js';
+import type { UniswapV3PositionResponse } from './typed-response.js';
 import { z } from 'zod';
 
 /**
@@ -50,7 +50,7 @@ export interface ImportUniswapV3PositionRequest {
  *   ...
  * }
  */
-export type ImportUniswapV3PositionData = BigIntToString<UniswapV3Position>;
+export type ImportUniswapV3PositionData = UniswapV3PositionResponse;
 
 /**
  * POST /api/v1/positions/uniswapv3/import - Response

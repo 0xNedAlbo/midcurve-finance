@@ -647,7 +647,7 @@ export async function PUT(
       });
 
       // 6. Serialize bigints to strings for JSON
-      const serializedPosition = serializeBigInt(position) as CreateUniswapV3PositionData;
+      const serializedPosition = serializeBigInt(position) as unknown as CreateUniswapV3PositionData;
 
       const response = createSuccessResponse(serializedPosition);
 
@@ -951,7 +951,7 @@ export async function PATCH(
       // 6. Serialize and return response
       const serializedPosition = serializeBigInt(
         updatedPosition
-      ) as UpdateUniswapV3PositionData;
+      ) as unknown as UpdateUniswapV3PositionData;
 
       const response = createSuccessResponse(serializedPosition);
 

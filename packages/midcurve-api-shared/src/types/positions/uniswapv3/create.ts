@@ -6,11 +6,11 @@
  * Allows users to manually create a position from their transaction receipt
  * after sending an INCREASE_LIQUIDITY transaction on-chain.
  *
- * Uses shared types from @midcurve/shared with bigint → string conversion for JSON.
+ * Uses typed response types for full type safety in UI components.
  */
 
-import type { ApiResponse, BigIntToString } from '../../common/index.js';
-import type { UniswapV3Position } from '@midcurve/shared';
+import type { ApiResponse } from '../../common/index.js';
+import type { UniswapV3PositionResponse } from './typed-response.js';
 import { z } from 'zod';
 
 /**
@@ -149,7 +149,7 @@ export interface CreateUniswapV3PositionRequest {
  * - Date fields converted to ISO 8601 strings
  * - Fully nested pool and token objects (no separate ID fields)
  */
-export type CreateUniswapV3PositionData = BigIntToString<UniswapV3Position>;
+export type CreateUniswapV3PositionData = UniswapV3PositionResponse;
 
 /**
  * PUT /api/v1/positions/uniswapv3/{chainId}/{nftId} - Response

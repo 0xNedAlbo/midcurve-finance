@@ -11,7 +11,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import type { PoolDiscoveryResult } from '@midcurve/shared';
+import type { UniswapV3PoolDiscoveryResultResponse } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { getChainId } from '@/config/chains';
 import { apiClient } from '@/lib/api-client';
@@ -47,7 +47,7 @@ export interface UsePoolDiscoveryReturn {
    * Array of discovered pools (sorted by TVL descending)
    * Only includes pools that exist (already created on-chain)
    */
-  pools: PoolDiscoveryResult<'uniswapv3'>[] | undefined;
+  pools: UniswapV3PoolDiscoveryResultResponse[] | undefined;
 
   /**
    * Whether the query is currently loading
@@ -101,7 +101,7 @@ export function usePoolDiscovery(
   const chainId = getChainId(chain);
   const queryKey = ['pools', 'discover', 'uniswapv3', chainId, tokenA, tokenB];
 
-  const queryFn = async (): Promise<PoolDiscoveryResult<'uniswapv3'>[]> => {
+  const queryFn = async (): Promise<UniswapV3PoolDiscoveryResultResponse[]> => {
     if (!tokenA || !tokenB) {
       throw new Error('Both token addresses are required');
     }
@@ -112,7 +112,7 @@ export function usePoolDiscovery(
       tokenB,
     });
 
-    const response = await apiClient.get<PoolDiscoveryResult<'uniswapv3'>[]>(
+    const response = await apiClient.get<UniswapV3PoolDiscoveryResultResponse[]>(
       `/api/v1/pools/uniswapv3/discover?${params.toString()}`
     );
 
@@ -164,8 +164,8 @@ export function usePoolDiscovery(
  * ```
  */
 export function getRecommendedPool(
-  pools: PoolDiscoveryResult<'uniswapv3'>[] | undefined
-): PoolDiscoveryResult<'uniswapv3'> | null {
+  pools: UniswapV3PoolDiscoveryResultResponse[] | undefined
+): UniswapV3PoolDiscoveryResultResponse | null {
   if (!pools || pools.length === 0) {
     return null;
   }

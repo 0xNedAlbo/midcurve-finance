@@ -5,11 +5,11 @@ import { useAccount } from "wagmi";
 import { formatCompactValue } from "@/lib/fraction-format";
 import type { EvmChainSlug } from "@/config/chains";
 import { getChainId } from "@/config/chains";
-import type { Erc20Token } from "@midcurve/shared";
+import type { Erc20TokenResponse } from "@midcurve/api-shared";
 import { useErc20TokenBalance } from "@/hooks/tokens/erc20/useErc20TokenBalance";
 
 interface TokenAmountInputProps {
-  token: Erc20Token;
+  token: Erc20TokenResponse;
   value: string;
   onChange: (value: string, valueBigInt: bigint) => void;
   onMaxClick?: () => void;

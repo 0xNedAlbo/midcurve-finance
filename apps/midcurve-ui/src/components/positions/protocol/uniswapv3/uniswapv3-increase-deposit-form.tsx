@@ -18,7 +18,7 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
 import { PositionSizeConfig } from '@/components/positions/wizard/uniswapv3/position-size-config';
 import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
-import type { Erc20Token, UniswapV3Pool } from '@midcurve/shared';
+import type { UniswapV3PoolResponse } from '@midcurve/api-shared';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 import { usePoolPrice } from '@/hooks/pools/usePoolPrice';
 import { WalletBalanceSection } from '@/components/positions/wizard/uniswapv3/shared/wallet-balance-section';
@@ -132,9 +132,9 @@ export function UniswapV3IncreaseDepositForm({
   const quoteBalance = quoteBalanceQuery.balanceBigInt || 0n;
 
   // Merge refreshed pool price into position pool (if available)
-  const currentPool: UniswapV3Pool = useMemo(() => {
+  const currentPool: UniswapV3PoolResponse = useMemo(() => {
     if (!refreshedSqrtPriceX96 || !refreshedCurrentTick) {
-      return position.pool as unknown as UniswapV3Pool;
+      return position.pool;
     }
 
     // Create updated pool with refreshed price data
@@ -142,10 +142,10 @@ export function UniswapV3IncreaseDepositForm({
       ...position.pool,
       state: {
         ...position.pool.state,
-        sqrtPriceX96: refreshedSqrtPriceX96,
+        sqrtPriceX96: refreshedSqrtPriceX96.toString(),
         currentTick: refreshedCurrentTick,
       },
-    } as unknown as UniswapV3Pool;
+    };
   }, [position.pool, refreshedSqrtPriceX96, refreshedCurrentTick]);
 
   // Calculate required token amounts from additional liquidity (MUST be called before any returns)
@@ -335,8 +335,8 @@ export function UniswapV3IncreaseDepositForm({
       <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg p-4">
         <PositionSizeConfig
           pool={currentPool}
-          baseToken={baseToken as unknown as Erc20Token}
-          quoteToken={quoteToken as unknown as Erc20Token}
+          baseToken={baseToken}
+          quoteToken={quoteToken}
           tickLower={config.tickLower}
           tickUpper={config.tickUpper}
           liquidity={additionalLiquidity}

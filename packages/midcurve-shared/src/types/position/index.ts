@@ -41,3 +41,12 @@ export {
   positionStateToJSON,
   positionStateFromJSON,
 } from './uniswapv3/index.js';
+
+// Import for use in type alias
+import type { UniswapV3Position as UniswapV3PositionType } from './uniswapv3/index.js';
+
+/**
+ * Union type for all position implementations.
+ * Extend this as new protocols are added (Orca, Raydium, etc.)
+ */
+export type AnyPosition = UniswapV3PositionType;

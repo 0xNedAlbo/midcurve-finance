@@ -9,3 +9,5 @@ export * from './get.js';
 export * from './update.js';
 export * from './delete.js';
 export * from './import.js';
+export * from './response-types.js';
+export * from './typed-response.js';

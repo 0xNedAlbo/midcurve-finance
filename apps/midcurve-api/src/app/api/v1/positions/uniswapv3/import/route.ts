@@ -115,7 +115,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       // 3. Serialize bigints to strings for JSON
       // The position object contains bigint values (currentValue, liquidity, etc.)
       // which cannot be directly serialized to JSON. We recursively convert them to strings.
-      const serializedPosition = serializeBigInt(position) as ImportUniswapV3PositionData;
+      const serializedPosition = serializeBigInt(position) as unknown as ImportUniswapV3PositionData;
 
       const response = createSuccessResponse(serializedPosition);
 

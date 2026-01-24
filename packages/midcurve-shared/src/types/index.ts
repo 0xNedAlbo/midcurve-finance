@@ -93,6 +93,7 @@ export type {
   UniswapV3PositionConfigJSON,
   UniswapV3PositionState,
   UniswapV3PositionStateJSON,
+  AnyPosition,
 } from './position/index.js';
 export {
   positionStateToJSON,

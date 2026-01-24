@@ -5,16 +5,16 @@ import { PencilLine, PencilOff, RefreshCw } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { TokenAmountInput } from "./shared/token-amount-input";
-import type { UniswapV3Pool, Erc20Token } from "@midcurve/shared";
+import type { UniswapV3PoolResponse, Erc20TokenResponse } from "@midcurve/api-shared";
 import { getTokenAmountsFromLiquidity } from "@midcurve/shared";
 import { formatCompactValue } from "@/lib/fraction-format";
 import type { EvmChainSlug } from "@/config/chains";
 import { usePositionSizeCalculation } from "@/hooks/positions/uniswapv3/wizard/usePositionSizeCalculation";
 
 interface PositionSizeConfigProps {
-  pool: UniswapV3Pool;
-  baseToken: Erc20Token;
-  quoteToken: Erc20Token;
+  pool: UniswapV3PoolResponse;
+  baseToken: Erc20TokenResponse;
+  quoteToken: Erc20TokenResponse;
   tickLower: number;
   tickUpper: number;
   liquidity: bigint; // Current liquidity value from parent/URL
@@ -52,7 +52,7 @@ export function PositionSizeConfig({
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isUserEditing, setIsUserEditing] = useState<boolean>(false);
   const [lastEditedField, setLastEditedField] = useState<"base" | "quote" | null>(null);
-  const [lastSqrtPriceX96, setLastSqrtPriceX96] = useState<bigint | null>(null);
+  const [lastSqrtPriceX96, setLastSqrtPriceX96] = useState<string | null>(null);
 
   // Use the position size calculation hook
   const positionCalculation = usePositionSizeCalculation({

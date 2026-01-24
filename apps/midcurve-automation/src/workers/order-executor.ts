@@ -6,7 +6,7 @@
  */
 
 import type { AutomationContractConfig } from '@midcurve/shared';
-import { formatCurrency, getTokenAmountsFromLiquidity } from '@midcurve/shared';
+import { formatCurrency, getTokenAmountsFromLiquidity, UniswapV3Position } from '@midcurve/shared';
 import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
 import {
   broadcastTransaction,
@@ -364,10 +364,12 @@ export class OrderExecutor {
 
     // Get full position data (needed for signer service + price formatting)
     const positionService = getPositionService();
-    const position = await positionService.findById(positionId);
-    if (!position) {
+    const positionData = await positionService.findById(positionId);
+    if (!positionData) {
       throw new Error(`Position not found: ${positionId}`);
     }
+    // Cast to UniswapV3Position for typed config/state access
+    const position = positionData as UniswapV3Position;
     const userId = position.userId;
 
     // Get quote token decimals for human-readable price formatting
@@ -375,8 +377,8 @@ export class OrderExecutor {
       ? position.pool.token0.decimals
       : position.pool.token1.decimals;
 
-    // Get nftId from position config
-    const nftId = position.config.nftId ? BigInt(position.config.nftId) : undefined;
+    // Get nftId from position config (using typedConfig for type safety)
+    const nftId = position.typedConfig.nftId ? BigInt(position.typedConfig.nftId) : undefined;
 
     // Declare preflight outside if block so it's accessible in swap params section
     let preflight: PreflightValidation | undefined;
@@ -396,7 +398,7 @@ export class OrderExecutor {
       preflight = await validatePositionForClose(
         chainId as SupportedChainId,
         nftId,
-        position.state.ownerAddress as `0x${string}`,
+        position.typedState.ownerAddress as `0x${string}`,
         contractAddress as `0x${string}`
       );
 
@@ -687,7 +689,7 @@ export class OrderExecutor {
           const simDiagPreflight = await validatePositionForClose(
             chainId as SupportedChainId,
             nftId,
-            position.state.ownerAddress as `0x${string}`,
+            position.typedState.ownerAddress as `0x${string}`,
             contractAddress as `0x${string}`
           );
 
@@ -822,7 +824,7 @@ export class OrderExecutor {
           const postRevertPreflight = await validatePositionForClose(
             chainId as SupportedChainId,
             nftId,
-            position.state.ownerAddress as `0x${string}`,
+            position.typedState.ownerAddress as `0x${string}`,
             contractAddress as `0x${string}`
           );
 

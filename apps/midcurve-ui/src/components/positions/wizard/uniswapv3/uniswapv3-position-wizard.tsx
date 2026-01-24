@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { X, ArrowLeft, ArrowRight } from "lucide-react";
 import type { EvmChainSlug } from "@/config/chains";
-import type { PoolDiscoveryResult } from "@midcurve/shared";
+import type { UniswapV3PoolDiscoveryResultResponse } from "@midcurve/api-shared";
 
 import { IntroStep } from "./intro-step";
 import { ChainSelectionStep } from "./chain-selection-step";
@@ -31,7 +31,7 @@ export function UniswapV3PositionWizard({
   const [selectedChain, setSelectedChain] = useState<EvmChainSlug | null>(null);
   const [baseToken, setBaseToken] = useState<TokenSearchResult | null>(null);
   const [quoteToken, setQuoteToken] = useState<TokenSearchResult | null>(null);
-  const [selectedPool, setSelectedPool] = useState<PoolDiscoveryResult<'uniswapv3'> | null>(null);
+  const [selectedPool, setSelectedPool] = useState<UniswapV3PoolDiscoveryResultResponse | null>(null);
 
   // Step 4 state (Position Configuration)
   const [tickLower, setTickLower] = useState<number | null>(null);

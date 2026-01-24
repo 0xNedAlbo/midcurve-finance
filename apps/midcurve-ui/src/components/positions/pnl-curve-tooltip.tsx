@@ -1,13 +1,13 @@
 "use client";
 
-import type { Erc20Token } from "@midcurve/shared";
+import type { Erc20TokenResponse } from "@midcurve/api-shared";
 
 interface PnLCurveTooltipProps {
   price: number;
   positionValue: number;
   pnl: number;
   pnlPercent: number;
-  quoteToken: Erc20Token;
+  quoteToken: Erc20TokenResponse;
 }
 
 export function PnLCurveTooltip({

@@ -14,7 +14,7 @@
 'use client';
 
 import { Loader2, AlertCircle, Zap, ExternalLink, Copy } from 'lucide-react';
-import type { PoolDiscoveryResult } from '@midcurve/shared';
+import type { UniswapV3PoolDiscoveryResultResponse } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import type { TokenSearchResult } from '@/hooks/positions/uniswapv3/wizard/useTokenSearch';
 import {
@@ -43,12 +43,12 @@ export interface PoolSelectionStepProps {
   /**
    * Currently selected pool (null if none selected)
    */
-  selectedPool: PoolDiscoveryResult<'uniswapv3'> | null;
+  selectedPool: UniswapV3PoolDiscoveryResultResponse | null;
 
   /**
    * Callback when user selects a pool
    */
-  onPoolSelect: (pool: PoolDiscoveryResult<'uniswapv3'>) => void;
+  onPoolSelect: (pool: UniswapV3PoolDiscoveryResultResponse) => void;
 }
 
 export function PoolSelectionStep(props: PoolSelectionStepProps) {
@@ -72,7 +72,7 @@ export function PoolSelectionStep(props: PoolSelectionStepProps) {
   };
 
   // Handle pool selection
-  const handlePoolSelect = (pool: PoolDiscoveryResult<'uniswapv3'>) => {
+  const handlePoolSelect = (pool: UniswapV3PoolDiscoveryResultResponse) => {
     onPoolSelect(pool);
   };
 

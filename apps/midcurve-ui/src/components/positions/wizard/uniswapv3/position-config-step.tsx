@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type { Erc20Token } from "@midcurve/shared";
-import type { PoolDiscoveryResult } from "@midcurve/shared";
+import type { UniswapV3PoolDiscoveryResultResponse, Erc20TokenResponse } from "@midcurve/api-shared";
 import type { EvmChainSlug } from "@/config/chains";
 import { TickMath } from "@uniswap/v3-sdk";
 import { getTickSpacing, compareAddresses } from "@midcurve/shared";
@@ -18,7 +17,7 @@ interface PositionConfigStepProps {
   chain: EvmChainSlug;
   baseToken: TokenSearchResult;
   quoteToken: TokenSearchResult;
-  pool: PoolDiscoveryResult<"uniswapv3">;
+  pool: UniswapV3PoolDiscoveryResultResponse;
   tickLower: number | null;
   tickUpper: number | null;
   liquidity: bigint;
@@ -44,7 +43,7 @@ export function PositionConfigStep({
   onValidationChange,
 }: PositionConfigStepProps) {
   // Local state for pool (allows updating with fresh price data)
-  const [pool, setPool] = useState<PoolDiscoveryResult<"uniswapv3">>(initialPool);
+  const [pool, setPool] = useState<UniswapV3PoolDiscoveryResultResponse>(initialPool);
 
   // Local state for position configuration
   const [tickLower, setTickLower] = useState<number>(() => {
@@ -91,7 +90,7 @@ export function PositionConfigStep({
           ...prevPool.pool,
           state: {
             ...prevPool.pool.state,
-            sqrtPriceX96: BigInt(latestSqrtPriceX96),
+            sqrtPriceX96: latestSqrtPriceX96.toString(),
             currentTick: latestCurrentTick,
           },
         },
@@ -100,23 +99,26 @@ export function PositionConfigStep({
   }, [latestSqrtPriceX96, latestCurrentTick]);
 
   /**
-   * Create proper Erc20Token objects from pool data
+   * Map pool tokens to base/quote based on user's selection
    * The pool contains full token information with addresses in config
    */
-  const { baseTokenErc20, quoteTokenErc20 } = useMemo(() => {
+  const { basePoolToken, quotePoolToken } = useMemo((): {
+    basePoolToken: Erc20TokenResponse;
+    quotePoolToken: Erc20TokenResponse;
+  } => {
     // Determine which pool token is base and which is quote
     const isToken0Base =
       compareAddresses(pool.pool.token0.config.address, baseToken.address) === 0;
 
     if (isToken0Base) {
       return {
-        baseTokenErc20: pool.pool.token0 as Erc20Token,
-        quoteTokenErc20: pool.pool.token1 as Erc20Token,
+        basePoolToken: pool.pool.token0,
+        quotePoolToken: pool.pool.token1,
       };
     } else {
       return {
-        baseTokenErc20: pool.pool.token1 as Erc20Token,
-        quoteTokenErc20: pool.pool.token0 as Erc20Token,
+        basePoolToken: pool.pool.token1,
+        quotePoolToken: pool.pool.token0,
       };
     }
   }, [pool, baseToken.address]);
@@ -128,8 +130,8 @@ export function PositionConfigStep({
     liquidity,
     tickLower,
     tickUpper,
-    baseToken: baseTokenErc20,
-    quoteToken: quoteTokenErc20,
+    baseToken: basePoolToken,
+    quoteToken: quotePoolToken,
   });
 
   // Update parent whenever config changes
@@ -171,8 +173,8 @@ export function PositionConfigStep({
       {/* Position Size Configuration */}
       <PositionSizeConfig
         pool={pool.pool}
-        baseToken={baseTokenErc20}
-        quoteToken={quoteTokenErc20}
+        baseToken={basePoolToken}
+        quoteToken={quotePoolToken}
         tickLower={tickLower}
         tickUpper={tickUpper}
         liquidity={liquidity}
@@ -216,8 +218,8 @@ export function PositionConfigStep({
       {/* Position Range Configuration */}
       <PositionRangeConfig
         pool={pool.pool}
-        baseToken={baseTokenErc20}
-        quoteToken={quoteTokenErc20}
+        baseToken={basePoolToken}
+        quoteToken={quotePoolToken}
         tickLower={tickLower}
         tickUpper={tickUpper}
         liquidity={liquidity}

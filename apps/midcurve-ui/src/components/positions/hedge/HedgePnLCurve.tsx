@@ -33,13 +33,13 @@ import {
   pricePerToken0InToken1,
   pricePerToken1InToken0,
 } from '@midcurve/shared';
-import type { UniswapV3Pool, Erc20Token } from '@midcurve/shared';
+import type { UniswapV3PoolResponse, Erc20TokenResponse } from '@midcurve/api-shared';
 import { PnLCurveTooltip } from '@/components/positions/pnl-curve-tooltip';
 
 interface HedgePnLCurveProps {
-  pool: UniswapV3Pool;
-  baseToken: Erc20Token;
-  quoteToken: Erc20Token;
+  pool: UniswapV3PoolResponse;
+  baseToken: Erc20TokenResponse;
+  quoteToken: Erc20TokenResponse;
   tickLower: number;
   tickUpper: number;
   silSqrtPriceX96: string;

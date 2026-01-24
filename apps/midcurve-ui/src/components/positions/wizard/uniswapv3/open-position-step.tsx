@@ -5,7 +5,7 @@ import { useAccount, useChainId } from 'wagmi';
 import type { Address } from 'viem';
 import { getAddress } from 'viem';
 import type { EvmChainSlug } from '@/config/chains';
-import type { PoolDiscoveryResult } from '@midcurve/shared';
+import type { UniswapV3PoolDiscoveryResultResponse } from '@midcurve/api-shared';
 import { getTokenAmountsFromLiquidity, getTokenMapping } from '@midcurve/shared';
 import type { TokenSearchResult } from '@/hooks/positions/uniswapv3/wizard/useTokenSearch';
 import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
@@ -26,7 +26,7 @@ interface OpenPositionStepProps {
   chain: EvmChainSlug;
   baseToken: TokenSearchResult;
   quoteToken: TokenSearchResult;
-  pool: PoolDiscoveryResult<'uniswapv3'>;
+  pool: UniswapV3PoolDiscoveryResultResponse;
   tickLower: number;
   tickUpper: number;
   liquidity: bigint;
@@ -66,7 +66,7 @@ export function OpenPositionStep({
   const isWrongNetwork = isConnected && connectedChainId !== expectedChainId;
 
   // Local pool state to manage pool with updated prices
-  const [localPool, setLocalPool] = useState<PoolDiscoveryResult<'uniswapv3'>>(pool);
+  const [localPool, setLocalPool] = useState<UniswapV3PoolDiscoveryResultResponse>(pool);
 
   // Fetch latest pool price (with refresh capability)
   const {
@@ -88,7 +88,7 @@ export function OpenPositionStep({
           ...prevPool.pool,
           state: {
             ...prevPool.pool.state,
-            sqrtPriceX96: BigInt(latestSqrtPriceX96),
+            sqrtPriceX96: latestSqrtPriceX96.toString(),
             currentTick: latestCurrentTick,
           },
         },

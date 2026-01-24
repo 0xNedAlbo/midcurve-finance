@@ -18,13 +18,13 @@ import {
   compareAddresses,
   getTickSpacing,
 } from "@midcurve/shared";
-import type { UniswapV3Pool, Erc20Token } from "@midcurve/shared";
+import type { UniswapV3PoolResponse, Erc20TokenResponse } from "@midcurve/api-shared";
 import { PnLCurveTooltip } from "@/components/positions/pnl-curve-tooltip";
 
 interface PositionPnLCurveProps {
-  pool: UniswapV3Pool;
-  baseToken: Erc20Token;
-  quoteToken: Erc20Token;
+  pool: UniswapV3PoolResponse;
+  baseToken: Erc20TokenResponse;
+  quoteToken: Erc20TokenResponse;
   tickLower: number;
   tickUpper: number;
   liquidity: bigint;

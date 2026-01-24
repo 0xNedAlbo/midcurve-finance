@@ -7,9 +7,9 @@
 
 import type { PublicClient } from 'viem';
 import { uniswapV3PoolAbi } from './pool-abi.js';
-import type {
+import {
   UniswapV3PoolConfig,
-  UniswapV3PoolState,
+  type UniswapV3PoolState,
 } from '@midcurve/shared';
 
 /**
@@ -135,14 +135,14 @@ export async function readPoolConfig(
       );
     }
 
-    return {
+    return new UniswapV3PoolConfig({
       chainId,
       address,
       token0,
       token1,
       feeBps: fee,
       tickSpacing,
-    };
+    });
   } catch (error) {
     // Re-throw PoolConfigError as-is
     if (error instanceof PoolConfigError) {
