@@ -10,7 +10,10 @@ export type { User } from './user.js';
 export type { AuthWalletAddress } from './auth-wallet-address.js';
 export type { ApiKeyDisplay } from './api-key.js';
 
+// ============================================================================
 // Token types (OOP inheritance pattern)
+// ============================================================================
+
 export type {
   TokenInterface,
   TokenType,
@@ -37,18 +40,10 @@ export type {
   BasicCurrencyConfigJSON,
 } from './token/index.js';
 
-// Token types (legacy - to be removed after migration)
-export type {
-  Token,
-  TokenConfigMap,
-  Erc20Token as Erc20TokenLegacy,
-  BasicCurrencyToken as BasicCurrencyTokenLegacy,
-  AnyToken,
-  Erc20TokenConfig as Erc20TokenConfigLegacy,
-  BasicCurrencyConfig as BasicCurrencyConfigLegacy,
-} from './token.js';
-
+// ============================================================================
 // Pool types (OOP inheritance pattern)
+// ============================================================================
+
 export type {
   PoolInterface,
   Protocol,
@@ -73,13 +68,14 @@ export type {
 } from './pool/index.js';
 export { stateToJSON, stateFromJSON } from './pool/index.js';
 
-// Pool types (legacy - to be removed after migration)
-export type { Pool, AnyPool } from './pool.js';
-export type { PoolConfigMap } from './pool-config.js';
-
+// ============================================================================
 // Position types (OOP inheritance pattern)
+// ============================================================================
+
 export type {
   PositionInterface,
+  PositionProtocol,
+  PositionType,
   PositionJSON,
   BasePositionParams,
   PositionRow,
@@ -87,19 +83,15 @@ export type {
 export {
   BasePosition,
   PositionFactory,
+  UniswapV3Position,
+  UniswapV3PositionConfig,
 } from './position/index.js';
-
-// Note: PositionProtocol and PositionType are now exported from ./position/index.js
-// Keeping legacy exports below for backward compatibility
-
-// Uniswap V3 Position (OOP pattern)
-export { UniswapV3Position, UniswapV3PositionConfig } from './position/index.js';
 export type {
   UniswapV3PositionParams,
   UniswapV3PositionRow,
   UniswapV3PositionConfigData,
   UniswapV3PositionConfigJSON,
-  UniswapV3PositionState as UniswapV3PositionStateNew,
+  UniswapV3PositionState,
   UniswapV3PositionStateJSON,
 } from './position/index.js';
 export {
@@ -107,28 +99,10 @@ export {
   positionStateFromJSON,
 } from './position/index.js';
 
-// Position types (legacy - to be removed after migration)
-export type {
-  Position,
-  PositionProtocol,
-  PositionType,
-  PositionConfigMap,
-  UniswapV3Position as UniswapV3PositionLegacy,
-  AnyPosition,
-} from './position.js';
-
-// Position utility functions (legacy - now methods on BasePosition)
-export {
-  getBaseToken,
-  getQuoteToken,
-  isUniswapV3Position,
-  assertUniswapV3Position,
-  narrowPositionProtocol,
-  getTotalRealizedPnl,
-  getTotalUnrealizedPnl,
-} from './position.js';
-
+// ============================================================================
 // PoolPrice types (OOP inheritance pattern)
+// ============================================================================
+
 export type {
   PoolPriceInterface,
   PoolPriceProtocol,
@@ -156,11 +130,10 @@ export {
   priceStateFromJSON,
 } from './pool-price/index.js';
 
-// Pool price types (legacy - to be removed after migration)
-export type { PoolPrice, AnyPoolPrice } from './pool-price.js';
-export type { PoolPriceConfigMap } from './pool-price-config.js';
-
+// ============================================================================
 // Position Ledger Event types (OOP inheritance pattern)
+// ============================================================================
+
 export type {
   PositionLedgerEventInterface,
   LedgerEventProtocol,
@@ -181,11 +154,11 @@ export {
 export type {
   UniswapV3LedgerEventConfig,
   UniswapV3LedgerEventConfigJSON,
-  UniswapV3LedgerEventState as UniswapV3LedgerEventStateNew,
+  UniswapV3LedgerEventState,
   UniswapV3LedgerEventStateJSON,
-  UniswapV3IncreaseLiquidityEvent as UniswapV3IncreaseLiquidityEventNew,
-  UniswapV3DecreaseLiquidityEvent as UniswapV3DecreaseLiquidityEventNew,
-  UniswapV3CollectEvent as UniswapV3CollectEventNew,
+  UniswapV3IncreaseLiquidityEvent,
+  UniswapV3DecreaseLiquidityEvent,
+  UniswapV3CollectEvent,
   UniswapV3IncreaseLiquidityEventJSON,
   UniswapV3DecreaseLiquidityEventJSON,
   UniswapV3CollectEventJSON,
@@ -199,22 +172,17 @@ export {
   ledgerEventStateFromJSON,
 } from './position-ledger-event/index.js';
 
-// Position Ledger Event types (legacy - to be removed after migration)
-export type {
-  PositionLedgerEvent,
-  PositionLedgerEventConfigMap,
-  PositionLedgerEventStateMap,
-  UniswapV3LedgerEvent,
-  AnyLedgerEvent,
-} from './position-ledger-event.js';
+// ============================================================================
+// Position APR types
+// ============================================================================
 
-// Position APR Period types
 export type { PositionAprPeriod, AprPeriodSummary } from './position-apr-period.js';
-
-// Position APR Summary types
 export type { AprSummary } from './position-apr-summary.js';
 
-// Quote Token Result types (OOP pattern)
+// ============================================================================
+// Quote Token Result types
+// ============================================================================
+
 export type {
   QuoteTokenResultProtocol,
   QuoteTokenMatchType,
@@ -229,35 +197,14 @@ export {
   createUniswapV3QuoteTokenResult,
 } from './quote-token-result/index.js';
 
-// Quote Token Result types (legacy - to be removed after migration)
-export type {
-  QuoteTokenResult as QuoteTokenResultLegacy,
-  UniswapV3QuoteTokenResult as UniswapV3QuoteTokenResultLegacy,
-} from './quote-token-result.js';
-
+// ============================================================================
 // Pool Discovery Result types
+// ============================================================================
+
 export type {
   PoolDiscoveryResult,
   UniswapV3PoolDiscoveryResult,
 } from './pool-discovery-result.js';
-
-// Uniswap V3 types (protocol-specific, legacy - to be migrated)
-// Note: UniswapV3PoolConfig, UniswapV3PoolState, UniswapV3Pool now come from ./pool/index.js
-// Note: UniswapV3PoolPriceConfig, UniswapV3PoolPriceState, UniswapV3PoolPrice now come from ./pool-price/index.js
-// Note: UniswapV3PositionConfig, UniswapV3PositionState now come from ./position/index.js
-// Note: UniswapV3LedgerEventConfig, UniswapV3LedgerEventState now come from ./position-ledger-event/index.js
-export type {
-  UniswapV3PositionConfig as UniswapV3PositionConfigLegacy,
-  UniswapV3PositionState,
-  UniswapV3LedgerEventConfig as UniswapV3LedgerEventConfigLegacy,
-  UniswapV3LedgerEventState,
-  UniswapV3IncreaseLiquidityEvent,
-  UniswapV3DecreaseLiquidityEvent,
-  UniswapV3CollectEvent,
-  UniswapV3IncreaseLedgerEvent,
-  UniswapV3DecreaseLedgerEvent,
-  UniswapV3CollectLedgerEvent,
-} from './uniswapv3/index.js';
 
 // ============================================================================
 // Automation Types (position automation features)
@@ -338,4 +285,3 @@ export {
   UniswapV3ContractState,
   UniswapV3AutomationContract,
 } from './automation/index.js';
-
