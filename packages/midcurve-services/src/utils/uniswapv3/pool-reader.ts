@@ -280,6 +280,28 @@ export async function readPoolState(
       );
     }
 
+    // Semantic validation: Check for non-existent pool
+    // When a pool contract doesn't exist, the EVM returns zeros for storage reads.
+    // sqrtPriceX96 === 0 is impossible for an initialized pool (minimum is MIN_SQRT_RATIO).
+    if (sqrtPriceX96 === 0n) {
+      throw new PoolStateError(
+        `Pool at ${address} has zero sqrtPriceX96 - pool may not exist or is uninitialized`,
+        address
+      );
+    }
+
+    // Uniswap V3 constants for valid price range
+    // These are the minimum and maximum values for sqrtPriceX96 in Uniswap V3
+    const MIN_SQRT_RATIO = 4295128739n;
+    const MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342n;
+
+    if (sqrtPriceX96 < MIN_SQRT_RATIO || sqrtPriceX96 > MAX_SQRT_RATIO) {
+      throw new PoolStateError(
+        `Pool at ${address} has invalid sqrtPriceX96 (${sqrtPriceX96}) - value outside valid range`,
+        address
+      );
+    }
+
     return {
       sqrtPriceX96,
       currentTick,

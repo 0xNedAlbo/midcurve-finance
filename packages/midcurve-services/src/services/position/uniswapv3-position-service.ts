@@ -1181,6 +1181,37 @@ export class UniswapV3PositionService extends PositionService<"uniswapv3"> {
                     }) as Promise<Address>,
                 ]);
 
+                // ========================================================================
+                // VALIDATION: Check for non-existent or burned NFT
+                // ========================================================================
+                // When NFT doesn't exist, the positions() function returns all zeros.
+                // positionData[2] is token0, positionData[3] is token1
+                const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+                if (positionData[2] === ZERO_ADDRESS || positionData[3] === ZERO_ADDRESS) {
+                    const error = new Error(
+                        `Position NFT ${nftId} on chain ${chainId} does not exist or has been burned (token addresses are zero)`
+                    );
+                    log.methodError(this.logger, "refresh", error, { id, nftId, chainId });
+                    throw error;
+                }
+
+                // Additional check: if position previously had liquidity but now all fields are zero,
+                // it's likely the chain was reset (e.g., local dev chain restarted)
+                const allFieldsZero = positionData[7] === 0n && // liquidity
+                                      positionData[8] === 0n && // feeGrowthInside0LastX128
+                                      positionData[9] === 0n && // feeGrowthInside1LastX128
+                                      positionData[10] === 0n && // tokensOwed0
+                                      positionData[11] === 0n;   // tokensOwed1
+
+                if (allFieldsZero && existingPosition.state.liquidity > 0n) {
+                    const error = new Error(
+                        `Position NFT ${nftId} on chain ${chainId} appears to have been deleted (all state fields are zero but position previously had liquidity)`
+                    );
+                    log.methodError(this.logger, "refresh", error, { id, nftId, chainId });
+                    throw error;
+                }
+
                 this.logger.debug(
                     {
                         id,

@@ -237,6 +237,8 @@ export async function GET(
 
       // Map service errors to API error codes
       if (error instanceof Error) {
+        const errorMessage = error.message.toLowerCase();
+
         // Chain not supported
         if (
           error.message.includes('not configured') ||
@@ -253,7 +255,24 @@ export async function GET(
           });
         }
 
-        // Position not found
+        // Position/Pool unavailable on chain (chain reset, contract deleted, burned NFT)
+        // This must be checked BEFORE "not found" to avoid returning 404 for chain state issues
+        if (
+          errorMessage.includes('has been burned') ||
+          errorMessage.includes('token addresses are zero') ||
+          errorMessage.includes('zero sqrtpricex96') ||
+          errorMessage.includes('all state fields are zero')
+        ) {
+          const errorResponse = createErrorResponse(
+            ApiErrorCode.SERVICE_UNAVAILABLE,
+            'Position data unavailable on chain',
+            error.message
+          );
+          apiLog.requestEnd(apiLogger, requestId, 503, Date.now() - startTime);
+          return NextResponse.json(errorResponse, { status: 503 });
+        }
+
+        // Position not found in database (different from unavailable on chain)
         if (
           error.message.includes('not found') ||
           error.message.includes('does not exist')
