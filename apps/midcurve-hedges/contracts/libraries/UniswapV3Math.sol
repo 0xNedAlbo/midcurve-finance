@@ -77,6 +77,7 @@ library UniswapV3Math {
     /// @param x The uint256 to be downcasted
     /// @return y The passed value, downcasted to uint128
     function toUint128(uint256 x) private pure returns (uint128 y) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         require((y = uint128(x)) == x);
     }
 

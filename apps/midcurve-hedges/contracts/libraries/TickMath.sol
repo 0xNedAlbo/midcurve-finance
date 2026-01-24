@@ -22,7 +22,9 @@ library TickMath {
     /// at the given tick
     function getSqrtRatioAtTick(int24 tick) internal pure returns (uint160 sqrtPriceX96) {
         unchecked {
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 absTick = tick < 0 ? uint256(-int256(tick)) : uint256(int256(tick));
+            // forge-lint: disable-next-line(unsafe-typecast)
             require(absTick <= uint256(int256(MAX_TICK)), "T");
 
             uint256 ratio = absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
@@ -112,6 +114,7 @@ library TickMath {
             if (msb >= 128) r = ratio >> (msb - 127);
             else r = ratio << (127 - msb);
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             int256 log_2 = (int256(msb) - 128) << 64;
 
             assembly {

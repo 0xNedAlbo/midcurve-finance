@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {AppStorage, LibAppStorage, VaultState} from "../storage/AppStorage.sol";
+import {AppStorage, LibAppStorage} from "../storage/AppStorage.sol";
 import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
 import {IERC20} from "../interfaces/IERC20.sol";
 import {UniswapV3Math} from "./UniswapV3Math.sol";
-import {TickMath} from "./TickMath.sol";
 import {SafeERC20} from "./SafeERC20.sol";
 
 /// @title LibVault

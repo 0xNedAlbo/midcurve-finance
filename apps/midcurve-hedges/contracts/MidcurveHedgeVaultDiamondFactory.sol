@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Diamond} from "./diamond/Diamond.sol";
 import {IDiamondCut} from "./diamond/interfaces/IDiamondCut.sol";
-import {AppStorage, LibAppStorage, VaultState} from "./storage/AppStorage.sol";
+import {AppStorage, LibAppStorage} from "./storage/AppStorage.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
 import {IUniswapV3Factory} from "./interfaces/IUniswapV3Factory.sol";
 

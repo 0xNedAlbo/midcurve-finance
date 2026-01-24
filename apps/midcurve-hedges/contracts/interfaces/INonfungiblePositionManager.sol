@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./IERC721Minimal.sol";
+import {IERC721Minimal} from "./IERC721Minimal.sol";
 
 interface INonfungiblePositionManager is IERC721Minimal {
     struct MintParams {

@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
-import {UniswapV3PositionCloser} from "../contracts/UniswapV3PositionCloser.sol";
 
 // Diamond facets
 import {DiamondCutFacet} from "../contracts/facets/DiamondCutFacet.sol";
@@ -72,15 +71,7 @@ contract DeployScript is Script {
         vm.startBroadcast();
 
         // ========================================
-        // 1. Deploy Position Closer
-        // ========================================
-        console.log("--- Deploying Position Closer ---");
-        UniswapV3PositionCloser closer = new UniswapV3PositionCloser(nfpm, augustusRegistry);
-        console.log("UniswapV3PositionCloser deployed at:", address(closer));
-        console.log("");
-
-        // ========================================
-        // 2. Deploy Diamond Facets
+        // 1. Deploy Diamond Facets
         // ========================================
         console.log("--- Deploying Diamond Facets ---");
 
@@ -147,9 +138,6 @@ contract DeployScript is Script {
         console.log("========================================");
         console.log("=== Deployment Summary ===");
         console.log("========================================");
-        console.log("");
-        console.log("--- Shared Contracts ---");
-        console.log("UniswapV3PositionCloser:", address(closer));
         console.log("");
         console.log("--- Diamond Facets ---");
         console.log("DiamondCutFacet:", address(diamondCutFacet));

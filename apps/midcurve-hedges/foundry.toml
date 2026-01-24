@@ -22,6 +22,16 @@ quote_style = "double"
 number_underscore = "thousands"
 wrap_comments = true
 
+[lint]
+# Enable linting during build (show same warnings as IDE)
+lint_on_build = true
+
+# Severity threshold - show all issues including info-level
+severity = ["high", "med", "low", "info"]
+
+# Exclude naming convention warnings (Uniswap conventions like sqrtRatioAX96, camelCase immutables)
+exclude_lints = ["mixed-case-variable", "mixed-case-function", "screaming-snake-case-immutable"]
+
 [rpc_endpoints]
 local = "http://localhost:8545"
 mainnet = "${RPC_URL_ETHEREUM}"

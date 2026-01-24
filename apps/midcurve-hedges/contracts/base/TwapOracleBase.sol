@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../interfaces/IUniswapV3PoolMinimal.sol";
-import "../interfaces/IUniswapV3Factory.sol";
-import "../interfaces/IERC20.sol";
-import "../libraries/FullMath.sol";
-import "../libraries/TickMath.sol";
+import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3Factory} from "../interfaces/IUniswapV3Factory.sol";
+import {IERC20} from "../interfaces/IERC20.sol";
+import {FullMath} from "../libraries/FullMath.sol";
+import {TickMath} from "../libraries/TickMath.sol";
 
 /// @title TwapOracleBase
 /// @notice Abstract base contract for TWAP oracle functionality
@@ -237,6 +237,7 @@ abstract contract TwapOracleBase {
         (int56[] memory tickCumulatives, ) = IUniswapV3PoolMinimal(oraclePool).observe(secondsAgos);
 
         int56 tickCumulativesDelta = tickCumulatives[1] - tickCumulatives[0];
+        // forge-lint: disable-next-line(unsafe-typecast)
         arithmeticMeanTick = int24(tickCumulativesDelta / int56(int32(windowSeconds)));
     }
 
