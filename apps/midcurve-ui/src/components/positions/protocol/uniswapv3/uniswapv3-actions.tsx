@@ -63,10 +63,19 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   );
   const { data: autowalletData } = useAutowallet();
 
-  // Automation visibility checks
+  // Automation availability checks
   const isChainSupported = contractData?.isSupported ?? false;
   const hasAutowallet = !!autowalletData?.address;
-  const showAutomationButtons = position.isActive && isChainSupported && hasAutowallet;
+
+  // Calculate automation disabled state and reason
+  const automationDisabled = !position.isActive || !isChainSupported || !hasAutowallet;
+
+  const automationDisabledReason = useMemo(() => {
+    if (!position.isActive) return 'Position is closed';
+    if (!isChainSupported) return 'Automation not supported on this chain';
+    if (!hasAutowallet) return 'No automation wallet configured';
+    return undefined;
+  }, [position.isActive, isChainSupported, hasAutowallet]);
 
   // Build token config for price display
   const tokenConfig: TokenConfig = useMemo(
@@ -141,69 +150,73 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           Collect Fees
         </button>
 
-        {/* Automation Buttons - only visible when automation is available */}
-        {showAutomationButtons && (
-          <>
-            {/* Divider between position actions and automation */}
-            <div className="w-px h-6 bg-slate-600/50 mx-1" />
+        {/* Automation Buttons - always visible, disabled when unavailable */}
+        {/* Divider between position actions and automation */}
+        <div className="w-px h-6 bg-slate-600/50 mx-1" />
 
-            <StopLossButton
-              position={position}
-              positionId={position.id}
-              poolAddress={poolConfig.address}
-              chainId={positionConfig.chainId}
-              contractAddress={contractData!.contractAddress as Address}
-              positionManager={contractData!.positionManager as Address}
-              nftId={BigInt(positionConfig.nftId)}
-              positionOwner={ownerAddress as Address}
-              currentPriceDisplay={currentPriceDisplay}
-              currentSqrtPriceX96={poolState.sqrtPriceX96}
-              baseToken={{
-                address: baseTokenConfig.address,
-                symbol: baseToken.symbol,
-                decimals: baseToken.decimals,
-              }}
-              quoteToken={{
-                address: quoteTokenConfig.address,
-                symbol: quoteToken.symbol,
-                decimals: quoteToken.decimals,
-              }}
-              isToken0Quote={position.isToken0Quote}
-            />
+        <StopLossButton
+          position={position}
+          positionId={position.id}
+          poolAddress={poolConfig.address}
+          chainId={positionConfig.chainId}
+          contractAddress={automationDisabled ? undefined : contractData!.contractAddress as Address}
+          positionManager={automationDisabled ? undefined : contractData!.positionManager as Address}
+          nftId={BigInt(positionConfig.nftId)}
+          positionOwner={ownerAddress as Address}
+          currentPriceDisplay={currentPriceDisplay}
+          currentSqrtPriceX96={poolState.sqrtPriceX96}
+          baseToken={{
+            address: baseTokenConfig.address,
+            symbol: baseToken.symbol,
+            decimals: baseToken.decimals,
+          }}
+          quoteToken={{
+            address: quoteTokenConfig.address,
+            symbol: quoteToken.symbol,
+            decimals: quoteToken.decimals,
+          }}
+          isToken0Quote={position.isToken0Quote}
+          disabled={automationDisabled}
+          disabledReason={automationDisabledReason}
+        />
 
-            {/* Current Price Display - between SL and TP buttons */}
-            <FlashingPriceLabel price={currentPriceDisplay} symbol={quoteToken.symbol} />
+        {/* Current Price Display - between SL and TP buttons */}
+        <FlashingPriceLabel price={currentPriceDisplay} symbol={quoteToken.symbol} />
 
-            <TakeProfitButton
-              position={position}
-              positionId={position.id}
-              poolAddress={poolConfig.address}
-              chainId={positionConfig.chainId}
-              contractAddress={contractData!.contractAddress as Address}
-              positionManager={contractData!.positionManager as Address}
-              nftId={BigInt(positionConfig.nftId)}
-              positionOwner={ownerAddress as Address}
-              currentPriceDisplay={currentPriceDisplay}
-              currentSqrtPriceX96={poolState.sqrtPriceX96}
-              baseToken={{
-                address: baseTokenConfig.address,
-                symbol: baseToken.symbol,
-                decimals: baseToken.decimals,
-              }}
-              quoteToken={{
-                address: quoteTokenConfig.address,
-                symbol: quoteToken.symbol,
-                decimals: quoteToken.decimals,
-              }}
-              isToken0Quote={position.isToken0Quote}
-            />
+        <TakeProfitButton
+          position={position}
+          positionId={position.id}
+          poolAddress={poolConfig.address}
+          chainId={positionConfig.chainId}
+          contractAddress={automationDisabled ? undefined : contractData!.contractAddress as Address}
+          positionManager={automationDisabled ? undefined : contractData!.positionManager as Address}
+          nftId={BigInt(positionConfig.nftId)}
+          positionOwner={ownerAddress as Address}
+          currentPriceDisplay={currentPriceDisplay}
+          currentSqrtPriceX96={poolState.sqrtPriceX96}
+          baseToken={{
+            address: baseTokenConfig.address,
+            symbol: baseToken.symbol,
+            decimals: baseToken.decimals,
+          }}
+          quoteToken={{
+            address: quoteTokenConfig.address,
+            symbol: quoteToken.symbol,
+            decimals: quoteToken.decimals,
+          }}
+          isToken0Quote={position.isToken0Quote}
+          disabled={automationDisabled}
+          disabledReason={automationDisabledReason}
+        />
 
-            {/* Divider between automation and hedge */}
-            <div className="w-px h-6 bg-slate-600/50 mx-1" />
+        {/* Divider between automation and hedge */}
+        <div className="w-px h-6 bg-slate-600/50 mx-1" />
 
-            <HedgeButton onClick={() => setShowHedgeModal(true)} />
-          </>
-        )}
+        <HedgeButton
+          onClick={() => setShowHedgeModal(true)}
+          disabled={automationDisabled}
+          disabledReason={automationDisabledReason}
+        />
       </div>
 
       {/* Increase Deposit Modal */}

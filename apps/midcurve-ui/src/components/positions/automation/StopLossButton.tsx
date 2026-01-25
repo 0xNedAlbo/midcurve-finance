@@ -47,14 +47,14 @@ interface StopLossButtonProps {
   chainId: number;
 
   /**
-   * Shared automation contract address
+   * Shared automation contract address (optional when disabled)
    */
-  contractAddress: Address;
+  contractAddress?: Address;
 
   /**
-   * Position manager (NFPM) address
+   * Position manager (NFPM) address (optional when disabled)
    */
-  positionManager: Address;
+  positionManager?: Address;
 
   /**
    * NFT ID of the position
@@ -98,6 +98,16 @@ interface StopLossButtonProps {
    * Whether token0 is the quote token
    */
   isToken0Quote: boolean;
+
+  /**
+   * Whether the button is disabled
+   */
+  disabled?: boolean;
+
+  /**
+   * Reason why the button is disabled (shown as tooltip)
+   */
+  disabledReason?: string;
 }
 
 export function StopLossButton({
@@ -114,7 +124,23 @@ export function StopLossButton({
   baseToken,
   quoteToken,
   isToken0Quote,
+  disabled = false,
+  disabledReason,
 }: StopLossButtonProps) {
+  // If disabled, show disabled button with tooltip
+  if (disabled) {
+    return (
+      <button
+        disabled
+        title={disabledReason}
+        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
+      >
+        <Plus className="w-3 h-3" />
+        Stop Loss
+      </button>
+    );
+  }
+
   // Extract position data for PnL simulation
   const positionState = position.state as { liquidity: string };
   const positionConfig = position.config as { tickLower: number; tickUpper: number };
@@ -203,8 +229,8 @@ export function StopLossButton({
           positionId={positionId}
           poolAddress={poolAddress}
           chainId={chainId}
-          contractAddress={contractAddress}
-          positionManager={positionManager}
+          contractAddress={contractAddress!}
+          positionManager={positionManager!}
           nftId={nftId}
           positionOwner={positionOwner}
           baseToken={baseToken}
@@ -268,7 +294,7 @@ export function StopLossButton({
         onClose={() => setShowCancelModal(false)}
         order={activeOrder}
         tokenConfig={tokenConfig}
-        contractAddress={contractAddress}
+        contractAddress={contractAddress!}
         chainId={chainId}
         nftId={nftId.toString()}
         onSuccess={() => setShowCancelModal(false)}
