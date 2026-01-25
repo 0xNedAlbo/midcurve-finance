@@ -184,8 +184,6 @@ import type {
   NotifyOrderCancelledRequest,
   NotifyOrderCancelledResponse,
   // Shared Contracts
-  GetSharedContractResponse,
-  ListSharedContractsResponse,
   GetPositionSharedContractsResponseData,
   // Wallet
   GetAutowalletResponse,
@@ -352,22 +350,7 @@ export const automationApi = {
   // ---------------------------------------------------------------------------
 
   /**
-   * List all shared contracts (grouped by protocol)
-   */
-  listSharedContracts() {
-    return apiClient.get<ListSharedContractsResponse['data']>('/api/v1/automation/shared-contracts');
-  },
-
-  /**
-   * Get shared contract for a specific chain
-   * @deprecated Use getPositionSharedContracts instead
-   */
-  getSharedContract(chainId: number) {
-    return apiClient.get<GetSharedContractResponse['data']>(`/api/v1/automation/shared-contracts/${chainId}`);
-  },
-
-  /**
-   * Get shared contracts for a position's chain (new DB-backed endpoint)
+   * Get shared contracts for a position's chain (DB-backed endpoint)
    * Returns a map of contract names to contract info.
    */
   getPositionSharedContracts(chainId: number, nftId: string) {
