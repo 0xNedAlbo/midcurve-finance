@@ -17,6 +17,8 @@
 // Close Orders - User signing via Wagmi
 export {
   useCreateCloseOrder,
+  type OrderType,
+  type SwapConfig,
   type RegisterCloseOrderParams,
   type CreateCloseOrderResult,
   type UseCreateCloseOrderResult,
@@ -32,10 +34,12 @@ export {
 export {
   useUpdateCloseOrder,
   type UpdateType,
-  type UpdateBoundsParams,
+  type UpdateTriggerTickParams,
   type UpdateSlippageParams,
   type UpdatePayoutParams,
   type UpdateValidUntilParams,
+  type UpdateOperatorParams,
+  type UpdateSwapIntentParams,
   type UpdateCloseOrderParams,
   type UpdateCloseOrderResult,
   type UseUpdateCloseOrderResult,

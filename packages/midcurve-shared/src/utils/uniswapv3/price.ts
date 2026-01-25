@@ -153,6 +153,16 @@ export function tickToSqrtRatioX96(tick: number): JSBI {
   return TickMath.getSqrtRatioAtTick(tick);
 }
 
+/**
+ * Convert sqrtPriceX96 to tick
+ * @param sqrtPriceX96 The sqrt price in Q96 format (string or bigint)
+ * @returns The tick (floored)
+ */
+export function sqrtPriceX96ToTick(sqrtPriceX96: string | bigint): number {
+  const jsbi = JSBI.BigInt(sqrtPriceX96.toString());
+  return TickMath.getTickAtSqrtRatio(jsbi);
+}
+
 export function sqrtRatioX96ToToken1PerToken0(
   sqrtRatioX96: JSBI,
   token0Decimals: number

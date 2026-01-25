@@ -3,13 +3,18 @@
  *
  * Fetches the pre-deployed shared automation contracts for a position's chain.
  * Returns a map of contract names to contract info, with convenience fields
- * for the UniswapV3PositionCloser contract.
+ * for the UniswapV3PositionCloser contract including the version-specific ABI.
  */
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { automationApi } from '@/lib/api-client';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
+import {
+  getUniswapV3PositionCloserAbi,
+  isVersionSupported,
+  type UniswapV3PositionCloserAbi,
+} from '@midcurve/shared';
 import type {
   SharedContractsMap,
   ContractVersion,
@@ -40,6 +45,12 @@ interface UseSharedContractResult {
    * Version of UniswapV3PositionCloser (if available)
    */
   version: ContractVersion | null;
+
+  /**
+   * ABI for the UniswapV3PositionCloser contract (version-specific)
+   * Returns null if version is not supported
+   */
+  abi: UniswapV3PositionCloserAbi | null;
 }
 
 const EMPTY_RESULT: UseSharedContractResult = {
@@ -48,6 +59,7 @@ const EMPTY_RESULT: UseSharedContractResult = {
   contractAddress: null,
   positionManager: null,
   version: null,
+  abi: null,
 };
 
 /**
@@ -76,12 +88,19 @@ export function useSharedContract(
       // Get positionManager from local config (not from API)
       const positionManager = getNonfungiblePositionManagerAddress(chainId) ?? null;
 
+      // Get version-specific ABI (if version is supported)
+      let abi: UniswapV3PositionCloserAbi | null = null;
+      if (closerContract?.version && isVersionSupported(closerContract.version)) {
+        abi = getUniswapV3PositionCloserAbi(closerContract.version);
+      }
+
       return {
         contracts,
-        isSupported: !!closerContract,
+        isSupported: !!closerContract && abi !== null,
         contractAddress: closerContract?.contractAddress ?? null,
         positionManager,
         version: closerContract?.version ?? null,
+        abi,
       };
     },
     enabled: !!chainId && !!nftId,

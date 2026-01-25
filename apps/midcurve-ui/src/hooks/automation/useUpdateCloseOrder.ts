@@ -5,11 +5,13 @@
  * directly with their connected wallet. After confirmation, it
  * invalidates the cache and returns success.
  *
- * Available updates:
- * - setCloseBounds(closeId, sqrtPriceX96Lower, sqrtPriceX96Upper)
- * - setCloseSlippage(closeId, slippageBps)
- * - setClosePayout(closeId, payoutAddress)
- * - setCloseValidUntil(closeId, validUntil)
+ * V1.0 Interface (tick-based):
+ * - setTriggerTick(nftId, orderType, newTriggerTick)
+ * - setSlippage(nftId, orderType, newSlippageBps)
+ * - setPayout(nftId, orderType, newPayout)
+ * - setValidUntil(nftId, orderType, newValidUntil)
+ * - setOperator(nftId, orderType, newOperator)
+ * - setSwapIntent(nftId, orderType, direction, quoteToken, swapSlippageBps)
  *
  * Flow:
  * 1. User calls updateOrder() with the update type and params
@@ -23,32 +25,23 @@ import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Address, Hash } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
-import { POSITION_CLOSER_ABI } from '@/config/contracts/uniswapv3-position-closer';
+import { useSharedContract } from './useSharedContract';
+import type { OrderType } from './useCreateCloseOrder';
 
 /**
- * Update type enum
+ * Update type enum (V1.0 interface)
  */
-export type UpdateType = 'bounds' | 'slippage' | 'payout' | 'validUntil';
+export type UpdateType = 'triggerTick' | 'slippage' | 'payout' | 'validUntil' | 'operator' | 'swapIntent';
 
 /**
- * Base parameters for all updates
+ * Base parameters for all updates (V1.0 interface)
+ * Note: ABI, contract address, chainId, nftId are fetched/passed to hook
  */
 interface BaseUpdateParams {
-  /** The automation contract address */
-  contractAddress: Address;
-  /** Chain ID */
-  chainId: number;
-  /** On-chain close order ID */
-  closeId: bigint;
-  /** Uniswap V3 NFT token ID (for position-scoped cache invalidation) */
-  nftId: string;
-  /** Close order semantic hash (e.g., "sl@-12345", "tp@201120") */
+  /** Order type: STOP_LOSS or TAKE_PROFIT */
+  orderType: OrderType;
+  /** Close order semantic hash for cache invalidation (e.g., "sl@-12345", "tp@201120") */
   closeOrderHash: string;
-  /**
-   * Database order ID for cache invalidation
-   * @deprecated Derived from closeOrderHash for position-scoped endpoints
-   */
-  orderId?: string;
   /**
    * Position ID for cache invalidation
    * @deprecated Derived from chainId/nftId for position-scoped endpoints
@@ -57,14 +50,11 @@ interface BaseUpdateParams {
 }
 
 /**
- * Parameters for updating price bounds
+ * Parameters for updating trigger tick
  */
-export interface UpdateBoundsParams extends BaseUpdateParams {
-  updateType: 'bounds';
-  sqrtPriceX96Lower: bigint;
-  sqrtPriceX96Upper: bigint;
-  /** Trigger mode: 'LOWER', 'UPPER', or 'BOTH' */
-  triggerMode: 'LOWER' | 'UPPER' | 'BOTH';
+export interface UpdateTriggerTickParams extends BaseUpdateParams {
+  updateType: 'triggerTick';
+  triggerTick: number;
 }
 
 /**
@@ -92,13 +82,33 @@ export interface UpdateValidUntilParams extends BaseUpdateParams {
 }
 
 /**
+ * Parameters for updating operator
+ */
+export interface UpdateOperatorParams extends BaseUpdateParams {
+  updateType: 'operator';
+  operatorAddress: Address;
+}
+
+/**
+ * Parameters for updating swap intent
+ */
+export interface UpdateSwapIntentParams extends BaseUpdateParams {
+  updateType: 'swapIntent';
+  direction: 'NONE' | 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+  quoteToken: Address;
+  swapSlippageBps: number;
+}
+
+/**
  * Union type of all update params
  */
 export type UpdateCloseOrderParams =
-  | UpdateBoundsParams
+  | UpdateTriggerTickParams
   | UpdateSlippageParams
   | UpdatePayoutParams
-  | UpdateValidUntilParams;
+  | UpdateValidUntilParams
+  | UpdateOperatorParams
+  | UpdateSwapIntentParams;
 
 /**
  * Result from updating a close order
@@ -128,16 +138,33 @@ export interface UseUpdateCloseOrderResult {
   error: Error | null;
   /** Reset the hook state */
   reset: () => void;
+  /** Whether the shared contract is ready (ABI loaded) */
+  isReady: boolean;
 }
 
 /**
- * Hook for updating a close order via user's wallet
+ * Hook for updating a close order via user's wallet (V1.0 tick-based interface)
+ *
+ * @param chainId - The EVM chain ID
+ * @param nftId - The position NFT ID (as string)
  */
-export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
+export function useUpdateCloseOrder(
+  chainId: number,
+  nftId: string
+): UseUpdateCloseOrderResult {
   const queryClient = useQueryClient();
   const [result, setResult] = useState<UpdateCloseOrderResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [currentParams, setCurrentParams] = useState<UpdateCloseOrderParams | null>(null);
+
+  // Fetch ABI and contract address from shared contract API
+  const {
+    data: sharedContract,
+    isLoading: isLoadingContract,
+  } = useSharedContract(chainId, nftId);
+
+  const { abi, contractAddress } = sharedContract ?? {};
+  const isReady = !isLoadingContract && !!abi && !!contractAddress;
 
   // Wagmi write contract hook
   const {
@@ -169,7 +196,7 @@ export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
 
     // Invalidate position-scoped caches
     queryClient.invalidateQueries({
-      queryKey: queryKeys.positions.uniswapv3.closeOrders.all(currentParams.chainId, currentParams.nftId),
+      queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
     });
     // Also invalidate legacy caches for backward compatibility
     if (currentParams.positionId) {
@@ -180,7 +207,7 @@ export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
     queryClient.invalidateQueries({
       queryKey: queryKeys.automation.closeOrders.lists(),
     });
-  }, [isTxSuccess, txHash, currentParams, queryClient]);
+  }, [isTxSuccess, txHash, currentParams, queryClient, chainId, nftId]);
 
   // Handle errors
   useEffect(() => {
@@ -191,66 +218,102 @@ export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
     }
   }, [writeError, receiptError]);
 
-  // Update function
+  // Update function - calls update functions on shared contract (V1.0 interface)
   const updateOrder = useCallback((params: UpdateCloseOrderParams) => {
     // Reset state
     setResult(null);
     setError(null);
     setCurrentParams(params);
 
+    // Pre-flight check: verify shared contract is ready
+    if (!isReady || !abi || !contractAddress) {
+      setError(new Error('Shared contract not ready. Please wait and try again.'));
+      return;
+    }
+
+    const nftIdBigInt = BigInt(nftId);
+
+    // Map OrderType to contract enum value
+    // Contract: STOP_LOSS = 0, TAKE_PROFIT = 1
+    const orderTypeMap: Record<OrderType, number> = {
+      'STOP_LOSS': 0,
+      'TAKE_PROFIT': 1,
+    };
+    const orderTypeValue = orderTypeMap[params.orderType];
+
     // Call the appropriate contract function based on update type
     switch (params.updateType) {
-      case 'bounds': {
-        // Map TriggerMode string to contract enum value
-        // Contract: LOWER_ONLY = 0, UPPER_ONLY = 1, BOTH = 2
-        const triggerModeMap: Record<string, number> = {
-          'LOWER': 0,
-          'UPPER': 1,
-          'BOTH': 2,
-        };
-        const mode = triggerModeMap[params.triggerMode] ?? 0;
-
+      case 'triggerTick':
         writeContract({
-          address: params.contractAddress,
-          abi: POSITION_CLOSER_ABI,
-          functionName: 'setCloseBounds',
-          args: [params.closeId, params.sqrtPriceX96Lower, params.sqrtPriceX96Upper, mode],
-          chainId: params.chainId,
+          address: contractAddress as Address,
+          abi,
+          functionName: 'setTriggerTick',
+          args: [nftIdBigInt, orderTypeValue, params.triggerTick],
+          chainId,
         });
         break;
-      }
 
       case 'slippage':
         writeContract({
-          address: params.contractAddress,
-          abi: POSITION_CLOSER_ABI,
-          functionName: 'setCloseSlippage',
-          args: [params.closeId, params.slippageBps],
-          chainId: params.chainId,
+          address: contractAddress as Address,
+          abi,
+          functionName: 'setSlippage',
+          args: [nftIdBigInt, orderTypeValue, params.slippageBps],
+          chainId,
         });
         break;
 
       case 'payout':
         writeContract({
-          address: params.contractAddress,
-          abi: POSITION_CLOSER_ABI,
-          functionName: 'setClosePayout',
-          args: [params.closeId, params.payoutAddress],
-          chainId: params.chainId,
+          address: contractAddress as Address,
+          abi,
+          functionName: 'setPayout',
+          args: [nftIdBigInt, orderTypeValue, params.payoutAddress],
+          chainId,
         });
         break;
 
       case 'validUntil':
         writeContract({
-          address: params.contractAddress,
-          abi: POSITION_CLOSER_ABI,
-          functionName: 'setCloseValidUntil',
-          args: [params.closeId, params.validUntil],
-          chainId: params.chainId,
+          address: contractAddress as Address,
+          abi,
+          functionName: 'setValidUntil',
+          args: [nftIdBigInt, orderTypeValue, params.validUntil],
+          chainId,
         });
         break;
+
+      case 'operator':
+        writeContract({
+          address: contractAddress as Address,
+          abi,
+          functionName: 'setOperator',
+          args: [nftIdBigInt, orderTypeValue, params.operatorAddress],
+          chainId,
+        });
+        break;
+
+      case 'swapIntent': {
+        // Map SwapDirection to contract enum value
+        // Contract: NONE = 0, BASE_TO_QUOTE = 1, QUOTE_TO_BASE = 2
+        const swapDirectionMap: Record<string, number> = {
+          'NONE': 0,
+          'BASE_TO_QUOTE': 1,
+          'QUOTE_TO_BASE': 2,
+        };
+        const directionValue = swapDirectionMap[params.direction] ?? 0;
+
+        writeContract({
+          address: contractAddress as Address,
+          abi,
+          functionName: 'setSwapIntent',
+          args: [nftIdBigInt, orderTypeValue, directionValue, params.quoteToken, params.swapSlippageBps],
+          chainId,
+        });
+        break;
+      }
     }
-  }, [writeContract]);
+  }, [writeContract, isReady, abi, contractAddress, chainId, nftId]);
 
   // Reset function
   const reset = useCallback(() => {
@@ -268,5 +331,6 @@ export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
     result,
     error,
     reset,
+    isReady,
   };
 }

@@ -1,16 +1,20 @@
 /**
  * useCancelCloseOrder - Cancel a close order via user's wallet
  *
- * This hook uses Wagmi to have the user sign the cancelClose transaction
+ * This hook uses Wagmi to have the user sign the cancelOrder transaction
  * directly with their connected wallet. After confirmation, it updates
  * the order status in the database.
  *
  * Flow:
  * 1. User calls cancelOrder()
- * 2. User signs cancelClose() tx in their wallet (Wagmi)
+ * 2. User signs cancelOrder() tx in their wallet (Wagmi)
  * 3. Wait for tx confirmation (with 60s timeout)
  * 4. On success/failure/timeout: Cancel via DELETE /api/v1/automation/close-orders/[id]
  * 5. Invalidate cache and return success
+ *
+ * V1.0 Interface (tick-based):
+ * - Uses cancelOrder(nftId, orderType) instead of cancelClose(closeId)
+ * - Orders identified by (nftId, orderType) - one SL and one TP per position
  */
 
 /** Timeout for waiting on transaction confirmation (60 seconds) */
@@ -22,28 +26,19 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Address, Hash } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
 import { automationApi } from '@/lib/api-client';
-import { POSITION_CLOSER_ABI } from '@/config/contracts/uniswapv3-position-closer';
+import { useSharedContract } from './useSharedContract';
 import type { SerializedCloseOrder } from '@midcurve/api-shared';
+import type { OrderType } from './useCreateCloseOrder';
 
 /**
- * Parameters for cancelling a close order
+ * Parameters for cancelling a close order (V1.0 tick-based interface)
+ * Note: ABI and contract address are fetched internally via useSharedContract
  */
 export interface CancelCloseOrderParams {
-  /** The automation contract address */
-  contractAddress: Address;
-  /** Chain ID */
-  chainId: number;
-  /** On-chain close order ID */
-  closeId: bigint;
-  /** Uniswap V3 NFT token ID (for position-scoped API) */
-  nftId: string;
-  /** Close order semantic hash (e.g., "sl@-12345", "tp@201120") */
+  /** Order type: STOP_LOSS or TAKE_PROFIT */
+  orderType: OrderType;
+  /** Close order semantic hash for API (e.g., "sl@-12345", "tp@201120") */
   closeOrderHash: string;
-  /**
-   * Database order ID for API notification
-   * @deprecated Use closeOrderHash with position-scoped endpoints instead
-   */
-  orderId?: string;
   /**
    * Position ID for cache invalidation
    * @deprecated Derived from chainId/nftId for position-scoped endpoints
@@ -85,18 +80,35 @@ export interface UseCancelCloseOrderResult {
   forceCancelled: boolean;
   /** Reset the hook state */
   reset: () => void;
+  /** Whether the shared contract is ready (ABI loaded) */
+  isReady: boolean;
 }
 
 /**
- * Hook for cancelling a close order via user's wallet
+ * Hook for cancelling a close order via user's wallet (V1.0 tick-based interface)
+ *
+ * @param chainId - The EVM chain ID
+ * @param nftId - The position NFT ID (as string)
  */
-export function useCancelCloseOrder(): UseCancelCloseOrderResult {
+export function useCancelCloseOrder(
+  chainId: number,
+  nftId: string
+): UseCancelCloseOrderResult {
   const queryClient = useQueryClient();
   const [result, setResult] = useState<CancelCloseOrderResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [currentParams, setCurrentParams] = useState<CancelCloseOrderParams | null>(null);
   const [isTimedOut, setIsTimedOut] = useState(false);
   const [forceCancelled, setForceCancelled] = useState(false);
+
+  // Fetch ABI and contract address from shared contract API
+  const {
+    data: sharedContract,
+    isLoading: isLoadingContract,
+  } = useSharedContract(chainId, nftId);
+
+  const { abi, contractAddress } = sharedContract ?? {};
+  const isReady = !isLoadingContract && !!abi && !!contractAddress;
 
   // Wagmi write contract hook
   const {
@@ -121,8 +133,8 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     try {
       // Use position-scoped endpoint
       const response = await automationApi.positionCloseOrders.cancel(
-        params.chainId,
-        params.nftId,
+        chainId,
+        nftId,
         params.closeOrderHash
       );
       setForceCancelled(true);
@@ -134,7 +146,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
 
       // Invalidate position-scoped caches
       queryClient.invalidateQueries({
-        queryKey: queryKeys.positions.uniswapv3.closeOrders.all(params.chainId, params.nftId),
+        queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
       });
       // Also invalidate legacy caches for backward compatibility
       if (params.positionId) {
@@ -148,7 +160,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to force cancel order'));
     }
-  }, [txHash, queryClient]);
+  }, [txHash, queryClient, chainId, nftId]);
 
   // Handle transaction success - update order status in database
   useEffect(() => {
@@ -158,8 +170,8 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
       try {
         // Cancel the order in the database via position-scoped DELETE endpoint
         const response = await automationApi.positionCloseOrders.cancel(
-          currentParams.chainId,
-          currentParams.nftId,
+          chainId,
+          nftId,
           currentParams.closeOrderHash
         );
 
@@ -170,7 +182,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
 
         // Invalidate position-scoped caches
         queryClient.invalidateQueries({
-          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(currentParams.chainId, currentParams.nftId),
+          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
         });
         // Also invalidate legacy caches for backward compatibility
         if (currentParams.positionId) {
@@ -191,7 +203,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     };
 
     handleSuccess();
-  }, [isTxSuccess, txHash, currentParams, queryClient, forceCancelled]);
+  }, [isTxSuccess, txHash, currentParams, queryClient, forceCancelled, chainId, nftId]);
 
   // Timeout mechanism - force cancel if tx takes too long
   useEffect(() => {
@@ -217,7 +229,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     }
   }, [writeError, receiptError, currentParams, forceCancelled, forceCancel]);
 
-  // Cancel function
+  // Cancel function - calls cancelOrder on shared contract (V1.0 interface)
   const cancelOrder = useCallback((params: CancelCloseOrderParams) => {
     // Reset state
     setResult(null);
@@ -226,15 +238,29 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     setForceCancelled(false);
     setCurrentParams(params);
 
-    // Call writeContract with cancelClose function
+    // Pre-flight check: verify shared contract is ready
+    if (!isReady || !abi || !contractAddress) {
+      setError(new Error('Shared contract not ready. Please wait and try again.'));
+      return;
+    }
+
+    // Map OrderType to contract enum value
+    // Contract: STOP_LOSS = 0, TAKE_PROFIT = 1
+    const orderTypeMap: Record<OrderType, number> = {
+      'STOP_LOSS': 0,
+      'TAKE_PROFIT': 1,
+    };
+    const orderTypeValue = orderTypeMap[params.orderType];
+
+    // Call writeContract with cancelOrder function (V1.0 interface)
     writeContract({
-      address: params.contractAddress,
-      abi: POSITION_CLOSER_ABI,
-      functionName: 'cancelClose',
-      args: [params.closeId],
-      chainId: params.chainId,
+      address: contractAddress as Address,
+      abi,
+      functionName: 'cancelOrder',
+      args: [BigInt(nftId), orderTypeValue],
+      chainId,
     });
-  }, [writeContract]);
+  }, [writeContract, isReady, abi, contractAddress, chainId, nftId]);
 
   // Reset function
   const reset = useCallback(() => {
@@ -256,5 +282,6 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     isTimedOut,
     forceCancelled,
     reset,
+    isReady,
   };
 }

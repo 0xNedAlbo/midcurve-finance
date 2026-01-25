@@ -17,10 +17,12 @@ import { createPortal } from 'react-dom';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
+import { sqrtPriceX96ToTick } from '@midcurve/shared';
 import {
   useCreateCloseOrder,
   useOperatorApproval,
   useAutowallet,
+  type OrderType,
 } from '@/hooks/automation';
 import { CloseOrderConfigureStep } from './steps/CloseOrderConfigureStep';
 import { CloseOrderReviewStep } from './steps/CloseOrderReviewStep';
@@ -57,11 +59,6 @@ export interface CloseOrderModalProps {
    * Shared automation contract address on this chain
    */
   contractAddress: Address;
-
-  /**
-   * Position manager (NFPM) address on this chain
-   */
-  positionManager: Address;
 
   /**
    * NFT ID of the position
@@ -180,7 +177,6 @@ export function CloseOrderModal({
   poolAddress,
   chainId,
   contractAddress,
-  positionManager,
   nftId,
   positionOwner,
   baseToken,
@@ -242,7 +238,7 @@ export function CloseOrderModal({
     reset: resetApproval,
   } = useOperatorApproval(chainId, contractAddress);
 
-  // Create order hook (Wagmi-based)
+  // Create order hook (Wagmi-based) - fetches ABI internally
   const {
     registerOrder,
     isRegistering,
@@ -250,8 +246,10 @@ export function CloseOrderModal({
     isSuccess,
     result,
     error: hookError,
+    apiError,
     reset: resetHook,
-  } = useCreateCloseOrder();
+    isReady: isHookReady,
+  } = useCreateCloseOrder(chainId, nftId.toString());
 
   // Detect if approval is needed (shared contract is always deployed)
   const needsApproval = !isApproved && !isCheckingApproval;
@@ -319,6 +317,14 @@ export function CloseOrderModal({
     }
   }, [hookError]);
 
+  // Handle API notification error (tx succeeded but API failed)
+  useEffect(() => {
+    if (apiError) {
+      setLocalError(`Transaction succeeded but order monitoring failed: ${apiError.message}`);
+      setStep('review'); // Go back to review to show error
+    }
+  }, [apiError]);
+
   // Clear wallet-related errors when wallet connects
   useEffect(() => {
     if (isConnected && localError === 'Wallet not connected') {
@@ -359,40 +365,53 @@ export function CloseOrderModal({
       return;
     }
 
+    if (!isHookReady) {
+      setLocalError('Contract not ready. Please wait and try again.');
+      setStep('review');
+      return;
+    }
+
     // Calculate valid until timestamp
     const validUntilDate = new Date();
     validUntilDate.setDate(validUntilDate.getDate() + formData.validUntilDays);
     const validUntil = BigInt(Math.floor(validUntilDate.getTime() / 1000));
 
-    // Parse price values as bigint
-    const sqrtPriceX96Lower =
-      formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH'
-        ? BigInt(formData.sqrtPriceX96Lower || '0')
-        : 0n;
-    const sqrtPriceX96Upper =
-      formData.triggerMode === 'UPPER' || formData.triggerMode === 'BOTH'
-        ? BigInt(formData.sqrtPriceX96Upper || '0')
-        : BigInt('0xffffffffffffffffffffffffffffffffffffffff'); // Max sqrtPriceX96
+    // Map triggerMode to orderType (V1.0 tick-based interface)
+    // LOWER -> STOP_LOSS (triggers when price drops below)
+    // UPPER -> TAKE_PROFIT (triggers when price rises above)
+    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = {
+      'LOWER': 'STOP_LOSS',
+      'UPPER': 'TAKE_PROFIT',
+      'BOTH': 'STOP_LOSS', // Default to STOP_LOSS for BOTH (shouldn't happen in practice)
+    };
+    const orderTypeValue: OrderType = orderTypeFromTriggerMode[formData.triggerMode];
 
-    // Call the hook's registerOrder function
-    // NOTE: isToken0Quote is passed so the hook can transform the trigger mode
-    // and sqrtPriceX96 values for correct contract behavior
+    // Convert sqrtPriceX96 to triggerTick
+    // For STOP_LOSS (LOWER), use sqrtPriceX96Lower
+    // For TAKE_PROFIT (UPPER), use sqrtPriceX96Upper
+    const sqrtPriceX96 = formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH'
+      ? formData.sqrtPriceX96Lower
+      : formData.sqrtPriceX96Upper;
+
+    if (!sqrtPriceX96) {
+      setLocalError('Trigger price not set');
+      setStep('review');
+      return;
+    }
+
+    const triggerTick = sqrtPriceX96ToTick(sqrtPriceX96);
+
+    // Call the hook's registerOrder function (V1.0 tick-based interface)
     registerOrder({
-      contractAddress,
-      positionManager,
-      chainId,
-      nftId,
-      sqrtPriceX96Lower,
-      sqrtPriceX96Upper,
+      poolAddress: poolAddress as Address,
+      orderType: orderTypeValue,
+      triggerTick,
       payoutAddress: userAddress,
       operatorAddress,
       validUntil,
       slippageBps: formData.slippageBps,
-      triggerMode: formData.triggerMode,
       positionId,
-      poolAddress: poolAddress as Address,
       positionOwner,
-      isToken0Quote,
       // Optional swap config
       swapConfig: formData.swapEnabled
         ? {
@@ -407,16 +426,12 @@ export function CloseOrderModal({
     userAddress,
     operatorAddress,
     formData,
-    contractAddress,
-    positionManager,
-    chainId,
-    nftId,
     positionId,
     poolAddress,
     positionOwner,
-    isToken0Quote,
     quoteToken.address,
     registerOrder,
+    isHookReady,
   ]);
 
   // Handle approval success - continue to registration

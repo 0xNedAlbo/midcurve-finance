@@ -116,7 +116,6 @@ export function TakeProfitButton({
   poolAddress,
   chainId,
   contractAddress,
-  positionManager,
   nftId,
   positionOwner,
   currentPriceDisplay,
@@ -127,6 +126,10 @@ export function TakeProfitButton({
   disabled = false,
   disabledReason,
 }: TakeProfitButtonProps) {
+  // Extract position data for PnL simulation
+  const positionState = position.state as { liquidity: string };
+  const positionConfig = position.config as { tickLower: number; tickUpper: number };
+
   // If disabled, show disabled button with tooltip
   if (disabled) {
     return (
@@ -140,10 +143,6 @@ export function TakeProfitButton({
       </button>
     );
   }
-
-  // Extract position data for PnL simulation
-  const positionState = position.state as { liquidity: string };
-  const positionConfig = position.config as { tickLower: number; tickUpper: number };
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
 
@@ -230,7 +229,6 @@ export function TakeProfitButton({
           poolAddress={poolAddress}
           chainId={chainId}
           contractAddress={contractAddress!}
-          positionManager={positionManager!}
           nftId={nftId}
           positionOwner={positionOwner}
           baseToken={baseToken}
@@ -294,7 +292,6 @@ export function TakeProfitButton({
         onClose={() => setShowCancelModal(false)}
         order={activeOrder}
         tokenConfig={tokenConfig}
-        contractAddress={contractAddress!}
         chainId={chainId}
         nftId={nftId.toString()}
         onSuccess={() => setShowCancelModal(false)}

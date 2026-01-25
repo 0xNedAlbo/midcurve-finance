@@ -11,8 +11,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, Loader2, CheckCircle, Trash2 } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
-import type { Address } from 'viem';
-import { useCancelCloseOrder } from '@/hooks/automation';
+import { useCancelCloseOrder, type OrderType } from '@/hooks/automation';
 import { formatTriggerPrice, type TokenConfig } from './order-button-utils';
 import { PnLSimulation } from './PnLSimulation';
 
@@ -36,11 +35,6 @@ interface CancelOrderConfirmModalProps {
    * Token configuration for price display
    */
   tokenConfig: TokenConfig;
-
-  /**
-   * Contract address for the automation contract
-   */
-  contractAddress: Address;
 
   /**
    * Chain ID
@@ -115,7 +109,6 @@ export function CancelOrderConfirmModal({
   onClose,
   order,
   tokenConfig,
-  contractAddress,
   chainId,
   nftId,
   onSuccess,
@@ -130,7 +123,7 @@ export function CancelOrderConfirmModal({
 }: CancelOrderConfirmModalProps) {
   const [mounted, setMounted] = useState(false);
 
-  // Cancel order hook
+  // Cancel order hook - fetches ABI internally
   const {
     cancelOrder,
     isCancelling,
@@ -138,7 +131,8 @@ export function CancelOrderConfirmModal({
     isSuccess,
     error,
     reset,
-  } = useCancelCloseOrder();
+    isReady: isHookReady,
+  } = useCancelCloseOrder(chainId, nftId);
 
   // Mount check for portal
   useEffect(() => {
@@ -178,24 +172,27 @@ export function CancelOrderConfirmModal({
 
   // Handle cancel confirmation
   const handleConfirm = () => {
-    if (config.closeId === undefined) {
-      console.error('Order missing closeId');
-      return;
-    }
-
     if (!order.closeOrderHash) {
       console.error('Order missing closeOrderHash');
       return;
     }
 
+    if (!isHookReady) {
+      console.error('Hook not ready');
+      return;
+    }
+
+    // Map triggerMode to orderType (V1.0 tick-based interface)
+    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = {
+      'LOWER': 'STOP_LOSS',
+      'UPPER': 'TAKE_PROFIT',
+      'BOTH': 'STOP_LOSS', // Default to STOP_LOSS for BOTH
+    };
+    const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
+
     cancelOrder({
-      contractAddress,
-      chainId,
-      closeId: BigInt(config.closeId),
-      nftId,
+      orderType,
       closeOrderHash: order.closeOrderHash,
-      // Keep legacy params for backward compatibility during migration
-      orderId: order.id,
       positionId: order.positionId,
     });
   };

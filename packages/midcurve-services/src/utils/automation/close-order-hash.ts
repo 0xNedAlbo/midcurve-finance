@@ -8,9 +8,7 @@
  * - tick = Integer tick derived from sqrtPriceX96
  */
 
-import { TickMath } from '@uniswap/v3-sdk';
-import JSBI from 'jsbi';
-import type { TriggerMode } from '@midcurve/shared';
+import { type TriggerMode, sqrtPriceX96ToTick } from '@midcurve/shared';
 
 /**
  * Close order type prefix
@@ -30,17 +28,6 @@ export interface CloseOrderHashComponents {
  * Matches: "sl@{tick}" or "tp@{tick}" where tick is an integer (positive or negative)
  */
 const CLOSE_ORDER_HASH_REGEX = /^(sl|tp)@(-?\d+)$/;
-
-/**
- * Converts sqrtPriceX96 (bigint) to tick using Uniswap V3 TickMath
- *
- * @param sqrtPriceX96 - The sqrt price in Q96.96 format
- * @returns The floor tick at this sqrt price
- */
-export function sqrtPriceX96ToTick(sqrtPriceX96: bigint): number {
-  const jsbiSqrtPrice = JSBI.BigInt(sqrtPriceX96.toString());
-  return TickMath.getTickAtSqrtRatio(jsbiSqrtPrice);
-}
 
 /**
  * Derives a close order hash from trigger mode and sqrtPriceX96

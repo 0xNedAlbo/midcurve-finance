@@ -21,6 +21,7 @@
     "local:price-down": "DIRECTION=down SWAP_AMOUNT=${SWAP_AMOUNT:-300000000000000000} forge script script/ManipulatePrice.s.sol --rpc-url local --broadcast --unlocked --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "local:check-price": "tsx scripts/local-fork/check-price.ts",
     "local:setup": "tsx scripts/local-fork/setup.ts",
+    "local:deploy": "forge script script/DeployPositionCloser.s.sol --rpc-url local --broadcast --unlocked --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "db:reset-local": "tsx scripts/reset-local-chain-db.ts"
   },
   "dependencies": {

@@ -307,6 +307,41 @@ export const automationApi = {
     },
 
     /**
+     * Create a new close order at the specified closeOrderHash
+     * @param chainId - Chain ID
+     * @param nftId - Uniswap V3 NFT token ID
+     * @param closeOrderHash - Semantic identifier (e.g., "sl@-12345", "tp@201120")
+     * @param data - Order creation data
+     */
+    create(
+      chainId: number,
+      nftId: string,
+      closeOrderHash: string,
+      data: {
+        poolAddress: string;
+        operatorAddress: string;
+        positionManager: string;
+        triggerMode: 'LOWER' | 'UPPER';
+        sqrtPriceX96: string;
+        payoutAddress: string;
+        validUntil: string;
+        slippageBps: number;
+        registrationTxHash: string;
+        swapConfig?: {
+          enabled: boolean;
+          direction: 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+          slippageBps: number;
+          quoteToken: string;
+        };
+      }
+    ) {
+      return apiClient.put<RegisterCloseOrderResponse['data']>(
+        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`,
+        data
+      );
+    },
+
+    /**
      * Get a single close order by semantic hash
      * @param chainId - Chain ID
      * @param nftId - Uniswap V3 NFT token ID

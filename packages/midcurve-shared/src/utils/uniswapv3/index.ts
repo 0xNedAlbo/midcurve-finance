@@ -24,6 +24,7 @@ export {
   priceToTick,
   priceToClosestUsableTick,
   tickToSqrtRatioX96,
+  sqrtPriceX96ToTick,
   sqrtRatioX96ToToken1PerToken0,
   sqrtRatioX96ToToken0PerToken1,
 } from './price.js';

@@ -37,15 +37,25 @@ contract RegistrationFacet is Modifiers {
     // ========================================
 
     /// @notice Register a new close order
-    /// @dev Caller must be the NFT owner and must have approved this contract
+    /// @dev Caller must be the NFT owner and must have approved this contract.
+    ///      Allows overwriting orders that are Cancelled or Executed (but not Active).
     /// @param params Registration parameters
     function registerOrder(IUniswapV3PositionCloserV1.RegisterOrderParams calldata params)
         external
         whenInitialized
         nonReentrant
-        orderMustNotExist(params.nftId, params.orderType)
     {
         AppStorage storage s = LibAppStorage.appStorage();
+
+        // Check if order already exists and is active - cannot overwrite active orders
+        if (s.orderExists[params.nftId][params.orderType]) {
+            bytes32 existingKey = LibAppStorage.orderKey(params.nftId, params.orderType);
+            CloseOrder storage existingOrder = s.orders[existingKey];
+            if (existingOrder.status == OrderStatus.ACTIVE) {
+                revert OrderAlreadyExists(params.nftId, params.orderType);
+            }
+            // Order exists but is Cancelled or Executed - allow overwriting
+        }
 
         // Validate addresses
         if (params.payout == address(0)) revert ZeroAddress();

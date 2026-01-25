@@ -835,6 +835,47 @@ export class CloseOrderService {
     }
   }
 
+  /**
+   * Deletes a close order permanently from the database
+   *
+   * This is used when replacing an order that is in a terminal state
+   * (cancelled, executed, expired, failed) with a new order at the same hash.
+   *
+   * @param id - Order ID
+   */
+  async delete(id: string): Promise<void> {
+    log.methodEntry(this.logger, 'delete', { id });
+
+    try {
+      const existing = await this.prisma.automationCloseOrder.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      // Only allow deletion of orders in terminal states
+      const terminalStates = ['cancelled', 'executed', 'expired', 'failed'];
+      if (!terminalStates.includes(existing.status)) {
+        throw new Error(
+          `Cannot delete order in state: ${existing.status}. ` +
+            `Order must be in a terminal state (${terminalStates.join(', ')}).`
+        );
+      }
+
+      await this.prisma.automationCloseOrder.delete({
+        where: { id },
+      });
+
+      this.logger.info({ id }, 'Close order deleted');
+      log.methodExit(this.logger, 'delete', { id });
+    } catch (error) {
+      log.methodError(this.logger, 'delete', error as Error, { id });
+      throw error;
+    }
+  }
+
   // ============================================================================
   // PRIVATE HELPERS
   // ============================================================================

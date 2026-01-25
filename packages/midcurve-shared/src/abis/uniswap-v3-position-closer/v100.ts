@@ -1,10 +1,11 @@
 // ============================================================================
-// UniswapV3PositionCloser V1 ABI
+// UniswapV3PositionCloser V1.0 ABI (Interface Version 100)
 // Generated from IUniswapV3PositionCloserV1.sol
+// Version: 1.0 (100 = majorVersion * 100 + minorVersion)
 // ============================================================================
 
 /**
- * ABI for UniswapV3PositionCloser V1 (Diamond pattern)
+ * ABI for UniswapV3PositionCloser V1.0 (Diamond pattern)
  *
  * Interface features:
  * - Tick-based triggers (int24)
@@ -12,7 +13,7 @@
  * - SwapDirection: NONE (0), BASE_TO_QUOTE (1), QUOTE_TO_BASE (2)
  * - OrderStatus: NONE (0), ACTIVE (1), EXECUTED (2), CANCELLED (3)
  */
-export const UniswapV3PositionCloserV1Abi = [
+export const UniswapV3PositionCloserV100Abi = [
   {
     type: 'function',
     name: 'augustusRegistry',
@@ -367,4 +368,4 @@ export const UniswapV3PositionCloserV1Abi = [
   },
 ] as const;
 
-export type UniswapV3PositionCloserV1Abi = typeof UniswapV3PositionCloserV1Abi;
+export type UniswapV3PositionCloserV100Abi = typeof UniswapV3PositionCloserV100Abi;

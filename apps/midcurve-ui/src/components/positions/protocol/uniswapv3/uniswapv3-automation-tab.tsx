@@ -52,7 +52,6 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
   } = useSharedContract(poolConfig.chainId, positionConfig.nftId.toString());
 
   const contractAddress = contractData?.contractAddress as Address | undefined;
-  const positionManager = contractData?.positionManager as Address | undefined;
   const isChainSupported = contractData?.isSupported ?? false;
 
   // PnL breakdown data for position states calculation
@@ -123,7 +122,6 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         poolAddress={poolConfig.address}
         chainId={poolConfig.chainId}
         contractAddress={contractAddress!}
-        positionManager={positionManager!}
         nftId={BigInt(positionConfig.nftId)}
         positionOwner={positionState.ownerAddress as Address}
         baseToken={{

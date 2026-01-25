@@ -11,9 +11,8 @@ import { useState } from 'react';
 import { Plus, AlertCircle, AlertTriangle, Loader2, Shield } from 'lucide-react';
 import type { Address } from 'viem';
 import { useAccount } from 'wagmi';
-import type { SerializedUniswapV3CloseOrderConfig } from '@midcurve/api-shared';
-import { useCloseOrders } from '@/hooks/automation';
-import { useCancelCloseOrder } from '@/hooks/automation';
+import type { SerializedUniswapV3CloseOrderConfig, TriggerMode } from '@midcurve/api-shared';
+import { useCloseOrders, useCancelCloseOrder, type OrderType } from '@/hooks/automation';
 import { CloseOrderCard, type WalletIssue } from './CloseOrderCard';
 import { isCloseOrderTerminal } from './CloseOrderStatusBadge';
 import { AutomationLogList } from './AutomationLogList';
@@ -138,7 +137,7 @@ export function PositionCloseOrdersPanel({
     { enabled: !!positionId && hasContract }
   );
 
-  // Cancel hook
+  // Cancel hook - fetches ABI internally
   const {
     cancelOrder,
     isCancelling,
@@ -148,7 +147,7 @@ export function PositionCloseOrdersPanel({
     isTimedOut,
     forceCancelled,
     reset: resetCancel,
-  } = useCancelCloseOrder();
+  } = useCancelCloseOrder(chainId, nftId);
 
   // Filter to show active orders first, then terminal ones
   const activeOrders = orders?.filter((o) => !isCloseOrderTerminal(o.status)) ?? [];
@@ -171,27 +170,30 @@ export function PositionCloseOrdersPanel({
     // Can't cancel without contract address
     if (!contractAddress) return;
 
-    // Find the order to get the closeId and closeOrderHash
+    // Find the order to get the closeOrderHash and triggerMode
     const order = orders?.find((o) => o.id === orderId);
     if (!order) return;
 
     const config = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
-    const closeId = BigInt(config.closeId);
+    const triggerMode = config.triggerMode ?? 'LOWER';
 
     if (!order.closeOrderHash) {
       console.error('Order missing closeOrderHash');
       return;
     }
 
+    // Map triggerMode to orderType (V1.0 tick-based interface)
+    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = {
+      'LOWER': 'STOP_LOSS',
+      'UPPER': 'TAKE_PROFIT',
+      'BOTH': 'STOP_LOSS', // Default to STOP_LOSS for BOTH
+    };
+    const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
+
     setCancellingOrderId(orderId);
     cancelOrder({
-      contractAddress,
-      chainId,
-      closeId,
-      nftId,
+      orderType,
       closeOrderHash: order.closeOrderHash,
-      // Keep legacy params for backward compatibility
-      orderId,
       positionId,
     });
   };
