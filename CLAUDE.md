@@ -202,8 +202,7 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 - ✅ **Prisma client generation** in consumer projects (peer dependency pattern)
 - ✅ **Distributed caching** via PostgreSQL (no Redis required)
 - ✅ **Address normalization** for EVM chains (EIP-55 checksumming)
-- ✅ **Dependency injection** for testability
-- ✅ **Comprehensive testing** (121+ tests with 100% coverage)
+- ✅ **Dependency injection** for flexibility
 - ✅ **Multi-chain support** (Ethereum, Arbitrum, Base, BSC, Polygon, Optimism)
 
 **Documentation:** See [packages/midcurve-services/CLAUDE.md](packages/midcurve-services/CLAUDE.md)
@@ -511,11 +510,6 @@ midcurve-automation/
 - **nginx** - Static file serving (UI)
 - **PostgreSQL** - Primary database (AWS RDS)
 - **RabbitMQ 3.13** - Message broker for pool price events and automation
-
-### Testing
-- **Vitest 3.2+** - Unit and API testing
-- **Playwright 1.56+** - UI E2E testing
-- **vitest-mock-extended** - Type-safe Prisma mocking
 
 ---
 
@@ -1044,7 +1038,6 @@ Jump to package-specific implementation documentation:
 
 **🔧 [@midcurve/services](packages/midcurve-services/CLAUDE.md)** - Business Logic Implementation
 - Service layer APIs (TokenService, Erc20TokenService)
-- Testing patterns and fixtures (121+ tests)
 - EVM utilities and on-chain data reading
 - Distributed caching implementation (PostgreSQL)
 - Database schema (Prisma)
@@ -1186,7 +1179,6 @@ RABBITMQ_URL="amqp://guest:guest@localhost:5672"
 cd packages/midcurve-shared
 # Make changes to src/
 pnpm build  # Dependent packages pick up changes via workspace
-pnpm test   # Run tests
 ```
 
 **Working on UI (Vite SPA):**
@@ -1218,22 +1210,6 @@ pnpm build
 
 # Turborepo parallelizes where possible and caches builds
 # Only rebuilds changed packages
-```
-
-### Testing
-
-**Packages:**
-```bash
-# From any package directory
-pnpm test              # Watch mode
-pnpm test:run          # Single run
-pnpm test:coverage     # With coverage
-```
-
-**Run All Tests:**
-```bash
-# From monorepo root - runs tests in parallel
-pnpm test
 ```
 
 ---
@@ -1399,7 +1375,6 @@ docker compose exec api sh
 - ✅ Core type system with discriminated unions
 - ✅ EVM address utilities
 - ✅ UniswapV3 math utilities
-- ✅ 107 tests with 100% coverage
 
 **@midcurve/services:**
 - ✅ Token service with CRUD operations
@@ -1407,7 +1382,6 @@ docker compose exec api sh
 - ✅ PostgreSQL-based distributed cache
 - ✅ CoinGecko client with caching
 - ✅ EVM configuration for 6 chains
-- ✅ 121+ tests with 100% coverage
 - ✅ Peer dependency pattern for Prisma
 
 **@midcurve/api-shared:**
@@ -1434,8 +1408,6 @@ docker compose exec api sh
 - ✅ Migrated to use @midcurve/api-shared
 - ✅ Docker Compose deployment configuration
 - ✅ pnpm workspaces integration
-- ✅ Playwright E2E tests (33 tests)
-- ✅ Vitest API E2E tests
 
 ### 🔄 Phase 2: Core Features (In Progress)
 
@@ -1500,12 +1472,19 @@ docker compose exec api sh
 - ✅ **Discriminated unions** for type narrowing
 - ✅ **Async/await** (no callbacks)
 
-### Testing
-- ✅ **Vitest** for all testing
-- ✅ **Arrange-Act-Assert** pattern
-- ✅ **Mock external dependencies** (Prisma, network calls)
-- ✅ **Test fixtures** for reusable test data
-- ✅ **Type-safe mocks** with vitest-mock-extended
+### Testing Policy
+
+**⚠️ IMPORTANT: Do NOT implement any tests (unit tests, integration tests, E2E tests) unless explicitly requested by the user.**
+
+This project does not use automated testing as part of its standard development workflow. Tests should only be written when:
+- The user explicitly asks for tests to be implemented
+- The user specifically requests test coverage for a feature
+
+When tests are NOT requested:
+- ❌ Do not create test files
+- ❌ Do not add test dependencies
+- ❌ Do not suggest "we should add tests for this"
+- ✅ Focus on implementing the feature correctly
 
 ### Error Handling
 - ✅ **Try/catch** for async operations
@@ -1801,7 +1780,6 @@ All interactive elements must include `cursor-pointer` class for proper UX feedb
 - **Services:** [midcurve-services/CLAUDE.md](midcurve-services/CLAUDE.md)
 - **API Shared:** [midcurve-api-shared/README.md](midcurve-api-shared/README.md)
 - **Shared:** [midcurve-shared/README.md](midcurve-shared/README.md)
-- **UI Testing:** [midcurve-ui/tests/README.md](midcurve-ui/tests/README.md)
 
 ### Common Issues
 
@@ -1853,10 +1831,9 @@ This project uses a **single git repository** at the root level with Turborepo f
 1. **Work from the root directory** (`/Users/job/Documents/Programmieren/midcurve-finance/`)
 2. Create feature branch from `main`
 3. Make changes in appropriate package(s) (apps/* or packages/*)
-4. Write tests for new functionality
-5. Run type checks and tests
-6. Commit with clear, descriptive messages (affects all modified packages)
-7. Push and create pull request
+4. Run type checks (`pnpm build`)
+5. Commit with clear, descriptive messages (affects all modified packages)
+6. Push and create pull request
 
 ### Commit Message Format
 ```
@@ -1873,8 +1850,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### Pull Request Checklist
-- [ ] All tests pass
-- [ ] Type checking passes
+- [ ] Type checking passes (`pnpm build` succeeds)
 - [ ] Documentation updated (if needed)
 - [ ] CLAUDE.md updated (if architecture changed)
 - [ ] No secrets committed (.env in .gitignore)

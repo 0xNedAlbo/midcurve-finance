@@ -57,7 +57,10 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const quoteTokenConfig = quoteToken.config as { address: string };
 
   // Check automation availability for this chain
-  const { data: contractData } = useSharedContract(positionConfig.chainId);
+  const { data: contractData } = useSharedContract(
+    positionConfig.chainId,
+    positionConfig.nftId.toString()
+  );
   const { data: autowalletData } = useAutowallet();
 
   // Automation visibility checks

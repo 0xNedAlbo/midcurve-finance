@@ -186,6 +186,7 @@ import type {
   // Shared Contracts
   GetSharedContractResponse,
   ListSharedContractsResponse,
+  GetPositionSharedContractsResponseData,
   // Wallet
   GetAutowalletResponse,
   CreateAutowalletResponse,
@@ -359,9 +360,20 @@ export const automationApi = {
 
   /**
    * Get shared contract for a specific chain
+   * @deprecated Use getPositionSharedContracts instead
    */
   getSharedContract(chainId: number) {
     return apiClient.get<GetSharedContractResponse['data']>(`/api/v1/automation/shared-contracts/${chainId}`);
+  },
+
+  /**
+   * Get shared contracts for a position's chain (new DB-backed endpoint)
+   * Returns a map of contract names to contract info.
+   */
+  getPositionSharedContracts(chainId: number, nftId: string) {
+    return apiClient.get<GetPositionSharedContractsResponseData>(
+      `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/shared-contracts`
+    );
   },
 
   // ---------------------------------------------------------------------------

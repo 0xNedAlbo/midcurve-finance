@@ -49,7 +49,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
     data: contractData,
     isLoading: isContractLoading,
     error: contractError,
-  } = useSharedContract(poolConfig.chainId);
+  } = useSharedContract(poolConfig.chainId, positionConfig.nftId.toString());
 
   const contractAddress = contractData?.contractAddress as Address | undefined;
   const positionManager = contractData?.positionManager as Address | undefined;

@@ -20,6 +20,7 @@ import {
   PositionListService,
   PositionAprService,
   CloseOrderService,
+  SharedContractService,
   PoolSubscriptionService,
   AutomationLogService,
   PnLCurveService,
@@ -41,6 +42,7 @@ let _uniswapV3PositionLedgerService: UniswapV3PositionLedgerService | null = nul
 let _positionListService: PositionListService | null = null;
 let _positionAprService: PositionAprService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
+let _sharedContractService: SharedContractService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _pnlCurveService: PnLCurveService | null = null;
@@ -166,6 +168,16 @@ export function getCloseOrderService(): CloseOrderService {
     _closeOrderService = new CloseOrderService();
   }
   return _closeOrderService;
+}
+
+/**
+ * Get singleton instance of SharedContractService
+ */
+export function getSharedContractService(): SharedContractService {
+  if (!_sharedContractService) {
+    _sharedContractService = new SharedContractService();
+  }
+  return _sharedContractService;
 }
 
 /**

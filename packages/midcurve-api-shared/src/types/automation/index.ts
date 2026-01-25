@@ -4,14 +4,18 @@
  * Types for position automation features (shared contracts, close orders, wallet).
  */
 
-// Shared Contracts
+// Shared Contracts (new DB-backed types)
 export {
+  type ContractVersion,
+  type VersionedSharedContractInfo,
+  type SharedContractsMap,
+  type GetPositionSharedContractsResponseData,
+  type GetPositionSharedContractsResponse,
+  // Deprecated (JSON-config-based)
   SHARED_CONTRACT_PROTOCOLS,
   type SharedContractProtocol,
   type SharedContractInfo,
-  // Get by chain
   type GetSharedContractResponse,
-  // List
   type ListSharedContractsResponseData,
   type ListSharedContractsResponse,
 } from './contracts.js';

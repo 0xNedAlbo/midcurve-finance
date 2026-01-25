@@ -21,10 +21,10 @@ import {
   getPoolSubscriptionService,
   getUniswapV3PositionService,
   getPositionListService,
+  getSharedContractService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
-import { isChainSupported } from '@/config/shared-contracts';
-import type { UniswapV3Position } from '@midcurve/shared';
+import { SharedContractNameEnum, type UniswapV3Position } from '@midcurve/shared';
 
 // Chains supported for Paraswap swap integration
 const PARASWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
@@ -152,10 +152,13 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       const data = validation.data;
 
-      // Validate chain is supported
-      if (
-        !isChainSupported('uniswapv3', data.automationContractConfig.chainId)
-      ) {
+      // Validate chain has a shared contract deployed
+      const sharedContractService = getSharedContractService();
+      const sharedContract = await sharedContractService.findLatestByChainAndName(
+        data.automationContractConfig.chainId,
+        SharedContractNameEnum.UNISWAP_V3_POSITION_CLOSER
+      );
+      if (!sharedContract) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.VALIDATION_ERROR,
           `Chain ${data.automationContractConfig.chainId} is not supported for close orders`

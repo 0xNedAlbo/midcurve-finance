@@ -190,9 +190,13 @@ export const queryKeys = {
       // List all shared contracts
       lists: () => [...queryKeys.automation.sharedContracts.all, 'list'] as const,
 
-      // By chain
+      // By chain (deprecated - use byPosition)
       byChain: (chainId: number) =>
         [...queryKeys.automation.sharedContracts.all, 'chain', chainId] as const,
+
+      // By position (chainId + nftId)
+      byPosition: (chainId: number, nftId: string) =>
+        [...queryKeys.automation.sharedContracts.all, 'position', chainId, nftId] as const,
     },
 
     // ---------------------------------------------------------------------------

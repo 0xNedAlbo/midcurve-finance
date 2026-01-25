@@ -1,10 +1,11 @@
 /**
- * Shared Contract by Chain API Endpoint
+ * Shared Contracts for Position Endpoint
  *
- * GET /api/v1/automation/shared-contracts/[chainId]
- *   - Get the shared contract configuration for a specific chain
+ * GET /api/v1/positions/uniswapv3/:chainId/:nftId/close-orders/shared-contracts
+ *   - Get shared contracts available for this position's chain
  *
  * No authentication required - this is public configuration data.
+ * Returns a map of contract names to contract info for lookup by consumers.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,13 +13,11 @@ import {
   createSuccessResponse,
   createErrorResponse,
   ApiErrorCode,
+  type SharedContractsMap,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse, applyCorsHeaders } from '@/lib/cors';
-import {
-  isChainSupported,
-  getSharedContractConfig,
-} from '@/config/shared-contracts';
+import { getSharedContractService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,16 +25,8 @@ export const dynamic = 'force-dynamic';
 interface RouteParams {
   params: Promise<{
     chainId: string;
+    nftId: string;
   }>;
-}
-
-/**
- * Shared contract info for a specific chain
- */
-interface SharedContractInfo {
-  chainId: number;
-  contractAddress: string;
-  positionManager: string;
 }
 
 /**
@@ -46,10 +37,27 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 /**
- * GET /api/v1/automation/shared-contracts/[chainId]
+ * GET /api/v1/positions/uniswapv3/:chainId/:nftId/close-orders/shared-contracts
  *
- * Get the shared contract configuration for a specific chain.
- * Currently only supports UniswapV3 protocol.
+ * Get shared contracts available for a position's chain.
+ * Returns a map of contract names to contract info.
+ *
+ * Response:
+ * {
+ *   data: {
+ *     contracts: {
+ *       "UniswapV3PositionCloser": {
+ *         chainId: 1,
+ *         contractAddress: "0x...",
+ *         version: { major: 1, minor: 0 },
+ *         sharedContractHash: "evm/uniswap-v3-position-closer/1/0"
+ *       }
+ *     }
+ *   }
+ * }
+ *
+ * Note: positionManager (NFPM) is NOT included - UI has this locally.
+ * An empty contracts map means no contracts are available for this chain.
  */
 export async function GET(
   request: NextRequest,
@@ -78,28 +86,25 @@ export async function GET(
       );
     }
 
-    // Check if chain is supported for UniswapV3
-    if (!isChainSupported('uniswapv3', chainId)) {
-      const errorResponse = createErrorResponse(
-        ApiErrorCode.NOT_FOUND,
-        `No shared contract available for chain ${chainId}`
-      );
-      apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
-      return applyCorsHeaders(
-        NextResponse.json(errorResponse, { status: 404 }),
-        origin
-      );
+    // Get shared contracts for this chain from database
+    const sharedContractService = getSharedContractService();
+    const contractsMap = await sharedContractService.findLatestContractsForChain(chainId);
+
+    // Build response map
+    const contracts: SharedContractsMap = {};
+    for (const [name, contract] of contractsMap) {
+      contracts[name] = {
+        chainId: contract.config.chainId,
+        contractAddress: contract.config.address,
+        version: {
+          major: contract.interfaceVersionMajor,
+          minor: contract.interfaceVersionMinor,
+        },
+        sharedContractHash: contract.sharedContractHash,
+      };
     }
 
-    // Get the contract config
-    const config = getSharedContractConfig('uniswapv3', chainId);
-    const result: SharedContractInfo = {
-      chainId,
-      contractAddress: config.contractAddress,
-      positionManager: config.positionManager,
-    };
-
-    const response = createSuccessResponse(result);
+    const response = createSuccessResponse({ contracts });
     apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
     return applyCorsHeaders(
       NextResponse.json(response, { status: 200 }),
@@ -108,13 +113,13 @@ export async function GET(
   } catch (error) {
     apiLog.methodError(
       apiLogger,
-      'GET /api/v1/automation/shared-contracts/[chainId]',
+      'GET /api/v1/positions/uniswapv3/[chainId]/[nftId]/close-orders/shared-contracts',
       error,
       { requestId }
     );
     const errorResponse = createErrorResponse(
       ApiErrorCode.INTERNAL_SERVER_ERROR,
-      'Failed to retrieve shared contract'
+      'Failed to retrieve shared contracts'
     );
     apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
     return applyCorsHeaders(
