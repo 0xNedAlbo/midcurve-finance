@@ -514,6 +514,9 @@ model SharedContract {
   // Status (allows soft-disable without deletion)
   isActive Boolean @default(true)
 
+  // Relations
+  closeOrders AutomationCloseOrder[]
+
   // Indexes for efficient lookups
   // Note: sharedContractHash provides uniqueness (includes type, name, version, and is derived from config)
   @@index([sharedContractType])
@@ -556,6 +559,11 @@ model AutomationCloseOrder {
   // UniswapV3: { chainId, contractAddress, positionManager }
   automationContractConfig Json
 
+  // SharedContract FK (nullable for existing records)
+  // Links to the SharedContract used for this order; SetNull on delete keeps order functional
+  sharedContractId String?
+  sharedContract   SharedContract? @relation(fields: [sharedContractId], references: [id], onDelete: SetNull)
+
   // Protocol-specific config (JSON) - Immutable after registration
   // UniswapV3: { closeId, nftId, poolAddress, operatorAddress, triggerMode,
   //              sqrtPriceX96Lower, sqrtPriceX96Upper, payoutAddress, validUntil, slippageBps }
@@ -577,6 +585,7 @@ model AutomationCloseOrder {
   @@index([closeOrderType])
   @@index([status])
   @@index([positionId])
+  @@index([sharedContractId])
   @@index([closeOrderType, status]) // Fast lookup for active orders by type
   @@map("automation_close_orders")
 }
