@@ -35,10 +35,20 @@ export interface CancelCloseOrderParams {
   chainId: number;
   /** On-chain close order ID */
   closeId: bigint;
-  /** Database order ID for API notification */
-  orderId: string;
-  /** Position ID for cache invalidation */
-  positionId: string;
+  /** Uniswap V3 NFT token ID (for position-scoped API) */
+  nftId: string;
+  /** Close order semantic hash (e.g., "sl@-12345", "tp@201120") */
+  closeOrderHash: string;
+  /**
+   * Database order ID for API notification
+   * @deprecated Use closeOrderHash with position-scoped endpoints instead
+   */
+  orderId?: string;
+  /**
+   * Position ID for cache invalidation
+   * @deprecated Derived from chainId/nftId for position-scoped endpoints
+   */
+  positionId?: string;
 }
 
 /**
@@ -107,9 +117,14 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
   });
 
   // Force cancel the order in the database (DELETE endpoint)
-  const forceCancel = useCallback(async (orderId: string, positionId: string) => {
+  const forceCancel = useCallback(async (params: CancelCloseOrderParams) => {
     try {
-      const response = await automationApi.cancelCloseOrder(orderId);
+      // Use position-scoped endpoint
+      const response = await automationApi.positionCloseOrders.cancel(
+        params.chainId,
+        params.nftId,
+        params.closeOrderHash
+      );
       setForceCancelled(true);
       setResult({
         txHash,
@@ -117,15 +132,18 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
         forceCancelled: true,
       });
 
-      // Invalidate caches
+      // Invalidate position-scoped caches
       queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.byPosition(positionId),
+        queryKey: queryKeys.positions.uniswapv3.closeOrders.all(params.chainId, params.nftId),
       });
+      // Also invalidate legacy caches for backward compatibility
+      if (params.positionId) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.automation.closeOrders.byPosition(params.positionId),
+        });
+      }
       queryClient.invalidateQueries({
         queryKey: queryKeys.automation.closeOrders.lists(),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.detail(orderId),
       });
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to force cancel order'));
@@ -138,23 +156,30 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
 
     const handleSuccess = async () => {
       try {
-        // Cancel the order in the database via DELETE endpoint
-        const response = await automationApi.cancelCloseOrder(currentParams.orderId);
+        // Cancel the order in the database via position-scoped DELETE endpoint
+        const response = await automationApi.positionCloseOrders.cancel(
+          currentParams.chainId,
+          currentParams.nftId,
+          currentParams.closeOrderHash
+        );
 
         setResult({
           txHash,
           order: response.data,
         });
 
-        // Invalidate caches
+        // Invalidate position-scoped caches
         queryClient.invalidateQueries({
-          queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(currentParams.chainId, currentParams.nftId),
         });
+        // Also invalidate legacy caches for backward compatibility
+        if (currentParams.positionId) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+          });
+        }
         queryClient.invalidateQueries({
           queryKey: queryKeys.automation.closeOrders.lists(),
-        });
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.automation.closeOrders.detail(currentParams.orderId),
         });
       } catch (err) {
         // Even if DB update fails, the on-chain tx succeeded
@@ -176,7 +201,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     const timeout = setTimeout(() => {
       console.warn('Transaction timeout reached, force cancelling order in database');
       setIsTimedOut(true);
-      forceCancel(currentParams.orderId, currentParams.positionId);
+      forceCancel(currentParams);
     }, TX_TIMEOUT_MS);
 
     return () => clearTimeout(timeout);
@@ -188,7 +213,7 @@ export function useCancelCloseOrder(): UseCancelCloseOrderResult {
     if (err && currentParams && !forceCancelled) {
       console.error('Transaction failed, force cancelling order in database:', err);
       setError(err);
-      forceCancel(currentParams.orderId, currentParams.positionId);
+      forceCancel(currentParams);
     }
   }, [writeError, receiptError, currentParams, forceCancelled, forceCancel]);
 

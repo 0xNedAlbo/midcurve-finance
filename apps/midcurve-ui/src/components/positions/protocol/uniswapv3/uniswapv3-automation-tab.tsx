@@ -102,6 +102,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
       <PositionCloseOrdersPanel
         positionId={position.id}
         chainId={poolConfig.chainId}
+        nftId={positionConfig.nftId.toString()}
         contractAddress={contractAddress}
         positionOwner={positionState.ownerAddress as Address}
         quoteTokenSymbol={quoteToken.symbol}

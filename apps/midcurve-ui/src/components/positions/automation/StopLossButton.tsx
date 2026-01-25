@@ -123,7 +123,11 @@ export function StopLossButton({
 
   // Fetch close orders for this position with polling enabled
   // Polling speeds up automatically when an order is executing
-  const { data: orders = [] } = useCloseOrders({ positionId, polling: true });
+  const { data: orders = [] } = useCloseOrders({
+    chainId,
+    nftId: nftId.toString(),
+    polling: true,
+  });
 
   // Build token config for utilities
   const tokenConfig: TokenConfig = useMemo(
@@ -266,6 +270,7 @@ export function StopLossButton({
         tokenConfig={tokenConfig}
         contractAddress={contractAddress}
         chainId={chainId}
+        nftId={nftId.toString()}
         onSuccess={() => setShowCancelModal(false)}
         // Position data for PnL simulation
         liquidity={BigInt(positionState.liquidity)}

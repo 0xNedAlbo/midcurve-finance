@@ -69,7 +69,10 @@ export function CreateHedgedPositionModal({
     : position.pool.token1;
 
   // Fetch existing close orders for defaults
-  const { data: closeOrders } = useCloseOrders({ positionId: position.id });
+  const { data: closeOrders } = useCloseOrders({
+    chainId: position.config.chainId,
+    nftId: position.config.nftId.toString(),
+  });
 
   // Find existing SL/TP orders for defaults
   const defaultTriggers = useMemo(() => {

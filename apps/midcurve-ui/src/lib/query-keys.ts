@@ -47,6 +47,21 @@ export const queryKeys = {
       aprs: () => [...queryKeys.positions.uniswapv3.all, 'apr'] as const,
       apr: (chainId: number, nftId: string) =>
         [...queryKeys.positions.uniswapv3.aprs(), chainId, nftId] as const,
+
+      // Close Orders (position-scoped)
+      closeOrders: {
+        // All close orders for a position
+        all: (chainId: number, nftId: string) =>
+          [...queryKeys.positions.uniswapv3.detail(chainId, nftId), 'close-orders'] as const,
+
+        // List with optional filters
+        list: (chainId: number, nftId: string, filters?: { status?: string; type?: string }) =>
+          [...queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId), 'list', filters] as const,
+
+        // Single close order by semantic hash
+        detail: (chainId: number, nftId: string, closeOrderHash: string) =>
+          [...queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId), closeOrderHash] as const,
+      },
     },
 
     // Future: Orca (Solana)

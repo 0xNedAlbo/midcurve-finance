@@ -498,6 +498,11 @@ model AutomationCloseOrder {
   positionId String
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
+  // Semantic identifier for URL-based lookups
+  // Format: "sl@{tick}" or "tp@{tick}" (e.g., "sl@-12345", "tp@201120")
+  // Derived from triggerMode + sqrtPriceX96Lower/Upper
+  closeOrderHash String?
+
   // Lifecycle status
   // pending -> registering -> active -> triggering -> executed/cancelled/expired/failed
   status String @default("pending")
@@ -520,6 +525,9 @@ model AutomationCloseOrder {
 
   // Relations
   logs AutomationLog[] // Log entries for this close order
+
+  // Unique constraint: one close order per position+hash (prevents duplicate triggers at same tick)
+  @@unique([positionId, closeOrderHash])
 
   // Indexes
   @@index([closeOrderType])

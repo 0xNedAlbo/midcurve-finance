@@ -30,6 +30,7 @@ export abstract class BaseCloseOrder implements CloseOrderInterface {
   // ============================================================================
 
   readonly id: string;
+  readonly closeOrderHash: string | null;
   readonly automationContractConfig: AutomationContractConfig;
 
   /**
@@ -76,6 +77,7 @@ export abstract class BaseCloseOrder implements CloseOrderInterface {
 
   constructor(params: BaseCloseOrderParams) {
     this.id = params.id;
+    this.closeOrderHash = params.closeOrderHash;
     this.automationContractConfig = params.automationContractConfig;
     this.status = params.status;
     this.positionId = params.positionId;
@@ -93,6 +95,7 @@ export abstract class BaseCloseOrder implements CloseOrderInterface {
   toJSON(): CloseOrderJSON {
     return {
       id: this.id,
+      closeOrderHash: this.closeOrderHash,
       closeOrderType: this.closeOrderType,
       status: this.status,
       positionId: this.positionId,

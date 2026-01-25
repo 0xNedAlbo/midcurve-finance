@@ -223,11 +223,12 @@ function buildQueryString(params: object): string {
  */
 export const automationApi = {
   // ---------------------------------------------------------------------------
-  // Close Orders
+  // Close Orders (Legacy - ID-based)
   // ---------------------------------------------------------------------------
 
   /**
    * List close orders for the current user
+   * @deprecated Use positionCloseOrders.list() instead
    */
   listCloseOrders(params: ListCloseOrdersRequest = {}) {
     const qs = buildQueryString(params);
@@ -243,6 +244,7 @@ export const automationApi = {
 
   /**
    * Get a single close order by ID
+   * @deprecated Use positionCloseOrders.get() instead
    */
   getCloseOrder(id: string) {
     return apiClient.get<GetCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
@@ -257,6 +259,7 @@ export const automationApi = {
 
   /**
    * Update an existing close order
+   * @deprecated Use positionCloseOrders.update() instead
    */
   updateCloseOrder(id: string, input: UpdateCloseOrderRequest) {
     return apiClient.put<UpdateCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`, input);
@@ -264,6 +267,7 @@ export const automationApi = {
 
   /**
    * Cancel a close order
+   * @deprecated Use positionCloseOrders.cancel() instead
    */
   cancelCloseOrder(id: string) {
     return apiClient.delete<CancelCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
@@ -277,6 +281,69 @@ export const automationApi = {
       `/api/v1/automation/close-orders/${orderId}/cancelled`,
       input
     );
+  },
+
+  // ---------------------------------------------------------------------------
+  // Close Orders (Position-Scoped - New)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Position-scoped close order operations
+   * Uses semantic identifiers (closeOrderHash) instead of database IDs
+   */
+  positionCloseOrders: {
+    /**
+     * List close orders for a specific position
+     * @param chainId - Chain ID
+     * @param nftId - Uniswap V3 NFT token ID
+     * @param params - Optional filters (status, type)
+     */
+    list(chainId: number, nftId: string, params?: { status?: string; type?: 'sl' | 'tp' }) {
+      const searchParams = new URLSearchParams();
+      if (params?.status) searchParams.set('status', params.status);
+      if (params?.type) searchParams.set('type', params.type);
+      const query = searchParams.toString();
+      const url = `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders${query ? `?${query}` : ''}`;
+      return apiClient.get<ListCloseOrdersResponse['data']>(url);
+    },
+
+    /**
+     * Get a single close order by semantic hash
+     * @param chainId - Chain ID
+     * @param nftId - Uniswap V3 NFT token ID
+     * @param closeOrderHash - Semantic identifier (e.g., "sl@-12345", "tp@201120")
+     */
+    get(chainId: number, nftId: string, closeOrderHash: string) {
+      return apiClient.get<GetCloseOrderResponse['data']>(
+        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`
+      );
+    },
+
+    /**
+     * Update a close order by semantic hash
+     * @param chainId - Chain ID
+     * @param nftId - Uniswap V3 NFT token ID
+     * @param closeOrderHash - Semantic identifier
+     * @param data - Update data (sqrtPriceX96Lower, sqrtPriceX96Upper, slippageBps)
+     */
+    update(chainId: number, nftId: string, closeOrderHash: string, data: UpdateCloseOrderRequest) {
+      return apiClient.patch<UpdateCloseOrderResponse['data']>(
+        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`,
+        data
+      );
+    },
+
+    /**
+     * Cancel a close order by semantic hash
+     * @param chainId - Chain ID
+     * @param nftId - Uniswap V3 NFT token ID
+     * @param closeOrderHash - Semantic identifier
+     */
+    cancel(chainId: number, nftId: string, closeOrderHash: string) {
+      return apiClient.delete<CancelCloseOrderResponse['data']>(
+        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`
+      );
+    },
   },
 
   // ---------------------------------------------------------------------------

@@ -41,8 +41,10 @@ export {
   type UseUpdateCloseOrderResult,
 } from './useUpdateCloseOrder';
 
-// Close Orders - Read only
-export { useCloseOrders, useCloseOrder } from './useCloseOrders';
+// Close Orders - Read only (position-scoped)
+export { useCloseOrders, useCloseOrderByHash } from './useCloseOrders';
+// Legacy exports for backward compatibility
+export { useLegacyCloseOrders, useCloseOrder } from './useCloseOrders';
 
 // Automation Logs
 export {

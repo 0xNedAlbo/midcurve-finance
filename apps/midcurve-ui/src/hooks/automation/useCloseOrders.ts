@@ -1,8 +1,8 @@
 /**
  * useCloseOrders - Fetch close orders for a position
  *
- * Fetches close orders optionally filtered by position ID.
- * Supports polling for orders in pending/active states.
+ * Fetches close orders for a specific Uniswap V3 position using the
+ * position-scoped API endpoints.
  *
  * Polling behavior:
  * - When polling=true: polls every 10s normally
@@ -20,16 +20,29 @@ const POLLING_INTERVAL_NORMAL = 10_000;
 /** Fast polling interval when orders are executing (2 seconds) */
 const POLLING_INTERVAL_EXECUTING = 2_000;
 
+/**
+ * Parameters for position-scoped close orders query
+ */
 interface UseCloseOrdersParams {
   /**
-   * Filter by position ID
+   * Chain ID
    */
-  positionId?: string;
+  chainId: number;
+
+  /**
+   * Uniswap V3 NFT token ID
+   */
+  nftId: string;
 
   /**
    * Filter by status
    */
   status?: CloseOrderStatus;
+
+  /**
+   * Filter by order type (sl = stop-loss, tp = take-profit)
+   */
+  type?: 'sl' | 'tp';
 
   /**
    * Enable polling (for monitoring active orders)
@@ -45,20 +58,20 @@ function hasExecutingOrder(orders: SerializedCloseOrder[] | undefined): boolean 
 }
 
 /**
- * Hook to fetch close orders, optionally filtered by position
+ * Hook to fetch close orders for a specific position
+ *
+ * Uses the position-scoped API: GET /api/v1/positions/uniswapv3/:chainId/:nftId/close-orders
  */
 export function useCloseOrders(
-  params?: UseCloseOrdersParams,
+  params: UseCloseOrdersParams,
   options?: Omit<UseQueryOptions<SerializedCloseOrder[]>, 'queryKey' | 'queryFn'>
 ) {
-  const { positionId, status, polling = false } = params ?? {};
+  const { chainId, nftId, status, type, polling = false } = params;
 
   return useQuery({
-    queryKey: positionId
-      ? queryKeys.automation.closeOrders.byPosition(positionId)
-      : queryKeys.automation.closeOrders.list({ positionId, status }),
+    queryKey: queryKeys.positions.uniswapv3.closeOrders.list(chainId, nftId, { status, type }),
     queryFn: async () => {
-      const response = await automationApi.listCloseOrders({ positionId, status });
+      const response = await automationApi.positionCloseOrders.list(chainId, nftId, { status, type });
       return response.data;
     },
     staleTime: 30_000, // 30 seconds
@@ -74,7 +87,98 @@ export function useCloseOrders(
 }
 
 /**
- * Hook to fetch a single close order by ID
+ * Parameters for single close order query by semantic hash
+ */
+interface UseCloseOrderByHashParams {
+  /**
+   * Chain ID
+   */
+  chainId: number;
+
+  /**
+   * Uniswap V3 NFT token ID
+   */
+  nftId: string;
+
+  /**
+   * Close order semantic hash (e.g., "sl@-12345", "tp@201120")
+   */
+  closeOrderHash: string;
+}
+
+/**
+ * Hook to fetch a single close order by semantic hash
+ *
+ * Uses the position-scoped API: GET /api/v1/positions/uniswapv3/:chainId/:nftId/close-orders/:closeOrderHash
+ */
+export function useCloseOrderByHash(
+  params: UseCloseOrderByHashParams | undefined,
+  options?: Omit<UseQueryOptions<SerializedCloseOrder>, 'queryKey' | 'queryFn' | 'enabled'>
+) {
+  const enabled = !!params?.chainId && !!params?.nftId && !!params?.closeOrderHash;
+
+  return useQuery({
+    queryKey: params
+      ? queryKeys.positions.uniswapv3.closeOrders.detail(params.chainId, params.nftId, params.closeOrderHash)
+      : ['close-order', 'none'],
+    queryFn: async () => {
+      if (!params) throw new Error('Close order params required');
+      const response = await automationApi.positionCloseOrders.get(
+        params.chainId,
+        params.nftId,
+        params.closeOrderHash
+      );
+      return response.data;
+    },
+    enabled,
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+// =============================================================================
+// LEGACY HOOKS (for backward compatibility during migration)
+// =============================================================================
+
+/**
+ * @deprecated Use useCloseOrders with chainId/nftId instead
+ */
+interface UseLegacyCloseOrdersParams {
+  positionId?: string;
+  status?: CloseOrderStatus;
+  polling?: boolean;
+}
+
+/**
+ * @deprecated Use useCloseOrders with chainId/nftId instead
+ */
+export function useLegacyCloseOrders(
+  params?: UseLegacyCloseOrdersParams,
+  options?: Omit<UseQueryOptions<SerializedCloseOrder[]>, 'queryKey' | 'queryFn'>
+) {
+  const { positionId, status, polling = false } = params ?? {};
+
+  return useQuery({
+    queryKey: positionId
+      ? queryKeys.automation.closeOrders.byPosition(positionId)
+      : queryKeys.automation.closeOrders.list({ positionId, status }),
+    queryFn: async () => {
+      const response = await automationApi.listCloseOrders({ positionId, status });
+      return response.data;
+    },
+    staleTime: 30_000,
+    refetchInterval: polling
+      ? (query) =>
+          hasExecutingOrder(query.state.data)
+            ? POLLING_INTERVAL_EXECUTING
+            : POLLING_INTERVAL_NORMAL
+      : false,
+    ...options,
+  });
+}
+
+/**
+ * @deprecated Use useCloseOrderByHash instead
  */
 export function useCloseOrder(
   orderId: string | undefined,

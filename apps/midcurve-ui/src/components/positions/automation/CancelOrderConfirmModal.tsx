@@ -48,6 +48,11 @@ interface CancelOrderConfirmModalProps {
   chainId: number;
 
   /**
+   * NFT ID for position-scoped API (as string)
+   */
+  nftId: string;
+
+  /**
    * Callback when cancellation succeeds
    */
   onSuccess?: () => void;
@@ -112,6 +117,7 @@ export function CancelOrderConfirmModal({
   tokenConfig,
   contractAddress,
   chainId,
+  nftId,
   onSuccess,
   // Position data for PnL simulation
   liquidity,
@@ -177,10 +183,18 @@ export function CancelOrderConfirmModal({
       return;
     }
 
+    if (!order.closeOrderHash) {
+      console.error('Order missing closeOrderHash');
+      return;
+    }
+
     cancelOrder({
       contractAddress,
       chainId,
       closeId: BigInt(config.closeId),
+      nftId,
+      closeOrderHash: order.closeOrderHash,
+      // Keep legacy params for backward compatibility during migration
       orderId: order.id,
       positionId: order.positionId,
     });

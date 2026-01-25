@@ -54,6 +54,7 @@ export interface AutomationContractConfig {
  */
 export interface CloseOrderJSON {
   id: string;
+  closeOrderHash: string | null;
   closeOrderType: CloseOrderType;
   status: CloseOrderStatus;
   positionId: string;
@@ -69,6 +70,7 @@ export interface CloseOrderJSON {
  */
 export interface BaseCloseOrderParams {
   id: string;
+  closeOrderHash: string | null;
   automationContractConfig: AutomationContractConfig;
   status: CloseOrderStatus;
   positionId: string;

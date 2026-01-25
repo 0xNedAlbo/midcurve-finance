@@ -40,10 +40,20 @@ interface BaseUpdateParams {
   chainId: number;
   /** On-chain close order ID */
   closeId: bigint;
-  /** Database order ID for cache invalidation */
-  orderId: string;
-  /** Position ID for cache invalidation */
-  positionId: string;
+  /** Uniswap V3 NFT token ID (for position-scoped cache invalidation) */
+  nftId: string;
+  /** Close order semantic hash (e.g., "sl@-12345", "tp@201120") */
+  closeOrderHash: string;
+  /**
+   * Database order ID for cache invalidation
+   * @deprecated Derived from closeOrderHash for position-scoped endpoints
+   */
+  orderId?: string;
+  /**
+   * Position ID for cache invalidation
+   * @deprecated Derived from chainId/nftId for position-scoped endpoints
+   */
+  positionId?: string;
 }
 
 /**
@@ -157,15 +167,18 @@ export function useUpdateCloseOrder(): UseUpdateCloseOrderResult {
       updateType: currentParams.updateType,
     });
 
-    // Invalidate caches
+    // Invalidate position-scoped caches
     queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+      queryKey: queryKeys.positions.uniswapv3.closeOrders.all(currentParams.chainId, currentParams.nftId),
     });
+    // Also invalidate legacy caches for backward compatibility
+    if (currentParams.positionId) {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+      });
+    }
     queryClient.invalidateQueries({
       queryKey: queryKeys.automation.closeOrders.lists(),
-    });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.detail(currentParams.orderId),
     });
   }, [isTxSuccess, txHash, currentParams, queryClient]);
 

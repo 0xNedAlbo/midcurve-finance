@@ -83,6 +83,7 @@ export interface SerializedAutomationContractConfig {
  */
 export interface SerializedCloseOrder {
   id: string;
+  closeOrderHash: string | null;
   closeOrderType: CloseOrderType;
   status: CloseOrderStatus;
   positionId: string;
@@ -92,6 +93,21 @@ export interface SerializedCloseOrder {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Close order hash format pattern
+ * Format: "{sl|tp}@{tick}" where tick is an integer (positive or negative)
+ * Examples: "sl@-12345", "tp@201120"
+ */
+export const CLOSE_ORDER_HASH_PATTERN = /^(sl|tp)@-?\d+$/;
+
+/**
+ * Zod schema for validating close order hash
+ */
+export const CloseOrderHashSchema = z.string().regex(
+  CLOSE_ORDER_HASH_PATTERN,
+  'Invalid close order hash format. Expected "sl@{tick}" or "tp@{tick}"'
+);
 
 /**
  * Serialized UniswapV3 close order config (for typed responses)

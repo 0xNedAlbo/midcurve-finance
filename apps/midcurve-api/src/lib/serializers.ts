@@ -280,6 +280,7 @@ export function serializeCloseOrder(
 ): SerializedCloseOrder {
   return {
     id: order.id,
+    closeOrderHash: order.closeOrderHash,
     closeOrderType: order.closeOrderType,
     status: order.status,
     positionId: order.positionId,

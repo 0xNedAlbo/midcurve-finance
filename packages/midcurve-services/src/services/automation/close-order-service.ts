@@ -23,6 +23,7 @@ import type {
   MarkOrderTriggeredInput,
   MarkOrderExecutedInput,
 } from '../types/automation/index.js';
+import { deriveCloseOrderHashFromConfig } from '../../utils/automation/close-order-hash.js';
 
 /**
  * Dependencies for CloseOrderService
@@ -84,10 +85,29 @@ export class CloseOrderService {
       const config = this.createConfig(input);
       const state = this.createInitialState(input);
 
+      // Compute closeOrderHash from trigger mode and price thresholds
+      const closeOrderHash = deriveCloseOrderHashFromConfig(
+        input.triggerMode,
+        input.sqrtPriceX96Lower,
+        input.sqrtPriceX96Upper
+      );
+
+      // Check for duplicate (same position + hash)
+      const existing = await this.findByPositionAndHash(
+        input.positionId,
+        closeOrderHash
+      );
+      if (existing) {
+        throw new Error(
+          `Close order already exists for position ${input.positionId} with hash ${closeOrderHash}`
+        );
+      }
+
       const result = await this.prisma.automationCloseOrder.create({
         data: {
           closeOrderType: input.closeOrderType,
           positionId: input.positionId,
+          closeOrderHash,
           status: 'active', // Already registered on-chain
           automationContractConfig:
             input.automationContractConfig as unknown as Prisma.InputJsonValue,
@@ -140,6 +160,59 @@ export class CloseOrderService {
       return order;
     } catch (error) {
       log.methodError(this.logger, 'findById', error as Error, { id });
+      throw error;
+    }
+  }
+
+  /**
+   * Finds a close order by position ID and close order hash
+   *
+   * Uses the unique constraint (positionId, closeOrderHash) for efficient lookup.
+   *
+   * @param positionId - Position ID
+   * @param closeOrderHash - Close order hash (e.g., "sl@-12345", "tp@201120")
+   * @returns The order if found, null otherwise
+   */
+  async findByPositionAndHash(
+    positionId: string,
+    closeOrderHash: string
+  ): Promise<CloseOrderInterface | null> {
+    log.methodEntry(this.logger, 'findByPositionAndHash', {
+      positionId,
+      closeOrderHash,
+    });
+
+    try {
+      const result = await this.prisma.automationCloseOrder.findUnique({
+        where: {
+          positionId_closeOrderHash: {
+            positionId,
+            closeOrderHash,
+          },
+        },
+      });
+
+      if (!result) {
+        log.methodExit(this.logger, 'findByPositionAndHash', {
+          positionId,
+          closeOrderHash,
+          found: false,
+        });
+        return null;
+      }
+
+      const order = this.mapToOrder(result);
+      log.methodExit(this.logger, 'findByPositionAndHash', {
+        positionId,
+        closeOrderHash,
+        found: true,
+      });
+      return order;
+    } catch (error) {
+      log.methodError(this.logger, 'findByPositionAndHash', error as Error, {
+        positionId,
+        closeOrderHash,
+      });
       throw error;
     }
   }
@@ -898,6 +971,7 @@ export class CloseOrderService {
     // Use factory for runtime type dispatch
     return CloseOrderFactory.fromDB({
       id: dbResult.id,
+      closeOrderHash: dbResult.closeOrderHash,
       createdAt: dbResult.createdAt,
       updatedAt: dbResult.updatedAt,
       closeOrderType: dbResult.closeOrderType as CloseOrderType,

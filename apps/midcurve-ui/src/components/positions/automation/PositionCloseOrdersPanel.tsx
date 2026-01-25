@@ -30,6 +30,11 @@ interface PositionCloseOrdersPanelProps {
   chainId: number;
 
   /**
+   * NFT ID of the position (for position-scoped API)
+   */
+  nftId: string;
+
+  /**
    * Automation contract address on this chain
    * Optional - when undefined, shows empty state but allows creating orders
    */
@@ -85,6 +90,7 @@ interface PositionCloseOrdersPanelProps {
 export function PositionCloseOrdersPanel({
   positionId,
   chainId,
+  nftId,
   contractAddress,
   positionOwner,
   quoteTokenSymbol,
@@ -128,7 +134,7 @@ export function PositionCloseOrdersPanel({
 
   // Fetch close orders for this position (only if contract exists)
   const { data: orders, isLoading, error, refetch } = useCloseOrders(
-    { positionId, polling: true },
+    { chainId, nftId, polling: true },
     { enabled: !!positionId && hasContract }
   );
 
@@ -165,18 +171,26 @@ export function PositionCloseOrdersPanel({
     // Can't cancel without contract address
     if (!contractAddress) return;
 
-    // Find the order to get the closeId
+    // Find the order to get the closeId and closeOrderHash
     const order = orders?.find((o) => o.id === orderId);
     if (!order) return;
 
     const config = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
     const closeId = BigInt(config.closeId);
 
+    if (!order.closeOrderHash) {
+      console.error('Order missing closeOrderHash');
+      return;
+    }
+
     setCancellingOrderId(orderId);
     cancelOrder({
       contractAddress,
       chainId,
       closeId,
+      nftId,
+      closeOrderHash: order.closeOrderHash,
+      // Keep legacy params for backward compatibility
       orderId,
       positionId,
     });

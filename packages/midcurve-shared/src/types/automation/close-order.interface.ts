@@ -29,6 +29,13 @@ export interface CloseOrderInterface {
   readonly id: string;
 
   /**
+   * Semantic identifier for URL-based lookups
+   * Format: "sl@{tick}" or "tp@{tick}" (e.g., "sl@-12345", "tp@201120")
+   * Derived from triggerMode + sqrtPriceX96 threshold
+   */
+  readonly closeOrderHash: string | null;
+
+  /**
    * Automation contract configuration (immutable at registration time)
    * Contains shared contract address used for this order
    */

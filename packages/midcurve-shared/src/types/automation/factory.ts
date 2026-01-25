@@ -35,6 +35,7 @@ export interface AutomationContractRow {
  */
 export interface CloseOrderRow {
   id: string;
+  closeOrderHash: string | null;
   closeOrderType: string;
   automationContractConfig: Record<string, unknown>;
   status: string;
