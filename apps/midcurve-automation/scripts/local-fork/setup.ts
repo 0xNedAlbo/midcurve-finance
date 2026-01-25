@@ -15,6 +15,14 @@
 import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { createPublicClient, http, parseAbi } from 'viem';
+import { foundry } from 'viem/chains';
+import {
+  parseInterfaceVersion,
+  SharedContractTypeEnum,
+  SharedContractNameEnum,
+} from '@midcurve/shared';
+import { SharedContractService } from '@midcurve/services';
 
 // Load .env file manually (no dotenv dependency)
 function loadEnv(): void {
@@ -57,7 +65,9 @@ interface SetupState {
   mockAugustusAddress?: string;
   mockAugustusRegistryAddress?: string;
   positionCloserAddress?: string;
-  diamondFactoryAddress?: string;
+  positionCloserVersion?: { major: number; minor: number };
+  sharedContractId?: string;
+  sharedContractHash?: string;
   poolAddress?: string;
   positionTokenId?: string;
 }
@@ -163,7 +173,6 @@ function updateLocalChainConfig(
   _mockAugustusAddress?: string,
   mockAugustusRegistryAddress?: string,
   positionCloserAddress?: string,
-  diamondFactoryAddress?: string,
   poolAddress?: string
 ): void {
   // Backend .env files (automation and API)
@@ -181,9 +190,6 @@ function updateLocalChainConfig(
       if (positionCloserAddress) {
         updateEnvFile(envPath, 'UNISWAPV3_POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
       }
-      if (diamondFactoryAddress) {
-        updateEnvFile(envPath, 'HEDGE_VAULT_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
-      }
       if (poolAddress) {
         updateEnvFile(envPath, 'MOCK_USD_WETH_POOL_ADDRESS', poolAddress);
       }
@@ -198,9 +204,6 @@ function updateLocalChainConfig(
   try {
     if (mockAugustusRegistryAddress) {
       updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS', mockAugustusRegistryAddress);
-    }
-    if (diamondFactoryAddress) {
-      updateEnvFile(uiEnvPath, 'VITE_HEDGE_VAULT_FACTORY_ADDRESS_LOCAL', diamondFactoryAddress);
     }
     console.log(`Updated: ${uiEnvPath}`);
   } catch (error) {
@@ -230,7 +233,6 @@ async function step1Deploy(state: SetupState): Promise<void> {
   state.mockAugustusAddress = extractAddress(output, /MockAugustus deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.mockAugustusRegistryAddress = extractAddress(output, /MockAugustusRegistry deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.positionCloserAddress = extractAddress(output, /PositionCloser deployed at:\s*(0x[a-fA-F0-9]{40})/);
-  state.diamondFactoryAddress = extractAddress(output, /MidcurveHedgeVaultDiamondFactory deployed at:\s*(0x[a-fA-F0-9]{40})/);
 
   if (!state.mockUsdAddress) {
     throw new Error('Failed to extract MockUSD address from deploy output');
@@ -247,6 +249,37 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('MockAugustus:', state.mockAugustusAddress);
   console.log('MockAugustusRegistry:', state.mockAugustusRegistryAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
+}
+
+async function step1bReadDiamondVersion(state: SetupState): Promise<void> {
+  console.log('\n' + '='.repeat(60));
+  console.log('Step 1b: Read Diamond Interface Version');
+  console.log('='.repeat(60) + '\n');
+
+  if (!state.positionCloserAddress) {
+    console.log('PositionCloser not deployed - skipping version read');
+    return;
+  }
+
+  // Create viem client for local chain
+  const client = createPublicClient({
+    chain: foundry,
+    transport: http('http://localhost:8545'),
+  });
+
+  // Read interfaceVersion from diamond via VersionFacet
+  const versionRaw = await client.readContract({
+    address: state.positionCloserAddress as `0x${string}`,
+    abi: parseAbi(['function interfaceVersion() view returns (uint32)']),
+    functionName: 'interfaceVersion',
+  });
+
+  // Parse the version (100 = v1.0, 101 = v1.1, etc.)
+  const version = parseInterfaceVersion(Number(versionRaw));
+  state.positionCloserVersion = version;
+
+  console.log('Interface Version (raw):', versionRaw);
+  console.log(`Interface Version: v${version.major}.${version.minor}`);
 }
 
 async function step2CreatePool(state: SetupState): Promise<void> {
@@ -375,17 +408,58 @@ async function step4FundTestAccount(state: SetupState): Promise<void> {
   );
 }
 
+const LOCAL_CHAIN_ID = 31337;
+
+async function step5StoreSharedContract(state: SetupState): Promise<void> {
+  console.log('\n' + '='.repeat(60));
+  console.log('Step 5: Store SharedContract in Database');
+  console.log('='.repeat(60) + '\n');
+
+  if (!state.positionCloserAddress || !state.positionCloserVersion) {
+    console.log('PositionCloser not deployed or version unknown - skipping database storage');
+    return;
+  }
+
+  const sharedContractService = new SharedContractService();
+
+  try {
+    const result = await sharedContractService.upsert({
+      sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
+      sharedContractName: SharedContractNameEnum.UNISWAP_V3_POSITION_CLOSER,
+      interfaceVersionMajor: state.positionCloserVersion.major,
+      interfaceVersionMinor: state.positionCloserVersion.minor,
+      chainId: LOCAL_CHAIN_ID,
+      address: state.positionCloserAddress,
+      isActive: true,
+    });
+
+    state.sharedContractId = result.id;
+    state.sharedContractHash = result.sharedContractHash;
+
+    console.log('SharedContract upserted:');
+    console.log('  ID:', result.id);
+    console.log('  Hash:', result.sharedContractHash);
+    console.log('  Address:', result.config.address);
+    console.log(`  Version: v${result.interfaceVersionMajor}.${result.interfaceVersionMinor}`);
+  } catch (error) {
+    console.error('Failed to store SharedContract:', error);
+    throw error;
+  }
+}
+
 async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('Local Fork Setup');
   console.log('='.repeat(60));
   console.log('');
   console.log('This script will:');
-  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, and PositionCloser');
+  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, and PositionCloser (Diamond)');
+  console.log('1b. Read Diamond interface version');
   console.log('2. Create a WETH/MockUSD Uniswap V3 pool');
   console.log('2b. Configure MockAugustus with pool address');
   console.log('3. Add initial liquidity to the pool');
   console.log('4. Fund test account #0 with 100 WETH + 1,000,000 MockUSD');
+  console.log('5. Store SharedContract deployment info in database');
   console.log('');
   console.log('Prerequisites:');
   console.log('- Anvil running on port 8545 (pnpm local:anvil)');
@@ -395,6 +469,7 @@ async function main(): Promise<void> {
 
   try {
     await step1Deploy(state);
+    await step1bReadDiamondVersion(state);
     await step2CreatePool(state);
     await step2bConfigureMockAugustus(state);
 
@@ -405,12 +480,12 @@ async function main(): Promise<void> {
       state.mockAugustusAddress,
       state.mockAugustusRegistryAddress,
       state.positionCloserAddress,
-      state.diamondFactoryAddress,
       state.poolAddress
     );
 
     await step3AddLiquidity(state);
     await step4FundTestAccount(state);
+    await step5StoreSharedContract(state);
 
     console.log('\n' + '='.repeat(60));
     console.log('Setup Complete!');
@@ -420,10 +495,18 @@ async function main(): Promise<void> {
     console.log('  MockUSD:', state.mockUsdAddress);
     console.log('  MockAugustus:', state.mockAugustusAddress);
     console.log('  MockAugustusRegistry:', state.mockAugustusRegistryAddress);
-    console.log('  PositionCloser:', state.positionCloserAddress || '(not deployed)');
-    console.log('  DiamondFactory:', state.diamondFactoryAddress || '(not deployed)');
+    console.log('  PositionCloser (Diamond):', state.positionCloserAddress || '(not deployed)');
+    if (state.positionCloserVersion) {
+      console.log(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
+    }
     console.log('  Pool:', state.poolAddress);
     console.log('');
+    if (state.sharedContractId) {
+      console.log('SharedContract Database Record:');
+      console.log('  ID:', state.sharedContractId);
+      console.log('  Hash:', state.sharedContractHash);
+      console.log('');
+    }
     console.log('Position NFT Token ID:', state.positionTokenId || '(not minted)');
     console.log('');
     console.log('Environment Variables for Manual Commands:');
@@ -432,7 +515,6 @@ async function main(): Promise<void> {
     console.log(`  export MOCK_AUGUSTUS_REGISTRY_ADDRESS="${state.mockAugustusRegistryAddress}"`);
     console.log(`  export MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
-    console.log(`  export DIAMOND_FACTORY_ADDRESS="${state.diamondFactoryAddress}"`);
     console.log('');
     console.log('Next Steps:');
     console.log('1. Check pool price:');
@@ -456,8 +538,12 @@ async function main(): Promise<void> {
     console.error('  MockUSD:', state.mockUsdAddress || '(not deployed)');
     console.error('  MockAugustus:', state.mockAugustusAddress || '(not deployed)');
     console.error('  MockAugustusRegistry:', state.mockAugustusRegistryAddress || '(not deployed)');
-    console.error('  DiamondFactory:', state.diamondFactoryAddress || '(not deployed)');
+    console.error('  PositionCloser:', state.positionCloserAddress || '(not deployed)');
+    if (state.positionCloserVersion) {
+      console.error(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
+    }
     console.error('  Pool:', state.poolAddress || '(not created)');
+    console.error('  SharedContract:', state.sharedContractId || '(not stored)');
     console.error('');
     console.error('Make sure Anvil is running: pnpm local:anvil');
     process.exit(1);

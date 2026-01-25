@@ -22,6 +22,7 @@ import { prisma } from '@midcurve/database';
 import { parseArgs } from 'node:util';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { SharedContractService } from '@midcurve/services';
 
 // Load .env file manually (no dotenv dependency)
 function loadEnv(): void {
@@ -70,6 +71,9 @@ async function resetLocalChainDb(options: ResetOptions) {
   console.log(`   New mockUSD address: ${mockUsdAddress}`);
   if (dryRun) console.log('   DRY RUN - no changes will be made\n');
 
+  // Initialize SharedContractService for cleanup
+  const sharedContractService = new SharedContractService({ prisma });
+
   // 1. Find local chain pools
   const localPools = await prisma.pool.findMany({
     where: {
@@ -105,6 +109,10 @@ async function resetLocalChainDb(options: ResetOptions) {
     },
   });
   console.log(`📊 Found mockUSD token: ${mockUsdToken?.id ?? 'NOT FOUND'}`);
+
+  // 5. Count SharedContracts to delete (using service method for dry run count)
+  // Note: We can't easily count without fetching, so we'll report in the execution
+  console.log(`📊 SharedContracts for chainId ${LOCAL_CHAIN_ID} will be deleted`);
 
   if (dryRun) {
     console.log('\n✅ Dry run complete - no changes made');
@@ -155,6 +163,12 @@ async function resetLocalChainDb(options: ResetOptions) {
       console.log(`⚠️  mockUSD token not found - skipping address update`);
     }
   });
+
+  // Delete SharedContracts outside transaction (uses its own service method)
+  const deletedSharedContracts = await sharedContractService.deleteByChainId(LOCAL_CHAIN_ID);
+  if (deletedSharedContracts > 0) {
+    console.log(`🗑️  Deleted ${deletedSharedContracts} SharedContract records`);
+  }
 
   console.log('\n✅ Local chain database reset complete');
 }

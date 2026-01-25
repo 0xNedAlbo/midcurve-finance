@@ -6,7 +6,7 @@
  * (e.g., UniswapV3PositionCloser deployed on multiple EVM chains).
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { PrismaClient, Prisma } from '@midcurve/database';
 import type { SharedContract } from '@midcurve/database';
 import {
   SharedContractTypeEnum,
@@ -15,6 +15,7 @@ import {
   type SharedContractData,
   EvmSmartContractConfig,
   type EvmSmartContractConfigData,
+  buildSharedContractHash,
 } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -28,6 +29,19 @@ export interface SharedContractServiceDependencies {
    * If not provided, a new PrismaClient instance will be created
    */
   prisma?: PrismaClient;
+}
+
+/**
+ * Input for upserting a shared contract
+ */
+export interface UpsertSharedContractInput {
+  sharedContractType: SharedContractType;
+  sharedContractName: SharedContractName;
+  interfaceVersionMajor: number;
+  interfaceVersionMinor: number;
+  chainId: number;
+  address: string;
+  isActive?: boolean;
 }
 
 /**
@@ -227,6 +241,130 @@ export class SharedContractService {
       return result;
     } catch (error) {
       log.methodError(this.logger, 'findById', error as Error, { id });
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // WRITE OPERATIONS
+  // ============================================================================
+
+  /**
+   * Create or update a shared contract by its semantic hash.
+   *
+   * This is idempotent - calling with the same hash updates the existing record,
+   * calling with a new hash creates a new record.
+   *
+   * @param input - The contract data to upsert
+   * @returns The upserted contract
+   */
+  async upsert(
+    input: UpsertSharedContractInput
+  ): Promise<SharedContractData<EvmSmartContractConfigData>> {
+    log.methodEntry(this.logger, 'upsert', {
+      name: input.sharedContractName,
+      chainId: input.chainId,
+      version: `${input.interfaceVersionMajor}.${input.interfaceVersionMinor}`,
+    });
+
+    try {
+      // Build semantic hash including chainId
+      const hash = buildSharedContractHash(
+        input.sharedContractType,
+        input.sharedContractName,
+        input.interfaceVersionMajor,
+        input.interfaceVersionMinor,
+        input.chainId
+      );
+
+      // Build config JSON
+      const config: EvmSmartContractConfigData = {
+        chainId: input.chainId,
+        address: input.address,
+      };
+
+      // Upsert using hash as unique key
+      const result = await this.prisma.sharedContract.upsert({
+        where: { sharedContractHash: hash },
+        create: {
+          sharedContractType: input.sharedContractType,
+          sharedContractName: input.sharedContractName,
+          interfaceVersionMajor: input.interfaceVersionMajor,
+          interfaceVersionMinor: input.interfaceVersionMinor,
+          sharedContractHash: hash,
+          config: config as unknown as Prisma.InputJsonValue,
+          isActive: input.isActive ?? true,
+        },
+        update: {
+          config: config as unknown as Prisma.InputJsonValue,
+          isActive: input.isActive ?? true,
+        },
+      });
+
+      const contractData = this.mapToSharedContractData(result);
+      log.methodExit(this.logger, 'upsert', {
+        id: contractData.id,
+        hash: contractData.sharedContractHash,
+        isNew: result.createdAt.getTime() === result.updatedAt.getTime(),
+      });
+
+      return contractData;
+    } catch (error) {
+      log.methodError(this.logger, 'upsert', error as Error, {
+        name: input.sharedContractName,
+        chainId: input.chainId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all shared contracts for a specific chain.
+   * Used during local chain reset.
+   *
+   * @param chainId - The chain ID to delete contracts for
+   * @returns Number of deleted contracts
+   */
+  async deleteByChainId(chainId: number): Promise<number> {
+    log.methodEntry(this.logger, 'deleteByChainId', { chainId });
+
+    try {
+      // Fetch all contracts first to filter by chainId in config
+      // Note: Prisma doesn't support JSON field filtering directly in where clause
+      const contracts = await this.prisma.sharedContract.findMany({
+        where: {
+          sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
+        },
+      });
+
+      // Filter by chainId from JSON config
+      const toDelete = contracts.filter((contract) => {
+        const config = EvmSmartContractConfig.fromRecord(contract.config);
+        return config.chainId === chainId;
+      });
+
+      if (toDelete.length === 0) {
+        this.logger.debug({ chainId }, 'No contracts found for chain');
+        return 0;
+      }
+
+      // Delete matching contracts
+      const deleted = await this.prisma.sharedContract.deleteMany({
+        where: {
+          id: { in: toDelete.map((c) => c.id) },
+        },
+      });
+
+      log.methodExit(this.logger, 'deleteByChainId', {
+        chainId,
+        deletedCount: deleted.count,
+      });
+
+      return deleted.count;
+    } catch (error) {
+      log.methodError(this.logger, 'deleteByChainId', error as Error, {
+        chainId,
+      });
       throw error;
     }
   }

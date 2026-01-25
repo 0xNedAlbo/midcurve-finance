@@ -14,7 +14,10 @@ export { CloseOrderService } from './close-order-service.js';
 export type { CloseOrderServiceDependencies } from './close-order-service.js';
 
 export { SharedContractService } from './shared-contract-service.js';
-export type { SharedContractServiceDependencies } from './shared-contract-service.js';
+export type {
+  SharedContractServiceDependencies,
+  UpsertSharedContractInput,
+} from './shared-contract-service.js';
 
 export { PoolSubscriptionService } from './pool-subscription-service.js';
 export type { PoolSubscriptionServiceDependencies } from './pool-subscription-service.js';

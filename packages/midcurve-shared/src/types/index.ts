@@ -308,6 +308,8 @@ export {
   buildSharedContractHash,
   parseSharedContractHash,
   buildUniswapV3PositionCloserHash,
+  parseInterfaceVersion,
+  buildInterfaceVersion,
 } from './shared-contract/index.js';
 
 // EVM shared contract types
