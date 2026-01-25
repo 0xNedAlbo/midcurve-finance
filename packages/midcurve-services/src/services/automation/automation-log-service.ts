@@ -18,7 +18,11 @@ import type {
   OrderExecutedContext,
   OrderFailedContext,
   OrderCreatedContext,
+  OrderRegisteredContext,
   OrderCancelledContext,
+  OrderExpiredContext,
+  OrderModifiedContext,
+  RetryScheduledContext,
   PreflightValidationContext,
   SimulationFailedContext,
 } from '../types/automation/index.js';
@@ -50,6 +54,8 @@ export const AutomationLogType = {
   ORDER_EXECUTED: 'ORDER_EXECUTED',
   ORDER_FAILED: 'ORDER_FAILED',
   ORDER_CANCELLED: 'ORDER_CANCELLED',
+  ORDER_EXPIRED: 'ORDER_EXPIRED',
+  ORDER_MODIFIED: 'ORDER_MODIFIED',
   RETRY_SCHEDULED: 'RETRY_SCHEDULED',
   PREFLIGHT_VALIDATION: 'PREFLIGHT_VALIDATION',
   SIMULATION_FAILED: 'SIMULATION_FAILED',
@@ -321,6 +327,25 @@ export class AutomationLogService {
   }
 
   /**
+   * Logs order registered on-chain event
+   */
+  async logOrderRegistered(
+    positionId: string,
+    closeOrderId: string,
+    context: OrderRegisteredContext
+  ): Promise<void> {
+    const message = this.formatOrderRegisteredMessage(context);
+    await this.log({
+      positionId,
+      closeOrderId,
+      level: LogLevel.INFO,
+      logType: AutomationLogType.ORDER_REGISTERED,
+      message,
+      context,
+    });
+  }
+
+  /**
    * Logs order triggered event
    */
   async logOrderTriggered(
@@ -404,7 +429,7 @@ export class AutomationLogService {
     closeOrderId: string,
     context: OrderCancelledContext
   ): Promise<void> {
-    const message = 'Close order cancelled by user';
+    const message = this.formatOrderCancelledMessage(context);
     await this.log({
       positionId,
       closeOrderId,
@@ -416,16 +441,52 @@ export class AutomationLogService {
   }
 
   /**
+   * Logs order expired event
+   */
+  async logOrderExpired(
+    positionId: string,
+    closeOrderId: string,
+    context: OrderExpiredContext
+  ): Promise<void> {
+    const message = this.formatOrderExpiredMessage(context);
+    await this.log({
+      positionId,
+      closeOrderId,
+      level: LogLevel.INFO,
+      logType: AutomationLogType.ORDER_EXPIRED,
+      message,
+      context,
+    });
+  }
+
+  /**
+   * Logs order modified event
+   */
+  async logOrderModified(
+    positionId: string,
+    closeOrderId: string,
+    context: OrderModifiedContext
+  ): Promise<void> {
+    const message = this.formatOrderModifiedMessage(context);
+    await this.log({
+      positionId,
+      closeOrderId,
+      level: LogLevel.INFO,
+      logType: AutomationLogType.ORDER_MODIFIED,
+      message,
+      context,
+    });
+  }
+
+  /**
    * Logs retry scheduled event
    */
   async logRetryScheduled(
     positionId: string,
     closeOrderId: string,
-    context: OrderFailedContext
+    context: RetryScheduledContext
   ): Promise<void> {
-    const delaySeconds = context.retryDelayMs ? Math.round(context.retryDelayMs / 1000) : 0;
-    const delayInfo = delaySeconds > 0 ? ` after ${delaySeconds}s delay` : '';
-    const message = `Retrying execution (attempt ${context.retryCount + 1}/${context.maxRetries})${delayInfo}`;
+    const message = this.formatRetryScheduledMessage(context);
     await this.log({
       positionId,
       closeOrderId,
@@ -444,9 +505,7 @@ export class AutomationLogService {
     closeOrderId: string,
     context: PreflightValidationContext
   ): Promise<void> {
-    const message = context.isValid
-      ? `Pre-flight validation passed (liquidity: ${context.liquidity})`
-      : `Pre-flight validation failed: ${context.reason}`;
+    const message = this.formatPreflightValidationMessage(context);
     await this.log({
       positionId,
       closeOrderId,
@@ -465,7 +524,7 @@ export class AutomationLogService {
     closeOrderId: string,
     context: SimulationFailedContext
   ): Promise<void> {
-    const message = `Transaction simulation failed: ${context.decodedError || 'unknown error'}`;
+    const message = this.formatSimulationFailedMessage(context);
     await this.log({
       positionId,
       closeOrderId,
@@ -480,45 +539,111 @@ export class AutomationLogService {
   // MESSAGE FORMATTING
   // ============================================================================
 
+  /**
+   * Formats message with order tag prefix
+   * All order-related messages should use this pattern: [orderTag] message
+   */
+  private formatWithOrderTag(orderTag: string, message: string): string {
+    return `[${orderTag}] ${message}`;
+  }
+
   private formatOrderCreatedMessage(context: OrderCreatedContext): string {
-    const parts: string[] = ['Close order created'];
+    return this.formatWithOrderTag(context.orderTag, 'Close order created');
+  }
 
-    if (context.triggerLowerPrice && context.triggerUpperPrice) {
-      parts.push(
-        `with triggers at ${context.triggerLowerPrice} (lower) and ${context.triggerUpperPrice} (upper)`
-      );
-    } else if (context.triggerLowerPrice) {
-      parts.push(`with lower trigger at ${context.triggerLowerPrice}`);
-    } else if (context.triggerUpperPrice) {
-      parts.push(`with upper trigger at ${context.triggerUpperPrice}`);
-    }
-
-    return parts.join(' ');
+  private formatOrderRegisteredMessage(context: OrderRegisteredContext): string {
+    const txShort = context.registrationTxHash.slice(0, 10) + '...';
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Order registered on-chain (tx: ${txShort})`
+    );
   }
 
   private formatOrderTriggeredMessage(context: OrderTriggeredContext): string {
-    return `Price crossed ${context.triggerSide} trigger (${context.humanTriggerPrice} → ${context.humanCurrentPrice})`;
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Price crossed trigger (${context.humanTriggerPrice} → ${context.humanCurrentPrice})`
+    );
   }
 
   private formatOrderExecutingMessage(context: OrderExecutingContext): string {
     const txShort = context.txHash
       ? `${context.txHash.slice(0, 10)}...`
       : 'pending';
-    return `Executing close transaction (tx: ${txShort})`;
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Executing close transaction (tx: ${txShort})`
+    );
   }
 
   private formatOrderExecutedMessage(context: OrderExecutedContext): string {
     const txShort = context.txHash
       ? `${context.txHash.slice(0, 10)}...`
       : 'unknown';
-    return `Position closed successfully (tx: ${txShort})`;
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Position closed successfully (tx: ${txShort})`
+    );
   }
 
   private formatOrderFailedMessage(context: OrderFailedContext): string {
     const retryInfo = context.willRetry
       ? ` Retry ${context.retryCount + 1}/${context.maxRetries} scheduled.`
       : ' No more retries.';
-    return `Execution failed: ${context.error}.${retryInfo}`;
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Execution failed: ${context.error}.${retryInfo}`
+    );
+  }
+
+  private formatRetryScheduledMessage(context: RetryScheduledContext): string {
+    const delaySeconds = context.retryDelayMs
+      ? Math.round(context.retryDelayMs / 1000)
+      : 0;
+    const delayInfo = delaySeconds > 0 ? ` after ${delaySeconds}s delay` : '';
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Retrying execution (attempt ${context.retryCount + 1}/${context.maxRetries})${delayInfo}`
+    );
+  }
+
+  private formatOrderCancelledMessage(context: OrderCancelledContext): string {
+    return this.formatWithOrderTag(
+      context.orderTag,
+      'Close order cancelled by user'
+    );
+  }
+
+  private formatOrderExpiredMessage(context: OrderExpiredContext): string {
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Close order expired (valid until ${context.validUntil})`
+    );
+  }
+
+  private formatOrderModifiedMessage(context: OrderModifiedContext): string {
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Close order modified: ${context.changes}`
+    );
+  }
+
+  private formatPreflightValidationMessage(
+    context: PreflightValidationContext
+  ): string {
+    const message = context.isValid
+      ? `Pre-flight validation passed (liquidity: ${context.liquidity})`
+      : `Pre-flight validation failed: ${context.reason}`;
+    return this.formatWithOrderTag(context.orderTag, message);
+  }
+
+  private formatSimulationFailedMessage(
+    context: SimulationFailedContext
+  ): string {
+    return this.formatWithOrderTag(
+      context.orderTag,
+      `Transaction simulation failed: ${context.decodedError || 'unknown error'}`
+    );
   }
 
   // ============================================================================

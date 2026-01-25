@@ -304,19 +304,55 @@ export interface SolanaLogContext extends BaseLogContext {
   computeUnits?: number;
 }
 
+// =============================================================================
+// ORDER LOG CONTEXT TYPES
+// =============================================================================
+
+/**
+ * Base context for order-related events
+ *
+ * All order log contexts should extend this interface to include
+ * the human-readable order tag for identification in log messages.
+ */
+export interface OrderLogContext extends EvmLogContext {
+  /**
+   * Human-readable order identifier
+   *
+   * Format: "{DIRECTION}@{PRICE}" e.g., "TP@3300.34" or "SL@1450.12"
+   * - Direction: "TP" (Take Profit / upper) or "SL" (Stop Loss / lower)
+   * - Price: Trigger price in quote tokens, formatted with formatCompactValue()
+   *
+   * Generated using generateOrderTag() from utils/automation/order-tag.ts
+   */
+  orderTag: string;
+}
+
 /**
  * Context for ORDER_CREATED event
+ *
+ * @messageTemplate "[{orderTag}] Close order created"
  */
-export interface OrderCreatedContext extends EvmLogContext {
+export interface OrderCreatedContext extends OrderLogContext {
   triggerLowerPrice?: string;
   triggerUpperPrice?: string;
   slippageBps?: number;
 }
 
 /**
- * Context for ORDER_TRIGGERED event
+ * Context for ORDER_REGISTERED event
+ *
+ * @messageTemplate "[{orderTag}] Order registered on-chain (tx: {registrationTxHash[0:10]}...)"
  */
-export interface OrderTriggeredContext extends EvmLogContext {
+export interface OrderRegisteredContext extends OrderLogContext {
+  registrationTxHash: string;
+}
+
+/**
+ * Context for ORDER_TRIGGERED event
+ *
+ * @messageTemplate "[{orderTag}] Price crossed trigger ({humanTriggerPrice} -> {humanCurrentPrice})"
+ */
+export interface OrderTriggeredContext extends OrderLogContext {
   triggerSide: 'lower' | 'upper';
   triggerPrice: string;
   currentPrice: string;
@@ -326,15 +362,19 @@ export interface OrderTriggeredContext extends EvmLogContext {
 
 /**
  * Context for ORDER_EXECUTING event
+ *
+ * @messageTemplate "[{orderTag}] Executing close transaction (tx: {txHash[0:10]}...)"
  */
-export interface OrderExecutingContext extends EvmLogContext {
+export interface OrderExecutingContext extends OrderLogContext {
   // txHash, gasLimit, gasPrice, operatorAddress from EvmLogContext
 }
 
 /**
  * Context for ORDER_EXECUTED event
+ *
+ * @messageTemplate "[{orderTag}] Position closed successfully (tx: {txHash[0:10]}...)"
  */
-export interface OrderExecutedContext extends EvmLogContext {
+export interface OrderExecutedContext extends OrderLogContext {
   // txHash, gasUsed from EvmLogContext
   amount0Out: string;
   amount1Out: string;
@@ -343,8 +383,11 @@ export interface OrderExecutedContext extends EvmLogContext {
 
 /**
  * Context for ORDER_FAILED event
+ *
+ * @messageTemplate "[{orderTag}] Execution failed: {error}. Retry {retryCount + 1}/{maxRetries} scheduled."
+ * @messageTemplate "[{orderTag}] Execution failed: {error}. No more retries."
  */
-export interface OrderFailedContext extends EvmLogContext {
+export interface OrderFailedContext extends OrderLogContext {
   error: string;
   retryCount: number;
   maxRetries: number;
@@ -356,9 +399,26 @@ export interface OrderFailedContext extends EvmLogContext {
 }
 
 /**
- * Context for PREFLIGHT_VALIDATION event
+ * Context for RETRY_SCHEDULED event
+ *
+ * @messageTemplate "[{orderTag}] Retrying execution (attempt {retryCount + 1}/{maxRetries}) after {delaySeconds}s delay"
+ * @messageTemplate "[{orderTag}] Retrying execution (attempt {retryCount + 1}/{maxRetries})"
  */
-export interface PreflightValidationContext extends EvmLogContext {
+export interface RetryScheduledContext extends OrderLogContext {
+  error: string;
+  retryCount: number;
+  maxRetries: number;
+  retryDelayMs?: number;
+  scheduledRetryAt?: string;
+}
+
+/**
+ * Context for PREFLIGHT_VALIDATION event
+ *
+ * @messageTemplate "[{orderTag}] Pre-flight validation passed (liquidity: {liquidity})"
+ * @messageTemplate "[{orderTag}] Pre-flight validation failed: {reason}"
+ */
+export interface PreflightValidationContext extends OrderLogContext {
   isValid: boolean;
   reason?: string;
   liquidity?: string;
@@ -375,8 +435,10 @@ export interface PreflightValidationContext extends EvmLogContext {
 
 /**
  * Context for SIMULATION_FAILED event
+ *
+ * @messageTemplate "[{orderTag}] Transaction simulation failed: {decodedError || 'unknown error'}"
  */
-export interface SimulationFailedContext extends EvmLogContext {
+export interface SimulationFailedContext extends OrderLogContext {
   error: string;
   closeId: number;
   contractAddress: string;
@@ -393,10 +455,36 @@ export interface SimulationFailedContext extends EvmLogContext {
 
 /**
  * Context for ORDER_CANCELLED event
+ *
+ * @messageTemplate "[{orderTag}] Close order cancelled by user"
  */
-export interface OrderCancelledContext extends EvmLogContext {
+export interface OrderCancelledContext extends OrderLogContext {
   cancelledBy?: string;
   reason?: string;
+}
+
+/**
+ * Context for ORDER_EXPIRED event
+ *
+ * @messageTemplate "[{orderTag}] Close order expired (valid until {validUntil})"
+ */
+export interface OrderExpiredContext extends OrderLogContext {
+  /** ISO timestamp when the order expired */
+  validUntil: string;
+}
+
+/**
+ * Context for ORDER_MODIFIED event
+ *
+ * @messageTemplate "[{orderTag}] Close order modified: {changes}"
+ */
+export interface OrderModifiedContext extends OrderLogContext {
+  /** Human-readable description of changes */
+  changes: string;
+  previousTriggerPrice?: string;
+  newTriggerPrice?: string;
+  previousSlippageBps?: number;
+  newSlippageBps?: number;
 }
 
 /**
@@ -406,12 +494,17 @@ export type AutomationLogContext =
   | BaseLogContext
   | EvmLogContext
   | SolanaLogContext
+  | OrderLogContext
   | OrderCreatedContext
+  | OrderRegisteredContext
   | OrderTriggeredContext
   | OrderExecutingContext
   | OrderExecutedContext
   | OrderFailedContext
+  | RetryScheduledContext
   | OrderCancelledContext
+  | OrderExpiredContext
+  | OrderModifiedContext
   | PreflightValidationContext
   | SimulationFailedContext;
 

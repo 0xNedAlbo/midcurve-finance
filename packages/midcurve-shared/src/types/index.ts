@@ -286,3 +286,38 @@ export {
   UniswapV3ContractState,
   UniswapV3AutomationContract,
 } from './automation/index.js';
+
+// ============================================================================
+// Shared Contract Types (platform-independent contract registry)
+// ============================================================================
+
+export type {
+  SharedContractType,
+  SharedContractName,
+  SharedContractStatus,
+  SharedContractData,
+  SharedContractJSON,
+} from './shared-contract/index.js';
+
+export {
+  SharedContractType as SharedContractTypeEnum,
+  SharedContractName as SharedContractNameEnum,
+} from './shared-contract/index.js';
+
+export {
+  buildSharedContractHash,
+  parseSharedContractHash,
+  buildUniswapV3PositionCloserHash,
+} from './shared-contract/index.js';
+
+// EVM shared contract types
+export type {
+  EvmSmartContractConfigData,
+  EvmSmartContractConfigJSON,
+  EvmSharedContract,
+  EvmSharedContractJSON,
+  UniswapV3PositionCloserContract,
+  UniswapV3PositionCloserContractJSON,
+} from './shared-contract/index.js';
+
+export { EvmSmartContractConfig } from './shared-contract/index.js';

@@ -18,6 +18,14 @@
       "types": "./dist/utils/index.d.ts",
       "import": "./dist/utils/index.js"
     },
+    "./abis": {
+      "types": "./dist/abis/index.d.ts",
+      "import": "./dist/abis/index.js"
+    },
+    "./abis/uniswap-v3-position-closer": {
+      "types": "./dist/abis/uniswap-v3-position-closer/index.d.ts",
+      "import": "./dist/abis/uniswap-v3-position-closer/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

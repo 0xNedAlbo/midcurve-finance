@@ -3,3 +3,4 @@
  */
 
 export * from './close-order-hash.js';
+export * from './order-tag.js';

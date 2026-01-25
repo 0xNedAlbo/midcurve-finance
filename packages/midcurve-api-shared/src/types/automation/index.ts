@@ -28,6 +28,8 @@ export {
   type SerializedCloseOrder,
   type SerializedUniswapV3CloseOrderConfig,
   type SerializedUniswapV3CloseOrderState,
+  // Close Order Hash validation
+  CloseOrderHashSchema,
   // Register (user signs on-chain, then calls this endpoint)
   type RegisterCloseOrderRequest,
   RegisterCloseOrderRequestSchema,

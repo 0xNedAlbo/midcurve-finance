@@ -113,9 +113,10 @@ export function parseCloseOrderHash(hash: string): CloseOrderHashComponents {
     );
   }
 
+  // match[1] and match[2] are guaranteed to exist after successful regex match
   return {
-    type: match[1] as CloseOrderHashType,
-    tick: parseInt(match[2], 10),
+    type: match[1]! as CloseOrderHashType,
+    tick: parseInt(match[2]!, 10),
   };
 }
 

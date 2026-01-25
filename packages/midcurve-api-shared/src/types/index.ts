@@ -16,3 +16,4 @@ export * from './positions/index.js';
 export * from './automation/index.js';
 export * from './notifications/index.js';
 export * from './swap/index.js';
+export * from './shared-contracts/index.js';

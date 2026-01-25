@@ -34,6 +34,7 @@ export interface UniswapV3CloseOrderParams extends BaseCloseOrderParams {
  */
 export interface UniswapV3CloseOrderRow {
   id: string;
+  closeOrderHash: string | null;
   closeOrderType: 'uniswapv3';
   automationContractConfig: Record<string, unknown>;
   status: CloseOrderStatus;
@@ -148,6 +149,7 @@ export class UniswapV3CloseOrder extends BaseCloseOrder {
   static fromDB(row: UniswapV3CloseOrderRow): UniswapV3CloseOrder {
     return new UniswapV3CloseOrder({
       id: row.id,
+      closeOrderHash: row.closeOrderHash,
       automationContractConfig: row.automationContractConfig as unknown as AutomationContractConfig,
       status: row.status,
       positionId: row.positionId,

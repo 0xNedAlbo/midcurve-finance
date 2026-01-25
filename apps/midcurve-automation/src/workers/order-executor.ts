@@ -186,9 +186,12 @@ export class OrderExecutor {
         const willRetry = retryCount < MAX_EXECUTION_ATTEMPTS;
 
         // Log ORDER_FAILED for user visibility
+        // Note: Using simple direction-only tag since full order details aren't fetched in error path
+        const orderTag = triggerSide === 'upper' ? 'TP' : 'SL';
         await automationLogService.logOrderFailed(positionId, orderId, {
           platform: 'evm',
           chainId,
+          orderTag,
           error: error.message,
           retryCount,
           maxRetries: MAX_EXECUTION_ATTEMPTS,
@@ -200,10 +203,10 @@ export class OrderExecutor {
           await automationLogService.logRetryScheduled(positionId, orderId, {
             platform: 'evm',
             chainId,
+            orderTag,
             error: error.message,
             retryCount,
             maxRetries: MAX_EXECUTION_ATTEMPTS,
-            willRetry: true,
             retryDelayMs: ORDER_RETRY_DELAY_MS,
             scheduledRetryAt: new Date(Date.now() + ORDER_RETRY_DELAY_MS).toISOString(),
           });
@@ -426,9 +429,11 @@ export class OrderExecutor {
 
         // Log to database for UI visibility
         const automationLogService = getAutomationLogService();
+        const orderTag = triggerSide === 'upper' ? 'TP' : 'SL';
         await automationLogService.logPreflightValidation(positionId, orderId, {
           platform: 'evm',
           chainId,
+          orderTag,
           isValid: preflight.isValid,
           reason: preflight.reason,
           liquidity: preflight.positionData.liquidity.toString(),
@@ -473,9 +478,11 @@ export class OrderExecutor {
       });
 
       // Log ORDER_TRIGGERED for user visibility
+      const orderTagTriggered = triggerSide === 'upper' ? 'TP' : 'SL';
       await automationLogService.logOrderTriggered(positionId, orderId, {
         platform: 'evm',
         chainId,
+        orderTag: orderTagTriggered,
         triggerSide,
         triggerPrice,
         currentPrice: _currentPrice,
@@ -727,14 +734,15 @@ export class OrderExecutor {
 
       // Log simulation failure to database for UI visibility
       const automationLogService = getAutomationLogService();
+      const orderTagSim = triggerSide === 'upper' ? 'TP' : 'SL';
       await automationLogService.logSimulationFailed(positionId, orderId, {
         platform: 'evm',
         chainId,
+        orderTag: orderTagSim,
         error: simulation.error || 'Unknown simulation error',
         decodedError: simulation.decodedError,
         closeId,
         contractAddress,
-        operatorAddress,
         feeRecipient: feeConfig.recipient,
         feeBps: feeConfig.bps,
         contractBalances,
@@ -783,9 +791,11 @@ export class OrderExecutor {
     });
 
     // Log ORDER_EXECUTING for user visibility
+    const orderTagExec = triggerSide === 'upper' ? 'TP' : 'SL';
     await automationLogService.logOrderExecuting(positionId, orderId, {
       platform: 'evm',
       chainId,
+      orderTag: orderTagExec,
       txHash: signedTx.txHash,
       operatorAddress,
     });
@@ -896,9 +906,11 @@ export class OrderExecutor {
     }
 
     // Log ORDER_EXECUTED for user visibility
+    const orderTagCompleted = triggerSide === 'upper' ? 'TP' : 'SL';
     await automationLogService.logOrderExecuted(positionId, orderId, {
       platform: 'evm',
       chainId,
+      orderTag: orderTagCompleted,
       txHash,
       gasUsed: receipt.gasUsed.toString(),
       amount0Out: '0', // TODO: Parse from tx receipt

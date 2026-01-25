@@ -26,7 +26,6 @@ import {
   getPoolSubscriptionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
-import { isValidCloseOrderHash } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

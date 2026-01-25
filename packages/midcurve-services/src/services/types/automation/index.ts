@@ -15,19 +15,26 @@ export type {
   // Pool subscription inputs
   UpdatePoolSubscriptionInput,
   FindPoolSubscriptionOptions,
-  // Automation log types
+  // Automation log types - base contexts
   AutomationPlatform,
   BaseLogContext,
   EvmLogContext,
   SolanaLogContext,
+  // Automation log types - order contexts (extend OrderLogContext)
+  OrderLogContext,
   OrderCreatedContext,
+  OrderRegisteredContext,
   OrderTriggeredContext,
   OrderExecutingContext,
   OrderExecutedContext,
   OrderFailedContext,
+  RetryScheduledContext,
   OrderCancelledContext,
+  OrderExpiredContext,
+  OrderModifiedContext,
   PreflightValidationContext,
   SimulationFailedContext,
+  // Automation log types - union and inputs
   AutomationLogContext,
   CreateAutomationLogInput,
   ListAutomationLogsOptions,

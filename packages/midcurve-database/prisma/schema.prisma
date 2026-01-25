@@ -481,6 +481,50 @@ model AutomationWallet {
 }
 
 // =============================================================================
+// Shared Contract Infrastructure
+// =============================================================================
+
+// SharedContract - Platform-independent contract deployment registry
+// Stores deployed shared contracts (e.g., UniswapV3PositionCloser) per chain/version
+// Uses JSON config field for platform-specific data (EVM: chainId + address)
+model SharedContract {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Type discriminator for platform independence (e.g., "evm-smart-contract")
+  sharedContractType String
+
+  // Contract identifier (e.g., "UniswapV3PositionCloser")
+  sharedContractName String
+
+  // Interface versioning (separate fields for querying)
+  interfaceVersionMajor Int // e.g., 1
+  interfaceVersionMinor Int // e.g., 0
+
+  // Semantic hash for URL-friendly lookups
+  // Format: "{type-prefix}/{name-kebab}/{major}/{minor}"
+  // Example: "evm/uniswap-v3-position-closer/1/0"
+  sharedContractHash String @unique
+
+  // Platform-specific config (JSON)
+  // EVM: { chainId: number, address: string }
+  config Json
+
+  // Status (allows soft-disable without deletion)
+  isActive Boolean @default(true)
+
+  // Indexes for efficient lookups
+  // Note: sharedContractHash provides uniqueness (includes type, name, version, and is derived from config)
+  @@index([sharedContractType])
+  @@index([sharedContractName])
+  @@index([sharedContractType, sharedContractName])
+  @@index([interfaceVersionMajor, interfaceVersionMinor])
+  @@index([isActive])
+  @@map("shared_contracts")
+}
+
+// =============================================================================
 // Position Automation Models
 // =============================================================================
 
