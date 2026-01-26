@@ -240,11 +240,6 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 400 });
       }
 
-      // TODO: TEMPORARY - Re-enable trigger price validation after testing
-      // This validation prevents SL orders above current price and TP orders below
-      // Disabled for testing purposes
-      // --- BEGIN DISABLED VALIDATION ---
-      /*
       // Validate trigger price against current pool price
       // This prevents users from creating SL orders above current price or TP orders below
       const poolState = position.pool.state;
@@ -292,8 +287,6 @@ export async function POST(request: NextRequest): Promise<Response> {
           }
         }
       }
-      */
-      // --- END DISABLED VALIDATION ---
 
       // Ensure pool subscription exists for price monitoring
       const subscriptionService = getPoolSubscriptionService();
