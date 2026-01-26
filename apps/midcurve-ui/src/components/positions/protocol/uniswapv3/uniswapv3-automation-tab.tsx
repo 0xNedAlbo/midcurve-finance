@@ -8,23 +8,17 @@
  * - Order history
  */
 
-import { useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import type { Address } from "viem";
-import { formatCompactValue } from "@/lib/fraction-format";
-import { calculatePositionStates } from "@/lib/position-states";
 import { useSharedContract } from "@/hooks/automation";
 import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
-import { PositionCloseOrdersPanel, CloseOrderModal } from "../../automation";
+import { PositionCloseOrdersPanel } from "../../automation";
 
 interface UniswapV3AutomationTabProps {
   position: GetUniswapV3PositionResponse;
 }
 
 export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps) {
-  // Close order modal state
-  const [isCloseOrderModalOpen, setIsCloseOrderModalOpen] = useState(false);
-
   // Get quote token info for formatting
   const quoteToken = position.isToken0Quote
     ? position.pool.token0
@@ -35,8 +29,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
 
   // Extract pool and position config for automation
   const poolConfig = position.pool.config as { address: string; chainId: number };
-  const poolState = position.pool.state as { sqrtPriceX96: string };
-  const positionConfig = position.config as { nftId: number; tickLower: number; tickUpper: number };
+  const positionConfig = position.config as { nftId: number };
   const positionState = position.state as { ownerAddress: string; liquidity: string };
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
@@ -53,18 +46,6 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
 
   const contractAddress = contractData?.contractAddress as Address | undefined;
   const isChainSupported = contractData?.isSupported ?? false;
-
-  // PnL breakdown data for position states calculation
-  const pnlBreakdown = {
-    currentValue: position.currentValue,
-    currentCostBasis: position.currentCostBasis,
-    realizedPnL: position.realizedPnl,
-    collectedFees: position.collectedFees,
-    unclaimedFees: position.unClaimedFees,
-  };
-
-  // Calculate position states (for current pool price)
-  const positionStates = calculatePositionStates(position, pnlBreakdown);
 
   // Loading state while fetching contract
   if (isContractLoading) {
@@ -110,39 +91,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         baseTokenDecimals={baseToken.decimals}
         baseTokenAddress={baseTokenConfig.address}
         quoteTokenAddress={quoteTokenConfig.address}
-        onCreateOrder={() => setIsCloseOrderModalOpen(true)}
         isPositionClosed={isPositionClosed}
-      />
-
-      {/* Close Order Modal */}
-      <CloseOrderModal
-        isOpen={isCloseOrderModalOpen}
-        onClose={() => setIsCloseOrderModalOpen(false)}
-        positionId={position.id}
-        poolAddress={poolConfig.address}
-        chainId={poolConfig.chainId}
-        contractAddress={contractAddress!}
-        nftId={BigInt(positionConfig.nftId)}
-        positionOwner={positionState.ownerAddress as Address}
-        baseToken={{
-          address: baseTokenConfig.address,
-          symbol: baseToken.symbol,
-          decimals: baseToken.decimals,
-        }}
-        quoteToken={{
-          address: quoteTokenConfig.address,
-          symbol: quoteToken.symbol,
-          decimals: quoteToken.decimals,
-        }}
-        currentSqrtPriceX96={poolState.sqrtPriceX96}
-        currentPriceDisplay={formatCompactValue(positionStates.current.poolPrice, quoteToken.decimals)}
-        isToken0Quote={position.isToken0Quote}
-        // Position data for PnL simulation
-        liquidity={BigInt(positionState.liquidity)}
-        tickLower={positionConfig.tickLower}
-        tickUpper={positionConfig.tickUpper}
-        currentCostBasis={position.currentCostBasis}
-        unclaimedFees={position.unClaimedFees}
       />
     </div>
   );

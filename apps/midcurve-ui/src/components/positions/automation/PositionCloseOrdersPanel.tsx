@@ -3,12 +3,11 @@
  *
  * Panel for position detail page showing:
  * - Active close orders for this position
- * - "Set Close Order" button to create new ones
  * - Loading and error states
  */
 
 import { useState } from 'react';
-import { Plus, AlertCircle, AlertTriangle, Loader2, Shield } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Loader2, Shield } from 'lucide-react';
 import type { Address } from 'viem';
 import { useAccount } from 'wagmi';
 import type { SerializedUniswapV3CloseOrderConfig, TriggerMode } from '@midcurve/api-shared';
@@ -75,13 +74,7 @@ interface PositionCloseOrdersPanelProps {
   quoteTokenAddress: string;
 
   /**
-   * Callback to open the create order modal
-   */
-  onCreateOrder?: () => void;
-
-  /**
    * Whether the position is closed (liquidity = 0)
-   * When true, disables order creation
    */
   isPositionClosed?: boolean;
 }
@@ -98,7 +91,6 @@ export function PositionCloseOrdersPanel({
   baseTokenDecimals,
   baseTokenAddress,
   quoteTokenAddress,
-  onCreateOrder,
   isPositionClosed = false,
 }: PositionCloseOrdersPanelProps) {
   // Track which order is being cancelled
@@ -211,20 +203,9 @@ export function PositionCloseOrdersPanel({
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Shield className="w-5 h-5 text-blue-400" />
-          <h3 className="text-lg font-semibold text-slate-200">Automation</h3>
-        </div>
-        {onCreateOrder && !isPositionClosed && (
-          <button
-            onClick={onCreateOrder}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-400 hover:text-blue-300 bg-blue-900/20 hover:bg-blue-900/30 border border-blue-700/50 rounded-lg transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Set Close Order
-          </button>
-        )}
+      <div className="flex items-center gap-2 mb-4">
+        <Shield className="w-5 h-5 text-blue-400" />
+        <h3 className="text-lg font-semibold text-slate-200">Automation</h3>
       </div>
 
       {/* Warning: Order was force-cancelled due to timeout/failure */}
