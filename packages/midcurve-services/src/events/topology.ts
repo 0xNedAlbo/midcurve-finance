@@ -15,12 +15,12 @@ import type { Channel } from 'amqplib';
  * Domain events exchange name
  * Topic exchange for flexible routing with wildcards
  */
-export const DOMAIN_EVENTS_EXCHANGE = 'midcurve.domain-events';
+export const DOMAIN_EVENTS_EXCHANGE = 'domain-events';
 
 /**
  * Dead letter exchange for failed event processing
  */
-export const DOMAIN_EVENTS_DLX = 'midcurve.domain-events.dlx';
+export const DOMAIN_EVENTS_DLX = 'domain-events-dlx';
 
 /**
  * Queue name patterns for domain event consumers
@@ -92,8 +92,8 @@ export const DLQ_MESSAGE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * Called once on service startup.
  *
  * Creates:
- * - midcurve.domain-events (topic exchange)
- * - midcurve.domain-events.dlx (fanout exchange for dead letters)
+ * - domain-events (topic exchange)
+ * - domain-events-dlx (fanout exchange for dead letters)
  * - domain.events.dlq (dead letter queue with 7-day retention)
  */
 export async function setupDomainEventsTopology(channel: Channel): Promise<void> {
