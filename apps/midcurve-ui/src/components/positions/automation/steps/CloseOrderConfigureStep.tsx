@@ -204,9 +204,16 @@ export function CloseOrderConfigureStep({
     (priceStr: string): string | null => {
       if (!priceStr || isNaN(parseFloat(priceStr))) return null;
 
+      // Early return for zero or negative prices (invalid input)
+      const priceNum = parseFloat(priceStr);
+      if (priceNum <= 0) return null;
+
       try {
         // Parse the price to bigint with quote token decimals
         const priceBigInt = parseUnits(priceStr, quoteToken.decimals);
+
+        // Additional check: parseUnits might return 0n for very small values
+        if (priceBigInt <= 0n) return null;
 
         // Convert to sqrtPriceX96
         const sqrtRatioX96 = priceToSqrtRatioX96(
@@ -217,8 +224,8 @@ export function CloseOrderConfigureStep({
         );
 
         return sqrtRatioX96.toString();
-      } catch (err) {
-        console.error('Failed to convert price:', err);
+      } catch {
+        // Silently return null for invalid price conversions
         return null;
       }
     },
@@ -355,8 +362,8 @@ export function CloseOrderConfigureStep({
           </div>
         )}
 
-        {/* PnL Simulation */}
-        {triggerSqrtPriceX96 && (
+        {/* PnL Simulation - only show when price is valid */}
+        {triggerSqrtPriceX96 && !formData.priceValidationError && (
           <PnLSimulation
             liquidity={liquidity}
             tickLower={tickLower}
