@@ -18,8 +18,6 @@ const log = automationLogger.child({ component: 'Topology' });
 export const EXCHANGES = {
   /** Direct exchange for order trigger events */
   TRIGGERS: 'automation.triggers',
-  /** Direct exchange for contract deployment events */
-  DEPLOYMENTS: 'automation.deployments',
   /** Direct exchange for notification events */
   NOTIFICATIONS: 'automation.notifications',
 } as const;
@@ -28,8 +26,6 @@ export const EXCHANGES = {
 export const QUEUES = {
   /** Queue for orders ready for execution (competing consumers) */
   ORDERS_PENDING: 'orders.pending',
-  /** Queue for contracts ready for deployment */
-  CONTRACTS_PENDING: 'contracts.pending',
   /** Delay queue for order retries (60s TTL, dead-letters back to orders.pending) */
   ORDERS_RETRY_DELAY: 'orders.retry-delay',
   /** Queue for pending notifications to be processed */
@@ -47,8 +43,6 @@ export const ORDER_RETRY_DELAY_MS = 60000;
 export const ROUTING_KEYS = {
   /** Routing key for triggered orders */
   ORDER_TRIGGERED: 'triggered',
-  /** Routing key for contract deployment */
-  CONTRACT_DEPLOY: 'deploy',
   /** Routing key for position range change notifications */
   NOTIFICATION_RANGE_CHANGE: 'range.change',
   /** Routing key for order execution result notifications */
@@ -69,9 +63,9 @@ export const ROUTING_KEYS = {
  *
  * Creates:
  * - automation.triggers (direct exchange)
- * - automation.deployments (direct exchange)
+ * - automation.notifications (direct exchange)
  * - orders.pending queue (bound to automation.triggers)
- * - contracts.pending queue (bound to automation.deployments)
+ * - notifications.pending queue (bound to automation.notifications)
  */
 export async function setupAutomationTopology(channel: Channel): Promise<void> {
   log.info({ msg: 'Setting up automation topology...' });
@@ -82,12 +76,6 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     autoDelete: false,
   });
   log.info({ exchange: EXCHANGES.TRIGGERS, type: 'direct', msg: 'Exchange declared' });
-
-  await channel.assertExchange(EXCHANGES.DEPLOYMENTS, 'direct', {
-    durable: true,
-    autoDelete: false,
-  });
-  log.info({ exchange: EXCHANGES.DEPLOYMENTS, type: 'direct', msg: 'Exchange declared' });
 
   // Create orders.pending queue
   await channel.assertQueue(QUEUES.ORDERS_PENDING, {
@@ -128,27 +116,6 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     deadLetterExchange: EXCHANGES.TRIGGERS,
     deadLetterRoutingKey: ROUTING_KEYS.ORDER_TRIGGERED,
     msg: 'Delay queue declared with TTL and dead-letter config',
-  });
-
-  // Create contracts.pending queue
-  await channel.assertQueue(QUEUES.CONTRACTS_PENDING, {
-    durable: true,
-    exclusive: false,
-    autoDelete: false,
-  });
-  log.info({ queue: QUEUES.CONTRACTS_PENDING, msg: 'Queue declared' });
-
-  // Bind contracts.pending to deployments exchange
-  await channel.bindQueue(
-    QUEUES.CONTRACTS_PENDING,
-    EXCHANGES.DEPLOYMENTS,
-    ROUTING_KEYS.CONTRACT_DEPLOY
-  );
-  log.info({
-    exchange: EXCHANGES.DEPLOYMENTS,
-    queue: QUEUES.CONTRACTS_PENDING,
-    routingKey: ROUTING_KEYS.CONTRACT_DEPLOY,
-    msg: 'Queue bound to exchange',
   });
 
   // Create notifications exchange
@@ -256,11 +223,9 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
 export async function verifyAutomationTopology(channel: Channel): Promise<boolean> {
   try {
     await channel.checkExchange(EXCHANGES.TRIGGERS);
-    await channel.checkExchange(EXCHANGES.DEPLOYMENTS);
     await channel.checkExchange(EXCHANGES.NOTIFICATIONS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
     await channel.checkQueue(QUEUES.ORDERS_RETRY_DELAY);
-    await channel.checkQueue(QUEUES.CONTRACTS_PENDING);
     await channel.checkQueue(QUEUES.NOTIFICATIONS_PENDING);
     await channel.checkQueue(QUEUES.HEDGE_VAULT_PENDING);
     await channel.checkQueue(QUEUES.HEDGE_VAULT_RETRY_DELAY);
