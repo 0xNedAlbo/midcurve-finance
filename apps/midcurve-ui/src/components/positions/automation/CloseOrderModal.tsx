@@ -146,9 +146,9 @@ export interface CloseOrderModalProps {
 type WizardStep = 'configure' | 'review' | 'processing' | 'success';
 
 /**
- * Swap direction for post-close swap
+ * Swap direction for post-close swap (uses Uniswap's native token ordering)
  */
-export type SwapDirection = 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+export type SwapDirection = 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
 
 export interface CloseOrderFormData {
   triggerMode: TriggerMode;
@@ -216,7 +216,7 @@ export function CloseOrderModal({
     priceValidationError: null,
     // Swap config (disabled by default)
     swapEnabled: false,
-    swapDirection: 'BASE_TO_QUOTE',
+    swapDirection: 'TOKEN0_TO_1',
     swapSlippageBps: 100, // 1%
   });
   const [createdOrder, setCreatedOrder] = useState<SerializedCloseOrder | null>(null);
@@ -288,7 +288,7 @@ export function CloseOrderModal({
         priceValidationError: null,
         // Swap config (disabled by default)
         swapEnabled: false,
-        swapDirection: 'BASE_TO_QUOTE',
+        swapDirection: 'TOKEN0_TO_1',
         swapSlippageBps: 100,
       });
       setCreatedOrder(null);
@@ -430,7 +430,6 @@ export function CloseOrderModal({
             enabled: true,
             direction: formData.swapDirection,
             slippageBps: formData.swapSlippageBps,
-            quoteToken: quoteToken.address,
           }
         : undefined,
     });
@@ -441,7 +440,6 @@ export function CloseOrderModal({
     positionId,
     poolAddress,
     positionOwner,
-    quoteToken.address,
     registerOrder,
     isHookReady,
     isToken0Quote,

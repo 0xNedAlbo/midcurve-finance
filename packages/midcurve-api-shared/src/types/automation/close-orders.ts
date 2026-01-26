@@ -40,8 +40,9 @@ export type TriggerMode = (typeof TRIGGER_MODES)[number];
 
 /**
  * Swap direction values for post-close swap
+ * Uses Uniswap's native token ordering (token0/token1), role-agnostic.
  */
-export const SWAP_DIRECTIONS = ['BASE_TO_QUOTE', 'QUOTE_TO_BASE'] as const;
+export const SWAP_DIRECTIONS = ['TOKEN0_TO_1', 'TOKEN1_TO_0'] as const;
 export type SwapDirection = (typeof SWAP_DIRECTIONS)[number];
 
 /**
@@ -54,7 +55,7 @@ export interface SwapConfig {
   enabled: boolean;
 
   /**
-   * Direction of the swap
+   * Direction of the swap (TOKEN0_TO_1 or TOKEN1_TO_0)
    */
   direction: SwapDirection;
 
@@ -62,11 +63,6 @@ export interface SwapConfig {
    * Slippage tolerance in basis points (e.g., 100 = 1%)
    */
   slippageBps: number;
-
-  /**
-   * Quote token address (used to determine src/dest tokens)
-   */
-  quoteToken: string;
 }
 
 /**
@@ -284,7 +280,6 @@ export const RegisterCloseOrderRequestSchema = z
           errorMap: () => ({ message: `Swap direction must be one of: ${SWAP_DIRECTIONS.join(', ')}` }),
         }),
         slippageBps: z.number().int().min(0).max(10000, 'Swap slippage cannot exceed 100%'),
-        quoteToken: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid quote token address'),
       })
       .optional(),
   })

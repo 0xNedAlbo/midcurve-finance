@@ -102,6 +102,13 @@ export function CloseOrderReviewStep({
   // Get chain slug for NetworkSwitchStep
   const chain = getChainSlugFromChainId(positionChainId);
 
+  // Determine swap direction in user-friendly terms
+  // Token0 is the lower address, token1 is the higher address
+  const baseIsToken0 = BigInt(baseToken.address) < BigInt(quoteToken.address);
+  const isSwapToQuote = baseIsToken0
+    ? formData.swapDirection === 'TOKEN0_TO_1'
+    : formData.swapDirection === 'TOKEN1_TO_0';
+
   // Check if connected to wrong network
   const isWrongNetwork = !!(
     isConnected &&
@@ -185,7 +192,7 @@ export function CloseOrderReviewStep({
                 <span className="text-slate-400">Post-Close Swap</span>
               </div>
               <span className="text-blue-400 font-medium">
-                {formData.swapDirection === 'BASE_TO_QUOTE'
+                {isSwapToQuote
                   ? `${baseToken.symbol} → ${quoteToken.symbol}`
                   : `${quoteToken.symbol} → ${baseToken.symbol}`}
               </span>
@@ -305,7 +312,7 @@ export function CloseOrderReviewStep({
           <li>3. When price reaches your trigger, we execute the close</li>
           {formData.swapEnabled ? (
             <>
-              <li>4. Withdrawn assets are swapped to {formData.swapDirection === 'BASE_TO_QUOTE' ? quoteToken.symbol : baseToken.symbol} via Paraswap</li>
+              <li>4. Withdrawn assets are swapped to {isSwapToQuote ? quoteToken.symbol : baseToken.symbol} via Paraswap</li>
               <li>5. Final proceeds sent directly to your wallet</li>
             </>
           ) : (

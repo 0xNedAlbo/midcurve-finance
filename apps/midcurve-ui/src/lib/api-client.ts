@@ -329,9 +329,8 @@ export const automationApi = {
         registrationTxHash: string;
         swapConfig?: {
           enabled: boolean;
-          direction: 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+          direction: 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
           slippageBps: number;
-          quoteToken: string;
         };
       }
     ) {

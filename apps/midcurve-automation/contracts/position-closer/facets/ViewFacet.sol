@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {AppStorage, LibAppStorage, OrderType, OrderStatus, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
+import {AppStorage, LibAppStorage, TriggerMode, OrderStatus, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
 import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
 
 /// @title ViewFacet
@@ -14,36 +14,36 @@ contract ViewFacet is Modifiers {
 
     /// @notice Get the full order details
     /// @param nftId The position NFT ID
-    /// @param orderType The order type
+    /// @param triggerMode The trigger mode
     /// @return order The close order data
-    function getOrder(uint256 nftId, OrderType orderType)
+    function getOrder(uint256 nftId, TriggerMode triggerMode)
         external
         view
         returns (CloseOrder memory order)
     {
         AppStorage storage s = LibAppStorage.appStorage();
-        bytes32 key = LibAppStorage.orderKey(nftId, orderType);
+        bytes32 key = LibAppStorage.orderKey(nftId, triggerMode);
         order = s.orders[key];
     }
 
     /// @notice Check if an order exists
     /// @param nftId The position NFT ID
-    /// @param orderType The order type
+    /// @param triggerMode The trigger mode
     /// @return exists True if order exists
-    function hasOrder(uint256 nftId, OrderType orderType)
+    function hasOrder(uint256 nftId, TriggerMode triggerMode)
         external
         view
         returns (bool exists)
     {
         AppStorage storage s = LibAppStorage.appStorage();
-        exists = s.orderExists[nftId][orderType];
+        exists = s.orderExists[nftId][triggerMode];
     }
 
     /// @notice Check if an order can be executed (status, expiry, trigger)
     /// @param nftId The position NFT ID
-    /// @param orderType The order type
+    /// @param triggerMode The trigger mode
     /// @return canExecute True if order can be executed now
-    function canExecuteOrder(uint256 nftId, OrderType orderType)
+    function canExecuteOrder(uint256 nftId, TriggerMode triggerMode)
         external
         view
         returns (bool canExecute)
@@ -51,11 +51,11 @@ contract ViewFacet is Modifiers {
         AppStorage storage s = LibAppStorage.appStorage();
 
         // Check existence
-        if (!s.orderExists[nftId][orderType]) {
+        if (!s.orderExists[nftId][triggerMode]) {
             return false;
         }
 
-        bytes32 key = LibAppStorage.orderKey(nftId, orderType);
+        bytes32 key = LibAppStorage.orderKey(nftId, triggerMode);
         CloseOrder storage order = s.orders[key];
 
         // Check status
@@ -71,11 +71,11 @@ contract ViewFacet is Modifiers {
         // Check trigger condition
         (, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(order.pool).slot0();
 
-        if (orderType == OrderType.STOP_LOSS) {
-            // Stop loss triggers when price falls: currentTick <= triggerTick
+        if (triggerMode == TriggerMode.LOWER) {
+            // LOWER triggers when price falls: currentTick <= triggerTick
             canExecute = currentTick <= order.triggerTick;
         } else {
-            // Take profit triggers when price rises: currentTick >= triggerTick
+            // UPPER triggers when price rises: currentTick >= triggerTick
             canExecute = currentTick >= order.triggerTick;
         }
     }

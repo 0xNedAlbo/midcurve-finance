@@ -40,9 +40,8 @@ export type OrderType = 'STOP_LOSS' | 'TAKE_PROFIT';
  */
 export interface SwapConfig {
   enabled: boolean;
-  direction: 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+  direction: 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
   slippageBps: number;
-  quoteToken: string;
 }
 
 /**
@@ -313,29 +312,26 @@ export function useCreateCloseOrder(
       return;
     }
 
-    // Map OrderType to contract enum value
-    // Contract: STOP_LOSS = 0, TAKE_PROFIT = 1
+    // Map OrderType to contract TriggerMode enum value
+    // Contract: LOWER = 0, UPPER = 1
+    // UI: STOP_LOSS maps to LOWER, TAKE_PROFIT maps to UPPER
     const orderTypeMap: Record<OrderType, number> = {
-      'STOP_LOSS': 0,
-      'TAKE_PROFIT': 1,
+      'STOP_LOSS': 0,   // LOWER
+      'TAKE_PROFIT': 1, // UPPER
     };
-    const orderTypeValue = orderTypeMap[params.orderType];
+    const triggerModeValue = orderTypeMap[params.orderType];
 
     // Map SwapDirection
-    // Contract: NONE = 0, BASE_TO_QUOTE = 1, QUOTE_TO_BASE = 2
+    // Contract: NONE = 0, TOKEN0_TO_1 = 1, TOKEN1_TO_0 = 2
     const swapDirectionMap: Record<string, number> = {
       'NONE': 0,
-      'BASE_TO_QUOTE': 1,
-      'QUOTE_TO_BASE': 2,
+      'TOKEN0_TO_1': 1,
+      'TOKEN1_TO_0': 2,
     };
 
     const swapDirection = params.swapConfig?.enabled
       ? swapDirectionMap[params.swapConfig.direction]
       : 0;
-
-    const swapQuoteToken = params.swapConfig?.enabled
-      ? (params.swapConfig.quoteToken as Address)
-      : ('0x0000000000000000000000000000000000000000' as Address);
 
     const swapSlippageBps = params.swapConfig?.enabled
       ? params.swapConfig.slippageBps
@@ -350,14 +346,13 @@ export function useCreateCloseOrder(
         {
           nftId: BigInt(nftId),
           pool: params.poolAddress,
-          orderType: orderTypeValue,
+          triggerMode: triggerModeValue,
           triggerTick: params.triggerTick,
           payout: params.payoutAddress,
           operator: params.operatorAddress,
           validUntil: params.validUntil,
           slippageBps: params.slippageBps,
           swapDirection,
-          swapQuoteToken,
           swapSlippageBps,
         },
       ],

@@ -112,7 +112,6 @@ const CreateCloseOrderRequestSchema = z.object({
         errorMap: () => ({ message: `Swap direction must be one of: ${SWAP_DIRECTIONS.join(', ')}` }),
       }),
       slippageBps: z.number().int().min(0).max(10000, 'Swap slippage cannot exceed 100%'),
-      quoteToken: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid quote token address'),
     })
     .optional(),
 });

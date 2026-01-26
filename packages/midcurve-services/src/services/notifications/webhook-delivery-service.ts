@@ -352,9 +352,8 @@ export class WebhookDeliveryService {
         slippageBps: 50,
         swapConfig: {
           enabled: true,
-          direction: 'BASE_TO_QUOTE',
+          direction: 'TOKEN0_TO_1',
           slippageBps: 100,
-          quoteToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         },
       },
       state: {
@@ -371,7 +370,7 @@ export class WebhookDeliveryService {
         amount1Out: status === 'executed' ? '0' : null,
         swapExecution: status === 'executed' ? {
           swapExecuted: true,
-          swapDirection: 'BASE_TO_QUOTE',
+          swapDirection: 'TOKEN0_TO_1',
           srcToken: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
           destToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
           srcAmount: '5000000000000000000',

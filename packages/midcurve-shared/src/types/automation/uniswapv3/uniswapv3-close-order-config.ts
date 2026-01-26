@@ -16,10 +16,11 @@ export type TriggerMode = 'LOWER' | 'UPPER';
 /**
  * Swap direction for post-close token conversion
  *
- * - BASE_TO_QUOTE: Swap base token to quote token
- * - QUOTE_TO_BASE: Swap quote token to base token
+ * Uses Uniswap's native token ordering (token0/token1), role-agnostic.
+ * - TOKEN0_TO_1: Swap token0 to token1
+ * - TOKEN1_TO_0: Swap token1 to token0
  */
-export type SwapDirection = 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
+export type SwapDirection = 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
 
 /**
  * Optional swap configuration for post-close token conversion
@@ -31,7 +32,7 @@ export interface SwapConfig {
   enabled: boolean;
 
   /**
-   * Direction of swap
+   * Direction of swap (TOKEN0_TO_1 or TOKEN1_TO_0)
    */
   direction: SwapDirection;
 
@@ -39,11 +40,6 @@ export interface SwapConfig {
    * Slippage tolerance in basis points (0-10000)
    */
   slippageBps: number;
-
-  /**
-   * Quote token address (user's perspective of the "stable" token)
-   */
-  quoteToken: string;
 }
 
 /**
@@ -120,7 +116,6 @@ export interface SwapConfigJSON {
   enabled: boolean;
   direction: SwapDirection;
   slippageBps: number;
-  quoteToken: string;
 }
 
 export interface UniswapV3CloseOrderConfigJSON {

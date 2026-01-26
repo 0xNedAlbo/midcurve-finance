@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {AppStorage, LibAppStorage, OrderType, OrderStatus, SwapDirection, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
+import {AppStorage, LibAppStorage, TriggerMode, OrderStatus, SwapDirection, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
 import {IUniswapV3PositionCloserV1} from "../interfaces/IUniswapV3PositionCloserV1.sol";
 import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePositionManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
@@ -64,7 +64,7 @@ contract ExecutionFacet is Modifiers {
 
     event OrderExecuted(
         uint256 indexed nftId,
-        OrderType indexed orderType,
+        TriggerMode indexed triggerMode,
         address indexed owner,
         address payout,
         int24 executionTick,
@@ -74,7 +74,7 @@ contract ExecutionFacet is Modifiers {
 
     event FeeApplied(
         uint256 indexed nftId,
-        OrderType indexed orderType,
+        TriggerMode indexed triggerMode,
         address indexed feeRecipient,
         uint16 feeBps,
         uint256 feeAmount0,
@@ -83,7 +83,7 @@ contract ExecutionFacet is Modifiers {
 
     event SwapExecuted(
         uint256 indexed nftId,
-        OrderType indexed orderType,
+        TriggerMode indexed triggerMode,
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
@@ -92,7 +92,7 @@ contract ExecutionFacet is Modifiers {
 
     event DustSwept(
         uint256 indexed nftId,
-        OrderType indexed orderType,
+        TriggerMode indexed triggerMode,
         address tokenIn,
         uint256 dustIn,
         uint256 dustOut
@@ -105,13 +105,13 @@ contract ExecutionFacet is Modifiers {
     /// @notice Execute a close order when trigger condition is met
     /// @dev Only the registered operator can execute
     /// @param nftId The position NFT ID
-    /// @param orderType The order type to execute
+    /// @param triggerMode The trigger mode to execute
     /// @param feeRecipient Recipient of operator fee (address(0) = no fee)
     /// @param feeBps Fee in basis points (capped by maxFeeBps)
     /// @param swapParams Swap parameters (required if swap was configured)
     function executeOrder(
         uint256 nftId,
-        OrderType orderType,
+        TriggerMode triggerMode,
         address feeRecipient,
         uint16 feeBps,
         IUniswapV3PositionCloserV1.SwapParams calldata swapParams
@@ -119,10 +119,10 @@ contract ExecutionFacet is Modifiers {
         external
         whenInitialized
         nonReentrant
-        orderMustExist(nftId, orderType)
+        orderMustExist(nftId, triggerMode)
     {
         AppStorage storage s = LibAppStorage.appStorage();
-        bytes32 key = LibAppStorage.orderKey(nftId, orderType);
+        bytes32 key = LibAppStorage.orderKey(nftId, triggerMode);
         CloseOrder storage order = s.orders[key];
 
         // 1) Validate status
@@ -143,8 +143,8 @@ contract ExecutionFacet is Modifiers {
 
         // 5) Check trigger condition (tick-based)
         (, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(order.pool).slot0();
-        if (!_triggerConditionMet(currentTick, order.triggerTick, orderType)) {
-            revert TriggerConditionNotMet(currentTick, order.triggerTick, orderType);
+        if (!_triggerConditionMet(currentTick, order.triggerTick, triggerMode)) {
+            revert TriggerConditionNotMet(currentTick, order.triggerTick, triggerMode);
         }
 
         // 6) Validate NFT ownership and approval
@@ -165,7 +165,7 @@ contract ExecutionFacet is Modifiers {
 
         // 10) Apply optional operator fee
         (uint256 payout0, uint256 payout1) = _applyFees(
-            nftId, orderType, ctx, feeRecipient, feeBps
+            nftId, triggerMode, ctx, feeRecipient, feeBps
         );
 
         // 11) Execute optional swap if configured
@@ -173,10 +173,9 @@ contract ExecutionFacet is Modifiers {
             (payout0, payout1) = _executeSwap(
                 s,
                 nftId,
-                orderType,
+                triggerMode,
                 order.pool,
                 order.swapDirection,
-                order.swapQuoteToken,
                 ctx.token0,
                 ctx.token1,
                 payout0,
@@ -191,7 +190,7 @@ contract ExecutionFacet is Modifiers {
 
         emit OrderExecuted(
             nftId,
-            orderType,
+            triggerMode,
             order.owner,
             order.payout,
             currentTick,
@@ -238,17 +237,17 @@ contract ExecutionFacet is Modifiers {
     // INTERNAL FUNCTIONS
     // ========================================
 
-    /// @dev Check if trigger condition is met based on order type
+    /// @dev Check if trigger condition is met based on trigger mode
     function _triggerConditionMet(
         int24 currentTick,
         int24 triggerTick,
-        OrderType orderType
+        TriggerMode triggerMode
     ) internal pure returns (bool) {
-        if (orderType == OrderType.STOP_LOSS) {
-            // Stop loss triggers when price falls: currentTick <= triggerTick
+        if (triggerMode == TriggerMode.LOWER) {
+            // LOWER triggers when price falls: currentTick <= triggerTick
             return currentTick <= triggerTick;
         } else {
-            // Take profit triggers when price rises: currentTick >= triggerTick
+            // UPPER triggers when price rises: currentTick >= triggerTick
             return currentTick >= triggerTick;
         }
     }
@@ -340,7 +339,7 @@ contract ExecutionFacet is Modifiers {
     /// @dev Apply operator fees and return remaining payout amounts
     function _applyFees(
         uint256 nftId,
-        OrderType orderType,
+        TriggerMode triggerMode,
         CloseContext memory ctx,
         address feeRecipient,
         uint16 feeBps
@@ -355,7 +354,7 @@ contract ExecutionFacet is Modifiers {
             if (fee0 > 0) ctx.token0.safeTransfer(feeRecipient, fee0);
             if (fee1 > 0) ctx.token1.safeTransfer(feeRecipient, fee1);
 
-            emit FeeApplied(nftId, orderType, feeRecipient, feeBps, fee0, fee1);
+            emit FeeApplied(nftId, triggerMode, feeRecipient, feeBps, fee0, fee1);
 
             payout0 = ctx.amount0Out - fee0;
             payout1 = ctx.amount1Out - fee1;
@@ -366,10 +365,9 @@ contract ExecutionFacet is Modifiers {
     function _executeSwap(
         AppStorage storage s,
         uint256 nftId,
-        OrderType orderType,
+        TriggerMode triggerMode,
         address pool,
         SwapDirection direction,
-        address quoteToken,
         address token0,
         address token1,
         uint256 amount0,
@@ -388,7 +386,7 @@ contract ExecutionFacet is Modifiers {
 
         // 3) Build swap context
         SwapContext memory ctx = _buildSwapContext(
-            direction, quoteToken, token0, token1, amount0, amount1, params.augustus, params.minAmountOut
+            direction, token0, token1, amount0, amount1, params.augustus, params.minAmountOut
         );
 
         // Nothing to swap if amountIn is 0
@@ -400,7 +398,7 @@ contract ExecutionFacet is Modifiers {
         uint256 amountOut = _performSwap(ctx, params.swapCalldata);
 
         // 5) Emit swap event
-        emit SwapExecuted(nftId, orderType, ctx.tokenIn, ctx.tokenOut, ctx.amountIn, amountOut);
+        emit SwapExecuted(nftId, triggerMode, ctx.tokenIn, ctx.tokenOut, ctx.amountIn, amountOut);
 
         // 6) Sweep remaining dust via direct pool swap
         uint256 dustIn = IERC20Minimal(ctx.tokenIn).balanceOf(address(this));
@@ -408,7 +406,7 @@ contract ExecutionFacet is Modifiers {
             uint256 dustOut = _sweepDustViaPool(s, pool, ctx.tokenIn, ctx.tokenOut);
             if (dustOut > 0) {
                 amountOut += dustOut;
-                emit DustSwept(nftId, orderType, ctx.tokenIn, dustIn, dustOut);
+                emit DustSwept(nftId, triggerMode, ctx.tokenIn, dustIn, dustOut);
             }
         }
 
@@ -423,9 +421,9 @@ contract ExecutionFacet is Modifiers {
     }
 
     /// @dev Build swap context struct to avoid stack-too-deep
+    /// @param direction TOKEN0_TO_1 or TOKEN1_TO_0 (explicit direction)
     function _buildSwapContext(
         SwapDirection direction,
-        address quoteToken,
         address token0,
         address token1,
         uint256 amount0,
@@ -433,17 +431,16 @@ contract ExecutionFacet is Modifiers {
         address augustus,
         uint256 minAmountOut
     ) internal view returns (SwapContext memory ctx) {
-        // Determine which is base and which is quote
-        address baseToken = (quoteToken == token0) ? token1 : token0;
-
-        if (direction == SwapDirection.BASE_TO_QUOTE) {
-            ctx.tokenIn = baseToken;
-            ctx.tokenOut = quoteToken;
-            ctx.amountIn = (baseToken == token0) ? amount0 : amount1;
+        // Direction explicitly defines swap path
+        if (direction == SwapDirection.TOKEN0_TO_1) {
+            ctx.tokenIn = token0;
+            ctx.tokenOut = token1;
+            ctx.amountIn = amount0;
         } else {
-            ctx.tokenIn = quoteToken;
-            ctx.tokenOut = baseToken;
-            ctx.amountIn = (quoteToken == token0) ? amount0 : amount1;
+            // TOKEN1_TO_0
+            ctx.tokenIn = token1;
+            ctx.tokenOut = token0;
+            ctx.amountIn = amount1;
         }
 
         ctx.augustus = augustus;

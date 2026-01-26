@@ -348,9 +348,9 @@ export class OrderExecutor {
       closeId
     );
 
-    // SwapDirection enum: 0=NONE, 1=BASE_TO_QUOTE, 2=QUOTE_TO_BASE
+    // SwapDirection enum: 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0
     const swapEnabled = onChainOrder.swapDirection !== 0;
-    const swapDirection = onChainOrder.swapDirection === 1 ? 'BASE_TO_QUOTE' : 'QUOTE_TO_BASE';
+    const swapDirection = onChainOrder.swapDirection === 1 ? 'TOKEN0_TO_1' : 'TOKEN1_TO_0';
     const swapSlippageBps = onChainOrder.swapSlippageBps;
 
     log.info({
@@ -360,7 +360,6 @@ export class OrderExecutor {
       onChainSwapDirection: onChainOrder.swapDirection,
       swapEnabled,
       swapDirection: swapEnabled ? swapDirection : null,
-      swapQuoteToken: swapEnabled ? onChainOrder.swapQuoteToken : null,
       swapSlippageBps: swapEnabled ? swapSlippageBps : null,
       msg: 'On-chain swap configuration',
     });
@@ -519,25 +518,17 @@ export class OrderExecutor {
           msg: 'Building Paraswap swap params from on-chain config',
         });
 
-        // Resolve tokens based on swap direction (using on-chain direction)
-        const quoteToken = position.isToken0Quote
-          ? position.pool.token0.config.address
-          : position.pool.token1.config.address;
-        const baseToken = position.isToken0Quote
-          ? position.pool.token1.config.address
-          : position.pool.token0.config.address;
-        const quoteDecimals = position.isToken0Quote
-          ? position.pool.token0.decimals
-          : position.pool.token1.decimals;
-        const baseDecimals = position.isToken0Quote
-          ? position.pool.token1.decimals
-          : position.pool.token0.decimals;
+        // Get pool tokens directly (no base/quote indirection needed with TOKEN0_TO_1 / TOKEN1_TO_0)
+        const token0Address = position.pool.token0.config.address;
+        const token1Address = position.pool.token1.config.address;
+        const token0Decimals = position.pool.token0.decimals;
+        const token1Decimals = position.pool.token1.decimals;
 
-        // Determine src/dest based on swap direction (using on-chain direction)
-        const srcToken = swapDirection === 'BASE_TO_QUOTE' ? baseToken : quoteToken;
-        const destToken = swapDirection === 'BASE_TO_QUOTE' ? quoteToken : baseToken;
-        const srcDecimals = swapDirection === 'BASE_TO_QUOTE' ? baseDecimals : quoteDecimals;
-        const destDecimals = swapDirection === 'BASE_TO_QUOTE' ? quoteDecimals : baseDecimals;
+        // Determine src/dest based on explicit swap direction
+        const srcToken = swapDirection === 'TOKEN0_TO_1' ? token0Address : token1Address;
+        const destToken = swapDirection === 'TOKEN0_TO_1' ? token1Address : token0Address;
+        const srcDecimals = swapDirection === 'TOKEN0_TO_1' ? token0Decimals : token1Decimals;
+        const destDecimals = swapDirection === 'TOKEN0_TO_1' ? token1Decimals : token0Decimals;
 
         // Calculate expected swap amount from preflight position data
         // This uses the same Uniswap V3 math the contract uses to determine actual amounts
@@ -572,15 +563,10 @@ export class OrderExecutor {
           const totalAmount0 = expectedAmounts.token0Amount + preflight.positionData.tokensOwed0;
           const totalAmount1 = expectedAmounts.token1Amount + preflight.positionData.tokensOwed1;
 
-          // Determine swap source amount based on direction
-          // BASE_TO_QUOTE: swap base token → source is base
-          // QUOTE_TO_BASE: swap quote token → source is quote
-          let rawSwapAmount: bigint;
-          if (swapDirection === 'BASE_TO_QUOTE') {
-            rawSwapAmount = position.isToken0Quote ? totalAmount1 : totalAmount0;
-          } else {
-            rawSwapAmount = position.isToken0Quote ? totalAmount0 : totalAmount1;
-          }
+          // Determine swap source amount based on explicit direction
+          // TOKEN0_TO_1: swap token0 → source is totalAmount0
+          // TOKEN1_TO_0: swap token1 → source is totalAmount1
+          const rawSwapAmount = swapDirection === 'TOKEN0_TO_1' ? totalAmount0 : totalAmount1;
 
           // Apply 0.5% safety margin to swap amount to account for price movement
           // between off-chain calculation and on-chain execution. This prevents

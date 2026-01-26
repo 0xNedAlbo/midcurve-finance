@@ -9,10 +9,10 @@ pragma solidity ^0.8.20;
 // ENUMS
 // =============================================================================
 
-/// @notice Order type for close triggers
-enum OrderType {
-    STOP_LOSS,   // 0 - Trigger when currentTick <= triggerTick
-    TAKE_PROFIT  // 1 - Trigger when currentTick >= triggerTick
+/// @notice Trigger mode for close orders (tick-based, role-agnostic)
+enum TriggerMode {
+    LOWER,   // 0 - Trigger when currentTick <= triggerTick
+    UPPER    // 1 - Trigger when currentTick >= triggerTick
 }
 
 /// @notice Order status lifecycle
@@ -24,10 +24,11 @@ enum OrderStatus {
 }
 
 /// @notice Swap direction for post-close token conversion via Paraswap
+/// @dev Uses Uniswap's native token ordering (token0/token1), role-agnostic
 enum SwapDirection {
-    NONE,           // 0 - No swap, user receives both tokens as-is
-    BASE_TO_QUOTE,  // 1 - Swap base token to quote token
-    QUOTE_TO_BASE   // 2 - Swap quote token to base token
+    NONE,         // 0 - No swap, user receives both tokens as-is
+    TOKEN0_TO_1,  // 1 - Swap token0 to token1
+    TOKEN1_TO_0   // 2 - Swap token1 to token0
 }
 
 // =============================================================================
@@ -35,7 +36,7 @@ enum SwapDirection {
 // =============================================================================
 
 /// @notice Close order data structure
-/// @dev Each position can have at most 1 STOP_LOSS and 1 TAKE_PROFIT order
+/// @dev Each position can have at most 1 LOWER and 1 UPPER order
 struct CloseOrder {
     // Order identification and status
     OrderStatus status;         // Current lifecycle status
@@ -55,8 +56,7 @@ struct CloseOrder {
     uint16 slippageBps;         // Decrease liquidity slippage tolerance (0-10000)
 
     // Post-close swap configuration
-    SwapDirection swapDirection;    // Direction of optional token swap
-    address swapQuoteToken;         // Quote token address (for swap direction)
+    SwapDirection swapDirection;    // Direction of optional token swap (TOKEN0_TO_1 or TOKEN1_TO_0)
     uint16 swapSlippageBps;         // Swap slippage tolerance (0-10000)
 }
 
@@ -88,12 +88,12 @@ struct AppStorage {
     // ========================================
 
     /// @notice Mapping from order key to CloseOrder
-    /// @dev Key: keccak256(abi.encode(nftId, orderType))
+    /// @dev Key: keccak256(abi.encode(nftId, triggerMode))
     mapping(bytes32 => CloseOrder) orders;
 
     /// @notice Mapping to track which orders exist for a position
-    /// @dev Used for quick existence checks: nftId => orderType => exists
-    mapping(uint256 => mapping(OrderType => bool)) orderExists;
+    /// @dev Used for quick existence checks: nftId => triggerMode => exists
+    mapping(uint256 => mapping(TriggerMode => bool)) orderExists;
 
     // ========================================
     // REENTRANCY & INITIALIZATION
@@ -128,12 +128,12 @@ library LibAppStorage {
         }
     }
 
-    /// @notice Generate order key from nftId and orderType
+    /// @notice Generate order key from nftId and triggerMode
     /// @param nftId The position NFT ID
-    /// @param orderType The order type (STOP_LOSS or TAKE_PROFIT)
+    /// @param triggerMode The trigger mode (LOWER or UPPER)
     /// @return The order key
-    function orderKey(uint256 nftId, OrderType orderType) internal pure returns (bytes32) {
-        return keccak256(abi.encode(nftId, orderType));
+    function orderKey(uint256 nftId, TriggerMode triggerMode) internal pure returns (bytes32) {
+        return keccak256(abi.encode(nftId, triggerMode));
     }
 }
 
@@ -168,16 +168,16 @@ abstract contract Modifiers {
     // ============ Order Existence ============
 
     /// @notice Modifier to ensure order exists
-    modifier orderMustExist(uint256 nftId, OrderType orderType) {
+    modifier orderMustExist(uint256 nftId, TriggerMode triggerMode) {
         AppStorage storage s = LibAppStorage.appStorage();
-        require(s.orderExists[nftId][orderType], "ORDER_NOT_FOUND");
+        require(s.orderExists[nftId][triggerMode], "ORDER_NOT_FOUND");
         _;
     }
 
     /// @notice Modifier to ensure order does not exist
-    modifier orderMustNotExist(uint256 nftId, OrderType orderType) {
+    modifier orderMustNotExist(uint256 nftId, TriggerMode triggerMode) {
         AppStorage storage s = LibAppStorage.appStorage();
-        require(!s.orderExists[nftId][orderType], "ORDER_ALREADY_EXISTS");
+        require(!s.orderExists[nftId][triggerMode], "ORDER_ALREADY_EXISTS");
         _;
     }
 
@@ -187,12 +187,12 @@ abstract contract Modifiers {
     error NotOperator();
     error ZeroAddress();
     error SlippageBpsOutOfRange(uint16 slippageBps);
-    error InvalidTriggerTick(int24 tick, OrderType orderType);
-    error OrderAlreadyExists(uint256 nftId, OrderType orderType);
-    error OrderNotFound(uint256 nftId, OrderType orderType);
+    error InvalidTriggerTick(int24 tick, TriggerMode triggerMode);
+    error OrderAlreadyExists(uint256 nftId, TriggerMode triggerMode);
+    error OrderNotFound(uint256 nftId, TriggerMode triggerMode);
     error WrongOrderStatus(OrderStatus expected, OrderStatus actual);
     error OrderExpired(uint256 validUntil, uint256 nowTs);
-    error TriggerConditionNotMet(int24 currentTick, int24 triggerTick, OrderType orderType);
+    error TriggerConditionNotMet(int24 currentTick, int24 triggerTick, TriggerMode triggerMode);
     error NftNotOwnedByRecordedOwner(address expectedOwner, address actualOwner);
     error NftNotApproved(address owner, uint256 nftId);
     error FeeBpsTooHigh(uint16 feeBps, uint16 maxFeeBps);
@@ -201,7 +201,6 @@ abstract contract Modifiers {
     error SwapDeadlineExpired(uint256 deadline, uint256 current);
     error SwapFailed();
     error SwapOutputZero();
-    error InvalidQuoteToken(address quoteToken, address token0, address token1);
     error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);
     error SlippageExceeded(uint256 minExpected, uint256 actual);
 }

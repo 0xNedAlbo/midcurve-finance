@@ -967,7 +967,6 @@ export class CloseOrderService {
                 enabled: input.swapConfig.enabled,
                 direction: input.swapConfig.direction,
                 slippageBps: input.swapConfig.slippageBps,
-                quoteToken: input.swapConfig.quoteToken,
               }
             : undefined,
         };

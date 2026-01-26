@@ -775,10 +775,8 @@ export async function simulateExecuteClose(
  * On-chain close order data (relevant swap fields)
  */
 export interface OnChainCloseOrderSwapInfo {
-  /** SwapDirection enum: 0=NONE, 1=BASE_TO_QUOTE, 2=QUOTE_TO_BASE */
+  /** SwapDirection enum: 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0 */
   swapDirection: number;
-  /** Quote token address (for swap direction resolution) */
-  swapQuoteToken: `0x${string}`;
   /** Swap slippage in basis points */
   swapSlippageBps: number;
 }
@@ -812,10 +810,9 @@ export async function getOnChainCloseOrder(
   // Index mapping from ABI:
   // 0: status, 1: tokenId, 2: owner, 3: payout, 4: operator
   // 5: pool, 6: lower, 7: upper, 8: mode, 9: validUntil
-  // 10: slippageBps, 11: swapDirection, 12: swapQuoteToken, 13: swapSlippageBps
+  // 10: slippageBps, 11: swapDirection, 12: swapSlippageBps
   return {
     swapDirection: Number(result.swapDirection),
-    swapQuoteToken: result.swapQuoteToken as `0x${string}`,
     swapSlippageBps: Number(result.swapSlippageBps),
   };
 }

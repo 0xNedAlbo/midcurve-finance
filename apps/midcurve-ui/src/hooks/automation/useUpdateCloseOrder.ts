@@ -94,8 +94,7 @@ export interface UpdateOperatorParams extends BaseUpdateParams {
  */
 export interface UpdateSwapIntentParams extends BaseUpdateParams {
   updateType: 'swapIntent';
-  direction: 'NONE' | 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
-  quoteToken: Address;
+  direction: 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
   swapSlippageBps: number;
 }
 
@@ -295,11 +294,11 @@ export function useUpdateCloseOrder(
 
       case 'swapIntent': {
         // Map SwapDirection to contract enum value
-        // Contract: NONE = 0, BASE_TO_QUOTE = 1, QUOTE_TO_BASE = 2
+        // Contract: NONE = 0, TOKEN0_TO_1 = 1, TOKEN1_TO_0 = 2
         const swapDirectionMap: Record<string, number> = {
           'NONE': 0,
-          'BASE_TO_QUOTE': 1,
-          'QUOTE_TO_BASE': 2,
+          'TOKEN0_TO_1': 1,
+          'TOKEN1_TO_0': 2,
         };
         const directionValue = swapDirectionMap[params.direction] ?? 0;
 
@@ -307,7 +306,7 @@ export function useUpdateCloseOrder(
           address: contractAddress as Address,
           abi,
           functionName: 'setSwapIntent',
-          args: [nftIdBigInt, orderTypeValue, directionValue, params.quoteToken, params.swapSlippageBps],
+          args: [nftIdBigInt, orderTypeValue, directionValue, params.swapSlippageBps],
           chainId,
         });
         break;

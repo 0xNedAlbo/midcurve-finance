@@ -9,8 +9,8 @@
  *
  * Interface features:
  * - Tick-based triggers (int24)
- * - OrderType: STOP_LOSS (0), TAKE_PROFIT (1)
- * - SwapDirection: NONE (0), BASE_TO_QUOTE (1), QUOTE_TO_BASE (2)
+ * - TriggerMode: LOWER (0), UPPER (1)
+ * - SwapDirection: NONE (0), TOKEN0_TO_1 (1), TOKEN1_TO_0 (2)
  * - OrderStatus: NONE (0), ACTIVE (1), EXECUTED (2), CANCELLED (3)
  */
 export const UniswapV3PositionCloserV100Abi = [
@@ -26,7 +26,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'canExecuteOrder',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
     ],
     outputs: [{ name: 'canExecute', type: 'bool', internalType: 'bool' }],
     stateMutability: 'view',
@@ -36,7 +36,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'cancelOrder',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -46,7 +46,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'executeOrder',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'feeRecipient', type: 'address', internalType: 'address' },
       { name: 'feeBps', type: 'uint16', internalType: 'uint16' },
       {
@@ -76,7 +76,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'getOrder',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
     ],
     outputs: [
       {
@@ -94,7 +94,6 @@ export const UniswapV3PositionCloserV100Abi = [
           { name: 'validUntil', type: 'uint256', internalType: 'uint256' },
           { name: 'slippageBps', type: 'uint16', internalType: 'uint16' },
           { name: 'swapDirection', type: 'uint8', internalType: 'enum SwapDirection' },
-          { name: 'swapQuoteToken', type: 'address', internalType: 'address' },
           { name: 'swapSlippageBps', type: 'uint16', internalType: 'uint16' },
         ],
       },
@@ -106,7 +105,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'hasOrder',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
     ],
     outputs: [{ name: 'exists', type: 'bool', internalType: 'bool' }],
     stateMutability: 'view',
@@ -143,14 +142,13 @@ export const UniswapV3PositionCloserV100Abi = [
         components: [
           { name: 'nftId', type: 'uint256', internalType: 'uint256' },
           { name: 'pool', type: 'address', internalType: 'address' },
-          { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+          { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
           { name: 'triggerTick', type: 'int24', internalType: 'int24' },
           { name: 'payout', type: 'address', internalType: 'address' },
           { name: 'operator', type: 'address', internalType: 'address' },
           { name: 'validUntil', type: 'uint256', internalType: 'uint256' },
           { name: 'slippageBps', type: 'uint16', internalType: 'uint16' },
           { name: 'swapDirection', type: 'uint8', internalType: 'enum SwapDirection' },
-          { name: 'swapQuoteToken', type: 'address', internalType: 'address' },
           { name: 'swapSlippageBps', type: 'uint16', internalType: 'uint16' },
         ],
       },
@@ -163,7 +161,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'setOperator',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'newOperator', type: 'address', internalType: 'address' },
     ],
     outputs: [],
@@ -174,7 +172,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'setPayout',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'newPayout', type: 'address', internalType: 'address' },
     ],
     outputs: [],
@@ -185,7 +183,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'setSlippage',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'newSlippageBps', type: 'uint16', internalType: 'uint16' },
     ],
     outputs: [],
@@ -196,9 +194,8 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'setSwapIntent',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'direction', type: 'uint8', internalType: 'enum SwapDirection' },
-      { name: 'quoteToken', type: 'address', internalType: 'address' },
       { name: 'swapSlippageBps', type: 'uint16', internalType: 'uint16' },
     ],
     outputs: [],
@@ -209,7 +206,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'setTriggerTick',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'newTriggerTick', type: 'int24', internalType: 'int24' },
     ],
     outputs: [],
@@ -220,7 +217,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'setValidUntil',
     inputs: [
       { name: 'nftId', type: 'uint256', internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', internalType: 'enum TriggerMode' },
       { name: 'newValidUntil', type: 'uint256', internalType: 'uint256' },
     ],
     outputs: [],
@@ -239,7 +236,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'FeeApplied',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'feeRecipient', type: 'address', indexed: true, internalType: 'address' },
       { name: 'feeBps', type: 'uint16', indexed: false, internalType: 'uint16' },
       { name: 'feeAmount0', type: 'uint256', indexed: false, internalType: 'uint256' },
@@ -252,7 +249,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderCancelled',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'owner', type: 'address', indexed: true, internalType: 'address' },
     ],
     anonymous: false,
@@ -262,7 +259,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderExecuted',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'owner', type: 'address', indexed: true, internalType: 'address' },
       { name: 'payout', type: 'address', indexed: false, internalType: 'address' },
       { name: 'executionTick', type: 'int24', indexed: false, internalType: 'int24' },
@@ -276,7 +273,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderOperatorUpdated',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'oldOperator', type: 'address', indexed: false, internalType: 'address' },
       { name: 'newOperator', type: 'address', indexed: false, internalType: 'address' },
     ],
@@ -287,7 +284,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderPayoutUpdated',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'oldPayout', type: 'address', indexed: false, internalType: 'address' },
       { name: 'newPayout', type: 'address', indexed: false, internalType: 'address' },
     ],
@@ -298,7 +295,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderRegistered',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'owner', type: 'address', indexed: true, internalType: 'address' },
       { name: 'pool', type: 'address', indexed: false, internalType: 'address' },
       { name: 'operator', type: 'address', indexed: false, internalType: 'address' },
@@ -314,7 +311,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderSlippageUpdated',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'oldSlippageBps', type: 'uint16', indexed: false, internalType: 'uint16' },
       { name: 'newSlippageBps', type: 'uint16', indexed: false, internalType: 'uint16' },
     ],
@@ -325,7 +322,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderSwapIntentUpdated',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'oldDirection', type: 'uint8', indexed: false, internalType: 'enum SwapDirection' },
       { name: 'newDirection', type: 'uint8', indexed: false, internalType: 'enum SwapDirection' },
     ],
@@ -336,7 +333,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderTriggerTickUpdated',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'oldTick', type: 'int24', indexed: false, internalType: 'int24' },
       { name: 'newTick', type: 'int24', indexed: false, internalType: 'int24' },
     ],
@@ -347,7 +344,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'OrderValidUntilUpdated',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'oldValidUntil', type: 'uint256', indexed: false, internalType: 'uint256' },
       { name: 'newValidUntil', type: 'uint256', indexed: false, internalType: 'uint256' },
     ],
@@ -358,7 +355,7 @@ export const UniswapV3PositionCloserV100Abi = [
     name: 'SwapExecuted',
     inputs: [
       { name: 'nftId', type: 'uint256', indexed: true, internalType: 'uint256' },
-      { name: 'orderType', type: 'uint8', indexed: true, internalType: 'enum OrderType' },
+      { name: 'triggerMode', type: 'uint8', indexed: true, internalType: 'enum TriggerMode' },
       { name: 'tokenIn', type: 'address', indexed: false, internalType: 'address' },
       { name: 'tokenOut', type: 'address', indexed: false, internalType: 'address' },
       { name: 'amountIn', type: 'uint256', indexed: false, internalType: 'uint256' },

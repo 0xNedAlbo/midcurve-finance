@@ -5,9 +5,8 @@
   "type": "module",
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "compile": "tsx scripts/compile-contracts.ts",
-    "dev": "pnpm compile && next dev -p 3004",
-    "build": "pnpm compile && next build",
+    "dev": "next dev -p 3004",
+    "build": "next build",
     "start": "next start -p 3004",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -37,7 +36,6 @@
     "pino": "^9.9.5",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "solc": "^0.8.28",
     "typescript": "^5",
     "viem": "^2.37.3"
   },

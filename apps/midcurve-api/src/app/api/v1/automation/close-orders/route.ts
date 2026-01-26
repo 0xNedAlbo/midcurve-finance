@@ -85,9 +85,8 @@ const RegisterCloseOrderRequestSchema = z.object({
   swapConfig: z
     .object({
       enabled: z.boolean(),
-      direction: z.enum(['BASE_TO_QUOTE', 'QUOTE_TO_BASE']),
+      direction: z.enum(['TOKEN0_TO_1', 'TOKEN1_TO_0']),
       slippageBps: z.number().int().min(0).max(10000),
-      quoteToken: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid quote token address'),
     })
     .optional(),
 
@@ -242,9 +241,10 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       // Validate trigger price against current pool price
       // This prevents users from creating SL orders above current price or TP orders below
-      const poolState = position.pool.state;
+      const poolState = position.pool.state as { sqrtPriceX96?: string } | null;
       if (poolState?.sqrtPriceX96) {
-        const currentSqrtPriceX96 = poolState.sqrtPriceX96;
+        // Convert to BigInt for comparison (may be string from API/database)
+        const currentSqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
         const isToken0Quote = position.isToken0Quote;
 
         // Validation functions account for isToken0Quote inversion
@@ -303,7 +303,6 @@ export async function POST(request: NextRequest): Promise<Response> {
             enabled: true,
             direction: data.swapConfig.direction as SwapDirection,
             slippageBps: data.swapConfig.slippageBps,
-            quoteToken: data.swapConfig.quoteToken,
           }
         : undefined;
 

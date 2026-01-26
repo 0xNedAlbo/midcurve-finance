@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {AppStorage, LibAppStorage, OrderType, OrderStatus, SwapDirection, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
+import {AppStorage, LibAppStorage, TriggerMode, OrderStatus, SwapDirection, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
 import {IUniswapV3PositionCloserV1} from "../interfaces/IUniswapV3PositionCloserV1.sol";
 import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePositionManagerMinimal.sol";
-import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
 
 /// @title RegistrationFacet
 /// @notice Facet for registering and cancelling close orders
@@ -16,7 +15,7 @@ contract RegistrationFacet is Modifiers {
 
     event OrderRegistered(
         uint256 indexed nftId,
-        OrderType indexed orderType,
+        TriggerMode indexed triggerMode,
         address indexed owner,
         address pool,
         address operator,
@@ -28,7 +27,7 @@ contract RegistrationFacet is Modifiers {
 
     event OrderCancelled(
         uint256 indexed nftId,
-        OrderType indexed orderType,
+        TriggerMode indexed triggerMode,
         address indexed owner
     );
 
@@ -48,11 +47,11 @@ contract RegistrationFacet is Modifiers {
         AppStorage storage s = LibAppStorage.appStorage();
 
         // Check if order already exists and is active - cannot overwrite active orders
-        if (s.orderExists[params.nftId][params.orderType]) {
-            bytes32 existingKey = LibAppStorage.orderKey(params.nftId, params.orderType);
+        if (s.orderExists[params.nftId][params.triggerMode]) {
+            bytes32 existingKey = LibAppStorage.orderKey(params.nftId, params.triggerMode);
             CloseOrder storage existingOrder = s.orders[existingKey];
             if (existingOrder.status == OrderStatus.ACTIVE) {
-                revert OrderAlreadyExists(params.nftId, params.orderType);
+                revert OrderAlreadyExists(params.nftId, params.triggerMode);
             }
             // Order exists but is Cancelled or Executed - allow overwriting
         }
@@ -67,15 +66,7 @@ contract RegistrationFacet is Modifiers {
 
         // Validate swap config if enabled
         if (params.swapDirection != SwapDirection.NONE) {
-            if (params.swapQuoteToken == address(0)) revert ZeroAddress();
             if (params.swapSlippageBps > 10000) revert SwapSlippageBpsOutOfRange(params.swapSlippageBps);
-
-            // Validate quote token is token0 or token1
-            address token0 = IUniswapV3PoolMinimal(params.pool).token0();
-            address token1 = IUniswapV3PoolMinimal(params.pool).token1();
-            if (params.swapQuoteToken != token0 && params.swapQuoteToken != token1) {
-                revert InvalidQuoteToken(params.swapQuoteToken, token0, token1);
-            }
         }
 
         // Verify ownership and approval
@@ -92,7 +83,7 @@ contract RegistrationFacet is Modifiers {
         }
 
         // Generate order key and create order
-        bytes32 key = LibAppStorage.orderKey(params.nftId, params.orderType);
+        bytes32 key = LibAppStorage.orderKey(params.nftId, params.triggerMode);
 
         s.orders[key] = CloseOrder({
             status: OrderStatus.ACTIVE,
@@ -105,15 +96,14 @@ contract RegistrationFacet is Modifiers {
             validUntil: params.validUntil,
             slippageBps: params.slippageBps,
             swapDirection: params.swapDirection,
-            swapQuoteToken: params.swapQuoteToken,
             swapSlippageBps: params.swapSlippageBps
         });
 
-        s.orderExists[params.nftId][params.orderType] = true;
+        s.orderExists[params.nftId][params.triggerMode] = true;
 
         emit OrderRegistered(
             params.nftId,
-            params.orderType,
+            params.triggerMode,
             nftOwner,
             params.pool,
             params.operator,
@@ -127,15 +117,15 @@ contract RegistrationFacet is Modifiers {
     /// @notice Cancel an existing close order
     /// @dev Only the NFT owner can cancel
     /// @param nftId The position NFT ID
-    /// @param orderType The order type to cancel
-    function cancelOrder(uint256 nftId, OrderType orderType)
+    /// @param triggerMode The trigger mode to cancel
+    function cancelOrder(uint256 nftId, TriggerMode triggerMode)
         external
         whenInitialized
         nonReentrant
-        orderMustExist(nftId, orderType)
+        orderMustExist(nftId, triggerMode)
     {
         AppStorage storage s = LibAppStorage.appStorage();
-        bytes32 key = LibAppStorage.orderKey(nftId, orderType);
+        bytes32 key = LibAppStorage.orderKey(nftId, triggerMode);
         CloseOrder storage order = s.orders[key];
 
         // Only owner can cancel
@@ -149,6 +139,6 @@ contract RegistrationFacet is Modifiers {
         // Mark as cancelled
         order.status = OrderStatus.CANCELLED;
 
-        emit OrderCancelled(nftId, orderType, order.owner);
+        emit OrderCancelled(nftId, triggerMode, order.owner);
     }
 }

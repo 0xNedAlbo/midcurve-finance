@@ -29,8 +29,7 @@ interface CloseOrderConfig {
   sqrtPriceX96Upper?: string;
   swapConfig?: {
     enabled: boolean;
-    direction: 'BASE_TO_QUOTE' | 'QUOTE_TO_BASE';
-    quoteToken: string;
+    direction: 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
   };
 }
 
@@ -184,9 +183,17 @@ export function getOrderButtonLabel(
   // Check if swap is enabled
   if (config.swapConfig?.enabled) {
     // Determine target token based on swap direction
-    const targetSymbol = config.swapConfig.direction === 'BASE_TO_QUOTE'
-      ? tokenConfig.quoteTokenSymbol
-      : tokenConfig.baseTokenSymbol;
+    // First determine which token is token0 (lower address) vs token1 (higher address)
+    const baseIsToken0 =
+      BigInt(tokenConfig.baseTokenAddress) < BigInt(tokenConfig.quoteTokenAddress);
+
+    // TOKEN0_TO_1 means swapping token0 → token1 (target is token1)
+    // TOKEN1_TO_0 means swapping token1 → token0 (target is token0)
+    const targetIsToken1 = config.swapConfig.direction === 'TOKEN0_TO_1';
+    const targetIsBase = baseIsToken0 ? !targetIsToken1 : targetIsToken1;
+    const targetSymbol = targetIsBase
+      ? tokenConfig.baseTokenSymbol
+      : tokenConfig.quoteTokenSymbol;
     return { prefix, priceDisplay, targetSymbol, hasSwap: true };
   }
 

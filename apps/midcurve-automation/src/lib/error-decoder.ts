@@ -5,8 +5,8 @@
  * Supports UniswapV3PositionCloser custom errors and standard revert strings.
  */
 
-import { decodeErrorResult, type Hex } from 'viem';
-import { getPositionCloserAbi } from './contract-artifacts';
+import { decodeErrorResult, type Hex, type Abi } from 'viem';
+import { UniswapV3PositionCloserV100Abi } from '@midcurve/shared';
 import { automationLogger } from './logger';
 
 const log = automationLogger.child({ component: 'ErrorDecoder' });
@@ -143,8 +143,7 @@ export function decodeRevertReason(revertData: Hex | string | unknown): string {
 
   // Try to decode using the PositionCloser ABI
   try {
-    const abi = getPositionCloserAbi();
-    const decoded = decodeErrorResult({ abi, data });
+    const decoded = decodeErrorResult({ abi: UniswapV3PositionCloserV100Abi as Abi, data });
 
     // Format the error with its arguments
     if (decoded.args && decoded.args.length > 0) {

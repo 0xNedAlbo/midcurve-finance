@@ -55,12 +55,34 @@ export function SwapConfigSection({
     return null;
   }
 
+  // Determine if base token is token0 (lower address = token0)
+  const baseIsToken0 = BigInt(baseToken.address) < BigInt(quoteToken.address);
+
+  // Map between UI concept (base→quote) and contract concept (token0→token1)
+  // If baseIsToken0:
+  //   - BASE_TO_QUOTE = swap base(token0) → quote(token1) = TOKEN0_TO_1
+  //   - QUOTE_TO_BASE = swap quote(token1) → base(token0) = TOKEN1_TO_0
+  // If !baseIsToken0:
+  //   - BASE_TO_QUOTE = swap base(token1) → quote(token0) = TOKEN1_TO_0
+  //   - QUOTE_TO_BASE = swap quote(token0) → base(token1) = TOKEN0_TO_1
+
+  // Check if current direction is "swap to quote token"
+  const isSwapToQuote = baseIsToken0
+    ? formData.swapDirection === 'TOKEN0_TO_1'
+    : formData.swapDirection === 'TOKEN1_TO_0';
+
   const handleToggleSwap = () => {
     onChange({ swapEnabled: !formData.swapEnabled });
   };
 
-  const handleDirectionChange = (direction: SwapDirection) => {
-    onChange({ swapDirection: direction });
+  const handleDirectionToggle = () => {
+    // Toggle between swap-to-quote and swap-to-base
+    // Determine the new direction based on current state and token ordering
+    const newSwapToQuote = !isSwapToQuote;
+    const newDirection: SwapDirection = baseIsToken0
+      ? (newSwapToQuote ? 'TOKEN0_TO_1' : 'TOKEN1_TO_0')
+      : (newSwapToQuote ? 'TOKEN1_TO_0' : 'TOKEN0_TO_1');
+    onChange({ swapDirection: newDirection });
   };
 
   const handleSlippageChange = (slippageBps: number) => {
@@ -102,19 +124,17 @@ export function SwapConfigSection({
           <div className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
             <div>
               <span className="text-sm text-slate-300">
-                {formData.swapDirection === 'BASE_TO_QUOTE'
+                {isSwapToQuote
                   ? `${baseToken.symbol} → ${quoteToken.symbol}`
                   : `${quoteToken.symbol} → ${baseToken.symbol}`}
               </span>
               <p className="text-xs text-slate-500">
-                Receive all in {formData.swapDirection === 'BASE_TO_QUOTE' ? quoteToken.symbol : baseToken.symbol}
+                Receive all in {isSwapToQuote ? quoteToken.symbol : baseToken.symbol}
               </p>
             </div>
             <button
               type="button"
-              onClick={() => handleDirectionChange(
-                formData.swapDirection === 'BASE_TO_QUOTE' ? 'QUOTE_TO_BASE' : 'BASE_TO_QUOTE'
-              )}
+              onClick={handleDirectionToggle}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white border border-slate-600 hover:border-slate-500 rounded-lg transition-colors cursor-pointer"
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
