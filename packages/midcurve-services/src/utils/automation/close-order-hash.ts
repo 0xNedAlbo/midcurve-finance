@@ -35,7 +35,6 @@ const CLOSE_ORDER_HASH_REGEX = /^(sl|tp)@(-?\d+)$/;
  * @param triggerMode - The trigger mode (LOWER or UPPER)
  * @param sqrtPriceX96Trigger - The sqrtPriceX96 threshold that triggers the close
  * @returns Close order hash in format "{sl|tp}@{tick}"
- * @throws Error if triggerMode is BOTH (not supported)
  */
 export function deriveCloseOrderHash(
   triggerMode: TriggerMode,
@@ -45,13 +44,9 @@ export function deriveCloseOrderHash(
 
   if (triggerMode === 'LOWER') {
     return `sl@${tick}`;
-  } else if (triggerMode === 'UPPER') {
+  } else {
     return `tp@${tick}`;
   }
-
-  throw new Error(
-    'BOTH triggerMode not supported - create separate sl and tp orders'
-  );
 }
 
 /**
@@ -61,7 +56,7 @@ export function deriveCloseOrderHash(
  * @param sqrtPriceX96Lower - Lower price threshold (used for LOWER trigger)
  * @param sqrtPriceX96Upper - Upper price threshold (used for UPPER trigger)
  * @returns Close order hash in format "{sl|tp}@{tick}"
- * @throws Error if triggerMode is BOTH or required threshold is missing
+ * @throws Error if required threshold is missing
  */
 export function deriveCloseOrderHashFromConfig(
   triggerMode: TriggerMode,
@@ -73,16 +68,12 @@ export function deriveCloseOrderHashFromConfig(
       throw new Error('sqrtPriceX96Lower required for LOWER triggerMode');
     }
     return deriveCloseOrderHash(triggerMode, sqrtPriceX96Lower);
-  } else if (triggerMode === 'UPPER') {
+  } else {
     if (sqrtPriceX96Upper === undefined) {
       throw new Error('sqrtPriceX96Upper required for UPPER triggerMode');
     }
     return deriveCloseOrderHash(triggerMode, sqrtPriceX96Upper);
   }
-
-  throw new Error(
-    'BOTH triggerMode not supported - create separate sl and tp orders'
-  );
 }
 
 /**
@@ -132,15 +123,9 @@ export function hashTypeToTriggerMode(type: CloseOrderHashType): TriggerMode {
  *
  * @param triggerMode - The trigger mode (LOWER or UPPER)
  * @returns The corresponding hash type ('sl' or 'tp')
- * @throws Error if triggerMode is BOTH
  */
 export function triggerModeToHashType(
   triggerMode: TriggerMode
 ): CloseOrderHashType {
-  if (triggerMode === 'LOWER') {
-    return 'sl';
-  } else if (triggerMode === 'UPPER') {
-    return 'tp';
-  }
-  throw new Error('BOTH triggerMode has no single hash type');
+  return triggerMode === 'LOWER' ? 'sl' : 'tp';
 }

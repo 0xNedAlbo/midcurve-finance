@@ -5,7 +5,7 @@
  */
 
 import { Link } from 'react-router-dom';
-import { AlertCircle, TrendingDown, TrendingUp, ArrowLeftRight, ArrowRightLeft, Info, AlertTriangle } from 'lucide-react';
+import { AlertCircle, TrendingDown, TrendingUp, ArrowRightLeft, Info, AlertTriangle } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
 import type { CloseOrderFormData } from '../CloseOrderModal';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
@@ -62,8 +62,6 @@ function getTriggerModeIcon(mode: TriggerMode) {
       return <TrendingDown className="w-5 h-5 text-red-400" />;
     case 'UPPER':
       return <TrendingUp className="w-5 h-5 text-green-400" />;
-    case 'BOTH':
-      return <ArrowLeftRight className="w-5 h-5 text-blue-400" />;
   }
 }
 
@@ -73,8 +71,6 @@ function getTriggerModeLabel(mode: TriggerMode): string {
       return 'Stop-Loss';
     case 'UPPER':
       return 'Take-Profit';
-    case 'BOTH':
-      return 'Range Exit';
   }
 }
 
@@ -141,7 +137,7 @@ export function CloseOrderReviewStep({
         </div>
 
         {/* Lower Price */}
-        {(formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH') && (
+        {formData.triggerMode === 'LOWER' && (
           <div className="p-4 flex items-center justify-between">
             <span className="text-slate-400">Lower Trigger</span>
             <span className="text-red-400 font-mono">
@@ -151,7 +147,7 @@ export function CloseOrderReviewStep({
         )}
 
         {/* Upper Price */}
-        {(formData.triggerMode === 'UPPER' || formData.triggerMode === 'BOTH') && (
+        {formData.triggerMode === 'UPPER' && (
           <div className="p-4 flex items-center justify-between">
             <span className="text-slate-400">Upper Trigger</span>
             <span className="text-green-400 font-mono">

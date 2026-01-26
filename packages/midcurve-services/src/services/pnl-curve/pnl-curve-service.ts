@@ -388,7 +388,7 @@ export class PnLCurveService {
       const baseIsToken0 = BigInt(baseToken.config.address) < BigInt(quoteToken.config.address);
 
       // Process LOWER trigger (stop-loss)
-      if (config.triggerMode === 'LOWER' || config.triggerMode === 'BOTH') {
+      if (config.triggerMode === 'LOWER') {
         const sqrtPriceX96Lower = BigInt(config.sqrtPriceX96Lower || '0');
 
         // Only process if sqrtPriceX96 is valid (not a sentinel value)
@@ -424,12 +424,11 @@ export class PnLCurveService {
             { orderId: order.id, sqrtPriceX96Lower: sqrtPriceX96Lower.toString() },
             'Skipping LOWER trigger: invalid sqrtPriceX96 (sentinel value)'
           );
-          // NOTE: No continue! Let code flow to UPPER block for 'BOTH' mode
         }
       }
 
       // Process UPPER trigger (take-profit)
-      if (config.triggerMode === 'UPPER' || config.triggerMode === 'BOTH') {
+      if (config.triggerMode === 'UPPER') {
         const sqrtPriceX96Upper = BigInt(config.sqrtPriceX96Upper || '0');
 
         // Only process if sqrtPriceX96 is valid (not a sentinel value)

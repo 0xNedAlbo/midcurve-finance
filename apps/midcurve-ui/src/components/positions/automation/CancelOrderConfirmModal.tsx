@@ -97,8 +97,6 @@ function getOrderTypeLabel(triggerMode: TriggerMode): string {
       return 'Stop-Loss';
     case 'UPPER':
       return 'Take-Profit';
-    case 'BOTH':
-      return 'Range Exit';
     default:
       return 'Close Order';
   }
@@ -163,7 +161,7 @@ export function CancelOrderConfirmModal({
 
   const triggerMode = config.triggerMode ?? 'LOWER';
   const sqrtPriceX96 =
-    triggerMode === 'LOWER' || triggerMode === 'BOTH'
+    triggerMode === 'LOWER'
       ? config.sqrtPriceX96Lower
       : config.sqrtPriceX96Upper;
 
@@ -183,11 +181,16 @@ export function CancelOrderConfirmModal({
     }
 
     // Map triggerMode to orderType (V1.0 tick-based interface)
-    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = {
-      'LOWER': 'STOP_LOSS',
-      'UPPER': 'TAKE_PROFIT',
-      'BOTH': 'STOP_LOSS', // Default to STOP_LOSS for BOTH
-    };
+    // When isToken0Quote=true, the order type is inverted because tick direction is opposite to user price direction
+    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = isToken0Quote
+      ? {
+          'LOWER': 'TAKE_PROFIT',  // Lower user price → tick rises → TAKE_PROFIT
+          'UPPER': 'STOP_LOSS',    // Upper user price → tick falls → STOP_LOSS
+        }
+      : {
+          'LOWER': 'STOP_LOSS',    // Lower user price → tick falls → STOP_LOSS
+          'UPPER': 'TAKE_PROFIT',  // Upper user price → tick rises → TAKE_PROFIT
+        };
     const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
 
     cancelOrder({
@@ -285,7 +288,7 @@ export function CancelOrderConfirmModal({
                 </div>
 
                 {/* PnL Simulation - shows expected PnL if order triggers */}
-                {sqrtPriceX96 && triggerMode !== 'BOTH' && (
+                {sqrtPriceX96 && (
                   <PnLSimulation
                     liquidity={liquidity}
                     tickLower={tickLower}
@@ -299,7 +302,7 @@ export function CancelOrderConfirmModal({
                       decimals: tokenConfig.quoteTokenDecimals,
                       symbol: tokenConfig.quoteTokenSymbol,
                     }}
-                    triggerMode={triggerMode as 'LOWER' | 'UPPER'}
+                    triggerMode={triggerMode}
                     label="Expected PnL if order triggers:"
                   />
                 )}

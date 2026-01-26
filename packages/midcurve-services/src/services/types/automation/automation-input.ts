@@ -56,19 +56,19 @@ export interface RegisterCloseOrderInput {
   poolAddress: string;
 
   /**
-   * Trigger mode (LOWER, UPPER, or BOTH)
+   * Trigger mode (LOWER or UPPER)
    */
   triggerMode: TriggerMode;
 
   /**
    * Lower price threshold (sqrtPriceX96 format)
-   * Required if triggerMode is LOWER or BOTH
+   * Required if triggerMode is LOWER
    */
   sqrtPriceX96Lower?: bigint;
 
   /**
    * Upper price threshold (sqrtPriceX96 format)
-   * Required if triggerMode is UPPER or BOTH
+   * Required if triggerMode is UPPER
    */
   sqrtPriceX96Upper?: bigint;
 

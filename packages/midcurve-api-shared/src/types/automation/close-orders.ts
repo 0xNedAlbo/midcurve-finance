@@ -35,7 +35,7 @@ export type CloseOrderStatus = (typeof CLOSE_ORDER_STATUSES)[number];
 /**
  * Trigger mode values
  */
-export const TRIGGER_MODES = ['LOWER', 'UPPER', 'BOTH'] as const;
+export const TRIGGER_MODES = ['LOWER', 'UPPER'] as const;
 export type TriggerMode = (typeof TRIGGER_MODES)[number];
 
 /**
@@ -194,19 +194,19 @@ export interface RegisterCloseOrderRequest {
   operatorAddress: string;
 
   /**
-   * Trigger mode (LOWER, UPPER, or BOTH)
+   * Trigger mode (LOWER or UPPER)
    */
   triggerMode: TriggerMode;
 
   /**
    * Lower price threshold (sqrtPriceX96 format as string)
-   * Required if triggerMode is LOWER or BOTH
+   * Required if triggerMode is LOWER
    */
   sqrtPriceX96Lower?: string;
 
   /**
    * Upper price threshold (sqrtPriceX96 format as string)
-   * Required if triggerMode is UPPER or BOTH
+   * Required if triggerMode is UPPER
    */
   sqrtPriceX96Upper?: string;
 
@@ -290,21 +290,21 @@ export const RegisterCloseOrderRequestSchema = z
   })
   .refine(
     (data) => {
-      if (data.triggerMode === 'LOWER' || data.triggerMode === 'BOTH') {
+      if (data.triggerMode === 'LOWER') {
         return !!data.sqrtPriceX96Lower;
       }
       return true;
     },
-    { message: 'sqrtPriceX96Lower is required for LOWER or BOTH trigger modes', path: ['sqrtPriceX96Lower'] }
+    { message: 'sqrtPriceX96Lower is required for LOWER trigger mode', path: ['sqrtPriceX96Lower'] }
   )
   .refine(
     (data) => {
-      if (data.triggerMode === 'UPPER' || data.triggerMode === 'BOTH') {
+      if (data.triggerMode === 'UPPER') {
         return !!data.sqrtPriceX96Upper;
       }
       return true;
     },
-    { message: 'sqrtPriceX96Upper is required for UPPER or BOTH trigger modes', path: ['sqrtPriceX96Upper'] }
+    { message: 'sqrtPriceX96Upper is required for UPPER trigger mode', path: ['sqrtPriceX96Upper'] }
   );
 
 /**

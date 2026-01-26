@@ -377,19 +377,31 @@ export function CloseOrderModal({
     const validUntil = BigInt(Math.floor(validUntilDate.getTime() / 1000));
 
     // Map triggerMode to orderType (V1.0 tick-based interface)
-    // LOWER -> STOP_LOSS (triggers when price drops below)
-    // UPPER -> TAKE_PROFIT (triggers when price rises above)
-    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = {
-      'LOWER': 'STOP_LOSS',
-      'UPPER': 'TAKE_PROFIT',
-      'BOTH': 'STOP_LOSS', // Default to STOP_LOSS for BOTH (shouldn't happen in practice)
-    };
+    // The mapping depends on isToken0Quote because tick direction is inverse to user price direction
+    // when token0 is the quote token.
+    //
+    // When isToken0Quote=false: user price direction = tick direction
+    //   LOWER (user price falls) -> tick falls -> STOP_LOSS (triggers when currentTick <= triggerTick)
+    //   UPPER (user price rises) -> tick rises -> TAKE_PROFIT (triggers when currentTick >= triggerTick)
+    //
+    // When isToken0Quote=true: user price direction = OPPOSITE of tick direction
+    //   LOWER (user price falls) -> tick RISES -> TAKE_PROFIT (triggers when currentTick >= triggerTick)
+    //   UPPER (user price rises) -> tick FALLS -> STOP_LOSS (triggers when currentTick <= triggerTick)
+    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = isToken0Quote
+      ? {
+          'LOWER': 'TAKE_PROFIT',  // Lower user price → tick rises → TAKE_PROFIT
+          'UPPER': 'STOP_LOSS',    // Upper user price → tick falls → STOP_LOSS
+        }
+      : {
+          'LOWER': 'STOP_LOSS',    // Lower user price → tick falls → STOP_LOSS
+          'UPPER': 'TAKE_PROFIT',  // Upper user price → tick rises → TAKE_PROFIT
+        };
     const orderTypeValue: OrderType = orderTypeFromTriggerMode[formData.triggerMode];
 
     // Convert sqrtPriceX96 to triggerTick
-    // For STOP_LOSS (LOWER), use sqrtPriceX96Lower
-    // For TAKE_PROFIT (UPPER), use sqrtPriceX96Upper
-    const sqrtPriceX96 = formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH'
+    // For LOWER trigger mode, use sqrtPriceX96Lower
+    // For UPPER trigger mode, use sqrtPriceX96Upper
+    const sqrtPriceX96 = formData.triggerMode === 'LOWER'
       ? formData.sqrtPriceX96Lower
       : formData.sqrtPriceX96Upper;
 
@@ -432,6 +444,7 @@ export function CloseOrderModal({
     quoteToken.address,
     registerOrder,
     isHookReady,
+    isToken0Quote,
   ]);
 
   // Handle approval success - continue to registration
@@ -494,8 +507,7 @@ export function CloseOrderModal({
   // Requires: prices filled for selected trigger mode AND no price validation error
   const hasPricesForMode =
     (formData.triggerMode === 'LOWER' && formData.sqrtPriceX96Lower) ||
-    (formData.triggerMode === 'UPPER' && formData.sqrtPriceX96Upper) ||
-    (formData.triggerMode === 'BOTH' && formData.sqrtPriceX96Lower && formData.sqrtPriceX96Upper);
+    (formData.triggerMode === 'UPPER' && formData.sqrtPriceX96Upper);
   const isFormValid = hasPricesForMode && !formData.priceValidationError;
 
   const modalContent = (

@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { TrendingDown, TrendingUp, ArrowLeftRight, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
+import { TrendingDown, TrendingUp, Info, AlertCircle, ChevronDown, X } from 'lucide-react';
 import type { TriggerMode } from '@midcurve/api-shared';
 import { priceToSqrtRatioX96 } from '@midcurve/shared';
 import { parseUnits } from 'viem';
@@ -108,7 +108,7 @@ function validateTriggerPrice(
       : (trigger: bigint) => trigger > current; // normal: higher user price = higher sqrtPriceX96
 
     // Check LOWER trigger (stop-loss must be below current price)
-    if ((triggerMode === 'LOWER' || triggerMode === 'BOTH') && sqrtPriceX96Lower) {
+    if (triggerMode === 'LOWER' && sqrtPriceX96Lower) {
       const lower = BigInt(sqrtPriceX96Lower);
       if (!isLowerValid(lower)) {
         return 'Stop-loss price must be below current price';
@@ -116,7 +116,7 @@ function validateTriggerPrice(
     }
 
     // Check UPPER trigger (take-profit must be above current price)
-    if ((triggerMode === 'UPPER' || triggerMode === 'BOTH') && sqrtPriceX96Upper) {
+    if (triggerMode === 'UPPER' && sqrtPriceX96Upper) {
       const upper = BigInt(sqrtPriceX96Upper);
       if (!isUpperValid(upper)) {
         return 'Take-profit price must be above current price';
@@ -143,12 +143,6 @@ const TRIGGER_MODES: { value: TriggerMode; label: string; description: string; i
     label: 'Take-Profit',
     description: 'Close when price rises above threshold',
     icon: TrendingUp,
-  },
-  {
-    value: 'BOTH',
-    label: 'Range Exit',
-    description: 'Close when price exits the range',
-    icon: ArrowLeftRight,
   },
 ];
 
@@ -191,9 +185,7 @@ export function CloseOrderConfigureStep({
   // Get the trigger sqrtPriceX96 based on order type/trigger mode for PnL simulation
   const triggerSqrtPriceX96 = formData.triggerMode === 'LOWER'
     ? formData.sqrtPriceX96Lower
-    : formData.triggerMode === 'UPPER'
-      ? formData.sqrtPriceX96Upper
-      : null; // BOTH mode not supported for single PnL display
+    : formData.sqrtPriceX96Upper;
 
   // Validate prices whenever relevant form data changes
   useEffect(() => {
@@ -316,7 +308,7 @@ export function CloseOrderConfigureStep({
 
       {/* Price Inputs */}
       <div className="space-y-4">
-        {(formData.triggerMode === 'LOWER' || formData.triggerMode === 'BOTH') && (
+        {formData.triggerMode === 'LOWER' && (
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
               Lower Trigger Price ({quoteToken.symbol})
@@ -339,7 +331,7 @@ export function CloseOrderConfigureStep({
           </div>
         )}
 
-        {(formData.triggerMode === 'UPPER' || formData.triggerMode === 'BOTH') && (
+        {formData.triggerMode === 'UPPER' && (
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
               Upper Trigger Price ({quoteToken.symbol})
@@ -371,7 +363,7 @@ export function CloseOrderConfigureStep({
         )}
 
         {/* PnL Simulation */}
-        {formData.triggerMode !== 'BOTH' && triggerSqrtPriceX96 && (
+        {triggerSqrtPriceX96 && (
           <PnLSimulation
             liquidity={liquidity}
             tickLower={tickLower}
@@ -382,7 +374,7 @@ export function CloseOrderConfigureStep({
             currentSqrtPriceX96={currentSqrtPriceX96}
             isToken0Quote={isToken0Quote}
             quoteToken={quoteToken}
-            triggerMode={formData.triggerMode as 'LOWER' | 'UPPER'}
+            triggerMode={formData.triggerMode}
           />
         )}
       </div>

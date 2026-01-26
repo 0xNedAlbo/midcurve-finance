@@ -183,11 +183,17 @@ export function PositionCloseOrdersPanel({
     }
 
     // Map triggerMode to orderType (V1.0 tick-based interface)
-    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = {
-      'LOWER': 'STOP_LOSS',
-      'UPPER': 'TAKE_PROFIT',
-      'BOTH': 'STOP_LOSS', // Default to STOP_LOSS for BOTH
-    };
+    // When isToken0Quote=true, the order type is inverted because tick direction is opposite to user price direction
+    const isToken0Quote = BigInt(quoteTokenAddress) < BigInt(baseTokenAddress);
+    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = isToken0Quote
+      ? {
+          'LOWER': 'TAKE_PROFIT',  // Lower user price → tick rises → TAKE_PROFIT
+          'UPPER': 'STOP_LOSS',    // Upper user price → tick falls → STOP_LOSS
+        }
+      : {
+          'LOWER': 'STOP_LOSS',    // Lower user price → tick falls → STOP_LOSS
+          'UPPER': 'TAKE_PROFIT',  // Upper user price → tick rises → TAKE_PROFIT
+        };
     const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
 
     setCancellingOrderId(orderId);

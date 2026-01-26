@@ -9,7 +9,7 @@
  * - Cancel button (if cancellable)
  */
 
-import { X, AlertTriangle, TrendingDown, TrendingUp, ArrowLeftRight, Wallet } from 'lucide-react';
+import { X, AlertTriangle, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
 import { pricePerToken0InToken1, pricePerToken1InToken0 } from '@midcurve/shared';
 import { CloseOrderStatusBadge, canCancelCloseOrder } from './CloseOrderStatusBadge';
@@ -82,8 +82,6 @@ function getTriggerIcon(mode: TriggerMode) {
       return <TrendingDown className="w-4 h-4 text-red-400" />;
     case 'UPPER':
       return <TrendingUp className="w-4 h-4 text-green-400" />;
-    case 'BOTH':
-      return <ArrowLeftRight className="w-4 h-4 text-blue-400" />;
     default:
       return null;
   }
@@ -98,8 +96,6 @@ function getTriggerLabel(mode: TriggerMode): string {
       return 'Stop-Loss';
     case 'UPPER':
       return 'Take-Profit';
-    case 'BOTH':
-      return 'Range Exit';
     default:
       return 'Unknown';
   }
@@ -171,7 +167,7 @@ export function CloseOrderCard({
 
       {/* Trigger Prices */}
       <div className="space-y-2 mb-3">
-        {(triggerMode === 'LOWER' || triggerMode === 'BOTH') && (
+        {triggerMode === 'LOWER' && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Lower trigger:</span>
             <span className="text-red-400 font-mono">
@@ -179,7 +175,7 @@ export function CloseOrderCard({
             </span>
           </div>
         )}
-        {(triggerMode === 'UPPER' || triggerMode === 'BOTH') && (
+        {triggerMode === 'UPPER' && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Upper trigger:</span>
             <span className="text-green-400 font-mono">

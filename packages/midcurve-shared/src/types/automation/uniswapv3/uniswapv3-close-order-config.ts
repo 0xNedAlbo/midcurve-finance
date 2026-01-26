@@ -10,9 +10,8 @@
  *
  * - LOWER: Trigger when price falls below sqrtPriceX96Lower
  * - UPPER: Trigger when price rises above sqrtPriceX96Upper
- * - BOTH: Trigger on either condition
  */
-export type TriggerMode = 'LOWER' | 'UPPER' | 'BOTH';
+export type TriggerMode = 'LOWER' | 'UPPER';
 
 /**
  * Swap direction for post-close token conversion
@@ -69,7 +68,7 @@ export interface UniswapV3CloseOrderConfigData {
   poolAddress: string;
 
   /**
-   * Trigger mode (LOWER, UPPER, or BOTH)
+   * Trigger mode (LOWER or UPPER)
    */
   triggerMode: TriggerMode;
 

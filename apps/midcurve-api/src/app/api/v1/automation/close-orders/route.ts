@@ -70,7 +70,7 @@ const RegisterCloseOrderRequestSchema = z.object({
   operatorAddress: z
     .string()
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid operator address'),
-  triggerMode: z.enum(['LOWER', 'UPPER', 'BOTH']),
+  triggerMode: z.enum(['LOWER', 'UPPER']),
   sqrtPriceX96Lower: z.string().optional(),
   sqrtPriceX96Upper: z.string().optional(),
   priceLowerDisplay: z.string().optional(),
@@ -267,10 +267,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         };
 
         // Check LOWER trigger price (stop-loss must be below current price)
-        if (
-          (data.triggerMode === 'LOWER' || data.triggerMode === 'BOTH') &&
-          data.sqrtPriceX96Lower
-        ) {
+        if (data.triggerMode === 'LOWER' && data.sqrtPriceX96Lower) {
           const lowerSqrt = BigInt(data.sqrtPriceX96Lower);
           if (!isLowerPriceValid(lowerSqrt)) {
             const errorResponse = createErrorResponse(
@@ -283,10 +280,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
 
         // Check UPPER trigger price (take-profit must be above current price)
-        if (
-          (data.triggerMode === 'UPPER' || data.triggerMode === 'BOTH') &&
-          data.sqrtPriceX96Upper
-        ) {
+        if (data.triggerMode === 'UPPER' && data.sqrtPriceX96Upper) {
           const upperSqrt = BigInt(data.sqrtPriceX96Upper);
           if (!isUpperPriceValid(upperSqrt)) {
             const errorResponse = createErrorResponse(
