@@ -1,5 +1,5 @@
 /**
- * Uniswap V3 WebSocket Provider
+ * Uniswap V3 Pool WebSocket Provider
  *
  * Subscribes to Swap events from Uniswap V3 pools using eth_subscribe.
  * Publishes raw events to RabbitMQ for downstream processing.
@@ -9,13 +9,13 @@
  */
 
 import { createPublicClient, webSocket, type PublicClient, type WatchEventReturnType, keccak256, toHex } from 'viem';
-import { poolPricesLogger, priceLog } from '../../lib/logger';
+import { onchainDataLogger, priceLog } from '../../lib/logger';
 import { getRabbitMQConnection } from '../../mq/connection-manager';
 import { buildUniswapV3RoutingKey } from '../../mq/topology';
 import { createRawSwapEvent, serializeRawSwapEvent } from '../../mq/messages';
 import type { SupportedChainId } from '../../lib/config';
 
-const log = poolPricesLogger.child({ component: 'UniswapV3Provider' });
+const log = onchainDataLogger.child({ component: 'UniswapV3PoolProvider' });
 
 /** Maximum pools per WebSocket subscription (eth_subscribe limit) */
 export const MAX_POOLS_PER_SUBSCRIPTION = 1000;
@@ -42,7 +42,7 @@ export interface PoolInfo {
  * UniswapV3 subscription batch for a single chain.
  * Each batch handles up to MAX_POOLS_PER_SUBSCRIPTION pools.
  */
-export class UniswapV3SubscriptionBatch {
+export class UniswapV3PoolSubscriptionBatch {
   private readonly chainId: SupportedChainId;
   private readonly wssUrl: string;
   private readonly batchIndex: number;
@@ -402,14 +402,14 @@ export function createSubscriptionBatches(
   chainId: SupportedChainId,
   wssUrl: string,
   pools: PoolInfo[]
-): UniswapV3SubscriptionBatch[] {
-  const batches: UniswapV3SubscriptionBatch[] = [];
+): UniswapV3PoolSubscriptionBatch[] {
+  const batches: UniswapV3PoolSubscriptionBatch[] = [];
 
   for (let i = 0; i < pools.length; i += MAX_POOLS_PER_SUBSCRIPTION) {
     const batchPools = pools.slice(i, i + MAX_POOLS_PER_SUBSCRIPTION);
     const batchIndex = Math.floor(i / MAX_POOLS_PER_SUBSCRIPTION);
 
-    batches.push(new UniswapV3SubscriptionBatch(chainId, wssUrl, batchIndex, batchPools));
+    batches.push(new UniswapV3PoolSubscriptionBatch(chainId, wssUrl, batchIndex, batchPools));
   }
 
   log.info({

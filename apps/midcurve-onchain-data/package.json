@@ -1,5 +1,5 @@
 {
-  "name": "@midcurve/pool-prices",
+  "name": "@midcurve/onchain-data",
   "version": "0.1.0",
   "private": true,
   "type": "module",

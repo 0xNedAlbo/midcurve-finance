@@ -13,8 +13,8 @@ COPY turbo.json ./
 # Copy packages (dependencies)
 COPY packages/ packages/
 
-# Copy pool-prices app
-COPY apps/midcurve-pool-prices/ apps/midcurve-pool-prices/
+# Copy onchain-data app
+COPY apps/midcurve-onchain-data/ apps/midcurve-onchain-data/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
@@ -26,8 +26,8 @@ RUN pnpm --filter @midcurve/database db:generate
 RUN pnpm --filter @midcurve/shared build
 RUN pnpm --filter @midcurve/services build
 
-# Build the pool-prices app
-RUN pnpm --filter @midcurve/pool-prices build
+# Build the onchain-data app
+RUN pnpm --filter @midcurve/onchain-data build
 
 # Production stage
 FROM node:20-alpine AS runner
@@ -36,14 +36,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Copy built application
-COPY --from=builder /app/apps/midcurve-pool-prices/dist ./dist
+COPY --from=builder /app/apps/midcurve-onchain-data/dist ./dist
 
 # Copy package.json for module resolution
-COPY --from=builder /app/apps/midcurve-pool-prices/package.json ./
+COPY --from=builder /app/apps/midcurve-onchain-data/package.json ./
 
 # Copy node_modules (includes workspace packages)
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/midcurve-pool-prices/node_modules ./apps/midcurve-pool-prices/node_modules
+COPY --from=builder /app/apps/midcurve-onchain-data/node_modules ./apps/midcurve-onchain-data/node_modules
 
 # Copy Prisma client
 COPY --from=builder /app/packages/midcurve-database/src/generated/prisma ./packages/midcurve-database/src/generated/prisma

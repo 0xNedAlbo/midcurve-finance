@@ -1,25 +1,32 @@
 /**
  * WorkerManager
  *
- * Coordinates workers and services for the pool prices service.
+ * Coordinates workers and services for the onchain data service.
  * Manages lifecycle: start, stop, and status reporting.
+ *
+ * Workers:
+ * - PoolPriceSubscriber: Subscribes to Swap events from Uniswap V3 pools
+ * - PositionLiquiditySubscriber: Subscribes to position events from NFPM
  */
 
-import { poolPricesLogger, priceLog } from '../lib/logger';
+import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PoolPriceSubscriber } from './pool-price-subscriber';
+import { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
 
-const log = poolPricesLogger.child({ component: 'WorkerManager' });
+const log = onchainDataLogger.child({ component: 'WorkerManager' });
 
 /**
  * WorkerManager coordinates all workers and services.
  */
 export class WorkerManager {
-  private subscriber: PoolPriceSubscriber;
+  private poolPriceSubscriber: PoolPriceSubscriber;
+  private positionLiquiditySubscriber: PositionLiquiditySubscriber;
   private isRunning = false;
 
   constructor() {
-    this.subscriber = new PoolPriceSubscriber();
+    this.poolPriceSubscriber = new PoolPriceSubscriber();
+    this.positionLiquiditySubscriber = new PositionLiquiditySubscriber();
   }
 
   /**
@@ -35,14 +42,17 @@ export class WorkerManager {
     priceLog.workerLifecycle(log, 'WorkerManager', 'starting');
 
     try {
-      // Connect to RabbitMQ first (this also sets up topology)
+      // Connect to RabbitMQ first (this also sets up topology for both exchanges)
       log.info({ msg: 'Connecting to RabbitMQ...' });
       const mq = getRabbitMQConnection();
       await mq.getChannel();
 
-      // Start the subscriber
-      log.info({ msg: 'Starting PoolPriceSubscriber...' });
-      await this.subscriber.start();
+      // Start both subscribers in parallel
+      log.info({ msg: 'Starting subscribers...' });
+      await Promise.all([
+        this.poolPriceSubscriber.start(),
+        this.positionLiquiditySubscriber.start(),
+      ]);
 
       this.isRunning = true;
       priceLog.workerLifecycle(log, 'WorkerManager', 'started');
@@ -67,9 +77,12 @@ export class WorkerManager {
     priceLog.workerLifecycle(log, 'WorkerManager', 'stopping');
 
     try {
-      // Stop the subscriber
-      log.info({ msg: 'Stopping PoolPriceSubscriber...' });
-      await this.subscriber.stop();
+      // Stop both subscribers in parallel
+      log.info({ msg: 'Stopping subscribers...' });
+      await Promise.all([
+        this.poolPriceSubscriber.stop(),
+        this.positionLiquiditySubscriber.stop(),
+      ]);
 
       // Close RabbitMQ connection
       log.info({ msg: 'Closing RabbitMQ connection...' });
@@ -91,7 +104,8 @@ export class WorkerManager {
    */
   getStatus(): {
     isRunning: boolean;
-    subscriber: ReturnType<PoolPriceSubscriber['getStatus']>;
+    poolPriceSubscriber: ReturnType<PoolPriceSubscriber['getStatus']>;
+    positionLiquiditySubscriber: ReturnType<PositionLiquiditySubscriber['getStatus']>;
     rabbitmq: {
       isConnected: boolean;
     };
@@ -100,15 +114,24 @@ export class WorkerManager {
 
     return {
       isRunning: this.isRunning,
-      subscriber: this.subscriber.getStatus(),
+      poolPriceSubscriber: this.poolPriceSubscriber.getStatus(),
+      positionLiquiditySubscriber: this.positionLiquiditySubscriber.getStatus(),
       rabbitmq: {
         isConnected: mq.isConnected(),
       },
     };
   }
+
+  /**
+   * @deprecated Use poolPriceSubscriber instead. Kept for backward compatibility.
+   */
+  get subscriber(): PoolPriceSubscriber {
+    return this.poolPriceSubscriber;
+  }
 }
 
 /**
- * Export the PoolPriceSubscriber for direct usage if needed.
+ * Export subscribers for direct usage if needed.
  */
 export { PoolPriceSubscriber } from './pool-price-subscriber';
+export { PositionLiquiditySubscriber } from './position-liquidity-subscriber';

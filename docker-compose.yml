@@ -4,7 +4,7 @@
 # - Caddy (reverse proxy with auto SSL)
 # - UI (Vite SPA served via nginx)
 # - API (Next.js backend)
-# - Pool Prices (Real-time Swap event subscriptions)
+# - Onchain Data (Real-time pool price and position event subscriptions)
 # - Automation (Close order execution)
 # - Signer (Private signing service)
 # - RabbitMQ (Message broker)
@@ -102,15 +102,16 @@ services:
       - database
 
   # ============================================
-  # POOL PRICES SERVICE
+  # ONCHAIN DATA SERVICE
   # - Real-time Swap event subscriptions via WebSocket
-  # - Publishes to RabbitMQ pool-prices exchange
+  # - Real-time position liquidity event subscriptions
+  # - Publishes to RabbitMQ exchanges (pool-prices, position-liquidity-events)
   # ============================================
-  pool-prices:
+  onchain-data:
     build:
       context: .
-      dockerfile: apps/midcurve-pool-prices/Dockerfile
-    container_name: midcurve-pool-prices
+      dockerfile: apps/midcurve-onchain-data/Dockerfile
+    container_name: midcurve-onchain-data
     environment:
       - NODE_ENV=production
       - DATABASE_URL=${DATABASE_URL}
@@ -145,7 +146,7 @@ services:
   # ============================================
   # AUTOMATION SERVICE
   # - Contract bytecode serving (compiled Solidity contracts)
-  # - Close order execution (consumes from pool-prices via RabbitMQ)
+  # - Close order execution (consumes from onchain-data via RabbitMQ)
   # ============================================
   automation:
     build:
@@ -184,7 +185,7 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      pool-prices:
+      onchain-data:
         condition: service_started
       signer:
         condition: service_started

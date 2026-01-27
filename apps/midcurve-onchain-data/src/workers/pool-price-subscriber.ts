@@ -6,7 +6,7 @@
  */
 
 import { prisma } from '@midcurve/database';
-import { poolPricesLogger, priceLog } from '../lib/logger';
+import { onchainDataLogger, priceLog } from '../lib/logger';
 import {
   getConfiguredWssUrls,
   getWorkerConfig,
@@ -14,13 +14,13 @@ import {
   type SupportedChainId,
 } from '../lib/config';
 import {
-  UniswapV3SubscriptionBatch,
+  UniswapV3PoolSubscriptionBatch,
   createSubscriptionBatches,
   type PoolInfo,
-} from '../ws/providers/uniswap-v3';
+} from '../ws/providers/uniswap-v3-pools';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 
-const log = poolPricesLogger.child({ component: 'PoolPriceSubscriber' });
+const log = onchainDataLogger.child({ component: 'PoolPriceSubscriber' });
 
 /**
  * Pool configuration from database JSON field.
@@ -34,8 +34,8 @@ interface PoolConfig {
  * PoolPriceSubscriber manages WebSocket subscriptions for pool prices.
  */
 export class PoolPriceSubscriber {
-  private batches: UniswapV3SubscriptionBatch[] = [];
-  private batchesByChain: Map<SupportedChainId, UniswapV3SubscriptionBatch[]> = new Map();
+  private batches: UniswapV3PoolSubscriptionBatch[] = [];
+  private batchesByChain: Map<SupportedChainId, UniswapV3PoolSubscriptionBatch[]> = new Map();
   private isRunning = false;
 
   // Polling state
@@ -343,7 +343,7 @@ export class PoolPriceSubscriber {
     } else {
       // Create new batch
       const batchIndex = chainBatches.length;
-      const newBatch = new UniswapV3SubscriptionBatch(chainId, wssUrl, batchIndex, [pool]);
+      const newBatch = new UniswapV3PoolSubscriptionBatch(chainId, wssUrl, batchIndex, [pool]);
       chainBatches.push(newBatch);
       this.batches.push(newBatch);
 

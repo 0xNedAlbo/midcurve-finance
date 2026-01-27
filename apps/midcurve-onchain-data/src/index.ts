@@ -1,13 +1,13 @@
 /**
- * Pool Prices Worker Entry Point
+ * Onchain Data Worker Entry Point
  *
  * Starts the WorkerManager and handles graceful shutdown on SIGINT/SIGTERM.
  */
 
-import { poolPricesLogger } from './lib/logger';
+import { onchainDataLogger } from './lib/logger';
 import { WorkerManager } from './workers';
 
-const log = poolPricesLogger.child({ component: 'Main' });
+const log = onchainDataLogger.child({ component: 'Main' });
 
 // Global worker manager instance
 let workerManager: WorkerManager | null = null;
@@ -45,7 +45,7 @@ async function shutdown(signal: string): Promise<void> {
  * Main entry point.
  */
 async function main(): Promise<void> {
-  log.info({ msg: 'Starting Midcurve Pool Prices Worker...' });
+  log.info({ msg: 'Starting Midcurve Onchain Data Worker...' });
 
   // Register shutdown handlers
   process.on('SIGINT', () => shutdown('SIGINT'));
@@ -70,9 +70,16 @@ async function main(): Promise<void> {
 
     // Log status
     const status = workerManager.getStatus();
+    const totalPools = status.poolPriceSubscriber.batches.reduce((sum, b) => sum + b.poolCount, 0);
+    const totalPositions = status.positionLiquiditySubscriber.batches.reduce(
+      (sum, b) => sum + b.positionCount,
+      0
+    );
     log.info({
-      subscriberBatches: status.subscriber.batchCount,
-      totalPools: status.subscriber.batches.reduce((sum, b) => sum + b.poolCount, 0),
+      poolPriceBatches: status.poolPriceSubscriber.batchCount,
+      totalPools,
+      positionLiquidityBatches: status.positionLiquiditySubscriber.batchCount,
+      totalPositions,
       rabbitmqConnected: status.rabbitmq.isConnected,
       msg: 'Worker started successfully',
     });

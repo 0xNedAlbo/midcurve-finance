@@ -1,7 +1,7 @@
 /**
- * Pool Prices Logging Utilities
+ * Onchain Data Logging Utilities
  *
- * Provides structured logging for pool prices workers using Pino from @midcurve/services.
+ * Provides structured logging for onchain data workers using Pino from @midcurve/services.
  * Includes worker-specific logging patterns for WebSocket subscriptions, price events, etc.
  */
 
@@ -9,9 +9,14 @@ import { createServiceLogger, LogPatterns } from '@midcurve/services';
 import type { ServiceLogger } from '@midcurve/services';
 
 /**
- * Base pool prices logger instance
+ * Base onchain data logger instance
  */
-export const poolPricesLogger = createServiceLogger('MidcurvePoolPrices');
+export const onchainDataLogger = createServiceLogger('MidcurveOnchainData');
+
+/**
+ * @deprecated Use onchainDataLogger instead. Kept for backward compatibility during migration.
+ */
+export const poolPricesLogger = onchainDataLogger;
 
 /**
  * Convert unknown error to Error instance

@@ -1,16 +1,16 @@
 /**
  * RabbitMQ Connection Manager
  *
- * Manages a singleton connection and channel for the pool prices service.
+ * Manages a singleton connection and channel for the onchain data service.
  * This service only publishes messages (no consume needed).
  */
 
 import amqplib, { type ChannelModel, type Channel } from 'amqplib';
-import { poolPricesLogger, priceLog } from '../lib/logger';
+import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConfig, type RabbitMQConfig } from '../lib/config';
-import { setupPoolPricesTopology } from './topology';
+import { setupOnchainDataTopology, EXCHANGE_POOL_PRICES, EXCHANGE_POSITION_LIQUIDITY } from './topology';
 
-const log = poolPricesLogger.child({ component: 'RabbitMQConnection' });
+const log = onchainDataLogger.child({ component: 'RabbitMQConnection' });
 
 // =============================================================================
 // Connection Manager
@@ -56,7 +56,7 @@ class RabbitMQConnectionManager {
   }
 
   /**
-   * Connect to RabbitMQ and setup pool prices topology.
+   * Connect to RabbitMQ and setup onchain data topology.
    * Includes retry logic for initial connection.
    */
   async connect(): Promise<Channel> {
@@ -96,8 +96,8 @@ class RabbitMQConnectionManager {
           this.channel = null;
         });
 
-        // Setup pool prices topology
-        await setupPoolPricesTopology(this.channel);
+        // Setup onchain data topology (pool-prices + position-liquidity-events exchanges)
+        await setupOnchainDataTopology(this.channel);
 
         priceLog.mqEvent(log, 'connected');
         priceLog.methodExit(log, 'connect');
@@ -204,13 +204,30 @@ class RabbitMQConnectionManager {
    */
   async publish(routingKey: string, content: Buffer): Promise<boolean> {
     const channel = await this.getChannel();
-    const published = channel.publish('pool-prices', routingKey, content, {
+    const published = channel.publish(EXCHANGE_POOL_PRICES, routingKey, content, {
       persistent: true,
       contentType: 'application/json',
     });
 
     if (published) {
-      priceLog.mqEvent(log, 'published', { routingKey });
+      priceLog.mqEvent(log, 'published', { exchange: EXCHANGE_POOL_PRICES, routingKey });
+    }
+
+    return published;
+  }
+
+  /**
+   * Publish a message to the position-liquidity-events exchange
+   */
+  async publishPositionEvent(routingKey: string, content: Buffer): Promise<boolean> {
+    const channel = await this.getChannel();
+    const published = channel.publish(EXCHANGE_POSITION_LIQUIDITY, routingKey, content, {
+      persistent: true,
+      contentType: 'application/json',
+    });
+
+    if (published) {
+      priceLog.mqEvent(log, 'published', { exchange: EXCHANGE_POSITION_LIQUIDITY, routingKey });
     }
 
     return published;
@@ -223,14 +240,14 @@ class RabbitMQConnectionManager {
 
 // Use globalThis to prevent singleton from being reset during Hot Module Reloading
 const globalForRabbitMQ = globalThis as unknown as {
-  poolPricesRabbitMQ: RabbitMQConnectionManager | undefined;
+  onchainDataRabbitMQ: RabbitMQConnectionManager | undefined;
 };
 
 export function getRabbitMQConnection(): RabbitMQConnectionManager {
-  if (!globalForRabbitMQ.poolPricesRabbitMQ) {
-    globalForRabbitMQ.poolPricesRabbitMQ = new RabbitMQConnectionManager();
+  if (!globalForRabbitMQ.onchainDataRabbitMQ) {
+    globalForRabbitMQ.onchainDataRabbitMQ = new RabbitMQConnectionManager();
   }
-  return globalForRabbitMQ.poolPricesRabbitMQ;
+  return globalForRabbitMQ.onchainDataRabbitMQ;
 }
 
 export { RabbitMQConnectionManager };

@@ -1,7 +1,7 @@
 /**
- * Pool Prices Configuration
+ * Onchain Data Configuration
  *
- * Environment-based configuration for the pool prices service.
+ * Environment-based configuration for the onchain data service.
  */
 
 /**
@@ -44,13 +44,18 @@ export interface WorkerConfig {
 }
 
 /**
- * Full pool prices configuration
+ * Full onchain data configuration
  */
-export interface PoolPricesConfig {
+export interface OnchainDataConfig {
   rabbitmq: RabbitMQConfig;
   worker: WorkerConfig;
   logLevel: string;
 }
+
+/**
+ * @deprecated Use OnchainDataConfig instead. Kept for backward compatibility.
+ */
+export type PoolPricesConfig = OnchainDataConfig;
 
 /**
  * Get RabbitMQ configuration from environment
@@ -81,15 +86,20 @@ export function getWorkerConfig(): WorkerConfig {
 }
 
 /**
- * Get full pool prices configuration
+ * Get full onchain data configuration
  */
-export function getPoolPricesConfig(): PoolPricesConfig {
+export function getOnchainDataConfig(): OnchainDataConfig {
   return {
     rabbitmq: getRabbitMQConfig(),
     worker: getWorkerConfig(),
     logLevel: process.env.LOG_LEVEL || 'info',
   };
 }
+
+/**
+ * @deprecated Use getOnchainDataConfig instead. Kept for backward compatibility.
+ */
+export const getPoolPricesConfig = getOnchainDataConfig;
 
 /**
  * Supported chain IDs for WebSocket subscriptions
