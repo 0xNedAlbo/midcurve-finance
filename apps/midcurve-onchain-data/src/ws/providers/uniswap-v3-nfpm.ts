@@ -80,6 +80,12 @@ export interface PositionInfo {
 }
 
 /**
+ * Callback for block number updates from WebSocket events.
+ * Used by the subscriber to track the latest processed block per chain.
+ */
+export type BlockUpdateCallback = (chainId: number, blockNumber: bigint) => void;
+
+/**
  * NFPM subscription batch for a single chain.
  * Each batch handles up to MAX_POSITIONS_PER_SUBSCRIPTION positions.
  */
@@ -98,6 +104,9 @@ export class UniswapV3NfpmSubscriptionBatch {
   private maxReconnectAttempts = 10;
   private reconnectDelayMs = 5000;
 
+  /** Optional callback for block number updates (used for block tracking) */
+  private onBlockUpdate: BlockUpdateCallback | null = null;
+
   constructor(
     chainId: SupportedChainId,
     wssUrl: string,
@@ -115,6 +124,14 @@ export class UniswapV3NfpmSubscriptionBatch {
         `Batch exceeds max positions: ${positions.length} > ${MAX_POSITIONS_PER_SUBSCRIPTION}`
       );
     }
+  }
+
+  /**
+   * Set the block update callback.
+   * Called when events are received with the block number.
+   */
+  setBlockUpdateCallback(callback: BlockUpdateCallback | null): void {
+    this.onBlockUpdate = callback;
   }
 
   /**
@@ -392,6 +409,11 @@ export class UniswapV3NfpmSubscriptionBatch {
         removed,
         msg: `Position event: ${eventType} nftId=${nftId} block=${blockNumber}${removed ? ' (removed)' : ''}`,
       });
+
+      // Notify subscriber of block number for block tracking
+      if (logData.blockNumber && this.onBlockUpdate) {
+        this.onBlockUpdate(this.chainId, logData.blockNumber);
+      }
 
       // Publish raw event to RabbitMQ
       this.publishEvent(nftId, eventType, rawLog).catch((err) => {

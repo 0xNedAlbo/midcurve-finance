@@ -178,3 +178,30 @@ export function getConfiguredWssUrls(): WssConfig[] {
 export function isSupportedChain(chainId: number): chainId is SupportedChainId {
   return (SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId);
 }
+
+// ============================================================
+// Catch-Up Configuration
+// ============================================================
+
+/**
+ * Catch-up configuration for recovering missed events
+ */
+export interface CatchUpConfig {
+  /** Whether catch-up is enabled (default: true) */
+  enabled: boolean;
+  /** Maximum blocks per getLogs request (default: 10000, eth_getLogs provider limit) */
+  batchSizeBlocks: number;
+  /** Block tracking heartbeat interval in milliseconds (default: 60000) */
+  heartbeatIntervalMs: number;
+}
+
+/**
+ * Get catch-up configuration from environment
+ */
+export function getCatchUpConfig(): CatchUpConfig {
+  return {
+    enabled: process.env.CATCHUP_ENABLED !== 'false',
+    batchSizeBlocks: parseInt(process.env.CATCHUP_BATCH_SIZE_BLOCKS || '10000', 10),
+    heartbeatIntervalMs: parseInt(process.env.CATCHUP_HEARTBEAT_INTERVAL_MS || '60000', 10),
+  };
+}

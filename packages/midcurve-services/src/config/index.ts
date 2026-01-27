@@ -14,8 +14,10 @@ export {
   UNISWAP_V3_POSITION_MANAGER_ABI,
   UNISWAP_V3_FACTORY_ADDRESSES,
   UNISWAP_V3_FACTORY_ABI,
+  NFPM_DEPLOYMENT_BLOCKS,
   getPositionManagerAddress,
   getFactoryAddress,
+  getNfpmDeploymentBlock,
   type UniswapV3PositionData,
 } from './uniswapv3.js';
 

@@ -8,11 +8,13 @@
 
 import { prisma } from '@midcurve/database';
 import type { PositionJSON } from '@midcurve/shared';
+import { EvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import {
   getConfiguredWssUrls,
   getWssUrl,
   getWorkerConfig,
+  getCatchUpConfig,
   isSupportedChain,
   type SupportedChainId,
 } from '../lib/config';
@@ -21,6 +23,7 @@ import {
   createUniswapV3NfpmSubscriptionBatches,
   type PositionInfo,
 } from '../ws/providers/uniswap-v3-nfpm';
+import { executeCatchUpForChains, updateBlockIfHigher, setLastProcessedBlock } from '../catchup';
 
 const log = onchainDataLogger.child({ component: 'PositionLiquiditySubscriber' });
 
@@ -43,6 +46,9 @@ export class PositionLiquiditySubscriber {
 
   // Cleanup state (safety net for missed events)
   private cleanupTimer: NodeJS.Timeout | null = null;
+
+  // Block tracking state (for catch-up on restart)
+  private blockTrackingTimer: NodeJS.Timeout | null = null;
 
   // Track all subscribed positions by nftId for quick lookup
   private subscribedPositions: Map<string, { chainId: SupportedChainId; positionId: string }> =
@@ -99,15 +105,25 @@ export class PositionLiquiditySubscriber {
 
       this.isRunning = true;
 
+      // Set block update callback on all batches for block tracking
+      for (const batch of this.batches) {
+        batch.setBlockUpdateCallback((chainId, blockNumber) => {
+          this.handleBlockUpdate(chainId, blockNumber);
+        });
+      }
+
       if (this.batches.length === 0) {
         log.warn({ msg: 'No subscription batches created, subscriber will idle' });
       } else {
-        // Start all batches
+        // Start WebSocket subscriptions FIRST to capture real-time events
         await Promise.all(this.batches.map((batch) => batch.start()));
       }
 
       // Start cleanup timer (safety net for missed events)
       this.startCleanup();
+
+      // Start block tracking heartbeat
+      this.startBlockTracking();
 
       const totalPositions = this.batches.reduce(
         (sum, batch) => sum + batch.getStatus().positionCount,
@@ -118,6 +134,10 @@ export class PositionLiquiditySubscriber {
         batchCount: this.batches.length,
         totalPositions,
       });
+
+      // Execute catch-up in background AFTER WebSocket is running
+      // This can take time but won't cause missed events since WebSocket is already active
+      this.executeCatchUpInBackground(positionsByChain);
     } catch (error) {
       priceLog.workerLifecycle(log, 'PositionLiquiditySubscriber', 'error', {
         error: error instanceof Error ? error.message : String(error),
@@ -140,6 +160,9 @@ export class PositionLiquiditySubscriber {
 
     // Stop cleanup timer
     this.stopCleanup();
+
+    // Stop block tracking timer
+    this.stopBlockTracking();
 
     // Stop all batches
     await Promise.all(this.batches.map((batch) => batch.stop()));
@@ -383,6 +406,123 @@ export class PositionLiquiditySubscriber {
     for (const { nftId, chainId, positionId } of toRemove) {
       await this.removePositionFromBatch(chainId, nftId, positionId);
     }
+  }
+
+  // ===========================================================================
+  // Block Tracking (for catch-up on restart)
+  // ===========================================================================
+
+  /**
+   * Start the block tracking heartbeat timer.
+   * Periodically updates the last processed block for each chain to prevent
+   * large scan ranges on restart when there's no position activity.
+   */
+  private startBlockTracking(): void {
+    const config = getCatchUpConfig();
+
+    if (!config.enabled) {
+      log.info({ msg: 'Block tracking disabled (catch-up disabled)' });
+      return;
+    }
+
+    this.blockTrackingTimer = setInterval(() => {
+      this.updateBlockTrackingHeartbeat().catch((err) => {
+        log.warn({
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Block tracking heartbeat failed',
+        });
+      });
+    }, config.heartbeatIntervalMs);
+
+    log.info({ intervalMs: config.heartbeatIntervalMs, msg: 'Started block tracking heartbeat' });
+  }
+
+  /**
+   * Stop the block tracking heartbeat timer.
+   */
+  private stopBlockTracking(): void {
+    if (this.blockTrackingTimer) {
+      clearInterval(this.blockTrackingTimer);
+      this.blockTrackingTimer = null;
+      log.info({ msg: 'Stopped block tracking heartbeat' });
+    }
+  }
+
+  /**
+   * Handle block update from WebSocket event.
+   * Updates the cached block if the new block is higher.
+   */
+  private handleBlockUpdate(chainId: number, blockNumber: bigint): void {
+    // Fire and forget - don't block event processing
+    updateBlockIfHigher(chainId, blockNumber).catch((err) => {
+      log.warn({
+        chainId,
+        blockNumber: blockNumber.toString(),
+        error: err instanceof Error ? err.message : String(err),
+        msg: 'Failed to update block tracking from event',
+      });
+    });
+  }
+
+  /**
+   * Heartbeat update for block tracking.
+   * Fetches current block number for each chain and updates the cache.
+   */
+  private async updateBlockTrackingHeartbeat(): Promise<void> {
+    const evmConfig = EvmConfig.getInstance();
+
+    for (const [chainId] of this.batchesByChain) {
+      try {
+        const client = evmConfig.getPublicClient(chainId);
+        const currentBlock = await client.getBlockNumber();
+        await setLastProcessedBlock(chainId, currentBlock);
+        log.debug({ chainId, blockNumber: currentBlock.toString(), msg: 'Block tracking heartbeat' });
+      } catch (err) {
+        log.warn({
+          chainId,
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Failed to update block tracking heartbeat',
+        });
+      }
+    }
+  }
+
+  /**
+   * Execute catch-up process in background.
+   * Called after WebSocket subscriptions are started.
+   */
+  private executeCatchUpInBackground(positionsByChain: Map<SupportedChainId, PositionInfo[]>): void {
+    const config = getCatchUpConfig();
+
+    if (!config.enabled) {
+      log.info({ msg: 'Catch-up disabled by configuration' });
+      return;
+    }
+
+    // Convert to chainId -> nftIds map for catch-up
+    const chainNftIds = new Map<number, string[]>();
+    for (const [chainId, positions] of positionsByChain) {
+      chainNftIds.set(chainId, positions.map((p) => p.nftId));
+    }
+
+    // Execute catch-up in background (fire and forget)
+    executeCatchUpForChains(chainNftIds)
+      .then((results) => {
+        const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
+        const failedChains = results.filter((r) => r.error).length;
+        log.info({
+          chainsProcessed: results.length,
+          failedChains,
+          totalEvents,
+          msg: 'Background catch-up completed',
+        });
+      })
+      .catch((err) => {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Background catch-up failed',
+        });
+      });
   }
 
   // ===========================================================================
