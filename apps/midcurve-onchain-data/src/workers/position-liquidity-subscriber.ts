@@ -7,9 +7,11 @@
  */
 
 import { prisma } from '@midcurve/database';
+import type { PositionJSON } from '@midcurve/shared';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import {
   getConfiguredWssUrls,
+  getWssUrl,
   getWorkerConfig,
   isSupportedChain,
   type SupportedChainId,
@@ -39,11 +41,7 @@ export class PositionLiquiditySubscriber {
   private batchesByChain: Map<SupportedChainId, UniswapV3NfpmSubscriptionBatch[]> = new Map();
   private isRunning = false;
 
-  // Polling state
-  private lastPollTimestamp: Date = new Date();
-  private pollTimer: NodeJS.Timeout | null = null;
-
-  // Cleanup state
+  // Cleanup state (safety net for missed events)
   private cleanupTimer: NodeJS.Timeout | null = null;
 
   // Track all subscribed positions by nftId for quick lookup
@@ -108,8 +106,7 @@ export class PositionLiquiditySubscriber {
         await Promise.all(this.batches.map((batch) => batch.start()));
       }
 
-      // Start polling and cleanup timers (even if no batches, for dynamic subscriptions)
-      this.startPolling();
+      // Start cleanup timer (safety net for missed events)
       this.startCleanup();
 
       const totalPositions = this.batches.reduce(
@@ -141,8 +138,7 @@ export class PositionLiquiditySubscriber {
 
     priceLog.workerLifecycle(log, 'PositionLiquiditySubscriber', 'stopping');
 
-    // Stop timers
-    this.stopPolling();
+    // Stop cleanup timer
     this.stopCleanup();
 
     // Stop all batches
@@ -238,140 +234,8 @@ export class PositionLiquiditySubscriber {
   }
 
   // ===========================================================================
-  // Polling for new positions
+  // Position Batch Management
   // ===========================================================================
-
-  /**
-   * Start the polling timer for new positions.
-   */
-  private startPolling(): void {
-    const config = getWorkerConfig();
-    this.lastPollTimestamp = new Date();
-
-    this.pollTimer = setInterval(() => {
-      this.pollNewPositions().catch((err) => {
-        log.error({
-          error: err instanceof Error ? err.message : String(err),
-          msg: 'Error polling new positions',
-        });
-      });
-    }, config.pollIntervalMs);
-
-    log.info({ intervalMs: config.pollIntervalMs, msg: 'Started position polling' });
-  }
-
-  /**
-   * Stop the polling timer.
-   */
-  private stopPolling(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-      log.info({ msg: 'Stopped position polling' });
-    }
-  }
-
-  /**
-   * Poll for new or reactivated positions since last poll, and detect closed positions.
-   * Uses updatedAt to catch both newly created, reactivated, and deactivated positions.
-   */
-  private async pollNewPositions(): Promise<void> {
-    // Get currently subscribed position IDs for the deactivation query
-    const subscribedPositionIds = Array.from(this.subscribedPositions.values()).map(
-      (p) => p.positionId
-    );
-
-    // Query in parallel: new positions AND recently deactivated positions
-    const [newPositions, deactivatedPositions] = await Promise.all([
-      // New or reactivated positions
-      prisma.position.findMany({
-        where: {
-          isActive: true,
-          protocol: 'uniswapv3',
-          updatedAt: { gt: this.lastPollTimestamp },
-        },
-        select: {
-          id: true,
-          config: true,
-        },
-      }),
-      // Recently deactivated positions (only check if we have subscriptions)
-      subscribedPositionIds.length > 0
-        ? prisma.position.findMany({
-            where: {
-              isActive: false,
-              protocol: 'uniswapv3',
-              updatedAt: { gt: this.lastPollTimestamp },
-              id: { in: subscribedPositionIds },
-            },
-            select: {
-              id: true,
-              config: true,
-            },
-          })
-        : Promise.resolve([]),
-    ]);
-
-    this.lastPollTimestamp = new Date();
-
-    // Process deactivated positions first (remove before adding)
-    if (deactivatedPositions.length > 0) {
-      log.info({ count: deactivatedPositions.length, msg: 'Found deactivated positions to remove' });
-
-      for (const position of deactivatedPositions) {
-        const config = position.config as unknown as PositionConfig;
-        if (!config.nftId) continue;
-
-        const nftId = String(config.nftId);
-        const info = this.subscribedPositions.get(nftId);
-        if (!info) continue;
-
-        await this.removePositionFromBatch(info.chainId, nftId, position.id);
-      }
-    }
-
-    // Process new positions
-    if (newPositions.length === 0) {
-      return;
-    }
-
-    log.info({ count: newPositions.length, msg: 'Found new positions' });
-
-    // Group new positions by chain
-    const wssConfigs = getConfiguredWssUrls();
-    const wssUrlByChain = new Map(wssConfigs.map((c) => [c.chainId as SupportedChainId, c.url]));
-
-    for (const position of newPositions) {
-      const config = position.config as unknown as PositionConfig;
-
-      if (!config.chainId || config.nftId === undefined || !isSupportedChain(config.chainId)) {
-        continue;
-      }
-
-      const chainId = config.chainId as SupportedChainId;
-      const nftId = String(config.nftId);
-
-      // Skip if already subscribed
-      if (this.subscribedPositions.has(nftId)) {
-        continue;
-      }
-
-      const wssUrl = wssUrlByChain.get(chainId);
-
-      if (!wssUrl) {
-        log.warn({ chainId, msg: 'No WSS URL configured for chain, skipping new position' });
-        continue;
-      }
-
-      const positionInfo: PositionInfo = {
-        nftId,
-        positionId: position.id,
-      };
-
-      // Add to existing batch or create new one
-      await this.addPositionToBatch(chainId, wssUrl, positionInfo);
-    }
-  }
 
   /**
    * Add a position to an existing batch or create a new batch if needed.
@@ -519,5 +383,89 @@ export class PositionLiquiditySubscriber {
     for (const { nftId, chainId, positionId } of toRemove) {
       await this.removePositionFromBatch(chainId, nftId, positionId);
     }
+  }
+
+  // ===========================================================================
+  // Domain Event Handlers
+  // ===========================================================================
+
+  /**
+   * Handle position.created domain event.
+   * Adds the position to WebSocket subscriptions if it's a UniswapV3 position.
+   *
+   * @param payload - Position data from the domain event
+   */
+  async handlePositionCreated(payload: PositionJSON): Promise<void> {
+    // 1. Filter by protocol - only handle UniswapV3 positions
+    if (payload.protocol !== 'uniswapv3') {
+      log.debug({ protocol: payload.protocol, positionId: payload.id }, 'Ignoring non-UniswapV3 position');
+      return;
+    }
+
+    // 2. Extract and validate config
+    const config = payload.config as unknown as PositionConfig;
+    if (!config.chainId || config.nftId === undefined) {
+      log.warn({ positionId: payload.id }, 'Position config missing chainId or nftId');
+      return;
+    }
+
+    // 3. Validate chain support
+    if (!isSupportedChain(config.chainId)) {
+      log.debug({ chainId: config.chainId, positionId: payload.id }, 'Unsupported chain, ignoring');
+      return;
+    }
+
+    const chainId = config.chainId as SupportedChainId;
+    const nftId = String(config.nftId);
+
+    // 4. Skip if already subscribed (idempotency)
+    if (this.subscribedPositions.has(nftId)) {
+      log.debug({ nftId, positionId: payload.id }, 'Position already subscribed, skipping');
+      return;
+    }
+
+    // 5. Get WSS URL for chain
+    const wssUrl = getWssUrl(chainId);
+    if (!wssUrl) {
+      log.warn({ chainId, positionId: payload.id }, 'No WSS URL configured for chain');
+      return;
+    }
+
+    // 6. Add to subscription
+    const positionInfo: PositionInfo = {
+      nftId,
+      positionId: payload.id,
+    };
+
+    log.info({ chainId, nftId, positionId: payload.id }, 'Adding position from created event');
+    await this.addPositionToBatch(chainId, wssUrl, positionInfo);
+  }
+
+  /**
+   * Handle position.closed domain event.
+   * Removes the position from WebSocket subscriptions.
+   *
+   * @param payload - Position data from the domain event
+   */
+  async handlePositionClosed(payload: PositionJSON): Promise<void> {
+    // 1. Extract config
+    const config = payload.config as unknown as PositionConfig;
+    if (!config.nftId) {
+      log.debug({ positionId: payload.id }, 'No nftId in config, skipping');
+      return;
+    }
+
+    const nftId = String(config.nftId);
+
+    // 2. Look up subscription info
+    const info = this.subscribedPositions.get(nftId);
+    if (!info) {
+      log.debug({ nftId, positionId: payload.id }, 'Position not subscribed, skipping');
+      return;
+    }
+
+    // 3. Remove from subscription
+    log.info({ chainId: info.chainId, nftId, positionId: info.positionId }, 'Removing position from closed event');
+    await this.removePositionFromBatch(info.chainId, nftId, info.positionId);
   }
 }

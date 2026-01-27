@@ -30,11 +30,6 @@ import {
   deduplicateEvents,
 } from './missing-events.js';
 import { UniswapV3PositionSyncState } from '../../position-sync-state.js';
-import {
-  getDomainEventPublisher,
-  createDomainEvent,
-  type PositionClosedPayload,
-} from '../../../../events/index.js';
 
 /**
  * Parameters for syncLedgerEvents function
@@ -263,17 +258,6 @@ export async function syncLedgerEvents(
       // Save sync state (may have pruned events)
       await syncState.save(prisma, 'ledger-sync');
 
-      // Even with no new events, check if position is closed and publish event
-      // (handles case where position was closed before event publishing was implemented)
-      const currentLiquidity = await getPositionLiquidityFromLastEvent(positionId, prisma);
-      if (currentLiquidity !== null && currentLiquidity === 0n) {
-        logger.info(
-          { positionId, currentLiquidity: currentLiquidity.toString() },
-          'Position is closed (no new events), publishing position.closed event'
-        );
-        await publishPositionClosedEvent(positionId, chainId, nftId, prisma, logger);
-      }
-
       return {
         eventsAdded: 0,
         finalizedBlock,
@@ -385,16 +369,6 @@ export async function syncLedgerEvents(
     // 9. Refresh APR periods
     logger.info({ positionId }, 'Refreshing APR periods');
     await aprService.refresh(positionId);
-
-    // 10. Publish position.closed event if position is now closed (liquidity = 0)
-    // Use the finalLiquidity from processed events (not position.state which may be stale)
-    if (processResult.finalLiquidity !== null && processResult.finalLiquidity === 0n) {
-      logger.info(
-        { positionId, finalLiquidity: processResult.finalLiquidity.toString() },
-        'Position is closed (liquidity=0), publishing position.closed event'
-      );
-      await publishPositionClosedEvent(positionId, chainId, nftId, prisma, logger);
-    }
 
     logger.info(
       {
@@ -703,122 +677,4 @@ async function processAndSaveEvents(
     eventsAdded,
     finalLiquidity: previousState.liquidity,
   };
-}
-
-/**
- * Get the current liquidity of a position from its last ledger event
- *
- * This is more reliable than position.state during ledger sync because
- * position.state may not be updated until after the sync completes.
- *
- * @param positionId - Position database ID
- * @param prisma - Prisma client
- * @returns Position liquidity as bigint, or null if no events exist
- */
-async function getPositionLiquidityFromLastEvent(
-  positionId: string,
-  prisma: PrismaClient
-): Promise<bigint | null> {
-  // Get the most recent ledger event to check liquidityAfter
-  const lastEvent = await prisma.positionLedgerEvent.findFirst({
-    where: { positionId },
-    orderBy: { timestamp: 'desc' },
-    select: { config: true },
-  });
-
-  if (!lastEvent) {
-    return null; // No events = can't determine liquidity
-  }
-
-  const config = lastEvent.config as { liquidityAfter?: string | bigint } | null;
-  if (!config?.liquidityAfter) {
-    return null;
-  }
-
-  return BigInt(config.liquidityAfter);
-}
-
-/**
- * Publish a position.closed domain event when a position's liquidity drops to 0
- *
- * This enables event-driven reactions to position closures across the system,
- * such as automatic order cancellation, notifications, and hedge management.
- *
- * @param positionId - Position database ID
- * @param chainId - Chain ID
- * @param nftId - NFT token ID
- * @param prisma - Prisma client
- * @param logger - Logger instance
- */
-async function publishPositionClosedEvent(
-  positionId: string,
-  chainId: number,
-  nftId: bigint,
-  prisma: PrismaClient,
-  logger: Logger
-): Promise<void> {
-  try {
-    // Fetch position with pool for event payload
-    const position = await prisma.position.findUnique({
-      where: { id: positionId },
-      select: {
-        id: true,
-        poolId: true,
-        userId: true,
-        collectedFees: true,
-        config: true,
-        state: true,
-      },
-    });
-
-    if (!position) {
-      logger.warn({ positionId }, 'Cannot publish position.closed event: position not found');
-      return;
-    }
-
-    // Extract final state from position state (amounts should be 0 for closed position)
-    const state = position.state as {
-      token0Amount?: string;
-      token1Amount?: string;
-    } | null;
-
-    // Construct payload
-    const payload: PositionClosedPayload = {
-      positionId: position.id,
-      poolId: position.poolId,
-      chainId,
-      nftId: nftId.toString(),
-      closedAt: new Date().toISOString(),
-      finalState: {
-        token0Amount: state?.token0Amount ?? '0',
-        token1Amount: state?.token1Amount ?? '0',
-        collectedFees0: '0', // TODO: Track per-token fees if available
-        collectedFees1: '0',
-      },
-    };
-
-    // Create and publish event via outbox pattern
-    const publisher = getDomainEventPublisher({ prisma });
-    const event = createDomainEvent({
-      type: 'position.closed',
-      entityType: 'position',
-      entityId: positionId,
-      userId: position.userId,
-      payload,
-      source: 'ledger-sync',
-    });
-
-    await publisher.publish(event, prisma);
-
-    logger.info(
-      { positionId, eventId: event.id, eventType: event.type },
-      'Published position.closed domain event'
-    );
-  } catch (error) {
-    // Log but don't throw - event publishing failure shouldn't break ledger sync
-    logger.error(
-      { positionId, error },
-      'Failed to publish position.closed event (non-fatal)'
-    );
-  }
 }

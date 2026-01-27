@@ -39,6 +39,8 @@ export const DOMAIN_QUEUES = {
  * - `#` matches zero or more words
  */
 export const ROUTING_PATTERNS = {
+  /** All position created events: position.*.created */
+  POSITION_CREATED: 'position.*.created',
   /** All position closed events: position.*.closed */
   POSITION_CLOSED: 'position.*.closed',
   /** All position events: position.# */

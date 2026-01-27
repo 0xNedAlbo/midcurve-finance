@@ -6,6 +6,7 @@
  */
 
 import amqplib, { type ChannelModel, type Channel } from 'amqplib';
+import { setupDomainEventsTopology } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConfig, type RabbitMQConfig } from '../lib/config';
 import { setupOnchainDataTopology, EXCHANGE_POOL_PRICES, EXCHANGE_POSITION_LIQUIDITY } from './topology';
@@ -98,6 +99,9 @@ class RabbitMQConnectionManager {
 
         // Setup onchain data topology (pool-prices + position-liquidity-events exchanges)
         await setupOnchainDataTopology(this.channel);
+
+        // Setup domain events topology (domain-events exchange + DLQ for event consumers)
+        await setupDomainEventsTopology(this.channel);
 
         priceLog.mqEvent(log, 'connected');
         priceLog.methodExit(log, 'connect');
