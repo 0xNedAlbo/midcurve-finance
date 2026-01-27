@@ -57,7 +57,7 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
    * Handle a position.closed event by cancelling all active close orders.
    */
   async handle(event: DomainEvent<PositionClosedPayload>): Promise<void> {
-    const { positionId } = event.payload;
+    const positionId = event.payload.id;
 
     this.logger.info(
       {

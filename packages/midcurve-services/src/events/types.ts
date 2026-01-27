@@ -5,6 +5,8 @@
  * Events are published to RabbitMQ for decoupled, event-driven processing.
  */
 
+import type { PositionJSON } from '@midcurve/shared';
+
 // ============================================================
 // Event Type Discriminators
 // ============================================================
@@ -102,43 +104,20 @@ export interface DomainEvent<TPayload = unknown> {
 
 /**
  * Payload for position.created event
+ *
+ * Contains the full position data including nested pool and token information
+ * for complete audit trails and downstream business processes.
  */
-export interface PositionCreatedPayload {
-  positionId: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  protocol: string;
-  createdAt: string;
-}
-
-/**
- * Final state of a position when closed (all amounts in smallest units as strings)
- */
-export interface PositionFinalState {
-  /** Token0 amount remaining (usually 0 for closed positions) */
-  token0Amount: string;
-  /** Token1 amount remaining (usually 0 for closed positions) */
-  token1Amount: string;
-  /** Total fees collected in token0 over position lifetime */
-  collectedFees0: string;
-  /** Total fees collected in token1 over position lifetime */
-  collectedFees1: string;
-}
+export type PositionCreatedPayload = PositionJSON;
 
 /**
  * Payload for position.closed event
  * Emitted when a position's liquidity drops to 0
+ *
+ * Contains the full position data including nested pool and token information
+ * for complete audit trails and downstream business processes.
  */
-export interface PositionClosedPayload {
-  positionId: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  closedAt: string;
-  /** Final state before closure */
-  finalState: PositionFinalState;
-}
+export type PositionClosedPayload = PositionJSON;
 
 /**
  * Payload for position.liquidity.increased event
