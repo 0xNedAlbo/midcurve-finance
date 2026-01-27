@@ -445,26 +445,32 @@ export class PositionLiquiditySubscriber {
    * Handle position.closed domain event.
    * Removes the position from WebSocket subscriptions.
    *
-   * @param payload - Position data from the domain event
+   * @param chainId - Chain ID from routing key
+   * @param nftId - NFT ID from routing key
    */
-  async handlePositionClosed(payload: PositionJSON): Promise<void> {
-    // 1. Extract config
-    const config = payload.config as unknown as PositionConfig;
-    if (!config.nftId) {
-      log.debug({ positionId: payload.id }, 'No nftId in config, skipping');
+  async handlePositionClosed(chainId: number, nftId: string): Promise<void> {
+    // 1. Validate chain support
+    if (!isSupportedChain(chainId)) {
+      log.debug({ chainId, nftId }, 'Unsupported chain, ignoring');
       return;
     }
-
-    const nftId = String(config.nftId);
 
     // 2. Look up subscription info
     const info = this.subscribedPositions.get(nftId);
     if (!info) {
-      log.debug({ nftId, positionId: payload.id }, 'Position not subscribed, skipping');
+      log.debug({ chainId, nftId }, 'Position not subscribed, skipping');
       return;
     }
 
-    // 3. Remove from subscription
+    // 3. Verify chain matches (extra safety check)
+    if (info.chainId !== chainId) {
+      log.warn(
+        { expectedChainId: info.chainId, actualChainId: chainId, nftId },
+        'Chain ID mismatch for position'
+      );
+    }
+
+    // 4. Remove from subscription
     log.info({ chainId: info.chainId, nftId, positionId: info.positionId }, 'Removing position from closed event');
     await this.removePositionFromBatch(info.chainId, nftId, info.positionId);
   }

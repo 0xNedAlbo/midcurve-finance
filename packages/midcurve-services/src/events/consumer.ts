@@ -28,11 +28,12 @@ import { setupConsumerQueue } from './topology.js';
  * @example
  * ```typescript
  * class PositionClosedHandler extends DomainEventConsumer<PositionClosedPayload> {
- *   readonly eventPattern = 'position.*.closed';
+ *   readonly eventPattern = 'positions.closed.#';
  *   readonly queueName = 'domain.position-closed.my-handler';
  *
- *   async handle(event: DomainEvent<PositionClosedPayload>): Promise<void> {
+ *   async handle(event: DomainEvent<PositionClosedPayload>, routingKey: string): Promise<void> {
  *     // Handle the event
+ *     // routingKey format: positions.closed.{protocol}.{chainId}.{nftId}
  *   }
  * }
  * ```
@@ -65,9 +66,10 @@ export abstract class DomainEventConsumer<TPayload = unknown> {
    * more than once (at-least-once delivery).
    *
    * @param event - The domain event to handle
+   * @param routingKey - The routing key used to deliver this message
    * @throws Error if the event cannot be processed (will be retried or dead-lettered)
    */
-  abstract handle(event: DomainEvent<TPayload>): Promise<void>;
+  abstract handle(event: DomainEvent<TPayload>, routingKey: string): Promise<void>;
 
   // ============================================================================
   // LIFECYCLE
@@ -169,6 +171,7 @@ export abstract class DomainEventConsumer<TPayload = unknown> {
     }
 
     const startTime = Date.now();
+    const routingKey = msg.fields.routingKey;
     let event: DomainEvent<TPayload> | null = null;
 
     try {
@@ -176,12 +179,12 @@ export abstract class DomainEventConsumer<TPayload = unknown> {
       event = this.parseMessage(msg);
 
       this.logger.debug(
-        { eventId: event.id, eventType: event.type, entityId: event.entityId },
+        { eventId: event.id, eventType: event.type, entityId: event.entityId, routingKey },
         'Processing event'
       );
 
       // Handle the event
-      await this.handle(event);
+      await this.handle(event, routingKey);
 
       // Acknowledge success
       this.channel.ack(msg);
@@ -198,6 +201,7 @@ export abstract class DomainEventConsumer<TPayload = unknown> {
         {
           eventId: event?.id,
           eventType: event?.type,
+          routingKey,
           error: errorMessage,
         },
         'Error processing event'

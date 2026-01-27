@@ -90,6 +90,7 @@ export type {
   // Position payloads
   PositionCreatedPayload,
   PositionClosedPayload,
+  PositionDeletedPayload,
   PositionLiquidityIncreasedPayload,
   PositionLiquidityDecreasedPayload,
   PositionFeesCollectedPayload,
@@ -126,13 +127,25 @@ export {
   DOMAIN_QUEUES,
   ROUTING_PATTERNS,
   DLQ_MESSAGE_TTL_MS,
-  // Functions
-  buildRoutingKey,
+  // Functions - Position routing keys
+  parsePositionHash,
+  buildPositionRoutingKey,
+  parsePositionRoutingKey,
+  // Functions - Order routing keys
+  buildOrderRoutingKey,
   getEventSuffix,
+  // Functions - Legacy (deprecated)
+  buildRoutingKey,
+  // Functions - Topology setup
   setupDomainEventsTopology,
   setupPositionClosedOrderCancellerQueue,
   setupConsumerQueue,
   verifyDomainEventsTopology,
+} from './topology.js';
+
+export type {
+  PositionCoordinates,
+  ParsedPositionRoutingKey,
 } from './topology.js';
 
 // ============================================================

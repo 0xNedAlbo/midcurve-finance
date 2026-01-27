@@ -12,7 +12,12 @@ import type { Channel } from 'amqplib';
 import { createServiceLogger, log } from '../logging/index.js';
 import type { ServiceLogger } from '../logging/index.js';
 import type { DomainEvent, DomainEventMetadata } from './types.js';
-import { DOMAIN_EVENTS_EXCHANGE, buildRoutingKey, getEventSuffix } from './topology.js';
+import {
+  DOMAIN_EVENTS_EXCHANGE,
+  buildPositionRoutingKey,
+  buildOrderRoutingKey,
+  getEventSuffix,
+} from './topology.js';
 
 // ============================================================
 // Configuration
@@ -227,13 +232,22 @@ export class OutboxPublisher {
       metadata,
     };
 
-    // Build routing key
-    const eventSuffix = getEventSuffix(outboxRecord.eventType);
-    const routingKey = buildRoutingKey(
-      outboxRecord.entityType as 'position' | 'order',
-      outboxRecord.entityId,
-      eventSuffix
-    );
+    // Build routing key based on entity type
+    let routingKey: string;
+    if (outboxRecord.entityType === 'position') {
+      // Position events: use positionHash from payload
+      const payload = outboxRecord.payload as { positionHash?: string };
+      if (!payload.positionHash) {
+        throw new Error(
+          `Position event payload missing positionHash: ${outboxRecord.eventType} (id: ${outboxRecord.id})`
+        );
+      }
+      routingKey = buildPositionRoutingKey(outboxRecord.eventType, payload.positionHash);
+    } else {
+      // Order events: use legacy format
+      const eventSuffix = getEventSuffix(outboxRecord.eventType);
+      routingKey = buildOrderRoutingKey(outboxRecord.entityId, eventSuffix);
+    }
 
     // Publish to RabbitMQ
     const message = Buffer.from(JSON.stringify(event));

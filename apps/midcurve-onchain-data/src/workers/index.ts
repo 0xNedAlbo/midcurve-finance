@@ -9,16 +9,12 @@
  * - PositionLiquiditySubscriber: Subscribes to position events from NFPM
  *
  * Event Consumers:
- * - PositionCreatedSubscriptionHandler: Adds new positions to subscriptions
- * - PositionClosedSubscriptionHandler: Removes closed positions from subscriptions
+ * - PositionEventHandler: Handles position.created and position.closed events
  */
 
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
-import {
-  PositionCreatedSubscriptionHandler,
-  PositionClosedSubscriptionHandler,
-} from '../events';
+import { PositionEventHandler } from '../events';
 import { PoolPriceSubscriber } from './pool-price-subscriber';
 import { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
 
@@ -30,19 +26,16 @@ const log = onchainDataLogger.child({ component: 'WorkerManager' });
 export class WorkerManager {
   private poolPriceSubscriber: PoolPriceSubscriber;
   private positionLiquiditySubscriber: PositionLiquiditySubscriber;
-  private positionCreatedHandler: PositionCreatedSubscriptionHandler;
-  private positionClosedHandler: PositionClosedSubscriptionHandler;
+  private positionEventHandler: PositionEventHandler;
   private isRunning = false;
 
   constructor() {
     this.poolPriceSubscriber = new PoolPriceSubscriber();
     this.positionLiquiditySubscriber = new PositionLiquiditySubscriber();
-    this.positionCreatedHandler = new PositionCreatedSubscriptionHandler();
-    this.positionClosedHandler = new PositionClosedSubscriptionHandler();
+    this.positionEventHandler = new PositionEventHandler();
 
-    // Wire subscriber reference to event handlers
-    this.positionCreatedHandler.setSubscriber(this.positionLiquiditySubscriber);
-    this.positionClosedHandler.setSubscriber(this.positionLiquiditySubscriber);
+    // Wire subscriber reference to event handler
+    this.positionEventHandler.setSubscriber(this.positionLiquiditySubscriber);
   }
 
   /**
@@ -63,11 +56,10 @@ export class WorkerManager {
       const mq = getRabbitMQConnection();
       const channel = await mq.getChannel();
 
-      // Start event consumers BEFORE loading positions
+      // Start event consumer BEFORE loading positions
       // This ensures we don't miss any events during startup
-      log.info({ msg: 'Starting domain event consumers...' });
-      await this.positionCreatedHandler.start(channel);
-      await this.positionClosedHandler.start(channel);
+      log.info({ msg: 'Starting domain event consumer...' });
+      await this.positionEventHandler.start(channel);
 
       // Start both subscribers in parallel (initial DB load + WebSocket connections)
       log.info({ msg: 'Starting subscribers...' });
@@ -99,10 +91,9 @@ export class WorkerManager {
     priceLog.workerLifecycle(log, 'WorkerManager', 'stopping');
 
     try {
-      // Stop event consumers first
-      log.info({ msg: 'Stopping domain event consumers...' });
-      await this.positionCreatedHandler.stop();
-      await this.positionClosedHandler.stop();
+      // Stop event consumer first
+      log.info({ msg: 'Stopping domain event consumer...' });
+      await this.positionEventHandler.stop();
 
       // Stop both subscribers in parallel
       log.info({ msg: 'Stopping subscribers...' });
@@ -133,9 +124,8 @@ export class WorkerManager {
     isRunning: boolean;
     poolPriceSubscriber: ReturnType<PoolPriceSubscriber['getStatus']>;
     positionLiquiditySubscriber: ReturnType<PositionLiquiditySubscriber['getStatus']>;
-    eventConsumers: {
-      positionCreated: { isRunning: boolean };
-      positionClosed: { isRunning: boolean };
+    eventConsumer: {
+      positionEvents: { isRunning: boolean };
     };
     rabbitmq: {
       isConnected: boolean;
@@ -147,9 +137,8 @@ export class WorkerManager {
       isRunning: this.isRunning,
       poolPriceSubscriber: this.poolPriceSubscriber.getStatus(),
       positionLiquiditySubscriber: this.positionLiquiditySubscriber.getStatus(),
-      eventConsumers: {
-        positionCreated: { isRunning: this.positionCreatedHandler.isRunning() },
-        positionClosed: { isRunning: this.positionClosedHandler.isRunning() },
+      eventConsumer: {
+        positionEvents: { isRunning: this.positionEventHandler.isRunning() },
       },
       rabbitmq: {
         isConnected: mq.isConnected(),

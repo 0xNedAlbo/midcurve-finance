@@ -4,7 +4,4 @@
  * Domain event consumers for the onchain-data service.
  */
 
-export {
-  PositionCreatedSubscriptionHandler,
-  PositionClosedSubscriptionHandler,
-} from './position-subscription-consumers';
+export { PositionEventHandler } from './position-subscription-consumers';

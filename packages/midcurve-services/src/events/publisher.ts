@@ -18,7 +18,12 @@ import type {
   DomainEntityType,
   DomainEventSource,
 } from './types.js';
-import { DOMAIN_EVENTS_EXCHANGE, buildRoutingKey, getEventSuffix } from './topology.js';
+import {
+  DOMAIN_EVENTS_EXCHANGE,
+  buildPositionRoutingKey,
+  buildOrderRoutingKey,
+  getEventSuffix,
+} from './topology.js';
 
 // ============================================================
 // Event Builder Types
@@ -245,12 +250,22 @@ export class DomainEventPublisher {
       entityId: event.entityId,
     });
 
-    const eventSuffix = getEventSuffix(event.type);
-    const routingKey = buildRoutingKey(
-      event.entityType as 'position' | 'order',
-      event.entityId,
-      eventSuffix
-    );
+    // Build routing key based on entity type
+    let routingKey: string;
+    if (event.entityType === 'position') {
+      // Position events: use positionHash from payload
+      const payload = event.payload as { positionHash?: string };
+      if (!payload.positionHash) {
+        throw new Error(
+          `Position event payload missing positionHash: ${event.type} (id: ${event.id})`
+        );
+      }
+      routingKey = buildPositionRoutingKey(event.type, payload.positionHash);
+    } else {
+      // Order events: use legacy format
+      const eventSuffix = getEventSuffix(event.type);
+      routingKey = buildOrderRoutingKey(event.entityId, eventSuffix);
+    }
 
     try {
       const message = Buffer.from(JSON.stringify(event));

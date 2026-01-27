@@ -17,6 +17,7 @@ import type { PositionJSON } from '@midcurve/shared';
 export type PositionEventType =
   | 'position.created'
   | 'position.closed'
+  | 'position.deleted'
   | 'position.liquidity.increased'
   | 'position.liquidity.decreased'
   | 'position.fees.collected'
@@ -118,6 +119,15 @@ export type PositionCreatedPayload = PositionJSON;
  * for complete audit trails and downstream business processes.
  */
 export type PositionClosedPayload = PositionJSON;
+
+/**
+ * Payload for position.deleted event
+ * Emitted when a position is removed from the database by user action
+ *
+ * Contains the full position data including nested pool and token information
+ * for complete audit trails and downstream business processes.
+ */
+export type PositionDeletedPayload = PositionJSON;
 
 /**
  * Payload for position.liquidity.increased event
