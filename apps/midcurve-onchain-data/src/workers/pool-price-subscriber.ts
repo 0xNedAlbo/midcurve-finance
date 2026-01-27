@@ -1,14 +1,17 @@
 /**
  * PoolPriceSubscriber Worker
  *
- * Loads active subscriptions from database, creates WebSocket subscription batches,
- * and manages their lifecycle. Publishes incoming Swap events to RabbitMQ.
+ * Subscribes to Swap events for pools that have active positions.
+ * Dynamically adds/removes pools based on position lifecycle events.
+ * Publishes incoming Swap events to RabbitMQ.
  */
 
 import { prisma } from '@midcurve/database';
+import type { PositionJSON } from '@midcurve/shared';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import {
   getConfiguredWssUrls,
+  getWssUrl,
   getWorkerConfig,
   isSupportedChain,
   type SupportedChainId,
@@ -18,7 +21,6 @@ import {
   createSubscriptionBatches,
   type PoolInfo,
 } from '../ws/providers/uniswap-v3-pools';
-import { getRabbitMQConnection } from '../mq/connection-manager';
 
 const log = onchainDataLogger.child({ component: 'PoolPriceSubscriber' });
 
@@ -31,23 +33,42 @@ interface PoolConfig {
 }
 
 /**
+ * Position configuration from database JSON field.
+ */
+interface PositionConfig {
+  chainId: number;
+  nftId: number;
+  poolAddress: string;
+}
+
+/**
+ * Tracks a subscribed pool with its metadata.
+ */
+interface SubscribedPool {
+  poolId: string;
+  poolAddress: string;
+  chainId: SupportedChainId;
+}
+
+/**
  * PoolPriceSubscriber manages WebSocket subscriptions for pool prices.
+ * Subscriptions are derived from active positions - pools are subscribed
+ * when they have at least one active position.
  */
 export class PoolPriceSubscriber {
   private batches: UniswapV3PoolSubscriptionBatch[] = [];
   private batchesByChain: Map<SupportedChainId, UniswapV3PoolSubscriptionBatch[]> = new Map();
   private isRunning = false;
 
-  // Polling state
-  private lastPollTimestamp: Date = new Date();
-  private pollTimer: NodeJS.Timeout | null = null;
+  // Track subscribed pools by address (lowercase)
+  private subscribedPools: Map<string, SubscribedPool> = new Map();
 
   // Cleanup state
   private cleanupTimer: NodeJS.Timeout | null = null;
 
   /**
    * Start the subscriber.
-   * Loads active subscriptions and creates WebSocket batches.
+   * Loads pools with active positions and creates WebSocket batches.
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -58,7 +79,7 @@ export class PoolPriceSubscriber {
     priceLog.workerLifecycle(log, 'PoolPriceSubscriber', 'starting');
 
     try {
-      // Load active subscriptions from database
+      // Load pools with active positions from database
       const poolsByChain = await this.loadActiveSubscriptions();
 
       // Get configured WSS URLs
@@ -75,7 +96,7 @@ export class PoolPriceSubscriber {
         const pools = poolsByChain.get(chainId);
 
         if (!pools || pools.length === 0) {
-          log.info({ chainId, msg: 'No active subscriptions for chain, skipping' });
+          log.info({ chainId, msg: 'No pools with active positions for chain, skipping' });
           continue;
         }
 
@@ -93,8 +114,7 @@ export class PoolPriceSubscriber {
         await Promise.all(this.batches.map((batch) => batch.start()));
       }
 
-      // Start polling and cleanup timers (even if no batches, for dynamic subscriptions)
-      this.startPolling();
+      // Start cleanup timer (safety net for missed events)
       this.startCleanup();
 
       const totalPools = this.batches.reduce(
@@ -126,14 +146,14 @@ export class PoolPriceSubscriber {
 
     priceLog.workerLifecycle(log, 'PoolPriceSubscriber', 'stopping');
 
-    // Stop timers
-    this.stopPolling();
+    // Stop cleanup timer
     this.stopCleanup();
 
     // Stop all batches
     await Promise.all(this.batches.map((batch) => batch.stop()));
     this.batches = [];
     this.batchesByChain.clear();
+    this.subscribedPools.clear();
     this.isRunning = false;
 
     priceLog.workerLifecycle(log, 'PoolPriceSubscriber', 'stopped');
@@ -160,66 +180,71 @@ export class PoolPriceSubscriber {
   }
 
   /**
-   * Load active subscriptions from database, grouped by chain ID.
+   * Load pools that have at least one active UniswapV3 position.
+   * Groups by chain ID for batch creation.
    */
   private async loadActiveSubscriptions(): Promise<Map<SupportedChainId, PoolInfo[]>> {
     priceLog.methodEntry(log, 'loadActiveSubscriptions');
 
-    // Query active subscriptions with pool info
-    const subscriptions = await prisma.poolPriceSubscribers.findMany({
+    // Query pools that have at least one active UniswapV3 position
+    const pools = await prisma.pool.findMany({
       where: {
-        isActive: true,
-      },
-      include: {
-        pool: {
-          select: {
-            id: true,
-            config: true,
-            protocol: true,
+        protocol: 'uniswapv3',
+        positions: {
+          some: {
+            isActive: true,
+            protocol: 'uniswapv3',
           },
         },
       },
+      select: {
+        id: true,
+        config: true,
+      },
     });
 
-    log.info({ subscriptionCount: subscriptions.length, msg: 'Loaded active subscriptions' });
+    log.info({ poolCount: pools.length, msg: 'Loaded pools with active positions' });
 
     // Group pools by chain ID
     const poolsByChain = new Map<SupportedChainId, PoolInfo[]>();
 
-    for (const sub of subscriptions) {
-      // Only handle UniswapV3 pools for now
-      if (sub.pool.protocol !== 'uniswapv3') {
-        log.debug({ protocol: sub.pool.protocol, poolId: sub.pool.id, msg: 'Skipping non-UniswapV3 pool' });
-        continue;
-      }
-
-      const config = sub.pool.config as unknown as PoolConfig;
+    for (const pool of pools) {
+      const config = pool.config as unknown as PoolConfig;
 
       if (!config.chainId || !config.address) {
-        log.warn({ poolId: sub.pool.id, msg: 'Pool config missing chainId or address' });
+        log.warn({ poolId: pool.id, msg: 'Pool config missing chainId or address' });
         continue;
       }
 
       if (!isSupportedChain(config.chainId)) {
-        log.warn({ chainId: config.chainId, poolId: sub.pool.id, msg: 'Unsupported chain ID' });
+        log.warn({ chainId: config.chainId, poolId: pool.id, msg: 'Unsupported chain ID' });
         continue;
       }
 
       const chainId = config.chainId as SupportedChainId;
+      const normalizedAddress = config.address.toLowerCase();
 
+      // Track in internal state
+      this.subscribedPools.set(normalizedAddress, {
+        poolId: pool.id,
+        poolAddress: normalizedAddress,
+        chainId,
+      });
+
+      // Add to chain grouping
       if (!poolsByChain.has(chainId)) {
         poolsByChain.set(chainId, []);
       }
 
       poolsByChain.get(chainId)!.push({
-        address: config.address,
-        poolId: sub.pool.id,
+        address: normalizedAddress,
+        poolId: pool.id,
       });
     }
 
     // Log summary
-    for (const [chainId, pools] of poolsByChain) {
-      log.info({ chainId, poolCount: pools.length, msg: 'Pools grouped by chain' });
+    for (const [chainId, chainPools] of poolsByChain) {
+      log.info({ chainId, poolCount: chainPools.length, msg: 'Pools grouped by chain' });
     }
 
     priceLog.methodExit(log, 'loadActiveSubscriptions');
@@ -228,96 +253,194 @@ export class PoolPriceSubscriber {
   }
 
   // ===========================================================================
-  // Polling for new subscriptions
+  // Domain Event Handlers
   // ===========================================================================
 
   /**
-   * Start the polling timer for new subscriptions.
+   * Handle position.created domain event.
+   * Adds the pool to WebSocket subscriptions if not already subscribed.
+   *
+   * @param payload - Position data from the domain event
    */
-  private startPolling(): void {
-    const config = getWorkerConfig();
-    this.lastPollTimestamp = new Date();
-
-    this.pollTimer = setInterval(() => {
-      this.pollNewSubscriptions().catch((err) => {
-        log.error({ error: err instanceof Error ? err.message : String(err), msg: 'Error polling new subscriptions' });
-      });
-    }, config.pollIntervalMs);
-
-    log.info({ intervalMs: config.pollIntervalMs, msg: 'Started subscription polling' });
-  }
-
-  /**
-   * Stop the polling timer.
-   */
-  private stopPolling(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-      log.info({ msg: 'Stopped subscription polling' });
+  async handlePositionCreated(payload: PositionJSON): Promise<void> {
+    // 1. Filter by protocol - only handle UniswapV3 positions
+    if (payload.protocol !== 'uniswapv3') {
+      log.debug({ protocol: payload.protocol, positionId: payload.id }, 'Ignoring non-UniswapV3 position');
+      return;
     }
+
+    // 2. Extract and validate config
+    const config = payload.config as unknown as PositionConfig;
+    if (!config.chainId || !config.poolAddress) {
+      log.warn({ positionId: payload.id }, 'Position config missing chainId or poolAddress');
+      return;
+    }
+
+    // 3. Validate chain support
+    if (!isSupportedChain(config.chainId)) {
+      log.debug({ chainId: config.chainId, positionId: payload.id }, 'Unsupported chain, ignoring');
+      return;
+    }
+
+    const chainId = config.chainId as SupportedChainId;
+    const normalizedAddress = config.poolAddress.toLowerCase();
+
+    // 4. Skip if pool already subscribed (idempotency)
+    if (this.subscribedPools.has(normalizedAddress)) {
+      log.debug({ poolAddress: normalizedAddress, positionId: payload.id }, 'Pool already subscribed, skipping');
+      return;
+    }
+
+    // 5. Get WSS URL for chain
+    const wssUrl = getWssUrl(chainId);
+    if (!wssUrl) {
+      log.warn({ chainId, positionId: payload.id }, 'No WSS URL configured for chain');
+      return;
+    }
+
+    // 6. Look up pool ID from database (position.poolId or find by address)
+    const position = await prisma.position.findUnique({
+      where: { id: payload.id },
+      select: { poolId: true },
+    });
+
+    const poolId = position?.poolId ?? `pool-${chainId}-${normalizedAddress}`;
+
+    // 7. Track and add to subscription
+    this.subscribedPools.set(normalizedAddress, {
+      poolId,
+      poolAddress: normalizedAddress,
+      chainId,
+    });
+
+    const poolInfo: PoolInfo = {
+      address: normalizedAddress,
+      poolId,
+    };
+
+    log.info({ chainId, poolAddress: normalizedAddress, positionId: payload.id }, 'Adding pool from position.created event');
+    await this.addPoolToBatch(chainId, wssUrl, poolInfo);
   }
 
   /**
-   * Poll for new or reactivated subscriptions since last poll.
-   * Uses updatedAt to catch both newly created and reactivated subscribers.
+   * Handle position.closed domain event.
+   * Removes the pool from subscriptions if no other active positions use it.
+   *
+   * @param chainId - Chain ID from routing key
+   * @param nftId - NFT ID from routing key
    */
-  private async pollNewSubscriptions(): Promise<void> {
-    const newSubs = await prisma.poolPriceSubscribers.findMany({
+  async handlePositionClosed(chainId: number, nftId: string): Promise<void> {
+    await this.handlePositionRemoved(chainId, nftId, 'closed');
+  }
+
+  /**
+   * Handle position.deleted domain event.
+   * Removes the pool from subscriptions if no other active positions use it.
+   *
+   * @param chainId - Chain ID from routing key
+   * @param nftId - NFT ID from routing key
+   */
+  async handlePositionDeleted(chainId: number, nftId: string): Promise<void> {
+    await this.handlePositionRemoved(chainId, nftId, 'deleted');
+  }
+
+  /**
+   * Private helper for position removal (closed or deleted).
+   * Checks if any other active positions use the same pool before unsubscribing.
+   */
+  private async handlePositionRemoved(
+    chainId: number,
+    nftId: string,
+    reason: 'closed' | 'deleted'
+  ): Promise<void> {
+    // 1. Validate chain support
+    if (!isSupportedChain(chainId)) {
+      log.debug({ chainId, nftId }, 'Unsupported chain, ignoring');
+      return;
+    }
+
+    // 2. Find the position by positionHash to get its poolId
+    const positionHash = `uniswapv3/${chainId}/${nftId}`;
+    const position = await prisma.position.findFirst({
       where: {
-        isActive: true,
-        updatedAt: { gt: this.lastPollTimestamp },
+        positionHash,
+        protocol: 'uniswapv3',
       },
-      include: {
+      select: {
+        id: true,
+        poolId: true,
         pool: {
           select: {
-            id: true,
             config: true,
-            protocol: true,
           },
         },
       },
     });
 
-    this.lastPollTimestamp = new Date();
-
-    if (newSubs.length === 0) {
+    if (!position) {
+      log.debug({ chainId, nftId, reason }, 'Position not found in database');
       return;
     }
 
-    log.info({ count: newSubs.length, msg: 'Found new subscriptions' });
+    // 3. Get pool address
+    const poolConfig = position.pool.config as unknown as PoolConfig;
+    const poolAddress = poolConfig.address?.toLowerCase();
 
-    // Group new subscriptions by chain
-    const wssConfigs = getConfiguredWssUrls();
-    const wssUrlByChain = new Map(wssConfigs.map((c) => [c.chainId as SupportedChainId, c.url]));
+    if (!poolAddress) {
+      log.warn({ positionId: position.id, reason }, 'Pool address not found');
+      return;
+    }
 
-    for (const sub of newSubs) {
-      if (sub.pool.protocol !== 'uniswapv3') {
-        continue;
+    // 4. Check if pool is tracked
+    if (!this.subscribedPools.has(poolAddress)) {
+      log.debug({ poolAddress, reason }, 'Pool not subscribed, skipping');
+      return;
+    }
+
+    // 5. Check if other active positions still use this pool
+    const otherActivePositions = await prisma.position.count({
+      where: {
+        poolId: position.poolId,
+        isActive: true,
+        protocol: 'uniswapv3',
+        id: { not: position.id },
+      },
+    });
+
+    if (otherActivePositions > 0) {
+      log.debug(
+        { poolAddress, otherActivePositions, reason },
+        'Pool still has other active positions, keeping subscription'
+      );
+      return;
+    }
+
+    // 6. No other active positions - unsubscribe from pool
+    log.info(
+      { poolId: position.poolId, poolAddress, chainId, reason },
+      'Pool has no more active positions, removing subscription'
+    );
+
+    const poolSub = this.subscribedPools.get(poolAddress);
+    this.subscribedPools.delete(poolAddress);
+
+    // 7. Remove from WebSocket batch
+    if (poolSub) {
+      const chainBatches = this.batchesByChain.get(poolSub.chainId);
+      if (chainBatches) {
+        for (const batch of chainBatches) {
+          if (batch.hasPool(poolAddress)) {
+            await batch.removePool(poolAddress);
+            break;
+          }
+        }
       }
-
-      const config = sub.pool.config as unknown as PoolConfig;
-      if (!config.chainId || !config.address || !isSupportedChain(config.chainId)) {
-        continue;
-      }
-
-      const chainId = config.chainId as SupportedChainId;
-      const wssUrl = wssUrlByChain.get(chainId);
-
-      if (!wssUrl) {
-        log.warn({ chainId, msg: 'No WSS URL configured for chain, skipping new subscription' });
-        continue;
-      }
-
-      const poolInfo: PoolInfo = {
-        address: config.address,
-        poolId: sub.pool.id,
-      };
-
-      // Add to existing batch or create new one
-      await this.addPoolToBatch(chainId, wssUrl, poolInfo);
     }
   }
+
+  // ===========================================================================
+  // Pool Batch Management
+  // ===========================================================================
 
   /**
    * Add a pool to an existing batch or create a new batch if needed.
@@ -354,22 +477,22 @@ export class PoolPriceSubscriber {
   }
 
   // ===========================================================================
-  // Cleanup stale subscribers
+  // Cleanup (safety net for missed events)
   // ===========================================================================
 
   /**
-   * Start the cleanup timer for stale subscribers.
+   * Start the cleanup timer for orphaned pools.
    */
   private startCleanup(): void {
     const config = getWorkerConfig();
 
     this.cleanupTimer = setInterval(() => {
-      this.cleanupStaleSubscribers().catch((err) => {
-        log.error({ error: err instanceof Error ? err.message : String(err), msg: 'Error cleaning up stale subscribers' });
+      this.cleanupOrphanedPools().catch((err) => {
+        log.error({ error: err instanceof Error ? err.message : String(err), msg: 'Error cleaning up orphaned pools' });
       });
     }, config.cleanupIntervalMs);
 
-    log.info({ intervalMs: config.cleanupIntervalMs, msg: 'Started stale subscriber cleanup' });
+    log.info({ intervalMs: config.cleanupIntervalMs, msg: 'Started orphaned pool cleanup' });
   }
 
   /**
@@ -379,216 +502,70 @@ export class PoolPriceSubscriber {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
-      log.info({ msg: 'Stopped stale subscriber cleanup' });
+      log.info({ msg: 'Stopped orphaned pool cleanup' });
     }
   }
 
   /**
-   * Clean up stale subscribers and remove orphaned pools.
-   *
-   * This method does two things:
-   * 1. Marks stale subscribers as inactive (lastAliveAt behind current time by threshold)
-   * 2. Removes pools with no active subscribers from WebSocket subscriptions
-   *
-   * The second step handles both:
-   * - Pools that became orphaned due to stale cleanup
-   * - Pools where subscribers manually set isActive=false (active unsubscription)
+   * Clean up pools that no longer have active positions.
+   * Safety net in case domain events were missed.
    */
-  private async cleanupStaleSubscribers(): Promise<void> {
-    const config = getWorkerConfig();
-    const staleThreshold = new Date(Date.now() - config.staleThresholdMs);
+  private async cleanupOrphanedPools(): Promise<void> {
+    if (this.subscribedPools.size === 0) {
+      return;
+    }
 
-    // Find subscribers whose lastAliveAt is behind current time by threshold
-    const staleSubscribers = await prisma.poolPriceSubscribers.findMany({
+    // Get all currently subscribed pool IDs
+    const subscribedPoolIds = Array.from(this.subscribedPools.values()).map((p) => p.poolId);
+
+    // Query which of these pools still have active positions
+    const poolsWithActivePositions = await prisma.pool.findMany({
       where: {
-        isActive: true,
-        lastAliveAt: {
-          not: null,
-          lt: staleThreshold, // lastAliveAt < (now - threshold)
+        id: { in: subscribedPoolIds },
+        positions: {
+          some: {
+            isActive: true,
+            protocol: 'uniswapv3',
+          },
         },
       },
-      select: { id: true, poolId: true },
+      select: { id: true },
     });
 
-    if (staleSubscribers.length > 0) {
-      log.info({ count: staleSubscribers.length, msg: 'Marking stale subscribers as inactive' });
+    const activePoolIds = new Set(poolsWithActivePositions.map((p) => p.id));
 
-      // Mark as inactive (soft delete)
-      await prisma.poolPriceSubscribers.updateMany({
-        where: { id: { in: staleSubscribers.map((s) => s.id) } },
-        data: { isActive: false },
-      });
-    }
-
-    // Check all subscribed pools for orphans (handles both stale cleanup and manual unsubscription)
-    await this.removeOrphanedPoolsFromAllBatches();
-
-    // Prune subscribers that have been inactive for extended period
-    await this.pruneStaleSubscribers();
-  }
-
-  /**
-   * Prune subscribers that have been inactive for 24+ hours.
-   *
-   * This permanently deletes records from the database and their
-   * associated RabbitMQ queues to prevent unbounded growth.
-   */
-  private async pruneStaleSubscribers(): Promise<void> {
-    const config = getWorkerConfig();
-    const pruneThreshold = new Date(Date.now() - config.pruneThresholdMs);
-
-    // 1. Find subscribers to prune (with queue names)
-    const toPrune = await prisma.poolPriceSubscribers.findMany({
-      where: {
-        isActive: false,
-        OR: [
-          // Subscribers that went stale and have old lastAliveAt
-          { lastAliveAt: { lt: pruneThreshold } },
-          // Subscribers that were never alive (lastAliveAt is null) and are old
-          {
-            lastAliveAt: null,
-            updatedAt: { lt: pruneThreshold },
-          },
-        ],
-      },
-      select: { id: true, queueName: true },
-    });
-
-    if (toPrune.length === 0) return;
-
-    // 2. Delete RabbitMQ queues (skip null - shouldn't happen if start() succeeded)
-    const queueNames = toPrune
-      .map((s) => s.queueName)
-      .filter((name): name is string => name !== null);
-
-    if (queueNames.length > 0) {
-      await this.deleteQueues(queueNames);
-    }
-
-    // Log warning for records without queueName (start() never completed)
-    const nullCount = toPrune.filter((s) => s.queueName === null).length;
-    if (nullCount > 0) {
-      log.warn({ count: nullCount }, 'Pruning subscribers without queueName (start never completed)');
-    }
-
-    // 3. Delete database records
-    const result = await prisma.poolPriceSubscribers.deleteMany({
-      where: { id: { in: toPrune.map((s) => s.id) } },
-    });
-
-    if (result.count > 0) {
-      log.info(
-        {
-          prunedCount: result.count,
-          queuesDeleted: queueNames.length,
-          thresholdHours: config.pruneThresholdMs / (1000 * 60 * 60),
-        },
-        'Pruned stale subscribers and queues'
-      );
-    }
-  }
-
-  /**
-   * Delete RabbitMQ queues by name.
-   *
-   * Logs warnings for queues that can't be deleted (may already be gone due to autoDelete).
-   */
-  private async deleteQueues(queueNames: string[]): Promise<void> {
-    const mqConnection = getRabbitMQConnection();
-    const channel = await mqConnection.getChannel();
-
-    for (const queueName of queueNames) {
-      try {
-        await channel.deleteQueue(queueName);
-        log.debug({ queueName }, 'Deleted RabbitMQ queue');
-      } catch (err) {
-        // Queue might already be deleted (autoDelete) - log and continue
-        log.warn(
-          {
-            queueName,
-            error: err instanceof Error ? err.message : String(err),
-          },
-          'Failed to delete queue (may already be gone)'
-        );
+    // Find pools that are subscribed but have no active positions
+    const orphanedPools: SubscribedPool[] = [];
+    for (const poolSub of this.subscribedPools.values()) {
+      if (!activePoolIds.has(poolSub.poolId)) {
+        orphanedPools.push(poolSub);
       }
     }
-  }
 
-  /**
-   * Remove pools with no active subscribers from all WebSocket subscription batches.
-   *
-   * This checks all currently subscribed pools and removes any that have no active
-   * subscribers in the database. Handles both:
-   * - Pools orphaned by stale cleanup
-   * - Pools where subscribers manually set isActive=false
-   */
-  private async removeOrphanedPoolsFromAllBatches(): Promise<void> {
-    // Collect all poolIds currently subscribed across all batches
-    const subscribedPoolIds: string[] = [];
-    for (const chainBatches of this.batchesByChain.values()) {
-      for (const batch of chainBatches) {
-        const status = batch.getStatus();
-        if (status.poolCount > 0) {
-          // Get pool IDs from our internal tracking
-          // We need to look up poolIds by address from the batch
-          const poolAddresses = batch.getPoolAddresses();
-          for (const address of poolAddresses) {
-            const poolInfo = batch.getPoolInfo(address);
-            if (poolInfo) {
-              subscribedPoolIds.push(poolInfo.poolId);
-            }
+    if (orphanedPools.length === 0) {
+      return;
+    }
+
+    log.info({ count: orphanedPools.length, msg: 'Found orphaned pools to remove from subscriptions' });
+
+    // Remove orphaned pools
+    for (const poolSub of orphanedPools) {
+      this.subscribedPools.delete(poolSub.poolAddress);
+
+      // Remove from WebSocket batch
+      const chainBatches = this.batchesByChain.get(poolSub.chainId);
+      if (chainBatches) {
+        for (const batch of chainBatches) {
+          if (batch.hasPool(poolSub.poolAddress)) {
+            await batch.removePool(poolSub.poolAddress);
+            log.info({
+              poolId: poolSub.poolId,
+              poolAddress: poolSub.poolAddress,
+              chainId: poolSub.chainId,
+              msg: 'Removed orphaned pool from subscription',
+            });
+            break;
           }
-        }
-      }
-    }
-
-    if (subscribedPoolIds.length === 0) return;
-
-    // Find which of these pools have at least one active subscriber
-    const poolsWithSubscribers = await prisma.poolPriceSubscribers.groupBy({
-      by: ['poolId'],
-      where: {
-        poolId: { in: subscribedPoolIds },
-        isActive: true,
-      },
-      _count: true,
-    });
-
-    const poolsWithActiveSubscribers = new Set(poolsWithSubscribers.map((p) => p.poolId));
-    const orphanedPoolIds = subscribedPoolIds.filter((id) => !poolsWithActiveSubscribers.has(id));
-
-    if (orphanedPoolIds.length === 0) return;
-
-    log.info({ count: orphanedPoolIds.length, msg: 'Found orphaned pools to remove from subscriptions' });
-
-    // Get pool addresses from database
-    const orphanedPools = await prisma.pool.findMany({
-      where: { id: { in: orphanedPoolIds } },
-      select: { id: true, config: true },
-    });
-
-    for (const pool of orphanedPools) {
-      const config = pool.config as { chainId?: number; address?: string };
-      if (!config.chainId || !config.address) continue;
-
-      if (!isSupportedChain(config.chainId)) continue;
-
-      const chainId = config.chainId as SupportedChainId;
-
-      // Find and remove from batch
-      const chainBatches = this.batchesByChain.get(chainId);
-      if (!chainBatches) continue;
-
-      for (const batch of chainBatches) {
-        if (batch.hasPool(config.address)) {
-          await batch.removePool(config.address);
-          log.info({
-            poolId: pool.id,
-            poolAddress: config.address,
-            chainId,
-            msg: 'Removed orphaned pool from subscription',
-          });
-          break;
         }
       }
     }

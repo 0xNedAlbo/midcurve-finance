@@ -5,11 +5,12 @@
  * Manages lifecycle: start, stop, and status reporting.
  *
  * Workers:
- * - PoolPriceSubscriber: Subscribes to Swap events from Uniswap V3 pools
- * - PositionLiquiditySubscriber: Subscribes to position events from NFPM
+ * - PoolPriceSubscriber: Subscribes to Swap events for pools with active positions
+ * - PositionLiquiditySubscriber: Subscribes to NFPM events for active positions
  *
  * Event Consumers:
- * - PositionEventHandler: Handles position.created and position.closed events
+ * - PositionEventHandler: Handles position.created, position.closed, and position.deleted
+ *   events, notifying both subscribers to dynamically update their WebSocket subscriptions
  */
 
 import { onchainDataLogger, priceLog } from '../lib/logger';
@@ -34,8 +35,12 @@ export class WorkerManager {
     this.positionLiquiditySubscriber = new PositionLiquiditySubscriber();
     this.positionEventHandler = new PositionEventHandler();
 
-    // Wire subscriber reference to event handler
-    this.positionEventHandler.setSubscriber(this.positionLiquiditySubscriber);
+    // Wire both subscribers to event handler
+    // Position events trigger updates in both:
+    // - PositionLiquiditySubscriber: NFPM event subscriptions
+    // - PoolPriceSubscriber: pool price subscriptions
+    this.positionEventHandler.setPositionSubscriber(this.positionLiquiditySubscriber);
+    this.positionEventHandler.setPoolPriceSubscriber(this.poolPriceSubscriber);
   }
 
   /**

@@ -3,6 +3,10 @@
  *
  * Single event consumer that handles position.created, position.closed, and
  * position.deleted domain events to dynamically update WebSocket subscriptions.
+ *
+ * Notifies both:
+ * - PositionLiquiditySubscriber: for position liquidity event subscriptions (NFPM)
+ * - PoolPriceSubscriber: for pool price subscriptions (Swap events)
  */
 
 import type { Channel } from 'amqplib';
@@ -15,24 +19,42 @@ import {
   type DomainEvent,
 } from '@midcurve/services';
 import type { PositionLiquiditySubscriber } from '../workers/position-liquidity-subscriber';
+import type { PoolPriceSubscriber } from '../workers/pool-price-subscriber';
 
 /**
  * Handles position.created, position.closed, and position.deleted events for WebSocket subscription management.
  *
  * Uses a single queue bound to all event patterns, dispatching based on event type.
+ * Notifies both position and pool price subscribers.
  */
 export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   readonly eventPattern = ROUTING_PATTERNS.POSITION_CREATED; // Primary binding
   readonly queueName = 'onchain-data.position-events';
 
-  private subscriber: PositionLiquiditySubscriber | null = null;
+  private positionSubscriber: PositionLiquiditySubscriber | null = null;
+  private poolPriceSubscriber: PoolPriceSubscriber | null = null;
 
   /**
-   * Set the subscriber instance to delegate events to.
+   * Set the position liquidity subscriber instance.
    * Must be called before starting the consumer.
    */
+  setPositionSubscriber(subscriber: PositionLiquiditySubscriber): void {
+    this.positionSubscriber = subscriber;
+  }
+
+  /**
+   * Set the pool price subscriber instance.
+   * Must be called before starting the consumer.
+   */
+  setPoolPriceSubscriber(subscriber: PoolPriceSubscriber): void {
+    this.poolPriceSubscriber = subscriber;
+  }
+
+  /**
+   * @deprecated Use setPositionSubscriber instead
+   */
   setSubscriber(subscriber: PositionLiquiditySubscriber): void {
-    this.subscriber = subscriber;
+    this.setPositionSubscriber(subscriber);
   }
 
   /**
@@ -66,8 +88,8 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   }
 
   async handle(event: DomainEvent<PositionJSON>, routingKey: string): Promise<void> {
-    if (!this.subscriber) {
-      this.logger.warn({ eventId: event.id }, 'No subscriber set, skipping event');
+    if (!this.positionSubscriber && !this.poolPriceSubscriber) {
+      this.logger.warn({ eventId: event.id }, 'No subscribers set, skipping event');
       return;
     }
 
@@ -78,7 +100,11 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
 
     if (event.type === 'position.created') {
       // For created events, we need the full payload for position data
-      await this.subscriber.handlePositionCreated(event.payload);
+      // Notify both subscribers in parallel
+      await Promise.all([
+        this.positionSubscriber?.handlePositionCreated(event.payload),
+        this.poolPriceSubscriber?.handlePositionCreated(event.payload),
+      ]);
     } else if (event.type === 'position.closed') {
       // For closed events, extract coordinates from routing key
       const coords = parsePositionRoutingKey(routingKey);
@@ -86,7 +112,11 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         this.logger.error({ routingKey }, 'Invalid routing key for position.closed event');
         return;
       }
-      await this.subscriber.handlePositionClosed(coords.chainId, coords.nftId);
+      // Notify both subscribers in parallel
+      await Promise.all([
+        this.positionSubscriber?.handlePositionClosed(coords.chainId, coords.nftId),
+        this.poolPriceSubscriber?.handlePositionClosed(coords.chainId, coords.nftId),
+      ]);
     } else if (event.type === 'position.deleted') {
       // For deleted events, extract coordinates from routing key
       const coords = parsePositionRoutingKey(routingKey);
@@ -94,7 +124,11 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         this.logger.error({ routingKey }, 'Invalid routing key for position.deleted event');
         return;
       }
-      await this.subscriber.handlePositionDeleted(coords.chainId, coords.nftId);
+      // Notify both subscribers in parallel
+      await Promise.all([
+        this.positionSubscriber?.handlePositionDeleted(coords.chainId, coords.nftId),
+        this.poolPriceSubscriber?.handlePositionDeleted(coords.chainId, coords.nftId),
+      ]);
     } else {
       this.logger.warn({ eventType: event.type }, 'Unknown position event type');
     }
