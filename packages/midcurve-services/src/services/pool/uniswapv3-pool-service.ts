@@ -26,7 +26,7 @@ import type {
   UpdateUniswapV3PoolInput,
 } from '../types/pool/pool-input.js';
 import { PoolService } from './pool-service.js';
-import type { PoolDbResult } from './pool-service.js';
+import type { PoolDbResult, PrismaTransactionClient } from './pool-service.js';
 import {
   readPoolConfig,
   readPoolState,
@@ -378,20 +378,25 @@ export class UniswapV3PoolService extends PoolService {
    * use discover() which handles token discovery and pool state fetching.
    *
    * @param input - Pool data to create (with token0Id, token1Id)
+   * @param tx - Optional Prisma transaction client for batching operations
    * @returns The created pool with full Token objects
    * @throws Error if address format is invalid
    */
   async create(
-    input: CreateUniswapV3PoolInput
+    input: CreateUniswapV3PoolInput,
+    tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool> {
     log.methodEntry(this.logger, 'create', {
       address: input.config.address,
       chainId: input.config.chainId,
       token0Id: input.token0Id,
       token1Id: input.token1Id,
+      inTransaction: !!tx,
     });
 
     try {
+      const client = tx ?? this.prisma;
+
       // Validate and normalize pool address
       if (!isValidAddress(input.config.address)) {
         const error = new Error(
@@ -435,7 +440,7 @@ export class UniswapV3PoolService extends PoolService {
         poolType: input.poolType,
       });
 
-      const result = await this.prisma.pool.create({
+      const result = await client.pool.create({
         data: {
           protocol: input.protocol,
           poolType: input.poolType,
@@ -480,15 +485,20 @@ export class UniswapV3PoolService extends PoolService {
    * - Pool is not uniswapv3 protocol
    *
    * @param id - Pool ID
+   * @param tx - Optional Prisma transaction client for batching operations
    * @returns Pool if found and is uniswapv3 protocol, null otherwise
    */
-  override async findById(id: string): Promise<UniswapV3Pool | null> {
-    log.methodEntry(this.logger, 'findById', { id });
+  override async findById(
+    id: string,
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3Pool | null> {
+    log.methodEntry(this.logger, 'findById', { id, inTransaction: !!tx });
 
     try {
+      const client = tx ?? this.prisma;
       log.dbOperation(this.logger, 'findUnique', 'Pool', { id });
 
-      const result = await this.prisma.pool.findUnique({
+      const result = await client.pool.findUnique({
         where: { id },
         include: {
           token0: true,
@@ -529,16 +539,20 @@ export class UniswapV3PoolService extends PoolService {
    *
    * @param id - Pool ID
    * @param input - Update input with optional fields
+   * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool with full Token objects
    * @throws Error if pool not found or not uniswapv3 protocol
    */
   async update(
     id: string,
-    input: UpdateUniswapV3PoolInput
+    input: UpdateUniswapV3PoolInput,
+    tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'update', { id, input });
+    log.methodEntry(this.logger, 'update', { id, input, inTransaction: !!tx });
 
     try {
+      const client = tx ?? this.prisma;
+
       // Build update data
       const data: Record<string, unknown> = {};
 
@@ -549,7 +563,7 @@ export class UniswapV3PoolService extends PoolService {
       // Handle config update with address normalization
       if (input.config !== undefined) {
         // Get existing pool to merge with partial config
-        const existing = await this.findById(id);
+        const existing = await this.findById(id, tx);
         if (!existing) {
           const error = new Error(`Pool ${id} not found`);
           log.methodError(this.logger, 'update', error, { id });
@@ -602,7 +616,7 @@ export class UniswapV3PoolService extends PoolService {
       // Handle state update
       if (input.state !== undefined) {
         // Get existing pool to merge with partial state
-        const existing = await this.findById(id);
+        const existing = await this.findById(id, tx);
         if (!existing) {
           const error = new Error(`Pool ${id} not found`);
           log.methodError(this.logger, 'update', error, { id });
@@ -619,7 +633,7 @@ export class UniswapV3PoolService extends PoolService {
 
       log.dbOperation(this.logger, 'update', 'Pool', { id, fields: Object.keys(data) });
 
-      const result = await this.prisma.pool.update({
+      const result = await client.pool.update({
         where: { id },
         data,
         include: {
@@ -648,18 +662,21 @@ export class UniswapV3PoolService extends PoolService {
    * Silently succeeds if pool doesn't exist (idempotent).
    *
    * @param id - Pool ID
+   * @param tx - Optional Prisma transaction client for batching operations
    * @returns Promise that resolves when deletion is complete
    * @throws Error if pool exists but is not uniswapv3 protocol
    * @throws Error if pool has dependent positions
    */
-  override async delete(id: string): Promise<void> {
-    log.methodEntry(this.logger, 'delete', { id });
+  override async delete(id: string, tx?: PrismaTransactionClient): Promise<void> {
+    log.methodEntry(this.logger, 'delete', { id, inTransaction: !!tx });
 
     try {
+      const client = tx ?? this.prisma;
+
       // Check if pool exists and verify protocol type
       log.dbOperation(this.logger, 'findUnique', 'Pool', { id });
 
-      const existing = await this.prisma.pool.findUnique({
+      const existing = await client.pool.findUnique({
         where: { id },
         include: {
           positions: {
@@ -693,7 +710,7 @@ export class UniswapV3PoolService extends PoolService {
       }
 
       // Call base implementation
-      await super.delete(id);
+      await super.delete(id, tx);
 
       log.methodExit(this.logger, 'delete', { id, deleted: true });
     } catch (error) {
@@ -715,103 +732,37 @@ export class UniswapV3PoolService extends PoolService {
    * Config fields (address, token addresses, fee, tickSpacing) are immutable and not updated.
    *
    * @param id - Pool ID
+   * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool with fresh on-chain state and full Token objects
    * @throws Error if pool not found
    * @throws Error if pool is not uniswapv3 protocol
    * @throws Error if chain is not supported
    * @throws Error if on-chain read fails
    */
-  async refresh(id: string): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'refresh', { id });
+  async refresh(id: string, tx?: PrismaTransactionClient): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'refresh', { id, inTransaction: !!tx });
 
     try {
-      // 1. Get existing pool to verify it exists and get config
-      const existing = await this.findById(id);
+      // Delegate to refreshPoolState for the heavy lifting
+      await this.refreshPoolState(id, tx);
 
-      if (!existing) {
-        const error = new Error(`Pool not found: ${id}`);
+      // Return the updated pool
+      const updated = await this.findById(id, tx);
+      if (!updated) {
+        // This shouldn't happen since refreshPoolState would have thrown
+        const error = new Error(`Pool not found after refresh: ${id}`);
         log.methodError(this.logger, 'refresh', error, { id });
         throw error;
       }
 
-      this.logger.debug(
-        {
-          id,
-          address: existing.address,
-          chainId: existing.chainId,
-        },
-        'Refreshing pool state from on-chain data'
-      );
-
-      // 2. Verify chain is supported
-      if (!this.evmConfig.isChainSupported(existing.chainId)) {
-        const error = new Error(
-          `Chain ${existing.chainId} is not supported or not configured. Please configure RPC_URL_* environment variable.`
-        );
-        log.methodError(this.logger, 'refresh', error, { id, chainId: existing.chainId });
-        throw error;
-      }
-
-      // 3. Read fresh state from on-chain
-      const client = this.evmConfig.getPublicClient(existing.chainId);
-
-      this.logger.debug(
-        { id, address: existing.address, chainId: existing.chainId },
-        'Reading fresh pool state from contract'
-      );
-
-      let freshState: UniswapV3PoolState;
-      try {
-        freshState = await readPoolState(client, existing.address);
-      } catch (error) {
-        const wrappedError = new Error(
-          `Failed to read pool state from contract at ${existing.address} on chain ${existing.chainId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-        log.methodError(this.logger, 'refresh', wrappedError, {
-          id,
-          address: existing.address,
-          chainId: existing.chainId,
-        });
-        throw wrappedError;
-      }
-
-      this.logger.info(
-        {
-          id,
-          address: existing.address,
-          chainId: existing.chainId,
-          sqrtPriceX96: freshState.sqrtPriceX96.toString(),
-          liquidity: freshState.liquidity.toString(),
-          currentTick: freshState.currentTick,
-        },
-        'Fresh pool state read from contract'
-      );
-
-      // 4. Update pool state using update() method
-      const updated = await this.update(id, {
-        state: freshState,
-      });
-
-      this.logger.info(
-        {
-          id,
-          address: existing.address,
-          chainId: existing.chainId,
-        },
-        'Pool state refreshed successfully'
-      );
-
       log.methodExit(this.logger, 'refresh', { id });
       return updated;
     } catch (error) {
-      // Only log if not already logged
+      // Only log if not already logged by refreshPoolState
       if (
         !(error instanceof Error &&
           (error.message.includes('not found') ||
-           error.message.includes('not supported') ||
-           error.message.includes('Failed to read')))
+           error.message.includes('not configured')))
       ) {
         log.methodError(this.logger, 'refresh', error as Error, { id });
       }
@@ -920,23 +871,631 @@ export class UniswapV3PoolService extends PoolService {
   }
 
   /**
+   * Update pool price in the database.
+   *
+   * Simply persists the provided sqrtPriceX96 and currentTick to the database
+   * without making any RPC calls.
+   *
+   * @param id - Pool database ID
+   * @param priceData - Price data { sqrtPriceX96: bigint, currentTick: number }
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Updated pool
+   */
+  async setPoolPrice(
+    id: string,
+    priceData: { sqrtPriceX96: bigint; currentTick: number },
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'setPoolPrice', { id, inTransaction: !!tx });
+
+    try {
+      const updated = await this.update(
+        id,
+        {
+          state: {
+            sqrtPriceX96: priceData.sqrtPriceX96,
+            currentTick: priceData.currentTick,
+          },
+        },
+        tx
+      );
+
+      this.logger.debug(
+        {
+          id,
+          sqrtPriceX96: priceData.sqrtPriceX96.toString(),
+          currentTick: priceData.currentTick,
+        },
+        'Pool price updated'
+      );
+
+      log.methodExit(this.logger, 'setPoolPrice', { id });
+      return updated;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes('not found'))) {
+        log.methodError(this.logger, 'setPoolPrice', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refresh pool price from on-chain data by pool ID.
+   *
+   * Fetches the current price from on-chain and persists it to the database.
+   *
+   * @param id - Pool database ID
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Current price data { sqrtPriceX96: string, currentTick: number }
+   * @throws Error if pool not found
+   * @throws Error if chain is not supported
+   * @throws Error if on-chain read fails
+   */
+  async refreshPoolPrice(
+    id: string,
+    tx?: PrismaTransactionClient
+  ): Promise<{ sqrtPriceX96: string; currentTick: number }> {
+    log.methodEntry(this.logger, 'refreshPoolPrice', { id, inTransaction: !!tx });
+
+    try {
+      // 1. Get existing pool to get address and chainId
+      const existing = await this.findById(id);
+      if (!existing) {
+        const error = new Error(`Pool not found: ${id}`);
+        log.methodError(this.logger, 'refreshPoolPrice', error, { id });
+        throw error;
+      }
+
+      // 2. Call getPoolPrice with the pool's address and chainId
+      const priceData = await this.getPoolPrice(
+        existing.chainId,
+        existing.address
+      );
+
+      // 3. Persist to database
+      await this.setPoolPrice(
+        id,
+        {
+          sqrtPriceX96: BigInt(priceData.sqrtPriceX96),
+          currentTick: priceData.currentTick,
+        },
+        tx
+      );
+
+      log.methodExit(this.logger, 'refreshPoolPrice', {
+        id,
+        sqrtPriceX96: priceData.sqrtPriceX96,
+        currentTick: priceData.currentTick,
+      });
+
+      return priceData;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes('not found'))) {
+        log.methodError(this.logger, 'refreshPoolPrice', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update pool liquidity in the database.
+   *
+   * Simply persists the provided liquidity to the database
+   * without making any RPC calls.
+   *
+   * @param id - Pool database ID
+   * @param liquidity - Pool liquidity value
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Updated pool
+   */
+  async setPoolLiquidity(
+    id: string,
+    liquidity: bigint,
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'setPoolLiquidity', { id, inTransaction: !!tx });
+
+    try {
+      const updated = await this.update(
+        id,
+        {
+          state: {
+            liquidity,
+          },
+        },
+        tx
+      );
+
+      this.logger.debug(
+        {
+          id,
+          liquidity: liquidity.toString(),
+        },
+        'Pool liquidity updated'
+      );
+
+      log.methodExit(this.logger, 'setPoolLiquidity', { id });
+      return updated;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes('not found'))) {
+        log.methodError(this.logger, 'setPoolLiquidity', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refresh pool liquidity from on-chain data by pool ID.
+   *
+   * Fetches the current liquidity from on-chain and persists it to the database.
+   *
+   * @param id - Pool database ID
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Current liquidity as string
+   * @throws Error if pool not found
+   * @throws Error if chain is not supported
+   * @throws Error if on-chain read fails
+   */
+  async refreshPoolLiquidity(
+    id: string,
+    tx?: PrismaTransactionClient
+  ): Promise<string> {
+    log.methodEntry(this.logger, 'refreshPoolLiquidity', { id, inTransaction: !!tx });
+
+    try {
+      // 1. Get existing pool to get address and chainId
+      const existing = await this.findById(id);
+      if (!existing) {
+        const error = new Error(`Pool not found: ${id}`);
+        log.methodError(this.logger, 'refreshPoolLiquidity', error, { id });
+        throw error;
+      }
+
+      // 2. Verify chain is supported
+      if (!this.evmConfig.isChainSupported(existing.chainId)) {
+        const error = new Error(
+          `Chain ${existing.chainId} is not configured. Supported chains: ${this.evmConfig
+            .getSupportedChainIds()
+            .join(', ')}`
+        );
+        log.methodError(this.logger, 'refreshPoolLiquidity', error, {
+          id,
+          chainId: existing.chainId,
+        });
+        throw error;
+      }
+
+      // 3. Get public client for the chain
+      const client = this.evmConfig.getPublicClient(existing.chainId);
+      const poolAddress = existing.address as `0x${string}`;
+
+      // 4. Read liquidity from pool contract
+      this.logger.debug(
+        { id, poolAddress, chainId: existing.chainId },
+        'Reading liquidity from pool contract'
+      );
+
+      const liquidity = (await client.readContract({
+        address: poolAddress,
+        abi: uniswapV3PoolAbi,
+        functionName: 'liquidity',
+      })) as bigint;
+
+      // 5. Persist to database
+      await this.setPoolLiquidity(id, liquidity, tx);
+
+      this.logger.info(
+        {
+          id,
+          poolAddress,
+          chainId: existing.chainId,
+          liquidity: liquidity.toString(),
+        },
+        'Pool liquidity refreshed and persisted'
+      );
+
+      log.methodExit(this.logger, 'refreshPoolLiquidity', {
+        id,
+        liquidity: liquidity.toString(),
+      });
+
+      return liquidity.toString();
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          (error.message.includes('not found') ||
+            error.message.includes('not configured'))
+        )
+      ) {
+        log.methodError(this.logger, 'refreshPoolLiquidity', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update pool fee growth in the database.
+   *
+   * Simply persists the provided feeGrowthGlobal0 and feeGrowthGlobal1 to the database
+   * without making any RPC calls.
+   *
+   * @param id - Pool database ID
+   * @param feeGrowthData - Fee growth data { feeGrowthGlobal0: bigint, feeGrowthGlobal1: bigint }
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Updated pool
+   */
+  async setPoolFeeGrowth(
+    id: string,
+    feeGrowthData: { feeGrowthGlobal0: bigint; feeGrowthGlobal1: bigint },
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'setPoolFeeGrowth', { id, inTransaction: !!tx });
+
+    try {
+      const updated = await this.update(
+        id,
+        {
+          state: {
+            feeGrowthGlobal0: feeGrowthData.feeGrowthGlobal0,
+            feeGrowthGlobal1: feeGrowthData.feeGrowthGlobal1,
+          },
+        },
+        tx
+      );
+
+      this.logger.debug(
+        {
+          id,
+          feeGrowthGlobal0: feeGrowthData.feeGrowthGlobal0.toString(),
+          feeGrowthGlobal1: feeGrowthData.feeGrowthGlobal1.toString(),
+        },
+        'Pool fee growth updated'
+      );
+
+      log.methodExit(this.logger, 'setPoolFeeGrowth', { id });
+      return updated;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes('not found'))) {
+        log.methodError(this.logger, 'setPoolFeeGrowth', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refresh pool fee growth from on-chain data by pool ID.
+   *
+   * Fetches the current fee growth values from on-chain and persists them to the database.
+   *
+   * @param id - Pool database ID
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Current fee growth data { feeGrowthGlobal0: string, feeGrowthGlobal1: string }
+   * @throws Error if pool not found
+   * @throws Error if chain is not supported
+   * @throws Error if on-chain read fails
+   */
+  async refreshPoolFeeGrowth(
+    id: string,
+    tx?: PrismaTransactionClient
+  ): Promise<{ feeGrowthGlobal0: string; feeGrowthGlobal1: string }> {
+    log.methodEntry(this.logger, 'refreshPoolFeeGrowth', { id, inTransaction: !!tx });
+
+    try {
+      // 1. Get existing pool to get address and chainId
+      const existing = await this.findById(id);
+      if (!existing) {
+        const error = new Error(`Pool not found: ${id}`);
+        log.methodError(this.logger, 'refreshPoolFeeGrowth', error, { id });
+        throw error;
+      }
+
+      // 2. Verify chain is supported
+      if (!this.evmConfig.isChainSupported(existing.chainId)) {
+        const error = new Error(
+          `Chain ${existing.chainId} is not configured. Supported chains: ${this.evmConfig
+            .getSupportedChainIds()
+            .join(', ')}`
+        );
+        log.methodError(this.logger, 'refreshPoolFeeGrowth', error, {
+          id,
+          chainId: existing.chainId,
+        });
+        throw error;
+      }
+
+      // 3. Get public client for the chain
+      const client = this.evmConfig.getPublicClient(existing.chainId);
+      const poolAddress = existing.address as `0x${string}`;
+
+      // 4. Read feeGrowthGlobal0X128 and feeGrowthGlobal1X128 in parallel
+      this.logger.debug(
+        { id, poolAddress, chainId: existing.chainId },
+        'Reading fee growth from pool contract'
+      );
+
+      const [feeGrowthGlobal0, feeGrowthGlobal1] = await Promise.all([
+        client.readContract({
+          address: poolAddress,
+          abi: uniswapV3PoolAbi,
+          functionName: 'feeGrowthGlobal0X128',
+        }) as Promise<bigint>,
+        client.readContract({
+          address: poolAddress,
+          abi: uniswapV3PoolAbi,
+          functionName: 'feeGrowthGlobal1X128',
+        }) as Promise<bigint>,
+      ]);
+
+      // 5. Persist to database
+      await this.setPoolFeeGrowth(
+        id,
+        {
+          feeGrowthGlobal0,
+          feeGrowthGlobal1,
+        },
+        tx
+      );
+
+      this.logger.info(
+        {
+          id,
+          poolAddress,
+          chainId: existing.chainId,
+          feeGrowthGlobal0: feeGrowthGlobal0.toString(),
+          feeGrowthGlobal1: feeGrowthGlobal1.toString(),
+        },
+        'Pool fee growth refreshed and persisted'
+      );
+
+      log.methodExit(this.logger, 'refreshPoolFeeGrowth', {
+        id,
+        feeGrowthGlobal0: feeGrowthGlobal0.toString(),
+        feeGrowthGlobal1: feeGrowthGlobal1.toString(),
+      });
+
+      return {
+        feeGrowthGlobal0: feeGrowthGlobal0.toString(),
+        feeGrowthGlobal1: feeGrowthGlobal1.toString(),
+      };
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          (error.message.includes('not found') ||
+            error.message.includes('not configured'))
+        )
+      ) {
+        log.methodError(this.logger, 'refreshPoolFeeGrowth', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update complete pool state in the database.
+   *
+   * Simply persists all state fields to the database without making any RPC calls.
+   * This is the most efficient way to update all state fields at once.
+   *
+   * @param id - Pool database ID
+   * @param stateData - Complete state data
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Updated pool
+   */
+  async setPoolState(
+    id: string,
+    stateData: {
+      sqrtPriceX96: bigint;
+      currentTick: number;
+      liquidity: bigint;
+      feeGrowthGlobal0: bigint;
+      feeGrowthGlobal1: bigint;
+    },
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'setPoolState', { id, inTransaction: !!tx });
+
+    try {
+      const updated = await this.update(
+        id,
+        {
+          state: {
+            sqrtPriceX96: stateData.sqrtPriceX96,
+            currentTick: stateData.currentTick,
+            liquidity: stateData.liquidity,
+            feeGrowthGlobal0: stateData.feeGrowthGlobal0,
+            feeGrowthGlobal1: stateData.feeGrowthGlobal1,
+          },
+        },
+        tx
+      );
+
+      this.logger.debug(
+        {
+          id,
+          sqrtPriceX96: stateData.sqrtPriceX96.toString(),
+          currentTick: stateData.currentTick,
+          liquidity: stateData.liquidity.toString(),
+          feeGrowthGlobal0: stateData.feeGrowthGlobal0.toString(),
+          feeGrowthGlobal1: stateData.feeGrowthGlobal1.toString(),
+        },
+        'Pool state updated'
+      );
+
+      log.methodExit(this.logger, 'setPoolState', { id });
+      return updated;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes('not found'))) {
+        log.methodError(this.logger, 'setPoolState', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refresh complete pool state from on-chain data by pool ID.
+   *
+   * Fetches all state values (price, liquidity, fee growth) from on-chain
+   * in parallel and persists them to the database in a single update.
+   *
+   * This is more efficient than calling individual refresh methods separately
+   * as it batches both RPC reads and database writes.
+   *
+   * @param id - Pool database ID
+   * @param tx - Optional Prisma transaction client for batching operations
+   * @returns Complete state data with all fields as strings
+   * @throws Error if pool not found
+   * @throws Error if chain is not supported
+   * @throws Error if on-chain read fails
+   */
+  async refreshPoolState(
+    id: string,
+    tx?: PrismaTransactionClient
+  ): Promise<{
+    sqrtPriceX96: string;
+    currentTick: number;
+    liquidity: string;
+    feeGrowthGlobal0: string;
+    feeGrowthGlobal1: string;
+  }> {
+    log.methodEntry(this.logger, 'refreshPoolState', { id, inTransaction: !!tx });
+
+    try {
+      // 1. Get existing pool to get address and chainId
+      const existing = await this.findById(id);
+      if (!existing) {
+        const error = new Error(`Pool not found: ${id}`);
+        log.methodError(this.logger, 'refreshPoolState', error, { id });
+        throw error;
+      }
+
+      // 2. Verify chain is supported
+      if (!this.evmConfig.isChainSupported(existing.chainId)) {
+        const error = new Error(
+          `Chain ${existing.chainId} is not configured. Supported chains: ${this.evmConfig
+            .getSupportedChainIds()
+            .join(', ')}`
+        );
+        log.methodError(this.logger, 'refreshPoolState', error, {
+          id,
+          chainId: existing.chainId,
+        });
+        throw error;
+      }
+
+      // 3. Get public client for the chain
+      const client = this.evmConfig.getPublicClient(existing.chainId);
+      const poolAddress = existing.address as `0x${string}`;
+
+      // 4. Read all state values in parallel
+      this.logger.debug(
+        { id, poolAddress, chainId: existing.chainId },
+        'Reading complete pool state from contract'
+      );
+
+      const [slot0Data, liquidity, feeGrowthGlobal0, feeGrowthGlobal1] =
+        await Promise.all([
+          client.readContract({
+            address: poolAddress,
+            abi: uniswapV3PoolAbi,
+            functionName: 'slot0',
+          }) as Promise<
+            readonly [bigint, number, number, number, number, number, boolean]
+          >,
+          client.readContract({
+            address: poolAddress,
+            abi: uniswapV3PoolAbi,
+            functionName: 'liquidity',
+          }) as Promise<bigint>,
+          client.readContract({
+            address: poolAddress,
+            abi: uniswapV3PoolAbi,
+            functionName: 'feeGrowthGlobal0X128',
+          }) as Promise<bigint>,
+          client.readContract({
+            address: poolAddress,
+            abi: uniswapV3PoolAbi,
+            functionName: 'feeGrowthGlobal1X128',
+          }) as Promise<bigint>,
+        ]);
+
+      const sqrtPriceX96 = slot0Data[0];
+      const currentTick = slot0Data[1];
+
+      // 5. Persist all state to database in single update
+      await this.setPoolState(
+        id,
+        {
+          sqrtPriceX96,
+          currentTick,
+          liquidity,
+          feeGrowthGlobal0,
+          feeGrowthGlobal1,
+        },
+        tx
+      );
+
+      this.logger.info(
+        {
+          id,
+          poolAddress,
+          chainId: existing.chainId,
+          sqrtPriceX96: sqrtPriceX96.toString(),
+          currentTick,
+          liquidity: liquidity.toString(),
+          feeGrowthGlobal0: feeGrowthGlobal0.toString(),
+          feeGrowthGlobal1: feeGrowthGlobal1.toString(),
+        },
+        'Pool state refreshed and persisted'
+      );
+
+      log.methodExit(this.logger, 'refreshPoolState', { id });
+
+      return {
+        sqrtPriceX96: sqrtPriceX96.toString(),
+        currentTick,
+        liquidity: liquidity.toString(),
+        feeGrowthGlobal0: feeGrowthGlobal0.toString(),
+        feeGrowthGlobal1: feeGrowthGlobal1.toString(),
+      };
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          (error.message.includes('not found') ||
+            error.message.includes('not configured'))
+        )
+      ) {
+        log.methodError(this.logger, 'refreshPoolState', error as Error, { id });
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Find pool by address and chain
    *
-   * @param address - Pool address (normalized)
+   * @param address - Pool address (normalized or not - will be normalized internally)
    * @param chainId - Chain ID
+   * @param tx - Optional Prisma transaction client for batching operations
    * @returns Pool with full Token objects if found, null otherwise
    */
-  private async findByAddressAndChain(
+  async findByAddressAndChain(
     address: string,
-    chainId: number
+    chainId: number,
+    tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool | null> {
     log.dbOperation(this.logger, 'findFirst', 'Pool', {
       address,
       chainId,
       protocol: 'uniswapv3',
+      inTransaction: !!tx,
     });
 
-    const result = await this.prisma.pool.findFirst({
+    const client = tx ?? this.prisma;
+
+    const result = await client.pool.findFirst({
       where: {
         protocol: 'uniswapv3',
         // Query config JSON field for address and chainId

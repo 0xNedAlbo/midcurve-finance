@@ -42,6 +42,6 @@ export { RuleRegistry } from './registry';
 // =============================================================================
 // Rule Implementations
 // =============================================================================
-// Export your rule implementations here as they are created.
-// Example:
-// export { FetchLedgerEventsRule } from './fetch-ledger-events-when-position-created';
+
+// Pool price event handler - updates position metrics when pool prices change
+export { UpdatePositionMetricsOnPoolPriceRule } from './update-position-metrics-on-pool-price';

@@ -12,3 +12,6 @@ export * from './automation/index.js';
 
 // Re-export request scheduler utilities (services-specific)
 export * from './request-scheduler/index.js';
+
+// Re-export Uniswap V3 specific utilities (pool ABI, ledger calculations)
+export * from './uniswapv3/index.js';

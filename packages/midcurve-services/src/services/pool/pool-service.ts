@@ -25,6 +25,15 @@ import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
 /**
+ * Prisma transaction client type for use in transactional operations.
+ * This is the client type available within a $transaction callback.
+ */
+export type PrismaTransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+/**
  * Dependencies for PoolService
  * All dependencies are optional and will use defaults if not provided
  */
@@ -176,15 +185,21 @@ export abstract class PoolService {
    * handle token fetching appropriately.
    *
    * @param id - Pool database ID
+   * @param tx - Optional transaction client for atomic operations
    * @returns The pool if found, null otherwise
    */
-  async findById(id: string): Promise<PoolInterface | null> {
+  async findById(
+    id: string,
+    tx?: PrismaTransactionClient
+  ): Promise<PoolInterface | null> {
     log.methodEntry(this.logger, 'findById', { id });
+
+    const client = tx ?? this.prisma;
 
     try {
       log.dbOperation(this.logger, 'findUnique', 'Pool', { id });
 
-      const result = await this.prisma.pool.findUnique({
+      const result = await client.pool.findUnique({
         where: { id },
         include: {
           token0: true,
@@ -227,15 +242,18 @@ export abstract class PoolService {
    * returns silently without error.
    *
    * @param id - Pool database ID
+   * @param tx - Optional transaction client for atomic operations
    */
-  async delete(id: string): Promise<void> {
+  async delete(id: string, tx?: PrismaTransactionClient): Promise<void> {
     log.methodEntry(this.logger, 'delete', { id });
+
+    const client = tx ?? this.prisma;
 
     try {
       // Verify pool exists
       log.dbOperation(this.logger, 'findUnique', 'Pool', { id });
 
-      const existing = await this.prisma.pool.findUnique({
+      const existing = await client.pool.findUnique({
         where: { id },
       });
 
@@ -248,7 +266,7 @@ export abstract class PoolService {
       // Delete pool
       log.dbOperation(this.logger, 'delete', 'Pool', { id });
 
-      await this.prisma.pool.delete({
+      await client.pool.delete({
         where: { id },
       });
 

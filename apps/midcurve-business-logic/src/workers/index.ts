@@ -13,7 +13,11 @@
 
 import { businessLogicLogger, ruleLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
-import { RuleRegistry, type BusinessRuleStatus } from '../rules';
+import {
+  RuleRegistry,
+  UpdatePositionMetricsOnPoolPriceRule,
+  type BusinessRuleStatus,
+} from '../rules';
 
 const log = businessLogicLogger.child({ component: 'RuleManager' });
 
@@ -43,22 +47,13 @@ export class RuleManager {
   /**
    * Register all business rules.
    *
-   * Add new rules here as they are implemented:
-   *
-   * ```typescript
-   * import { FetchLedgerEventsRule } from '../rules/fetch-ledger-events-when-position-created';
-   *
-   * private registerRules(): void {
-   *   this.registry.register(new FetchLedgerEventsRule());
-   *   // Add more rules here...
-   * }
-   * ```
+   * Add new rules here as they are implemented.
    */
   private registerRules(): void {
-    // Rules will be registered here as they are created
-    // Example:
-    // this.registry.register(new FetchLedgerEventsRule());
-    log.info({ msg: 'No rules registered yet - add rules in RuleManager.registerRules()' });
+    // Position metrics updater - updates value, PnL, and unclaimed fees on pool price changes
+    this.registry.register(new UpdatePositionMetricsOnPoolPriceRule());
+
+    log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
 
   /**
