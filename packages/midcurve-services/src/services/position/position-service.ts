@@ -24,6 +24,8 @@ import type {
 } from '../types/position/position-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
+import { getDomainEventPublisher, createDomainEvent } from '../../events/index.js';
+import type { DomainEventPublisher } from '../../events/index.js';
 
 /**
  * Dependencies for PositionService
@@ -35,6 +37,12 @@ export interface PositionServiceDependencies {
    * If not provided, a new PrismaClient instance will be created
    */
   prisma?: PrismaClient;
+
+  /**
+   * Domain event publisher for publishing position events
+   * If not provided, uses the singleton instance
+   */
+  eventPublisher?: DomainEventPublisher;
 }
 
 /**
@@ -82,6 +90,7 @@ export interface PositionDbResult {
 export abstract class PositionService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
+  protected readonly eventPublisher: DomainEventPublisher;
 
   /**
    * Protocol identifier for this service
@@ -94,10 +103,12 @@ export abstract class PositionService {
    *
    * @param dependencies - Optional dependencies object
    * @param dependencies.prisma - Prisma client instance (creates default if not provided)
+   * @param dependencies.eventPublisher - Domain event publisher (uses singleton if not provided)
    */
   constructor(dependencies: PositionServiceDependencies = {}) {
     this._prisma = dependencies.prisma ?? new PrismaClient();
     this.logger = createServiceLogger(this.constructor.name);
+    this.eventPublisher = dependencies.eventPublisher ?? getDomainEventPublisher();
   }
 
   /**
@@ -277,41 +288,68 @@ export abstract class PositionService {
         positionHash,
       });
 
-      const result = await this.prisma.position.create({
-        data: {
-          protocol: input.protocol,
-          positionType: input.positionType,
-          userId: input.userId,
-          poolId: input.poolId,
-          isToken0Quote: input.isToken0Quote,
-          positionHash,
-          config: configDB as object,
-          state: stateDB as object,
-          // Default calculated values
-          currentValue: zeroValue,
-          currentCostBasis: zeroValue,
-          realizedPnl: zeroValue,
-          unrealizedPnl: zeroValue,
-          // Cash flow fields for non-AMM protocols (always 0 for UniswapV3)
-          realizedCashflow: zeroValue,
-          unrealizedCashflow: zeroValue,
-          collectedFees: zeroValue,
-          unClaimedFees: zeroValue,
-          lastFeesCollectedAt: now,
-          priceRangeLower: zeroValue,
-          priceRangeUpper: zeroValue,
-          positionOpenedAt: input.positionOpenedAt ?? now,
-          positionClosedAt: null,
-          isActive: true,
-        },
-        include: {
-          pool: {
-            include: {
-              token0: true,
-              token1: true,
+      // Wrap position creation + event publishing in a transaction for atomicity
+      // If position creation fails -> no event
+      // If event write fails -> position creation rolled back
+      const result = await this.prisma.$transaction(async (tx) => {
+        // 1. Create the position
+        const positionRow = await tx.position.create({
+          data: {
+            protocol: input.protocol,
+            positionType: input.positionType,
+            userId: input.userId,
+            poolId: input.poolId,
+            isToken0Quote: input.isToken0Quote,
+            positionHash,
+            config: configDB as object,
+            state: stateDB as object,
+            // Default calculated values
+            currentValue: zeroValue,
+            currentCostBasis: zeroValue,
+            realizedPnl: zeroValue,
+            unrealizedPnl: zeroValue,
+            // Cash flow fields for non-AMM protocols (always 0 for UniswapV3)
+            realizedCashflow: zeroValue,
+            unrealizedCashflow: zeroValue,
+            collectedFees: zeroValue,
+            unClaimedFees: zeroValue,
+            lastFeesCollectedAt: now,
+            priceRangeLower: zeroValue,
+            priceRangeUpper: zeroValue,
+            positionOpenedAt: input.positionOpenedAt ?? now,
+            positionClosedAt: null,
+            isActive: true,
+          },
+          include: {
+            pool: {
+              include: {
+                token0: true,
+                token1: true,
+              },
             },
           },
-        },
+        });
+
+        // 2. Map to position entity and publish position.created event
+        const position = this.mapToPosition(positionRow as PositionDbResult);
+
+        const event = createDomainEvent({
+          type: 'position.created',
+          entityType: 'position',
+          entityId: position.id,
+          userId: input.userId,
+          payload: position.toJSON(),
+          source: 'api',
+        });
+
+        await this.eventPublisher.publish(event, tx);
+
+        this.logger.debug(
+          { eventId: event.id, positionId: position.id },
+          'Position created event published to outbox'
+        );
+
+        return positionRow;
       });
 
       // Map database result to Position type
