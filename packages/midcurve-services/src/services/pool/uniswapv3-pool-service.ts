@@ -25,8 +25,6 @@ import type {
   CreateUniswapV3PoolInput,
   UpdateUniswapV3PoolInput,
 } from '../types/pool/pool-input.js';
-import { PoolService } from './pool-service.js';
-import type { PoolDbResult, PrismaTransactionClient } from './pool-service.js';
 import {
   readPoolConfig,
   readPoolState,
@@ -35,7 +33,64 @@ import {
 } from '../../utils/uniswapv3/index.js';
 import { EvmConfig } from '../../config/evm.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
-import { log } from '../../logging/index.js';
+import { createServiceLogger, log } from '../../logging/index.js';
+import type { ServiceLogger } from '../../logging/index.js';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+/**
+ * Prisma transaction client type for use in transactional operations.
+ * This is the client type available within a $transaction callback.
+ */
+export type PrismaTransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+/**
+ * Generic pool result from database (before conversion to class instance)
+ * Matches Prisma Pool model output with included token relations
+ */
+export interface PoolDbResult {
+  id: string;
+  protocol: string;
+  poolType: string;
+  token0Id: string;
+  token1Id: string;
+  feeBps: number;
+  config: unknown;
+  state: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+  token0?: {
+    id: string;
+    tokenType: string;
+    name: string;
+    symbol: string;
+    decimals: number;
+    logoUrl: string | null;
+    coingeckoId: string | null;
+    marketCap: number | null;
+    config: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  token1?: {
+    id: string;
+    tokenType: string;
+    name: string;
+    symbol: string;
+    decimals: number;
+    logoUrl: string | null;
+    coingeckoId: string | null;
+    marketCap: number | null;
+    config: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+}
 
 /**
  * Dependencies for UniswapV3PoolService
@@ -67,7 +122,9 @@ export interface UniswapV3PoolServiceDependencies {
  * Provides pool management for Uniswap V3 concentrated liquidity pools.
  * Returns UniswapV3Pool class instances for type-safe config/state access.
  */
-export class UniswapV3PoolService extends PoolService {
+export class UniswapV3PoolService {
+  protected readonly _prisma: PrismaClient;
+  protected readonly logger: ServiceLogger;
   protected readonly protocol = 'uniswapv3' as const;
 
   private readonly _evmConfig: EvmConfig;
@@ -82,11 +139,19 @@ export class UniswapV3PoolService extends PoolService {
    * @param dependencies.erc20TokenService - ERC-20 token service (creates default if not provided)
    */
   constructor(dependencies: UniswapV3PoolServiceDependencies = {}) {
-    super(dependencies);
+    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this.logger = createServiceLogger('UniswapV3PoolService');
     this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
     this._erc20TokenService =
       dependencies.erc20TokenService ??
-      new Erc20TokenService({ prisma: this.prisma });
+      new Erc20TokenService({ prisma: this._prisma });
+  }
+
+  /**
+   * Get the Prisma client instance
+   */
+  protected get prisma(): PrismaClient {
+    return this._prisma;
   }
 
   /**
@@ -488,7 +553,7 @@ export class UniswapV3PoolService extends PoolService {
    * @param tx - Optional Prisma transaction client for batching operations
    * @returns Pool if found and is uniswapv3 protocol, null otherwise
    */
-  override async findById(
+  async findById(
     id: string,
     tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool | null> {
@@ -667,7 +732,7 @@ export class UniswapV3PoolService extends PoolService {
    * @throws Error if pool exists but is not uniswapv3 protocol
    * @throws Error if pool has dependent positions
    */
-  override async delete(id: string, tx?: PrismaTransactionClient): Promise<void> {
+  async delete(id: string, tx?: PrismaTransactionClient): Promise<void> {
     log.methodEntry(this.logger, 'delete', { id, inTransaction: !!tx });
 
     try {
@@ -709,8 +774,14 @@ export class UniswapV3PoolService extends PoolService {
         throw error;
       }
 
-      // Call base implementation
-      await super.delete(id, tx);
+      // Delete pool
+      log.dbOperation(this.logger, 'delete', 'Pool', { id });
+      await client.pool.delete({ where: { id } });
+
+      this.logger.info(
+        { id, protocol: existing.protocol, poolType: existing.poolType },
+        'Pool deleted successfully'
+      );
 
       log.methodExit(this.logger, 'delete', { id, deleted: true });
     } catch (error) {
