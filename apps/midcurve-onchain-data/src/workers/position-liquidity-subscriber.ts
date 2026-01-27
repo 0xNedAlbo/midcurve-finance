@@ -474,4 +474,38 @@ export class PositionLiquiditySubscriber {
     log.info({ chainId: info.chainId, nftId, positionId: info.positionId }, 'Removing position from closed event');
     await this.removePositionFromBatch(info.chainId, nftId, info.positionId);
   }
+
+  /**
+   * Handle position.deleted domain event.
+   * Removes the position from WebSocket subscriptions.
+   *
+   * @param chainId - Chain ID from routing key
+   * @param nftId - NFT ID from routing key
+   */
+  async handlePositionDeleted(chainId: number, nftId: string): Promise<void> {
+    // 1. Validate chain support
+    if (!isSupportedChain(chainId)) {
+      log.debug({ chainId, nftId }, 'Unsupported chain, ignoring');
+      return;
+    }
+
+    // 2. Look up subscription info
+    const info = this.subscribedPositions.get(nftId);
+    if (!info) {
+      log.debug({ chainId, nftId }, 'Position not subscribed, skipping');
+      return;
+    }
+
+    // 3. Verify chain matches (extra safety check)
+    if (info.chainId !== chainId) {
+      log.warn(
+        { expectedChainId: info.chainId, actualChainId: chainId, nftId },
+        'Chain ID mismatch for position'
+      );
+    }
+
+    // 4. Remove from subscription
+    log.info({ chainId: info.chainId, nftId, positionId: info.positionId }, 'Removing position from deleted event');
+    await this.removePositionFromBatch(info.chainId, nftId, info.positionId);
+  }
 }

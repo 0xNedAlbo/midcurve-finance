@@ -1,8 +1,8 @@
 /**
  * Position Event Handler
  *
- * Single event consumer that handles both position.created and position.closed
- * domain events to dynamically update WebSocket subscriptions.
+ * Single event consumer that handles position.created, position.closed, and
+ * position.deleted domain events to dynamically update WebSocket subscriptions.
  */
 
 import type { Channel } from 'amqplib';
@@ -17,9 +17,9 @@ import {
 import type { PositionLiquiditySubscriber } from '../workers/position-liquidity-subscriber';
 
 /**
- * Handles position.created and position.closed events for WebSocket subscription management.
+ * Handles position.created, position.closed, and position.deleted events for WebSocket subscription management.
  *
- * Uses a single queue bound to both event patterns, dispatching based on event type.
+ * Uses a single queue bound to all event patterns, dispatching based on event type.
  */
 export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   readonly eventPattern = ROUTING_PATTERNS.POSITION_CREATED; // Primary binding
@@ -41,7 +41,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   override async start(channel?: Channel, prefetch?: number): Promise<void> {
     await super.start(channel, prefetch);
 
-    // Add additional binding for position.closed events
+    // Add additional bindings for position.closed and position.deleted events
     if (this.channel) {
       await this.channel.bindQueue(
         this.queueName,
@@ -51,6 +51,16 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
       this.logger.info(
         { pattern: ROUTING_PATTERNS.POSITION_CLOSED },
         'Added additional binding for position.closed events'
+      );
+
+      await this.channel.bindQueue(
+        this.queueName,
+        DOMAIN_EVENTS_EXCHANGE,
+        ROUTING_PATTERNS.POSITION_DELETED
+      );
+      this.logger.info(
+        { pattern: ROUTING_PATTERNS.POSITION_DELETED },
+        'Added additional binding for position.deleted events'
       );
     }
   }
@@ -77,6 +87,14 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         return;
       }
       await this.subscriber.handlePositionClosed(coords.chainId, coords.nftId);
+    } else if (event.type === 'position.deleted') {
+      // For deleted events, extract coordinates from routing key
+      const coords = parsePositionRoutingKey(routingKey);
+      if (!coords) {
+        this.logger.error({ routingKey }, 'Invalid routing key for position.deleted event');
+        return;
+      }
+      await this.subscriber.handlePositionDeleted(coords.chainId, coords.nftId);
     } else {
       this.logger.warn({ eventType: event.type }, 'Unknown position event type');
     }
