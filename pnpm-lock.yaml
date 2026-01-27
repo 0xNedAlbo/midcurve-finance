@@ -152,6 +152,43 @@ importers:
         specifier: ^4.19.0
         version: 4.21.0
 
+  apps/midcurve-business-logic:
+    dependencies:
+      '@midcurve/database':
+        specifier: workspace:^
+        version: link:../../packages/midcurve-database
+      '@midcurve/services':
+        specifier: workspace:^
+        version: link:../../packages/midcurve-services
+      '@midcurve/shared':
+        specifier: workspace:^
+        version: link:../../packages/midcurve-shared
+      amqplib:
+        specifier: ^0.10.7
+        version: 0.10.9
+      pino:
+        specifier: ^9.9.5
+        version: 9.14.0
+    devDependencies:
+      '@types/amqplib':
+        specifier: ^0.10.7
+        version: 0.10.8
+      '@types/node':
+        specifier: ^20
+        version: 20.19.25
+      eslint:
+        specifier: ^9
+        version: 9.39.1(jiti@2.6.1)
+      pino-pretty:
+        specifier: ^13.1.2
+        version: 13.1.2
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   apps/midcurve-hedges: {}
 
   apps/midcurve-onchain-data:
