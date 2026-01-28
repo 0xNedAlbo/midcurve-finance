@@ -202,7 +202,7 @@ export class UpdatePositionMetricsOnPoolPriceRule extends BusinessRule {
     }
 
     // 2. Update pool price in database
-    await this.poolService.setPoolPrice(pool.id, {
+    await this.poolService.updatePoolPrice(pool.id, {
       sqrtPriceX96,
       currentTick,
     });

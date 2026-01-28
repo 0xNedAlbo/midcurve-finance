@@ -72,6 +72,34 @@ export interface UniswapV3PositionState {
    * More accurate than tokensOwed1 as it includes fees earned since last checkpoint
    */
   unclaimedFees1: bigint;
+
+  /**
+   * Fee growth outside lower tick for token0
+   * From pool.ticks(tickLower).feeGrowthOutside0X128
+   * Updated when the tick is crossed during swaps
+   */
+  tickLowerFeeGrowthOutside0X128: bigint;
+
+  /**
+   * Fee growth outside lower tick for token1
+   * From pool.ticks(tickLower).feeGrowthOutside1X128
+   * Updated when the tick is crossed during swaps
+   */
+  tickLowerFeeGrowthOutside1X128: bigint;
+
+  /**
+   * Fee growth outside upper tick for token0
+   * From pool.ticks(tickUpper).feeGrowthOutside0X128
+   * Updated when the tick is crossed during swaps
+   */
+  tickUpperFeeGrowthOutside0X128: bigint;
+
+  /**
+   * Fee growth outside upper tick for token1
+   * From pool.ticks(tickUpper).feeGrowthOutside1X128
+   * Updated when the tick is crossed during swaps
+   */
+  tickUpperFeeGrowthOutside1X128: bigint;
 }
 
 // ============================================================================
@@ -91,6 +119,10 @@ export interface UniswapV3PositionStateJSON {
   tokensOwed1: string;
   unclaimedFees0: string;
   unclaimedFees1: string;
+  tickLowerFeeGrowthOutside0X128: string;
+  tickLowerFeeGrowthOutside1X128: string;
+  tickUpperFeeGrowthOutside0X128: string;
+  tickUpperFeeGrowthOutside1X128: string;
 }
 
 // ============================================================================
@@ -116,6 +148,14 @@ export function positionStateToJSON(
     tokensOwed1: state.tokensOwed1.toString(),
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
+    tickLowerFeeGrowthOutside0X128:
+      state.tickLowerFeeGrowthOutside0X128.toString(),
+    tickLowerFeeGrowthOutside1X128:
+      state.tickLowerFeeGrowthOutside1X128.toString(),
+    tickUpperFeeGrowthOutside0X128:
+      state.tickUpperFeeGrowthOutside0X128.toString(),
+    tickUpperFeeGrowthOutside1X128:
+      state.tickUpperFeeGrowthOutside1X128.toString(),
   };
 }
 
@@ -138,5 +178,9 @@ export function positionStateFromJSON(
     tokensOwed1: BigInt(json.tokensOwed1),
     unclaimedFees0: BigInt(json.unclaimedFees0),
     unclaimedFees1: BigInt(json.unclaimedFees1),
+    tickLowerFeeGrowthOutside0X128: BigInt(json.tickLowerFeeGrowthOutside0X128),
+    tickLowerFeeGrowthOutside1X128: BigInt(json.tickLowerFeeGrowthOutside1X128),
+    tickUpperFeeGrowthOutside0X128: BigInt(json.tickUpperFeeGrowthOutside0X128),
+    tickUpperFeeGrowthOutside1X128: BigInt(json.tickUpperFeeGrowthOutside1X128),
   };
 }

@@ -37,6 +37,19 @@ export interface FeeGrowthInside {
 }
 
 /**
+ * Tick fee growth data (from pool.ticks(tick))
+ *
+ * Contains the fee growth outside values for a single tick.
+ * These values are updated when the tick is crossed during swaps.
+ */
+export interface TickFeeGrowth {
+  /** Fee growth outside this tick for token0 */
+  feeGrowthOutside0X128: bigint;
+  /** Fee growth outside this tick for token1 */
+  feeGrowthOutside1X128: bigint;
+}
+
+/**
  * Unclaimed fees breakdown for a position
  */
 export interface UnclaimedFees {
@@ -155,4 +168,156 @@ export function calculateIncrementalFees(
   // Convert Q128.128 fee growth to actual token amount
   // fees = (feeGrowthDelta * liquidity) / Q128
   return (feeGrowthDelta * liquidity) / Q128;
+}
+
+/**
+ * Input parameters for unclaimed fee amounts calculation
+ *
+ * Takes raw position state, pool state, and tick data to compute unclaimed fees.
+ * The function computes feeGrowthInside internally from the provided data.
+ */
+export interface UnclaimedFeeAmountsInput {
+  // Position state (from NFPM contract)
+  /** Position liquidity */
+  liquidity: bigint;
+  /** Position's lower tick bound */
+  tickLower: number;
+  /** Position's upper tick bound */
+  tickUpper: number;
+  /** Fee growth inside at last checkpoint for token0 (from position state) */
+  feeGrowthInside0LastX128: bigint;
+  /** Fee growth inside at last checkpoint for token1 (from position state) */
+  feeGrowthInside1LastX128: bigint;
+  /** Tokens owed for token0 (from position state - contains fees + uncollected principal) */
+  tokensOwed0: bigint;
+  /** Tokens owed for token1 (from position state - contains fees + uncollected principal) */
+  tokensOwed1: bigint;
+
+  // Tick fee growth data (from position state, fetched via pool.ticks())
+  /** Fee growth outside lower tick for token0 */
+  tickLowerFeeGrowthOutside0X128: bigint;
+  /** Fee growth outside lower tick for token1 */
+  tickLowerFeeGrowthOutside1X128: bigint;
+  /** Fee growth outside upper tick for token0 */
+  tickUpperFeeGrowthOutside0X128: bigint;
+  /** Fee growth outside upper tick for token1 */
+  tickUpperFeeGrowthOutside1X128: bigint;
+
+  // Pool state (from pool contract)
+  /** Current pool tick (from slot0) */
+  currentTick: number;
+  /** Global fee growth for token0 */
+  feeGrowthGlobal0X128: bigint;
+  /** Global fee growth for token1 */
+  feeGrowthGlobal1X128: bigint;
+
+  // Ledger data (optional - defaults to 0n if not tracking principal)
+  /** Uncollected principal for token0 (from ledger events) */
+  uncollectedPrincipal0?: bigint;
+  /** Uncollected principal for token1 (from ledger events) */
+  uncollectedPrincipal1?: bigint;
+}
+
+/**
+ * Result of unclaimed fee amounts calculation
+ */
+export interface UnclaimedFeeAmountsResult {
+  /** Unclaimed fees in token0 (incremental + checkpointed) */
+  unclaimedFees0: bigint;
+  /** Unclaimed fees in token1 (incremental + checkpointed) */
+  unclaimedFees1: bigint;
+}
+
+/**
+ * Calculate unclaimed fee amounts for a position
+ *
+ * Pure calculation function that computes the unclaimed fees in token amounts.
+ * Does NOT convert to quote token value.
+ *
+ * Algorithm:
+ * 1. Compute feeGrowthInside from pool state and tick data
+ * 2. Calculate incremental fees (fees earned since last checkpoint)
+ * 3. Separate pure fees from tokensOwed by subtracting uncollected principal
+ * 4. Return total = incremental + checkpointed (pure fees only)
+ *
+ * Why separating principal is necessary:
+ * - `tokensOwed*` in NFPM contract contains BOTH fees AND withdrawn principal
+ * - When liquidity is decreased, token amounts are added to `tokensOwed*`
+ * - Those amounts remain in `tokensOwed*` until `collect()` is called
+ * - We must separate pure fees from principal to show accurate unclaimed fees
+ *
+ * @param input - Calculation parameters
+ * @returns Object containing unclaimed fee amounts for both tokens
+ */
+export function calculateUnclaimedFeeAmounts(
+  input: UnclaimedFeeAmountsInput
+): UnclaimedFeeAmountsResult {
+  const {
+    liquidity,
+    tickLower,
+    tickUpper,
+    feeGrowthInside0LastX128,
+    feeGrowthInside1LastX128,
+    tokensOwed0,
+    tokensOwed1,
+    tickLowerFeeGrowthOutside0X128,
+    tickLowerFeeGrowthOutside1X128,
+    tickUpperFeeGrowthOutside0X128,
+    tickUpperFeeGrowthOutside1X128,
+    currentTick,
+    feeGrowthGlobal0X128,
+    feeGrowthGlobal1X128,
+    uncollectedPrincipal0 = 0n,
+    uncollectedPrincipal1 = 0n,
+  } = input;
+
+  // 1. Compute current feeGrowthInside from pool state and tick data
+  const { inside0: feeGrowthInside0, inside1: feeGrowthInside1 } =
+    computeFeeGrowthInside(
+      currentTick,
+      tickLower,
+      tickUpper,
+      feeGrowthGlobal0X128,
+      feeGrowthGlobal1X128,
+      tickLowerFeeGrowthOutside0X128,
+      tickLowerFeeGrowthOutside1X128,
+      tickUpperFeeGrowthOutside0X128,
+      tickUpperFeeGrowthOutside1X128
+    );
+
+  // 2. Calculate incremental fees (fees earned since last checkpoint)
+  // If no liquidity, no incremental fees (but may still have checkpointed fees)
+  const incremental0 =
+    liquidity > 0n
+      ? calculateIncrementalFees(
+          feeGrowthInside0,
+          feeGrowthInside0LastX128,
+          liquidity
+        )
+      : 0n;
+  const incremental1 =
+    liquidity > 0n
+      ? calculateIncrementalFees(
+          feeGrowthInside1,
+          feeGrowthInside1LastX128,
+          liquidity
+        )
+      : 0n;
+
+  // 3. Separate pure checkpointed fees from tokensOwed by subtracting principal
+  // If tokensOwed < uncollectedPrincipal, all of tokensOwed is principal (no fees checkpointed)
+  const pureCheckpointedFees0 =
+    tokensOwed0 > uncollectedPrincipal0
+      ? tokensOwed0 - uncollectedPrincipal0
+      : 0n;
+  const pureCheckpointedFees1 =
+    tokensOwed1 > uncollectedPrincipal1
+      ? tokensOwed1 - uncollectedPrincipal1
+      : 0n;
+
+  // 4. Total = checkpointed + incremental
+  return {
+    unclaimedFees0: pureCheckpointedFees0 + incremental0,
+    unclaimedFees1: pureCheckpointedFees1 + incremental1,
+  };
 }

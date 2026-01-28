@@ -57,4 +57,14 @@ export {
   safeDiff,
   computeFeeGrowthInside,
   calculateIncrementalFees,
+  calculateUnclaimedFeeAmounts,
+} from './fees.js';
+
+export type {
+  FeeGrowthInside,
+  TickFeeGrowth,
+  UnclaimedFees,
+  UnclaimedFeesWithMetadata,
+  UnclaimedFeeAmountsInput,
+  UnclaimedFeeAmountsResult,
 } from './fees.js';

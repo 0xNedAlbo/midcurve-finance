@@ -67,6 +67,34 @@ import { syncLedgerEvents } from "../position-ledger/helpers/uniswapv3/ledger-sy
 import { UniswapV3PositionSyncState } from "../position-ledger/position-sync-state.js";
 
 /**
+ * Fee state for a position
+ *
+ * Contains all fee-related fields that can be refreshed independently.
+ */
+export interface PositionFeeState {
+    /** Fee growth inside the position's tick range for token0 */
+    feeGrowthInside0LastX128: bigint;
+    /** Fee growth inside the position's tick range for token1 */
+    feeGrowthInside1LastX128: bigint;
+    /** Checkpointed tokens owed for token0 (fees + uncollected principal) */
+    tokensOwed0: bigint;
+    /** Checkpointed tokens owed for token1 (fees + uncollected principal) */
+    tokensOwed1: bigint;
+    /** Unclaimed fees in token0 (set to tokensOwed0 in granular refresh) */
+    unclaimedFees0: bigint;
+    /** Unclaimed fees in token1 (set to tokensOwed1 in granular refresh) */
+    unclaimedFees1: bigint;
+    /** Fee growth outside lower tick for token0 (from pool.ticks(tickLower)) */
+    tickLowerFeeGrowthOutside0X128: bigint;
+    /** Fee growth outside lower tick for token1 (from pool.ticks(tickLower)) */
+    tickLowerFeeGrowthOutside1X128: bigint;
+    /** Fee growth outside upper tick for token0 (from pool.ticks(tickUpper)) */
+    tickUpperFeeGrowthOutside0X128: bigint;
+    /** Fee growth outside upper tick for token1 (from pool.ticks(tickUpper)) */
+    tickUpperFeeGrowthOutside1X128: bigint;
+}
+
+/**
  * Database result interface for position queries.
  * Note: Prisma stores bigint as string in the database, so we use string here.
  * The mapToPosition method handles conversion to native bigint for PositionRow.
@@ -380,6 +408,10 @@ export class UniswapV3PositionService {
             tokensOwed1: string;
             unclaimedFees0?: string;
             unclaimedFees1?: string;
+            tickLowerFeeGrowthOutside0X128?: string;
+            tickLowerFeeGrowthOutside1X128?: string;
+            tickUpperFeeGrowthOutside0X128?: string;
+            tickUpperFeeGrowthOutside1X128?: string;
         };
 
         return {
@@ -391,6 +423,18 @@ export class UniswapV3PositionService {
             tokensOwed1: BigInt(db.tokensOwed1),
             unclaimedFees0: BigInt(db.unclaimedFees0 ?? "0"),
             unclaimedFees1: BigInt(db.unclaimedFees1 ?? "0"),
+            tickLowerFeeGrowthOutside0X128: BigInt(
+                db.tickLowerFeeGrowthOutside0X128 ?? "0"
+            ),
+            tickLowerFeeGrowthOutside1X128: BigInt(
+                db.tickLowerFeeGrowthOutside1X128 ?? "0"
+            ),
+            tickUpperFeeGrowthOutside0X128: BigInt(
+                db.tickUpperFeeGrowthOutside0X128 ?? "0"
+            ),
+            tickUpperFeeGrowthOutside1X128: BigInt(
+                db.tickUpperFeeGrowthOutside1X128 ?? "0"
+            ),
         };
     }
 
@@ -412,29 +456,71 @@ export class UniswapV3PositionService {
             tokensOwed1: state.tokensOwed1.toString(),
             unclaimedFees0: state.unclaimedFees0?.toString() ?? "0",
             unclaimedFees1: state.unclaimedFees1?.toString() ?? "0",
+            tickLowerFeeGrowthOutside0X128:
+                state.tickLowerFeeGrowthOutside0X128?.toString() ?? "0",
+            tickLowerFeeGrowthOutside1X128:
+                state.tickLowerFeeGrowthOutside1X128?.toString() ?? "0",
+            tickUpperFeeGrowthOutside0X128:
+                state.tickUpperFeeGrowthOutside0X128?.toString() ?? "0",
+            tickUpperFeeGrowthOutside1X128:
+                state.tickUpperFeeGrowthOutside1X128?.toString() ?? "0",
         };
     }
 
     /**
-     * Create position hash for UniswapV3 positions
+     * Create position hash from raw parameters
      *
-     * Generates a human-readable composite key for fast database lookups.
-     * Format: "uniswapv3/{chainId}/{nftId}"
+     * Validates input parameters and creates a composite hash key.
+     * Follows the same pattern as UniswapV3PoolService.createHash().
      *
-     * Examples:
-     * - Ethereum position 123456: "uniswapv3/1/123456"
-     * - Arbitrum position 4865121: "uniswapv3/42161/4865121"
-     * - BSC position 789: "uniswapv3/56/789"
-     *
-     * This hash is unique across all UniswapV3 positions and enables
-     * fast indexed lookups instead of slow JSONB queries.
-     *
-     * @param config - UniswapV3 position configuration
+     * @param params - Parameters containing chainId and nftId
      * @returns Position hash string in format "uniswapv3/{chainId}/{nftId}"
+     * @throws Error if chainId is missing or not a number
+     * @throws Error if nftId is missing or not a number
      */
-    createPositionHash(config: Record<string, unknown>): string {
-        const typedConfig = config as unknown as UniswapV3PositionConfigData;
-        return `uniswapv3/${typedConfig.chainId}/${typedConfig.nftId}`;
+    createHash(params: { chainId: number; nftId: number }): string {
+        const { chainId, nftId } = params;
+
+        // Validate chainId
+        if (chainId === undefined || chainId === null) {
+            throw new Error("chainId is required for position hash creation");
+        }
+        if (typeof chainId !== "number") {
+            throw new Error(
+                `chainId must be a number, got ${typeof chainId}`,
+            );
+        }
+
+        // Validate nftId
+        if (nftId === undefined || nftId === null) {
+            throw new Error("nftId is required for position hash creation");
+        }
+        if (typeof nftId !== "number") {
+            throw new Error(`nftId must be a number, got ${typeof nftId}`);
+        }
+
+        return `${this.protocol}/${chainId}/${nftId}`;
+    }
+
+    /**
+     * Create position hash from a position object
+     *
+     * Extracts chainId and nftId from the position's typed config and
+     * creates a composite hash key. Follows the same pattern as
+     * UniswapV3PoolService.createHashFromPool().
+     *
+     * @param position - UniswapV3Position object
+     * @returns Position hash string in format "uniswapv3/{chainId}/{nftId}"
+     * @throws Error if position protocol doesn't match this service's protocol
+     */
+    createHashFromPosition(position: UniswapV3Position): string {
+        if (position.protocol !== this.protocol) {
+            throw new Error(
+                `Protocol mismatch: expected ${this.protocol}, got ${position.protocol}`,
+            );
+        }
+        const { chainId, nftId } = position.typedConfig;
+        return this.createHash({ chainId, nftId });
     }
 
     // ============================================================================
@@ -483,14 +569,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Check database first using positionHash (fast indexed lookup)
-            // Generate hash with minimal config (chainId + nftId) - other fields not needed for lookup
-            const positionHash = this.createPositionHash({
-                chainId,
-                nftId,
-                poolAddress: "0x0000000000000000000000000000000000000000", // Placeholder - not used in hash
-                tickLower: 0, // Placeholder - not used in hash
-                tickUpper: 0, // Placeholder - not used in hash
-            });
+            const positionHash = this.createHash({ chainId, nftId });
 
             const existing = await this.findByPositionHash(
                 userId,
@@ -803,6 +882,10 @@ export class UniswapV3PositionService {
                 tokensOwed1: position.tokensOwed1,
                 unclaimedFees0: 0n, // Will be calculated after position creation
                 unclaimedFees1: 0n,
+                tickLowerFeeGrowthOutside0X128: 0n, // Will be fetched on fee refresh
+                tickLowerFeeGrowthOutside1X128: 0n,
+                tickUpperFeeGrowthOutside0X128: 0n,
+                tickUpperFeeGrowthOutside1X128: 0n,
             };
 
             this.logger.debug(
@@ -1301,6 +1384,10 @@ export class UniswapV3PositionService {
                 tokensOwed1: positionData[11],
                 unclaimedFees0: 0n, // Will be calculated later
                 unclaimedFees1: 0n,
+                tickLowerFeeGrowthOutside0X128: 0n, // Will be fetched on fee refresh
+                tickLowerFeeGrowthOutside1X128: 0n,
+                tickUpperFeeGrowthOutside0X128: 0n,
+                tickUpperFeeGrowthOutside1X128: 0n,
             };
 
             this.logger.debug(
@@ -1444,6 +1531,10 @@ export class UniswapV3PositionService {
                     tokensOwed1: positionDataAfterSync[11],
                     unclaimedFees0: 0n, // Will be calculated later
                     unclaimedFees1: 0n,
+                    tickLowerFeeGrowthOutside0X128: 0n, // Will be fetched on fee refresh
+                    tickLowerFeeGrowthOutside1X128: 0n,
+                    tickUpperFeeGrowthOutside0X128: 0n,
+                    tickUpperFeeGrowthOutside1X128: 0n,
                 };
 
                 this.logger.debug(
@@ -2286,6 +2377,556 @@ export class UniswapV3PositionService {
     }
 
     // ============================================================================
+    // GRANULAR STATE SETTERS
+    // ============================================================================
+
+    /**
+     * Set position owner address
+     *
+     * Manually updates the owner address in position state without making RPC calls.
+     * Use this when you have the owner address from another source (e.g., event logs).
+     *
+     * @param id - Position database ID
+     * @param ownerAddress - New owner address
+     * @returns Updated position
+     */
+    async updateOwnerAddress(id: string, ownerAddress: string): Promise<UniswapV3Position> {
+        log.methodEntry(this.logger, "updateOwnerAddress", { id, ownerAddress });
+
+        try {
+            // 1. Get existing position
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            // 2. Parse current state and update owner address
+            const currentState = this.parseState(existing.state);
+            const updatedState: UniswapV3PositionState = {
+                ...currentState,
+                ownerAddress: normalizeAddress(ownerAddress),
+            };
+
+            // 3. Serialize and persist
+            const stateDB = this.serializeState(updatedState);
+
+            log.dbOperation(this.logger, "update", "Position", {
+                id,
+                fields: ["state.ownerAddress"],
+            });
+
+            const result = await this.prisma.position.update({
+                where: { id },
+                data: { state: stateDB as object },
+                include: {
+                    pool: {
+                        include: { token0: true, token1: true },
+                    },
+                },
+            });
+
+            const position = this.mapToPosition(result as PositionDbResult) as UniswapV3Position;
+
+            this.logger.debug({ id, ownerAddress }, "Position owner address updated");
+            log.methodExit(this.logger, "updateOwnerAddress", { id });
+            return position;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "updateOwnerAddress", error as Error, { id });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Set position liquidity
+     *
+     * Manually updates the liquidity in position state without making RPC calls.
+     * Use this when you have the liquidity from another source (e.g., ledger events).
+     *
+     * @param id - Position database ID
+     * @param liquidity - New liquidity value
+     * @returns Updated position
+     */
+    async updateLiquidity(id: string, liquidity: bigint): Promise<UniswapV3Position> {
+        log.methodEntry(this.logger, "updateLiquidity", { id, liquidity: liquidity.toString() });
+
+        try {
+            // 1. Get existing position
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            // 2. Parse current state and update liquidity
+            const currentState = this.parseState(existing.state);
+            const updatedState: UniswapV3PositionState = {
+                ...currentState,
+                liquidity,
+            };
+
+            // 3. Serialize and persist
+            const stateDB = this.serializeState(updatedState);
+
+            log.dbOperation(this.logger, "update", "Position", {
+                id,
+                fields: ["state.liquidity"],
+            });
+
+            const result = await this.prisma.position.update({
+                where: { id },
+                data: { state: stateDB as object },
+                include: {
+                    pool: {
+                        include: { token0: true, token1: true },
+                    },
+                },
+            });
+
+            const position = this.mapToPosition(result as PositionDbResult) as UniswapV3Position;
+
+            this.logger.debug({ id, liquidity: liquidity.toString() }, "Position liquidity updated");
+            log.methodExit(this.logger, "updateLiquidity", { id });
+            return position;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "updateLiquidity", error as Error, { id });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Set position fee state
+     *
+     * Manually updates fee-related fields in position state without making RPC calls.
+     * Use this when you have fee data from another source.
+     *
+     * @param id - Position database ID
+     * @param feeState - Fee state values to set
+     * @returns Updated position
+     */
+    async updateFeeState(
+        id: string,
+        feeState: PositionFeeState,
+    ): Promise<UniswapV3Position> {
+        log.methodEntry(this.logger, "updateFeeState", {
+            id,
+            tokensOwed0: feeState.tokensOwed0.toString(),
+            tokensOwed1: feeState.tokensOwed1.toString(),
+        });
+
+        try {
+            // 1. Get existing position
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            // 2. Parse current state and update fee fields
+            const currentState = this.parseState(existing.state);
+            const updatedState: UniswapV3PositionState = {
+                ...currentState,
+                feeGrowthInside0LastX128: feeState.feeGrowthInside0LastX128,
+                feeGrowthInside1LastX128: feeState.feeGrowthInside1LastX128,
+                tokensOwed0: feeState.tokensOwed0,
+                tokensOwed1: feeState.tokensOwed1,
+                unclaimedFees0: feeState.unclaimedFees0,
+                unclaimedFees1: feeState.unclaimedFees1,
+                tickLowerFeeGrowthOutside0X128:
+                    feeState.tickLowerFeeGrowthOutside0X128,
+                tickLowerFeeGrowthOutside1X128:
+                    feeState.tickLowerFeeGrowthOutside1X128,
+                tickUpperFeeGrowthOutside0X128:
+                    feeState.tickUpperFeeGrowthOutside0X128,
+                tickUpperFeeGrowthOutside1X128:
+                    feeState.tickUpperFeeGrowthOutside1X128,
+            };
+
+            // 3. Serialize and persist
+            const stateDB = this.serializeState(updatedState);
+
+            log.dbOperation(this.logger, "update", "Position", {
+                id,
+                fields: [
+                    "state.feeGrowthInside0LastX128",
+                    "state.feeGrowthInside1LastX128",
+                    "state.tokensOwed0",
+                    "state.tokensOwed1",
+                    "state.unclaimedFees0",
+                    "state.unclaimedFees1",
+                    "state.tickLowerFeeGrowthOutside0X128",
+                    "state.tickLowerFeeGrowthOutside1X128",
+                    "state.tickUpperFeeGrowthOutside0X128",
+                    "state.tickUpperFeeGrowthOutside1X128",
+                ],
+            });
+
+            const result = await this.prisma.position.update({
+                where: { id },
+                data: { state: stateDB as object },
+                include: {
+                    pool: {
+                        include: { token0: true, token1: true },
+                    },
+                },
+            });
+
+            const position = this.mapToPosition(result as PositionDbResult) as UniswapV3Position;
+
+            this.logger.debug(
+                {
+                    id,
+                    tokensOwed0: feeState.tokensOwed0.toString(),
+                    tokensOwed1: feeState.tokensOwed1.toString(),
+                },
+                "Position fee state updated",
+            );
+            log.methodExit(this.logger, "updateFeeState", { id });
+            return position;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "updateFeeState", error as Error, { id });
+            }
+            throw error;
+        }
+    }
+
+    // ============================================================================
+    // GRANULAR REFRESH METHODS
+    // ============================================================================
+
+    /**
+     * Refresh position owner address from on-chain data
+     *
+     * Fetches the current owner from the NFT contract's ownerOf() function
+     * and persists it to the database.
+     *
+     * @param id - Position database ID
+     * @returns The current owner address
+     * @throws Error if position not found
+     * @throws Error if chain is not supported
+     * @throws Error if NFT doesn't exist (burned)
+     */
+    async refreshOwnerAddress(id: string): Promise<string> {
+        log.methodEntry(this.logger, "refreshOwnerAddress", { id });
+
+        try {
+            // 1. Get existing position
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            const { chainId, nftId } = existing.typedConfig;
+
+            // 2. Verify chain is supported
+            if (!this.evmConfig.isChainSupported(chainId)) {
+                throw new Error(
+                    `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
+                        .getSupportedChainIds()
+                        .join(", ")}`,
+                );
+            }
+
+            // 3. Get position manager address and public client
+            const positionManagerAddress = getPositionManagerAddress(chainId);
+            const client = this.evmConfig.getPublicClient(chainId);
+
+            this.logger.debug(
+                { id, positionManagerAddress, nftId, chainId },
+                "Reading owner address from NonfungiblePositionManager",
+            );
+
+            // 4. Read owner from contract
+            const ownerAddress = await client.readContract({
+                address: positionManagerAddress,
+                abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                functionName: "ownerOf",
+                args: [BigInt(nftId)],
+            }) as Address;
+
+            // 5. Persist using setter
+            await this.updateOwnerAddress(id, ownerAddress);
+
+            this.logger.info(
+                { id, nftId, chainId, ownerAddress },
+                "Position owner address refreshed",
+            );
+
+            log.methodExit(this.logger, "refreshOwnerAddress", { id, ownerAddress });
+            return ownerAddress;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "refreshOwnerAddress", error as Error, { id });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Refresh position liquidity from on-chain data
+     *
+     * Fetches the current liquidity from the positions() function
+     * and persists it to the database.
+     *
+     * Note: For accurate liquidity tracking, prefer using ledger events
+     * which are the source of truth for liquidity changes.
+     *
+     * @param id - Position database ID
+     * @returns The current liquidity as bigint
+     * @throws Error if position not found
+     * @throws Error if chain is not supported
+     * @throws Error if NFT doesn't exist (burned)
+     */
+    async refreshLiquidity(id: string): Promise<bigint> {
+        log.methodEntry(this.logger, "refreshLiquidity", { id });
+
+        try {
+            // 1. Get existing position
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            const { chainId, nftId } = existing.typedConfig;
+
+            // 2. Verify chain is supported
+            if (!this.evmConfig.isChainSupported(chainId)) {
+                throw new Error(
+                    `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
+                        .getSupportedChainIds()
+                        .join(", ")}`,
+                );
+            }
+
+            // 3. Get position manager address and public client
+            const positionManagerAddress = getPositionManagerAddress(chainId);
+            const client = this.evmConfig.getPublicClient(chainId);
+
+            this.logger.debug(
+                { id, positionManagerAddress, nftId, chainId },
+                "Reading liquidity from NonfungiblePositionManager",
+            );
+
+            // 4. Read positions data from contract
+            const positionData = await client.readContract({
+                address: positionManagerAddress,
+                abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                functionName: "positions",
+                args: [BigInt(nftId)],
+            }) as readonly [
+                bigint, // nonce
+                Address, // operator
+                Address, // token0
+                Address, // token1
+                number, // fee
+                number, // tickLower
+                number, // tickUpper
+                bigint, // liquidity
+                bigint, // feeGrowthInside0LastX128
+                bigint, // feeGrowthInside1LastX128
+                bigint, // tokensOwed0
+                bigint, // tokensOwed1
+            ];
+
+            const liquidity = positionData[7];
+
+            // 5. Persist using setter
+            await this.updateLiquidity(id, liquidity);
+
+            this.logger.info(
+                { id, nftId, chainId, liquidity: liquidity.toString() },
+                "Position liquidity refreshed",
+            );
+
+            log.methodExit(this.logger, "refreshLiquidity", { id, liquidity: liquidity.toString() });
+            return liquidity;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "refreshLiquidity", error as Error, { id });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Refresh position fee state from on-chain data
+     *
+     * Fetches fee-related fields from the positions() function and calculates
+     * unclaimed fees using the pool's fee growth values.
+     *
+     * @param id - Position database ID
+     * @returns The current fee state
+     * @throws Error if position not found
+     * @throws Error if chain is not supported
+     * @throws Error if NFT doesn't exist (burned)
+     */
+    async refreshFeeState(id: string): Promise<PositionFeeState> {
+        log.methodEntry(this.logger, "refreshFeeState", { id });
+
+        try {
+            // 1. Get existing position with pool
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            const { chainId, nftId } = existing.typedConfig;
+
+            // 2. Verify chain is supported
+            if (!this.evmConfig.isChainSupported(chainId)) {
+                throw new Error(
+                    `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
+                        .getSupportedChainIds()
+                        .join(", ")}`,
+                );
+            }
+
+            // 3. Get position manager address and public client
+            const positionManagerAddress = getPositionManagerAddress(chainId);
+            const client = this.evmConfig.getPublicClient(chainId);
+
+            this.logger.debug(
+                { id, positionManagerAddress, nftId, chainId },
+                "Reading fee state from NonfungiblePositionManager",
+            );
+
+            // 4. Get pool address and tick bounds from position config
+            const { poolAddress, tickLower, tickUpper } = existing.typedConfig;
+
+            // 5. Read position data and tick data in parallel
+            const [positionData, tickLowerData, tickUpperData] =
+                await Promise.all([
+                    client.readContract({
+                        address: positionManagerAddress,
+                        abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                        functionName: "positions",
+                        args: [BigInt(nftId)],
+                    }) as Promise<
+                        readonly [
+                            bigint, // nonce
+                            Address, // operator
+                            Address, // token0
+                            Address, // token1
+                            number, // fee
+                            number, // tickLower
+                            number, // tickUpper
+                            bigint, // liquidity
+                            bigint, // feeGrowthInside0LastX128
+                            bigint, // feeGrowthInside1LastX128
+                            bigint, // tokensOwed0
+                            bigint, // tokensOwed1
+                        ]
+                    >,
+                    client.readContract({
+                        address: poolAddress as Address,
+                        abi: uniswapV3PoolAbi,
+                        functionName: "ticks",
+                        args: [tickLower],
+                    }) as Promise<
+                        readonly [
+                            bigint, // liquidityGross
+                            bigint, // liquidityNet (int128)
+                            bigint, // feeGrowthOutside0X128
+                            bigint, // feeGrowthOutside1X128
+                            bigint, // tickCumulativeOutside
+                            bigint, // secondsPerLiquidityOutsideX128
+                            number, // secondsOutside
+                            boolean, // initialized
+                        ]
+                    >,
+                    client.readContract({
+                        address: poolAddress as Address,
+                        abi: uniswapV3PoolAbi,
+                        functionName: "ticks",
+                        args: [tickUpper],
+                    }) as Promise<
+                        readonly [
+                            bigint, // liquidityGross
+                            bigint, // liquidityNet (int128)
+                            bigint, // feeGrowthOutside0X128
+                            bigint, // feeGrowthOutside1X128
+                            bigint, // tickCumulativeOutside
+                            bigint, // secondsPerLiquidityOutsideX128
+                            number, // secondsOutside
+                            boolean, // initialized
+                        ]
+                    >,
+                ]);
+
+            const feeGrowthInside0LastX128 = positionData[8];
+            const feeGrowthInside1LastX128 = positionData[9];
+            const tokensOwed0 = positionData[10];
+            const tokensOwed1 = positionData[11];
+
+            // Extract tick fee growth data
+            const tickLowerFeeGrowthOutside0X128 = tickLowerData[2];
+            const tickLowerFeeGrowthOutside1X128 = tickLowerData[3];
+            const tickUpperFeeGrowthOutside0X128 = tickUpperData[2];
+            const tickUpperFeeGrowthOutside1X128 = tickUpperData[3];
+
+            this.logger.debug(
+                {
+                    id,
+                    tickLower,
+                    tickUpper,
+                    tickLowerFeeGrowthOutside0X128:
+                        tickLowerFeeGrowthOutside0X128.toString(),
+                    tickLowerFeeGrowthOutside1X128:
+                        tickLowerFeeGrowthOutside1X128.toString(),
+                    tickUpperFeeGrowthOutside0X128:
+                        tickUpperFeeGrowthOutside0X128.toString(),
+                    tickUpperFeeGrowthOutside1X128:
+                        tickUpperFeeGrowthOutside1X128.toString(),
+                },
+                "Tick fee growth data fetched",
+            );
+
+            // 6. Create fee state with tick data
+            // Note: unclaimedFees is set to tokensOwed as a baseline. For accurate
+            // unclaimed fees calculation including incremental fees, use
+            // calculateUnclaimedFeeAmounts() with pool state data.
+            const feeState: PositionFeeState = {
+                feeGrowthInside0LastX128,
+                feeGrowthInside1LastX128,
+                tokensOwed0,
+                tokensOwed1,
+                unclaimedFees0: tokensOwed0,
+                unclaimedFees1: tokensOwed1,
+                tickLowerFeeGrowthOutside0X128,
+                tickLowerFeeGrowthOutside1X128,
+                tickUpperFeeGrowthOutside0X128,
+                tickUpperFeeGrowthOutside1X128,
+            };
+
+            // 6. Persist using setter
+            await this.updateFeeState(id, feeState);
+
+            this.logger.info(
+                {
+                    id,
+                    nftId,
+                    chainId,
+                    tokensOwed0: tokensOwed0.toString(),
+                    tokensOwed1: tokensOwed1.toString(),
+                    unclaimedFees0: feeState.unclaimedFees0.toString(),
+                    unclaimedFees1: feeState.unclaimedFees1.toString(),
+                },
+                "Position fee state refreshed",
+            );
+
+            log.methodExit(this.logger, "refreshFeeState", { id });
+            return feeState;
+        } catch (error) {
+            if (!(error instanceof Error && error.message.includes("not found"))) {
+                log.methodError(this.logger, "refreshFeeState", error as Error, { id });
+            }
+            throw error;
+        }
+    }
+
+    // ============================================================================
     // USER-PROVIDED DATA CREATION
     // ============================================================================
 
@@ -2348,13 +2989,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Check if position already exists (idempotent)
-            const positionHash = this.createPositionHash({
-                chainId,
-                nftId,
-                poolAddress: input.poolAddress,
-                tickLower: input.tickLower,
-                tickUpper: input.tickUpper,
-            });
+            const positionHash = this.createHash({ chainId, nftId });
 
             const existing = await this.findByPositionHash(
                 userId,
@@ -2696,6 +3331,10 @@ export class UniswapV3PositionService {
                 tokensOwed1: 0n, // New position
                 unclaimedFees0: 0n, // Will be calculated after position creation
                 unclaimedFees1: 0n,
+                tickLowerFeeGrowthOutside0X128: 0n, // Will be fetched on fee refresh
+                tickLowerFeeGrowthOutside1X128: 0n,
+                tickUpperFeeGrowthOutside0X128: 0n,
+                tickUpperFeeGrowthOutside1X128: 0n,
             };
 
             this.logger.debug(
@@ -2982,13 +3621,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Find position by chainId and nftId
-            const positionHash = this.createPositionHash({
-                chainId,
-                nftId,
-                poolAddress: "0x0000000000000000000000000000000000000000", // Not used in hash
-                tickLower: 0, // Not used in hash
-                tickUpper: 0, // Not used in hash
-            });
+            const positionHash = this.createHash({ chainId, nftId });
 
             log.dbOperation(this.logger, "findUnique", "Position", {
                 userId,
@@ -3107,9 +3740,10 @@ export class UniswapV3PositionService {
 
         try {
             // Check for existing position by positionHash (fast indexed lookup)
-            const positionHash = this.createPositionHash(
-                input.config as unknown as Record<string, unknown>,
-            );
+            const positionHash = this.createHash({
+                chainId: input.config.chainId,
+                nftId: input.config.nftId,
+            });
             const existing = await this.findByPositionHash(
                 input.userId,
                 positionHash,
@@ -3760,7 +4394,7 @@ export class UniswapV3PositionService {
      * Replaces slow JSONB queries for position lookups.
      *
      * @param userId - User ID (ensures user can only access their positions)
-     * @param positionHash - Position hash (generated by createPositionHash)
+     * @param positionHash - Position hash (generated by createHash)
      * @returns Position if found, null otherwise
      */
     async findByPositionHash(

@@ -1069,12 +1069,12 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool
    */
-  async setPoolPrice(
+  async updatePoolPrice(
     id: string,
     priceData: { sqrtPriceX96: bigint; currentTick: number },
     tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'setPoolPrice', { id, inTransaction: !!tx });
+    log.methodEntry(this.logger, 'updatePoolPrice', { id, inTransaction: !!tx });
 
     try {
       const updated = await this.update(
@@ -1097,11 +1097,11 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         'Pool price updated'
       );
 
-      log.methodExit(this.logger, 'setPoolPrice', { id });
+      log.methodExit(this.logger, 'updatePoolPrice', { id });
       return updated;
     } catch (error) {
       if (!(error instanceof Error && error.message.includes('not found'))) {
-        log.methodError(this.logger, 'setPoolPrice', error as Error, { id });
+        log.methodError(this.logger, 'updatePoolPrice', error as Error, { id });
       }
       throw error;
     }
@@ -1141,7 +1141,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       );
 
       // 3. Persist to database
-      await this.setPoolPrice(
+      await this.updatePoolPrice(
         id,
         {
           sqrtPriceX96: BigInt(priceData.sqrtPriceX96),
@@ -1176,12 +1176,12 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool
    */
-  async setPoolLiquidity(
+  async updatePoolLiquidity(
     id: string,
     liquidity: bigint,
     tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'setPoolLiquidity', { id, inTransaction: !!tx });
+    log.methodEntry(this.logger, 'updatePoolLiquidity', { id, inTransaction: !!tx });
 
     try {
       const updated = await this.update(
@@ -1202,11 +1202,11 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         'Pool liquidity updated'
       );
 
-      log.methodExit(this.logger, 'setPoolLiquidity', { id });
+      log.methodExit(this.logger, 'updatePoolLiquidity', { id });
       return updated;
     } catch (error) {
       if (!(error instanceof Error && error.message.includes('not found'))) {
-        log.methodError(this.logger, 'setPoolLiquidity', error as Error, { id });
+        log.methodError(this.logger, 'updatePoolLiquidity', error as Error, { id });
       }
       throw error;
     }
@@ -1270,7 +1270,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       })) as bigint;
 
       // 5. Persist to database
-      await this.setPoolLiquidity(id, liquidity, tx);
+      await this.updatePoolLiquidity(id, liquidity, tx);
 
       this.logger.info(
         {
@@ -1313,12 +1313,12 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool
    */
-  async setPoolFeeGrowth(
+  async updatePoolFeeGrowth(
     id: string,
     feeGrowthData: { feeGrowthGlobal0: bigint; feeGrowthGlobal1: bigint },
     tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'setPoolFeeGrowth', { id, inTransaction: !!tx });
+    log.methodEntry(this.logger, 'updatePoolFeeGrowth', { id, inTransaction: !!tx });
 
     try {
       const updated = await this.update(
@@ -1341,11 +1341,11 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         'Pool fee growth updated'
       );
 
-      log.methodExit(this.logger, 'setPoolFeeGrowth', { id });
+      log.methodExit(this.logger, 'updatePoolFeeGrowth', { id });
       return updated;
     } catch (error) {
       if (!(error instanceof Error && error.message.includes('not found'))) {
-        log.methodError(this.logger, 'setPoolFeeGrowth', error as Error, { id });
+        log.methodError(this.logger, 'updatePoolFeeGrowth', error as Error, { id });
       }
       throw error;
     }
@@ -1416,7 +1416,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       ]);
 
       // 5. Persist to database
-      await this.setPoolFeeGrowth(
+      await this.updatePoolFeeGrowth(
         id,
         {
           feeGrowthGlobal0,
@@ -1471,7 +1471,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool
    */
-  async setPoolState(
+  async updatePoolState(
     id: string,
     stateData: {
       sqrtPriceX96: bigint;
@@ -1482,7 +1482,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
     },
     tx?: PrismaTransactionClient
   ): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'setPoolState', { id, inTransaction: !!tx });
+    log.methodEntry(this.logger, 'updatePoolState', { id, inTransaction: !!tx });
 
     try {
       const updated = await this.update(
@@ -1511,11 +1511,11 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         'Pool state updated'
       );
 
-      log.methodExit(this.logger, 'setPoolState', { id });
+      log.methodExit(this.logger, 'updatePoolState', { id });
       return updated;
     } catch (error) {
       if (!(error instanceof Error && error.message.includes('not found'))) {
-        log.methodError(this.logger, 'setPoolState', error as Error, { id });
+        log.methodError(this.logger, 'updatePoolState', error as Error, { id });
       }
       throw error;
     }
@@ -1612,7 +1612,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       const currentTick = slot0Data[1];
 
       // 5. Persist all state to database in single update
-      await this.setPoolState(
+      await this.updatePoolState(
         id,
         {
           sqrtPriceX96,
