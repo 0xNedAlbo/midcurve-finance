@@ -166,6 +166,11 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
     return this._config.txHash;
   }
 
+  /** Block hash (for reorg detection) */
+  get blockHash(): string {
+    return this._config.blockHash;
+  }
+
   /** Change in liquidity (delta L) */
   get deltaL(): bigint {
     return this._config.deltaL;

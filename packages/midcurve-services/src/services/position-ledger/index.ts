@@ -1,9 +1,11 @@
 /**
- * Position Ledger Service
- * Barrel export for position ledger service and related types
+ * Position Ledger Service Exports
  */
 
-export type { UniswapV3PositionLedgerServiceDependencies, LedgerEventDbResult } from './uniswapv3-position-ledger-service.js';
-export { UniswapV3PositionLedgerService } from './uniswapv3-position-ledger-service.js';
-
-export { UniswapV3PositionSyncState } from './position-sync-state.js';
+export {
+  UniswapV3LedgerEventService,
+  type UniswapV3LedgerEventServiceConfig,
+  type UniswapV3LedgerEventServiceDependencies,
+  type CreateLedgerEventInput,
+  type PrismaTransactionClient,
+} from './uniswapv3-ledger-event-service.js';

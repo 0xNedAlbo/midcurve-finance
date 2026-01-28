@@ -49,7 +49,7 @@ import {
 } from "@midcurve/shared";
 import { UniswapV3PoolService } from "../pool/uniswapv3-pool-service.js";
 import { EtherscanClient } from "../../clients/etherscan/index.js";
-import { UniswapV3PositionLedgerService } from "../position-ledger/uniswapv3-position-ledger-service.js";
+import { UniswapV3PositionLedgerService } from "../position-ledger-deprecated/uniswapv3-position-ledger-service.js";
 import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token-service.js";
 import { EvmBlockService } from "../block/evm-block-service.js";
 import { PositionAprService } from "../position-apr/position-apr-service.js";
@@ -168,7 +168,7 @@ export interface UniswapV3PositionServiceDependencies {
      * Uniswap V3 position ledger service for fetching position history
      * If not provided, a new UniswapV3PositionLedgerService instance will be created
      */
-    ledgerService?: import("../position-ledger/uniswapv3-position-ledger-service.js").UniswapV3PositionLedgerService;
+    ledgerService?: import("../position-ledger-deprecated/uniswapv3-position-ledger-service.js").UniswapV3PositionLedgerService;
 
     /**
      * Uniswap V3 quote token service for automatic quote token determination

@@ -33,6 +33,9 @@ export interface UniswapV3LedgerEventConfig {
   /** Transaction hash */
   txHash: string;
 
+  /** Block hash (for reorg detection) */
+  blockHash: string;
+
   /** Change in liquidity (delta L) */
   deltaL: bigint;
 
@@ -71,6 +74,7 @@ export interface UniswapV3LedgerEventConfigJSON {
   txIndex: number;
   logIndex: number;
   txHash: string;
+  blockHash: string;
   deltaL: string;
   liquidityAfter: string;
   feesCollected0: string;
@@ -97,6 +101,7 @@ export function ledgerEventConfigToJSON(
     txIndex: config.txIndex,
     logIndex: config.logIndex,
     txHash: config.txHash,
+    blockHash: config.blockHash,
     deltaL: config.deltaL.toString(),
     liquidityAfter: config.liquidityAfter.toString(),
     feesCollected0: config.feesCollected0.toString(),
@@ -120,6 +125,7 @@ export function ledgerEventConfigFromJSON(
     txIndex: json.txIndex,
     logIndex: json.logIndex,
     txHash: json.txHash,
+    blockHash: json.blockHash,
     deltaL: BigInt(json.deltaL),
     liquidityAfter: BigInt(json.liquidityAfter),
     feesCollected0: BigInt(json.feesCollected0),
