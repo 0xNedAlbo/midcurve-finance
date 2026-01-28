@@ -13,16 +13,15 @@
  */
 
 import { createHash } from 'crypto';
-import { PositionLedgerService } from './position-ledger-service.js';
-import type {
-  PositionLedgerServiceDependencies,
-  LedgerEventDbResult,
-} from './position-ledger-service.js';
+import { PrismaClient } from '@midcurve/database';
 import type {
   UniswapV3LedgerEventConfig,
   UniswapV3LedgerEventState,
+  PositionLedgerEventRow,
+  EventType,
+  Reward,
 } from '@midcurve/shared';
-import { UniswapV3PositionLedgerEvent } from '@midcurve/shared';
+import { UniswapV3PositionLedgerEvent, PositionLedgerEventFactory } from '@midcurve/shared';
 import type {
   CreateUniswapV3LedgerEventInput,
   UniswapV3EventDiscoverInput,
@@ -48,14 +47,55 @@ import {
   calculateProportionalCostBasis,
   separateFeesFromPrincipal,
 } from '../../utils/uniswapv3/ledger-calculations.js';
-import { log } from '../../logging/index.js';
+import { createServiceLogger, log } from '../../logging/index.js';
+import type { ServiceLogger } from '../../logging/index.js';
+import { PositionAprService } from '../position-apr/position-apr-service.js';
+import type { CreateAnyLedgerEventInput } from '../types/position-ledger/position-ledger-event-input.js';
+
+/**
+ * Generic ledger event result from database (before deserialization)
+ */
+export interface LedgerEventDbResult {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  positionId: string;
+  protocol: string;
+  previousId: string | null;
+  timestamp: Date;
+  eventType: string;
+  inputHash: string;
+  poolPrice: string;
+  token0Amount: string;
+  token1Amount: string;
+  tokenValue: string;
+  rewards: unknown;
+  deltaCostBasis: string;
+  costBasisAfter: string;
+  deltaPnl: string;
+  pnlAfter: string;
+  config: unknown;
+  state: unknown;
+}
 
 /**
  * Dependencies for UniswapV3PositionLedgerService
  * All dependencies are optional and will use defaults if not provided
  */
-export interface UniswapV3PositionLedgerServiceDependencies
-  extends PositionLedgerServiceDependencies {
+export interface UniswapV3PositionLedgerServiceDependencies {
+  /**
+   * Prisma client for database operations
+   * If not provided, a new PrismaClient instance will be created
+   */
+  prisma?: PrismaClient;
+
+  /**
+   * Position APR service for calculating fee-based returns
+   * If not provided, a new PositionAprService instance will be created
+   * APR calculation is mandatory and runs automatically after ledger discovery
+   */
+  aprService?: PositionAprService;
+
   /**
    * Etherscan client for fetching position events from blockchain
    * If not provided, the singleton EtherscanClient instance will be used
@@ -139,11 +179,14 @@ interface PreviousEventState {
 /**
  * Uniswap V3 Position Ledger Service
  *
- * Extends PositionLedgerService with Uniswap V3-specific implementation.
+ * Standalone service for Uniswap V3 position ledger event management.
  * Fetches events from Etherscan and calculates financial data using historic pool prices.
  */
-export class UniswapV3PositionLedgerService extends PositionLedgerService {
+export class UniswapV3PositionLedgerService {
   protected readonly protocol = 'uniswapv3' as const;
+  protected readonly _prisma: PrismaClient;
+  protected readonly _aprService: PositionAprService;
+  protected readonly logger: ServiceLogger;
   private readonly _etherscanClient: EtherscanClient;
   private readonly _positionService: UniswapV3PositionService;
   private readonly _poolService: UniswapV3PoolService;
@@ -155,20 +198,36 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
    * @param dependencies - Optional dependencies object
    */
   constructor(dependencies: UniswapV3PositionLedgerServiceDependencies = {}) {
-    super(dependencies);
+    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._aprService = dependencies.aprService ?? new PositionAprService({ prisma: this._prisma });
+    this.logger = createServiceLogger('UniswapV3PositionLedgerService');
 
     this._etherscanClient =
       dependencies.etherscanClient ?? EtherscanClient.getInstance();
     this._positionService =
       dependencies.positionService ??
-      new UniswapV3PositionService({ prisma: this.prisma });
+      new UniswapV3PositionService({ prisma: this._prisma });
     this._poolService =
-      dependencies.poolService ?? new UniswapV3PoolService({ prisma: this.prisma });
+      dependencies.poolService ?? new UniswapV3PoolService({ prisma: this._prisma });
     this._poolPriceService =
       dependencies.poolPriceService ??
-      new UniswapV3PoolPriceService({ prisma: this.prisma });
+      new UniswapV3PoolPriceService({ prisma: this._prisma });
 
     this.logger.info('UniswapV3PositionLedgerService initialized');
+  }
+
+  /**
+   * Get the Prisma client instance
+   */
+  protected get prisma(): PrismaClient {
+    return this._prisma;
+  }
+
+  /**
+   * Get the APR service instance
+   */
+  protected get aprService(): PositionAprService {
+    return this._aprService;
   }
 
   /**
@@ -253,7 +312,177 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
   }
 
   // ============================================================================
-  // ABSTRACT METHOD IMPLEMENTATIONS - HASH GENERATION
+  // PROTECTED HELPERS
+  // ============================================================================
+
+  /**
+   * Map database result to UniswapV3PositionLedgerEvent using factory
+   *
+   * Converts string values to bigint for financial fields and uses
+   * PositionLedgerEventFactory to create protocol-specific class.
+   *
+   * @param dbResult - Raw database result from Prisma
+   * @returns UniswapV3PositionLedgerEvent instance
+   */
+  protected mapToLedgerEvent(
+    dbResult: LedgerEventDbResult
+  ): UniswapV3PositionLedgerEvent {
+    // Parse rewards array
+    const rewardsDB = dbResult.rewards as Array<{
+      tokenId: string;
+      tokenAmount: string;
+      tokenValue: string;
+    }>;
+
+    const rewards: Reward[] = rewardsDB.map((r: { tokenId: string; tokenAmount: string; tokenValue: string }) => ({
+      tokenId: r.tokenId,
+      tokenAmount: BigInt(r.tokenAmount),
+      tokenValue: BigInt(r.tokenValue),
+    }));
+
+    // Convert string bigint fields to native bigint
+    const rowWithBigInt: PositionLedgerEventRow = {
+      id: dbResult.id,
+      createdAt: dbResult.createdAt,
+      updatedAt: dbResult.updatedAt,
+      positionId: dbResult.positionId,
+      protocol: dbResult.protocol,
+      previousId: dbResult.previousId,
+      timestamp: dbResult.timestamp,
+      eventType: dbResult.eventType as EventType,
+      inputHash: dbResult.inputHash,
+      poolPrice: BigInt(dbResult.poolPrice),
+      token0Amount: BigInt(dbResult.token0Amount),
+      token1Amount: BigInt(dbResult.token1Amount),
+      tokenValue: BigInt(dbResult.tokenValue),
+      rewards,
+      deltaCostBasis: BigInt(dbResult.deltaCostBasis),
+      costBasisAfter: BigInt(dbResult.costBasisAfter),
+      deltaPnl: BigInt(dbResult.deltaPnl),
+      pnlAfter: BigInt(dbResult.pnlAfter),
+      config: dbResult.config as Record<string, unknown>,
+      state: dbResult.state as Record<string, unknown>,
+    };
+
+    // Use factory to create protocol-specific event class
+    return PositionLedgerEventFactory.fromDB(rowWithBigInt) as UniswapV3PositionLedgerEvent;
+  }
+
+  /**
+   * Validate event sequence
+   *
+   * Ensures:
+   * - Event is added after last event (if previousId provided)
+   * - Previous event exists and belongs to same position
+   * - Previous event is same protocol
+   *
+   * @param positionId - Position database ID
+   * @param previousId - Previous event ID (null for first event)
+   * @param protocol - Protocol identifier
+   * @throws Error if validation fails
+   */
+  protected async validateEventSequence(
+    positionId: string,
+    previousId: string | null,
+    protocol: string
+  ): Promise<void> {
+    log.methodEntry(this.logger, 'validateEventSequence', {
+      positionId,
+      previousId,
+      protocol,
+    });
+
+    try {
+      // If no previous event, this is the first event
+      if (!previousId) {
+        this.logger.debug({ positionId }, 'First event in chain, no validation needed');
+        log.methodExit(this.logger, 'validateEventSequence', {
+          firstEvent: true,
+        });
+        return;
+      }
+
+      // Verify previous event exists
+      log.dbOperation(this.logger, 'findUnique', 'PositionLedgerEvent', {
+        id: previousId,
+      });
+
+      const previousEvent = await this.prisma.positionLedgerEvent.findUnique({
+        where: { id: previousId },
+      });
+
+      if (!previousEvent) {
+        const error = new Error(
+          `Previous event ${previousId} not found for position ${positionId}`
+        );
+        log.methodError(this.logger, 'validateEventSequence', error, {
+          positionId,
+          previousId,
+        });
+        throw error;
+      }
+
+      // Verify previous event belongs to same position
+      if (previousEvent.positionId !== positionId) {
+        const error = new Error(
+          `Previous event ${previousId} belongs to position ${previousEvent.positionId}, not ${positionId}`
+        );
+        log.methodError(this.logger, 'validateEventSequence', error, {
+          positionId,
+          previousId,
+          previousPositionId: previousEvent.positionId,
+        });
+        throw error;
+      }
+
+      // Verify previous event is same protocol
+      if (previousEvent.protocol !== protocol) {
+        const error = new Error(
+          `Previous event ${previousId} is protocol ${previousEvent.protocol}, not ${protocol}`
+        );
+        log.methodError(this.logger, 'validateEventSequence', error, {
+          positionId,
+          previousId,
+          expectedProtocol: protocol,
+          actualProtocol: previousEvent.protocol,
+        });
+        throw error;
+      }
+
+      this.logger.debug(
+        {
+          positionId,
+          previousId,
+          protocol,
+        },
+        'Event sequence validated successfully'
+      );
+
+      log.methodExit(this.logger, 'validateEventSequence', {
+        positionId,
+        previousId,
+      });
+    } catch (error) {
+      // Only log if not already logged
+      if (
+        !(
+          error instanceof Error &&
+          (error.message.includes('not found') ||
+            error.message.includes('belongs to') ||
+            error.message.includes('is protocol'))
+        )
+      ) {
+        log.methodError(this.logger, 'validateEventSequence', error as Error, {
+          positionId,
+          previousId,
+        });
+      }
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // HASH GENERATION
   // ============================================================================
 
   /**
@@ -1287,8 +1516,217 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
     };
   }
 
+  // ============================================================================
+  // CRUD OPERATIONS
+  // ============================================================================
+
   /**
-   * Override findAllItems to use blockchain ordering instead of database timestamps
+   * Get the most recent ledger event for a position
+   *
+   * Events are returned from findAllItems() sorted in DESCENDING order by timestamp,
+   * so the first element is always the most recent event.
+   *
+   * IMPORTANT: This ordering is critical for correctness. The most recent event contains
+   * the final state after all historical operations (INCREASE, DECREASE, COLLECT).
+   *
+   * All event types (INCREASE_POSITION, DECREASE_POSITION, COLLECT) include final state
+   * in their config (e.g., liquidityAfter, feeGrowthInside0LastX128, etc.). Even COLLECT
+   * events pass through the liquidity value from the previous event.
+   *
+   * @param positionId - Position database ID
+   * @returns Most recent event, or null if no events exist
+   */
+  async getMostRecentEvent(
+    positionId: string
+  ): Promise<UniswapV3PositionLedgerEvent | null> {
+    log.methodEntry(this.logger, 'getMostRecentEvent', { positionId });
+
+    try {
+      const events = await this.findAllItems(positionId);
+
+      if (events.length === 0) {
+        log.methodExit(this.logger, 'getMostRecentEvent', {
+          positionId,
+          found: false,
+        });
+        return null;
+      }
+
+      // First element is most recent (DESC order by timestamp)
+      const mostRecentEvent = events[0]!;
+
+      log.methodExit(this.logger, 'getMostRecentEvent', {
+        positionId,
+        eventId: mostRecentEvent.id,
+        eventType: mostRecentEvent.eventType,
+        timestamp: mostRecentEvent.timestamp,
+      });
+
+      return mostRecentEvent;
+    } catch (error) {
+      log.methodError(this.logger, 'getMostRecentEvent', error as Error, {
+        positionId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Add a new event to position ledger
+   *
+   * Validates event sequence and saves to database.
+   * Returns complete event history after addition.
+   *
+   * @param positionId - Position database ID
+   * @param input - Event creation input
+   * @returns Complete event history, sorted descending by timestamp
+   * @throws Error if validation fails or database operation fails
+   */
+  async addItem(
+    positionId: string,
+    input: CreateAnyLedgerEventInput,
+    configDB: Record<string, unknown>,
+    stateDB: Record<string, unknown>
+  ): Promise<UniswapV3PositionLedgerEvent[]> {
+    log.methodEntry(this.logger, 'addItem', {
+      positionId,
+      eventType: input.eventType,
+      timestamp: input.timestamp,
+    });
+
+    try {
+      // Validate event sequence
+      await this.validateEventSequence(
+        positionId,
+        input.previousId,
+        input.protocol
+      );
+
+      // Generate input hash
+      const inputHash = this.generateInputHash(input as CreateUniswapV3LedgerEventInput);
+      this.logger.debug({ positionId, inputHash }, 'Input hash generated');
+
+      // Check if event already exists (deduplication by inputHash)
+      const existingEvent = await this.prisma.positionLedgerEvent.findFirst({
+        where: {
+          positionId,
+          inputHash,
+        },
+      });
+
+      if (existingEvent) {
+        this.logger.info(
+          { positionId, inputHash, existingEventId: existingEvent.id },
+          'Event already exists (duplicate inputHash), skipping insert'
+        );
+        log.methodExit(this.logger, 'addItem', { id: existingEvent.id, skipped: true });
+        // Return complete history without inserting duplicate
+        return this.findAllItems(positionId);
+      }
+
+      // Serialize rewards
+      const rewardsDB = input.rewards.map((r) => ({
+        tokenId: r.tokenId,
+        tokenAmount: r.tokenAmount.toString(),
+        tokenValue: r.tokenValue.toString(),
+      }));
+
+      // Create event in database
+      log.dbOperation(this.logger, 'create', 'PositionLedgerEvent', {
+        positionId,
+        eventType: input.eventType,
+      });
+
+      const result = await this.prisma.positionLedgerEvent.create({
+        data: {
+          positionId,
+          protocol: input.protocol,
+          previousId: input.previousId,
+          timestamp: input.timestamp,
+          eventType: input.eventType,
+          inputHash,
+          poolPrice: input.poolPrice.toString(),
+          token0Amount: input.token0Amount.toString(),
+          token1Amount: input.token1Amount.toString(),
+          tokenValue: input.tokenValue.toString(),
+          rewards: rewardsDB as object[],
+          deltaCostBasis: input.deltaCostBasis.toString(),
+          costBasisAfter: input.costBasisAfter.toString(),
+          deltaPnl: input.deltaPnl.toString(),
+          pnlAfter: input.pnlAfter.toString(),
+          config: configDB as object,
+          state: stateDB as object,
+        },
+      });
+
+      this.logger.info(
+        {
+          id: result.id,
+          positionId,
+          eventType: input.eventType,
+          timestamp: input.timestamp,
+        },
+        'Event created successfully'
+      );
+
+      log.methodExit(this.logger, 'addItem', { id: result.id });
+
+      // Return complete history
+      return this.findAllItems(positionId);
+    } catch (error) {
+      log.methodError(this.logger, 'addItem', error as Error, {
+        positionId,
+        eventType: input.eventType,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all events for a position
+   *
+   * This is typically used before rebuilding the ledger via discoverAllEvents.
+   * Operation is idempotent - deleting for non-existent position returns silently.
+   *
+   * @param positionId - Position database ID
+   */
+  async deleteAllItems(positionId: string): Promise<void> {
+    log.methodEntry(this.logger, 'deleteAllItems', { positionId });
+
+    try {
+      log.dbOperation(this.logger, 'deleteMany', 'PositionLedgerEvent', {
+        positionId,
+      });
+
+      const result = await this.prisma.positionLedgerEvent.deleteMany({
+        where: {
+          positionId,
+          protocol: 'uniswapv3',
+        },
+      });
+
+      this.logger.info(
+        {
+          positionId,
+          count: result.count,
+        },
+        'Events deleted successfully'
+      );
+
+      log.methodExit(this.logger, 'deleteAllItems', {
+        positionId,
+        count: result.count,
+      });
+    } catch (error) {
+      log.methodError(this.logger, 'deleteAllItems', error as Error, {
+        positionId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Find all events for a position using blockchain ordering
    *
    * This ensures deterministic event ordering based on blockchain coordinates
    * (blockNumber, txIndex, logIndex) stored in the config field, rather than
@@ -1297,7 +1735,7 @@ export class UniswapV3PositionLedgerService extends PositionLedgerService {
    * @param positionId - Position database ID
    * @returns Array of events, sorted descending by blockchain coordinates (newest first)
    */
-  override async findAllItems(positionId: string): Promise<UniswapV3PositionLedgerEvent[]> {
+  async findAllItems(positionId: string): Promise<UniswapV3PositionLedgerEvent[]> {
     log.methodEntry(this.logger, 'findAllItems (Uniswap V3 override)', { positionId });
 
     try {

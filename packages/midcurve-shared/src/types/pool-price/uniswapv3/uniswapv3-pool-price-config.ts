@@ -26,6 +26,13 @@ export interface UniswapV3PoolPriceConfig {
   blockNumber: number;
 
   /**
+   * Block hash for reorg detection
+   * If the hash changes for the same block number, data is stale due to reorg.
+   * @example "0x1234...abcd"
+   */
+  blockHash: string;
+
+  /**
    * Unix timestamp of the block (in seconds)
    * @example 1693526400
    */
@@ -42,6 +49,7 @@ export interface UniswapV3PoolPriceConfig {
  */
 export interface UniswapV3PoolPriceConfigJSON {
   blockNumber: number;
+  blockHash: string;
   blockTimestamp: number;
 }
 
