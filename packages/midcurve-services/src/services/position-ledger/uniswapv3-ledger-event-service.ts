@@ -467,6 +467,38 @@ export class UniswapV3LedgerEventService {
     return result?.id ?? null;
   }
 
+  /**
+   * Find all events with a given transaction hash.
+   *
+   * Used for catch-up reorg detection: if we find events with the same txHash
+   * but different blockHash, it indicates a reorg occurred while offline.
+   *
+   * @param txHash - Transaction hash to search for
+   * @param tx - Optional transaction client
+   * @returns Array of events with this txHash
+   */
+  async findByTxHash(
+    txHash: string,
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3PositionLedgerEvent[]> {
+    const db = tx ?? this.prisma;
+    const results = await db.positionLedgerEvent.findMany({
+      where: {
+        positionId: this.positionId,
+        config: {
+          path: ['txHash'],
+          equals: txHash,
+        },
+      },
+    });
+
+    return results.map((result) =>
+      UniswapV3PositionLedgerEvent.fromDB(
+        result as unknown as UniswapV3PositionLedgerEventRow
+      )
+    );
+  }
+
   // ============================================================================
   // CRUD METHODS
   // ============================================================================
@@ -779,6 +811,28 @@ export class UniswapV3LedgerEventService {
     if (existingId) {
       this.logger.debug({ inputHash }, 'Event already exists, skipping');
       return { action: 'skipped', reason: 'already_exists' };
+    }
+
+    // Check for catch-up reorg: same txHash but different blockHash
+    // This happens when the indexer was offline during a reorg and is catching up
+    // via eth_getLogs() - we may have stale events from an orphaned fork
+    const eventsWithSameTxHash = await this.findByTxHash(log.transactionHash, tx);
+    for (const existingEvent of eventsWithSameTxHash) {
+      const existingBlockHash = existingEvent.typedConfig.blockHash;
+      if (existingBlockHash !== log.blockHash) {
+        // Reorg detected during catch-up - orphaned fork events found
+        this.logger.info(
+          {
+            txHash: log.transactionHash,
+            orphanedBlockHash: existingBlockHash,
+            canonicalBlockHash: log.blockHash,
+          },
+          'Catch-up reorg detected: removing events from orphaned fork'
+        );
+        await this.deleteAllByBlockHash(existingBlockHash, tx);
+        // Continue to insert the canonical event
+        break;
+      }
     }
 
     // Discover pool price at the event's block number
