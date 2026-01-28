@@ -54,6 +54,7 @@ import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token
 import { EvmBlockService } from "../block/evm-block-service.js";
 import { PositionAprService } from "../position-apr/position-apr-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
+import { UniswapV3LedgerEventService } from "../position-ledger/uniswapv3-ledger-event-service.js";
 import type { Address } from "viem";
 import { computeFeeGrowthInside } from "@midcurve/shared";
 import { calculatePositionValue } from "@midcurve/shared";
@@ -2883,24 +2884,53 @@ export class UniswapV3PositionService {
                 "Tick fee growth data fetched",
             );
 
-            // 6. Create fee state with tick data
-            // Note: unclaimedFees is set to tokensOwed as a baseline. For accurate
-            // unclaimed fees calculation including incremental fees, use
-            // calculateUnclaimedFeeAmounts() with pool state data.
+            // 6. Get uncollected principal from ledger to calculate accurate unclaimed fees
+            // tokensOwed on-chain = uncollectedPrincipal (from decrease liquidity) + unclaimedFees
+            // So: unclaimedFees = tokensOwed - uncollectedPrincipal
+            const ledgerEventService = new UniswapV3LedgerEventService(
+                { positionId: id },
+                { prisma: this._prisma }
+            );
+            const aggregates = await ledgerEventService.recalculateAggregates();
+            const { uncollectedPrincipal0, uncollectedPrincipal1 } = aggregates;
+
+            // Calculate actual unclaimed fees by subtracting uncollected principal
+            // Use max(0, ...) to handle edge cases where on-chain and ledger may be slightly out of sync
+            const unclaimedFees0 = tokensOwed0 > uncollectedPrincipal0
+                ? tokensOwed0 - uncollectedPrincipal0
+                : 0n;
+            const unclaimedFees1 = tokensOwed1 > uncollectedPrincipal1
+                ? tokensOwed1 - uncollectedPrincipal1
+                : 0n;
+
+            this.logger.debug(
+                {
+                    id,
+                    tokensOwed0: tokensOwed0.toString(),
+                    tokensOwed1: tokensOwed1.toString(),
+                    uncollectedPrincipal0: uncollectedPrincipal0.toString(),
+                    uncollectedPrincipal1: uncollectedPrincipal1.toString(),
+                    unclaimedFees0: unclaimedFees0.toString(),
+                    unclaimedFees1: unclaimedFees1.toString(),
+                },
+                "Calculated unclaimed fees from ledger aggregates",
+            );
+
+            // 7. Create fee state with tick data and accurate unclaimed fees
             const feeState: PositionFeeState = {
                 feeGrowthInside0LastX128,
                 feeGrowthInside1LastX128,
                 tokensOwed0,
                 tokensOwed1,
-                unclaimedFees0: tokensOwed0,
-                unclaimedFees1: tokensOwed1,
+                unclaimedFees0,
+                unclaimedFees1,
                 tickLowerFeeGrowthOutside0X128,
                 tickLowerFeeGrowthOutside1X128,
                 tickUpperFeeGrowthOutside0X128,
                 tickUpperFeeGrowthOutside1X128,
             };
 
-            // 6. Persist using setter
+            // 8. Persist using setter
             await this.updateFeeState(id, feeState);
 
             this.logger.info(
