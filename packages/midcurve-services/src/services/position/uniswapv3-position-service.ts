@@ -1979,7 +1979,7 @@ export class UniswapV3PositionService {
                 { prisma: this._prisma },
             );
             const aggregates =
-                await ledgerEventService.recalculateAggregates(tx);
+                await ledgerEventService.recalculateAggregates(existing.isToken0Quote, tx);
             const { uncollectedPrincipal0, uncollectedPrincipal1 } = aggregates;
 
             // Calculate actual unclaimed fees using shared utility

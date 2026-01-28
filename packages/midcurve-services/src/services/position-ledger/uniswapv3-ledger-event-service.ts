@@ -126,11 +126,32 @@ export interface LedgerAggregates {
 
 /**
  * Result of importing a raw log event.
+ * @deprecated Use ImportLogsResult with importLogsForPosition() instead
  */
 export type ImportLogResult =
   | { action: 'inserted'; inputHash: string; aggregates: LedgerAggregates }
   | { action: 'removed'; inputHash: string; aggregates: LedgerAggregates }
   | { action: 'skipped'; reason: 'already_exists' | 'invalid_event' };
+
+/**
+ * Result for a single log import within a batch.
+ * Does not include aggregates - those are calculated once at the end of the batch.
+ */
+export type SingleLogResult =
+  | { action: 'inserted'; inputHash: string }
+  | { action: 'removed'; inputHash: string; deletedCount: number }
+  | { action: 'skipped'; reason: 'already_exists' | 'invalid_event' };
+
+/**
+ * Result of importing multiple raw log events.
+ * Contains per-log results and the final aggregates after all events are processed.
+ */
+export interface ImportLogsResult {
+  /** Results for each input log */
+  results: SingleLogResult[];
+  /** Final aggregates after recalculating all events in correct order */
+  aggregates: LedgerAggregates;
+}
 
 /**
  * Decoded data from a raw log's data field.
@@ -297,6 +318,35 @@ export interface UniswapV3LedgerEventServiceConfig {
 }
 
 /**
+ * Input for updating an event's calculated aggregates.
+ * Used by recalculateAggregates() to fix running totals after out-of-order imports.
+ */
+export interface UpdateEventAggregatesInput {
+  /** ID of the previous event in chronological order (null for first event) */
+  previousId: string | null;
+  /** Change in liquidity (delta L) */
+  deltaL: bigint;
+  /** Total liquidity after this event */
+  liquidityAfter: bigint;
+  /** Change in cost basis */
+  deltaCostBasis: bigint;
+  /** Cost basis after this event */
+  costBasisAfter: bigint;
+  /** Change in PnL */
+  deltaPnl: bigint;
+  /** PnL after this event */
+  pnlAfter: bigint;
+  /** Change in collected fees */
+  deltaCollectedFees: bigint;
+  /** Collected fees after this event */
+  collectedFeesAfter: bigint;
+  /** Uncollected principal in token0 after this event */
+  uncollectedPrincipal0After: bigint;
+  /** Uncollected principal in token1 after this event */
+  uncollectedPrincipal1After: bigint;
+}
+
+/**
  * Input for creating a new ledger event.
  */
 export interface CreateLedgerEventInput {
@@ -448,6 +498,33 @@ export class UniswapV3LedgerEventService {
       config.blockHash,
       config.logIndex
     );
+  }
+
+  // ============================================================================
+  // SORTING METHODS
+  // ============================================================================
+
+  /**
+   * Sort events by blockchain coordinates (blockNumber ASC, logIndex ASC).
+   *
+   * logIndex is unique within a block (not within a transaction), so txIndex
+   * is not needed for ordering.
+   *
+   * @param events - Array of events to sort (mutates in place)
+   * @returns The sorted array (same reference)
+   */
+  static sortByBlockchainCoordinates<T extends { typedConfig: { blockNumber: bigint; logIndex: number } }>(
+    events: T[]
+  ): T[] {
+    return events.sort((a, b) => {
+      const aConfig = a.typedConfig;
+      const bConfig = b.typedConfig;
+
+      if (aConfig.blockNumber !== bConfig.blockNumber) {
+        return aConfig.blockNumber < bConfig.blockNumber ? -1 : 1;
+      }
+      return aConfig.logIndex - bConfig.logIndex;
+    });
   }
 
   // ============================================================================
@@ -611,6 +688,49 @@ export class UniswapV3LedgerEventService {
   }
 
   /**
+   * Update an event's calculated aggregates (deltas and running totals).
+   *
+   * Used by recalculateAggregates() to fix running totals after out-of-order imports.
+   * Updates both row-level fields and the config JSON.
+   *
+   * @param eventId - Database ID of the event to update
+   * @param existingConfig - The existing config object (needed to preserve immutable fields)
+   * @param updates - The new aggregate values
+   * @param tx - Optional transaction client
+   */
+  private async updateEventAggregates(
+    eventId: string,
+    existingConfig: UniswapV3LedgerEventConfig,
+    updates: UpdateEventAggregatesInput,
+    tx?: PrismaTransactionClient
+  ): Promise<void> {
+    const db = tx ?? this.prisma;
+
+    // Merge updates into existing config (preserve immutable fields like blockNumber, txHash, etc.)
+    const updatedConfig: UniswapV3LedgerEventConfig = {
+      ...existingConfig,
+      deltaL: updates.deltaL,
+      liquidityAfter: updates.liquidityAfter,
+      uncollectedPrincipal0After: updates.uncollectedPrincipal0After,
+      uncollectedPrincipal1After: updates.uncollectedPrincipal1After,
+    };
+
+    await db.positionLedgerEvent.update({
+      where: { id: eventId },
+      data: {
+        previousId: updates.previousId,
+        deltaCostBasis: updates.deltaCostBasis.toString(),
+        costBasisAfter: updates.costBasisAfter.toString(),
+        deltaPnl: updates.deltaPnl.toString(),
+        pnlAfter: updates.pnlAfter.toString(),
+        deltaCollectedFees: updates.deltaCollectedFees.toString(),
+        collectedFeesAfter: updates.collectedFeesAfter.toString(),
+        config: ledgerEventConfigToJSON(updatedConfig) as object,
+      },
+    });
+  }
+
+  /**
    * Delete an event by its database ID.
    *
    * @param id - Database ID of the event to delete
@@ -745,19 +865,23 @@ export class UniswapV3LedgerEventService {
   /**
    * Recalculate aggregates from all events for this position.
    *
-   * Used after reorgs to ensure consistency. Returns aggregates from
-   * the last event, or zero values if no events exist.
+   * Iterates through ALL events in blockchain order (blockNumber ASC, logIndex ASC),
+   * recalculating deltas and running totals based on the correct previous state.
+   * Updates each event in the database with corrected values.
    *
-   * Note: unclaimedFees0/1 are returned as 0n since they require on-chain data.
+   * This is the core method for fixing out-of-order event imports and reorg handling.
    *
+   * @param isToken0Quote - Whether token0 is the quote token (needed for fee value calculations)
    * @param tx - Optional transaction client
-   * @returns Aggregated metrics from all events
+   * @returns Aggregated metrics after recalculating all events
    */
-  async recalculateAggregates(tx?: PrismaTransactionClient): Promise<LedgerAggregates> {
-    const lastEvent = await this.findLast(tx);
+  async recalculateAggregates(
+    isToken0Quote: boolean,
+    tx?: PrismaTransactionClient
+  ): Promise<LedgerAggregates> {
+    const events = await this.findAll(tx);
 
-    if (!lastEvent) {
-      // No events - return zero aggregates
+    if (events.length === 0) {
       return {
         liquidityAfter: 0n,
         costBasisAfter: 0n,
@@ -769,17 +893,139 @@ export class UniswapV3LedgerEventService {
       };
     }
 
-    // Get "after" values from the last event
-    const config = lastEvent.typedConfig;
+    // Sort events by blockchain coordinates (blockNumber ASC, logIndex ASC)
+    UniswapV3LedgerEventService.sortByBlockchainCoordinates(events);
+
+    // Initialize running totals
+    let liquidityAfter = 0n;
+    let costBasisAfter = 0n;
+    let pnlAfter = 0n;
+    let collectedFeesAfter = 0n;
+    let uncollectedPrincipal0After = 0n;
+    let uncollectedPrincipal1After = 0n;
+    let previousEventId: string | null = null;
+
+    // Process events in order, recalculating deltas and running totals
+    for (const event of events) {
+      const state = event.typedState;
+      const config = event.typedConfig;
+      const sqrtPriceX96 = config.sqrtPriceX96;
+
+      // Previous state for this event's calculations
+      const previousLiquidity = liquidityAfter;
+      const previousCostBasis = costBasisAfter;
+      const previousPnl = pnlAfter;
+      const previousCollectedFees = collectedFeesAfter;
+      const previousUncollectedPrincipal0 = uncollectedPrincipal0After;
+      const previousUncollectedPrincipal1 = uncollectedPrincipal1After;
+
+      // Calculate deltas and update running totals based on event type
+      let deltaL = 0n;
+      let deltaCostBasis = 0n;
+      let deltaPnl = 0n;
+      let deltaCollectedFees = 0n;
+
+      if (state.eventType === 'INCREASE_LIQUIDITY') {
+        // Use stored tokenValue for cost basis (already calculated with correct price)
+        deltaL = state.liquidity;
+        liquidityAfter = previousLiquidity + deltaL;
+        deltaCostBasis = event.tokenValue;
+        costBasisAfter = previousCostBasis + deltaCostBasis;
+        deltaPnl = 0n;
+        pnlAfter = previousPnl;
+        // Uncollected principal unchanged
+        uncollectedPrincipal0After = previousUncollectedPrincipal0;
+        uncollectedPrincipal1After = previousUncollectedPrincipal1;
+
+      } else if (state.eventType === 'DECREASE_LIQUIDITY') {
+        deltaL = -state.liquidity;
+        liquidityAfter = previousLiquidity + deltaL;
+
+        // Calculate proportional cost basis being removed
+        let proportionalCostBasis = 0n;
+        if (previousLiquidity > 0n && state.liquidity > 0n) {
+          proportionalCostBasis = (state.liquidity * previousCostBasis) / previousLiquidity;
+        }
+        deltaCostBasis = -proportionalCostBasis;
+        costBasisAfter = previousCostBasis + deltaCostBasis;
+
+        // Realize PnL: tokenValue (stored) vs proportional cost basis
+        deltaPnl = event.tokenValue - proportionalCostBasis;
+        pnlAfter = previousPnl + deltaPnl;
+
+        // Uncollected principal INCREASES
+        uncollectedPrincipal0After = previousUncollectedPrincipal0 + state.amount0;
+        uncollectedPrincipal1After = previousUncollectedPrincipal1 + state.amount1;
+
+      } else if (state.eventType === 'COLLECT') {
+        deltaL = 0n;
+        liquidityAfter = previousLiquidity;
+        deltaCostBasis = 0n;
+        costBasisAfter = previousCostBasis;
+
+        // Determine principal vs fees
+        const principal0Collected = state.amount0 <= previousUncollectedPrincipal0
+          ? state.amount0
+          : previousUncollectedPrincipal0;
+        const principal1Collected = state.amount1 <= previousUncollectedPrincipal1
+          ? state.amount1
+          : previousUncollectedPrincipal1;
+
+        const feesCollected0 = state.amount0 - principal0Collected;
+        const feesCollected1 = state.amount1 - principal1Collected;
+
+        // Calculate fee value in quote tokens
+        let feeValue: bigint;
+        if (isToken0Quote) {
+          const fees1InQuote = valueOfToken1AmountInToken0(feesCollected1, sqrtPriceX96);
+          feeValue = feesCollected0 + fees1InQuote;
+        } else {
+          const fees0InQuote = valueOfToken0AmountInToken1(feesCollected0, sqrtPriceX96);
+          feeValue = fees0InQuote + feesCollected1;
+        }
+
+        deltaPnl = feeValue;
+        pnlAfter = previousPnl + deltaPnl;
+        deltaCollectedFees = feeValue;
+        collectedFeesAfter = previousCollectedFees + deltaCollectedFees;
+
+        // Uncollected principal decreases
+        uncollectedPrincipal0After = previousUncollectedPrincipal0 - principal0Collected;
+        uncollectedPrincipal1After = previousUncollectedPrincipal1 - principal1Collected;
+      }
+
+      // Update event in database with corrected values
+      await this.updateEventAggregates(
+        event.id,
+        config,
+        {
+          previousId: previousEventId,
+          deltaL,
+          liquidityAfter,
+          deltaCostBasis,
+          costBasisAfter,
+          deltaPnl,
+          pnlAfter,
+          deltaCollectedFees,
+          collectedFeesAfter,
+          uncollectedPrincipal0After,
+          uncollectedPrincipal1After,
+        },
+        tx
+      );
+
+      // This event becomes the previous event for the next iteration
+      previousEventId = event.id;
+    }
 
     return {
-      liquidityAfter: config.liquidityAfter,
-      costBasisAfter: lastEvent.costBasisAfter,
-      realizedPnlAfter: lastEvent.pnlAfter,
-      collectedFeesAfter: lastEvent.collectedFeesAfter,
-      realizedCashflowAfter: lastEvent.realizedCashflowAfter,
-      uncollectedPrincipal0: config.uncollectedPrincipal0After,
-      uncollectedPrincipal1: config.uncollectedPrincipal1After,
+      liquidityAfter,
+      costBasisAfter,
+      realizedPnlAfter: pnlAfter,
+      collectedFeesAfter,
+      realizedCashflowAfter: 0n, // Always 0 for AMM positions
+      uncollectedPrincipal0: uncollectedPrincipal0After,
+      uncollectedPrincipal1: uncollectedPrincipal1After,
     };
   }
 
@@ -788,30 +1034,63 @@ export class UniswapV3LedgerEventService {
   // ============================================================================
 
   /**
-   * Import a raw log event into the ledger database.
+   * Import multiple raw log events into the ledger database.
    *
-   * Actions:
-   * - If `removed=true`: Deletes events from the affected block, recalculates aggregates
-   * - If event already exists: Returns 'skipped'
-   * - Otherwise: Creates ledger event with calculated deltas/after values
+   * This is the primary method for importing events. It:
+   * 1. Processes each log (validation, dedup, reorg detection, event creation)
+   * 2. Calls recalculateAggregates() once at the end to fix all running totals
    *
-   * The pool price is fetched from the pool price service at the event's block number.
-   * This ensures reorg-safe price lookups and proper timestamp extraction.
+   * Events can be imported in any order - the recalculation ensures correct
+   * running totals based on blockchain coordinates (blockNumber, logIndex).
    *
    * @param position - UniswapV3Position (provides pool, tokens, isToken0Quote)
    * @param chainId - EVM chain ID
-   * @param log - Raw log data from eth_getLogs or eth_subscribe
+   * @param logs - Array of raw log data from eth_getLogs or eth_subscribe
    * @param poolPriceService - Pool price service for discovering prices at specific blocks
    * @param tx - Optional Prisma transaction client
-   * @returns Import result with aggregates (or skip reason)
+   * @returns Import results for each log and final aggregates
    */
-  async importLogForPosition(
+  async importLogsForPosition(
+    position: UniswapV3Position,
+    chainId: number,
+    logs: RawLogInput[],
+    poolPriceService: UniswapV3PoolPriceService,
+    tx?: PrismaTransactionClient
+  ): Promise<ImportLogsResult> {
+    const results: SingleLogResult[] = [];
+
+    for (const log of logs) {
+      const result = await this.processSingleLog(position, chainId, log, poolPriceService, tx);
+      results.push(result);
+    }
+
+    // Recalculate all aggregates to ensure correct running totals
+    const aggregates = await this.recalculateAggregates(position.isToken0Quote, tx);
+
+    return { results, aggregates };
+  }
+
+  /**
+   * Process a single raw log event.
+   *
+   * Handles validation, deduplication, reorg detection, and event creation.
+   * Does NOT recalculate aggregates - that's done by the caller after all
+   * events are processed.
+   *
+   * @param position - UniswapV3Position
+   * @param chainId - EVM chain ID
+   * @param log - Raw log data
+   * @param poolPriceService - Pool price service
+   * @param tx - Optional transaction client
+   * @returns Single log result (no aggregates)
+   */
+  private async processSingleLog(
     position: UniswapV3Position,
     chainId: number,
     log: RawLogInput,
     poolPriceService: UniswapV3PoolPriceService,
     tx?: PrismaTransactionClient
-  ): Promise<ImportLogResult> {
+  ): Promise<SingleLogResult> {
     const nftId = position.typedConfig.nftId;
 
     // Validate the raw event
@@ -845,14 +1124,13 @@ export class UniswapV3LedgerEventService {
       logIndex
     );
 
-    // Handle reorg case: remove all events from this block and recalculate
+    // Handle reorg case: remove all events from this block
     if (log.removed) {
       const deletedCount = await this.deleteAllByBlockHash(log.blockHash, tx);
       if (deletedCount > 0) {
         this.logger.info({ blockHash: log.blockHash, deletedCount }, 'Events removed due to reorg');
       }
-      const aggregates = await this.recalculateAggregates(tx);
-      return { action: 'removed', inputHash, aggregates };
+      return { action: 'removed', inputHash, deletedCount };
     }
 
     // Check if event already exists
@@ -863,13 +1141,10 @@ export class UniswapV3LedgerEventService {
     }
 
     // Check for catch-up reorg: same txHash but different blockHash
-    // This happens when the indexer was offline during a reorg and is catching up
-    // via eth_getLogs() - we may have stale events from an orphaned fork
     const eventsWithSameTxHash = await this.findByTxHash(log.transactionHash, tx);
     for (const existingEvent of eventsWithSameTxHash) {
       const existingBlockHash = existingEvent.typedConfig.blockHash;
       if (existingBlockHash !== log.blockHash) {
-        // Reorg detected during catch-up - orphaned fork events found
         this.logger.info(
           {
             txHash: log.transactionHash,
@@ -879,13 +1154,11 @@ export class UniswapV3LedgerEventService {
           'Catch-up reorg detected: removing events from orphaned fork'
         );
         await this.deleteAllByBlockHash(existingBlockHash, tx);
-        // Continue to insert the canonical event
         break;
       }
     }
 
     // Discover pool price at the event's block number
-    // This is reorg-safe and provides both sqrtPriceX96 and timestamp
     const poolPrice = await poolPriceService.discover(
       position.pool.id,
       { blockNumber: Number(blockNumber) },
@@ -897,43 +1170,17 @@ export class UniswapV3LedgerEventService {
     // Decode the log data
     const decoded = decodeLogData(validation.eventType, log.data);
 
-    // Get previous event's "after" values (or zeros if first event)
-    const previousEvent = await this.findLast(tx);
-    const previousLiquidity = previousEvent?.typedConfig.liquidityAfter ?? 0n;
-    const previousCostBasis = previousEvent?.costBasisAfter ?? 0n;
-    const previousPnl = previousEvent?.pnlAfter ?? 0n;
-    const previousCollectedFees = previousEvent?.collectedFeesAfter ?? 0n;
-    const previousUncollectedPrincipal0 = previousEvent?.typedConfig.uncollectedPrincipal0After ?? 0n;
-    const previousUncollectedPrincipal1 = previousEvent?.typedConfig.uncollectedPrincipal1After ?? 0n;
-
-    // Calculate deltas and "after" values based on event type
-    let deltaL = 0n;
-    let liquidityAfter = previousLiquidity;
-    let deltaCostBasis = 0n;
-    let costBasisAfter = previousCostBasis;
-    let deltaPnl = 0n;
-    let pnlAfter = previousPnl;
-    let deltaCollectedFees = 0n;
-    let collectedFeesAfter = previousCollectedFees;
-    let feesCollected0 = 0n;
-    let feesCollected1 = 0n;
-    let uncollectedPrincipal0After = previousUncollectedPrincipal0;
-    let uncollectedPrincipal1After = previousUncollectedPrincipal1;
-
-    // Calculate token value in quote tokens using shared utilities
+    // Calculate token value in quote tokens
     let tokenValue: bigint;
     if (position.isToken0Quote) {
-      // token0 is quote, convert token1 to token0 units
       const amount1InQuote = valueOfToken1AmountInToken0(decoded.amount1, sqrtPriceX96);
       tokenValue = decoded.amount0 + amount1InQuote;
     } else {
-      // token1 is quote, convert token0 to token1 units
       const amount0InQuote = valueOfToken0AmountInToken1(decoded.amount0, sqrtPriceX96);
       tokenValue = amount0InQuote + decoded.amount1;
     }
 
     // Map ValidEventType to EventType for database
-    // Note: EventType uses INCREASE_POSITION/DECREASE_POSITION, not INCREASE_LIQUIDITY/DECREASE_LIQUIDITY
     const eventTypeMap: Record<ValidEventType, EventType> = {
       'INCREASE_LIQUIDITY': 'INCREASE_POSITION',
       'DECREASE_LIQUIDITY': 'DECREASE_POSITION',
@@ -941,84 +1188,13 @@ export class UniswapV3LedgerEventService {
     };
     const eventType = eventTypeMap[validation.eventType];
 
-    if (validation.eventType === 'INCREASE_LIQUIDITY') {
-      // Adding liquidity - tokens are deposited into active liquidity
-      deltaL = decoded.liquidity ?? 0n;
-      liquidityAfter = previousLiquidity + deltaL;
-      deltaCostBasis = tokenValue;
-      costBasisAfter = previousCostBasis + deltaCostBasis;
-      // No PnL realization on increase
-      deltaPnl = 0n;
-      pnlAfter = previousPnl;
-      // Uncollected principal unchanged - tokens go into active liquidity, not owed amounts
-      uncollectedPrincipal0After = previousUncollectedPrincipal0;
-      uncollectedPrincipal1After = previousUncollectedPrincipal1;
+    // Build ledger event config (running totals will be fixed by recalculateAggregates)
+    const deltaL = validation.eventType === 'INCREASE_LIQUIDITY'
+      ? (decoded.liquidity ?? 0n)
+      : validation.eventType === 'DECREASE_LIQUIDITY'
+        ? -(decoded.liquidity ?? 0n)
+        : 0n;
 
-    } else if (validation.eventType === 'DECREASE_LIQUIDITY') {
-      // Removing liquidity - tokens become "owed" and must be collected via collect()
-      deltaL = -(decoded.liquidity ?? 0n);
-      liquidityAfter = previousLiquidity + deltaL;
-
-      // Calculate proportional cost basis being removed
-      let proportionalCostBasis = 0n;
-      if (previousLiquidity > 0n && decoded.liquidity) {
-        proportionalCostBasis = (decoded.liquidity * previousCostBasis) / previousLiquidity;
-      }
-      deltaCostBasis = -proportionalCostBasis;
-      costBasisAfter = previousCostBasis + deltaCostBasis;
-
-      // Realize PnL at decrease time: value of owed tokens vs proportional cost basis
-      deltaPnl = tokenValue - proportionalCostBasis;
-      pnlAfter = previousPnl + deltaPnl;
-
-      // Uncollected principal INCREASES - withdrawn amounts are now owed
-      uncollectedPrincipal0After = previousUncollectedPrincipal0 + decoded.amount0;
-      uncollectedPrincipal1After = previousUncollectedPrincipal1 + decoded.amount1;
-
-    } else if (validation.eventType === 'COLLECT') {
-      // Collecting owed tokens (principal from decrease + accrued fees)
-      deltaL = 0n;
-      liquidityAfter = previousLiquidity;
-      deltaCostBasis = 0n;
-      costBasisAfter = previousCostBasis;
-
-      // Determine how much of the collected amount is principal vs fees
-      // Principal portion: min(collected, uncollectedPrincipal)
-      const principal0Collected = decoded.amount0 <= previousUncollectedPrincipal0
-        ? decoded.amount0
-        : previousUncollectedPrincipal0;
-      const principal1Collected = decoded.amount1 <= previousUncollectedPrincipal1
-        ? decoded.amount1
-        : previousUncollectedPrincipal1;
-
-      // Fees are the remainder after principal
-      feesCollected0 = decoded.amount0 - principal0Collected;
-      feesCollected1 = decoded.amount1 - principal1Collected;
-
-      // Calculate fee value in quote tokens for PnL
-      let feeValue: bigint;
-      if (position.isToken0Quote) {
-        const fees1InQuote = valueOfToken1AmountInToken0(feesCollected1, sqrtPriceX96);
-        feeValue = feesCollected0 + fees1InQuote;
-      } else {
-        const fees0InQuote = valueOfToken0AmountInToken1(feesCollected0, sqrtPriceX96);
-        feeValue = fees0InQuote + feesCollected1;
-      }
-
-      // Only fees are realized gains (principal was already accounted for at decrease time)
-      deltaPnl = feeValue;
-      pnlAfter = previousPnl + deltaPnl;
-
-      // Track collected fees (fees portion only, not principal)
-      deltaCollectedFees = feeValue;
-      collectedFeesAfter = previousCollectedFees + deltaCollectedFees;
-
-      // Uncollected principal decreases by the principal portion collected
-      uncollectedPrincipal0After = previousUncollectedPrincipal0 - principal0Collected;
-      uncollectedPrincipal1After = previousUncollectedPrincipal1 - principal1Collected;
-    }
-
-    // Build the ledger event config
     const ledgerConfig: UniswapV3LedgerEventConfig = {
       chainId,
       nftId: BigInt(nftId),
@@ -1028,15 +1204,15 @@ export class UniswapV3LedgerEventService {
       txHash: log.transactionHash,
       blockHash: log.blockHash,
       deltaL,
-      liquidityAfter,
-      feesCollected0,
-      feesCollected1,
-      uncollectedPrincipal0After,
-      uncollectedPrincipal1After,
+      liquidityAfter: 0n, // Will be fixed by recalculateAggregates
+      feesCollected0: 0n, // Will be fixed by recalculateAggregates
+      feesCollected1: 0n, // Will be fixed by recalculateAggregates
+      uncollectedPrincipal0After: 0n, // Will be fixed by recalculateAggregates
+      uncollectedPrincipal1After: 0n, // Will be fixed by recalculateAggregates
       sqrtPriceX96,
     };
 
-    // Build the ledger event state (discriminated union based on event type)
+    // Build ledger event state
     const tokenIdBigInt = BigInt(nftId);
     let ledgerState: UniswapV3LedgerEventState;
     if (validation.eventType === 'INCREASE_LIQUIDITY') {
@@ -1065,25 +1241,25 @@ export class UniswapV3LedgerEventService {
       };
     }
 
-    // Create the ledger event
+    // Create the ledger event (with placeholder running totals)
     const createInput: CreateLedgerEventInput = {
-      previousId: previousEvent?.id ?? null,
+      previousId: null, // Will be fixed by recalculateAggregates
       timestamp: blockTimestamp,
       eventType,
       inputHash,
-      poolPrice: sqrtPriceX96, // Store sqrtPriceX96 as pool price
+      poolPrice: sqrtPriceX96,
       token0Amount: decoded.amount0,
       token1Amount: decoded.amount1,
       tokenValue,
-      rewards: [], // Fees are tracked separately in config
-      deltaCostBasis,
-      costBasisAfter,
-      deltaPnl,
-      pnlAfter,
-      deltaCollectedFees,
-      collectedFeesAfter,
-      deltaRealizedCashflow: 0n, // Always 0 for AMM positions
-      realizedCashflowAfter: 0n, // Always 0 for AMM positions
+      rewards: [],
+      deltaCostBasis: 0n, // Will be fixed by recalculateAggregates
+      costBasisAfter: 0n, // Will be fixed by recalculateAggregates
+      deltaPnl: 0n, // Will be fixed by recalculateAggregates
+      pnlAfter: 0n, // Will be fixed by recalculateAggregates
+      deltaCollectedFees: 0n, // Will be fixed by recalculateAggregates
+      collectedFeesAfter: 0n, // Will be fixed by recalculateAggregates
+      deltaRealizedCashflow: 0n,
+      realizedCashflowAfter: 0n,
       config: ledgerConfig,
       state: ledgerState,
     };
@@ -1091,21 +1267,59 @@ export class UniswapV3LedgerEventService {
     await this.create(createInput, tx);
 
     this.logger.debug(
-      { inputHash, eventType: validation.eventType, liquidityAfter: liquidityAfter.toString() },
-      'Ledger event created'
+      { inputHash, eventType: validation.eventType },
+      'Ledger event created (aggregates pending recalculation)'
     );
 
-    // Return aggregates
-    const aggregates: LedgerAggregates = {
-      liquidityAfter,
-      costBasisAfter,
-      realizedPnlAfter: pnlAfter,
-      collectedFeesAfter,
-      realizedCashflowAfter: 0n, // Always 0 for AMM positions
-      uncollectedPrincipal0: uncollectedPrincipal0After,
-      uncollectedPrincipal1: uncollectedPrincipal1After,
-    };
+    return { action: 'inserted', inputHash };
+  }
 
-    return { action: 'inserted', inputHash, aggregates };
+  /**
+   * Import a raw log event into the ledger database.
+   *
+   * @deprecated Use importLogsForPosition() instead for better performance and
+   * correct handling of out-of-order events.
+   *
+   * Actions:
+   * - If `removed=true`: Deletes events from the affected block, recalculates aggregates
+   * - If event already exists: Returns 'skipped'
+   * - Otherwise: Creates ledger event with calculated deltas/after values
+   *
+   * The pool price is fetched from the pool price service at the event's block number.
+   * This ensures reorg-safe price lookups and proper timestamp extraction.
+   *
+   * @param position - UniswapV3Position (provides pool, tokens, isToken0Quote)
+   * @param chainId - EVM chain ID
+   * @param log - Raw log data from eth_getLogs or eth_subscribe
+   * @param poolPriceService - Pool price service for discovering prices at specific blocks
+   * @param tx - Optional Prisma transaction client
+   * @returns Import result with aggregates (or skip reason)
+   */
+  async importLogForPosition(
+    position: UniswapV3Position,
+    chainId: number,
+    log: RawLogInput,
+    poolPriceService: UniswapV3PoolPriceService,
+    tx?: PrismaTransactionClient
+  ): Promise<ImportLogResult> {
+    // Delegate to the batch method with a single log
+    const { results, aggregates } = await this.importLogsForPosition(
+      position,
+      chainId,
+      [log],
+      poolPriceService,
+      tx
+    );
+
+    const result = results[0]!;
+
+    // Convert SingleLogResult to ImportLogResult (add aggregates)
+    if (result.action === 'skipped') {
+      return result;
+    } else if (result.action === 'removed') {
+      return { action: 'removed', inputHash: result.inputHash, aggregates };
+    } else {
+      return { action: 'inserted', inputHash: result.inputHash, aggregates };
+    }
   }
 }
