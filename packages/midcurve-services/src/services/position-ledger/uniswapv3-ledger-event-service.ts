@@ -24,7 +24,7 @@ import type {
 import { getPositionManagerAddress } from '../../config/uniswapv3.js';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
-import type { PrismaTransactionClient } from '../pool/uniswapv3-pool-service.js';
+import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import type { UniswapV3PoolPriceService } from '../pool-price/uniswapv3-pool-price-service.js';
 
 // ============================================================================
@@ -113,7 +113,10 @@ export interface LedgerAggregates {
   realizedPnlAfter: bigint;
 
   /** Total collected fees (in quote token units) */
-  collectedFeesTotal: bigint;
+  collectedFeesAfter: bigint;
+
+  /** Total realized cashflow after all events (in quote token units) - always 0 for AMM positions */
+  realizedCashflowAfter: bigint;
 
   /** Uncollected principal in token0 (from decrease liquidity, awaiting collect) */
   uncollectedPrincipal0: bigint;
@@ -323,6 +326,14 @@ export interface CreateLedgerEventInput {
   deltaPnl: bigint;
   /** PnL after this event */
   pnlAfter: bigint;
+  /** Change in collected fees */
+  deltaCollectedFees: bigint;
+  /** Collected fees after this event */
+  collectedFeesAfter: bigint;
+  /** Change in realized cashflow (always 0 for AMM positions) */
+  deltaRealizedCashflow: bigint;
+  /** Realized cashflow after this event (always 0 for AMM positions) */
+  realizedCashflowAfter: bigint;
   /** Protocol-specific config */
   config: UniswapV3LedgerEventConfig;
   /** Protocol-specific state */
@@ -585,6 +596,10 @@ export class UniswapV3LedgerEventService {
         costBasisAfter: input.costBasisAfter.toString(),
         deltaPnl: input.deltaPnl.toString(),
         pnlAfter: input.pnlAfter.toString(),
+        deltaCollectedFees: input.deltaCollectedFees.toString(),
+        collectedFeesAfter: input.collectedFeesAfter.toString(),
+        deltaRealizedCashflow: input.deltaRealizedCashflow.toString(),
+        realizedCashflowAfter: input.realizedCashflowAfter.toString(),
         config: ledgerEventConfigToJSON(input.config) as object,
         state: ledgerEventStateToJSON(input.state) as object,
       },
@@ -686,6 +701,48 @@ export class UniswapV3LedgerEventService {
   }
 
   /**
+   * Get the latest (most recent) ledger event for this position.
+   *
+   * This is an alias for findLast() with a more explicit name.
+   * Returns the event with the most recent timestamp.
+   *
+   * @param tx - Optional transaction client
+   * @returns The latest event, or null if no events exist
+   */
+  async getLatestEvent(tx?: PrismaTransactionClient): Promise<UniswapV3PositionLedgerEvent | null> {
+    return this.findLast(tx);
+  }
+
+  /**
+   * Get the last COLLECT event for this position.
+   *
+   * Used to determine the timestamp of the most recent fee collection.
+   *
+   * @param tx - Optional transaction client
+   * @returns The last COLLECT event, or null if no COLLECT events exist
+   */
+  async getLastCollectEvent(tx?: PrismaTransactionClient): Promise<UniswapV3PositionLedgerEvent | null> {
+    const db = tx ?? this.prisma;
+    const result = await db.positionLedgerEvent.findFirst({
+      where: {
+        positionId: this.positionId,
+        eventType: 'COLLECT',
+      },
+      orderBy: [
+        { timestamp: 'desc' },
+      ],
+    });
+
+    if (!result) {
+      return null;
+    }
+
+    return UniswapV3PositionLedgerEvent.fromDB(
+      result as unknown as UniswapV3PositionLedgerEventRow
+    );
+  }
+
+  /**
    * Recalculate aggregates from all events for this position.
    *
    * Used after reorgs to ensure consistency. Returns aggregates from
@@ -705,7 +762,8 @@ export class UniswapV3LedgerEventService {
         liquidityAfter: 0n,
         costBasisAfter: 0n,
         realizedPnlAfter: 0n,
-        collectedFeesTotal: 0n,
+        collectedFeesAfter: 0n,
+        realizedCashflowAfter: 0n,
         uncollectedPrincipal0: 0n,
         uncollectedPrincipal1: 0n,
       };
@@ -714,21 +772,12 @@ export class UniswapV3LedgerEventService {
     // Get "after" values from the last event
     const config = lastEvent.typedConfig;
 
-    // Calculate total collected fees by summing all COLLECT events
-    const allEvents = await this.findAll(tx);
-    let collectedFeesTotal = 0n;
-    for (const event of allEvents) {
-      // Sum up all rewards (fees are stored as rewards)
-      for (const reward of event.rewards) {
-        collectedFeesTotal += reward.tokenValue;
-      }
-    }
-
     return {
       liquidityAfter: config.liquidityAfter,
       costBasisAfter: lastEvent.costBasisAfter,
       realizedPnlAfter: lastEvent.pnlAfter,
-      collectedFeesTotal,
+      collectedFeesAfter: lastEvent.collectedFeesAfter,
+      realizedCashflowAfter: lastEvent.realizedCashflowAfter,
       uncollectedPrincipal0: config.uncollectedPrincipal0After,
       uncollectedPrincipal1: config.uncollectedPrincipal1After,
     };
@@ -853,6 +902,7 @@ export class UniswapV3LedgerEventService {
     const previousLiquidity = previousEvent?.typedConfig.liquidityAfter ?? 0n;
     const previousCostBasis = previousEvent?.costBasisAfter ?? 0n;
     const previousPnl = previousEvent?.pnlAfter ?? 0n;
+    const previousCollectedFees = previousEvent?.collectedFeesAfter ?? 0n;
     const previousUncollectedPrincipal0 = previousEvent?.typedConfig.uncollectedPrincipal0After ?? 0n;
     const previousUncollectedPrincipal1 = previousEvent?.typedConfig.uncollectedPrincipal1After ?? 0n;
 
@@ -863,6 +913,8 @@ export class UniswapV3LedgerEventService {
     let costBasisAfter = previousCostBasis;
     let deltaPnl = 0n;
     let pnlAfter = previousPnl;
+    let deltaCollectedFees = 0n;
+    let collectedFeesAfter = previousCollectedFees;
     let feesCollected0 = 0n;
     let feesCollected1 = 0n;
     let uncollectedPrincipal0After = previousUncollectedPrincipal0;
@@ -957,6 +1009,10 @@ export class UniswapV3LedgerEventService {
       deltaPnl = feeValue;
       pnlAfter = previousPnl + deltaPnl;
 
+      // Track collected fees (fees portion only, not principal)
+      deltaCollectedFees = feeValue;
+      collectedFeesAfter = previousCollectedFees + deltaCollectedFees;
+
       // Uncollected principal decreases by the principal portion collected
       uncollectedPrincipal0After = previousUncollectedPrincipal0 - principal0Collected;
       uncollectedPrincipal1After = previousUncollectedPrincipal1 - principal1Collected;
@@ -1024,6 +1080,10 @@ export class UniswapV3LedgerEventService {
       costBasisAfter,
       deltaPnl,
       pnlAfter,
+      deltaCollectedFees,
+      collectedFeesAfter,
+      deltaRealizedCashflow: 0n, // Always 0 for AMM positions
+      realizedCashflowAfter: 0n, // Always 0 for AMM positions
       config: ledgerConfig,
       state: ledgerState,
     };
@@ -1035,25 +1095,13 @@ export class UniswapV3LedgerEventService {
       'Ledger event created'
     );
 
-    // Calculate total collected fees from all events
-    const allEvents = await this.findAll(tx);
-    let collectedFeesTotal = 0n;
-    for (const event of allEvents) {
-      for (const reward of event.rewards) {
-        collectedFeesTotal += reward.tokenValue;
-      }
-      // Also add fees from COLLECT events
-      if (event.eventType === 'COLLECT') {
-        collectedFeesTotal += event.tokenValue;
-      }
-    }
-
     // Return aggregates
     const aggregates: LedgerAggregates = {
       liquidityAfter,
       costBasisAfter,
       realizedPnlAfter: pnlAfter,
-      collectedFeesTotal,
+      collectedFeesAfter,
+      realizedCashflowAfter: 0n, // Always 0 for AMM positions
       uncollectedPrincipal0: uncollectedPrincipal0After,
       uncollectedPrincipal1: uncollectedPrincipal1After,
     };

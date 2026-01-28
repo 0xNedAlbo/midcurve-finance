@@ -253,6 +253,14 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       deltaPnl: typeof row.deltaPnl === 'bigint' ? row.deltaPnl : BigInt(row.deltaPnl),
       pnlAfter: typeof row.pnlAfter === 'bigint' ? row.pnlAfter : BigInt(row.pnlAfter),
 
+      // Collected fees tracking (convert from string stored in DB to bigint)
+      deltaCollectedFees: typeof row.deltaCollectedFees === 'bigint' ? row.deltaCollectedFees : BigInt(row.deltaCollectedFees),
+      collectedFeesAfter: typeof row.collectedFeesAfter === 'bigint' ? row.collectedFeesAfter : BigInt(row.collectedFeesAfter),
+
+      // Realized cashflow tracking (always 0 for AMM positions)
+      deltaRealizedCashflow: typeof row.deltaRealizedCashflow === 'bigint' ? row.deltaRealizedCashflow : BigInt(row.deltaRealizedCashflow),
+      realizedCashflowAfter: typeof row.realizedCashflowAfter === 'bigint' ? row.realizedCashflowAfter : BigInt(row.realizedCashflowAfter),
+
       // Protocol-specific
       config: ledgerEventConfigFromJSON(configJSON),
       state: ledgerEventStateFromJSON(stateJSON),

@@ -354,10 +354,14 @@ model PositionLedgerEvent {
   rewards      Json // Array of {tokenId: string, tokenAmount: string, tokenValue: string}
 
   // PnL tracking (stored as string for bigint precision)
-  deltaCostBasis String // bigint as string - Change in cost basis from this event
-  costBasisAfter String // bigint as string - Cumulative cost basis after this event
-  deltaPnl       String // bigint as string - Change in realized PnL from this event
-  pnlAfter       String // bigint as string - Cumulative realized PnL after this event
+  deltaCostBasis      String // bigint as string - Change in cost basis from this event
+  costBasisAfter      String // bigint as string - Cumulative cost basis after this event
+  deltaPnl            String // bigint as string - Change in realized PnL from this event
+  pnlAfter            String // bigint as string - Cumulative realized PnL after this event
+  deltaCollectedFees      String @default("0") // bigint as string - Fees collected in this event
+  collectedFeesAfter      String @default("0") // bigint as string - Cumulative collected fees after this event
+  deltaRealizedCashflow   String @default("0") // bigint as string - Realized cashflow in this event (perpetuals, etc.)
+  realizedCashflowAfter   String @default("0") // bigint as string - Cumulative realized cashflow after this event
 
   // Protocol-specific data (JSON)
   config Json // Protocol-specific config (blockNumber, txIndex, logIndex, liquidity, fees, etc.)
