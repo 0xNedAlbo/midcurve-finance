@@ -10,17 +10,24 @@ import type {
     UniswapV3PositionConfigData,
     UniswapV3PositionState,
     PositionProtocol,
+    PositionInterface,
+    PositionRow,
+    Erc20TokenRow,
+    UniswapV3PoolRow,
 } from "@midcurve/shared";
-import { UniswapV3Position } from "@midcurve/shared";
+import { UniswapV3Position, PositionFactory, Erc20Token, PoolFactory } from "@midcurve/shared";
 import type { UnclaimedFeesResult } from "./helpers/uniswapv3/position-calculations.js";
 import { calculateUnclaimedFees } from "./helpers/uniswapv3/position-calculations.js";
 import type { UniswapV3Pool } from "@midcurve/shared";
 import type {
     UniswapV3PositionDiscoverInput,
     CreateUniswapV3PositionInput,
+    UpdateAnyPositionInput,
 } from "../types/position/position-input.js";
-import { PositionService } from "./position-service.js";
-import { log } from "../../logging/index.js";
+import { createServiceLogger, log } from "../../logging/index.js";
+import type { ServiceLogger } from "../../logging/index.js";
+import { getDomainEventPublisher, createDomainEvent } from '../../events/index.js';
+import type { DomainEventPublisher } from '../../events/index.js';
 import { EvmConfig } from "../../config/evm.js";
 import {
     getPositionManagerAddress,
@@ -56,6 +63,41 @@ import { syncLedgerEvents } from "../position-ledger/helpers/uniswapv3/ledger-sy
 import { UniswapV3PositionSyncState } from "../position-ledger/position-sync-state.js";
 
 /**
+ * Database result interface for position queries.
+ * Note: Prisma stores bigint as string in the database, so we use string here.
+ * The mapToPosition method handles conversion to native bigint for PositionRow.
+ */
+export interface PositionDbResult {
+    id: string;
+    positionHash: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    protocol: string;
+    positionType: string;
+    userId: string;
+    currentValue: string; // Prisma returns bigint as string
+    currentCostBasis: string;
+    realizedPnl: string;
+    unrealizedPnl: string;
+    realizedCashflow: string;
+    unrealizedCashflow: string;
+    collectedFees: string;
+    unClaimedFees: string;
+    lastFeesCollectedAt: Date;
+    totalApr: number | null;
+    priceRangeLower: string;
+    priceRangeUpper: string;
+    poolId: string;
+    isToken0Quote: boolean;
+    pool: any; // Pool with token0, token1 from include
+    positionOpenedAt: Date;
+    positionClosedAt: Date | null;
+    isActive: boolean;
+    config: Record<string, unknown>;
+    state: Record<string, unknown>;
+}
+
+/**
  * Dependencies for UniswapV3PositionService
  * All dependencies are optional and will use defaults if not provided
  */
@@ -65,6 +107,12 @@ export interface UniswapV3PositionServiceDependencies {
      * If not provided, a new PrismaClient instance will be created
      */
     prisma?: PrismaClient;
+
+    /**
+     * Domain event publisher for publishing position events
+     * If not provided, uses the singleton instance
+     */
+    eventPublisher?: DomainEventPublisher;
 
     /**
      * EVM configuration for chain RPC access
@@ -121,8 +169,11 @@ export interface UniswapV3PositionServiceDependencies {
  * Provides position management for Uniswap V3 concentrated liquidity positions.
  * Implements serialization methods for Uniswap V3-specific config and state types.
  */
-export class UniswapV3PositionService extends PositionService {
+export class UniswapV3PositionService {
     protected readonly protocol: PositionProtocol = 'uniswapv3';
+    protected readonly _prisma: PrismaClient;
+    protected readonly logger: ServiceLogger;
+    protected readonly eventPublisher: DomainEventPublisher;
     private readonly _evmConfig: EvmConfig;
     private readonly _poolService: UniswapV3PoolService;
     private readonly _etherscanClient: EtherscanClient;
@@ -137,6 +188,7 @@ export class UniswapV3PositionService extends PositionService {
      *
      * @param dependencies - Optional dependencies object
      * @param dependencies.prisma - Prisma client instance (creates default if not provided)
+     * @param dependencies.eventPublisher - Domain event publisher (uses singleton if not provided)
      * @param dependencies.evmConfig - EVM configuration instance (uses singleton if not provided)
      * @param dependencies.poolService - UniswapV3 pool service (creates default if not provided)
      * @param dependencies.etherscanClient - Etherscan client instance (uses singleton if not provided)
@@ -144,31 +196,43 @@ export class UniswapV3PositionService extends PositionService {
      * @param dependencies.quoteTokenService - UniswapV3 quote token service (creates default if not provided)
      */
     constructor(dependencies: UniswapV3PositionServiceDependencies = {}) {
-        super(dependencies);
+        // Initialize base class properties
+        this._prisma = dependencies.prisma ?? new PrismaClient();
+        this.logger = createServiceLogger(this.constructor.name);
+        this.eventPublisher = dependencies.eventPublisher ?? getDomainEventPublisher();
+
+        // Initialize UniswapV3-specific dependencies
         this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
         this._poolService =
             dependencies.poolService ??
-            new UniswapV3PoolService({ prisma: this.prisma });
+            new UniswapV3PoolService({ prisma: this._prisma });
         this._etherscanClient =
             dependencies.etherscanClient ?? EtherscanClient.getInstance();
         this._ledgerService =
             dependencies.ledgerService ??
             new UniswapV3PositionLedgerService({
-                prisma: this.prisma,
+                prisma: this._prisma,
                 positionService: this, // Pass self to break circular dependency
             });
         this._quoteTokenService =
             dependencies.quoteTokenService ??
-            new UniswapV3QuoteTokenService({ prisma: this.prisma });
+            new UniswapV3QuoteTokenService({ prisma: this._prisma });
         this._evmBlockService =
             dependencies.evmBlockService ??
             new EvmBlockService({ evmConfig: this._evmConfig });
         this._aprService =
             dependencies.aprService ??
-            new PositionAprService({ prisma: this.prisma });
+            new PositionAprService({ prisma: this._prisma });
         this._poolPriceService =
             dependencies.poolPriceService ??
-            new UniswapV3PoolPriceService({ prisma: this.prisma });
+            new UniswapV3PoolPriceService({ prisma: this._prisma });
+    }
+
+    /**
+     * Get the Prisma client instance
+     */
+    protected get prisma(): PrismaClient {
+        return this._prisma;
     }
 
     /**
@@ -355,7 +419,7 @@ export class UniswapV3PositionService extends PositionService {
      * @param config - UniswapV3 position configuration
      * @returns Position hash string in format "uniswapv3/{chainId}/{nftId}"
      */
-    override createPositionHash(config: Record<string, unknown>): string {
+    createPositionHash(config: Record<string, unknown>): string {
         const typedConfig = config as unknown as UniswapV3PositionConfigData;
         return `uniswapv3/${typedConfig.chainId}/${typedConfig.nftId}`;
     }
@@ -392,7 +456,7 @@ export class UniswapV3PositionService extends PositionService {
      * @throws Error if quoteTokenAddress doesn't match either pool token (when provided)
      * @throws Error if on-chain read fails
      */
-    override async discover(
+    async discover(
         userId: string,
         params: UniswapV3PositionDiscoverInput
     ): Promise<UniswapV3Position> {
@@ -1084,7 +1148,7 @@ export class UniswapV3PositionService extends PositionService {
      * @throws Error if chain is not supported
      * @throws Error if on-chain read fails (only for L > 0 positions)
      */
-    override async refresh(id: string): Promise<UniswapV3Position> {
+    async refresh(id: string): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "refresh", { id });
 
         try {
@@ -2080,7 +2144,7 @@ export class UniswapV3PositionService extends PositionService {
      * @throws Error if chain is not supported
      * @throws Error if Etherscan fetch fails
      */
-    override async reset(id: string): Promise<UniswapV3Position> {
+    async reset(id: string): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "reset", { id });
 
         try {
@@ -2982,7 +3046,7 @@ export class UniswapV3PositionService extends PositionService {
      * @param input - Position data to create
      * @returns The created position, or existing position if duplicate found
      */
-    override async create(
+    async create(
         input: CreateUniswapV3PositionInput,
         configDB: Record<string, unknown>,
         stateDB: Record<string, unknown>
@@ -3020,7 +3084,91 @@ export class UniswapV3PositionService extends PositionService {
             }
 
             // No duplicate found, create new position
-            const position = await super.create(input, configDB, stateDB);
+            // Default calculated values (will be computed properly in discover())
+            const now = new Date();
+            const zeroValue = '0';
+
+            log.dbOperation(this.logger, 'create', 'Position', {
+                protocol: input.protocol,
+                positionType: input.positionType,
+                userId: input.userId,
+                positionHash,
+            });
+
+            // Wrap position creation + event publishing in a transaction for atomicity
+            const result = await this.prisma.$transaction(async (tx) => {
+                // 1. Create the position
+                const positionRow = await tx.position.create({
+                    data: {
+                        protocol: input.protocol,
+                        positionType: input.positionType,
+                        userId: input.userId,
+                        poolId: input.poolId,
+                        isToken0Quote: input.isToken0Quote,
+                        positionHash,
+                        config: configDB as object,
+                        state: stateDB as object,
+                        // Default calculated values
+                        currentValue: zeroValue,
+                        currentCostBasis: zeroValue,
+                        realizedPnl: zeroValue,
+                        unrealizedPnl: zeroValue,
+                        // Cash flow fields for non-AMM protocols (always 0 for UniswapV3)
+                        realizedCashflow: zeroValue,
+                        unrealizedCashflow: zeroValue,
+                        collectedFees: zeroValue,
+                        unClaimedFees: zeroValue,
+                        lastFeesCollectedAt: now,
+                        priceRangeLower: zeroValue,
+                        priceRangeUpper: zeroValue,
+                        positionOpenedAt: input.positionOpenedAt ?? now,
+                        positionClosedAt: null,
+                        isActive: true,
+                    },
+                    include: {
+                        pool: {
+                            include: {
+                                token0: true,
+                                token1: true,
+                            },
+                        },
+                    },
+                });
+
+                // 2. Map to position entity and publish position.created event
+                const createdPosition = this.mapToPosition(positionRow as PositionDbResult);
+
+                const event = createDomainEvent({
+                    type: 'position.created',
+                    entityType: 'position',
+                    entityId: createdPosition.id,
+                    userId: input.userId,
+                    payload: createdPosition.toJSON(),
+                    source: 'api',
+                });
+
+                await this.eventPublisher.publish(event, tx);
+
+                this.logger.debug(
+                    { eventId: event.id, positionId: createdPosition.id },
+                    'Position created event published to outbox'
+                );
+
+                return positionRow;
+            });
+
+            // Map database result to Position type
+            const position = this.mapToPosition(result as PositionDbResult);
+
+            this.logger.info(
+                {
+                    id: position.id,
+                    protocol: position.protocol,
+                    positionType: position.positionType,
+                    userId: position.userId,
+                },
+                'Position created'
+            );
 
             log.methodExit(this.logger, "create", {
                 id: position.id,
@@ -3046,7 +3194,7 @@ export class UniswapV3PositionService extends PositionService {
      * @param id - Position ID
      * @returns Position if found and is uniswapv3 protocol, null otherwise
      */
-    override async findById(id: string): Promise<UniswapV3Position | null> {
+    async findById(id: string): Promise<UniswapV3Position | null> {
         log.methodEntry(this.logger, "findById", { id });
 
         try {
@@ -3097,7 +3245,7 @@ export class UniswapV3PositionService extends PositionService {
     /**
      * Delete position
      *
-     * Overrides base implementation to:
+     * Verifies protocol type and performs deletion:
      * - Verify protocol type (error if position exists but is not uniswapv3)
      * - Silently succeed if position doesn't exist (idempotent)
      *
@@ -3105,7 +3253,7 @@ export class UniswapV3PositionService extends PositionService {
      * @returns Promise that resolves when deletion is complete
      * @throws Error if position exists but is not uniswapv3 protocol
      */
-    override async delete(id: string): Promise<void> {
+    async delete(id: string): Promise<void> {
         log.methodEntry(this.logger, "delete", { id });
 
         try {
@@ -3137,8 +3285,11 @@ export class UniswapV3PositionService extends PositionService {
                 throw error;
             }
 
-            // Call base implementation
-            await super.delete(id);
+            // Delete the position
+            log.dbOperation(this.logger, 'delete', 'Position', { id });
+            await this.prisma.position.delete({
+                where: { id },
+            });
 
             log.methodExit(this.logger, "delete", { id, deleted: true });
         } catch (error) {
@@ -3543,5 +3694,163 @@ export class UniswapV3PositionService extends PositionService {
             "Position has uncollected principal, not fully closed"
         );
         return null;
+    }
+
+    // ============================================================================
+    // BASE CRUD METHODS
+    // ============================================================================
+
+    /**
+     * Find position by user ID and position hash
+     *
+     * Fast indexed lookup using positionHash field.
+     * Replaces slow JSONB queries for position lookups.
+     *
+     * @param userId - User ID (ensures user can only access their positions)
+     * @param positionHash - Position hash (generated by createPositionHash)
+     * @returns Position if found, null otherwise
+     */
+    async findByPositionHash(userId: string, positionHash: string): Promise<UniswapV3Position | null> {
+        log.methodEntry(this.logger, 'findByPositionHash', { userId, positionHash });
+
+        try {
+            log.dbOperation(this.logger, 'findFirst', 'Position', { userId, positionHash });
+
+            const result = await this.prisma.position.findFirst({
+                where: {
+                    userId,
+                    positionHash,
+                },
+                include: {
+                    pool: {
+                        include: {
+                            token0: true,
+                            token1: true,
+                        },
+                    },
+                },
+            });
+
+            if (!result) {
+                log.methodExit(this.logger, 'findByPositionHash', { userId, positionHash, found: false });
+                return null;
+            }
+
+            // Map to Position type
+            const position = this.mapToPosition(result as PositionDbResult);
+
+            log.methodExit(this.logger, 'findByPositionHash', { userId, positionHash, found: true });
+            return position as UniswapV3Position;
+        } catch (error) {
+            log.methodError(this.logger, 'findByPositionHash', error as Error, { userId, positionHash });
+            throw error;
+        }
+    }
+
+    /**
+     * Update position
+     *
+     * Generic helper for rare manual updates.
+     * - Config updates are rare (position parameters are immutable on-chain)
+     * - State updates should typically use refresh() method
+     * - Calculated fields (PnL, fees) should be recomputed after state changes
+     *
+     * @param id - Position ID
+     * @param input - Update input with optional fields
+     * @returns Updated position
+     * @throws Error if position not found
+     */
+    async update(id: string, input: UpdateAnyPositionInput): Promise<UniswapV3Position> {
+        log.methodEntry(this.logger, 'update', { id, input });
+
+        try {
+            // Currently, UpdateAnyPositionInput has no mutable fields
+            // All updates should use refresh() method for state updates
+            const data: Record<string, unknown> = {};
+
+            log.dbOperation(this.logger, 'update', 'Position', {
+                id,
+                fields: Object.keys(data),
+            });
+
+            const result = await this.prisma.position.update({
+                where: { id },
+                data,
+                include: {
+                    pool: {
+                        include: {
+                            token0: true,
+                            token1: true,
+                        },
+                    },
+                },
+            });
+
+            // Map to Position type
+            const position = this.mapToPosition(result as PositionDbResult);
+
+            log.methodExit(this.logger, 'update', { id });
+            return position as UniswapV3Position;
+        } catch (error) {
+            log.methodError(this.logger, 'update', error as Error, { id });
+            throw error;
+        }
+    }
+
+    // ============================================================================
+    // PROTECTED HELPERS
+    // ============================================================================
+
+    /**
+     * Map database result to UniswapV3Position using factory
+     *
+     * Converts string values to bigint for numeric fields, creates pool instance,
+     * and uses PositionFactory to create protocol-specific position class.
+     *
+     * @param dbResult - Raw database result from Prisma
+     * @returns UniswapV3Position instance
+     */
+    protected mapToPosition(dbResult: PositionDbResult): PositionInterface {
+        // Create token instances from included pool data
+        const token0 = Erc20Token.fromDB(dbResult.pool.token0 as Erc20TokenRow);
+        const token1 = Erc20Token.fromDB(dbResult.pool.token1 as Erc20TokenRow);
+
+        // Create pool instance from included pool data
+        const poolRow = dbResult.pool as UniswapV3PoolRow;
+        const pool = PoolFactory.fromDB(poolRow, token0, token1) as UniswapV3Pool;
+
+        // Convert string bigint fields to native bigint
+        const rowWithBigInt: PositionRow = {
+            id: dbResult.id,
+            positionHash: dbResult.positionHash ?? '',
+            userId: dbResult.userId,
+            protocol: dbResult.protocol,
+            positionType: dbResult.positionType,
+            poolId: dbResult.poolId,
+            isToken0Quote: dbResult.isToken0Quote,
+            currentValue: BigInt(dbResult.currentValue),
+            currentCostBasis: BigInt(dbResult.currentCostBasis),
+            realizedPnl: BigInt(dbResult.realizedPnl),
+            unrealizedPnl: BigInt(dbResult.unrealizedPnl),
+            realizedCashflow: BigInt(dbResult.realizedCashflow),
+            unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
+            collectedFees: BigInt(dbResult.collectedFees),
+            unClaimedFees: BigInt(dbResult.unClaimedFees),
+            lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
+            totalApr: dbResult.totalApr,
+            priceRangeLower: BigInt(dbResult.priceRangeLower),
+            priceRangeUpper: BigInt(dbResult.priceRangeUpper),
+            positionOpenedAt: dbResult.positionOpenedAt,
+            positionClosedAt: dbResult.positionClosedAt,
+            isActive: dbResult.isActive,
+            config: dbResult.config,
+            state: dbResult.state,
+            createdAt: dbResult.createdAt,
+            updatedAt: dbResult.updatedAt,
+            pool: dbResult.pool,
+        };
+
+        // Use factory to create protocol-specific position class
+        return PositionFactory.fromDB(rowWithBigInt, pool);
     }
 }
