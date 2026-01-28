@@ -5,7 +5,7 @@
  * Handles serialization/deserialization of Uniswap V3 position config and state.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { PrismaClient } from "@midcurve/database";
 import type {
     UniswapV3PositionConfigData,
     UniswapV3PositionState,
@@ -15,7 +15,12 @@ import type {
     Erc20TokenRow,
     UniswapV3PoolRow,
 } from "@midcurve/shared";
-import { UniswapV3Position, PositionFactory, Erc20Token, PoolFactory } from "@midcurve/shared";
+import {
+    UniswapV3Position,
+    PositionFactory,
+    Erc20Token,
+    PoolFactory,
+} from "@midcurve/shared";
 import type { UnclaimedFeesResult } from "./helpers/uniswapv3/position-calculations.js";
 import { calculateUnclaimedFees } from "./helpers/uniswapv3/position-calculations.js";
 import type { UniswapV3Pool } from "@midcurve/shared";
@@ -26,14 +31,15 @@ import type {
 } from "../types/position/position-input.js";
 import { createServiceLogger, log } from "../../logging/index.js";
 import type { ServiceLogger } from "../../logging/index.js";
-import { getDomainEventPublisher, createDomainEvent } from '../../events/index.js';
-import type { DomainEventPublisher } from '../../events/index.js';
+import {
+    getDomainEventPublisher,
+    createDomainEvent,
+} from "../../events/index.js";
+import type { DomainEventPublisher } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
     getPositionManagerAddress,
-    getFactoryAddress,
     UNISWAP_V3_POSITION_MANAGER_ABI,
-    UNISWAP_V3_FACTORY_ABI,
     type UniswapV3PositionData,
 } from "../../config/uniswapv3.js";
 import {
@@ -49,9 +55,7 @@ import { EvmBlockService } from "../block/evm-block-service.js";
 import { PositionAprService } from "../position-apr/position-apr-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
 import type { Address } from "viem";
-import {
-    computeFeeGrowthInside,
-} from "@midcurve/shared";
+import { computeFeeGrowthInside } from "@midcurve/shared";
 import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
 import { uniswapV3PoolAbi } from "../../utils/uniswapv3/pool-abi.js";
@@ -170,7 +174,7 @@ export interface UniswapV3PositionServiceDependencies {
  * Implements serialization methods for Uniswap V3-specific config and state types.
  */
 export class UniswapV3PositionService {
-    protected readonly protocol: PositionProtocol = 'uniswapv3';
+    protected readonly protocol: PositionProtocol = "uniswapv3";
     protected readonly _prisma: PrismaClient;
     protected readonly logger: ServiceLogger;
     protected readonly eventPublisher: DomainEventPublisher;
@@ -199,7 +203,8 @@ export class UniswapV3PositionService {
         // Initialize base class properties
         this._prisma = dependencies.prisma ?? new PrismaClient();
         this.logger = createServiceLogger(this.constructor.name);
-        this.eventPublisher = dependencies.eventPublisher ?? getDomainEventPublisher();
+        this.eventPublisher =
+            dependencies.eventPublisher ?? getDomainEventPublisher();
 
         // Initialize UniswapV3-specific dependencies
         this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
@@ -315,10 +320,18 @@ export class UniswapV3PositionService {
 
         // Defensive type conversion for JSON deserialization
         // PostgreSQL JSON columns may return numbers as strings
-        const chainId = typeof db.chainId === 'number' ? db.chainId : Number(db.chainId);
-        const nftId = typeof db.nftId === 'number' ? db.nftId : Number(db.nftId);
-        const tickUpper = typeof db.tickUpper === 'number' ? db.tickUpper : Number(db.tickUpper);
-        const tickLower = typeof db.tickLower === 'number' ? db.tickLower : Number(db.tickLower);
+        const chainId =
+            typeof db.chainId === "number" ? db.chainId : Number(db.chainId);
+        const nftId =
+            typeof db.nftId === "number" ? db.nftId : Number(db.nftId);
+        const tickUpper =
+            typeof db.tickUpper === "number"
+                ? db.tickUpper
+                : Number(db.tickUpper);
+        const tickLower =
+            typeof db.tickLower === "number"
+                ? db.tickLower
+                : Number(db.tickLower);
 
         return {
             chainId,
@@ -376,8 +389,8 @@ export class UniswapV3PositionService {
             feeGrowthInside1LastX128: BigInt(db.feeGrowthInside1LastX128),
             tokensOwed0: BigInt(db.tokensOwed0),
             tokensOwed1: BigInt(db.tokensOwed1),
-            unclaimedFees0: BigInt(db.unclaimedFees0 ?? '0'),
-            unclaimedFees1: BigInt(db.unclaimedFees1 ?? '0'),
+            unclaimedFees0: BigInt(db.unclaimedFees0 ?? "0"),
+            unclaimedFees1: BigInt(db.unclaimedFees1 ?? "0"),
         };
     }
 
@@ -397,8 +410,8 @@ export class UniswapV3PositionService {
             feeGrowthInside1LastX128: state.feeGrowthInside1LastX128.toString(),
             tokensOwed0: state.tokensOwed0.toString(),
             tokensOwed1: state.tokensOwed1.toString(),
-            unclaimedFees0: state.unclaimedFees0?.toString() ?? '0',
-            unclaimedFees1: state.unclaimedFees1?.toString() ?? '0',
+            unclaimedFees0: state.unclaimedFees0?.toString() ?? "0",
+            unclaimedFees1: state.unclaimedFees1?.toString() ?? "0",
         };
     }
 
@@ -458,7 +471,7 @@ export class UniswapV3PositionService {
      */
     async discover(
         userId: string,
-        params: UniswapV3PositionDiscoverInput
+        params: UniswapV3PositionDiscoverInput,
     ): Promise<UniswapV3Position> {
         const { chainId, nftId, quoteTokenAddress } = params;
         log.methodEntry(this.logger, "discover", {
@@ -481,7 +494,7 @@ export class UniswapV3PositionService {
 
             const existing = await this.findByPositionHash(
                 userId,
-                positionHash
+                positionHash,
             );
 
             if (existing) {
@@ -493,7 +506,7 @@ export class UniswapV3PositionService {
                         nftId,
                         positionHash,
                     },
-                    "Position already exists (found via positionHash), refreshing state from on-chain"
+                    "Position already exists (found via positionHash), refreshing state from on-chain",
                 );
 
                 // Refresh position state to get current on-chain values
@@ -512,7 +525,7 @@ export class UniswapV3PositionService {
             if (quoteTokenAddress) {
                 if (!isValidAddress(quoteTokenAddress)) {
                     const error = new Error(
-                        `Invalid quote token address format: ${quoteTokenAddress}`
+                        `Invalid quote token address format: ${quoteTokenAddress}`,
                     );
                     log.methodError(this.logger, "discover", error, {
                         userId,
@@ -529,11 +542,11 @@ export class UniswapV3PositionService {
                         original: quoteTokenAddress,
                         normalized: normalizedQuoteAddress,
                     },
-                    "Quote token address provided by caller"
+                    "Quote token address provided by caller",
                 );
             } else {
                 this.logger.debug(
-                    "No quote token provided, will auto-detect using QuoteTokenService"
+                    "No quote token provided, will auto-detect using QuoteTokenService",
                 );
             }
 
@@ -542,7 +555,7 @@ export class UniswapV3PositionService {
                 const error = new Error(
                     `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
                         .getSupportedChainIds()
-                        .join(", ")}`
+                        .join(", ")}`,
                 );
                 log.methodError(this.logger, "discover", error, { chainId });
                 throw error;
@@ -550,14 +563,14 @@ export class UniswapV3PositionService {
 
             this.logger.debug(
                 { chainId },
-                "Chain is supported, proceeding with on-chain discovery"
+                "Chain is supported, proceeding with on-chain discovery",
             );
 
             // 4. For burned/closed positions, fetch latest event from Etherscan first
             // This gives us a block number when the position still existed
             this.logger.debug(
                 { chainId, nftId },
-                "Fetching position events from Etherscan to determine if position is burned"
+                "Fetching position events from Etherscan to determine if position is burned",
             );
 
             let blockNumber: bigint | undefined;
@@ -565,7 +578,7 @@ export class UniswapV3PositionService {
             try {
                 const events = await this.etherscanClient.fetchPositionEvents(
                     chainId,
-                    nftId.toString()
+                    nftId.toString(),
                 );
 
                 if (events.length > 0) {
@@ -584,13 +597,13 @@ export class UniswapV3PositionService {
                             queryBlock: blockNumber.toString(),
                             eventType: firstEvent.eventType,
                         },
-                        "Found events - will query position state at block when position was created"
+                        "Found events - will query position state at block when position was created",
                     );
                 }
             } catch (error) {
                 this.logger.warn(
                     { error, chainId, nftId },
-                    "Failed to fetch events from Etherscan, will attempt current block query"
+                    "Failed to fetch events from Etherscan, will attempt current block query",
                 );
             }
 
@@ -605,7 +618,7 @@ export class UniswapV3PositionService {
                     chainId,
                     blockNumber: blockNumber?.toString() ?? "latest",
                 },
-                "Reading position data from NonfungiblePositionManager"
+                "Reading position data from NonfungiblePositionManager",
             );
 
             const [positionData, ownerAddress] = await Promise.all([
@@ -628,7 +641,7 @@ export class UniswapV3PositionService {
                         bigint,
                         bigint,
                         bigint,
-                        bigint
+                        bigint,
                     ]
                 >,
                 client.readContract({
@@ -666,43 +679,26 @@ export class UniswapV3PositionService {
                     liquidity: position.liquidity.toString(),
                     owner: ownerAddress,
                 },
-                "Position data read from contract"
+                "Position data read from contract",
             );
 
-            // 5. Compute pool address (UniswapV3 uses deterministic addressing)
-            // For now, we'll discover the pool from token addresses and fee
-            // Note: In production, you'd compute the pool address deterministically
-            // using the factory address and CREATE2
-            const poolAddress = await this.computePoolAddress(
+            // 5. Discover pool by tokens and fee via UniswapV3PoolService
+            // This queries the factory for the pool address and discovers/fetches the pool
+            const pool = await this.poolService.discoverByTokensAndFee(
                 chainId,
                 position.token0,
                 position.token1,
-                position.fee
+                position.fee,
             );
-
-            this.logger.debug(
-                {
-                    poolAddress,
-                    token0: position.token0,
-                    token1: position.token1,
-                    fee: position.fee,
-                },
-                "Pool address computed/discovered"
-            );
-
-            // 6. Discover pool via UniswapV3PoolService
-            const pool = await this.poolService.discover({
-                poolAddress,
-                chainId,
-            });
 
             this.logger.debug(
                 {
                     poolId: pool.id,
+                    poolAddress: pool.address,
                     token0: pool.token0.symbol,
                     token1: pool.token1.symbol,
                 },
-                "Pool discovered/fetched"
+                "Pool discovered/fetched",
             );
 
             // 7. Determine quote token
@@ -713,18 +709,18 @@ export class UniswapV3PositionService {
                 const token0Matches =
                     compareAddresses(
                         pool.token0.address,
-                        normalizedQuoteAddress
+                        normalizedQuoteAddress,
                     ) === 0;
                 const token1Matches =
                     compareAddresses(
                         pool.token1.address,
-                        normalizedQuoteAddress
+                        normalizedQuoteAddress,
                     ) === 0;
 
                 if (!token0Matches && !token1Matches) {
                     const error = new Error(
                         `Quote token address ${normalizedQuoteAddress} does not match either pool token. ` +
-                            `Pool token0: ${pool.token0.address}, token1: ${pool.token1.address}`
+                            `Pool token0: ${pool.token0.address}, token1: ${pool.token1.address}`,
                     );
                     log.methodError(this.logger, "discover", error, {
                         userId,
@@ -746,12 +742,12 @@ export class UniswapV3PositionService {
                             ? pool.token0.symbol
                             : pool.token1.symbol,
                     },
-                    "Quote token determined from caller input"
+                    "Quote token determined from caller input",
                 );
             } else {
                 // AUTO-DETECT MODE: Use QuoteTokenService
                 this.logger.debug(
-                    "Auto-detecting quote token using QuoteTokenService"
+                    "Auto-detecting quote token using QuoteTokenService",
                 );
 
                 const quoteResult =
@@ -772,7 +768,7 @@ export class UniswapV3PositionService {
                             : pool.token1.symbol,
                         matchedBy: quoteResult.matchedBy,
                     },
-                    "Quote token auto-detected"
+                    "Quote token auto-detected",
                 );
             }
 
@@ -785,14 +781,14 @@ export class UniswapV3PositionService {
                     baseToken: baseToken.symbol,
                     quoteToken: quoteToken.symbol,
                 },
-                "Token roles determined"
+                "Token roles determined",
             );
 
             // 8. Create position config (without token0IsQuote, now at position level)
             const config: UniswapV3PositionConfigData = {
                 chainId,
                 nftId,
-                poolAddress,
+                poolAddress: pool.address,
                 tickUpper: position.tickUpper,
                 tickLower: position.tickLower,
             };
@@ -816,22 +812,32 @@ export class UniswapV3PositionService {
                     tokensOwed0: state.tokensOwed0.toString(),
                     tokensOwed1: state.tokensOwed1.toString(),
                 },
-                "Position state initialized from on-chain data"
+                "Position state initialized from on-chain data",
             );
 
             // 10. Create position via create() method
-            const configDB = this.serializeConfig(config) as Record<string, unknown>;
-            const stateDB = this.serializeState(state) as Record<string, unknown>;
-            const createdPosition = await this.create({
-                protocol: "uniswapv3",
-                positionType: "CL_TICKS",
-                userId,
-                poolId: pool.id,
-                isToken0Quote, // Boolean flag for token roles
-                config,
-                state,
-                positionOpenedAt, // Blockchain timestamp from first event (if available)
-            }, configDB, stateDB);
+            const configDB = this.serializeConfig(config) as Record<
+                string,
+                unknown
+            >;
+            const stateDB = this.serializeState(state) as Record<
+                string,
+                unknown
+            >;
+            const createdPosition = await this.create(
+                {
+                    protocol: "uniswapv3",
+                    positionType: "CL_TICKS",
+                    userId,
+                    poolId: pool.id,
+                    isToken0Quote, // Boolean flag for token roles
+                    config,
+                    state,
+                    positionOpenedAt, // Blockchain timestamp from first event (if available)
+                },
+                configDB,
+                stateDB,
+            );
 
             this.logger.info(
                 {
@@ -843,14 +849,14 @@ export class UniswapV3PositionService {
                     baseToken: baseToken.symbol,
                     quoteToken: quoteToken.symbol,
                 },
-                "Position discovered and created"
+                "Position discovered and created",
             );
 
             // 11. Discover ledger events from blockchain
             try {
                 this.logger.info(
                     { positionId: createdPosition.id },
-                    "Discovering ledger events from blockchain"
+                    "Discovering ledger events from blockchain",
                 );
 
                 // Full sync from NFPM deployment block (new position)
@@ -859,7 +865,7 @@ export class UniswapV3PositionService {
                         positionId: createdPosition.id,
                         chainId: createdPosition.chainId,
                         nftId: BigInt(createdPosition.nftId),
-                        forceFullResync: true,  // New position - full sync
+                        forceFullResync: true, // New position - full sync
                     },
                     {
                         prisma: this.prisma,
@@ -869,7 +875,7 @@ export class UniswapV3PositionService {
                         logger: this.logger,
                         ledgerService: this.ledgerService,
                         poolPriceService: this.poolPriceService,
-                    }
+                    },
                 );
 
                 this.logger.info(
@@ -879,7 +885,7 @@ export class UniswapV3PositionService {
                         fromBlock: syncResult.fromBlock.toString(),
                         finalizedBlock: syncResult.finalizedBlock.toString(),
                     },
-                    "Ledger events discovered successfully"
+                    "Ledger events discovered successfully",
                 );
 
                 // Update position state from the last ledger event
@@ -888,19 +894,33 @@ export class UniswapV3PositionService {
                 if (syncResult.eventsAdded > 0) {
                     // Get most recent event using ledger service helper
                     // This ensures correct event ordering (DESC by timestamp)
-                    const mostRecentEvent = await this.ledgerService.getMostRecentEvent(createdPosition.id);
+                    const mostRecentEvent =
+                        await this.ledgerService.getMostRecentEvent(
+                            createdPosition.id,
+                        );
 
                     if (mostRecentEvent) {
-                        const eventConfig = mostRecentEvent.config as { liquidityAfter?: string | bigint; feeGrowthInside0LastX128?: string | bigint; feeGrowthInside1LastX128?: string | bigint; };
+                        const eventConfig = mostRecentEvent.config as {
+                            liquidityAfter?: string | bigint;
+                            feeGrowthInside0LastX128?: string | bigint;
+                            feeGrowthInside1LastX128?: string | bigint;
+                        };
 
                         // Read current position state
-                        const currentPosition = await this.findById(createdPosition.id);
+                        const currentPosition = await this.findById(
+                            createdPosition.id,
+                        );
                         if (!currentPosition) {
-                            throw new Error(`Position ${createdPosition.id} not found after sync`);
+                            throw new Error(
+                                `Position ${createdPosition.id} not found after sync`,
+                            );
                         }
 
                         // Update liquidity from most recent event
-                        const finalLiquidity = typeof eventConfig.liquidityAfter === "string" ? BigInt(eventConfig.liquidityAfter) : eventConfig.liquidityAfter;
+                        const finalLiquidity =
+                            typeof eventConfig.liquidityAfter === "string"
+                                ? BigInt(eventConfig.liquidityAfter)
+                                : eventConfig.liquidityAfter;
 
                         if (finalLiquidity !== undefined) {
                             // Build updated state (state is read-only, so create new object)
@@ -917,14 +937,20 @@ export class UniswapV3PositionService {
                                 data: { state: stateDB as object },
                             });
                         } else {
-                            this.logger.warn({ positionId: createdPosition.id, eventType: mostRecentEvent.eventType }, "Most recent event has no liquidityAfter - skipping update");
+                            this.logger.warn(
+                                {
+                                    positionId: createdPosition.id,
+                                    eventType: mostRecentEvent.eventType,
+                                },
+                                "Most recent event has no liquidityAfter - skipping update",
+                            );
                         }
                     }
                 }
             } catch (error) {
                 this.logger.warn(
                     { error, positionId: createdPosition.id },
-                    "Failed to discover ledger events, position will have zero PnL"
+                    "Failed to discover ledger events, position will have zero PnL",
                 );
                 // Continue - position exists but PnL will be stale
             }
@@ -933,18 +959,18 @@ export class UniswapV3PositionService {
             try {
                 this.logger.debug(
                     { positionId: createdPosition.id },
-                    "Calculating position common fields"
+                    "Calculating position common fields",
                 );
 
                 // Get ledger summary (now has real data from events discovered above)
                 const ledgerSummary = await this.getLedgerSummary(
-                    createdPosition.id
+                    createdPosition.id,
                 );
 
                 // Calculate current position value
                 const currentValue = this.calculateCurrentPositionValue(
                     createdPosition,
-                    pool
+                    pool,
                 );
 
                 // Calculate unrealized PnL
@@ -953,7 +979,7 @@ export class UniswapV3PositionService {
                 // Calculate unclaimed fees
                 const fees = await this.calculateUnclaimedFees(
                     createdPosition,
-                    pool
+                    pool,
                 );
 
                 // Update position state with individual fee amounts (state is read-only, create new object)
@@ -992,7 +1018,7 @@ export class UniswapV3PositionService {
                         priceRangeLower,
                         priceRangeUpper,
                     },
-                    createdPosition.positionOpenedAt
+                    createdPosition.positionOpenedAt,
                 );
 
                 this.logger.info(
@@ -1002,7 +1028,7 @@ export class UniswapV3PositionService {
                         costBasis: ledgerSummary.costBasis.toString(),
                         unrealizedPnl: unrealizedPnl.toString(),
                     },
-                    "Position common fields calculated and updated"
+                    "Position common fields calculated and updated",
                 );
             } catch (error) {
                 // Clean up orphaned position before re-throwing
@@ -1011,7 +1037,7 @@ export class UniswapV3PositionService {
                         error,
                         positionId: createdPosition.id,
                     },
-                    "Failed to calculate/update common fields, deleting orphaned position"
+                    "Failed to calculate/update common fields, deleting orphaned position",
                 );
                 await this.delete(createdPosition.id);
                 throw error;
@@ -1044,60 +1070,6 @@ export class UniswapV3PositionService {
             }
             throw error;
         }
-    }
-
-    /**
-     * Query the pool address for a given token pair and fee from the factory contract
-     *
-     * Uses the UniswapV3 Factory's getPool() function to retrieve the pool address.
-     * The factory returns the zero address if no pool exists for the given parameters.
-     *
-     * @param chainId - Chain ID
-     * @param token0 - Address of token0
-     * @param token1 - Address of token1
-     * @param fee - Fee tier in basis points
-     * @returns Pool address
-     * @throws Error if pool doesn't exist (factory returns zero address)
-     * @private
-     */
-    private async computePoolAddress(
-        chainId: number,
-        token0: Address,
-        token1: Address,
-        fee: number
-    ): Promise<string> {
-        const factoryAddress = getFactoryAddress(chainId);
-        const client = this.evmConfig.getPublicClient(chainId);
-
-        this.logger.debug(
-            { factoryAddress, token0, token1, fee, chainId },
-            "Querying factory for pool address"
-        );
-
-        const poolAddress = (await client.readContract({
-            address: factoryAddress,
-            abi: UNISWAP_V3_FACTORY_ABI,
-            functionName: "getPool",
-            args: [token0, token1, fee],
-        })) as Address;
-
-        // Check if pool exists (factory returns zero address if pool doesn't exist)
-        const zeroAddress = "0x0000000000000000000000000000000000000000";
-        if (
-            poolAddress.toLowerCase() === zeroAddress.toLowerCase() ||
-            poolAddress === zeroAddress
-        ) {
-            throw new Error(
-                `Pool does not exist for token0=${token0}, token1=${token1}, fee=${fee} on chain ${chainId}`
-            );
-        }
-
-        this.logger.debug(
-            { poolAddress, token0, token1, fee },
-            "Pool address retrieved from factory"
-        );
-
-        return normalizeAddress(poolAddress);
     }
 
     // ============================================================================
@@ -1165,15 +1137,17 @@ export class UniswapV3PositionService {
             // BUT: Skip cache if position was just created (< 5 seconds old)
             // to ensure missing events are processed immediately
             const now = new Date();
-            const ageSeconds = (now.getTime() - existingPosition.updatedAt.getTime()) / 1000;
-            const positionAgeSeconds = (now.getTime() - existingPosition.createdAt.getTime()) / 1000;
+            const ageSeconds =
+                (now.getTime() - existingPosition.updatedAt.getTime()) / 1000;
+            const positionAgeSeconds =
+                (now.getTime() - existingPosition.createdAt.getTime()) / 1000;
             const isNewlyCreated = positionAgeSeconds < 5;
 
             if (!isNewlyCreated && ageSeconds < 15) {
                 // Use cache only if not newly created
                 this.logger.info(
                     { id, ageSeconds: ageSeconds.toFixed(2) },
-                    "Position updated recently, returning cached data"
+                    "Position updated recently, returning cached data",
                 );
                 log.methodExit(this.logger, "refresh", { id, cached: true });
                 return existingPosition;
@@ -1182,7 +1156,7 @@ export class UniswapV3PositionService {
             if (isNewlyCreated) {
                 this.logger.debug(
                     { id, positionAgeSeconds: positionAgeSeconds.toFixed(2) },
-                    "Position newly created, bypassing cache to process missing events"
+                    "Position newly created, bypassing cache to process missing events",
                 );
             }
 
@@ -1192,7 +1166,7 @@ export class UniswapV3PositionService {
                     chainId: existingPosition.chainId,
                     nftId: existingPosition.nftId,
                 },
-                "Position found, proceeding with state refresh"
+                "Position found, proceeding with state refresh",
             );
 
             const chainId = existingPosition.chainId;
@@ -1203,7 +1177,7 @@ export class UniswapV3PositionService {
                 const error = new Error(
                     `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
                         .getSupportedChainIds()
-                        .join(", ")}`
+                        .join(", ")}`,
                 );
                 log.methodError(this.logger, "refresh", error, { id, chainId });
                 throw error;
@@ -1211,7 +1185,7 @@ export class UniswapV3PositionService {
 
             this.logger.debug(
                 { id, chainId },
-                "Chain is supported, proceeding with on-chain state read"
+                "Chain is supported, proceeding with on-chain state read",
             );
 
             // 3. Read fresh state from NonfungiblePositionManager contract
@@ -1220,197 +1194,217 @@ export class UniswapV3PositionService {
 
             this.logger.debug(
                 { id, positionManagerAddress, nftId, chainId },
-                "Reading fresh position state from NonfungiblePositionManager"
+                "Reading fresh position state from NonfungiblePositionManager",
             );
 
             // 4. Fetch position state from on-chain
             let updatedState: UniswapV3PositionState;
 
             const [positionData, ownerAddress] = await Promise.all([
-                    client.readContract({
-                        address: positionManagerAddress,
-                        abi: UNISWAP_V3_POSITION_MANAGER_ABI,
-                        functionName: "positions",
-                        args: [BigInt(nftId)],
-                    }) as Promise<
-                        readonly [
-                            bigint, // nonce
-                            Address, // operator
-                            Address, // token0
-                            Address, // token1
-                            number, // fee
-                            number, // tickLower
-                            number, // tickUpper
-                            bigint, // liquidity (IGNORED - use ledger value)
-                            bigint, // feeGrowthInside0LastX128
-                            bigint, // feeGrowthInside1LastX128
-                            bigint, // tokensOwed0
-                            bigint // tokensOwed1
-                        ]
-                    >,
-                    client.readContract({
-                        address: positionManagerAddress,
-                        abi: UNISWAP_V3_POSITION_MANAGER_ABI,
-                        functionName: "ownerOf",
-                        args: [BigInt(nftId)],
-                    }) as Promise<Address>,
-                ]);
+                client.readContract({
+                    address: positionManagerAddress,
+                    abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                    functionName: "positions",
+                    args: [BigInt(nftId)],
+                }) as Promise<
+                    readonly [
+                        bigint, // nonce
+                        Address, // operator
+                        Address, // token0
+                        Address, // token1
+                        number, // fee
+                        number, // tickLower
+                        number, // tickUpper
+                        bigint, // liquidity (IGNORED - use ledger value)
+                        bigint, // feeGrowthInside0LastX128
+                        bigint, // feeGrowthInside1LastX128
+                        bigint, // tokensOwed0
+                        bigint, // tokensOwed1
+                    ]
+                >,
+                client.readContract({
+                    address: positionManagerAddress,
+                    abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                    functionName: "ownerOf",
+                    args: [BigInt(nftId)],
+                }) as Promise<Address>,
+            ]);
 
-                // ========================================================================
-                // VALIDATION: Check for non-existent or burned NFT
-                // ========================================================================
-                // When NFT doesn't exist, the positions() function returns all zeros.
-                // positionData[2] is token0, positionData[3] is token1
-                const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+            // ========================================================================
+            // VALIDATION: Check for non-existent or burned NFT
+            // ========================================================================
+            // When NFT doesn't exist, the positions() function returns all zeros.
+            // positionData[2] is token0, positionData[3] is token1
+            const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-                if (positionData[2] === ZERO_ADDRESS || positionData[3] === ZERO_ADDRESS) {
-                    const error = new Error(
-                        `Position NFT ${nftId} on chain ${chainId} does not exist or has been burned (token addresses are zero)`
-                    );
-                    log.methodError(this.logger, "refresh", error, { id, nftId, chainId });
-                    throw error;
-                }
+            if (
+                positionData[2] === ZERO_ADDRESS ||
+                positionData[3] === ZERO_ADDRESS
+            ) {
+                const error = new Error(
+                    `Position NFT ${nftId} on chain ${chainId} does not exist or has been burned (token addresses are zero)`,
+                );
+                log.methodError(this.logger, "refresh", error, {
+                    id,
+                    nftId,
+                    chainId,
+                });
+                throw error;
+            }
 
-                // Additional check: if position previously had liquidity but now all fields are zero,
-                // it's likely the chain was reset (e.g., local dev chain restarted)
-                const allFieldsZero = positionData[7] === 0n && // liquidity
-                                      positionData[8] === 0n && // feeGrowthInside0LastX128
-                                      positionData[9] === 0n && // feeGrowthInside1LastX128
-                                      positionData[10] === 0n && // tokensOwed0
-                                      positionData[11] === 0n;   // tokensOwed1
+            // Additional check: if position previously had liquidity but now all fields are zero,
+            // it's likely the chain was reset (e.g., local dev chain restarted)
+            const allFieldsZero =
+                positionData[7] === 0n && // liquidity
+                positionData[8] === 0n && // feeGrowthInside0LastX128
+                positionData[9] === 0n && // feeGrowthInside1LastX128
+                positionData[10] === 0n && // tokensOwed0
+                positionData[11] === 0n; // tokensOwed1
 
-                // Defensive BigInt conversion in case state was deserialized from JSON
-                const existingLiquidity = typeof existingPosition.liquidity === 'bigint'
+            // Defensive BigInt conversion in case state was deserialized from JSON
+            const existingLiquidity =
+                typeof existingPosition.liquidity === "bigint"
                     ? existingPosition.liquidity
                     : BigInt(existingPosition.liquidity);
-                if (allFieldsZero && existingLiquidity > 0n) {
-                    const error = new Error(
-                        `Position NFT ${nftId} on chain ${chainId} appears to have been deleted (all state fields are zero but position previously had liquidity)`
-                    );
-                    log.methodError(this.logger, "refresh", error, { id, nftId, chainId });
-                    throw error;
-                }
+            if (allFieldsZero && existingLiquidity > 0n) {
+                const error = new Error(
+                    `Position NFT ${nftId} on chain ${chainId} appears to have been deleted (all state fields are zero but position previously had liquidity)`,
+                );
+                log.methodError(this.logger, "refresh", error, {
+                    id,
+                    nftId,
+                    chainId,
+                });
+                throw error;
+            }
 
-                this.logger.debug(
+            this.logger.debug(
+                {
+                    id,
+                    liquidity: positionData[7].toString(),
+                    feeGrowthInside0LastX128: positionData[8].toString(),
+                    feeGrowthInside1LastX128: positionData[9].toString(),
+                    tokensOwed0: positionData[10].toString(),
+                    tokensOwed1: positionData[11].toString(),
+                    owner: ownerAddress,
+                },
+                "Position state read from on-chain",
+            );
+
+            // Create updated state from on-chain data
+            updatedState = {
+                ownerAddress: normalizeAddress(ownerAddress),
+                liquidity: positionData[7], // From on-chain
+                feeGrowthInside0LastX128: positionData[8],
+                feeGrowthInside1LastX128: positionData[9],
+                tokensOwed0: positionData[10],
+                tokensOwed1: positionData[11],
+                unclaimedFees0: 0n, // Will be calculated later
+                unclaimedFees1: 0n,
+            };
+
+            this.logger.debug(
+                {
+                    id,
+                    ownerAddress: updatedState.ownerAddress,
+                    liquidity: updatedState.liquidity.toString(),
+                    stateSource: "on-chain",
+                },
+                "State updated from on-chain data",
+            );
+
+            // ========================================================================
+            // LAYER 2 - STEP 0: MISSING EVENTS CHECK
+            // ========================================================================
+            // Before any state comparisons, check if UI has transmitted missing
+            // events (from transactions not yet indexed by Etherscan).
+            // If missing events exist, skip all other checks and force sync immediately.
+            // ========================================================================
+
+            this.logger.debug(
+                { id },
+                "Checking for missing events in sync state",
+            );
+
+            // Get last finalized block
+            const finalizedBlock =
+                await this.evmBlockService.getLastFinalizedBlockNumber(chainId);
+
+            if (finalizedBlock === null || finalizedBlock === undefined) {
+                const error = new Error(
+                    `Failed to retrieve finalized block number for chain ${chainId}. ` +
+                        "Chain may not be supported or RPC endpoint may be unavailable.",
+                );
+                this.logger.error(
+                    { id, chainId, error: error.message },
+                    "Finalized block is null or undefined during missing events check",
+                );
+                throw error;
+            }
+
+            // Load sync state and prune finalized missing events
+            const syncState = await UniswapV3PositionSyncState.load(
+                this.prisma,
+                id,
+            );
+            syncState.pruneEvents(finalizedBlock);
+            const missingEvents = syncState.getMissingEventsSorted();
+
+            // Save sync state after pruning
+            await syncState.save(this.prisma, "position-refresh");
+
+            if (missingEvents.length > 0) {
+                this.logger.info(
                     {
                         id,
-                        liquidity: positionData[7].toString(),
-                        feeGrowthInside0LastX128: positionData[8].toString(),
-                        feeGrowthInside1LastX128: positionData[9].toString(),
-                        tokensOwed0: positionData[10].toString(),
-                        tokensOwed1: positionData[11].toString(),
-                        owner: ownerAddress,
+                        missingEventCount: missingEvents.length,
+                        oldestBlock: missingEvents[0]?.blockNumber,
+                        newestBlock:
+                            missingEvents[missingEvents.length - 1]
+                                ?.blockNumber,
                     },
-                    "Position state read from on-chain"
+                    "Missing events detected - forcing ledger sync (skipping state checks)",
                 );
 
-                // Create updated state from on-chain data
-                updatedState = {
-                    ownerAddress: normalizeAddress(ownerAddress),
-                    liquidity: positionData[7], // From on-chain
-                    feeGrowthInside0LastX128: positionData[8],
-                    feeGrowthInside1LastX128: positionData[9],
-                    tokensOwed0: positionData[10],
-                    tokensOwed1: positionData[11],
-                    unclaimedFees0: 0n, // Will be calculated later
-                    unclaimedFees1: 0n,
-                };
+                // Force incremental sync to process missing events
+                const syncResult = await syncLedgerEvents(
+                    {
+                        positionId: id,
+                        chainId,
+                        nftId: BigInt(nftId),
+                        forceFullResync: false, // Incremental sync
+                    },
+                    {
+                        prisma: this.prisma,
+                        etherscanClient: this.etherscanClient,
+                        evmBlockService: this.evmBlockService,
+                        aprService: this.aprService,
+                        logger: this.logger,
+                        ledgerService: this.ledgerService,
+                        poolPriceService: this.poolPriceService,
+                    },
+                );
 
-                this.logger.debug(
+                this.logger.info(
                     {
                         id,
-                        ownerAddress: updatedState.ownerAddress,
-                        liquidity: updatedState.liquidity.toString(),
-                        stateSource: "on-chain",
+                        eventsAdded: syncResult.eventsAdded,
+                        fromBlock: syncResult.fromBlock.toString(),
+                        finalizedBlock: syncResult.finalizedBlock.toString(),
                     },
-                    "State updated from on-chain data"
+                    "Ledger events synced successfully after missing events detection",
                 );
 
-                // ========================================================================
-                // LAYER 2 - STEP 0: MISSING EVENTS CHECK
-                // ========================================================================
-                // Before any state comparisons, check if UI has transmitted missing
-                // events (from transactions not yet indexed by Etherscan).
-                // If missing events exist, skip all other checks and force sync immediately.
-                // ========================================================================
-
+                // CRITICAL: Re-read on-chain state after processing missing events
+                // The COLLECT event may have changed feeGrowthInside values, so we need
+                // fresh on-chain data to calculate unclaimed fees correctly
                 this.logger.debug(
-                    { id },
-                    "Checking for missing events in sync state"
+                    { id, chainId, nftId },
+                    "Re-reading on-chain position state after missing events processing",
                 );
 
-                // Get last finalized block
-                const finalizedBlock = await this.evmBlockService.getLastFinalizedBlockNumber(chainId);
-
-                if (finalizedBlock === null || finalizedBlock === undefined) {
-                    const error = new Error(
-                        `Failed to retrieve finalized block number for chain ${chainId}. ` +
-                        'Chain may not be supported or RPC endpoint may be unavailable.'
-                    );
-                    this.logger.error(
-                        { id, chainId, error: error.message },
-                        'Finalized block is null or undefined during missing events check'
-                    );
-                    throw error;
-                }
-
-                // Load sync state and prune finalized missing events
-                const syncState = await UniswapV3PositionSyncState.load(this.prisma, id);
-                syncState.pruneEvents(finalizedBlock);
-                const missingEvents = syncState.getMissingEventsSorted();
-
-                // Save sync state after pruning
-                await syncState.save(this.prisma, 'position-refresh');
-
-                if (missingEvents.length > 0) {
-                    this.logger.info(
-                        {
-                            id,
-                            missingEventCount: missingEvents.length,
-                            oldestBlock: missingEvents[0]?.blockNumber,
-                            newestBlock: missingEvents[missingEvents.length - 1]?.blockNumber,
-                        },
-                        "Missing events detected - forcing ledger sync (skipping state checks)"
-                    );
-
-                    // Force incremental sync to process missing events
-                    const syncResult = await syncLedgerEvents(
-                        {
-                            positionId: id,
-                            chainId,
-                            nftId: BigInt(nftId),
-                            forceFullResync: false,  // Incremental sync
-                        },
-                        {
-                            prisma: this.prisma,
-                            etherscanClient: this.etherscanClient,
-                            evmBlockService: this.evmBlockService,
-                            aprService: this.aprService,
-                            logger: this.logger,
-                            ledgerService: this.ledgerService,
-                            poolPriceService: this.poolPriceService,
-                        }
-                    );
-
-                    this.logger.info(
-                        {
-                            id,
-                            eventsAdded: syncResult.eventsAdded,
-                            fromBlock: syncResult.fromBlock.toString(),
-                            finalizedBlock: syncResult.finalizedBlock.toString(),
-                        },
-                        "Ledger events synced successfully after missing events detection"
-                    );
-
-                    // CRITICAL: Re-read on-chain state after processing missing events
-                    // The COLLECT event may have changed feeGrowthInside values, so we need
-                    // fresh on-chain data to calculate unclaimed fees correctly
-                    this.logger.debug(
-                        { id, chainId, nftId },
-                        "Re-reading on-chain position state after missing events processing"
-                    );
-
-                    const [positionDataAfterSync, ownerAddressAfterSync] = await Promise.all([
+                const [positionDataAfterSync, ownerAddressAfterSync] =
+                    await Promise.all([
                         client.readContract({
                             address: positionManagerAddress,
                             abi: UNISWAP_V3_POSITION_MANAGER_ABI,
@@ -1429,7 +1423,7 @@ export class UniswapV3PositionService {
                                 bigint, // feeGrowthInside0LastX128
                                 bigint, // feeGrowthInside1LastX128
                                 bigint, // tokensOwed0
-                                bigint // tokensOwed1
+                                bigint, // tokensOwed1
                             ]
                         >,
                         client.readContract({
@@ -1440,365 +1434,460 @@ export class UniswapV3PositionService {
                         }) as Promise<Address>,
                     ]);
 
-                    // Update updatedState with fresh on-chain values
-                    updatedState = {
-                        ownerAddress: normalizeAddress(ownerAddressAfterSync),
-                        liquidity: positionDataAfterSync[7],
-                        feeGrowthInside0LastX128: positionDataAfterSync[8],
-                        feeGrowthInside1LastX128: positionDataAfterSync[9],
-                        tokensOwed0: positionDataAfterSync[10],
-                        tokensOwed1: positionDataAfterSync[11],
-                        unclaimedFees0: 0n, // Will be calculated later
-                        unclaimedFees1: 0n,
-                    };
+                // Update updatedState with fresh on-chain values
+                updatedState = {
+                    ownerAddress: normalizeAddress(ownerAddressAfterSync),
+                    liquidity: positionDataAfterSync[7],
+                    feeGrowthInside0LastX128: positionDataAfterSync[8],
+                    feeGrowthInside1LastX128: positionDataAfterSync[9],
+                    tokensOwed0: positionDataAfterSync[10],
+                    tokensOwed1: positionDataAfterSync[11],
+                    unclaimedFees0: 0n, // Will be calculated later
+                    unclaimedFees1: 0n,
+                };
 
-                    this.logger.debug(
-                        {
-                            id,
-                            feeGrowthInside0LastX128: updatedState.feeGrowthInside0LastX128.toString(),
-                            feeGrowthInside1LastX128: updatedState.feeGrowthInside1LastX128.toString(),
-                            tokensOwed0: updatedState.tokensOwed0.toString(),
-                            tokensOwed1: updatedState.tokensOwed1.toString(),
-                        },
-                        "On-chain state refreshed after missing events processing"
+                this.logger.debug(
+                    {
+                        id,
+                        feeGrowthInside0LastX128:
+                            updatedState.feeGrowthInside0LastX128.toString(),
+                        feeGrowthInside1LastX128:
+                            updatedState.feeGrowthInside1LastX128.toString(),
+                        tokensOwed0: updatedState.tokensOwed0.toString(),
+                        tokensOwed1: updatedState.tokensOwed1.toString(),
+                    },
+                    "On-chain state refreshed after missing events processing",
+                );
+
+                // Re-fetch position after sync to get updated state
+                // syncLedgerEvents() processes missing events and updates position state
+                // We need fresh data before calculating values
+                const syncedPosition = await this.findById(id);
+                if (!syncedPosition) {
+                    throw new Error(
+                        `Position ${id} not found after syncing missing events`,
                     );
+                }
 
-                    // Re-fetch position after sync to get updated state
-                    // syncLedgerEvents() processes missing events and updates position state
-                    // We need fresh data before calculating values
-                    const syncedPosition = await this.findById(id);
-                    if (!syncedPosition) {
-                        throw new Error(
-                            `Position ${id} not found after syncing missing events`
+                // Refresh pool state to ensure accurate current price for calculations
+                this.logger.debug(
+                    { poolId: syncedPosition.pool.id },
+                    "Refreshing pool state to get current sqrtPriceX96 and tick",
+                );
+
+                const pool = await this.poolService.refresh(
+                    syncedPosition.pool.id,
+                );
+
+                this.logger.debug(
+                    {
+                        id,
+                        poolId: pool.id,
+                        sqrtPriceX96: pool.sqrtPriceX96.toString(),
+                        currentTick: pool.state.currentTick,
+                    },
+                    "Position re-fetched after missing events sync, pool state refreshed - proceeding to value calculation",
+                );
+
+                // ========================================================================
+                // SYNC POSITION STATE WITH LEDGER
+                // ========================================================================
+                // After syncLedgerEvents() completes, ledger tracks correct liquidity
+                // in event configs, but position.state.liquidity may be stale.
+                // We need to:
+                // 1. Get last ledger event's liquidityAfter
+                // 2. Update position.state.liquidity to match ledger
+                // 3. Check if position is fully closed
+                // ========================================================================
+
+                this.logger.debug(
+                    { id },
+                    "Syncing position.state with ledger after event processing",
+                );
+
+                // Get last ledger event to extract calculated liquidity
+                const lastEvents = await this.ledgerService.findAllItems(id);
+                const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
+
+                if (lastLedgerEvent) {
+                    // Use typedConfig to get actual bigint values (not JSON-serialized strings)
+                    const ledgerLiquidity =
+                        lastLedgerEvent.typedConfig.liquidityAfter;
+                    const currentStateLiquidity = syncedPosition.liquidity;
+
+                    // Check if we need to update position.state.liquidity
+                    if (ledgerLiquidity !== currentStateLiquidity) {
+                        this.logger.info(
+                            {
+                                id,
+                                oldLiquidity: currentStateLiquidity.toString(),
+                                newLiquidity: ledgerLiquidity.toString(),
+                            },
+                            "Updating position.state.liquidity to match ledger",
+                        );
+
+                        // Update position state with new liquidity
+                        const currentTypedState = syncedPosition.typedState;
+                        const updatedState: UniswapV3PositionState = {
+                            ...currentTypedState,
+                            liquidity: ledgerLiquidity,
+                        };
+
+                        // Serialize state for database (converts bigints to strings)
+                        const stateDB = this.serializeState(updatedState);
+
+                        // Update position state in database
+                        await this.prisma.position.update({
+                            where: { id },
+                            data: {
+                                state: stateDB as object,
+                            },
+                        });
+                        // Note: in-memory state not updated - position will be re-read if needed
+                    }
+
+                    // ========================================================================
+                    // COLLECT EVENT CHECKPOINT REFRESH
+                    // ========================================================================
+                    // If a COLLECT event was synced, the on-chain feeGrowthInside*LastX128
+                    // values have been updated by the Uniswap contract. We need to refresh
+                    // these checkpoint values from on-chain to prevent double-counting fees
+                    // in the unclaimed fees calculation.
+                    // ========================================================================
+
+                    const hasRecentCollect =
+                        lastLedgerEvent &&
+                        lastLedgerEvent.eventType === "COLLECT";
+
+                    if (hasRecentCollect) {
+                        this.logger.info(
+                            {
+                                id,
+                                collectTimestamp:
+                                    lastLedgerEvent!.timestamp.toISOString(),
+                            },
+                            "COLLECT event detected - refreshing fee growth checkpoints from on-chain",
+                        );
+
+                        // Re-read position state from blockchain to get updated checkpoints
+                        const positionManagerAddress =
+                            getPositionManagerAddress(chainId);
+                        const client = this.evmConfig.getPublicClient(chainId);
+
+                        const [freshPositionData] = await Promise.all([
+                            client.readContract({
+                                address: positionManagerAddress,
+                                abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+                                functionName: "positions",
+                                args: [BigInt(nftId)],
+                            }) as Promise<
+                                readonly [
+                                    bigint, // nonce
+                                    Address, // operator
+                                    Address, // token0
+                                    Address, // token1
+                                    number, // fee
+                                    number, // tickLower
+                                    number, // tickUpper
+                                    bigint, // liquidity
+                                    bigint, // feeGrowthInside0LastX128
+                                    bigint, // feeGrowthInside1LastX128
+                                    bigint, // tokensOwed0
+                                    bigint, // tokensOwed1
+                                ]
+                            >,
+                        ]);
+
+                        const syncedTypedState = syncedPosition.typedState;
+                        this.logger.debug(
+                            {
+                                id,
+                                oldCheckpoint0:
+                                    syncedTypedState.feeGrowthInside0LastX128.toString(),
+                                newCheckpoint0: freshPositionData[8].toString(),
+                                oldCheckpoint1:
+                                    syncedTypedState.feeGrowthInside1LastX128.toString(),
+                                newCheckpoint1: freshPositionData[9].toString(),
+                                oldTokensOwed0:
+                                    syncedTypedState.tokensOwed0.toString(),
+                                newTokensOwed0:
+                                    freshPositionData[10].toString(),
+                                oldTokensOwed1:
+                                    syncedTypedState.tokensOwed1.toString(),
+                                newTokensOwed1:
+                                    freshPositionData[11].toString(),
+                            },
+                            "Fee growth checkpoints comparison (old vs new)",
+                        );
+
+                        // Update position state with fresh checkpoint values
+                        const refreshedState: UniswapV3PositionState = {
+                            ...syncedTypedState,
+                            feeGrowthInside0LastX128: freshPositionData[8],
+                            feeGrowthInside1LastX128: freshPositionData[9],
+                            tokensOwed0: freshPositionData[10],
+                            tokensOwed1: freshPositionData[11],
+                        };
+
+                        // Serialize state for database
+                        const refreshedStateDB =
+                            this.serializeState(refreshedState);
+
+                        // Update position state in database
+                        await this.prisma.position.update({
+                            where: { id },
+                            data: {
+                                state: refreshedStateDB as object,
+                            },
+                        });
+
+                        // Update in-memory object
+                        syncedPosition.state.feeGrowthInside0LastX128 =
+                            freshPositionData[8];
+                        syncedPosition.state.feeGrowthInside1LastX128 =
+                            freshPositionData[9];
+                        syncedPosition.state.tokensOwed0 =
+                            freshPositionData[10];
+                        syncedPosition.state.tokensOwed1 =
+                            freshPositionData[11];
+
+                        this.logger.info(
+                            { id },
+                            "Fee growth checkpoints refreshed successfully after COLLECT",
                         );
                     }
 
-                    // Refresh pool state to ensure accurate current price for calculations
-                    this.logger.debug(
-                        { poolId: syncedPosition.pool.id },
-                        "Refreshing pool state to get current sqrtPriceX96 and tick"
-                    );
+                    // ========================================================================
+                    // POSITION CLOSURE DETECTION
+                    // ========================================================================
+                    // A position is fully closed when:
+                    // 1. Liquidity is zero (all liquidity withdrawn)
+                    // 2. Last event is COLLECT (all principal collected)
+                    // 3. Position is currently marked as active
+                    // ========================================================================
 
-                    const pool = await this.poolService.refresh(syncedPosition.pool.id);
+                    const isLiquidityZero = ledgerLiquidity === 0n;
+                    const isLastEventCollect =
+                        lastLedgerEvent.eventType === "COLLECT";
+                    const isCurrentlyActive = syncedPosition.isActive;
 
-                    this.logger.debug(
+                    if (
+                        isLiquidityZero &&
+                        isLastEventCollect &&
+                        isCurrentlyActive
+                    ) {
+                        const closedAt = lastLedgerEvent.timestamp;
+
+                        this.logger.info(
+                            {
+                                id,
+                                closedAt: closedAt.toISOString(),
+                                lastEventType: lastLedgerEvent.eventType,
+                            },
+                            "Position fully closed - setting isActive=false and positionClosedAt",
+                        );
+
+                        // Mark position as closed
+                        await this.prisma.position.update({
+                            where: { id },
+                            data: {
+                                isActive: false,
+                                positionClosedAt: closedAt,
+                            },
+                        });
+                        // Note: in-memory state not updated - position will be re-read if needed
+                    }
+                }
+
+                // Skip state update (sync already handled it) - jump to value calculation
+                // Get ledger summary for PnL calculations
+                const ledgerSummary = await this.getLedgerSummary(id);
+
+                // Calculate current position value
+                const currentValue = this.calculateCurrentPositionValue(
+                    syncedPosition,
+                    pool,
+                );
+
+                // Calculate unrealized PnL
+                const unrealizedPnl = currentValue - ledgerSummary.costBasis;
+
+                // Calculate unclaimed fees
+                const fees = await this.calculateUnclaimedFees(
+                    syncedPosition,
+                    pool,
+                );
+
+                // Update position state with individual fee amounts (state is read-only)
+                const syncedTypedStateForFees = syncedPosition.typedState;
+                const feeUpdatedState: UniswapV3PositionState = {
+                    ...syncedTypedStateForFees,
+                    unclaimedFees0: fees.unclaimedFees0,
+                    unclaimedFees1: fees.unclaimedFees1,
+                };
+
+                // Serialize and save updated state
+                const feeStateDB = this.serializeState(feeUpdatedState);
+                await this.prisma.position.update({
+                    where: { id },
+                    data: { state: feeStateDB as object },
+                });
+
+                // Calculate price range
+                const { priceRangeLower, priceRangeUpper } =
+                    this.calculatePriceRange(syncedPosition, pool);
+
+                // Update position with calculated fields
+                await this.updatePositionCommonFields(
+                    id,
+                    {
+                        currentValue,
+                        currentCostBasis: ledgerSummary.costBasis,
+                        realizedPnl: ledgerSummary.realizedPnl,
+                        unrealizedPnl,
+                        collectedFees: ledgerSummary.collectedFees,
+                        unClaimedFees: fees.unclaimedFeesValue,
+                        lastFeesCollectedAt:
+                            ledgerSummary.lastFeesCollectedAt.getTime() === 0
+                                ? syncedPosition.positionOpenedAt
+                                : ledgerSummary.lastFeesCollectedAt,
+                        priceRangeLower,
+                        priceRangeUpper,
+                    },
+                    syncedPosition.positionOpenedAt,
+                );
+
+                this.logger.info(
+                    {
+                        id,
+                        currentValue: currentValue.toString(),
+                        costBasis: ledgerSummary.costBasis.toString(),
+                        unrealizedPnl: unrealizedPnl.toString(),
+                        unClaimedFees: fees.unclaimedFeesValue.toString(),
+                    },
+                    "Position values calculated and updated after missing events sync",
+                );
+
+                // Re-fetch final position with all updates
+                const finalPosition = await this.findById(id);
+                return finalPosition ?? syncedPosition;
+            } else {
+                this.logger.debug(
+                    { id },
+                    "No missing events found - proceeding with normal state checks",
+                );
+
+                // ========================================================================
+                // LAYER 2 - STEP 2A: LIQUIDITY CONSISTENCY CHECK
+                // ========================================================================
+                // Compare ledger's calculated liquidity with on-chain liquidity.
+                // If mismatch detected, it indicates missing events (likely due to
+                // Etherscan indexing lag). Force sync immediately without comparing
+                // other state fields.
+                // ========================================================================
+
+                this.logger.debug(
+                    { id },
+                    "Checking ledger liquidity consistency with on-chain state",
+                );
+
+                // Get last ledger event to extract calculated liquidity
+                const lastEvents = await this.ledgerService.findAllItems(id);
+                const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
+                // Use typedConfig to get actual bigint values (not JSON-serialized strings)
+                const ledgerLiquidity =
+                    lastLedgerEvent?.typedConfig?.liquidityAfter ?? 0n;
+                const onChainLiquidity = updatedState.liquidity;
+
+                const liquidityMismatch = ledgerLiquidity !== onChainLiquidity;
+
+                if (liquidityMismatch) {
+                    this.logger.warn(
                         {
                             id,
-                            poolId: pool.id,
-                            sqrtPriceX96: pool.sqrtPriceX96.toString(),
-                            currentTick: pool.state.currentTick
+                            ledgerLiquidity: ledgerLiquidity.toString(),
+                            onChainLiquidity: onChainLiquidity.toString(),
+                            delta: (
+                                onChainLiquidity - ledgerLiquidity
+                            ).toString(),
                         },
-                        "Position re-fetched after missing events sync, pool state refreshed - proceeding to value calculation"
+                        "Liquidity mismatch detected - missing events in ledger, forcing sync",
                     );
 
-                    // ========================================================================
-                    // SYNC POSITION STATE WITH LEDGER
-                    // ========================================================================
-                    // After syncLedgerEvents() completes, ledger tracks correct liquidity
-                    // in event configs, but position.state.liquidity may be stale.
-                    // We need to:
-                    // 1. Get last ledger event's liquidityAfter
-                    // 2. Update position.state.liquidity to match ledger
-                    // 3. Check if position is fully closed
-                    // ========================================================================
-
-                    this.logger.debug(
-                        { id },
-                        "Syncing position.state with ledger after event processing"
-                    );
-
-                    // Get last ledger event to extract calculated liquidity
-                    const lastEvents = await this.ledgerService.findAllItems(id);
-                    const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
-
-                    if (lastLedgerEvent) {
-                        // Use typedConfig to get actual bigint values (not JSON-serialized strings)
-                        const ledgerLiquidity = lastLedgerEvent.typedConfig.liquidityAfter;
-                        const currentStateLiquidity = syncedPosition.liquidity;
-
-                        // Check if we need to update position.state.liquidity
-                        if (ledgerLiquidity !== currentStateLiquidity) {
-                            this.logger.info(
-                                {
-                                    id,
-                                    oldLiquidity: currentStateLiquidity.toString(),
-                                    newLiquidity: ledgerLiquidity.toString(),
-                                },
-                                "Updating position.state.liquidity to match ledger"
-                            );
-
-                            // Update position state with new liquidity
-                            const currentTypedState = syncedPosition.typedState;
-                            const updatedState: UniswapV3PositionState = {
-                                ...currentTypedState,
-                                liquidity: ledgerLiquidity,
-                            };
-
-                            // Serialize state for database (converts bigints to strings)
-                            const stateDB = this.serializeState(updatedState);
-
-                            // Update position state in database
-                            await this.prisma.position.update({
-                                where: { id },
-                                data: {
-                                    state: stateDB as object,
-                                },
-                            });
-                            // Note: in-memory state not updated - position will be re-read if needed
-                        }
-
-                        // ========================================================================
-                        // COLLECT EVENT CHECKPOINT REFRESH
-                        // ========================================================================
-                        // If a COLLECT event was synced, the on-chain feeGrowthInside*LastX128
-                        // values have been updated by the Uniswap contract. We need to refresh
-                        // these checkpoint values from on-chain to prevent double-counting fees
-                        // in the unclaimed fees calculation.
-                        // ========================================================================
-
-                        const hasRecentCollect = lastLedgerEvent && lastLedgerEvent.eventType === 'COLLECT';
-
-                        if (hasRecentCollect) {
-                            this.logger.info(
-                                {
-                                    id,
-                                    collectTimestamp: lastLedgerEvent!.timestamp.toISOString(),
-                                },
-                                "COLLECT event detected - refreshing fee growth checkpoints from on-chain"
-                            );
-
-                            // Re-read position state from blockchain to get updated checkpoints
-                            const positionManagerAddress = getPositionManagerAddress(chainId);
-                            const client = this.evmConfig.getPublicClient(chainId);
-
-                            const [freshPositionData] = await Promise.all([
-                                client.readContract({
-                                    address: positionManagerAddress,
-                                    abi: UNISWAP_V3_POSITION_MANAGER_ABI,
-                                    functionName: "positions",
-                                    args: [BigInt(nftId)],
-                                }) as Promise<
-                                    readonly [
-                                        bigint, // nonce
-                                        Address, // operator
-                                        Address, // token0
-                                        Address, // token1
-                                        number, // fee
-                                        number, // tickLower
-                                        number, // tickUpper
-                                        bigint, // liquidity
-                                        bigint, // feeGrowthInside0LastX128
-                                        bigint, // feeGrowthInside1LastX128
-                                        bigint, // tokensOwed0
-                                        bigint // tokensOwed1
-                                    ]
-                                >,
-                            ]);
-
-                            const syncedTypedState = syncedPosition.typedState;
-                            this.logger.debug(
-                                {
-                                    id,
-                                    oldCheckpoint0: syncedTypedState.feeGrowthInside0LastX128.toString(),
-                                    newCheckpoint0: freshPositionData[8].toString(),
-                                    oldCheckpoint1: syncedTypedState.feeGrowthInside1LastX128.toString(),
-                                    newCheckpoint1: freshPositionData[9].toString(),
-                                    oldTokensOwed0: syncedTypedState.tokensOwed0.toString(),
-                                    newTokensOwed0: freshPositionData[10].toString(),
-                                    oldTokensOwed1: syncedTypedState.tokensOwed1.toString(),
-                                    newTokensOwed1: freshPositionData[11].toString(),
-                                },
-                                "Fee growth checkpoints comparison (old vs new)"
-                            );
-
-                            // Update position state with fresh checkpoint values
-                            const refreshedState: UniswapV3PositionState = {
-                                ...syncedTypedState,
-                                feeGrowthInside0LastX128: freshPositionData[8],
-                                feeGrowthInside1LastX128: freshPositionData[9],
-                                tokensOwed0: freshPositionData[10],
-                                tokensOwed1: freshPositionData[11],
-                            };
-
-                            // Serialize state for database
-                            const refreshedStateDB = this.serializeState(refreshedState);
-
-                            // Update position state in database
-                            await this.prisma.position.update({
-                                where: { id },
-                                data: {
-                                    state: refreshedStateDB as object,
-                                },
-                            });
-
-                            // Update in-memory object
-                            syncedPosition.state.feeGrowthInside0LastX128 = freshPositionData[8];
-                            syncedPosition.state.feeGrowthInside1LastX128 = freshPositionData[9];
-                            syncedPosition.state.tokensOwed0 = freshPositionData[10];
-                            syncedPosition.state.tokensOwed1 = freshPositionData[11];
-
-                            this.logger.info(
-                                { id },
-                                "Fee growth checkpoints refreshed successfully after COLLECT"
-                            );
-                        }
-
-                        // ========================================================================
-                        // POSITION CLOSURE DETECTION
-                        // ========================================================================
-                        // A position is fully closed when:
-                        // 1. Liquidity is zero (all liquidity withdrawn)
-                        // 2. Last event is COLLECT (all principal collected)
-                        // 3. Position is currently marked as active
-                        // ========================================================================
-
-                        const isLiquidityZero = ledgerLiquidity === 0n;
-                        const isLastEventCollect = lastLedgerEvent.eventType === 'COLLECT';
-                        const isCurrentlyActive = syncedPosition.isActive;
-
-                        if (isLiquidityZero && isLastEventCollect && isCurrentlyActive) {
-                            const closedAt = lastLedgerEvent.timestamp;
-
-                            this.logger.info(
-                                {
-                                    id,
-                                    closedAt: closedAt.toISOString(),
-                                    lastEventType: lastLedgerEvent.eventType,
-                                },
-                                "Position fully closed - setting isActive=false and positionClosedAt"
-                            );
-
-                            // Mark position as closed
-                            await this.prisma.position.update({
-                                where: { id },
-                                data: {
-                                    isActive: false,
-                                    positionClosedAt: closedAt,
-                                },
-                            });
-                            // Note: in-memory state not updated - position will be re-read if needed
-                        }
-                    }
-
-                    // Skip state update (sync already handled it) - jump to value calculation
-                    // Get ledger summary for PnL calculations
-                    const ledgerSummary = await this.getLedgerSummary(id);
-
-                    // Calculate current position value
-                    const currentValue = this.calculateCurrentPositionValue(
-                        syncedPosition,
-                        pool
-                    );
-
-                    // Calculate unrealized PnL
-                    const unrealizedPnl = currentValue - ledgerSummary.costBasis;
-
-                    // Calculate unclaimed fees
-                    const fees = await this.calculateUnclaimedFees(
-                        syncedPosition,
-                        pool
-                    );
-
-                    // Update position state with individual fee amounts (state is read-only)
-                    const syncedTypedStateForFees = syncedPosition.typedState;
-                    const feeUpdatedState: UniswapV3PositionState = {
-                        ...syncedTypedStateForFees,
-                        unclaimedFees0: fees.unclaimedFees0,
-                        unclaimedFees1: fees.unclaimedFees1,
-                    };
-
-                    // Serialize and save updated state
-                    const feeStateDB = this.serializeState(feeUpdatedState);
-                    await this.prisma.position.update({
-                        where: { id },
-                        data: { state: feeStateDB as object },
-                    });
-
-                    // Calculate price range
-                    const { priceRangeLower, priceRangeUpper } =
-                        this.calculatePriceRange(syncedPosition, pool);
-
-                    // Update position with calculated fields
-                    await this.updatePositionCommonFields(
-                        id,
+                    // Force incremental sync to catch missing events
+                    const syncResult = await syncLedgerEvents(
                         {
-                            currentValue,
-                            currentCostBasis: ledgerSummary.costBasis,
-                            realizedPnl: ledgerSummary.realizedPnl,
-                            unrealizedPnl,
-                            collectedFees: ledgerSummary.collectedFees,
-                            unClaimedFees: fees.unclaimedFeesValue,
-                            lastFeesCollectedAt:
-                                ledgerSummary.lastFeesCollectedAt.getTime() === 0
-                                    ? syncedPosition.positionOpenedAt
-                                    : ledgerSummary.lastFeesCollectedAt,
-                            priceRangeLower,
-                            priceRangeUpper,
+                            positionId: id,
+                            chainId,
+                            nftId: BigInt(nftId),
+                            forceFullResync: false, // Incremental sync
                         },
-                        syncedPosition.positionOpenedAt
+                        {
+                            prisma: this.prisma,
+                            etherscanClient: this.etherscanClient,
+                            evmBlockService: this.evmBlockService,
+                            aprService: this.aprService,
+                            logger: this.logger,
+                            ledgerService: this.ledgerService,
+                            poolPriceService: this.poolPriceService,
+                        },
                     );
 
                     this.logger.info(
                         {
                             id,
-                            currentValue: currentValue.toString(),
-                            costBasis: ledgerSummary.costBasis.toString(),
-                            unrealizedPnl: unrealizedPnl.toString(),
-                            unClaimedFees: fees.unclaimedFeesValue.toString(),
+                            eventsAdded: syncResult.eventsAdded,
+                            fromBlock: syncResult.fromBlock.toString(),
+                            finalizedBlock:
+                                syncResult.finalizedBlock.toString(),
                         },
-                        "Position values calculated and updated after missing events sync"
+                        "Ledger events synced successfully after liquidity mismatch",
                     );
 
-                    // Re-fetch final position with all updates
-                    const finalPosition = await this.findById(id);
-                    return finalPosition ?? syncedPosition;
+                    // Skip full state comparison - sync already happened
                 } else {
                     this.logger.debug(
-                        { id },
-                        "No missing events found - proceeding with normal state checks"
+                        {
+                            id,
+                            liquidity: ledgerLiquidity.toString(),
+                        },
+                        "Ledger liquidity consistent with on-chain - proceeding to full state check",
                     );
 
                     // ========================================================================
-                    // LAYER 2 - STEP 2A: LIQUIDITY CONSISTENCY CHECK
+                    // LAYER 2 - STEP 2B: FULL STATE COMPARISON
                     // ========================================================================
-                    // Compare ledger's calculated liquidity with on-chain liquidity.
-                    // If mismatch detected, it indicates missing events (likely due to
-                    // Etherscan indexing lag). Force sync immediately without comparing
-                    // other state fields.
+                    // Only runs if liquidity matches (no missing events).
+                    // Checks all state fields to detect other types of changes.
                     // ========================================================================
 
-                    this.logger.debug(
-                        { id },
-                        "Checking ledger liquidity consistency with on-chain state"
-                    );
+                    // Check if on-chain state has changed (indicates new events)
+                    // Use typedState to get actual bigint values (not JSON-serialized strings)
+                    const existingState = existingPosition.typedState;
+                    const stateChanged =
+                        updatedState.liquidity !== existingState.liquidity ||
+                        updatedState.tokensOwed0 !==
+                            existingState.tokensOwed0 ||
+                        updatedState.tokensOwed1 !==
+                            existingState.tokensOwed1 ||
+                        updatedState.feeGrowthInside0LastX128 !==
+                            existingState.feeGrowthInside0LastX128 ||
+                        updatedState.feeGrowthInside1LastX128 !==
+                            existingState.feeGrowthInside1LastX128;
 
-                    // Get last ledger event to extract calculated liquidity
-                    const lastEvents = await this.ledgerService.findAllItems(id);
-                    const lastLedgerEvent = lastEvents[0]; // Sorted DESC by timestamp
-                    // Use typedConfig to get actual bigint values (not JSON-serialized strings)
-                    const ledgerLiquidity = lastLedgerEvent?.typedConfig?.liquidityAfter ?? 0n;
-                    const onChainLiquidity = updatedState.liquidity;
-
-                    const liquidityMismatch = ledgerLiquidity !== onChainLiquidity;
-
-                    if (liquidityMismatch) {
-                        this.logger.warn(
-                            {
-                                id,
-                                ledgerLiquidity: ledgerLiquidity.toString(),
-                                onChainLiquidity: onChainLiquidity.toString(),
-                                delta: (onChainLiquidity - ledgerLiquidity).toString(),
-                            },
-                            "Liquidity mismatch detected - missing events in ledger, forcing sync"
+                    if (stateChanged) {
+                        this.logger.info(
+                            { id, chainId, nftId },
+                            "Position state changed on-chain, triggering ledger event sync",
                         );
 
-                        // Force incremental sync to catch missing events
+                        // Incremental sync from last event block
                         const syncResult = await syncLedgerEvents(
                             {
                                 positionId: id,
                                 chainId,
                                 nftId: BigInt(nftId),
-                                forceFullResync: false,  // Incremental sync
+                                forceFullResync: false, // Incremental sync
                             },
                             {
                                 prisma: this.prisma,
@@ -1808,7 +1897,7 @@ export class UniswapV3PositionService {
                                 logger: this.logger,
                                 ledgerService: this.ledgerService,
                                 poolPriceService: this.poolPriceService,
-                            }
+                            },
                         );
 
                         this.logger.info(
@@ -1816,81 +1905,19 @@ export class UniswapV3PositionService {
                                 id,
                                 eventsAdded: syncResult.eventsAdded,
                                 fromBlock: syncResult.fromBlock.toString(),
-                                finalizedBlock: syncResult.finalizedBlock.toString(),
+                                finalizedBlock:
+                                    syncResult.finalizedBlock.toString(),
                             },
-                            "Ledger events synced successfully after liquidity mismatch"
+                            "Ledger events synced successfully after state change detection",
                         );
-
-                        // Skip full state comparison - sync already happened
                     } else {
                         this.logger.debug(
-                            {
-                                id,
-                                liquidity: ledgerLiquidity.toString(),
-                            },
-                            "Ledger liquidity consistent with on-chain - proceeding to full state check"
+                            { id },
+                            "No state changes detected, skipping ledger event sync",
                         );
-
-                        // ========================================================================
-                        // LAYER 2 - STEP 2B: FULL STATE COMPARISON
-                        // ========================================================================
-                        // Only runs if liquidity matches (no missing events).
-                        // Checks all state fields to detect other types of changes.
-                        // ========================================================================
-
-                        // Check if on-chain state has changed (indicates new events)
-                        // Use typedState to get actual bigint values (not JSON-serialized strings)
-                        const existingState = existingPosition.typedState;
-                        const stateChanged = (
-                            updatedState.liquidity !== existingState.liquidity ||
-                            updatedState.tokensOwed0 !== existingState.tokensOwed0 ||
-                            updatedState.tokensOwed1 !== existingState.tokensOwed1 ||
-                            updatedState.feeGrowthInside0LastX128 !== existingState.feeGrowthInside0LastX128 ||
-                            updatedState.feeGrowthInside1LastX128 !== existingState.feeGrowthInside1LastX128
-                        );
-
-                        if (stateChanged) {
-                            this.logger.info(
-                                { id, chainId, nftId },
-                                "Position state changed on-chain, triggering ledger event sync"
-                            );
-
-                            // Incremental sync from last event block
-                            const syncResult = await syncLedgerEvents(
-                                {
-                                    positionId: id,
-                                    chainId,
-                                    nftId: BigInt(nftId),
-                                    forceFullResync: false,  // Incremental sync
-                                },
-                                {
-                                    prisma: this.prisma,
-                                    etherscanClient: this.etherscanClient,
-                                    evmBlockService: this.evmBlockService,
-                                    aprService: this.aprService,
-                                    logger: this.logger,
-                                    ledgerService: this.ledgerService,
-                                    poolPriceService: this.poolPriceService,
-                                }
-                            );
-
-                            this.logger.info(
-                                {
-                                    id,
-                                    eventsAdded: syncResult.eventsAdded,
-                                    fromBlock: syncResult.fromBlock.toString(),
-                                    finalizedBlock: syncResult.finalizedBlock.toString(),
-                                },
-                                "Ledger events synced successfully after state change detection"
-                            );
-                        } else {
-                            this.logger.debug(
-                                { id },
-                                "No state changes detected, skipping ledger event sync"
-                            );
-                        }
-                    } // End of liquidity consistency check else block
-                } // End of missing events check else block
+                    }
+                } // End of liquidity consistency check else block
+            } // End of missing events check else block
 
             // ========================================================================
             // SYNC POSITION STATE WITH LEDGER (PATH 2)
@@ -1902,19 +1929,24 @@ export class UniswapV3PositionService {
 
             this.logger.debug(
                 { id },
-                "Syncing position.state with ledger before saving (Path 2)"
+                "Syncing position.state with ledger before saving (Path 2)",
             );
 
             // Get last ledger event to extract calculated liquidity
-            const lastEventsBeforeSave = await this.ledgerService.findAllItems(id);
+            const lastEventsBeforeSave =
+                await this.ledgerService.findAllItems(id);
             const lastLedgerEventBeforeSave = lastEventsBeforeSave[0]; // Sorted DESC by timestamp
 
             // Track closure info separately
-            let positionClosureInfo: { shouldClose: boolean; closedAt: Date } | null = null;
+            let positionClosureInfo: {
+                shouldClose: boolean;
+                closedAt: Date;
+            } | null = null;
 
             if (lastLedgerEventBeforeSave) {
                 // Use typedConfig to get actual bigint values (not JSON-serialized strings)
-                const ledgerLiquidityBeforeSave = lastLedgerEventBeforeSave.typedConfig.liquidityAfter;
+                const ledgerLiquidityBeforeSave =
+                    lastLedgerEventBeforeSave.typedConfig.liquidityAfter;
 
                 // Update updatedState with ledger's liquidity (so it gets saved correctly)
                 if (ledgerLiquidityBeforeSave !== updatedState.liquidity) {
@@ -1924,7 +1956,7 @@ export class UniswapV3PositionService {
                             oldLiquidity: updatedState.liquidity.toString(),
                             newLiquidity: ledgerLiquidityBeforeSave.toString(),
                         },
-                        "Updating updatedState.liquidity to match ledger before save"
+                        "Updating updatedState.liquidity to match ledger before save",
                     );
 
                     updatedState.liquidity = ledgerLiquidityBeforeSave;
@@ -1932,10 +1964,15 @@ export class UniswapV3PositionService {
 
                 // Check for position closure
                 const isLiquidityZero = ledgerLiquidityBeforeSave === 0n;
-                const isLastEventCollect = lastLedgerEventBeforeSave.eventType === 'COLLECT';
+                const isLastEventCollect =
+                    lastLedgerEventBeforeSave.eventType === "COLLECT";
                 const isCurrentlyActive = existingPosition.isActive;
 
-                if (isLiquidityZero && isLastEventCollect && isCurrentlyActive) {
+                if (
+                    isLiquidityZero &&
+                    isLastEventCollect &&
+                    isCurrentlyActive
+                ) {
                     const closedAt = lastLedgerEventBeforeSave.timestamp;
 
                     this.logger.info(
@@ -1944,7 +1981,7 @@ export class UniswapV3PositionService {
                             closedAt: closedAt.toISOString(),
                             lastEventType: lastLedgerEventBeforeSave.eventType,
                         },
-                        "Position fully closed - will mark as closed after state update"
+                        "Position fully closed - will mark as closed after state update",
                     );
 
                     // Store closure info to apply after state update
@@ -1977,7 +2014,7 @@ export class UniswapV3PositionService {
 
             // 6. Map database result to Position type
             const refreshedPosition = this.mapToPosition(
-                result as any
+                result as any,
             ) as UniswapV3Position;
 
             this.logger.info(
@@ -1987,7 +2024,7 @@ export class UniswapV3PositionService {
                     nftId,
                     liquidity: updatedState.liquidity.toString(),
                 },
-                "Position state refreshed successfully"
+                "Position state refreshed successfully",
             );
 
             // 6a. Apply position closure if detected
@@ -1997,7 +2034,7 @@ export class UniswapV3PositionService {
                         id,
                         closedAt: positionClosureInfo.closedAt.toISOString(),
                     },
-                    "Marking position as closed"
+                    "Marking position as closed",
                 );
 
                 await this.prisma.position.update({
@@ -2013,24 +2050,26 @@ export class UniswapV3PositionService {
             // 7. Recalculate and update common fields
             this.logger.debug(
                 { positionId: id },
-                "Recalculating position common fields"
+                "Recalculating position common fields",
             );
 
             // Refresh pool state to ensure accurate current price for calculations
             this.logger.debug(
                 { poolId: refreshedPosition.pool.id },
-                "Refreshing pool state to get current sqrtPriceX96 and tick"
+                "Refreshing pool state to get current sqrtPriceX96 and tick",
             );
 
-            const pool = await this.poolService.refresh(refreshedPosition.pool.id);
+            const pool = await this.poolService.refresh(
+                refreshedPosition.pool.id,
+            );
 
             this.logger.debug(
                 {
                     poolId: pool.id,
                     sqrtPriceX96: pool.sqrtPriceX96.toString(),
-                    currentTick: pool.state.currentTick
+                    currentTick: pool.state.currentTick,
                 },
-                "Pool state refreshed with current on-chain price"
+                "Pool state refreshed with current on-chain price",
             );
 
             // Get ledger summary (cost basis, realized PnL, fees)
@@ -2039,7 +2078,7 @@ export class UniswapV3PositionService {
             // Calculate current position value with refreshed state
             const currentValue = this.calculateCurrentPositionValue(
                 refreshedPosition,
-                pool
+                pool,
             );
 
             // Calculate unrealized PnL
@@ -2048,7 +2087,7 @@ export class UniswapV3PositionService {
             // Calculate unclaimed fees with refreshed state
             const fees = await this.calculateUnclaimedFees(
                 refreshedPosition,
-                pool
+                pool,
             );
 
             // Update position state with individual fee amounts (state is read-only)
@@ -2087,7 +2126,7 @@ export class UniswapV3PositionService {
                     priceRangeLower,
                     priceRangeUpper,
                 },
-                refreshedPosition.positionOpenedAt
+                refreshedPosition.positionOpenedAt,
             );
 
             this.logger.info(
@@ -2097,7 +2136,7 @@ export class UniswapV3PositionService {
                     unrealizedPnl: unrealizedPnl.toString(),
                     unClaimedFees: fees.unclaimedFeesValue.toString(),
                 },
-                "Position common fields recalculated and updated"
+                "Position common fields recalculated and updated",
             );
 
             log.methodExit(this.logger, "refresh", { id });
@@ -2163,7 +2202,7 @@ export class UniswapV3PositionService {
                     chainId: existingPosition.config.chainId,
                     nftId: existingPosition.config.nftId,
                 },
-                "Starting position reset - rediscovering ledger events from blockchain"
+                "Starting position reset - rediscovering ledger events from blockchain",
             );
 
             // 2. Rediscover all ledger events from blockchain
@@ -2174,7 +2213,7 @@ export class UniswapV3PositionService {
             // - Triggers APR period calculation
             this.logger.info(
                 { positionId: id },
-                "Deleting old events and rediscovering from blockchain"
+                "Deleting old events and rediscovering from blockchain",
             );
 
             const syncResult = await syncLedgerEvents(
@@ -2182,7 +2221,7 @@ export class UniswapV3PositionService {
                     positionId: id,
                     chainId: existingPosition.chainId,
                     nftId: BigInt(existingPosition.nftId),
-                    forceFullResync: true,  // Full reset - resync from NFPM deployment
+                    forceFullResync: true, // Full reset - resync from NFPM deployment
                 },
                 {
                     prisma: this.prisma,
@@ -2192,7 +2231,7 @@ export class UniswapV3PositionService {
                     logger: this.logger,
                     ledgerService: this.ledgerService,
                     poolPriceService: this.poolPriceService,
-                }
+                },
             );
 
             this.logger.info(
@@ -2202,7 +2241,7 @@ export class UniswapV3PositionService {
                     fromBlock: syncResult.fromBlock.toString(),
                     finalizedBlock: syncResult.finalizedBlock.toString(),
                 },
-                "Ledger events rediscovered and APR periods recalculated"
+                "Ledger events rediscovered and APR periods recalculated",
             );
 
             // 3. Refresh position state from on-chain data
@@ -2213,7 +2252,7 @@ export class UniswapV3PositionService {
             // - Unclaimed fees
             this.logger.info(
                 { positionId: id },
-                "Refreshing position state from on-chain data"
+                "Refreshing position state from on-chain data",
             );
 
             const refreshedPosition = await this.refresh(id);
@@ -2226,7 +2265,7 @@ export class UniswapV3PositionService {
                     realizedPnl: refreshedPosition.realizedPnl.toString(),
                     unrealizedPnl: refreshedPosition.unrealizedPnl.toString(),
                 },
-                "Position reset complete - ledger rebuilt and state refreshed"
+                "Position reset complete - ledger rebuilt and state refreshed",
             );
 
             log.methodExit(this.logger, "reset", { id });
@@ -2299,7 +2338,7 @@ export class UniswapV3PositionService {
                 amount0: bigint;
                 amount1: bigint;
             };
-        }
+        },
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "createPositionFromUserData", {
             userId,
@@ -2319,7 +2358,7 @@ export class UniswapV3PositionService {
 
             const existing = await this.findByPositionHash(
                 userId,
-                positionHash
+                positionHash,
             );
 
             if (existing) {
@@ -2331,7 +2370,7 @@ export class UniswapV3PositionService {
                         nftId,
                         positionHash,
                     },
-                    "Position already exists, returning existing position"
+                    "Position already exists, returning existing position",
                 );
                 log.methodExit(this.logger, "createPositionFromUserData", {
                     id: existing.id,
@@ -2345,7 +2384,7 @@ export class UniswapV3PositionService {
                 const error = new Error(
                     `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
                         .getSupportedChainIds()
-                        .join(", ")}`
+                        .join(", ")}`,
                 );
                 log.methodError(
                     this.logger,
@@ -2353,7 +2392,7 @@ export class UniswapV3PositionService {
                     error,
                     {
                         chainId,
-                    }
+                    },
                 );
                 throw error;
             }
@@ -2361,7 +2400,7 @@ export class UniswapV3PositionService {
             // 3. Validate and normalize addresses
             if (!isValidAddress(input.poolAddress)) {
                 const error = new Error(
-                    `Invalid pool address format: ${input.poolAddress}`
+                    `Invalid pool address format: ${input.poolAddress}`,
                 );
                 log.methodError(
                     this.logger,
@@ -2369,14 +2408,14 @@ export class UniswapV3PositionService {
                     error,
                     {
                         poolAddress: input.poolAddress,
-                    }
+                    },
                 );
                 throw error;
             }
 
             if (!isValidAddress(input.ownerAddress)) {
                 const error = new Error(
-                    `Invalid owner address format: ${input.ownerAddress}`
+                    `Invalid owner address format: ${input.ownerAddress}`,
                 );
                 log.methodError(
                     this.logger,
@@ -2384,7 +2423,7 @@ export class UniswapV3PositionService {
                     error,
                     {
                         ownerAddress: input.ownerAddress,
-                    }
+                    },
                 );
                 throw error;
             }
@@ -2396,7 +2435,7 @@ export class UniswapV3PositionService {
             if (input.quoteTokenAddress) {
                 if (!isValidAddress(input.quoteTokenAddress)) {
                     const error = new Error(
-                        `Invalid quote token address format: ${input.quoteTokenAddress}`
+                        `Invalid quote token address format: ${input.quoteTokenAddress}`,
                     );
                     log.methodError(
                         this.logger,
@@ -2404,12 +2443,12 @@ export class UniswapV3PositionService {
                         error,
                         {
                             quoteTokenAddress: input.quoteTokenAddress,
-                        }
+                        },
                     );
                     throw error;
                 }
                 normalizedQuoteAddress = normalizeAddress(
-                    input.quoteTokenAddress
+                    input.quoteTokenAddress,
                 );
             }
 
@@ -2419,7 +2458,7 @@ export class UniswapV3PositionService {
                     ownerAddress,
                     quoteTokenAddress: normalizedQuoteAddress ?? "auto-detect",
                 },
-                "Addresses validated and normalized"
+                "Addresses validated and normalized",
             );
 
             // 4. Discover pool
@@ -2434,7 +2473,7 @@ export class UniswapV3PositionService {
                     token0: pool.token0.symbol,
                     token1: pool.token1.symbol,
                 },
-                "Pool discovered/fetched"
+                "Pool discovered/fetched",
             );
 
             // 5. Determine quote token
@@ -2445,18 +2484,18 @@ export class UniswapV3PositionService {
                 const token0Matches =
                     compareAddresses(
                         pool.token0.address,
-                        normalizedQuoteAddress
+                        normalizedQuoteAddress,
                     ) === 0;
                 const token1Matches =
                     compareAddresses(
                         pool.token1.address,
-                        normalizedQuoteAddress
+                        normalizedQuoteAddress,
                     ) === 0;
 
                 if (!token0Matches && !token1Matches) {
                     const error = new Error(
                         `Quote token address ${normalizedQuoteAddress} does not match either pool token. ` +
-                            `Pool token0: ${pool.token0.address}, token1: ${pool.token1.address}`
+                            `Pool token0: ${pool.token0.address}, token1: ${pool.token1.address}`,
                     );
                     log.methodError(
                         this.logger,
@@ -2466,7 +2505,7 @@ export class UniswapV3PositionService {
                             quoteTokenAddress: normalizedQuoteAddress,
                             poolToken0: pool.token0.address,
                             poolToken1: pool.token1.address,
-                        }
+                        },
                     );
                     throw error;
                 }
@@ -2480,12 +2519,12 @@ export class UniswapV3PositionService {
                             ? pool.token0.symbol
                             : pool.token1.symbol,
                     },
-                    "Quote token determined from caller input"
+                    "Quote token determined from caller input",
                 );
             } else {
                 // AUTO-DETECT MODE: Use QuoteTokenService
                 this.logger.debug(
-                    "Auto-detecting quote token using QuoteTokenService"
+                    "Auto-detecting quote token using QuoteTokenService",
                 );
 
                 const quoteResult =
@@ -2506,7 +2545,7 @@ export class UniswapV3PositionService {
                             : pool.token1.symbol,
                         matchedBy: quoteResult.matchedBy,
                     },
-                    "Quote token auto-detected"
+                    "Quote token auto-detected",
                 );
             }
 
@@ -2519,7 +2558,7 @@ export class UniswapV3PositionService {
                     baseToken: baseToken.symbol,
                     quoteToken: quoteToken.symbol,
                 },
-                "Token roles determined"
+                "Token roles determined",
             );
 
             // 6. Create position config
@@ -2540,7 +2579,7 @@ export class UniswapV3PositionService {
                     tickLower: input.tickLower,
                     tickUpper: input.tickUpper,
                 },
-                "Fetching fee growth inside at position creation block"
+                "Fetching fee growth inside at position creation block",
             );
 
             const client = this.evmConfig.getPublicClient(chainId);
@@ -2580,7 +2619,7 @@ export class UniswapV3PositionService {
                         bigint,
                         bigint,
                         number,
-                        boolean
+                        boolean,
                     ]
                 >,
                 client.readContract({
@@ -2598,7 +2637,7 @@ export class UniswapV3PositionService {
                         bigint,
                         bigint,
                         number,
-                        boolean
+                        boolean,
                     ]
                 >,
                 client.readContract({
@@ -2614,7 +2653,7 @@ export class UniswapV3PositionService {
                         number,
                         number,
                         number,
-                        boolean
+                        boolean,
                     ]
                 >,
             ]);
@@ -2635,7 +2674,7 @@ export class UniswapV3PositionService {
                 feeGrowthOutsideLower0X128,
                 feeGrowthOutsideLower1X128,
                 feeGrowthOutsideUpper0X128,
-                feeGrowthOutsideUpper1X128
+                feeGrowthOutsideUpper1X128,
             );
 
             this.logger.debug(
@@ -2644,7 +2683,7 @@ export class UniswapV3PositionService {
                     feeGrowthInside1: feeGrowthInside.inside1.toString(),
                     currentTick,
                 },
-                "Fee growth inside calculated at position creation block"
+                "Fee growth inside calculated at position creation block",
             );
 
             // 8. Create position state from user input with correct fee checkpoints
@@ -2668,21 +2707,31 @@ export class UniswapV3PositionService {
                     feeGrowthInside1LastX128:
                         state.feeGrowthInside1LastX128.toString(),
                 },
-                "Position state initialized with fee growth checkpoints"
+                "Position state initialized with fee growth checkpoints",
             );
 
             // 9. Create position via create() method
-            const configDB = this.serializeConfig(config) as Record<string, unknown>;
-            const stateDB = this.serializeState(state) as Record<string, unknown>;
-            const createdPosition = await this.create({
-                protocol: "uniswapv3",
-                positionType: "CL_TICKS",
-                userId,
-                poolId: pool.id,
-                isToken0Quote,
-                config,
-                state,
-            }, configDB, stateDB);
+            const configDB = this.serializeConfig(config) as Record<
+                string,
+                unknown
+            >;
+            const stateDB = this.serializeState(state) as Record<
+                string,
+                unknown
+            >;
+            const createdPosition = await this.create(
+                {
+                    protocol: "uniswapv3",
+                    positionType: "CL_TICKS",
+                    userId,
+                    poolId: pool.id,
+                    isToken0Quote,
+                    config,
+                    state,
+                },
+                configDB,
+                stateDB,
+            );
 
             this.logger.info(
                 {
@@ -2694,7 +2743,7 @@ export class UniswapV3PositionService {
                     baseToken: baseToken.symbol,
                     quoteToken: quoteToken.symbol,
                 },
-                "Position created in database"
+                "Position created in database",
             );
 
             // 10. Fetch historic pool price at event blockNumber
@@ -2703,7 +2752,7 @@ export class UniswapV3PositionService {
                     positionId: createdPosition.id,
                     blockNumber: input.increaseEvent.blockNumber.toString(),
                 },
-                "Fetching historic pool price at event blockNumber"
+                "Fetching historic pool price at event blockNumber",
             );
 
             const poolPriceService = new (
@@ -2721,7 +2770,7 @@ export class UniswapV3PositionService {
                     positionId: createdPosition.id,
                     sqrtPriceX96: poolPrice.sqrtPriceX96.toString(),
                 },
-                "Historic pool price fetched"
+                "Historic pool price fetched",
             );
 
             // 11. Calculate pool price (quote per base) from historic sqrtPriceX96
@@ -2732,7 +2781,7 @@ export class UniswapV3PositionService {
                 sqrtPriceX96,
                 isToken0Quote,
                 pool.token0.decimals,
-                pool.token1.decimals
+                pool.token1.decimals,
             );
 
             this.logger.debug(
@@ -2742,7 +2791,7 @@ export class UniswapV3PositionService {
                     quoteToken: quoteToken.symbol,
                     baseToken: baseToken.symbol,
                 },
-                "Pool price calculated from historic sqrtPriceX96"
+                "Pool price calculated from historic sqrtPriceX96",
             );
 
             // 12. Calculate token value in quote units
@@ -2756,7 +2805,7 @@ export class UniswapV3PositionService {
                 sqrtPriceX96,
                 isToken0Quote,
                 pool.token0.decimals,
-                pool.token1.decimals
+                pool.token1.decimals,
             );
 
             this.logger.debug(
@@ -2764,23 +2813,22 @@ export class UniswapV3PositionService {
                     positionId: createdPosition.id,
                     tokenValue: tokenValue.toString(),
                 },
-                "Token value calculated in quote units"
+                "Token value calculated in quote units",
             );
 
             // 13. Create initial sync state with user-provided event as missing event
             // This handles indexer lag - the event will be processed by refresh()
             this.logger.debug(
                 { positionId: createdPosition.id },
-                "Creating initial sync state with user-provided INCREASE event"
+                "Creating initial sync state with user-provided INCREASE event",
             );
 
-            const { UniswapV3PositionSyncState } = await import(
-                "../position-ledger/position-sync-state.js"
-            );
+            const { UniswapV3PositionSyncState } =
+                await import("../position-ledger/position-sync-state.js");
 
             const syncState = await UniswapV3PositionSyncState.load(
                 this.prisma,
-                createdPosition.id
+                createdPosition.id,
             );
 
             syncState.addMissingEvent({
@@ -2803,7 +2851,7 @@ export class UniswapV3PositionService {
                     eventType: "INCREASE_LIQUIDITY",
                     transactionHash: input.increaseEvent.transactionHash,
                 },
-                "Initial INCREASE_LIQUIDITY event stored as missing event"
+                "Initial INCREASE_LIQUIDITY event stored as missing event",
             );
 
             // 14. Call refresh() to process missing event and sync from blockchain
@@ -2814,7 +2862,7 @@ export class UniswapV3PositionService {
             // - Update all position fields
             this.logger.debug(
                 { positionId: createdPosition.id },
-                "Calling refresh() to process missing event and sync blockchain events"
+                "Calling refresh() to process missing event and sync blockchain events",
             );
 
             const refreshedPosition = await this.refresh(createdPosition.id);
@@ -2826,7 +2874,7 @@ export class UniswapV3PositionService {
                     costBasis: refreshedPosition.currentCostBasis.toString(),
                     unrealizedPnl: refreshedPosition.unrealizedPnl.toString(),
                 },
-                "Position created and refreshed successfully"
+                "Position created and refreshed successfully",
             );
 
             log.methodExit(this.logger, "createPositionFromUserData", {
@@ -2854,7 +2902,7 @@ export class UniswapV3PositionService {
                         userId,
                         chainId,
                         nftId,
-                    }
+                    },
                 );
             }
             throw error;
@@ -2923,7 +2971,7 @@ export class UniswapV3PositionService {
             amount0: bigint;
             amount1: bigint;
             recipient?: string;
-        }>
+        }>,
     ): Promise<UniswapV3Position | null> {
         log.methodEntry(this.logger, "updatePositionWithEvents", {
             userId,
@@ -2960,7 +3008,7 @@ export class UniswapV3PositionService {
             if (!existingPosition) {
                 this.logger.info(
                     { userId, chainId, nftId },
-                    "Position not found for user"
+                    "Position not found for user",
                 );
                 log.methodExit(this.logger, "updatePositionWithEvents", {
                     result: "not_found",
@@ -2970,29 +3018,29 @@ export class UniswapV3PositionService {
 
             this.logger.debug(
                 { positionId: existingPosition.id, userId, chainId, nftId },
-                "Position found for user"
+                "Position found for user",
             );
 
             // 2. Add events to ledger
             this.logger.info(
                 { positionId: existingPosition.id, eventCount: events.length },
-                "Adding events to position ledger"
+                "Adding events to position ledger",
             );
 
             await this.ledgerService.addEventsFromUserData(
                 existingPosition.id,
-                events
+                events,
             );
 
             this.logger.info(
                 { positionId: existingPosition.id, eventCount: events.length },
-                "Events added successfully"
+                "Events added successfully",
             );
 
             // 3. Refresh position state
             this.logger.info(
                 { positionId: existingPosition.id },
-                "Refreshing position state"
+                "Refreshing position state",
             );
 
             const updatedPosition = await this.refresh(existingPosition.id);
@@ -3004,7 +3052,7 @@ export class UniswapV3PositionService {
                     realizedPnl: updatedPosition.realizedPnl.toString(),
                     unrealizedPnl: updatedPosition.unrealizedPnl.toString(),
                 },
-                "Position refreshed with new state"
+                "Position refreshed with new state",
             );
 
             log.methodExit(this.logger, "updatePositionWithEvents", {
@@ -3023,7 +3071,7 @@ export class UniswapV3PositionService {
                     chainId,
                     nftId,
                     eventCount: events.length,
-                }
+                },
             );
             throw error;
         }
@@ -3049,7 +3097,7 @@ export class UniswapV3PositionService {
     async create(
         input: CreateUniswapV3PositionInput,
         configDB: Record<string, unknown>,
-        stateDB: Record<string, unknown>
+        stateDB: Record<string, unknown>,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "create", {
             userId: input.userId,
@@ -3059,10 +3107,12 @@ export class UniswapV3PositionService {
 
         try {
             // Check for existing position by positionHash (fast indexed lookup)
-            const positionHash = this.createPositionHash(input.config as unknown as Record<string, unknown>);
+            const positionHash = this.createPositionHash(
+                input.config as unknown as Record<string, unknown>,
+            );
             const existing = await this.findByPositionHash(
                 input.userId,
-                positionHash
+                positionHash,
             );
 
             if (existing) {
@@ -3074,7 +3124,7 @@ export class UniswapV3PositionService {
                         nftId: input.config.nftId,
                         positionHash,
                     },
-                    "Position already exists, returning existing position"
+                    "Position already exists, returning existing position",
                 );
                 log.methodExit(this.logger, "create", {
                     id: existing.id,
@@ -3086,9 +3136,9 @@ export class UniswapV3PositionService {
             // No duplicate found, create new position
             // Default calculated values (will be computed properly in discover())
             const now = new Date();
-            const zeroValue = '0';
+            const zeroValue = "0";
 
-            log.dbOperation(this.logger, 'create', 'Position', {
+            log.dbOperation(this.logger, "create", "Position", {
                 protocol: input.protocol,
                 positionType: input.positionType,
                 userId: input.userId,
@@ -3136,22 +3186,24 @@ export class UniswapV3PositionService {
                 });
 
                 // 2. Map to position entity and publish position.created event
-                const createdPosition = this.mapToPosition(positionRow as PositionDbResult);
+                const createdPosition = this.mapToPosition(
+                    positionRow as PositionDbResult,
+                );
 
                 const event = createDomainEvent({
-                    type: 'position.created',
-                    entityType: 'position',
+                    type: "position.created",
+                    entityType: "position",
                     entityId: createdPosition.id,
                     userId: input.userId,
                     payload: createdPosition.toJSON(),
-                    source: 'api',
+                    source: "api",
                 });
 
                 await this.eventPublisher.publish(event, tx);
 
                 this.logger.debug(
                     { eventId: event.id, positionId: createdPosition.id },
-                    'Position created event published to outbox'
+                    "Position created event published to outbox",
                 );
 
                 return positionRow;
@@ -3167,7 +3219,7 @@ export class UniswapV3PositionService {
                     positionType: position.positionType,
                     userId: position.userId,
                 },
-                'Position created'
+                "Position created",
             );
 
             log.methodExit(this.logger, "create", {
@@ -3221,7 +3273,7 @@ export class UniswapV3PositionService {
             if (result.protocol !== "uniswapv3") {
                 this.logger.debug(
                     { id, protocol: result.protocol },
-                    "Position found but is not uniswapv3 protocol"
+                    "Position found but is not uniswapv3 protocol",
                 );
                 log.methodExit(this.logger, "findById", {
                     id,
@@ -3267,7 +3319,7 @@ export class UniswapV3PositionService {
             if (!existing) {
                 this.logger.debug(
                     { id },
-                    "Position not found, delete operation is no-op"
+                    "Position not found, delete operation is no-op",
                 );
                 log.methodExit(this.logger, "delete", { id, deleted: false });
                 return;
@@ -3276,7 +3328,7 @@ export class UniswapV3PositionService {
             // Verify protocol type
             if (existing.protocol !== "uniswapv3") {
                 const error = new Error(
-                    `Cannot delete position ${id}: expected protocol 'uniswapv3', got '${existing.protocol}'`
+                    `Cannot delete position ${id}: expected protocol 'uniswapv3', got '${existing.protocol}'`,
                 );
                 log.methodError(this.logger, "delete", error, {
                     id,
@@ -3286,7 +3338,7 @@ export class UniswapV3PositionService {
             }
 
             // Delete the position
-            log.dbOperation(this.logger, 'delete', 'Position', { id });
+            log.dbOperation(this.logger, "delete", "Position", { id });
             await this.prisma.position.delete({
                 where: { id },
             });
@@ -3339,7 +3391,8 @@ export class UniswapV3PositionService {
             }
 
             // Get most recent event using ledger service helper
-            const latestEvent = await this.ledgerService.getMostRecentEvent(positionId);
+            const latestEvent =
+                await this.ledgerService.getMostRecentEvent(positionId);
             if (!latestEvent) {
                 throw new Error(`Expected to find events but got null`);
             }
@@ -3374,7 +3427,7 @@ export class UniswapV3PositionService {
         } catch (error) {
             this.logger.warn(
                 { error, positionId },
-                "Failed to get ledger summary, using defaults"
+                "Failed to get ledger summary, using defaults",
             );
             return {
                 costBasis: 0n,
@@ -3400,14 +3453,14 @@ export class UniswapV3PositionService {
      */
     private async calculateUnclaimedFees(
         position: UniswapV3Position,
-        pool: UniswapV3Pool
+        pool: UniswapV3Pool,
     ): Promise<UnclaimedFeesResult> {
         return calculateUnclaimedFees(
             position,
             pool,
             this.evmConfig,
             this.ledgerService,
-            this.logger
+            this.logger,
         );
     }
 
@@ -3422,7 +3475,7 @@ export class UniswapV3PositionService {
      */
     private calculateCurrentPositionValue(
         position: UniswapV3Position,
-        pool: UniswapV3Pool
+        pool: UniswapV3Pool,
     ): bigint {
         const tickLower = position.tickLower;
         const tickUpper = position.tickUpper;
@@ -3443,7 +3496,7 @@ export class UniswapV3PositionService {
             sqrtPriceX96,
             tickLower,
             tickUpper,
-            baseIsToken0
+            baseIsToken0,
         );
 
         return positionValue;
@@ -3460,7 +3513,7 @@ export class UniswapV3PositionService {
      */
     private calculatePriceRange(
         position: UniswapV3Position,
-        pool: UniswapV3Pool
+        pool: UniswapV3Pool,
     ): { priceRangeLower: bigint; priceRangeUpper: bigint } {
         const tickLower = position.tickLower;
         const tickUpper = position.tickUpper;
@@ -3477,14 +3530,14 @@ export class UniswapV3PositionService {
             tickLower,
             baseTokenAddress,
             quoteTokenAddress,
-            baseTokenDecimals
+            baseTokenDecimals,
         );
 
         const priceRangeUpper = tickToPrice(
             tickUpper,
             baseTokenAddress,
             quoteTokenAddress,
-            baseTokenDecimals
+            baseTokenDecimals,
         );
 
         return { priceRangeLower, priceRangeUpper };
@@ -3512,7 +3565,7 @@ export class UniswapV3PositionService {
             priceRangeLower: bigint;
             priceRangeUpper: bigint;
         },
-        positionOpenedAt: Date
+        positionOpenedAt: Date,
     ): Promise<void> {
         log.dbOperation(this.logger, "update", "Position", {
             id: positionId,
@@ -3535,7 +3588,7 @@ export class UniswapV3PositionService {
             positionId,
             fields.currentCostBasis,
             fields.unClaimedFees,
-            positionOpenedAt
+            positionOpenedAt,
         );
 
         // Determine totalApr value (null if below threshold)
@@ -3566,9 +3619,9 @@ export class UniswapV3PositionService {
                 currentValue: fields.currentValue.toString(),
                 currentCostBasis: fields.currentCostBasis.toString(),
                 unrealizedPnl: fields.unrealizedPnl.toString(),
-                totalApr: totalApr?.toFixed(2) ?? 'null (below threshold)',
+                totalApr: totalApr?.toFixed(2) ?? "null (below threshold)",
             },
-            "Position common fields updated with APR"
+            "Position common fields updated with APR",
         );
     }
 
@@ -3587,7 +3640,7 @@ export class UniswapV3PositionService {
      * @returns Current liquidity (0n if no events exist or position is closed)
      */
     public async getCurrentLiquidityFromLedger(
-        positionId: string
+        positionId: string,
     ): Promise<bigint> {
         const lastEvent = await this.prisma.positionLedgerEvent.findFirst({
             where: { positionId },
@@ -3599,7 +3652,7 @@ export class UniswapV3PositionService {
             // No events yet, position has no liquidity
             this.logger.debug(
                 { positionId },
-                "No ledger events found, returning liquidity = 0"
+                "No ledger events found, returning liquidity = 0",
             );
             return 0n;
         }
@@ -3612,7 +3665,7 @@ export class UniswapV3PositionService {
 
         this.logger.debug(
             { positionId, liquidityAfter: liquidityAfter.toString() },
-            "Retrieved liquidity from last ledger event"
+            "Retrieved liquidity from last ledger event",
         );
 
         return liquidityAfter;
@@ -3633,7 +3686,7 @@ export class UniswapV3PositionService {
      * @returns Timestamp of the closing COLLECT event, or null if position is not fully closed
      */
     public async getPositionCloseTimestamp(
-        positionId: string
+        positionId: string,
     ): Promise<Date | null> {
         const lastEvent = await this.prisma.positionLedgerEvent.findFirst({
             where: { positionId },
@@ -3644,7 +3697,7 @@ export class UniswapV3PositionService {
         if (!lastEvent) {
             this.logger.debug(
                 { positionId },
-                "No ledger events found, position not closed"
+                "No ledger events found, position not closed",
             );
             return null;
         }
@@ -3653,7 +3706,7 @@ export class UniswapV3PositionService {
         if (lastEvent.eventType !== "COLLECT") {
             this.logger.debug(
                 { positionId, lastEventType: lastEvent.eventType },
-                "Last event is not COLLECT, position not closed"
+                "Last event is not COLLECT, position not closed",
             );
             return null;
         }
@@ -3678,7 +3731,7 @@ export class UniswapV3PositionService {
         ) {
             this.logger.debug(
                 { positionId, closedAt: lastEvent.timestamp },
-                "Position is fully closed (final COLLECT with all principal withdrawn)"
+                "Position is fully closed (final COLLECT with all principal withdrawn)",
             );
             return lastEvent.timestamp;
         }
@@ -3691,7 +3744,7 @@ export class UniswapV3PositionService {
                 uncollectedPrincipal1After:
                     uncollectedPrincipal1After.toString(),
             },
-            "Position has uncollected principal, not fully closed"
+            "Position has uncollected principal, not fully closed",
         );
         return null;
     }
@@ -3710,11 +3763,20 @@ export class UniswapV3PositionService {
      * @param positionHash - Position hash (generated by createPositionHash)
      * @returns Position if found, null otherwise
      */
-    async findByPositionHash(userId: string, positionHash: string): Promise<UniswapV3Position | null> {
-        log.methodEntry(this.logger, 'findByPositionHash', { userId, positionHash });
+    async findByPositionHash(
+        userId: string,
+        positionHash: string,
+    ): Promise<UniswapV3Position | null> {
+        log.methodEntry(this.logger, "findByPositionHash", {
+            userId,
+            positionHash,
+        });
 
         try {
-            log.dbOperation(this.logger, 'findFirst', 'Position', { userId, positionHash });
+            log.dbOperation(this.logger, "findFirst", "Position", {
+                userId,
+                positionHash,
+            });
 
             const result = await this.prisma.position.findFirst({
                 where: {
@@ -3732,17 +3794,28 @@ export class UniswapV3PositionService {
             });
 
             if (!result) {
-                log.methodExit(this.logger, 'findByPositionHash', { userId, positionHash, found: false });
+                log.methodExit(this.logger, "findByPositionHash", {
+                    userId,
+                    positionHash,
+                    found: false,
+                });
                 return null;
             }
 
             // Map to Position type
             const position = this.mapToPosition(result as PositionDbResult);
 
-            log.methodExit(this.logger, 'findByPositionHash', { userId, positionHash, found: true });
+            log.methodExit(this.logger, "findByPositionHash", {
+                userId,
+                positionHash,
+                found: true,
+            });
             return position as UniswapV3Position;
         } catch (error) {
-            log.methodError(this.logger, 'findByPositionHash', error as Error, { userId, positionHash });
+            log.methodError(this.logger, "findByPositionHash", error as Error, {
+                userId,
+                positionHash,
+            });
             throw error;
         }
     }
@@ -3760,15 +3833,18 @@ export class UniswapV3PositionService {
      * @returns Updated position
      * @throws Error if position not found
      */
-    async update(id: string, input: UpdateAnyPositionInput): Promise<UniswapV3Position> {
-        log.methodEntry(this.logger, 'update', { id, input });
+    async update(
+        id: string,
+        input: UpdateAnyPositionInput,
+    ): Promise<UniswapV3Position> {
+        log.methodEntry(this.logger, "update", { id, input });
 
         try {
             // Currently, UpdateAnyPositionInput has no mutable fields
             // All updates should use refresh() method for state updates
             const data: Record<string, unknown> = {};
 
-            log.dbOperation(this.logger, 'update', 'Position', {
+            log.dbOperation(this.logger, "update", "Position", {
                 id,
                 fields: Object.keys(data),
             });
@@ -3789,10 +3865,10 @@ export class UniswapV3PositionService {
             // Map to Position type
             const position = this.mapToPosition(result as PositionDbResult);
 
-            log.methodExit(this.logger, 'update', { id });
+            log.methodExit(this.logger, "update", { id });
             return position as UniswapV3Position;
         } catch (error) {
-            log.methodError(this.logger, 'update', error as Error, { id });
+            log.methodError(this.logger, "update", error as Error, { id });
             throw error;
         }
     }
@@ -3817,12 +3893,16 @@ export class UniswapV3PositionService {
 
         // Create pool instance from included pool data
         const poolRow = dbResult.pool as UniswapV3PoolRow;
-        const pool = PoolFactory.fromDB(poolRow, token0, token1) as UniswapV3Pool;
+        const pool = PoolFactory.fromDB(
+            poolRow,
+            token0,
+            token1,
+        ) as UniswapV3Pool;
 
         // Convert string bigint fields to native bigint
         const rowWithBigInt: PositionRow = {
             id: dbResult.id,
-            positionHash: dbResult.positionHash ?? '',
+            positionHash: dbResult.positionHash ?? "",
             userId: dbResult.userId,
             protocol: dbResult.protocol,
             positionType: dbResult.positionType,

@@ -32,6 +32,10 @@ import {
   uniswapV3PoolAbi,
 } from '../../utils/uniswapv3/index.js';
 import { EvmConfig } from '../../config/evm.js';
+import {
+  getFactoryAddress,
+  UNISWAP_V3_FACTORY_ABI,
+} from '../../config/uniswapv3.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -422,6 +426,118 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         log.methodError(this.logger, 'discover', error as Error, {
           poolAddress,
           chainId,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Discover a pool by token addresses and fee tier
+   *
+   * Queries the Uniswap V3 Factory contract to find the pool address for the
+   * given token pair and fee tier, then calls discover() to fetch or create
+   * the pool record.
+   *
+   * @param chainId - Chain ID
+   * @param tokenA - Address of first token (order doesn't matter)
+   * @param tokenB - Address of second token (order doesn't matter)
+   * @param feeBps - Fee tier in basis points (e.g., 500, 3000, 10000)
+   * @returns The discovered or existing pool
+   * @throws Error if pool doesn't exist in factory
+   * @throws Error if token addresses are invalid
+   */
+  async discoverByTokensAndFee(
+    chainId: number,
+    tokenA: string,
+    tokenB: string,
+    feeBps: number
+  ): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'discoverByTokensAndFee', {
+      chainId,
+      tokenA,
+      tokenB,
+      feeBps,
+    });
+
+    try {
+      // Validate token addresses
+      if (!isValidAddress(tokenA)) {
+        throw new Error(`Invalid tokenA address format: ${tokenA}`);
+      }
+      if (!isValidAddress(tokenB)) {
+        throw new Error(`Invalid tokenB address format: ${tokenB}`);
+      }
+
+      // Normalize addresses
+      const normalizedTokenA = normalizeAddress(tokenA);
+      const normalizedTokenB = normalizeAddress(tokenB);
+
+      // Query factory for pool address
+      const factoryAddress = getFactoryAddress(chainId);
+      const client = this.evmConfig.getPublicClient(chainId);
+
+      this.logger.debug(
+        { factoryAddress, tokenA: normalizedTokenA, tokenB: normalizedTokenB, feeBps, chainId },
+        'Querying factory for pool address'
+      );
+
+      const poolAddress = (await client.readContract({
+        address: factoryAddress,
+        abi: UNISWAP_V3_FACTORY_ABI,
+        functionName: 'getPool',
+        args: [normalizedTokenA as `0x${string}`, normalizedTokenB as `0x${string}`, feeBps],
+      })) as string;
+
+      // Check if pool exists (factory returns zero address if pool doesn't exist)
+      const zeroAddress = '0x0000000000000000000000000000000000000000';
+      if (
+        poolAddress.toLowerCase() === zeroAddress.toLowerCase() ||
+        poolAddress === zeroAddress
+      ) {
+        const error = new Error(
+          `Pool does not exist for tokenA=${normalizedTokenA}, tokenB=${normalizedTokenB}, fee=${feeBps} on chain ${chainId}`
+        );
+        log.methodError(this.logger, 'discoverByTokensAndFee', error, {
+          chainId,
+          tokenA: normalizedTokenA,
+          tokenB: normalizedTokenB,
+          feeBps,
+        });
+        throw error;
+      }
+
+      const normalizedPoolAddress = normalizeAddress(poolAddress);
+      this.logger.debug(
+        { poolAddress: normalizedPoolAddress, tokenA: normalizedTokenA, tokenB: normalizedTokenB, feeBps },
+        'Pool address retrieved from factory'
+      );
+
+      // Call discover() to fetch or create the pool
+      const pool = await this.discover({
+        poolAddress: normalizedPoolAddress,
+        chainId,
+      });
+
+      log.methodExit(this.logger, 'discoverByTokensAndFee', {
+        poolId: pool.id,
+        poolAddress: normalizedPoolAddress,
+      });
+
+      return pool;
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          (error.message.includes('Invalid') ||
+            error.message.includes('Pool does not exist'))
+        )
+      ) {
+        log.methodError(this.logger, 'discoverByTokensAndFee', error as Error, {
+          chainId,
+          tokenA,
+          tokenB,
+          feeBps,
         });
       }
       throw error;
