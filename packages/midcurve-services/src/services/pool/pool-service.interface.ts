@@ -7,7 +7,7 @@
  */
 
 import type { PoolInterface } from '@midcurve/shared';
-import type { PrismaTransactionClient } from './uniswapv3-pool-service.js';
+import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 
 /**
  * PoolServiceInterface

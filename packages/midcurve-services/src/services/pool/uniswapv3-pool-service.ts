@@ -45,14 +45,10 @@ import type { PoolServiceInterface } from './pool-service.interface.js';
 // TYPES
 // ============================================================================
 
-/**
- * Prisma transaction client type for use in transactional operations.
- * This is the client type available within a $transaction callback.
- */
-export type PrismaTransactionClient = Omit<
-  PrismaClient,
-  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
->;
+// Re-export PrismaTransactionClient for backwards compatibility
+// The canonical location is now clients/prisma/index.ts
+export type { PrismaTransactionClient } from '../../clients/prisma/index.js';
+import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 
 /**
  * Generic pool result from database (before conversion to class instance)

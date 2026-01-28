@@ -91,3 +91,5 @@ export {
   getSwapClient,
   type SwapClient,
 } from './paraswap/index.js';
+
+export { type PrismaTransactionClient } from './prisma/index.js';

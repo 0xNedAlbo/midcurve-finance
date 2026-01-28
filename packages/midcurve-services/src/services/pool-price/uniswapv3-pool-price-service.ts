@@ -27,7 +27,7 @@ import type { ServiceLogger } from '../../logging/index.js';
 import { uniswapV3PoolAbi } from '../../utils/uniswapv3/pool-abi.js';
 import { EvmConfig } from '../../config/evm.js';
 import { UniswapV3PoolService } from '../pool/uniswapv3-pool-service.js';
-import type { PrismaTransactionClient } from '../pool/uniswapv3-pool-service.js';
+import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 
 /**
  * Database result interface for pool price queries.
