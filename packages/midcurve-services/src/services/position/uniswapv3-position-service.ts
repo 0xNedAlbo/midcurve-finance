@@ -34,6 +34,7 @@ import type { DomainEventPublisher } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
     getPositionManagerAddress,
+    getNfpmDeploymentBlock,
     UNISWAP_V3_POSITION_MANAGER_ABI,
     type UniswapV3PositionData,
 } from "../../config/uniswapv3.js";
@@ -50,13 +51,19 @@ import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token
 import { EvmBlockService } from "../block/evm-block-service.js";
 import { PositionAprService } from "../position-apr/position-apr-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
-import { UniswapV3LedgerEventService } from "../position-ledger/uniswapv3-ledger-event-service.js";
-import type { Address } from "viem";
+import {
+    UniswapV3LedgerEventService,
+    UNISWAP_V3_POSITION_EVENT_SIGNATURES,
+    type RawLogInput,
+} from "../position-ledger/uniswapv3-ledger-event-service.js";
+import type { Address, PublicClient } from "viem";
 import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
 import { calculateUnclaimedFeeAmounts } from "@midcurve/shared";
 import { uniswapV3PoolAbi } from "../../utils/uniswapv3/pool-abi.js";
 import { calculateTokenValueInQuote } from "../../utils/uniswapv3/ledger-calculations.js";
+import { syncLedgerEvents } from "../position-ledger-deprecated/helpers/uniswapv3/ledger-sync.js";
+import { getLedgerSummary } from "./helpers/uniswapv3/position-calculations.js";
 
 /**
  * Fee state for a position
@@ -1036,8 +1043,10 @@ export class UniswapV3PositionService {
                 );
 
                 // Get ledger summary (now has real data from events discovered above)
-                const ledgerSummary = await this.getLedgerSummary(
+                const ledgerSummary = await getLedgerSummary(
                     createdPosition.id,
+                    this.ledgerService,
+                    this.logger,
                 );
 
                 // Calculate current position value
@@ -1250,27 +1259,22 @@ export class UniswapV3PositionService {
      * Reset position by rediscovering all ledger events from blockchain
      *
      * Completely rebuilds the position's ledger history by:
-     * 1. Deleting all existing ledger events and APR periods
-     * 2. Rediscovering all events from Etherscan
-     * 3. Recalculating APR periods from fresh events
+     * 1. Deleting all existing ledger events
+     * 2. Fetching all events via eth_getLogs RPC
+     * 3. Batch importing events with aggregate recalculation
      * 4. Refreshing position state from NFT contract
-     * 5. Recalculating PnL fields based on fresh ledger data
-     *
-     * Process:
-     * 1. Verify position exists
-     * 2. Delete all ledger events (cascades to APR periods)
-     * 3. Rediscover events from blockchain via ledgerService.discoverAllEvents()
-     * 4. Call refresh() to update position state and PnL
-     * 5. Return fully rebuilt position
      *
      * @param id - Position ID
+     * @param dbTx - Optional Prisma transaction client for atomic operations
      * @returns Position with completely rebuilt ledger and refreshed state
      * @throws Error if position not found
-     * @throws Error if position is not uniswapv3 protocol
      * @throws Error if chain is not supported
-     * @throws Error if Etherscan fetch fails
+     * @throws Error if RPC fetch fails
      */
-    async reset(id: string): Promise<UniswapV3Position> {
+    async reset(
+        id: string,
+        dbTx?: PrismaTransactionClient,
+    ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "reset", { id });
 
         try {
@@ -1283,66 +1287,90 @@ export class UniswapV3PositionService {
                 throw error;
             }
 
+            const chainId = existingPosition.chainId;
+            const nftId = BigInt(existingPosition.nftId);
+
             this.logger.info(
-                {
-                    positionId: id,
-                    chainId: existingPosition.config.chainId,
-                    nftId: existingPosition.config.nftId,
-                },
-                "Starting position reset - rediscovering ledger events from blockchain",
+                { positionId: id, chainId, nftId: nftId.toString() },
+                "Starting position reset - rebuilding ledger from RPC",
             );
 
-            // 2. Rediscover all ledger events from blockchain
-            // This automatically:
-            // - Deletes events >= fromBlock (via syncLedgerEvents)
-            // - Fetches fresh events from Etherscan
-            // - Calculates PnL sequentially
-            // - Triggers APR period calculation
-            this.logger.info(
+            // 2. Get NFPM address and deployment block for this chain
+            const nfpmAddress = getPositionManagerAddress(chainId);
+            const deploymentBlock = getNfpmDeploymentBlock(chainId);
+
+            // 3. Get viem public client for RPC calls
+            const client = this.evmConfig.getPublicClient(chainId);
+
+            // 4. Create ledger event service for this position
+            const ledgerEventService = new UniswapV3LedgerEventService(
                 { positionId: id },
-                "Deleting old events and rediscovering from blockchain",
+                { prisma: this._prisma },
             );
 
-            const syncResult = await syncLedgerEvents(
-                {
-                    positionId: id,
-                    chainId: existingPosition.chainId,
-                    nftId: BigInt(existingPosition.nftId),
-                    forceFullResync: true, // Full reset - resync from NFPM deployment
-                },
-                {
-                    prisma: this.prisma,
-                    etherscanClient: this.etherscanClient,
-                    evmBlockService: this.evmBlockService,
-                    aprService: this.aprService,
-                    logger: this.logger,
-                    ledgerService: this.ledgerService,
-                    poolPriceService: this.poolPriceService,
-                },
+            // 5. Delete all existing ledger events
+            const deletedCount = await ledgerEventService.deleteAll(dbTx);
+            this.logger.info(
+                { positionId: id, deletedCount },
+                "Deleted all existing ledger events",
+            );
+
+            // 6. Fetch all events from NFPM deployment block to latest via eth_getLogs
+            const logs = await this.fetchAllPositionLogs(
+                client,
+                nfpmAddress,
+                nftId,
+                deploymentBlock,
             );
 
             this.logger.info(
-                {
-                    positionId: id,
-                    eventsAdded: syncResult.eventsAdded,
-                    fromBlock: syncResult.fromBlock.toString(),
-                    finalizedBlock: syncResult.finalizedBlock.toString(),
-                },
-                "Ledger events rediscovered and APR periods recalculated",
+                { positionId: id, logCount: logs.length },
+                "Fetched position logs via RPC",
             );
 
-            // 3. Refresh position state from on-chain data
-            // This updates:
-            // - Position state (liquidity, fees, owner)
-            // - Current value
-            // - Unrealized PnL (using fresh cost basis from ledger)
-            // - Unclaimed fees
+            // 7. Import logs (handles out-of-order, calculates aggregates)
+            if (logs.length > 0) {
+                const importResult =
+                    await ledgerEventService.importLogsForPosition(
+                        existingPosition,
+                        chainId,
+                        logs,
+                        this.poolPriceService,
+                        dbTx,
+                    );
+
+                const insertedCount = importResult.results.filter(
+                    (r) => r.action === "inserted",
+                ).length;
+                const skippedCount = importResult.results.filter(
+                    (r) => r.action === "skipped",
+                ).length;
+
+                this.logger.info(
+                    {
+                        positionId: id,
+                        inserted: insertedCount,
+                        skipped: skippedCount,
+                        aggregates: {
+                            liquidityAfter:
+                                importResult.aggregates.liquidityAfter.toString(),
+                            costBasisAfter:
+                                importResult.aggregates.costBasisAfter.toString(),
+                            realizedPnlAfter:
+                                importResult.aggregates.realizedPnlAfter.toString(),
+                        },
+                    },
+                    "Imported ledger events from logs",
+                );
+            }
+
+            // 8. Refresh position state from on-chain data
             this.logger.info(
                 { positionId: id },
                 "Refreshing position state from on-chain data",
             );
 
-            const refreshedPosition = await this.refresh(id);
+            const refreshedPosition = await this.refresh(id, dbTx);
 
             this.logger.info(
                 {
@@ -1370,6 +1398,71 @@ export class UniswapV3PositionService {
             }
             throw error;
         }
+    }
+
+    /**
+     * Fetch all position logs via eth_getLogs RPC
+     *
+     * Queries NFPM contract for IncreaseLiquidity, DecreaseLiquidity, and Collect events
+     * from deployment block to latest. Batches requests in 5000 block chunks to avoid
+     * RPC provider limits.
+     *
+     * @param client - Viem public client for RPC calls
+     * @param nfpmAddress - NonfungiblePositionManager contract address
+     * @param nftId - NFT token ID
+     * @param fromBlock - Starting block number (usually NFPM deployment block)
+     * @returns Array of raw log inputs compatible with importLogsForPosition
+     */
+    private async fetchAllPositionLogs(
+        client: PublicClient,
+        nfpmAddress: Address,
+        nftId: bigint,
+        fromBlock: bigint,
+    ): Promise<RawLogInput[]> {
+        const BATCH_SIZE = 5000n;
+
+        // Convert NFT ID to padded hex topic (32 bytes)
+        const nftIdTopic = ("0x" +
+            nftId.toString(16).padStart(64, "0")) as `0x${string}`;
+
+        // Get all event signatures
+        const eventSignatures = Object.values(
+            UNISWAP_V3_POSITION_EVENT_SIGNATURES,
+        ) as `0x${string}`[];
+
+        // Get latest block number
+        const latestBlock = await client.getBlockNumber();
+
+        // Fetch logs in batches of 5000 blocks
+        const allLogs: RawLogInput[] = [];
+        let currentFrom = fromBlock;
+
+        while (currentFrom <= latestBlock) {
+            const currentTo =
+                currentFrom + BATCH_SIZE - 1n < latestBlock
+                    ? currentFrom + BATCH_SIZE - 1n
+                    : latestBlock;
+
+            const batchLogs = (await client.request({
+                method: "eth_getLogs",
+                params: [
+                    {
+                        address: nfpmAddress,
+                        topics: [
+                            eventSignatures, // Array = OR condition for topic[0]
+                            nftIdTopic, // topic[1] = tokenId
+                        ],
+                        fromBlock: `0x${currentFrom.toString(16)}`,
+                        toBlock: `0x${currentTo.toString(16)}`,
+                    },
+                ],
+            })) as RawLogInput[];
+
+            allLogs.push(...batchLogs);
+            currentFrom = currentTo + 1n;
+        }
+
+        return allLogs;
     }
 
     // ============================================================================
