@@ -8,3 +8,4 @@ export type {
   PrismaTransactionClient,
   PoolDbResult,
 } from './uniswapv3-pool-service.js';
+export type { PoolServiceInterface } from './pool-service.interface.js';

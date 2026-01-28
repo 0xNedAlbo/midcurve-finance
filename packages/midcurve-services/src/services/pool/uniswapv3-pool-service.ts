@@ -35,6 +35,7 @@ import { EvmConfig } from '../../config/evm.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
+import type { PoolServiceInterface } from './pool-service.interface.js';
 
 // ============================================================================
 // TYPES
@@ -122,10 +123,10 @@ export interface UniswapV3PoolServiceDependencies {
  * Provides pool management for Uniswap V3 concentrated liquidity pools.
  * Returns UniswapV3Pool class instances for type-safe config/state access.
  */
-export class UniswapV3PoolService {
+export class UniswapV3PoolService implements PoolServiceInterface {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
-  protected readonly protocol = 'uniswapv3' as const;
+  public readonly protocol = 'uniswapv3' as const;
 
   private readonly _evmConfig: EvmConfig;
   private readonly _erc20TokenService: Erc20TokenService;
@@ -1594,5 +1595,108 @@ export class UniswapV3PoolService {
     }
 
     return pool;
+  }
+
+  // ============================================================================
+  // POOL HASH
+  // ============================================================================
+
+  /**
+   * Create a pool hash from raw parameters
+   *
+   * Format: "uniswapv3/{chainId}/{address}"
+   * Example: "uniswapv3/1/0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
+   *
+   * @param params - Object containing chainId and address
+   * @returns Human-readable composite key
+   * @throws Error if chainId or address is missing or invalid
+   */
+  createHash(params: { chainId: number; address: string }): string {
+    const { chainId, address } = params;
+
+    if (chainId === undefined || chainId === null) {
+      throw new Error('createHash: chainId is required');
+    }
+
+    if (typeof chainId !== 'number') {
+      throw new Error('createHash: chainId must be a number');
+    }
+
+    if (!address || typeof address !== 'string') {
+      throw new Error('createHash: address is required and must be a string');
+    }
+
+    if (!isValidAddress(address)) {
+      throw new Error(`createHash: invalid pool address format: ${address}`);
+    }
+
+    const normalizedAddress = normalizeAddress(address);
+
+    return `${this.protocol}/${chainId}/${normalizedAddress}`;
+  }
+
+  /**
+   * Create a pool hash from a UniswapV3Pool instance
+   *
+   * Format: "uniswapv3/{chainId}/{address}"
+   * Example: "uniswapv3/1/0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
+   *
+   * @param pool - UniswapV3Pool instance
+   * @returns Human-readable composite key
+   * @throws Error if pool protocol doesn't match
+   */
+  createHashFromPool(pool: UniswapV3Pool): string {
+    if (pool.protocol !== this.protocol) {
+      throw new Error(
+        `createHashFromPool: expected protocol '${this.protocol}', got '${pool.protocol}'`
+      );
+    }
+
+    const { chainId, address } = pool.typedConfig;
+
+    return `${this.protocol}/${chainId}/${address}`;
+  }
+
+  /**
+   * Find pool by its hash
+   *
+   * @param hash - Pool hash (e.g., "uniswapv3/1/0x...")
+   * @param tx - Optional transaction client
+   * @returns UniswapV3Pool if found and is uniswapv3 protocol, null otherwise
+   */
+  async findByHash(
+    hash: string,
+    tx?: PrismaTransactionClient
+  ): Promise<UniswapV3Pool | null> {
+    log.methodEntry(this.logger, 'findByHash', { hash, inTransaction: !!tx });
+
+    try {
+      const client = tx ?? this.prisma;
+      log.dbOperation(this.logger, 'findFirst', 'Pool', { poolHash: hash });
+
+      const result = await client.pool.findFirst({
+        where: {
+          poolHash: hash,
+          protocol: this.protocol,
+        },
+        include: {
+          token0: true,
+          token1: true,
+        },
+      });
+
+      if (!result) {
+        log.methodExit(this.logger, 'findByHash', { hash, found: false });
+        return null;
+      }
+
+      const pool = this.mapToUniswapV3Pool(result);
+
+      log.methodExit(this.logger, 'findByHash', { hash, found: true, id: pool.id });
+      return pool;
+    } catch (error) {
+      log.methodError(this.logger, 'findByHash', error as Error, { hash });
+      throw error;
+    }
   }
 }

@@ -151,6 +151,11 @@ model Pool {
   token1Id String
   feeBps   Int // Fee in basis points (3000 = 0.3%)
 
+  // Pool hash for fast lookups and uniqueness
+  // Human-readable composite key, format: "{protocol}/{chainId}/{poolAddress}"
+  // Example: "uniswapv3/1/0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
+  poolHash String? @unique
+
   // Protocol-specific configuration (JSON) - Immutable
   // Contains pool address, tick spacing, chainId, token addresses, etc.
   config Json
@@ -176,6 +181,7 @@ model Pool {
   @@index([poolType])
   @@index([token0Id])
   @@index([token1Id])
+  @@index([poolHash])
   @@map("pools")
 }
 
