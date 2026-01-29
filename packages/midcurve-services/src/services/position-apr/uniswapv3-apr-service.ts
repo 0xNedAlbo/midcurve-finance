@@ -5,7 +5,7 @@
  * APR periods are bounded by COLLECT events and track fee generation metrics.
  *
  * This service is used by:
- * - UniswapV3LedgerEventService: to persist APR periods during event import
+ * - UniswapV3LedgerService: to persist APR periods during event import
  * - External callers: to query APR periods for display/analysis
  */
 

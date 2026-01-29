@@ -1,5 +1,5 @@
 /**
- * UniswapV3LedgerEventService
+ * UniswapV3LedgerService
  *
  * Service for managing Uniswap V3 position ledger events.
  * Handles event creation, retrieval, and deduplication with reorg-safe hashing.
@@ -304,10 +304,10 @@ export function decodeLogData(
 // ============================================================================
 
 /**
- * Dependencies for UniswapV3LedgerEventService.
+ * Dependencies for UniswapV3LedgerService.
  * All dependencies are optional and will use defaults if not provided.
  */
-export interface UniswapV3LedgerEventServiceDependencies {
+export interface UniswapV3LedgerServiceDependencies {
     /**
      * Prisma client for database operations.
      * If not provided, a new PrismaClient instance will be created.
@@ -322,9 +322,9 @@ export interface UniswapV3LedgerEventServiceDependencies {
 }
 
 /**
- * Configuration for UniswapV3LedgerEventService.
+ * Configuration for UniswapV3LedgerService.
  */
-export interface UniswapV3LedgerEventServiceConfig {
+export interface UniswapV3LedgerServiceConfig {
     /**
      * Position ID that this service instance operates on.
      * All methods will use this position ID.
@@ -410,14 +410,14 @@ export interface CreateLedgerEventInput {
 // ============================================================================
 
 /**
- * UniswapV3LedgerEventService
+ * UniswapV3LedgerService
  *
  * Manages position ledger events for a specific Uniswap V3 position.
  * Provides reorg-safe event identification using txHash/blockHash/logIndex.
  *
  * Each instance is scoped to a single position via the positionId parameter.
  */
-export class UniswapV3LedgerEventService {
+export class UniswapV3LedgerService {
     protected readonly _prisma: PrismaClient;
     protected readonly logger: ServiceLogger;
     private readonly _aprService: UniswapV3AprService;
@@ -425,7 +425,7 @@ export class UniswapV3LedgerEventService {
     public readonly positionId: string;
 
     /**
-     * Creates a new UniswapV3LedgerEventService instance for a specific position.
+     * Creates a new UniswapV3LedgerService instance for a specific position.
      *
      * @param config - Configuration object containing the positionId
      * @param config.positionId - Position ID that this service instance operates on
@@ -433,12 +433,12 @@ export class UniswapV3LedgerEventService {
      * @param dependencies.prisma - Prisma client instance (creates default if not provided)
      */
     constructor(
-        config: UniswapV3LedgerEventServiceConfig,
-        dependencies: UniswapV3LedgerEventServiceDependencies = {},
+        config: UniswapV3LedgerServiceConfig,
+        dependencies: UniswapV3LedgerServiceDependencies = {},
     ) {
         this.positionId = config.positionId;
         this._prisma = dependencies.prisma ?? new PrismaClient();
-        this.logger = createServiceLogger("UniswapV3LedgerEventService");
+        this.logger = createServiceLogger("UniswapV3LedgerService");
         this._aprService =
             dependencies.aprService ??
             new UniswapV3AprService(
@@ -475,7 +475,7 @@ export class UniswapV3LedgerEventService {
      *
      * @example
      * ```typescript
-     * const hash = UniswapV3LedgerEventService.createHash(
+     * const hash = UniswapV3LedgerService.createHash(
      *   1,
      *   '0xabc123...',
      *   '0xdef456...',
@@ -504,7 +504,7 @@ export class UniswapV3LedgerEventService {
      *
      * @example
      * ```typescript
-     * const service = new UniswapV3LedgerEventService();
+     * const service = new UniswapV3LedgerService();
      * const hash = service.createHashForEvent({
      *   chainId: 1,
      *   txHash: '0xabc123...',
@@ -519,7 +519,7 @@ export class UniswapV3LedgerEventService {
         blockHash: string;
         logIndex: number;
     }): string {
-        return UniswapV3LedgerEventService.createHash(
+        return UniswapV3LedgerService.createHash(
             config.chainId,
             config.txHash,
             config.blockHash,
@@ -1011,7 +1011,7 @@ export class UniswapV3LedgerEventService {
         }
 
         // Sort events by blockchain coordinates (blockNumber ASC, logIndex ASC)
-        UniswapV3LedgerEventService.sortByBlockchainCoordinates(events);
+        UniswapV3LedgerService.sortByBlockchainCoordinates(events);
 
         // Delete existing APR periods before recalculating
         await this._aprService.deleteAllAprPeriods(tx);
@@ -1355,7 +1355,7 @@ export class UniswapV3LedgerEventService {
                 : log.blockNumber;
 
         // Compute the input hash for this event
-        const inputHash = UniswapV3LedgerEventService.createHash(
+        const inputHash = UniswapV3LedgerService.createHash(
             chainId,
             log.transactionHash,
             log.blockHash,

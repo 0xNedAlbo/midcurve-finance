@@ -3,9 +3,9 @@
  */
 
 export {
-  UniswapV3LedgerEventService,
-  type UniswapV3LedgerEventServiceConfig,
-  type UniswapV3LedgerEventServiceDependencies,
+  UniswapV3LedgerService,
+  type UniswapV3LedgerServiceConfig,
+  type UniswapV3LedgerServiceDependencies,
   type CreateLedgerEventInput,
   // Event signatures and validation
   UNISWAP_V3_POSITION_EVENT_SIGNATURES,
@@ -17,7 +17,7 @@ export {
   type DecodedLogData,
   // Import result types
   type LedgerAggregates,
-} from './uniswapv3-ledger-event-service.js';
+} from './uniswapv3-ledger-service.js';
 
 // Re-export APR types for backward compatibility
 export type { AprPeriodData } from '../types/position-apr/index.js';

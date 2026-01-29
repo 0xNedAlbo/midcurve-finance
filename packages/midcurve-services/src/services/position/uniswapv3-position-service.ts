@@ -45,10 +45,10 @@ import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token
 import { EvmBlockService } from "../block/evm-block-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
 import {
-    UniswapV3LedgerEventService,
+    UniswapV3LedgerService,
     UNISWAP_V3_POSITION_EVENT_SIGNATURES,
     type RawLogInput,
-} from "../position-ledger/uniswapv3-ledger-event-service.js";
+} from "../position-ledger/uniswapv3-ledger-service.js";
 import type { Address, PublicClient } from "viem";
 import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
@@ -756,7 +756,7 @@ export class UniswapV3PositionService {
                 refreshedState.tokensOwed1 === 0n
             ) {
                 // Get last COLLECT event timestamp for positionClosedAt
-                const ledgerService = new UniswapV3LedgerEventService(
+                const ledgerService = new UniswapV3LedgerService(
                     { positionId: id },
                     { prisma: this._prisma },
                 );
@@ -854,7 +854,7 @@ export class UniswapV3PositionService {
             const client = this.evmConfig.getPublicClient(chainId);
 
             // 4. Create ledger event service for this position
-            const ledgerEventService = new UniswapV3LedgerEventService(
+            const ledgerEventService = new UniswapV3LedgerService(
                 { positionId: id },
                 { prisma: this._prisma },
             );
@@ -1340,7 +1340,7 @@ export class UniswapV3PositionService {
             // 5. Get uncollected principal from ledger to calculate accurate unclaimed fees
             // tokensOwed on-chain = uncollectedPrincipal (from decrease liquidity) + unclaimedFees
             // So: unclaimedFees = tokensOwed - uncollectedPrincipal
-            const ledgerEventService = new UniswapV3LedgerEventService(
+            const ledgerEventService = new UniswapV3LedgerService(
                 { positionId: id },
                 { prisma: this._prisma },
             );
@@ -1707,7 +1707,7 @@ export class UniswapV3PositionService {
         );
 
         // Get last COLLECT event timestamp for positionClosedAt
-        const ledgerService = new UniswapV3LedgerEventService(
+        const ledgerService = new UniswapV3LedgerService(
             { positionId: id },
             { prisma: this._prisma },
         );
@@ -2160,7 +2160,7 @@ export class UniswapV3PositionService {
             }
 
             // 3. Get ledger data from latest events
-            const ledgerService = new UniswapV3LedgerEventService(
+            const ledgerService = new UniswapV3LedgerService(
                 { positionId: id },
                 { prisma: this._prisma },
             );
