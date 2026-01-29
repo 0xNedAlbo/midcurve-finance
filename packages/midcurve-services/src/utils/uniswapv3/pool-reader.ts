@@ -1,16 +1,15 @@
 /**
  * Uniswap V3 Pool Reader
  *
- * Utilities for reading pool configuration and state from Uniswap V3 contracts.
+ * Utilities for reading pool state from Uniswap V3 contracts.
  * Uses viem's multicall for efficient batch reads.
+ *
+ * Note: Pool configuration reading has been moved to UniswapV3PoolService.fetchPoolConfig()
  */
 
 import type { PublicClient } from 'viem';
 import { uniswapV3PoolAbi } from './pool-abi.js';
-import {
-  UniswapV3PoolConfig,
-  type UniswapV3PoolState,
-} from '@midcurve/shared';
+import { type UniswapV3PoolState } from '@midcurve/shared';
 
 /**
  * Error thrown when pool configuration cannot be read from contract
@@ -37,126 +36,6 @@ export class PoolStateError extends Error {
   ) {
     super(message);
     this.name = 'PoolStateError';
-  }
-}
-
-/**
- * Read pool configuration from a Uniswap V3 pool contract
- *
- * Uses viem's multicall to fetch immutable pool parameters (token0, token1, fee, tickSpacing)
- * in a single RPC call. This is more efficient than making four separate contract calls.
- *
- * @param client - Viem PublicClient configured for the correct chain
- * @param address - Pool contract address (must be checksummed)
- * @param chainId - Chain ID where the pool is deployed
- * @returns Pool configuration with immutable parameters
- * @throws PoolConfigError if contract doesn't implement Uniswap V3 pool interface
- *
- * @example
- * ```typescript
- * const client = evmConfig.getPublicClient(1);
- * const config = await readPoolConfig(
- *   client,
- *   '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
- *   1
- * );
- * // {
- * //   chainId: 1,
- * //   address: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640',
- * //   token0: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
- * //   token1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
- * //   feeBps: 3000,
- * //   tickSpacing: 60
- * // }
- * ```
- */
-export async function readPoolConfig(
-  client: PublicClient,
-  address: string,
-  chainId: number
-): Promise<UniswapV3PoolConfig> {
-  try {
-    // Use multicall for efficient batch reading
-    const results = await client.multicall({
-      contracts: [
-        {
-          address: address as `0x${string}`,
-          abi: uniswapV3PoolAbi,
-          functionName: 'token0',
-        },
-        {
-          address: address as `0x${string}`,
-          abi: uniswapV3PoolAbi,
-          functionName: 'token1',
-        },
-        {
-          address: address as `0x${string}`,
-          abi: uniswapV3PoolAbi,
-          functionName: 'fee',
-        },
-        {
-          address: address as `0x${string}`,
-          abi: uniswapV3PoolAbi,
-          functionName: 'tickSpacing',
-        },
-      ],
-      allowFailure: false, // Throw if any call fails
-    });
-
-    // Extract results from multicall response
-    const [token0, token1, fee, tickSpacing] = results;
-
-    // Validate results
-    if (typeof token0 !== 'string' || token0.length !== 42) {
-      throw new PoolConfigError(
-        `Pool contract returned invalid token0 address: ${token0}`,
-        address
-      );
-    }
-
-    if (typeof token1 !== 'string' || token1.length !== 42) {
-      throw new PoolConfigError(
-        `Pool contract returned invalid token1 address: ${token1}`,
-        address
-      );
-    }
-
-    if (typeof fee !== 'number' || fee < 0) {
-      throw new PoolConfigError(
-        `Pool contract returned invalid fee: ${fee}`,
-        address
-      );
-    }
-
-    if (typeof tickSpacing !== 'number') {
-      throw new PoolConfigError(
-        `Pool contract returned invalid tickSpacing: ${tickSpacing}`,
-        address
-      );
-    }
-
-    return new UniswapV3PoolConfig({
-      chainId,
-      address,
-      token0,
-      token1,
-      feeBps: fee,
-      tickSpacing,
-    });
-  } catch (error) {
-    // Re-throw PoolConfigError as-is
-    if (error instanceof PoolConfigError) {
-      throw error;
-    }
-
-    // Wrap other errors
-    throw new PoolConfigError(
-      `Failed to read pool configuration from ${address}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-      address,
-      error
-    );
   }
 }
 

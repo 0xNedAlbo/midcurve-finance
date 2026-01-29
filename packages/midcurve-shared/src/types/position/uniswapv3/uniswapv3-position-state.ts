@@ -28,6 +28,13 @@ export interface UniswapV3PositionState {
   ownerAddress: string;
 
   /**
+   * Operator address approved to manage this position
+   * From NFPM.positions() call
+   * EIP-55 checksummed address, or zero address if no operator
+   */
+  operator: string;
+
+  /**
    * Amount of liquidity in the position
    * Represents the amount of concentrated liquidity provided
    */
@@ -100,6 +107,20 @@ export interface UniswapV3PositionState {
    * Updated when the tick is crossed during swaps
    */
   tickUpperFeeGrowthOutside1X128: bigint;
+
+  /**
+   * Whether the NFT has been burned (no longer exists on-chain)
+   * When true, on-chain reads will fail with "Invalid token ID"
+   * Burned positions cannot be refreshed from on-chain data
+   */
+  isBurned: boolean;
+
+  /**
+   * Whether the position is fully closed
+   * True when liquidity=0 AND tokensOwed0=0 AND tokensOwed1=0
+   * A closed position has no remaining value to extract
+   */
+  isClosed: boolean;
 }
 
 // ============================================================================
@@ -112,6 +133,7 @@ export interface UniswapV3PositionState {
  */
 export interface UniswapV3PositionStateJSON {
   ownerAddress: string;
+  operator: string;
   liquidity: string;
   feeGrowthInside0LastX128: string;
   feeGrowthInside1LastX128: string;
@@ -123,6 +145,8 @@ export interface UniswapV3PositionStateJSON {
   tickLowerFeeGrowthOutside1X128: string;
   tickUpperFeeGrowthOutside0X128: string;
   tickUpperFeeGrowthOutside1X128: string;
+  isBurned: boolean;
+  isClosed: boolean;
 }
 
 // ============================================================================
@@ -141,6 +165,7 @@ export function positionStateToJSON(
 ): UniswapV3PositionStateJSON {
   return {
     ownerAddress: state.ownerAddress,
+    operator: state.operator,
     liquidity: state.liquidity.toString(),
     feeGrowthInside0LastX128: state.feeGrowthInside0LastX128.toString(),
     feeGrowthInside1LastX128: state.feeGrowthInside1LastX128.toString(),
@@ -156,6 +181,8 @@ export function positionStateToJSON(
       state.tickUpperFeeGrowthOutside0X128.toString(),
     tickUpperFeeGrowthOutside1X128:
       state.tickUpperFeeGrowthOutside1X128.toString(),
+    isBurned: state.isBurned,
+    isClosed: state.isClosed,
   };
 }
 
@@ -171,6 +198,7 @@ export function positionStateFromJSON(
 ): UniswapV3PositionState {
   return {
     ownerAddress: json.ownerAddress,
+    operator: json.operator,
     liquidity: BigInt(json.liquidity),
     feeGrowthInside0LastX128: BigInt(json.feeGrowthInside0LastX128),
     feeGrowthInside1LastX128: BigInt(json.feeGrowthInside1LastX128),
@@ -182,5 +210,7 @@ export function positionStateFromJSON(
     tickLowerFeeGrowthOutside1X128: BigInt(json.tickLowerFeeGrowthOutside1X128),
     tickUpperFeeGrowthOutside0X128: BigInt(json.tickUpperFeeGrowthOutside0X128),
     tickUpperFeeGrowthOutside1X128: BigInt(json.tickUpperFeeGrowthOutside1X128),
+    isBurned: json.isBurned,
+    isClosed: json.isClosed,
   };
 }

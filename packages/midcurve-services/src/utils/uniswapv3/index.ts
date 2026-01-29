@@ -6,7 +6,6 @@
 
 export { uniswapV3PoolAbi, type Slot0 } from './pool-abi.js';
 export {
-  readPoolConfig,
   readPoolState,
   PoolConfigError,
   PoolStateError,
