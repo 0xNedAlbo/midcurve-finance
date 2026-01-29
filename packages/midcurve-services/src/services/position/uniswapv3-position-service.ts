@@ -34,8 +34,10 @@ import type { DomainEventPublisher } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
     getPositionManagerAddress,
+    getFactoryAddress,
     getNfpmDeploymentBlock,
     UNISWAP_V3_POSITION_MANAGER_ABI,
+    UNISWAP_V3_FACTORY_ABI,
 } from "../../config/uniswapv3.js";
 import { normalizeAddress } from "@midcurve/shared";
 import { UniswapV3PoolService } from "../pool/uniswapv3-pool-service.js";
@@ -575,25 +577,221 @@ export class UniswapV3PositionService {
     /**
      * Discover and create a Uniswap V3 position from on-chain NFT data
      *
-     * TODO: Reimplement this method - it was removed during deprecated ledger service cleanup.
-     * Previous implementation relied on position-ledger-deprecated which has been deleted.
+     * Imports a position by:
+     * 1. Fetching all historical log events for the NFT
+     * 2. Fetching position config at first event's block
+     * 3. Discovering/creating the pool
+     * 4. Creating the position record
+     * 5. Importing ledger events
+     * 6. Refreshing position metrics
+     *
+     * If the position already exists for this user, returns the existing position
+     * after refreshing it.
      *
      * @param userId - User ID who owns this position
-     * @param params - Discovery parameters { chainId, nftId, quoteTokenAddress? }
+     * @param params - Discovery parameters { chainId, nftId, quoteTokenAddress }
+     * @param dbTx - Optional Prisma transaction client for atomic operations
      * @returns The discovered or existing position
+     * @throws Error if no events found for the NFT (position doesn't exist)
+     * @throws Error if chain is not supported
      */
     async discover(
         userId: string,
         params: UniswapV3PositionDiscoverInput,
+        dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
-        // TODO: Reimplement discover() method
-        // Previously used:
-        // - syncLedgerEvents from position-ledger-deprecated/helpers/uniswapv3/ledger-sync.js
-        // - this.ledgerService (UniswapV3PositionLedgerService) for getMostRecentEvent()
-        // - getLedgerSummary helper that also used the deprecated ledger service
-        throw new Error(
-            `discover() is not yet implemented. userId=${userId}, chainId=${params.chainId}, nftId=${params.nftId}`,
-        );
+        const { chainId, nftId, quoteTokenAddress } = params;
+        log.methodEntry(this.logger, "discover", { userId, chainId, nftId });
+
+        try {
+            // a) Check params validity
+            if (!this._evmConfig.isChainSupported(chainId)) {
+                throw new Error(
+                    `Chain ${chainId} is not supported. Supported chains: ${this._evmConfig
+                        .getSupportedChainIds()
+                        .join(", ")}`,
+                );
+            }
+
+            // Check if position already exists for this user
+            const positionHash = this.createHash({ chainId, nftId });
+            const existing = await this.findByPositionHash(
+                userId,
+                positionHash,
+                dbTx,
+            );
+            if (existing) {
+                this.logger.info(
+                    { id: existing.id, userId, chainId, nftId, positionHash },
+                    "Position already exists, refreshing",
+                );
+                const refreshed = await this.refresh(existing.id, "latest", dbTx);
+                log.methodExit(this.logger, "discover", {
+                    id: refreshed.id,
+                    existing: true,
+                });
+                return refreshed;
+            }
+
+            // b) Load all log events via fetchAllPositionLogs()
+            const client = this._evmConfig.getPublicClient(chainId);
+            const nfpmAddress = getPositionManagerAddress(chainId);
+            const fromBlock = getNfpmDeploymentBlock(chainId);
+
+            const logs = await this.fetchAllPositionLogs(
+                client,
+                nfpmAddress,
+                BigInt(nftId),
+                fromBlock,
+            );
+
+            if (logs.length === 0) {
+                throw new Error(
+                    `Position not found: no events for NFT ${nftId} on chain ${chainId}`,
+                );
+            }
+
+            this.logger.info(
+                { chainId, nftId, logCount: logs.length },
+                "Fetched position logs",
+            );
+
+            // c) Use blockNumber of first ledger event to fetch position config
+            const firstLog = logs[0]!; // Safe: we checked logs.length > 0 above
+            const firstLogBlockNumber =
+                typeof firstLog.blockNumber === "bigint"
+                    ? firstLog.blockNumber
+                    : BigInt(parseInt(firstLog.blockNumber, 16));
+            const positionConfig = await this.fetchPositionConfig(
+                chainId,
+                BigInt(nftId),
+                firstLogBlockNumber,
+            );
+
+            // d) fetchPositionState at first log block
+            const onChainState = await this.fetchPositionState(
+                chainId,
+                nftId,
+                Number(firstLogBlockNumber),
+            );
+
+            // e) Discover pool via pool service
+            const pool = await this.poolService.discover(
+                {
+                    chainId,
+                    poolAddress: positionConfig.poolAddress,
+                },
+                dbTx,
+            );
+
+            // Determine quote token (isToken0Quote)
+            const normalizedQuote = normalizeAddress(quoteTokenAddress);
+            let isToken0Quote: boolean;
+            if (normalizedQuote === pool.token0.typedConfig.address) {
+                isToken0Quote = true;
+            } else if (normalizedQuote === pool.token1.typedConfig.address) {
+                isToken0Quote = false;
+            } else {
+                throw new Error(
+                    `Quote token ${quoteTokenAddress} is not in pool. Pool tokens: ${pool.token0.typedConfig.address}, ${pool.token1.typedConfig.address}`,
+                );
+            }
+
+            // f) Create position with default values
+            const config: UniswapV3PositionConfigData = {
+                chainId,
+                nftId,
+                poolAddress: positionConfig.poolAddress,
+                tickLower: positionConfig.tickLower,
+                tickUpper: positionConfig.tickUpper,
+            };
+
+            const state: UniswapV3PositionState = {
+                ownerAddress: onChainState.ownerAddress,
+                operator: onChainState.operator,
+                liquidity: onChainState.liquidity,
+                feeGrowthInside0LastX128: onChainState.feeGrowthInside0LastX128,
+                feeGrowthInside1LastX128: onChainState.feeGrowthInside1LastX128,
+                tokensOwed0: onChainState.tokensOwed0,
+                tokensOwed1: onChainState.tokensOwed1,
+                unclaimedFees0: 0n,
+                unclaimedFees1: 0n,
+                tickLowerFeeGrowthOutside0X128: 0n,
+                tickLowerFeeGrowthOutside1X128: 0n,
+                tickUpperFeeGrowthOutside0X128: 0n,
+                tickUpperFeeGrowthOutside1X128: 0n,
+                isBurned: false,
+                isClosed: false,
+            };
+
+            // Get timestamp from first log for positionOpenedAt
+            const firstBlock = await client.getBlock({
+                blockNumber: firstLogBlockNumber,
+            });
+            const positionOpenedAt = new Date(
+                Number(firstBlock.timestamp) * 1000,
+            );
+
+            const position = await this.create(
+                {
+                    protocol: "uniswapv3",
+                    positionType: "CL_TICKS",
+                    userId,
+                    poolId: pool.id,
+                    isToken0Quote,
+                    positionOpenedAt,
+                    config,
+                    state,
+                },
+                this.serializeConfig(config) as Record<string, unknown>,
+                this.serializeState(state) as Record<string, unknown>,
+                dbTx,
+            );
+
+            this.logger.info(
+                { id: position.id, userId, chainId, nftId, poolId: pool.id },
+                "Position created, importing ledger events",
+            );
+
+            // g) Import logs via ledger service
+            const ledgerService = new UniswapV3LedgerService(
+                { positionId: position.id },
+                { prisma: this.prisma },
+            );
+            await ledgerService.importLogsForPosition(
+                position,
+                chainId,
+                logs,
+                this._poolPriceService,
+                dbTx,
+            );
+
+            // h) Call refresh()
+            const refreshedPosition = await this.refresh(position.id, "latest", dbTx);
+
+            this.logger.info(
+                {
+                    id: refreshedPosition.id,
+                    userId,
+                    chainId,
+                    nftId,
+                    logCount: logs.length,
+                },
+                "Position discovered and refreshed",
+            );
+
+            log.methodExit(this.logger, "discover", {
+                id: refreshedPosition.id,
+            });
+            return refreshedPosition;
+        } catch (error) {
+            log.methodError(this.logger, "discover", error as Error, {
+                userId,
+                chainId,
+                nftId,
+            });
+            throw error;
+        }
     }
 
     // ============================================================================
@@ -1115,6 +1313,134 @@ export class UniswapV3PositionService {
             }
             throw error;
         }
+    }
+
+    /**
+     * Fetch position configuration from on-chain data with caching
+     *
+     * Calls NFPM positions() to get token addresses, fee, and tick bounds.
+     * Then calls Factory getPool() to derive the pool address.
+     *
+     * Position config is immutable for a given NFT, so we cache aggressively.
+     * Cache key includes block number for consistency with other fetch methods.
+     *
+     * @param chainId - Chain ID
+     * @param nftId - NFT token ID
+     * @param blockNumber - Block number to fetch config at
+     * @returns Position config with poolAddress, tickLower, tickUpper, token0, token1, fee
+     * @throws Error if position doesn't exist at this block
+     * @throws Error if chain is not supported
+     */
+    private async fetchPositionConfig(
+        chainId: number,
+        nftId: bigint,
+        blockNumber: bigint,
+    ): Promise<{
+        poolAddress: string;
+        tickLower: number;
+        tickUpper: number;
+        token0: string;
+        token1: string;
+        fee: number;
+    }> {
+        // 1. Build cache key (position config is immutable, but key by block for consistency)
+        const cacheKey = `uniswapv3-position-config:${chainId}:${nftId}:${blockNumber}`;
+
+        // 2. Check cache
+        interface PositionConfigCached {
+            poolAddress: string;
+            tickLower: number;
+            tickUpper: number;
+            token0: string;
+            token1: string;
+            fee: number;
+        }
+        const cached =
+            await this._cacheService.get<PositionConfigCached>(cacheKey);
+        if (cached) {
+            this.logger.debug(
+                {
+                    chainId,
+                    nftId: nftId.toString(),
+                    blockNumber: blockNumber.toString(),
+                    cacheHit: true,
+                },
+                "Position config cache hit",
+            );
+            return cached;
+        }
+
+        // 3. Get public client for chain
+        const client = this._evmConfig.getPublicClient(chainId);
+
+        // 4. Get contract addresses
+        const positionManagerAddress = getPositionManagerAddress(chainId);
+        const factoryAddress = getFactoryAddress(chainId);
+
+        // 5. Call positions(nftId) to get token addresses, fee, and tick bounds
+        const positionData = await client.readContract({
+            address: positionManagerAddress,
+            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+            functionName: "positions",
+            args: [nftId],
+            blockNumber,
+        });
+
+        // positionData is a tuple: [nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity, ...]
+        const data = positionData as readonly [
+            bigint, // nonce
+            Address, // operator
+            Address, // token0
+            Address, // token1
+            number, // fee
+            number, // tickLower
+            number, // tickUpper
+            bigint, // liquidity
+            bigint, // feeGrowthInside0LastX128
+            bigint, // feeGrowthInside1LastX128
+            bigint, // tokensOwed0
+            bigint, // tokensOwed1
+        ];
+
+        const token0 = normalizeAddress(data[2]);
+        const token1 = normalizeAddress(data[3]);
+        const fee = data[4];
+        const tickLower = data[5];
+        const tickUpper = data[6];
+
+        // 6. Call factory.getPool(token0, token1, fee) to get pool address
+        const poolAddress = await client.readContract({
+            address: factoryAddress,
+            abi: UNISWAP_V3_FACTORY_ABI,
+            functionName: "getPool",
+            args: [token0 as Address, token1 as Address, fee],
+            blockNumber,
+        });
+
+        const result = {
+            poolAddress: normalizeAddress(poolAddress as Address),
+            tickLower,
+            tickUpper,
+            token0,
+            token1,
+            fee,
+        };
+
+        // 7. Cache with long TTL (position config is immutable)
+        await this._cacheService.set(cacheKey, result, 86400); // 24 hour TTL
+
+        this.logger.debug(
+            {
+                chainId,
+                nftId: nftId.toString(),
+                blockNumber: blockNumber.toString(),
+                ...result,
+                cacheHit: false,
+            },
+            "Fetched position config from on-chain and cached",
+        );
+
+        return result;
     }
 
     /**
@@ -2272,18 +2598,24 @@ export class UniswapV3PositionService {
      * use discover() which handles pool discovery, token role determination, and state fetching.
      *
      * @param input - Position data to create
+     * @param configDB - Serialized config for database storage
+     * @param stateDB - Serialized state for database storage
+     * @param dbTx - Optional Prisma transaction client
      * @returns The created position, or existing position if duplicate found
      */
     async create(
         input: CreateUniswapV3PositionInput,
         configDB: Record<string, unknown>,
         stateDB: Record<string, unknown>,
+        dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "create", {
             userId: input.userId,
             chainId: input.config.chainId,
             nftId: input.config.nftId,
         });
+
+        const db = dbTx ?? this.prisma;
 
         try {
             // Check for existing position by positionHash (fast indexed lookup)
@@ -2294,6 +2626,7 @@ export class UniswapV3PositionService {
             const existing = await this.findByPositionHash(
                 input.userId,
                 positionHash,
+                dbTx,
             );
 
             if (existing) {
@@ -2326,7 +2659,7 @@ export class UniswapV3PositionService {
                 positionHash,
             });
 
-            const result = await this.prisma.position.create({
+            const result = await db.position.create({
                 data: {
                     protocol: input.protocol,
                     positionType: input.positionType,
@@ -2635,16 +2968,20 @@ export class UniswapV3PositionService {
      *
      * @param userId - User ID (ensures user can only access their positions)
      * @param positionHash - Position hash (generated by createHash)
+     * @param dbTx - Optional Prisma transaction client
      * @returns Position if found, null otherwise
      */
     async findByPositionHash(
         userId: string,
         positionHash: string,
+        dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position | null> {
         log.methodEntry(this.logger, "findByPositionHash", {
             userId,
             positionHash,
         });
+
+        const db = dbTx ?? this.prisma;
 
         try {
             log.dbOperation(this.logger, "findFirst", "Position", {
@@ -2652,7 +2989,7 @@ export class UniswapV3PositionService {
                 positionHash,
             });
 
-            const result = await this.prisma.position.findFirst({
+            const result = await db.position.findFirst({
                 where: {
                     userId,
                     positionHash,

@@ -35,18 +35,13 @@ export interface UniswapV3PositionDiscoverInput {
   nftId: number;
 
   /**
-   * OPTIONAL: Address of the quote token (the token used as unit of account)
+   * Address of the quote token (the token used as unit of account)
    *
-   * If provided:
    * - Will be validated and normalized to EIP-55 checksum format
    * - Must match either token0 or token1 in the pool
    * - Service will use this address to determine isToken0Quote
-   *
-   * If omitted:
-   * - Quote token will be determined automatically using QuoteTokenService
-   * - Respects user preferences → chain defaults → token0 fallback
    */
-  quoteTokenAddress?: string;
+  quoteTokenAddress: string;
 }
 
 // =============================================================================
