@@ -48,6 +48,7 @@ export * from './services/types/auth/index.js';
 export * from './services/types/block/index.js';
 export * from './services/types/automation/index.js';
 export * from './services/types/notifications/index.js';
+export * from './services/types/position-apr/index.js';
 
 // Export domain events
 export * from './events/index.js';

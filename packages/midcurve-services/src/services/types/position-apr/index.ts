@@ -1,5 +1,5 @@
 /**
- * Position APR Input Types - Barrel Export
+ * Position APR Types Exports
  */
 
-export type { CreateAprPeriodInput, UpdateAprPeriodInput } from './position-apr-input.js';
+export type { AprPeriodData } from './apr-types.js';

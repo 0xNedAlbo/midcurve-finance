@@ -17,5 +17,7 @@ export {
   type DecodedLogData,
   // Import result types
   type LedgerAggregates,
-  type ImportLogResult,
 } from './uniswapv3-ledger-event-service.js';
+
+// Re-export APR types for backward compatibility
+export type { AprPeriodData } from '../types/position-apr/index.js';

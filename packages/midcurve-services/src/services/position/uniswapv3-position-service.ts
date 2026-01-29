@@ -43,7 +43,6 @@ import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import { EtherscanClient } from "../../clients/etherscan/index.js";
 import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token-service.js";
 import { EvmBlockService } from "../block/evm-block-service.js";
-import { PositionAprService } from "../position-apr/position-apr-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
 import {
     UniswapV3LedgerEventService,
@@ -54,7 +53,6 @@ import type { Address, PublicClient } from "viem";
 import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
 import { calculateUnclaimedFeeAmounts } from "@midcurve/shared";
-import { uniswapV3PoolAbi } from "../../utils/uniswapv3/pool-abi.js";
 import { calculateTokenValueInQuote } from "../../utils/uniswapv3/ledger-calculations.js";
 import { CacheService } from "../cache/cache-service.js";
 
@@ -246,12 +244,6 @@ export interface UniswapV3PositionServiceDependencies {
     evmBlockService?: EvmBlockService;
 
     /**
-     * Position APR service for APR period calculation
-     * If not provided, a new PositionAprService instance will be created
-     */
-    aprService?: PositionAprService;
-
-    /**
      * Pool price service for historic price discovery at ledger event blocks
      * If not provided, a new UniswapV3PoolPriceService instance will be created
      */
@@ -280,7 +272,6 @@ export class UniswapV3PositionService {
     private readonly _etherscanClient: EtherscanClient;
     private readonly _quoteTokenService: UniswapV3QuoteTokenService;
     private readonly _evmBlockService: EvmBlockService;
-    private readonly _aprService: PositionAprService;
     private readonly _poolPriceService: UniswapV3PoolPriceService;
     private readonly _cacheService: CacheService;
 
@@ -315,9 +306,6 @@ export class UniswapV3PositionService {
         this._evmBlockService =
             dependencies.evmBlockService ??
             new EvmBlockService({ evmConfig: this._evmConfig });
-        this._aprService =
-            dependencies.aprService ??
-            new PositionAprService({ prisma: this._prisma });
         this._poolPriceService =
             dependencies.poolPriceService ??
             new UniswapV3PoolPriceService({ prisma: this._prisma });
@@ -365,13 +353,6 @@ export class UniswapV3PositionService {
      */
     protected get evmBlockService(): EvmBlockService {
         return this._evmBlockService;
-    }
-
-    /**
-     * Get the APR service instance
-     */
-    protected get aprService(): PositionAprService {
-        return this._aprService;
     }
 
     /**
@@ -690,23 +671,16 @@ export class UniswapV3PositionService {
                 throw new Error(`Position not found: ${id}`);
             }
 
-            // 0.1 Early exit for burned or closed positions - no refresh needed
+            // 1. Early exit for burned positions - no refresh needed
             const currentState = position.typedState;
-            if (currentState.isBurned || currentState.isClosed) {
+            if (currentState.isBurned) {
                 this.logger.info(
-                    {
-                        id,
-                        isBurned: currentState.isBurned,
-                        isClosed: currentState.isClosed,
-                    },
-                    "Skipping refresh for burned/closed position",
+                    { id, isBurned: currentState.isBurned },
+                    "Skipping refresh for burned position",
                 );
                 log.methodExit(this.logger, "refresh", { id, skipped: true });
                 return position;
             }
-
-            // 1. Refresh pool state first (needed for fee calculations and metrics)
-            await this.poolService.refresh(position.pool.id, dbTx);
 
             // 2. Fetch on-chain position state (with caching) to get resolved block number
             // This ensures all refresh* methods read from the same block for consistency
@@ -719,55 +693,36 @@ export class UniswapV3PositionService {
 
             // 2.1 Handle burned NFT detected by fetchPositionState
             if (onChainState.isBurned) {
-                this.logger.info(
-                    { id, nftId: String(nftId), chainId },
-                    "NFT burned (detected by fetchPositionState) - updating state and refreshing metrics",
-                );
-
-                // Get last COLLECT event timestamp for positionClosedAt
-                const ledgerService = new UniswapV3LedgerEventService(
-                    { positionId: id },
-                    { prisma: this._prisma },
-                );
-                const lastCollect =
-                    await ledgerService.getLastCollectEvent(dbTx);
-                const closedAt =
-                    lastCollect?.timestamp ?? position.positionOpenedAt;
-
-                // Update closed state
-                await this.updateClosedState(id, true, true, closedAt, dbTx);
-
-                // Zero out on-chain state fields
-                await this.updateLiquidity(id, 0n, dbTx);
-                await this.updateFeeState(
+                const burnedPosition = await this.transitionToBurnedState(
                     id,
-                    {
-                        feeGrowthInside0LastX128: 0n,
-                        feeGrowthInside1LastX128: 0n,
-                        tokensOwed0: 0n,
-                        tokensOwed1: 0n,
-                        unclaimedFees0: 0n,
-                        unclaimedFees1: 0n,
-                        tickLowerFeeGrowthOutside0X128: 0n,
-                        tickLowerFeeGrowthOutside1X128: 0n,
-                        tickUpperFeeGrowthOutside0X128: 0n,
-                        tickUpperFeeGrowthOutside1X128: 0n,
-                    },
+                    position,
                     dbTx,
                 );
-
-                await this.refreshMetrics(id, dbTx);
-                const burnedPosition = await this.findById(id);
-                if (!burnedPosition) {
-                    throw new Error(
-                        `Position not found after burned refresh: ${id}`,
-                    );
-                }
                 log.methodExit(this.logger, "refresh", { id, burned: true });
                 return burnedPosition;
             }
 
-            // 2.2 Extract resolved block number for consistent state reads
+            // 2.2 Early exit for truly closed positions (no liquidity, no owed tokens)
+            if (
+                currentState.isClosed &&
+                onChainState.liquidity === 0n &&
+                onChainState.tokensOwed0 === 0n &&
+                onChainState.tokensOwed1 === 0n
+            ) {
+                this.logger.info(
+                    { id },
+                    "Position is closed and has no on-chain activity - skipping refresh",
+                );
+                log.methodExit(this.logger, "refresh", { id, skipped: true });
+                return position;
+            }
+
+            // 2.3 Handle reopened position (was closed but now has liquidity or owed tokens)
+            if (currentState.isClosed) {
+                await this.transitionFromClosedState(id, dbTx);
+            }
+
+            // 2.4 Extract resolved block number for consistent state reads
             const resolvedBlockNumber = Number(onChainState.blockNumber);
 
             // 3. Refresh owner address (may have been transferred)
@@ -805,8 +760,10 @@ export class UniswapV3PositionService {
                     { positionId: id },
                     { prisma: this._prisma },
                 );
-                const lastCollect =
-                    await ledgerService.getLastCollectEvent(dbTx);
+                const lastCollect = await ledgerService.fetchLastCollectEvent(
+                    "latest",
+                    dbTx,
+                );
                 const closedAt =
                     lastCollect?.timestamp ??
                     refreshedPosition.positionOpenedAt;
@@ -956,6 +913,7 @@ export class UniswapV3PositionService {
                     },
                     "Imported ledger events from logs",
                 );
+                // APR periods are persisted internally by the ledger service
             }
 
             // 8. Refresh position state from on-chain data
@@ -1274,6 +1232,190 @@ export class UniswapV3PositionService {
         return allLogs;
     }
 
+    /**
+     * Fetch position fee state from on-chain data
+     *
+     * Fetches fee-related fields from the positions() function and calculates
+     * unclaimed fees using the pool's fee growth values. Does not persist to database.
+     *
+     * @param id - Position database ID
+     * @param blockNumber - Block number to fetch state at, or 'latest' for current block
+     * @param tx - Optional Prisma transaction client
+     * @returns The calculated fee state (not persisted)
+     * @throws Error if position not found
+     * @throws Error if chain is not supported
+     * @throws Error if NFT doesn't exist (burned)
+     */
+    private async fetchFeeState(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<PositionFeeState> {
+        log.methodEntry(this.logger, "fetchFeeState", { id, blockNumber });
+
+        try {
+            // 1. Get existing position with pool
+            const existing = await this.findById(id);
+            if (!existing) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            const { chainId, nftId, poolAddress, tickLower, tickUpper } =
+                existing.typedConfig;
+
+            // 2. Fetch position state (uses cache if available) - this also resolves block number
+            const onChainState = await this.fetchPositionState(
+                chainId,
+                nftId,
+                blockNumber,
+            );
+
+            // Use the resolved block number for all subsequent fetches
+            const resolvedBlockNumber = onChainState.blockNumber;
+
+            // 3. Fetch pool state at the same block number
+            const poolState = await this.poolService.fetchPoolState(
+                chainId,
+                poolAddress,
+                Number(resolvedBlockNumber),
+            );
+            const {
+                currentTick,
+                feeGrowthGlobal0: feeGrowthGlobal0X128,
+                feeGrowthGlobal1: feeGrowthGlobal1X128,
+            } = poolState;
+
+            // 4. Fetch tick data (cached by pool service)
+            const [tickLowerData, tickUpperData] = await Promise.all([
+                this.poolService.fetchTickData(
+                    chainId,
+                    poolAddress,
+                    tickLower,
+                    Number(resolvedBlockNumber),
+                ),
+                this.poolService.fetchTickData(
+                    chainId,
+                    poolAddress,
+                    tickUpper,
+                    Number(resolvedBlockNumber),
+                ),
+            ]);
+
+            // Extract position data from cached state
+            const liquidity = onChainState.liquidity;
+            const feeGrowthInside0LastX128 =
+                onChainState.feeGrowthInside0LastX128;
+            const feeGrowthInside1LastX128 =
+                onChainState.feeGrowthInside1LastX128;
+            const tokensOwed0 = onChainState.tokensOwed0;
+            const tokensOwed1 = onChainState.tokensOwed1;
+
+            // Extract tick fee growth data
+            const tickLowerFeeGrowthOutside0X128 =
+                tickLowerData.feeGrowthOutside0X128;
+            const tickLowerFeeGrowthOutside1X128 =
+                tickLowerData.feeGrowthOutside1X128;
+            const tickUpperFeeGrowthOutside0X128 =
+                tickUpperData.feeGrowthOutside0X128;
+            const tickUpperFeeGrowthOutside1X128 =
+                tickUpperData.feeGrowthOutside1X128;
+
+            this.logger.debug(
+                {
+                    id,
+                    tickLower,
+                    tickUpper,
+                    tickLowerFeeGrowthOutside0X128:
+                        tickLowerFeeGrowthOutside0X128.toString(),
+                    tickLowerFeeGrowthOutside1X128:
+                        tickLowerFeeGrowthOutside1X128.toString(),
+                    tickUpperFeeGrowthOutside0X128:
+                        tickUpperFeeGrowthOutside0X128.toString(),
+                    tickUpperFeeGrowthOutside1X128:
+                        tickUpperFeeGrowthOutside1X128.toString(),
+                },
+                "Tick fee growth data fetched",
+            );
+
+            // 5. Get uncollected principal from ledger to calculate accurate unclaimed fees
+            // tokensOwed on-chain = uncollectedPrincipal (from decrease liquidity) + unclaimedFees
+            // So: unclaimedFees = tokensOwed - uncollectedPrincipal
+            const ledgerEventService = new UniswapV3LedgerEventService(
+                { positionId: id },
+                { prisma: this._prisma },
+            );
+            const { uncollectedPrincipal0, uncollectedPrincipal1 } =
+                await ledgerEventService.fetchUncollectedPrincipals(
+                    Number(resolvedBlockNumber),
+                    tx,
+                );
+
+            // 6. Calculate actual unclaimed fees using shared utility
+            // This accounts for both checkpointed fees (tokensOwed - principal) and
+            // incremental fees (uncheckpointed fee growth since last interaction)
+            const { unclaimedFees0, unclaimedFees1 } =
+                calculateUnclaimedFeeAmounts({
+                    liquidity,
+                    tickLower,
+                    tickUpper,
+                    feeGrowthInside0LastX128,
+                    feeGrowthInside1LastX128,
+                    tokensOwed0,
+                    tokensOwed1,
+                    tickLowerFeeGrowthOutside0X128,
+                    tickLowerFeeGrowthOutside1X128,
+                    tickUpperFeeGrowthOutside0X128,
+                    tickUpperFeeGrowthOutside1X128,
+                    currentTick,
+                    feeGrowthGlobal0X128,
+                    feeGrowthGlobal1X128,
+                    uncollectedPrincipal0,
+                    uncollectedPrincipal1,
+                });
+
+            this.logger.debug(
+                {
+                    id,
+                    liquidity: liquidity.toString(),
+                    currentTick,
+                    tokensOwed0: tokensOwed0.toString(),
+                    tokensOwed1: tokensOwed1.toString(),
+                    uncollectedPrincipal0: uncollectedPrincipal0.toString(),
+                    uncollectedPrincipal1: uncollectedPrincipal1.toString(),
+                    unclaimedFees0: unclaimedFees0.toString(),
+                    unclaimedFees1: unclaimedFees1.toString(),
+                },
+                "Calculated unclaimed fees with incremental fee growth",
+            );
+
+            // 7. Create and return fee state (no persistence)
+            const feeState: PositionFeeState = {
+                feeGrowthInside0LastX128,
+                feeGrowthInside1LastX128,
+                tokensOwed0,
+                tokensOwed1,
+                unclaimedFees0,
+                unclaimedFees1,
+                tickLowerFeeGrowthOutside0X128,
+                tickLowerFeeGrowthOutside1X128,
+                tickUpperFeeGrowthOutside0X128,
+                tickUpperFeeGrowthOutside1X128,
+            };
+
+            log.methodExit(this.logger, "fetchFeeState", { id });
+            return feeState;
+        } catch (error) {
+            if (
+                !(error instanceof Error && error.message.includes("not found"))
+            ) {
+                log.methodError(this.logger, "fetchFeeState", error as Error, {
+                    id,
+                });
+            }
+            throw error;
+        }
+    }
+
     // ============================================================================
     // GRANULAR STATE SETTERS
     // ============================================================================
@@ -1539,6 +1681,120 @@ export class UniswapV3PositionService {
             }
             throw error;
         }
+    }
+
+    /**
+     * Transition a position to burned state.
+     *
+     * Called when fetchPositionState detects the NFT has been burned.
+     * Updates all relevant state fields and refreshes metrics.
+     *
+     * @param id - Position database ID
+     * @param position - The position being transitioned
+     * @param tx - Optional Prisma transaction client
+     * @returns The updated position
+     */
+    private async transitionToBurnedState(
+        id: string,
+        position: UniswapV3Position,
+        tx?: PrismaTransactionClient,
+    ): Promise<UniswapV3Position> {
+        const { chainId, nftId } = position.typedConfig;
+
+        this.logger.info(
+            { id, nftId: String(nftId), chainId },
+            "NFT burned (detected by fetchPositionState) - updating state and refreshing metrics",
+        );
+
+        // Get last COLLECT event timestamp for positionClosedAt
+        const ledgerService = new UniswapV3LedgerEventService(
+            { positionId: id },
+            { prisma: this._prisma },
+        );
+        const lastCollect = await ledgerService.fetchLastCollectEvent(
+            "latest",
+            tx,
+        );
+        const closedAt = lastCollect?.timestamp ?? position.positionOpenedAt;
+
+        // Update closed state
+        await this.updateClosedState(id, true, true, closedAt, tx);
+
+        // Zero out on-chain state fields
+        await this.updateLiquidity(id, 0n, tx);
+        await this.updateFeeState(
+            id,
+            {
+                feeGrowthInside0LastX128: 0n,
+                feeGrowthInside1LastX128: 0n,
+                tokensOwed0: 0n,
+                tokensOwed1: 0n,
+                unclaimedFees0: 0n,
+                unclaimedFees1: 0n,
+                tickLowerFeeGrowthOutside0X128: 0n,
+                tickLowerFeeGrowthOutside1X128: 0n,
+                tickUpperFeeGrowthOutside0X128: 0n,
+                tickUpperFeeGrowthOutside1X128: 0n,
+            },
+            tx,
+        );
+
+        // Refresh metrics to recalculate position value
+        await this.refreshMetrics(id, tx);
+
+        // Return the updated position
+        const burnedPosition = await this.findById(id);
+        if (!burnedPosition) {
+            throw new Error(
+                `Position not found after burned transition: ${id}`,
+            );
+        }
+
+        return burnedPosition;
+    }
+
+    /**
+     * Transition a position from closed state back to active.
+     *
+     * Called when a position was marked as closed but on-chain state shows
+     * it has been reopened (has liquidity or owed tokens again).
+     *
+     * @param id - Position database ID
+     * @param tx - Optional Prisma transaction client
+     */
+    private async transitionFromClosedState(
+        id: string,
+        tx?: PrismaTransactionClient,
+    ): Promise<void> {
+        this.logger.info(
+            { id },
+            "Position reopened - transitioning from closed state",
+        );
+
+        const db = tx ?? this.prisma;
+
+        // Get existing position
+        const existing = await this.findById(id);
+        if (!existing) {
+            throw new Error(`Position not found: ${id}`);
+        }
+
+        // Update state to mark as not closed
+        const currentState = this.parseState(existing.state);
+        const updatedState: UniswapV3PositionState = {
+            ...currentState,
+            isClosed: false,
+        };
+
+        // Update position
+        await db.position.update({
+            where: { id },
+            data: {
+                state: this.serializeState(updatedState) as object,
+                isActive: true,
+                positionClosedAt: null,
+            },
+        });
     }
 
     /**
@@ -1812,8 +2068,7 @@ export class UniswapV3PositionService {
     /**
      * Refresh position fee state from on-chain data
      *
-     * Fetches fee-related fields from the positions() function and calculates
-     * unclaimed fees using the pool's fee growth values.
+     * Fetches fee state and persists to database.
      *
      * @param id - Position database ID
      * @param blockNumber - Block number to fetch state at, or 'latest' for current block
@@ -1831,211 +2086,17 @@ export class UniswapV3PositionService {
         log.methodEntry(this.logger, "refreshFeeState", { id, blockNumber });
 
         try {
-            // 1. Get existing position with pool
-            const existing = await this.findById(id);
-            if (!existing) {
-                throw new Error(`Position not found: ${id}`);
-            }
+            // 1. Fetch fee state from on-chain
+            const feeState = await this.fetchFeeState(id, blockNumber, tx);
 
-            const { chainId, nftId } = existing.typedConfig;
-
-            // 2. Get pool address and tick bounds from position config
-            const { poolAddress, tickLower, tickUpper } = existing.typedConfig;
-
-            // 3. Load pool state from database (already refreshed by caller)
-            const pool = await this.poolService.findById(existing.pool.id, tx);
-            if (!pool) {
-                throw new Error(`Pool not found: ${existing.pool.id}`);
-            }
-            const {
-                currentTick,
-                feeGrowthGlobal0: feeGrowthGlobal0X128,
-                feeGrowthGlobal1: feeGrowthGlobal1X128,
-            } = pool.typedState;
-
-            // 4. Fetch position data from cache and tick data in parallel
-            const client = this._evmConfig.getPublicClient(chainId);
-
-            // Fetch position state (uses cache if available) - this also resolves block number
-            const onChainState = await this.fetchPositionState(
-                chainId,
-                nftId,
-                blockNumber,
-            );
-
-            // Use the resolved block number from the cached state for tick data
-            const resolvedBlockNumber = onChainState.blockNumber;
-
-            // Fetch tick data (not cached, specific to pool)
-            const [tickLowerData, tickUpperData] = await Promise.all([
-                client.readContract({
-                    address: poolAddress as Address,
-                    abi: uniswapV3PoolAbi,
-                    functionName: "ticks",
-                    args: [tickLower],
-                    blockNumber: resolvedBlockNumber,
-                }) as Promise<
-                    readonly [
-                        bigint, // liquidityGross
-                        bigint, // liquidityNet (int128)
-                        bigint, // feeGrowthOutside0X128
-                        bigint, // feeGrowthOutside1X128
-                        bigint, // tickCumulativeOutside
-                        bigint, // secondsPerLiquidityOutsideX128
-                        number, // secondsOutside
-                        boolean, // initialized
-                    ]
-                >,
-                client.readContract({
-                    address: poolAddress as Address,
-                    abi: uniswapV3PoolAbi,
-                    functionName: "ticks",
-                    args: [tickUpper],
-                    blockNumber: resolvedBlockNumber,
-                }) as Promise<
-                    readonly [
-                        bigint, // liquidityGross
-                        bigint, // liquidityNet (int128)
-                        bigint, // feeGrowthOutside0X128
-                        bigint, // feeGrowthOutside1X128
-                        bigint, // tickCumulativeOutside
-                        bigint, // secondsPerLiquidityOutsideX128
-                        number, // secondsOutside
-                        boolean, // initialized
-                    ]
-                >,
-            ]);
-
-            // Extract position data from cached state
-            const liquidity = onChainState.liquidity;
-            const feeGrowthInside0LastX128 =
-                onChainState.feeGrowthInside0LastX128;
-            const feeGrowthInside1LastX128 =
-                onChainState.feeGrowthInside1LastX128;
-            const tokensOwed0 = onChainState.tokensOwed0;
-            const tokensOwed1 = onChainState.tokensOwed1;
-
-            // Extract tick fee growth data
-            const tickLowerFeeGrowthOutside0X128 = tickLowerData[2];
-            const tickLowerFeeGrowthOutside1X128 = tickLowerData[3];
-            const tickUpperFeeGrowthOutside0X128 = tickUpperData[2];
-            const tickUpperFeeGrowthOutside1X128 = tickUpperData[3];
-
-            this.logger.debug(
-                {
-                    id,
-                    tickLower,
-                    tickUpper,
-                    tickLowerFeeGrowthOutside0X128:
-                        tickLowerFeeGrowthOutside0X128.toString(),
-                    tickLowerFeeGrowthOutside1X128:
-                        tickLowerFeeGrowthOutside1X128.toString(),
-                    tickUpperFeeGrowthOutside0X128:
-                        tickUpperFeeGrowthOutside0X128.toString(),
-                    tickUpperFeeGrowthOutside1X128:
-                        tickUpperFeeGrowthOutside1X128.toString(),
-                },
-                "Tick fee growth data fetched",
-            );
-
-            // 7. Get uncollected principal from ledger to calculate accurate unclaimed fees
-            // tokensOwed on-chain = uncollectedPrincipal (from decrease liquidity) + unclaimedFees
-            // So: unclaimedFees = tokensOwed - uncollectedPrincipal
-            const ledgerEventService = new UniswapV3LedgerEventService(
-                { positionId: id },
-                { prisma: this._prisma },
-            );
-            const { aggregates, aprPeriods } =
-                await ledgerEventService.recalculateAggregates(
-                    existing.isToken0Quote,
-                    tx,
-                );
-            const { uncollectedPrincipal0, uncollectedPrincipal1 } = aggregates;
-
-            // Persist APR periods (calculated during recalculateAggregates for efficiency)
-            const prismaClient = tx ?? this._prisma;
-            await prismaClient.positionAprPeriod.deleteMany({
-                where: { positionId: id },
-            });
-            for (const period of aprPeriods) {
-                await prismaClient.positionAprPeriod.create({
-                    data: {
-                        positionId: id,
-                        startEventId: period.startEventId,
-                        endEventId: period.endEventId,
-                        startTimestamp: period.startTimestamp,
-                        endTimestamp: period.endTimestamp,
-                        durationSeconds: period.durationSeconds,
-                        costBasis: period.costBasis.toString(),
-                        collectedFeeValue: period.collectedFeeValue.toString(),
-                        aprBps: period.aprBps,
-                        eventCount: period.eventCount,
-                    },
-                });
-            }
-
-            // Calculate actual unclaimed fees using shared utility
-            // This accounts for both checkpointed fees (tokensOwed - principal) and
-            // incremental fees (uncheckpointed fee growth since last interaction)
-            const { unclaimedFees0, unclaimedFees1 } =
-                calculateUnclaimedFeeAmounts({
-                    liquidity,
-                    tickLower,
-                    tickUpper,
-                    feeGrowthInside0LastX128,
-                    feeGrowthInside1LastX128,
-                    tokensOwed0,
-                    tokensOwed1,
-                    tickLowerFeeGrowthOutside0X128,
-                    tickLowerFeeGrowthOutside1X128,
-                    tickUpperFeeGrowthOutside0X128,
-                    tickUpperFeeGrowthOutside1X128,
-                    currentTick,
-                    feeGrowthGlobal0X128,
-                    feeGrowthGlobal1X128,
-                    uncollectedPrincipal0,
-                    uncollectedPrincipal1,
-                });
-
-            this.logger.debug(
-                {
-                    id,
-                    liquidity: liquidity.toString(),
-                    currentTick,
-                    tokensOwed0: tokensOwed0.toString(),
-                    tokensOwed1: tokensOwed1.toString(),
-                    uncollectedPrincipal0: uncollectedPrincipal0.toString(),
-                    uncollectedPrincipal1: uncollectedPrincipal1.toString(),
-                    unclaimedFees0: unclaimedFees0.toString(),
-                    unclaimedFees1: unclaimedFees1.toString(),
-                },
-                "Calculated unclaimed fees with incremental fee growth",
-            );
-
-            // 8. Create fee state with tick data and accurate unclaimed fees
-            const feeState: PositionFeeState = {
-                feeGrowthInside0LastX128,
-                feeGrowthInside1LastX128,
-                tokensOwed0,
-                tokensOwed1,
-                unclaimedFees0,
-                unclaimedFees1,
-                tickLowerFeeGrowthOutside0X128,
-                tickLowerFeeGrowthOutside1X128,
-                tickUpperFeeGrowthOutside0X128,
-                tickUpperFeeGrowthOutside1X128,
-            };
-
-            // 9. Persist using setter
+            // 2. Persist to database
             await this.updateFeeState(id, feeState, tx);
 
             this.logger.info(
                 {
                     id,
-                    nftId,
-                    chainId,
-                    tokensOwed0: tokensOwed0.toString(),
-                    tokensOwed1: tokensOwed1.toString(),
+                    tokensOwed0: feeState.tokensOwed0.toString(),
+                    tokensOwed1: feeState.tokensOwed1.toString(),
                     unclaimedFees0: feeState.unclaimedFees0.toString(),
                     unclaimedFees1: feeState.unclaimedFees1.toString(),
                 },
@@ -2103,9 +2164,14 @@ export class UniswapV3PositionService {
                 { positionId: id },
                 { prisma: this._prisma },
             );
-            const latestEvent = await ledgerService.getLatestEvent(tx);
-            const lastCollectEvent =
-                await ledgerService.getLastCollectEvent(tx);
+            const latestEvent = await ledgerService.fetchLatestEvent(
+                "latest",
+                tx,
+            );
+            const lastCollectEvent = await ledgerService.fetchLastCollectEvent(
+                "latest",
+                tx,
+            );
 
             // Extract values from latest event (or use zeros if no events)
             const costBasis = latestEvent?.costBasisAfter ?? 0n;

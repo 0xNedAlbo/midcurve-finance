@@ -31,6 +31,8 @@ import {
     calculateDurationSeconds,
     calculateTimeWeightedCostBasis,
 } from "../../utils/apr/apr-calculations.js";
+import { UniswapV3AprService } from "../position-apr/uniswapv3-apr-service.js";
+import type { AprPeriodData } from "../types/position-apr/index.js";
 
 // ============================================================================
 // EVENT SIGNATURES
@@ -132,50 +134,7 @@ export interface LedgerAggregates {
     uncollectedPrincipal1: bigint;
 }
 
-/**
- * APR period data calculated during ledger event processing.
- * Ready for persistence to PositionAprPeriod table.
- */
-export interface AprPeriodData {
-    /** Event ID that started this period */
-    startEventId: string;
-    /** Event ID that ended this period (the COLLECT event) */
-    endEventId: string;
-    /** Timestamp when period started */
-    startTimestamp: Date;
-    /** Timestamp when period ended */
-    endTimestamp: Date;
-    /** Duration in seconds */
-    durationSeconds: number;
-    /** Time-weighted average cost basis during period (in quote token units) */
-    costBasis: bigint;
-    /** Total fees collected at end of period (in quote token units) */
-    collectedFeeValue: bigint;
-    /** Annual Percentage Rate in basis points (e.g., 2500 = 25%) */
-    aprBps: number;
-    /** Number of events in this period */
-    eventCount: number;
-}
-
-/**
- * Result of recalculating aggregates, including APR periods.
- * APR periods are calculated during the same event iteration for efficiency.
- */
-export interface RecalculateAggregatesResult {
-    /** Aggregated position metrics */
-    aggregates: LedgerAggregates;
-    /** APR periods bounded by COLLECT events (in chronological order) */
-    aprPeriods: AprPeriodData[];
-}
-
-/**
- * Result of importing a raw log event.
- * @deprecated Use ImportLogsResult with importLogsForPosition() instead
- */
-export type ImportLogResult =
-    | { action: "inserted"; inputHash: string; aggregates: LedgerAggregates }
-    | { action: "removed"; inputHash: string; aggregates: LedgerAggregates }
-    | { action: "skipped"; reason: "already_exists" | "invalid_event" };
+// AprPeriodData is imported from types/position-apr
 
 /**
  * Result for a single log import within a batch.
@@ -188,7 +147,8 @@ export type SingleLogResult =
 
 /**
  * Result of importing multiple raw log events.
- * Contains per-log results and the final aggregates after all events are processed.
+ * Contains per-log results and final aggregates after all events are processed.
+ * APR periods are persisted internally by the ledger service during import.
  */
 export interface ImportLogsResult {
     /** Results for each input log */
@@ -353,6 +313,12 @@ export interface UniswapV3LedgerEventServiceDependencies {
      * If not provided, a new PrismaClient instance will be created.
      */
     prisma?: PrismaClient;
+
+    /**
+     * APR service for APR period persistence.
+     * If not provided, a new UniswapV3AprService instance will be created.
+     */
+    aprService?: UniswapV3AprService;
 }
 
 /**
@@ -454,6 +420,7 @@ export interface CreateLedgerEventInput {
 export class UniswapV3LedgerEventService {
     protected readonly _prisma: PrismaClient;
     protected readonly logger: ServiceLogger;
+    private readonly _aprService: UniswapV3AprService;
     public readonly protocol = "uniswapv3" as const;
     public readonly positionId: string;
 
@@ -472,6 +439,12 @@ export class UniswapV3LedgerEventService {
         this.positionId = config.positionId;
         this._prisma = dependencies.prisma ?? new PrismaClient();
         this.logger = createServiceLogger("UniswapV3LedgerEventService");
+        this._aprService =
+            dependencies.aprService ??
+            new UniswapV3AprService(
+                { positionId: config.positionId },
+                { prisma: this._prisma },
+            );
     }
 
     /**
@@ -887,36 +860,33 @@ export class UniswapV3LedgerEventService {
     }
 
     /**
-     * Get the latest (most recent) ledger event for this position.
+     * Fetch the latest ledger event up to a specific block.
      *
-     * This is an alias for findLast() with a more explicit name.
-     * Returns the event with the most recent timestamp.
+     * Returns the most recent event where blockNumber <= specified block.
+     * The event contains all running totals (costBasisAfter, pnlAfter, etc.)
+     * making it sufficient for aggregate queries.
      *
+     * @param blockNumber - Block number limit (inclusive), or 'latest' for most recent
      * @param tx - Optional transaction client
-     * @returns The latest event, or null if no events exist
+     * @returns Latest event up to block, or null if no events exist
      */
-    async getLatestEvent(
+    async fetchLatestEvent(
+        blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
     ): Promise<UniswapV3PositionLedgerEvent | null> {
-        return this.findLast(tx);
-    }
+        // For 'latest', just use findLast
+        if (blockNumber === "latest") {
+            return this.findLast(tx);
+        }
 
-    /**
-     * Get the last COLLECT event for this position.
-     *
-     * Used to determine the timestamp of the most recent fee collection.
-     *
-     * @param tx - Optional transaction client
-     * @returns The last COLLECT event, or null if no COLLECT events exist
-     */
-    async getLastCollectEvent(
-        tx?: PrismaTransactionClient,
-    ): Promise<UniswapV3PositionLedgerEvent | null> {
         const db = tx ?? this.prisma;
         const result = await db.positionLedgerEvent.findFirst({
             where: {
                 positionId: this.positionId,
-                eventType: "COLLECT",
+                config: {
+                    path: ["blockNumber"],
+                    lte: blockNumber,
+                },
             },
             orderBy: [{ timestamp: "desc" }],
         });
@@ -931,44 +901,120 @@ export class UniswapV3LedgerEventService {
     }
 
     /**
-     * Recalculate aggregates from all events for this position.
+     * Fetch the last COLLECT event up to a specific block.
      *
-     * Iterates through ALL events in blockchain order (blockNumber ASC, logIndex ASC),
-     * recalculating deltas and running totals based on the correct previous state.
-     * Updates each event in the database with corrected values.
+     * Used to determine the timestamp of the most recent fee collection
+     * for APR calculations.
      *
-     * This is the core method for fixing out-of-order event imports and reorg handling.
+     * @param blockNumber - Block number limit (inclusive), or 'latest' for most recent
+     * @param tx - Optional transaction client
+     * @returns Last COLLECT event up to block, or null if none exist
+     */
+    async fetchLastCollectEvent(
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<UniswapV3PositionLedgerEvent | null> {
+        const db = tx ?? this.prisma;
+
+        // Build where clause
+        const whereClause: {
+            positionId: string;
+            eventType: string;
+            config?: { path: string[]; lte: number };
+        } = {
+            positionId: this.positionId,
+            eventType: "COLLECT",
+        };
+
+        // Filter by block number if specified
+        if (blockNumber !== "latest") {
+            whereClause.config = {
+                path: ["blockNumber"],
+                lte: blockNumber,
+            };
+        }
+
+        const result = await db.positionLedgerEvent.findFirst({
+            where: whereClause,
+            orderBy: [{ timestamp: "desc" }],
+        });
+
+        if (!result) {
+            return null;
+        }
+
+        return UniswapV3PositionLedgerEvent.fromDB(
+            result as unknown as UniswapV3PositionLedgerEventRow,
+        );
+    }
+
+    /**
+     * Fetch uncollected principal amounts up to a specific block.
      *
-     * Also calculates APR periods during the same iteration for efficiency.
-     * APR periods are bounded by COLLECT events.
+     * Returns the uncollectedPrincipal0After and uncollectedPrincipal1After
+     * from the latest event. These represent tokens from DECREASE_LIQUIDITY
+     * that haven't been collected yet.
+     *
+     * @param blockNumber - Block number limit (inclusive), or 'latest' for current
+     * @param tx - Optional transaction client
+     * @returns Uncollected principal amounts, or { 0n, 0n } if no events
+     */
+    async fetchUncollectedPrincipals(
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<{ uncollectedPrincipal0: bigint; uncollectedPrincipal1: bigint }> {
+        const latestEvent = await this.fetchLatestEvent(blockNumber, tx);
+
+        if (!latestEvent) {
+            return { uncollectedPrincipal0: 0n, uncollectedPrincipal1: 0n };
+        }
+
+        return {
+            uncollectedPrincipal0: latestEvent.typedConfig.uncollectedPrincipal0After,
+            uncollectedPrincipal1: latestEvent.typedConfig.uncollectedPrincipal1After,
+        };
+    }
+
+    /**
+     * Recalculate and persist aggregates for all events.
+     *
+     * Iterates through events in blockchain order (blockNumber ASC, logIndex ASC),
+     * recalculating deltas and running totals based on the correct previous state,
+     * and persisting the corrected values to each event in the database.
+     *
+     * This method is called after importing events to ensure correct running totals.
+     * It also calculates APR periods during the same iteration for efficiency.
+     *
+     * For point-in-time aggregate queries, use fetchLatestEvent(blockNumber) instead -
+     * the latest event contains all running totals (costBasisAfter, pnlAfter, etc.).
      *
      * @param isToken0Quote - Whether token0 is the quote token (needed for fee value calculations)
      * @param tx - Optional transaction client
-     * @returns Aggregated metrics and APR periods after recalculating all events
+     * @returns Aggregated metrics after updating events
      */
-    async recalculateAggregates(
+    private async recalculateAggregates(
         isToken0Quote: boolean,
         tx?: PrismaTransactionClient,
-    ): Promise<RecalculateAggregatesResult> {
+    ): Promise<LedgerAggregates> {
         const events = await this.findAll(tx);
 
         if (events.length === 0) {
             return {
-                aggregates: {
-                    liquidityAfter: 0n,
-                    costBasisAfter: 0n,
-                    realizedPnlAfter: 0n,
-                    collectedFeesAfter: 0n,
-                    realizedCashflowAfter: 0n,
-                    uncollectedPrincipal0: 0n,
-                    uncollectedPrincipal1: 0n,
-                },
-                aprPeriods: [],
+                liquidityAfter: 0n,
+                costBasisAfter: 0n,
+                realizedPnlAfter: 0n,
+                collectedFeesAfter: 0n,
+                realizedCashflowAfter: 0n,
+                uncollectedPrincipal0: 0n,
+                uncollectedPrincipal1: 0n,
             };
         }
 
         // Sort events by blockchain coordinates (blockNumber ASC, logIndex ASC)
         UniswapV3LedgerEventService.sortByBlockchainCoordinates(events);
+
+        // Delete existing APR periods before recalculating
+        await this._aprService.deleteAllAprPeriods(tx);
 
         // Initialize running totals
         let liquidityAfter = 0n;
@@ -980,7 +1026,6 @@ export class UniswapV3LedgerEventService {
         let previousEventId: string | null = null;
 
         // APR period tracking
-        const aprPeriods: AprPeriodData[] = [];
         let periodStartTimestamp: Date | null = null;
         let periodStartEventId: string | null = null;
         let periodCostBasisSnapshots: Array<{
@@ -1134,7 +1179,7 @@ export class UniswapV3LedgerEventService {
                                   )
                                 : 0;
 
-                        aprPeriods.push({
+                        const aprPeriod: AprPeriodData = {
                             startEventId: periodStartEventId!,
                             endEventId: event.id,
                             startTimestamp: periodStartTimestamp,
@@ -1144,7 +1189,10 @@ export class UniswapV3LedgerEventService {
                             collectedFeeValue: deltaCollectedFees,
                             aprBps,
                             eventCount: periodEventCount,
-                        });
+                        };
+
+                        // Persist immediately
+                        await this._aprService.persistAprPeriod(aprPeriod, tx);
                     } catch (e) {
                         // Skip invalid periods (e.g., zero duration, same timestamps)
                         this.logger.warn(
@@ -1190,16 +1238,13 @@ export class UniswapV3LedgerEventService {
         }
 
         return {
-            aggregates: {
-                liquidityAfter,
-                costBasisAfter,
-                realizedPnlAfter: pnlAfter,
-                collectedFeesAfter,
-                realizedCashflowAfter: 0n, // Always 0 for AMM positions
-                uncollectedPrincipal0: uncollectedPrincipal0After,
-                uncollectedPrincipal1: uncollectedPrincipal1After,
-            },
-            aprPeriods,
+            liquidityAfter,
+            costBasisAfter,
+            realizedPnlAfter: pnlAfter,
+            collectedFeesAfter,
+            realizedCashflowAfter: 0n, // Always 0 for AMM positions
+            uncollectedPrincipal0: uncollectedPrincipal0After,
+            uncollectedPrincipal1: uncollectedPrincipal1After,
         };
     }
 
@@ -1245,8 +1290,8 @@ export class UniswapV3LedgerEventService {
         }
 
         // Recalculate all aggregates to ensure correct running totals
-        // (also calculates APR periods which caller can optionally persist)
-        const { aggregates } = await this.recalculateAggregates(
+        // APR periods are persisted internally during recalculation
+        const aggregates = await this.recalculateAggregates(
             position.isToken0Quote,
             tx,
         );
@@ -1483,60 +1528,4 @@ export class UniswapV3LedgerEventService {
         return { action: "inserted", inputHash };
     }
 
-    /**
-     * Import a raw log event into the ledger database.
-     *
-     * @deprecated Use importLogsForPosition() instead for better performance and
-     * correct handling of out-of-order events.
-     *
-     * Actions:
-     * - If `removed=true`: Deletes events from the affected block, recalculates aggregates
-     * - If event already exists: Returns 'skipped'
-     * - Otherwise: Creates ledger event with calculated deltas/after values
-     *
-     * The pool price is fetched from the pool price service at the event's block number.
-     * This ensures reorg-safe price lookups and proper timestamp extraction.
-     *
-     * @param position - UniswapV3Position (provides pool, tokens, isToken0Quote)
-     * @param chainId - EVM chain ID
-     * @param log - Raw log data from eth_getLogs or eth_subscribe
-     * @param poolPriceService - Pool price service for discovering prices at specific blocks
-     * @param tx - Optional Prisma transaction client
-     * @returns Import result with aggregates (or skip reason)
-     */
-    async importLogForPosition(
-        position: UniswapV3Position,
-        chainId: number,
-        log: RawLogInput,
-        poolPriceService: UniswapV3PoolPriceService,
-        tx?: PrismaTransactionClient,
-    ): Promise<ImportLogResult> {
-        // Delegate to the batch method with a single log
-        const { results, aggregates } = await this.importLogsForPosition(
-            position,
-            chainId,
-            [log],
-            poolPriceService,
-            tx,
-        );
-
-        const result = results[0]!;
-
-        // Convert SingleLogResult to ImportLogResult (add aggregates)
-        if (result.action === "skipped") {
-            return result;
-        } else if (result.action === "removed") {
-            return {
-                action: "removed",
-                inputHash: result.inputHash,
-                aggregates,
-            };
-        } else {
-            return {
-                action: "inserted",
-                inputHash: result.inputHash,
-                aggregates,
-            };
-        }
-    }
 }

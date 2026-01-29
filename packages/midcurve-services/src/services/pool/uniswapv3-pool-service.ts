@@ -104,6 +104,46 @@ function deserializePoolState(cached: OnChainPoolStateCached): OnChainPoolState 
   };
 }
 
+/**
+ * On-chain tick data from Uniswap V3 pool contract ticks() function
+ */
+export interface OnChainTickData {
+  /** Block number when this data was fetched */
+  blockNumber: bigint;
+  /** The tick index */
+  tick: number;
+  /** Fee growth outside this tick for token0 */
+  feeGrowthOutside0X128: bigint;
+  /** Fee growth outside this tick for token1 */
+  feeGrowthOutside1X128: bigint;
+}
+
+/** Serialized version for cache (bigints as strings) */
+interface OnChainTickDataCached {
+  blockNumber: string;
+  tick: number;
+  feeGrowthOutside0X128: string;
+  feeGrowthOutside1X128: string;
+}
+
+function serializeTickData(data: OnChainTickData): OnChainTickDataCached {
+  return {
+    blockNumber: data.blockNumber.toString(),
+    tick: data.tick,
+    feeGrowthOutside0X128: data.feeGrowthOutside0X128.toString(),
+    feeGrowthOutside1X128: data.feeGrowthOutside1X128.toString(),
+  };
+}
+
+function deserializeTickData(cached: OnChainTickDataCached): OnChainTickData {
+  return {
+    blockNumber: BigInt(cached.blockNumber),
+    tick: cached.tick,
+    feeGrowthOutside0X128: BigInt(cached.feeGrowthOutside0X128),
+    feeGrowthOutside1X128: BigInt(cached.feeGrowthOutside1X128),
+  };
+}
+
 // Re-export PrismaTransactionClient for backwards compatibility
 // The canonical location is now clients/prisma/index.ts
 export type { PrismaTransactionClient } from '../../clients/prisma/index.js';
@@ -538,6 +578,127 @@ export class UniswapV3PoolService implements PoolServiceInterface {
   }
 
   /**
+   * Fetch tick data from on-chain with caching
+   *
+   * Fetches feeGrowthOutside0X128 and feeGrowthOutside1X128 for a specific tick.
+   * Results are cached by chainId/poolAddress/tick/blockNumber with 24h TTL.
+   *
+   * @param chainId - Chain ID
+   * @param poolAddress - Pool contract address
+   * @param tick - Tick index to fetch
+   * @param blockNumber - Block number to fetch state at, or 'latest' for current block
+   * @returns On-chain tick data with fee growth values
+   * @throws Error if chain not supported or RPC fails
+   */
+  async fetchTickData(
+    chainId: number,
+    poolAddress: string,
+    tick: number,
+    blockNumber: number | 'latest' = 'latest',
+  ): Promise<OnChainTickData> {
+    log.methodEntry(this.logger, 'fetchTickData', { chainId, poolAddress, tick, blockNumber });
+
+    // 1. Validate and normalize address
+    if (!isValidAddress(poolAddress)) {
+      const error = new Error(`Invalid pool address format: ${poolAddress}`);
+      log.methodError(this.logger, 'fetchTickData', error, { poolAddress, chainId });
+      throw error;
+    }
+    const normalizedAddress = normalizeAddress(poolAddress);
+
+    // 2. Verify chain is supported
+    if (!this.evmConfig.isChainSupported(chainId)) {
+      const error = new Error(
+        `Chain ${chainId} is not configured. Supported chains: ${this.evmConfig
+          .getSupportedChainIds()
+          .join(', ')}`
+      );
+      log.methodError(this.logger, 'fetchTickData', error, { chainId });
+      throw error;
+    }
+
+    // 3. Resolve block number (fetch if 'latest')
+    const resolvedBlockNumber =
+      blockNumber === 'latest'
+        ? await this._evmBlockService.getCurrentBlockNumber(chainId)
+        : BigInt(blockNumber);
+
+    // 4. Build cache key (includes tick and block number)
+    const cacheKey = `uniswapv3-tick:${chainId}:${normalizedAddress}:${tick}:${resolvedBlockNumber}`;
+
+    // 5. Check cache
+    const cached = await this._cacheService.get<OnChainTickDataCached>(cacheKey);
+    if (cached) {
+      this.logger.debug(
+        {
+          chainId,
+          poolAddress: normalizedAddress,
+          tick,
+          blockNumber: resolvedBlockNumber.toString(),
+          cacheHit: true,
+        },
+        'Tick data cache hit'
+      );
+      log.methodExit(this.logger, 'fetchTickData', { cacheHit: true });
+      return deserializeTickData(cached);
+    }
+
+    // 6. Cache miss - fetch from chain
+    const client = this.evmConfig.getPublicClient(chainId);
+
+    this.logger.debug(
+      { poolAddress: normalizedAddress, chainId, tick, blockNumber: resolvedBlockNumber.toString() },
+      'Fetching tick data from contract'
+    );
+
+    const tickData = await client.readContract({
+      address: normalizedAddress as `0x${string}`,
+      abi: uniswapV3PoolAbi,
+      functionName: 'ticks',
+      args: [tick],
+      blockNumber: resolvedBlockNumber,
+    }) as readonly [
+      bigint, // liquidityGross
+      bigint, // liquidityNet (int128)
+      bigint, // feeGrowthOutside0X128
+      bigint, // feeGrowthOutside1X128
+      bigint, // tickCumulativeOutside
+      bigint, // secondsPerLiquidityOutsideX128
+      number, // secondsOutside
+      boolean, // initialized
+    ];
+
+    // 7. Build result (only extract the fee growth values we need)
+    const result: OnChainTickData = {
+      blockNumber: resolvedBlockNumber,
+      tick,
+      feeGrowthOutside0X128: tickData[2],
+      feeGrowthOutside1X128: tickData[3],
+    };
+
+    // 8. Cache with 24h TTL
+    await this._cacheService.set(
+      cacheKey,
+      serializeTickData(result),
+      POOL_STATE_CACHE_TTL_SECONDS
+    );
+
+    this.logger.debug(
+      {
+        chainId,
+        poolAddress: normalizedAddress,
+        tick,
+        blockNumber: resolvedBlockNumber.toString(),
+        cacheHit: false,
+      },
+      'Tick data fetched and cached'
+    );
+
+    log.methodExit(this.logger, 'fetchTickData', { cacheHit: false });
+    return result;
+  }
+
+  /**
    * Fetch pool configuration from a Uniswap V3 pool contract
    *
    * Uses viem's multicall to fetch immutable pool parameters (token0, token1, fee, tickSpacing)
@@ -775,7 +936,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         );
 
         // Refresh pool state to get current price/liquidity/tick
-        const refreshed = await this.refresh(existing.id, tx);
+        const refreshed = await this.refresh(existing.id, "latest", tx);
 
         log.methodExit(this.logger, 'discover', {
           id: refreshed.id,
@@ -1605,6 +1766,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * Config fields (address, token addresses, fee, tickSpacing) are immutable and not updated.
    *
    * @param id - Pool ID
+   * @param blockNumber - Block number to fetch state at, or 'latest' for current block
    * @param tx - Optional Prisma transaction client for batching operations
    * @returns Updated pool with fresh on-chain state and full Token objects
    * @throws Error if pool not found
@@ -1612,8 +1774,12 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * @throws Error if chain is not supported
    * @throws Error if on-chain read fails
    */
-  async refresh(id: string, tx?: PrismaTransactionClient): Promise<UniswapV3Pool> {
-    log.methodEntry(this.logger, 'refresh', { id, inTransaction: !!tx });
+  async refresh(
+    id: string,
+    blockNumber: number | "latest" = "latest",
+    tx?: PrismaTransactionClient,
+  ): Promise<UniswapV3Pool> {
+    log.methodEntry(this.logger, 'refresh', { id, blockNumber, inTransaction: !!tx });
 
     try {
       // 1. Get existing pool to get address and chainId
@@ -1628,7 +1794,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       const onChainState = await this.fetchPoolState(
         existing.chainId,
         existing.address,
-        'latest'
+        blockNumber,
       );
 
       // 3. Extract resolved block number for consistency

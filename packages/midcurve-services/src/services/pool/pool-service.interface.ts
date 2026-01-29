@@ -69,8 +69,16 @@ export interface PoolServiceInterface {
   /**
    * Refresh pool state from on-chain data
    * Implementation is protocol-specific
+   *
+   * @param id - Pool database ID
+   * @param blockNumber - Block number to fetch state at, or 'latest' for current block
+   * @param tx - Optional transaction client
    */
-  refresh(id: string, tx?: PrismaTransactionClient): Promise<PoolInterface>;
+  refresh(
+    id: string,
+    blockNumber?: number | 'latest',
+    tx?: PrismaTransactionClient,
+  ): Promise<PoolInterface>;
 
   /**
    * Create a pool hash from raw parameters
