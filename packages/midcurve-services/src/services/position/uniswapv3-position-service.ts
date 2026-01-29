@@ -2071,9 +2071,31 @@ export class UniswapV3PositionService {
                 { positionId: id },
                 { prisma: this._prisma },
             );
-            const aggregates =
+            const { aggregates, aprPeriods } =
                 await ledgerEventService.recalculateAggregates(existing.isToken0Quote, tx);
             const { uncollectedPrincipal0, uncollectedPrincipal1 } = aggregates;
+
+            // Persist APR periods (calculated during recalculateAggregates for efficiency)
+            const prismaClient = tx ?? this._prisma;
+            await prismaClient.positionAprPeriod.deleteMany({
+                where: { positionId: id },
+            });
+            for (const period of aprPeriods) {
+                await prismaClient.positionAprPeriod.create({
+                    data: {
+                        positionId: id,
+                        startEventId: period.startEventId,
+                        endEventId: period.endEventId,
+                        startTimestamp: period.startTimestamp,
+                        endTimestamp: period.endTimestamp,
+                        durationSeconds: period.durationSeconds,
+                        costBasis: period.costBasis.toString(),
+                        collectedFeeValue: period.collectedFeeValue.toString(),
+                        aprBps: period.aprBps,
+                        eventCount: period.eventCount,
+                    },
+                });
+            }
 
             // Calculate actual unclaimed fees using shared utility
             // This accounts for both checkpointed fees (tokensOwed - principal) and

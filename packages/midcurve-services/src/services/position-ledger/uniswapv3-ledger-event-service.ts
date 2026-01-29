@@ -26,6 +26,11 @@ import { createServiceLogger } from "../../logging/index.js";
 import type { ServiceLogger } from "../../logging/index.js";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import type { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
+import {
+    calculateAprBps,
+    calculateDurationSeconds,
+    calculateTimeWeightedCostBasis,
+} from "../../utils/apr/apr-calculations.js";
 
 // ============================================================================
 // EVENT SIGNATURES
@@ -125,6 +130,42 @@ export interface LedgerAggregates {
     uncollectedPrincipal0: bigint;
     /** Uncollected principal in token1 (from decrease liquidity, awaiting collect) */
     uncollectedPrincipal1: bigint;
+}
+
+/**
+ * APR period data calculated during ledger event processing.
+ * Ready for persistence to PositionAprPeriod table.
+ */
+export interface AprPeriodData {
+    /** Event ID that started this period */
+    startEventId: string;
+    /** Event ID that ended this period (the COLLECT event) */
+    endEventId: string;
+    /** Timestamp when period started */
+    startTimestamp: Date;
+    /** Timestamp when period ended */
+    endTimestamp: Date;
+    /** Duration in seconds */
+    durationSeconds: number;
+    /** Time-weighted average cost basis during period (in quote token units) */
+    costBasis: bigint;
+    /** Total fees collected at end of period (in quote token units) */
+    collectedFeeValue: bigint;
+    /** Annual Percentage Rate in basis points (e.g., 2500 = 25%) */
+    aprBps: number;
+    /** Number of events in this period */
+    eventCount: number;
+}
+
+/**
+ * Result of recalculating aggregates, including APR periods.
+ * APR periods are calculated during the same event iteration for efficiency.
+ */
+export interface RecalculateAggregatesResult {
+    /** Aggregated position metrics */
+    aggregates: LedgerAggregates;
+    /** APR periods bounded by COLLECT events (in chronological order) */
+    aprPeriods: AprPeriodData[];
 }
 
 /**
@@ -898,25 +939,31 @@ export class UniswapV3LedgerEventService {
      *
      * This is the core method for fixing out-of-order event imports and reorg handling.
      *
+     * Also calculates APR periods during the same iteration for efficiency.
+     * APR periods are bounded by COLLECT events.
+     *
      * @param isToken0Quote - Whether token0 is the quote token (needed for fee value calculations)
      * @param tx - Optional transaction client
-     * @returns Aggregated metrics after recalculating all events
+     * @returns Aggregated metrics and APR periods after recalculating all events
      */
     async recalculateAggregates(
         isToken0Quote: boolean,
         tx?: PrismaTransactionClient,
-    ): Promise<LedgerAggregates> {
+    ): Promise<RecalculateAggregatesResult> {
         const events = await this.findAll(tx);
 
         if (events.length === 0) {
             return {
-                liquidityAfter: 0n,
-                costBasisAfter: 0n,
-                realizedPnlAfter: 0n,
-                collectedFeesAfter: 0n,
-                realizedCashflowAfter: 0n,
-                uncollectedPrincipal0: 0n,
-                uncollectedPrincipal1: 0n,
+                aggregates: {
+                    liquidityAfter: 0n,
+                    costBasisAfter: 0n,
+                    realizedPnlAfter: 0n,
+                    collectedFeesAfter: 0n,
+                    realizedCashflowAfter: 0n,
+                    uncollectedPrincipal0: 0n,
+                    uncollectedPrincipal1: 0n,
+                },
+                aprPeriods: [],
             };
         }
 
@@ -931,6 +978,16 @@ export class UniswapV3LedgerEventService {
         let uncollectedPrincipal0After = 0n;
         let uncollectedPrincipal1After = 0n;
         let previousEventId: string | null = null;
+
+        // APR period tracking
+        const aprPeriods: AprPeriodData[] = [];
+        let periodStartTimestamp: Date | null = null;
+        let periodStartEventId: string | null = null;
+        let periodCostBasisSnapshots: Array<{
+            timestamp: Date;
+            costBasisAfter: bigint;
+        }> = [];
+        let periodEventCount = 0;
 
         // Process events in order, recalculating deltas and running totals
         for (const event of events) {
@@ -1033,7 +1090,82 @@ export class UniswapV3LedgerEventService {
                     previousUncollectedPrincipal1 - principal1Collected;
             }
 
+            // ================================================================
+            // APR Period Tracking
+            // ================================================================
+
+            // Initialize period on first event
+            if (periodStartTimestamp === null) {
+                periodStartTimestamp = event.timestamp;
+                periodStartEventId = event.id;
+            }
+
+            // Track cost basis snapshot for time-weighted calculation
+            periodCostBasisSnapshots.push({
+                timestamp: event.timestamp,
+                costBasisAfter: costBasisAfter,
+            });
+            periodEventCount++;
+
+            // COLLECT event ends the current APR period
+            if (state.eventType === "COLLECT") {
+                // Only create period if we have meaningful data (at least 2 snapshots for duration)
+                if (
+                    periodStartTimestamp &&
+                    periodCostBasisSnapshots.length >= 2
+                ) {
+                    try {
+                        const timeWeightedCostBasis =
+                            calculateTimeWeightedCostBasis(
+                                periodCostBasisSnapshots,
+                            );
+                        const durationSeconds = calculateDurationSeconds(
+                            periodStartTimestamp,
+                            event.timestamp,
+                        );
+
+                        // Calculate APR if we have valid cost basis and duration
+                        const aprBps =
+                            durationSeconds > 0 && timeWeightedCostBasis > 0n
+                                ? calculateAprBps(
+                                      deltaCollectedFees,
+                                      timeWeightedCostBasis,
+                                      durationSeconds,
+                                  )
+                                : 0;
+
+                        aprPeriods.push({
+                            startEventId: periodStartEventId!,
+                            endEventId: event.id,
+                            startTimestamp: periodStartTimestamp,
+                            endTimestamp: event.timestamp,
+                            durationSeconds,
+                            costBasis: timeWeightedCostBasis,
+                            collectedFeeValue: deltaCollectedFees,
+                            aprBps,
+                            eventCount: periodEventCount,
+                        });
+                    } catch (e) {
+                        // Skip invalid periods (e.g., zero duration, same timestamps)
+                        this.logger.warn(
+                            { error: e },
+                            "Skipping invalid APR period",
+                        );
+                    }
+                }
+
+                // Reset for next period - COLLECT ends this period, next event starts new one
+                periodStartTimestamp = event.timestamp;
+                periodStartEventId = event.id;
+                periodCostBasisSnapshots = [
+                    { timestamp: event.timestamp, costBasisAfter },
+                ];
+                periodEventCount = 0;
+            }
+
+            // ================================================================
             // Update event in database with corrected values
+            // ================================================================
             await this.updateEventAggregates(
                 event.id,
                 config,
@@ -1058,13 +1190,16 @@ export class UniswapV3LedgerEventService {
         }
 
         return {
-            liquidityAfter,
-            costBasisAfter,
-            realizedPnlAfter: pnlAfter,
-            collectedFeesAfter,
-            realizedCashflowAfter: 0n, // Always 0 for AMM positions
-            uncollectedPrincipal0: uncollectedPrincipal0After,
-            uncollectedPrincipal1: uncollectedPrincipal1After,
+            aggregates: {
+                liquidityAfter,
+                costBasisAfter,
+                realizedPnlAfter: pnlAfter,
+                collectedFeesAfter,
+                realizedCashflowAfter: 0n, // Always 0 for AMM positions
+                uncollectedPrincipal0: uncollectedPrincipal0After,
+                uncollectedPrincipal1: uncollectedPrincipal1After,
+            },
+            aprPeriods,
         };
     }
 
@@ -1110,7 +1245,8 @@ export class UniswapV3LedgerEventService {
         }
 
         // Recalculate all aggregates to ensure correct running totals
-        const aggregates = await this.recalculateAggregates(
+        // (also calculates APR periods which caller can optionally persist)
+        const { aggregates } = await this.recalculateAggregates(
             position.isToken0Quote,
             tx,
         );
