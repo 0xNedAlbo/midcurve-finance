@@ -18,6 +18,7 @@ import {
   UpdatePositionOnLiquidityEventRule,
   type BusinessRuleStatus,
 } from '../rules';
+import { getSchedulerService, type SchedulerStatus } from '../scheduler';
 
 const log = businessLogicLogger.child({ component: 'RuleManager' });
 
@@ -30,6 +31,7 @@ export interface RuleManagerStatus {
   rabbitmq: {
     isConnected: boolean;
   };
+  scheduler: SchedulerStatus;
 }
 
 /**
@@ -69,7 +71,12 @@ export class RuleManager {
     ruleLog.workerLifecycle(log, 'RuleManager', 'starting');
 
     try {
-      // Connect to RabbitMQ first (this also sets up topology)
+      // Start scheduler service first (rules may register schedules during startup)
+      log.info({ msg: 'Starting scheduler service...' });
+      const scheduler = getSchedulerService();
+      scheduler.start();
+
+      // Connect to RabbitMQ (this also sets up topology)
       log.info({ msg: 'Connecting to RabbitMQ...' });
       const mq = getRabbitMQConnection();
       const channel = await mq.getChannel();
@@ -103,9 +110,14 @@ export class RuleManager {
     ruleLog.workerLifecycle(log, 'RuleManager', 'stopping');
 
     try {
-      // Stop all rules first
+      // Stop all rules first (this unregisters their schedules)
       log.info({ msg: 'Stopping all rules...' });
       await this.registry.stopAll();
+
+      // Stop scheduler service (cleanup any remaining tasks)
+      log.info({ msg: 'Stopping scheduler service...' });
+      const scheduler = getSchedulerService();
+      await scheduler.shutdown();
 
       // Close RabbitMQ connection
       log.info({ msg: 'Closing RabbitMQ connection...' });
@@ -127,6 +139,7 @@ export class RuleManager {
    */
   getStatus(): RuleManagerStatus {
     const mq = getRabbitMQConnection();
+    const scheduler = getSchedulerService();
 
     return {
       isRunning: this.isRunning,
@@ -134,6 +147,7 @@ export class RuleManager {
       rabbitmq: {
         isConnected: mq.isConnected(),
       },
+      scheduler: scheduler.getStatus(),
     };
   }
 }

@@ -17,6 +17,7 @@ import type { Channel } from 'amqplib';
 import { createServiceLogger } from '@midcurve/services';
 import type { ServiceLogger } from '@midcurve/services';
 import { ruleLog } from '../lib/logger';
+import { getSchedulerService } from '../scheduler';
 
 // =============================================================================
 // Types
@@ -137,6 +138,11 @@ export abstract class BusinessRule implements BusinessRuleMetadata {
    */
   private running = false;
 
+  /**
+   * Registered schedule task IDs for cleanup.
+   */
+  private scheduledTaskIds: string[] = [];
+
   constructor() {
     // Create logger using the class name
     // Subclasses can use this.logger in their onStartup/onShutdown methods
@@ -194,6 +200,13 @@ export abstract class BusinessRule implements BusinessRuleMetadata {
     ruleLog.ruleLifecycle(this.logger, this.ruleName, 'stopping');
 
     try {
+      // Unregister all scheduled tasks for this rule
+      const scheduler = getSchedulerService();
+      if (scheduler.isServiceRunning()) {
+        scheduler.unregisterAllForRule(this.ruleName);
+      }
+      this.scheduledTaskIds = [];
+
       await this.onShutdown();
       this.running = false;
       this.channel = null;
@@ -222,6 +235,71 @@ export abstract class BusinessRule implements BusinessRuleMetadata {
       ruleDescription: this.ruleDescription,
       isRunning: this.running,
     };
+  }
+
+  // ===========================================================================
+  // Schedule Registration Helpers
+  // ===========================================================================
+
+  /**
+   * Register a cron-like schedule for this rule.
+   *
+   * Schedules are automatically cleaned up during shutdown().
+   *
+   * @param cronExpression - Cron expression (e.g., "0/5 * * * *" for every 5 minutes)
+   *
+   *   Standard cron format: minute hour day-of-month month day-of-week
+   *
+   *   Examples:
+   *   - "* * * * *" - Every minute
+   *   - "0/5 * * * *" - Every 5 minutes
+   *   - "0 * * * *" - Every hour at minute 0
+   *   - "0 0 * * *" - Every day at midnight
+   *   - "0 0 * * 0" - Every Sunday at midnight
+   *
+   * @param description - Human-readable description of what this schedule does
+   * @param callback - Async function to execute when the schedule fires
+   * @param options - Additional options (timezone, runOnStart)
+   * @returns Task ID for manual unregistration (optional)
+   */
+  protected registerSchedule(
+    cronExpression: string,
+    description: string,
+    callback: () => Promise<void> | void,
+    options?: { timezone?: string; runOnStart?: boolean }
+  ): string {
+    const scheduler = getSchedulerService();
+
+    const taskId = scheduler.registerSchedule(
+      this.ruleName,
+      {
+        cronExpression,
+        description,
+        timezone: options?.timezone,
+        runOnStart: options?.runOnStart,
+      },
+      callback
+    );
+
+    this.scheduledTaskIds.push(taskId);
+    return taskId;
+  }
+
+  /**
+   * Manually unregister a scheduled task.
+   *
+   * Usually not needed - schedules are automatically cleaned up on shutdown.
+   *
+   * @param taskId - Task ID returned from registerSchedule()
+   */
+  protected unregisterSchedule(taskId: string): void {
+    const scheduler = getSchedulerService();
+    scheduler.unregisterSchedule(taskId);
+
+    const index = this.scheduledTaskIds.indexOf(taskId);
+    if (index > -1) {
+      this.scheduledTaskIds.splice(index, 1);
+    }
   }
 
   // ===========================================================================
