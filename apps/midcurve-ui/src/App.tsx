@@ -9,6 +9,7 @@ import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { WizardExamplePage } from './pages/WizardExamplePage';
 
 // Automation
 import { AutowalletPage } from './components/automation';
@@ -34,6 +35,10 @@ export function App() {
                 <Route
                   path="/notifications"
                   element={<NotificationsPage />}
+                />
+                <Route
+                  path="/wizard-example"
+                  element={<WizardExamplePage />}
                 />
               </Routes>
             </BrowserRouter>
