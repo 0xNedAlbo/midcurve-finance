@@ -325,3 +325,19 @@ export type {
 } from './shared-contract/index.js';
 
 export { EvmSmartContractConfig } from './shared-contract/index.js';
+
+// ============================================================================
+// CoinGecko Token types (lookup table for token enrichment)
+// ============================================================================
+
+export type {
+  CoingeckoTokenConfigData,
+  CoingeckoTokenConfigJSON,
+  CoingeckoTokenParams,
+  CoingeckoTokenRow,
+  CoingeckoTokenJSON,
+} from './coingecko-token/index.js';
+export {
+  CoingeckoTokenConfig,
+  CoingeckoToken,
+} from './coingecko-token/index.js';

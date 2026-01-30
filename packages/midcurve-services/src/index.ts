@@ -38,6 +38,7 @@ export * from './services/position-apr/index.js';
 export * from './services/quote-token/index.js';
 export * from './services/pool-discovery/index.js';
 export * from './services/cache/index.js';
+export * from './services/coingecko-token/index.js';
 export * from './services/block/index.js';
 export * from './services/automation/index.js';
 export * from './services/pnl-curve/index.js';

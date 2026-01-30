@@ -139,6 +139,32 @@ model Token {
   @@map("tokens")
 }
 
+// CoingeckoToken - Lookup table mapping ERC-20 addresses to CoinGecko IDs
+// Used for token enrichment and price discovery (NOT part of Token entity)
+// One record per token+chain combination
+model CoingeckoToken {
+  id        String   @id // Format: "erc20:{chainId}:{normalizedAddress}"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // CoinGecko identifier (e.g., 'usd-coin', 'ethereum', 'wrapped-bitcoin')
+  coingeckoId String
+
+  // Token metadata for text-based searches
+  name   String // Token name (e.g., 'USD Coin', 'Ethereum')
+  symbol String // Token symbol (e.g., 'USDC', 'ETH')
+
+  // Platform-specific configuration (JSON)
+  // Contains: { chainId: number, tokenAddress: string }
+  config Json
+
+  // Indexes for efficient lookups
+  @@index([coingeckoId])
+  @@index([symbol])
+  @@index([name])
+  @@map("coingecko_tokens")
+}
+
 model Pool {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
