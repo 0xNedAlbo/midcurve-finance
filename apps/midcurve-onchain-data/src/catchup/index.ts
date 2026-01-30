@@ -7,4 +7,14 @@
 
 export { getLastProcessedBlock, setLastProcessedBlock, updateBlockIfHigher } from './block-tracker';
 export { fetchHistoricalEvents, type FetchHistoricalEventsOptions, type HistoricalEvent } from './historical-event-fetcher';
-export { executeCatchUp, executeCatchUpForChains, type CatchUpResult } from './position-liquidity-catchup';
+export {
+  executeCatchUp,
+  executeCatchUpForChains,
+  executeCatchUpNonFinalized,
+  executeCatchUpNonFinalizedForChains,
+  executeCatchUpFinalized,
+  executeCatchUpFinalizedForChains,
+  executeSinglePositionCatchUpNonFinalized,
+  type CatchUpResult,
+  type SinglePositionCatchUpResult,
+} from './position-liquidity-catchup';

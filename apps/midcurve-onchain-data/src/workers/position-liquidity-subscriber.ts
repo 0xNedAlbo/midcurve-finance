@@ -23,7 +23,13 @@ import {
   createUniswapV3NfpmSubscriptionBatches,
   type PositionInfo,
 } from '../ws/providers/uniswap-v3-nfpm';
-import { executeCatchUpForChains, updateBlockIfHigher, setLastProcessedBlock } from '../catchup';
+import {
+  executeCatchUpNonFinalizedForChains,
+  executeCatchUpFinalizedForChains,
+  executeSinglePositionCatchUpNonFinalized,
+  updateBlockIfHigher,
+  setLastProcessedBlock,
+} from '../catchup';
 
 const log = onchainDataLogger.child({ component: 'PositionLiquiditySubscriber' });
 
@@ -56,7 +62,15 @@ export class PositionLiquiditySubscriber {
 
   /**
    * Start the subscriber.
-   * Loads active positions and creates WebSocket batches.
+   * Loads active positions, creates WebSocket batches, and performs reorg-safe catch-up.
+   *
+   * Catch-up flow (reorg-safe):
+   * 1. Create WebSocket batches in BUFFERING mode
+   * 2. Start WebSocket subscriptions (events buffered, not published)
+   * 3. Scan NON-FINALIZED blocks (finalizedBlock+1 → currentBlock)
+   * 4. Flush buffered events and switch to normal mode
+   * 5. Start cleanup and block tracking
+   * 6. Scan FINALIZED blocks in background (cachedBlock → finalizedBlock)
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -67,7 +81,7 @@ export class PositionLiquiditySubscriber {
     priceLog.workerLifecycle(log, 'PositionLiquiditySubscriber', 'starting');
 
     try {
-      // Load active positions from database
+      // 1. Load active positions from database
       const positionsByChain = await this.loadActivePositions();
 
       // Get configured WSS URLs
@@ -80,7 +94,7 @@ export class PositionLiquiditySubscriber {
         return;
       }
 
-      // Create subscription batches for each configured chain
+      // 2. Create subscription batches for each configured chain
       for (const wssConfig of wssConfigs) {
         const chainId = wssConfig.chainId as SupportedChainId;
         const positions = positionsByChain.get(chainId);
@@ -115,11 +129,11 @@ export class PositionLiquiditySubscriber {
       if (this.batches.length === 0) {
         log.warn({ msg: 'No subscription batches created, subscriber will idle' });
       } else {
-        // Start WebSocket subscriptions FIRST to capture real-time events
-        await Promise.all(this.batches.map((batch) => batch.start()));
+        // 3. Execute reorg-safe catch-up with buffering
+        await this.catchUpNonFinalizedBlocksWithBuffering(positionsByChain);
       }
 
-      // Start cleanup timer (safety net for missed events)
+      // 5. Start cleanup timer (safety net for missed events)
       this.startCleanup();
 
       // Start block tracking heartbeat
@@ -135,9 +149,9 @@ export class PositionLiquiditySubscriber {
         totalPositions,
       });
 
-      // Execute catch-up in background AFTER WebSocket is running
-      // This can take time but won't cause missed events since WebSocket is already active
-      this.executeCatchUpInBackground(positionsByChain);
+      // 6. Execute FINALIZED block catch-up in background
+      // Safe since finalized blocks are immutable
+      this.catchUpFinalizedBlocksInBackground(positionsByChain);
     } catch (error) {
       priceLog.workerLifecycle(log, 'PositionLiquiditySubscriber', 'error', {
         error: error instanceof Error ? error.message : String(error),
@@ -259,48 +273,6 @@ export class PositionLiquiditySubscriber {
   // ===========================================================================
   // Position Batch Management
   // ===========================================================================
-
-  /**
-   * Add a position to an existing batch or create a new batch if needed.
-   */
-  private async addPositionToBatch(
-    chainId: SupportedChainId,
-    wssUrl: string,
-    position: PositionInfo
-  ): Promise<void> {
-    let chainBatches = this.batchesByChain.get(chainId);
-
-    if (!chainBatches) {
-      chainBatches = [];
-      this.batchesByChain.set(chainId, chainBatches);
-    }
-
-    // Find a batch with room
-    let targetBatch = chainBatches.find((batch) => batch.hasCapacity());
-
-    if (targetBatch) {
-      // Add to existing batch
-      await targetBatch.addPosition(position);
-      this.subscribedPositions.set(position.nftId, { chainId, positionId: position.positionId });
-      log.info({
-        chainId,
-        nftId: position.nftId,
-        batchIndex: targetBatch.getStatus().batchIndex,
-        msg: 'Added position to existing batch',
-      });
-    } else {
-      // Create new batch
-      const batchIndex = chainBatches.length;
-      const newBatch = new UniswapV3NfpmSubscriptionBatch(chainId, wssUrl, batchIndex, [position]);
-      chainBatches.push(newBatch);
-      this.batches.push(newBatch);
-      this.subscribedPositions.set(position.nftId, { chainId, positionId: position.positionId });
-
-      // Start the new batch
-      await newBatch.start();
-      log.info({ chainId, nftId: position.nftId, batchIndex, msg: 'Created new batch for position' });
-    }
-  }
 
   /**
    * Remove a position from its batch.
@@ -488,14 +460,73 @@ export class PositionLiquiditySubscriber {
   }
 
   /**
-   * Execute catch-up process in background.
-   * Called after WebSocket subscriptions are started.
+   * Catch up non-finalized blocks while WebSocket buffers incoming events.
+   *
+   * Flow:
+   * 1. Enable buffering on all batches
+   * 2. Start WebSocket subscriptions (events go to buffer)
+   * 3. Scan non-finalized blocks (finalizedBlock+1 → currentBlock)
+   * 4. Flush buffered events and switch to normal mode
    */
-  private executeCatchUpInBackground(positionsByChain: Map<SupportedChainId, PositionInfo[]>): void {
+  private async catchUpNonFinalizedBlocksWithBuffering(
+    positionsByChain: Map<SupportedChainId, PositionInfo[]>
+  ): Promise<void> {
+    const config = getCatchUpConfig();
+
+    // 1. Enable buffering on all batches
+    for (const batch of this.batches) {
+      batch.enableBuffering();
+    }
+
+    // 2. Start WebSocket subscriptions (events will be buffered)
+    log.info({ msg: 'Starting WebSocket subscriptions in buffering mode' });
+    await Promise.all(this.batches.map((batch) => batch.start()));
+
+    // 3. Scan non-finalized blocks if catch-up is enabled
+    if (config.enabled) {
+      // Convert to chainId -> nftIds map for catch-up
+      const chainNftIds = new Map<number, string[]>();
+      for (const [chainId, positions] of positionsByChain) {
+        chainNftIds.set(chainId, positions.map((p) => p.nftId));
+      }
+
+      log.info({ msg: 'Scanning non-finalized blocks (blocking)' });
+      const results = await executeCatchUpNonFinalizedForChains(chainNftIds);
+
+      const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
+      const failedChains = results.filter((r) => r.error).length;
+      log.info({
+        chainsProcessed: results.length,
+        failedChains,
+        totalEvents,
+        msg: 'Non-finalized block catch-up completed',
+      });
+    }
+
+    // 4. Flush buffered events and switch to normal mode
+    let totalFlushed = 0;
+    for (const batch of this.batches) {
+      const flushed = await batch.flushBufferAndDisableBuffering();
+      totalFlushed += flushed;
+    }
+
+    log.info({
+      totalFlushedEvents: totalFlushed,
+      msg: 'Buffered events flushed, scanner now in normal mode',
+    });
+  }
+
+  /**
+   * Execute finalized block catch-up in background.
+   * Safe to run in background since finalized blocks are immutable.
+   */
+  private catchUpFinalizedBlocksInBackground(
+    positionsByChain: Map<SupportedChainId, PositionInfo[]>
+  ): void {
     const config = getCatchUpConfig();
 
     if (!config.enabled) {
-      log.info({ msg: 'Catch-up disabled by configuration' });
+      log.info({ msg: 'Finalized block catch-up disabled by configuration' });
       return;
     }
 
@@ -505,8 +536,9 @@ export class PositionLiquiditySubscriber {
       chainNftIds.set(chainId, positions.map((p) => p.nftId));
     }
 
-    // Execute catch-up in background (fire and forget)
-    executeCatchUpForChains(chainNftIds)
+    // Execute finalized catch-up in background (fire and forget)
+    log.info({ msg: 'Starting finalized block catch-up in background' });
+    executeCatchUpFinalizedForChains(chainNftIds)
       .then((results) => {
         const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
         const failedChains = results.filter((r) => r.error).length;
@@ -514,13 +546,13 @@ export class PositionLiquiditySubscriber {
           chainsProcessed: results.length,
           failedChains,
           totalEvents,
-          msg: 'Background catch-up completed',
+          msg: 'Background finalized block catch-up completed',
         });
       })
       .catch((err) => {
         log.error({
           error: err instanceof Error ? err.message : String(err),
-          msg: 'Background catch-up failed',
+          msg: 'Background finalized block catch-up failed',
         });
       });
   }
@@ -531,7 +563,13 @@ export class PositionLiquiditySubscriber {
 
   /**
    * Handle position.created domain event.
-   * Adds the position to WebSocket subscriptions if it's a UniswapV3 position.
+   * Adds the position to WebSocket subscriptions with reorg-safe catch-up.
+   *
+   * Flow (reorg-safe):
+   * 1. Enable per-position buffering for the new nftId
+   * 2. Add position to batch (triggers WebSocket reconnect)
+   * 3. Scan non-finalized blocks for this position
+   * 4. Flush buffered events and disable buffering
    *
    * @param payload - Position data from the domain event
    */
@@ -571,14 +609,98 @@ export class PositionLiquiditySubscriber {
       return;
     }
 
-    // 6. Add to subscription
     const positionInfo: PositionInfo = {
       nftId,
       positionId: payload.id,
     };
 
-    log.info({ chainId, nftId, positionId: payload.id }, 'Adding position from created event');
-    await this.addPositionToBatch(chainId, wssUrl, positionInfo);
+    log.info({ chainId, nftId, positionId: payload.id }, 'Adding position from created event with reorg-safe catch-up');
+
+    // 6. Find or create batch for this chain, enable per-position buffering
+    const batch = await this.addPositionToBatchWithBuffering(chainId, wssUrl, positionInfo);
+
+    if (!batch) {
+      log.warn({ chainId, nftId, positionId: payload.id }, 'Failed to add position to batch');
+      return;
+    }
+
+    // 7. Scan non-finalized blocks for this position (while events are buffered)
+    const catchUpConfig = getCatchUpConfig();
+    if (catchUpConfig.enabled) {
+      log.info({ chainId, nftId }, 'Scanning non-finalized blocks for new position');
+      const result = await executeSinglePositionCatchUpNonFinalized(chainId, nftId);
+      log.info({
+        chainId,
+        nftId,
+        eventsPublished: result.eventsPublished,
+        error: result.error,
+      }, 'Single-position non-finalized catch-up completed');
+    }
+
+    // 8. Flush buffered events and disable buffering for this position
+    const flushedCount = await batch.flushPositionBufferAndDisableBuffering(nftId);
+    log.info({
+      chainId,
+      nftId,
+      flushedEvents: flushedCount,
+    }, 'Position catch-up complete, now in normal mode');
+  }
+
+  /**
+   * Add a position to a batch with per-position buffering enabled.
+   * Returns the batch so we can flush the buffer after catch-up.
+   */
+  private async addPositionToBatchWithBuffering(
+    chainId: SupportedChainId,
+    wssUrl: string,
+    position: PositionInfo
+  ): Promise<UniswapV3NfpmSubscriptionBatch | null> {
+    let chainBatches = this.batchesByChain.get(chainId);
+
+    if (!chainBatches) {
+      chainBatches = [];
+      this.batchesByChain.set(chainId, chainBatches);
+    }
+
+    // Find a batch with room
+    let targetBatch = chainBatches.find((batch) => batch.hasCapacity());
+
+    if (targetBatch) {
+      // Enable per-position buffering BEFORE adding (so events are captured during reconnect)
+      targetBatch.enableBufferingForPosition(position.nftId);
+
+      // Add to existing batch (triggers reconnect)
+      await targetBatch.addPosition(position);
+      this.subscribedPositions.set(position.nftId, { chainId, positionId: position.positionId });
+      log.info({
+        chainId,
+        nftId: position.nftId,
+        batchIndex: targetBatch.getStatus().batchIndex,
+        msg: 'Added position to existing batch with buffering',
+      });
+      return targetBatch;
+    } else {
+      // Create new batch with buffering enabled for this position
+      const batchIndex = chainBatches.length;
+      const newBatch = new UniswapV3NfpmSubscriptionBatch(chainId, wssUrl, batchIndex, [position]);
+
+      // Enable per-position buffering
+      newBatch.enableBufferingForPosition(position.nftId);
+
+      // Set block update callback
+      newBatch.setBlockUpdateCallback((cid, blockNumber) => {
+        this.handleBlockUpdate(cid, blockNumber);
+      });
+
+      chainBatches.push(newBatch);
+      this.batches.push(newBatch);
+      this.subscribedPositions.set(position.nftId, { chainId, positionId: position.positionId });
+
+      // Start the new batch
+      await newBatch.start();
+      log.info({ chainId, nftId: position.nftId, batchIndex, msg: 'Created new batch for position with buffering' });
+      return newBatch;
+    }
   }
 
   /**

@@ -80,6 +80,17 @@ export interface PositionInfo {
 }
 
 /**
+ * Buffered event for deferred publishing.
+ * Used during catch-up to prevent race conditions with reorgs.
+ */
+interface BufferedEvent {
+  nftId: string;
+  eventType: PositionEventType;
+  rawPayload: unknown;
+  blockNumber: bigint | undefined;
+}
+
+/**
  * Callback for block number updates from WebSocket events.
  * Used by the subscriber to track the latest processed block per chain.
  */
@@ -107,6 +118,18 @@ export class UniswapV3NfpmSubscriptionBatch {
   /** Optional callback for block number updates (used for block tracking) */
   private onBlockUpdate: BlockUpdateCallback | null = null;
 
+  /** Buffering mode flag - when true, ALL events are buffered instead of published */
+  private isBuffering = false;
+
+  /** Buffer for events collected during buffering mode (global) */
+  private eventBuffer: BufferedEvent[] = [];
+
+  /** Per-position buffering - nftIds that should buffer their events */
+  private bufferingPositions: Set<string> = new Set();
+
+  /** Per-position event buffers - nftId -> buffered events */
+  private positionEventBuffers: Map<string, BufferedEvent[]> = new Map();
+
   constructor(
     chainId: SupportedChainId,
     wssUrl: string,
@@ -132,6 +155,162 @@ export class UniswapV3NfpmSubscriptionBatch {
    */
   setBlockUpdateCallback(callback: BlockUpdateCallback | null): void {
     this.onBlockUpdate = callback;
+  }
+
+  /**
+   * Enable buffering mode.
+   * Events will be collected in a buffer instead of being published immediately.
+   * Use this during non-finalized block catch-up to prevent race conditions.
+   */
+  enableBuffering(): void {
+    this.isBuffering = true;
+    this.eventBuffer = [];
+    log.info({
+      chainId: this.chainId,
+      batchIndex: this.batchIndex,
+      msg: 'Buffering mode enabled',
+    });
+  }
+
+  /**
+   * Check if buffering mode is enabled.
+   */
+  isBufferingEnabled(): boolean {
+    return this.isBuffering;
+  }
+
+  /**
+   * Get the number of buffered events.
+   */
+  getBufferedEventCount(): number {
+    return this.eventBuffer.length;
+  }
+
+  /**
+   * Flush all buffered events and disable buffering mode.
+   * Events are published in the order they were received.
+   */
+  async flushBufferAndDisableBuffering(): Promise<number> {
+    const eventCount = this.eventBuffer.length;
+
+    log.info({
+      chainId: this.chainId,
+      batchIndex: this.batchIndex,
+      bufferedEvents: eventCount,
+      msg: 'Flushing buffered events',
+    });
+
+    // Publish all buffered events in order
+    for (const event of this.eventBuffer) {
+      try {
+        await this.publishEvent(event.nftId, event.eventType, event.rawPayload);
+      } catch (err) {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          chainId: this.chainId,
+          nftId: event.nftId,
+          eventType: event.eventType,
+          msg: 'Failed to publish buffered event',
+        });
+      }
+    }
+
+    // Clear buffer and disable buffering
+    this.eventBuffer = [];
+    this.isBuffering = false;
+
+    log.info({
+      chainId: this.chainId,
+      batchIndex: this.batchIndex,
+      flushedEvents: eventCount,
+      msg: 'Buffering mode disabled, events flushed',
+    });
+
+    return eventCount;
+  }
+
+  // ===========================================================================
+  // Per-Position Buffering (for runtime position additions)
+  // ===========================================================================
+
+  /**
+   * Enable buffering for a specific position.
+   * Only events for this position will be buffered; others publish normally.
+   * Use this when adding a new position at runtime to catch up safely.
+   */
+  enableBufferingForPosition(nftId: string): void {
+    this.bufferingPositions.add(nftId);
+    this.positionEventBuffers.set(nftId, []);
+    log.info({
+      chainId: this.chainId,
+      batchIndex: this.batchIndex,
+      nftId,
+      msg: 'Per-position buffering enabled',
+    });
+  }
+
+  /**
+   * Check if a specific position is in buffering mode.
+   */
+  isPositionBuffering(nftId: string): boolean {
+    return this.bufferingPositions.has(nftId);
+  }
+
+  /**
+   * Get the number of buffered events for a specific position.
+   */
+  getPositionBufferedEventCount(nftId: string): number {
+    return this.positionEventBuffers.get(nftId)?.length ?? 0;
+  }
+
+  /**
+   * Flush buffered events for a specific position and disable its buffering.
+   * Events are published in the order they were received.
+   */
+  async flushPositionBufferAndDisableBuffering(nftId: string): Promise<number> {
+    const buffer = this.positionEventBuffers.get(nftId);
+    if (!buffer) {
+      return 0;
+    }
+
+    const eventCount = buffer.length;
+
+    log.info({
+      chainId: this.chainId,
+      batchIndex: this.batchIndex,
+      nftId,
+      bufferedEvents: eventCount,
+      msg: 'Flushing per-position buffered events',
+    });
+
+    // Publish all buffered events in order
+    for (const event of buffer) {
+      try {
+        await this.publishEvent(event.nftId, event.eventType, event.rawPayload);
+      } catch (err) {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          chainId: this.chainId,
+          nftId: event.nftId,
+          eventType: event.eventType,
+          msg: 'Failed to publish per-position buffered event',
+        });
+      }
+    }
+
+    // Clear buffer and disable buffering for this position
+    this.positionEventBuffers.delete(nftId);
+    this.bufferingPositions.delete(nftId);
+
+    log.info({
+      chainId: this.chainId,
+      batchIndex: this.batchIndex,
+      nftId,
+      flushedEvents: eventCount,
+      msg: 'Per-position buffering disabled, events flushed',
+    });
+
+    return eventCount;
   }
 
   /**
@@ -401,13 +580,19 @@ export class UniswapV3NfpmSubscriptionBatch {
       const blockNumber = logData.blockNumber ? Number(logData.blockNumber) : 0;
       const removed = logData.removed || false;
 
+      // Check buffering state: global or per-position
+      const isPositionBuffering = this.bufferingPositions.has(nftId);
+      const shouldBuffer = this.isBuffering || isPositionBuffering;
+
       log.debug({
         chainId: this.chainId,
         nftId,
         eventType,
         blockNumber,
         removed,
-        msg: `Position event: ${eventType} nftId=${nftId} block=${blockNumber}${removed ? ' (removed)' : ''}`,
+        buffering: shouldBuffer,
+        bufferingType: this.isBuffering ? 'global' : isPositionBuffering ? 'position' : 'none',
+        msg: `Position event: ${eventType} nftId=${nftId} block=${blockNumber}${removed ? ' (removed)' : ''}${shouldBuffer ? ' (buffered)' : ''}`,
       });
 
       // Notify subscriber of block number for block tracking
@@ -415,16 +600,38 @@ export class UniswapV3NfpmSubscriptionBatch {
         this.onBlockUpdate(this.chainId, logData.blockNumber);
       }
 
-      // Publish raw event to RabbitMQ
-      this.publishEvent(nftId, eventType, rawLog).catch((err) => {
-        log.error({
-          error: err instanceof Error ? err.message : String(err),
-          chainId: this.chainId,
+      // Buffer or publish based on mode
+      if (this.isBuffering) {
+        // Global buffering: add to global buffer
+        this.eventBuffer.push({
           nftId,
           eventType,
-          msg: 'Failed to publish position event',
+          rawPayload: rawLog,
+          blockNumber: logData.blockNumber,
         });
-      });
+      } else if (isPositionBuffering) {
+        // Per-position buffering: add to position-specific buffer
+        const positionBuffer = this.positionEventBuffers.get(nftId);
+        if (positionBuffer) {
+          positionBuffer.push({
+            nftId,
+            eventType,
+            rawPayload: rawLog,
+            blockNumber: logData.blockNumber,
+          });
+        }
+      } else {
+        // No buffering: publish raw event to RabbitMQ immediately
+        this.publishEvent(nftId, eventType, rawLog).catch((err) => {
+          log.error({
+            error: err instanceof Error ? err.message : String(err),
+            chainId: this.chainId,
+            nftId,
+            eventType,
+            msg: 'Failed to publish position event',
+          });
+        });
+      }
     }
   }
 
