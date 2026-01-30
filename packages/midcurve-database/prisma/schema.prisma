@@ -154,6 +154,11 @@ model CoingeckoToken {
   name   String // Token name (e.g., 'USD Coin', 'Ethereum')
   symbol String // Token symbol (e.g., 'USDC', 'ETH')
 
+  // Enrichment data from /coins/markets endpoint
+  enrichedAt   DateTime? // When token was last enriched with market data
+  imageUrl     String? // Token logo URL from CoinGecko
+  marketCapUsd Float? // Market cap in USD
+
   // Platform-specific configuration (JSON)
   // Contains: { chainId: number, tokenAddress: string }
   config Json
@@ -162,6 +167,7 @@ model CoingeckoToken {
   @@index([coingeckoId])
   @@index([symbol])
   @@index([name])
+  @@index([enrichedAt]) // For finding unenriched/stale tokens
   @@map("coingecko_tokens")
 }
 

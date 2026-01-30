@@ -226,6 +226,110 @@ export class CoingeckoTokenService {
     return result;
   }
 
+  /**
+   * Refresh token details (imageUrl, marketCapUsd) for unenriched tokens
+   *
+   * Finds tokens where enrichedAt is null or older than 24 hours,
+   * fetches market data from CoinGecko, and updates the database.
+   *
+   * @param limit - Maximum tokens to process (default: 100)
+   * @returns Number of tokens updated
+   */
+  async refreshTokenDetails(limit: number = 100): Promise<number> {
+    log.methodEntry(this.logger, 'refreshTokenDetails', { limit });
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    // Step 1: Find unenriched tokens
+    // Where enrichedAt IS NULL OR enrichedAt < 24 hours ago
+    // Order by enrichedAt ASC (NULL first in PostgreSQL)
+    const tokensToEnrich = await this.prisma.coingeckoToken.findMany({
+      where: {
+        OR: [{ enrichedAt: null }, { enrichedAt: { lt: twentyFourHoursAgo } }],
+      },
+      take: limit,
+      orderBy: [
+        // NULL values first (never enriched), then oldest enrichedAt
+        { enrichedAt: 'asc' },
+      ],
+    });
+
+    if (tokensToEnrich.length === 0) {
+      this.logger.info('No tokens need enrichment');
+      log.methodExit(this.logger, 'refreshTokenDetails', { updated: 0 });
+      return 0;
+    }
+
+    this.logger.info(
+      { count: tokensToEnrich.length },
+      'Found tokens needing enrichment'
+    );
+
+    // Step 2: Extract unique coingeckoIds (multiple rows may share same coingeckoId)
+    const coingeckoIds = [...new Set(tokensToEnrich.map((t) => t.coingeckoId))];
+
+    this.logger.debug(
+      { uniqueCoingeckoIds: coingeckoIds.length },
+      'Unique CoinGecko IDs to fetch'
+    );
+
+    // Step 3: Fetch market data from CoinGecko (single batch API call)
+    const marketData =
+      await this.coinGeckoClient.getCoinsMarketData(coingeckoIds);
+
+    // Create lookup map for O(1) access
+    const marketDataMap = new Map(marketData.map((m) => [m.id, m]));
+
+    this.logger.debug(
+      { received: marketData.length, expected: coingeckoIds.length },
+      'Market data received'
+    );
+
+    // Step 4: Update tokens in database
+    let updatedCount = 0;
+    const now = new Date();
+
+    for (const token of tokensToEnrich) {
+      const data = marketDataMap.get(token.coingeckoId);
+
+      if (data) {
+        // Token found in market data - update with enrichment
+        await this.prisma.coingeckoToken.update({
+          where: { id: token.id },
+          data: {
+            imageUrl: data.image,
+            marketCapUsd: data.market_cap,
+            enrichedAt: now,
+          },
+        });
+        updatedCount++;
+      } else {
+        // Token not found in market data - mark as enriched anyway
+        // to avoid re-fetching tokens that CoinGecko doesn't have market data for
+        this.logger.warn(
+          { coingeckoId: token.coingeckoId, tokenId: token.id },
+          'Token not found in CoinGecko market data'
+        );
+        await this.prisma.coingeckoToken.update({
+          where: { id: token.id },
+          data: {
+            enrichedAt: now,
+            // Leave imageUrl and marketCapUsd as null
+          },
+        });
+        updatedCount++;
+      }
+    }
+
+    this.logger.info(
+      { updated: updatedCount, total: tokensToEnrich.length },
+      'Token enrichment completed'
+    );
+
+    log.methodExit(this.logger, 'refreshTokenDetails', { updated: updatedCount });
+    return updatedCount;
+  }
+
   // ============================================================================
   // QUERY OPERATIONS
   // ============================================================================

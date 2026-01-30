@@ -591,9 +591,17 @@ export class CoinGeckoClient {
         vs_currency: 'usd',
       });
 
-      const response = await this.scheduledFetch(
-        `${this.baseUrl}/coins/markets?vs_currency=usd&ids=${encodeURIComponent(idsParam)}&per_page=250`
-      );
+      // Build URL with all required parameters for token enrichment
+      const url = new URL(`${this.baseUrl}/coins/markets`);
+      url.searchParams.set('vs_currency', 'usd');
+      url.searchParams.set('ids', idsParam);
+      url.searchParams.set('include_tokens', 'all');
+      url.searchParams.set('sparkline', 'false');
+      url.searchParams.set('locale', 'en');
+      url.searchParams.set('precision', '2');
+      url.searchParams.set('per_page', '250');
+
+      const response = await this.scheduledFetch(url.toString());
 
       if (!response.ok) {
         const error = new CoinGeckoApiError(

@@ -21,6 +21,10 @@ export interface CoingeckoTokenParams {
   config: CoingeckoTokenConfig;
   createdAt: Date;
   updatedAt: Date;
+  // Enrichment data from /coins/markets endpoint
+  enrichedAt?: Date | null;
+  imageUrl?: string | null;
+  marketCapUsd?: number | null;
 }
 
 /**
@@ -35,6 +39,10 @@ export interface CoingeckoTokenRow {
   config: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
+  // Enrichment data from /coins/markets endpoint
+  enrichedAt: Date | null;
+  imageUrl: string | null;
+  marketCapUsd: number | null;
 }
 
 /**
@@ -48,6 +56,10 @@ export interface CoingeckoTokenJSON {
   config: CoingeckoTokenConfigJSON;
   createdAt: string;
   updatedAt: string;
+  // Enrichment data from /coins/markets endpoint
+  enrichedAt: string | null;
+  imageUrl: string | null;
+  marketCapUsd: number | null;
 }
 
 /**
@@ -64,6 +76,10 @@ export class CoingeckoToken {
   readonly typedConfig: CoingeckoTokenConfig;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  // Enrichment data from /coins/markets endpoint
+  readonly enrichedAt: Date | null;
+  readonly imageUrl: string | null;
+  readonly marketCapUsd: number | null;
 
   constructor(params: CoingeckoTokenParams) {
     this.id = params.id;
@@ -73,6 +89,10 @@ export class CoingeckoToken {
     this.typedConfig = params.config;
     this.createdAt = params.createdAt;
     this.updatedAt = params.updatedAt;
+    // Enrichment data (optional, defaults to null)
+    this.enrichedAt = params.enrichedAt ?? null;
+    this.imageUrl = params.imageUrl ?? null;
+    this.marketCapUsd = params.marketCapUsd ?? null;
   }
 
   // ============================================================================
@@ -116,6 +136,9 @@ export class CoingeckoToken {
       config: this.typedConfig.toJSON(),
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),
+      enrichedAt: this.enrichedAt?.toISOString() ?? null,
+      imageUrl: this.imageUrl,
+      marketCapUsd: this.marketCapUsd,
     };
   }
 
@@ -137,6 +160,9 @@ export class CoingeckoToken {
       ),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      enrichedAt: row.enrichedAt,
+      imageUrl: row.imageUrl,
+      marketCapUsd: row.marketCapUsd,
     });
   }
 

@@ -15,6 +15,8 @@ import { businessLogicLogger, ruleLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import {
   RuleRegistry,
+  EnrichCoingeckoTokensRule,
+  RefreshCoingeckoTokensRule,
   UpdatePositionOnLiquidityEventRule,
   type BusinessRuleStatus,
 } from '../rules';
@@ -52,6 +54,13 @@ export class RuleManager {
    * Add new rules here as they are implemented.
    */
   private registerRules(): void {
+    // Platform-wide rules
+    // CoinGecko token list refresh - runs daily at 3:17 AM UTC
+    this.registry.register(new RefreshCoingeckoTokensRule());
+
+    // CoinGecko token enrichment - runs every 5 minutes
+    this.registry.register(new EnrichCoingeckoTokensRule());
+
     // Position liquidity event handler - imports ledger events and refreshes positions
     this.registry.register(new UpdatePositionOnLiquidityEventRule());
 

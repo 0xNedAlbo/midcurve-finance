@@ -43,5 +43,9 @@ export { RuleRegistry } from './registry';
 // Rule Implementations
 // =============================================================================
 
+// Platform-wide rules (not protocol-specific)
+export { EnrichCoingeckoTokensRule } from './enrich-coingecko-tokens';
+export { RefreshCoingeckoTokensRule } from './refresh-coingecko-tokens';
+
 // UniswapV3 protocol-specific rules
 export * from './uniswapv3';
