@@ -54,7 +54,7 @@ export function FullPageWizardLayout({
           {/* Left Column - Golden Ratio Major (61.8%) */}
           <div className="w-full lg:w-[61.8%] h-full flex flex-col gap-6 min-h-0">
             {/* Interactive Content - sizes to content */}
-            <div className="shrink-0">
+            <div className="shrink-0 relative z-10">
               <div className="bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6">
                 {interactiveContent}
               </div>
