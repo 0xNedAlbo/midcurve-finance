@@ -41,6 +41,7 @@ import {
 import {
   POOL_METRICS_QUERY,
   POOL_FEE_DATA_QUERY,
+  POOLS_BY_TOKEN_SETS_QUERY,
 } from './queries.js';
 import {
   PoolNotFoundInSubgraphError,
@@ -50,6 +51,8 @@ import type {
   PoolMetrics,
   PoolFeeData,
   RawPoolData,
+  RawPoolSearchData,
+  PoolSearchSubgraphResult,
   UniswapV3SubgraphApiError,
   UniswapV3SubgraphUnavailableError,
 } from './types.js';
@@ -449,6 +452,146 @@ export class UniswapV3SubgraphClient {
 
       log.methodExit(this.logger, 'getPoolFeeData', { found: true });
       return feeData;
+    } catch (error) {
+      // Errors already logged
+      throw error;
+    }
+  }
+
+  /**
+   * Search pools by token sets
+   *
+   * Finds all pools where tokens match the provided sets in either direction.
+   * Returns pools sorted by TVL descending with calculated 7-day APR.
+   *
+   * @param chainId - Chain ID to search
+   * @param tokenSetA - Array of token addresses (lowercase)
+   * @param tokenSetB - Array of token addresses (lowercase)
+   * @returns Array of pool search results with metrics and 7-day APR
+   *
+   * @example
+   * ```typescript
+   * const pools = await client.searchPoolsByTokenSets(
+   *   1, // Ethereum
+   *   ['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', '0xdac17f958d2ee523a2206206994597c13d831ec7'], // USDC, USDT
+   *   ['0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'] // WETH
+   * );
+   * console.log(`Found ${pools.length} pools`);
+   * ```
+   */
+  async searchPoolsByTokenSets(
+    chainId: number,
+    tokenSetA: string[],
+    tokenSetB: string[]
+  ): Promise<PoolSearchSubgraphResult[]> {
+    log.methodEntry(this.logger, 'searchPoolsByTokenSets', {
+      chainId,
+      tokenSetA,
+      tokenSetB,
+    });
+
+    // Graceful degradation for local development chains
+    if (isLocalChain(chainId)) {
+      this.logger.warn(
+        { chainId },
+        'Subgraph not available for local chain, returning empty results'
+      );
+      log.methodExit(this.logger, 'searchPoolsByTokenSets', { reason: 'local_chain' });
+      return [];
+    }
+
+    // Validate inputs
+    if (tokenSetA.length === 0 || tokenSetB.length === 0) {
+      this.logger.warn('Empty token set provided, returning empty results');
+      log.methodExit(this.logger, 'searchPoolsByTokenSets', { reason: 'empty_input' });
+      return [];
+    }
+
+    try {
+      // Normalize addresses to lowercase for subgraph query
+      const token0List = tokenSetA.map((addr) => addr.toLowerCase());
+      const token1List = tokenSetB.map((addr) => addr.toLowerCase());
+
+      log.externalApiCall(
+        this.logger,
+        'UniswapV3Subgraph',
+        'POOLS_BY_TOKEN_SETS_QUERY',
+        { chainId, token0Count: token0List.length, token1Count: token1List.length }
+      );
+
+      const response = await this.query<{ pools: RawPoolSearchData[] }>(
+        chainId,
+        POOLS_BY_TOKEN_SETS_QUERY,
+        { token0List, token1List }
+      );
+
+      // Check for GraphQL errors
+      if (response.errors && response.errors.length > 0) {
+        const error = new Error(
+          `Subgraph query failed: ${response.errors.map((e) => e.message).join(', ')}`
+        ) as UniswapV3SubgraphApiError;
+        error.name = 'UniswapV3SubgraphApiError';
+        (error as any).graphqlErrors = response.errors;
+        log.methodError(this.logger, 'searchPoolsByTokenSets', error, { chainId });
+        throw error;
+      }
+
+      // Handle no pools found
+      if (!response.data?.pools || response.data.pools.length === 0) {
+        this.logger.debug({ chainId }, 'No pools found for token sets');
+        log.methodExit(this.logger, 'searchPoolsByTokenSets', { found: 0 });
+        return [];
+      }
+
+      // Process each pool
+      const results: PoolSearchSubgraphResult[] = response.data.pools.map((pool) => {
+        // Calculate 7-day fees sum
+        const fees7d = pool.poolDayData.reduce((sum, day) => {
+          return sum + parseFloat(day.feesUSD || '0');
+        }, 0);
+
+        // Get most recent day data for 24h metrics
+        const latestDay = pool.poolDayData[0];
+        const volume24h = latestDay?.volumeUSD || '0';
+        const fees24h = latestDay?.feesUSD || '0';
+        const currentTvl = parseFloat(pool.totalValueLockedUSD || '0');
+
+        // Calculate 7-day average APR: (fees7d / 7 * 365) / tvl * 100
+        let apr7d = 0;
+        if (currentTvl > 0 && fees7d > 0) {
+          const avgDailyFees = fees7d / 7;
+          apr7d = (avgDailyFees * 365 / currentTvl) * 100;
+        }
+
+        return {
+          poolAddress: normalizeAddress(pool.id),
+          chainId,
+          feeTier: parseInt(pool.feeTier),
+          token0: {
+            address: normalizeAddress(pool.token0.id),
+            symbol: pool.token0.symbol,
+            decimals: parseInt(pool.token0.decimals),
+          },
+          token1: {
+            address: normalizeAddress(pool.token1.id),
+            symbol: pool.token1.symbol,
+            decimals: parseInt(pool.token1.decimals),
+          },
+          tvlUSD: pool.totalValueLockedUSD || '0',
+          volume24hUSD: volume24h,
+          fees24hUSD: fees24h,
+          fees7dUSD: fees7d.toFixed(2),
+          apr7d: Math.round(apr7d * 100) / 100, // Round to 2 decimal places
+        };
+      });
+
+      this.logger.debug(
+        { chainId, poolCount: results.length },
+        'Pool search completed'
+      );
+
+      log.methodExit(this.logger, 'searchPoolsByTokenSets', { found: results.length });
+      return results;
     } catch (error) {
       // Errors already logged
       throw error;

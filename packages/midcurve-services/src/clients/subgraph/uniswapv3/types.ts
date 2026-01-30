@@ -317,3 +317,106 @@ export class PoolNotFoundInSubgraphError extends Error {
     this.name = 'PoolNotFoundInSubgraphError';
   }
 }
+
+// ============================================================================
+// POOL SEARCH TYPES
+// ============================================================================
+
+/**
+ * Raw pool data from POOLS_BY_TOKEN_SETS_QUERY
+ *
+ * Internal type for parsing pool search responses.
+ * Includes 7 days of poolDayData for APR calculation.
+ */
+export interface RawPoolSearchData {
+  /** Pool address (lowercase from subgraph) */
+  id: string;
+  /** Fee tier as string (e.g., "500", "3000", "10000") */
+  feeTier: string;
+  /** Current sqrt price as decimal string */
+  sqrtPrice: string;
+  /** Current liquidity as decimal string */
+  liquidity: string;
+  /** Current tick as string */
+  tick: string;
+  /** Total Value Locked in USD (current) */
+  totalValueLockedUSD: string;
+
+  /** Token0 entity */
+  token0: {
+    /** Token address (lowercase) */
+    id: string;
+    /** Token symbol */
+    symbol: string;
+    /** Token decimals as string */
+    decimals: string;
+  };
+
+  /** Token1 entity */
+  token1: {
+    /** Token address (lowercase) */
+    id: string;
+    /** Token symbol */
+    symbol: string;
+    /** Token decimals as string */
+    decimals: string;
+  };
+
+  /** Pool day data (7 days, most recent first) */
+  poolDayData: Array<{
+    /** Unix timestamp (seconds) */
+    date: number;
+    /** 24h volume in USD */
+    volumeUSD: string;
+    /** 24h fees in USD */
+    feesUSD: string;
+    /** TVL in USD at end of day */
+    tvlUSD: string;
+  }>;
+}
+
+/**
+ * Processed pool search result from subgraph client
+ *
+ * Returned by searchPoolsByTokenSets() with calculated metrics.
+ * All USD values are strings to preserve precision.
+ */
+export interface PoolSearchSubgraphResult {
+  /** Pool contract address (normalized to EIP-55 checksum) */
+  poolAddress: string;
+  /** Chain ID where pool exists */
+  chainId: number;
+  /** Fee tier in basis points (e.g., 500, 3000, 10000) */
+  feeTier: number;
+
+  /** Token0 data (lower address in pool pair) */
+  token0: {
+    /** Token address (normalized) */
+    address: string;
+    /** Token symbol */
+    symbol: string;
+    /** Token decimals */
+    decimals: number;
+  };
+
+  /** Token1 data (higher address in pool pair) */
+  token1: {
+    /** Token address (normalized) */
+    address: string;
+    /** Token symbol */
+    symbol: string;
+    /** Token decimals */
+    decimals: number;
+  };
+
+  /** Current Total Value Locked in USD */
+  tvlUSD: string;
+  /** Most recent 24h volume in USD */
+  volume24hUSD: string;
+  /** Most recent 24h fees in USD */
+  fees24hUSD: string;
+  /** Sum of fees from last 7 days in USD */
+  fees7dUSD: string;
+  /** 7-day average APR: (fees7d/7 * 365) / tvl * 100 */
+  apr7d: number;
+}

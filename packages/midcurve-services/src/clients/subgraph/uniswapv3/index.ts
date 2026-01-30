@@ -14,6 +14,8 @@ export type {
   PoolMetrics,
   PoolFeeData,
   RawPoolData,
+  RawPoolSearchData,
+  PoolSearchSubgraphResult,
 } from './types.js';
 
 // Error types
@@ -30,4 +32,5 @@ export {
   POOLS_BATCH_QUERY,
   POOL_HISTORICAL_DATA_QUERY,
   POOL_CREATION_QUERY,
+  POOLS_BY_TOKEN_SETS_QUERY,
 } from './queries.js';

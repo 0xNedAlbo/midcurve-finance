@@ -15,6 +15,7 @@ import {
   UserTokenBalanceService,
   UniswapV3PoolService,
   UniswapV3PoolDiscoveryService,
+  UniswapV3PoolSearchService,
   UniswapV3PositionService,
   UniswapV3PositionLedgerService,
   PositionListService,
@@ -37,6 +38,7 @@ let _erc20TokenService: Erc20TokenService | null = null;
 let _userTokenBalanceService: UserTokenBalanceService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _uniswapV3PoolDiscoveryService: UniswapV3PoolDiscoveryService | null = null;
+let _uniswapV3PoolSearchService: UniswapV3PoolSearchService | null = null;
 let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _uniswapV3PositionLedgerService: UniswapV3PositionLedgerService | null = null;
 let _positionListService: PositionListService | null = null;
@@ -138,6 +140,16 @@ export function getUniswapV3PoolDiscoveryService(): UniswapV3PoolDiscoveryServic
     _uniswapV3PoolDiscoveryService = new UniswapV3PoolDiscoveryService();
   }
   return _uniswapV3PoolDiscoveryService;
+}
+
+/**
+ * Get singleton instance of UniswapV3PoolSearchService
+ */
+export function getUniswapV3PoolSearchService(): UniswapV3PoolSearchService {
+  if (!_uniswapV3PoolSearchService) {
+    _uniswapV3PoolSearchService = new UniswapV3PoolSearchService();
+  }
+  return _uniswapV3PoolSearchService;
 }
 
 /**

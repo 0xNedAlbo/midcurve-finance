@@ -37,6 +37,7 @@ export * from './services/position-ledger/index.js';
 export * from './services/position-apr/index.js';
 export * from './services/quote-token/index.js';
 export * from './services/pool-discovery/index.js';
+export * from './services/pool-search/index.js';
 export * from './services/cache/index.js';
 export * from './services/coingecko-token/index.js';
 export * from './services/block/index.js';
@@ -50,6 +51,7 @@ export * from './services/types/block/index.js';
 export * from './services/types/automation/index.js';
 export * from './services/types/notifications/index.js';
 export * from './services/types/position-apr/index.js';
+export * from './services/types/pool-search/index.js';
 
 // Export domain events
 export * from './events/index.js';

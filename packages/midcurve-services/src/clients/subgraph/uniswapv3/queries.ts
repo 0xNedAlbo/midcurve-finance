@@ -223,3 +223,67 @@ export const POOL_CREATION_QUERY = `
     }
   }
 `;
+
+/**
+ * Search pools by token sets
+ *
+ * Finds all pools where tokens match the provided sets in either direction:
+ * - token0 in setA AND token1 in setB, OR
+ * - token0 in setB AND token1 in setA
+ *
+ * Returns pools sorted by TVL descending with 7 days of poolDayData
+ * for APR calculation.
+ *
+ * Variables:
+ * - $token0List: Array of token addresses (lowercase)
+ * - $token1List: Array of token addresses (lowercase)
+ *
+ * Returns:
+ * - Array of pools with token metadata and 7-day metrics
+ *
+ * Example usage:
+ * ```typescript
+ * const response = await query(POOLS_BY_TOKEN_SETS_QUERY, {
+ *   token0List: ['0xa0b86991...', '0xdac17f95...'], // USDC, USDT
+ *   token1List: ['0xc02aaa39...', '0xae7ab96...']   // WETH, stETH
+ * });
+ * ```
+ */
+export const POOLS_BY_TOKEN_SETS_QUERY = `
+  query PoolsByTokenSets($token0List: [String!]!, $token1List: [String!]!) {
+    pools(
+      where: {
+        or: [
+          { token0_in: $token0List, token1_in: $token1List },
+          { token0_in: $token1List, token1_in: $token0List }
+        ]
+      },
+      first: 100,
+      orderBy: totalValueLockedUSD,
+      orderDirection: desc
+    ) {
+      id
+      feeTier
+      liquidity
+      sqrtPrice
+      tick
+      totalValueLockedUSD
+      token0 {
+        id
+        symbol
+        decimals
+      }
+      token1 {
+        id
+        symbol
+        decimals
+      }
+      poolDayData(orderBy: date, orderDirection: desc, first: 7) {
+        date
+        volumeUSD
+        feesUSD
+        tvlUSD
+      }
+    }
+  }
+`;

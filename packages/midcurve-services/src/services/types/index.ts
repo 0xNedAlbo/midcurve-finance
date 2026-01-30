@@ -91,6 +91,12 @@ export type {
   UniswapV3PoolDiscoveryInput,
 } from './pool-discovery/index.js';
 
+// Pool Search input types
+export type {
+  UniswapV3PoolSearchInput,
+  ResolvedTokenAddress,
+} from './pool-search/index.js';
+
 // Automation input types
 export type {
   RegisterCloseOrderInput,
