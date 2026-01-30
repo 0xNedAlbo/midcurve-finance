@@ -43,5 +43,5 @@ export { RuleRegistry } from './registry';
 // Rule Implementations
 // =============================================================================
 
-// Pool price event handler - updates position metrics when pool prices change
-export { UpdatePositionMetricsOnPoolPriceRule } from './update-position-metrics-on-pool-price';
+// UniswapV3 protocol-specific rules
+export * from './uniswapv3';

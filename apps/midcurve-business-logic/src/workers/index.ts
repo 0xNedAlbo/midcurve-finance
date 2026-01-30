@@ -15,7 +15,7 @@ import { businessLogicLogger, ruleLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import {
   RuleRegistry,
-  UpdatePositionMetricsOnPoolPriceRule,
+  UpdatePositionOnLiquidityEventRule,
   type BusinessRuleStatus,
 } from '../rules';
 
@@ -50,8 +50,8 @@ export class RuleManager {
    * Add new rules here as they are implemented.
    */
   private registerRules(): void {
-    // Position metrics updater - updates value, PnL, and unclaimed fees on pool price changes
-    this.registry.register(new UpdatePositionMetricsOnPoolPriceRule());
+    // Position liquidity event handler - imports ledger events and refreshes positions
+    this.registry.register(new UpdatePositionOnLiquidityEventRule());
 
     log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
