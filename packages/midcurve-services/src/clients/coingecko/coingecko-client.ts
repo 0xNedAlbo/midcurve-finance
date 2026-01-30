@@ -595,7 +595,6 @@ export class CoinGeckoClient {
       const url = new URL(`${this.baseUrl}/coins/markets`);
       url.searchParams.set('vs_currency', 'usd');
       url.searchParams.set('ids', idsParam);
-      url.searchParams.set('include_tokens', 'all');
       url.searchParams.set('sparkline', 'false');
       url.searchParams.set('locale', 'en');
       url.searchParams.set('precision', '2');
