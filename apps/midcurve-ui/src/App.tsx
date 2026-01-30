@@ -10,6 +10,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { WizardExamplePage } from './pages/WizardExamplePage';
+import { CreatePositionPage } from './pages/CreatePositionPage';
 
 // Automation
 import { AutowalletPage } from './components/automation';
@@ -39,6 +40,10 @@ export function App() {
                 <Route
                   path="/wizard-example"
                   element={<WizardExamplePage />}
+                />
+                <Route
+                  path="/positions/create"
+                  element={<CreatePositionPage />}
                 />
               </Routes>
             </BrowserRouter>
