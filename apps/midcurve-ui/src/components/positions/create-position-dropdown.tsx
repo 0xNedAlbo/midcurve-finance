@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus, ChevronDown, Loader2 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
-import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
 import {
   getAllUniswapV3Chains,
   type UniswapV3ChainSlug,
@@ -19,11 +18,8 @@ export function CreatePositionDropdown() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
-  // Wizard state
-  const [isWizardOpen, setIsWizardOpen] = useState(false);
-
+  const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const queryClient = useQueryClient();
 
   // Import position mutation
   const importMutation = useImportPositionByNftId();
@@ -42,8 +38,8 @@ export function CreatePositionDropdown() {
 
   // Handle menu item clicks
   const handleCreateNew = () => {
-    setIsWizardOpen(true);
     setIsDropdownOpen(false);
+    navigate('/positions/create');
   };
 
   const handleToggleNftForm = () => {
@@ -200,17 +196,6 @@ export function CreatePositionDropdown() {
         </div>
         )}
       </div>
-
-      {/* Wizard Modal */}
-      <UniswapV3PositionWizard
-        isOpen={isWizardOpen}
-        onClose={() => setIsWizardOpen(false)}
-        onPositionCreated={() => {
-          // Don't auto-close - let user click "Finish" button
-          // Just trigger position list refresh
-          queryClient.invalidateQueries({ queryKey: ['positions', 'list'] });
-        }}
-      />
     </>
   );
 }

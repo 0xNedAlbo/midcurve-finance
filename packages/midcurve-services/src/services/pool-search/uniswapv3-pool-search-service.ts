@@ -237,24 +237,27 @@ export class UniswapV3PoolSearchService {
       } else {
         // It's a symbol - look up in CoinGecko token table
         try {
-          const coingeckoTokens = await this.coingeckoTokenService.searchByTextAndChains(
+          const tokenSymbols = await this.coingeckoTokenService.searchByTextAndChains(
             token,
             chainIds,
             50 // Get up to 50 matches
           );
 
           // Filter for exact symbol matches (case-insensitive)
-          const exactMatches = coingeckoTokens.filter(
+          const exactMatches = tokenSymbols.filter(
             (t) => t.symbol.toUpperCase() === token.toUpperCase()
           );
 
-          for (const cgToken of exactMatches) {
-            results.push({
-              input: token,
-              chainId: cgToken.chainId,
-              address: cgToken.tokenAddress,
-              symbol: cgToken.symbol,
-            });
+          // Each TokenSymbolResult has an addresses array with chainId and address
+          for (const tokenSymbol of exactMatches) {
+            for (const addr of tokenSymbol.addresses) {
+              results.push({
+                input: token,
+                chainId: addr.chainId,
+                address: addr.address,
+                symbol: tokenSymbol.symbol,
+              });
+            }
           }
 
           if (exactMatches.length === 0) {

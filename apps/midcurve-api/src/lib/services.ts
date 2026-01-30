@@ -12,6 +12,7 @@ import {
   AuthNonceService,
   SessionService,
   Erc20TokenService,
+  CoingeckoTokenService,
   UserTokenBalanceService,
   UniswapV3PoolService,
   UniswapV3PoolDiscoveryService,
@@ -35,6 +36,7 @@ let _authUserService: AuthUserService | null = null;
 let _authNonceService: AuthNonceService | null = null;
 let _sessionService: SessionService | null = null;
 let _erc20TokenService: Erc20TokenService | null = null;
+let _coingeckoTokenService: CoingeckoTokenService | null = null;
 let _userTokenBalanceService: UserTokenBalanceService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _uniswapV3PoolDiscoveryService: UniswapV3PoolDiscoveryService | null = null;
@@ -90,6 +92,16 @@ export function getErc20TokenService(): Erc20TokenService {
     _erc20TokenService = new Erc20TokenService();
   }
   return _erc20TokenService;
+}
+
+/**
+ * Get singleton instance of CoingeckoTokenService
+ */
+export function getCoingeckoTokenService(): CoingeckoTokenService {
+  if (!_coingeckoTokenService) {
+    _coingeckoTokenService = new CoingeckoTokenService();
+  }
+  return _coingeckoTokenService;
 }
 
 /**

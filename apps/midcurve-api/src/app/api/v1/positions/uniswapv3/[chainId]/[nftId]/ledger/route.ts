@@ -170,7 +170,7 @@ export async function GET(
       });
 
       // 4. Serialize events using built-in toJSON() method (handles bigint → string conversion)
-      const serializedEvents = ledgerEvents.map(event => event.toJSON()) as unknown as LedgerEventData[];
+      const serializedEvents = ledgerEvents.map((event: { toJSON: () => unknown }) => event.toJSON()) as unknown as LedgerEventData[];
 
       const response: LedgerEventsResponse = {
         ...createSuccessResponse(serializedEvents),

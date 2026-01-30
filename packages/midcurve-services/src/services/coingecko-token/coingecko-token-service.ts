@@ -22,6 +22,7 @@ import {
   CoingeckoTokenConfig,
   type CoingeckoTokenRow,
 } from '@midcurve/shared';
+import type { TokenSymbolResult } from '@midcurve/api-shared';
 import { CoinGeckoClient } from '../../clients/coingecko/index.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -548,21 +549,22 @@ export class CoingeckoTokenService {
   }
 
   /**
-   * Search tokens by text and filter by chain IDs
+   * Search tokens by symbol and filter by chain IDs
    *
-   * Performs case-insensitive substring matching on both name and symbol fields,
+   * Performs case-insensitive substring matching on symbol field,
    * filtered to only include tokens on the specified chains.
+   * Results are grouped by symbol with all addresses across chains.
    *
-   * @param query - Text to search for in name or symbol
+   * @param query - Text to search for in symbol (case-insensitive partial match)
    * @param chainIds - Array of chain IDs to filter by (e.g., [1, 42161])
-   * @param limit - Maximum results to return (default: 10)
-   * @returns Array of matching CoingeckoToken entries
+   * @param limit - Maximum unique symbols to return (default: 10)
+   * @returns Array of TokenSymbolResult entries grouped by symbol, sorted by market cap
    */
   async searchByTextAndChains(
     query: string,
     chainIds: number[],
     limit: number = 10
-  ): Promise<CoingeckoToken[]> {
+  ): Promise<TokenSymbolResult[]> {
     log.methodEntry(this.logger, 'searchByTextAndChains', {
       query,
       chainIds,
@@ -574,36 +576,54 @@ export class CoingeckoTokenService {
       return [];
     }
 
-    // Use raw query to filter by chainId in JSON config field
+    // Raw SQL query that groups by symbol and aggregates addresses
+    // Uses MAX for name, coingeckoId, imageUrl, marketCapUsd (picks one per symbol)
+    // Uses JSON_AGG to collect all addresses per symbol
+    // Sorts by MAX(marketCapUsd) descending (highest market cap first)
     const results = await this.prisma.$queryRaw<
       Array<{
-        id: string;
-        coingeckoId: string;
-        name: string;
         symbol: string;
-        config: Record<string, unknown>;
-        createdAt: Date;
-        updatedAt: Date;
+        name: string;
+        coingeckoId: string;
+        logoUrl: string | null;
+        marketCap: number | null;
+        addresses: Array<{ chainId: number; address: string }>;
       }>
     >`
-      SELECT id, "coingeckoId", name, symbol, config, "createdAt", "updatedAt"
+      SELECT
+        symbol,
+        MAX(name) as name,
+        MAX("coingeckoId") as "coingeckoId",
+        MAX("imageUrl") as "logoUrl",
+        MAX("marketCapUsd") as "marketCap",
+        JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'chainId', (config->>'chainId')::int,
+            'address', config->>'tokenAddress'
+          )
+        ) as addresses
       FROM coingecko_tokens
       WHERE (config->>'chainId')::int = ANY(${chainIds})
-        AND (
-          symbol ILIKE ${'%' + query + '%'}
-          OR name ILIKE ${'%' + query + '%'}
-        )
-      ORDER BY symbol ASC, name ASC
+        AND symbol ILIKE ${'%' + query + '%'}
+      GROUP BY symbol
+      ORDER BY MAX("marketCapUsd") DESC NULLS LAST
       LIMIT ${limit}
     `;
 
-    const tokens = results.map((row) =>
-      CoingeckoToken.fromDB(row as unknown as CoingeckoTokenRow)
-    );
+    // Map to TokenSymbolResult format
+    const tokenSymbols: TokenSymbolResult[] = results.map((row) => ({
+      symbol: row.symbol,
+      name: row.name,
+      coingeckoId: row.coingeckoId,
+      logoUrl: row.logoUrl ?? undefined,
+      marketCap: row.marketCap ?? undefined,
+      addresses: row.addresses,
+    }));
+
     log.methodExit(this.logger, 'searchByTextAndChains', {
-      count: tokens.length,
+      count: tokenSymbols.length,
     });
-    return tokens;
+    return tokenSymbols;
   }
 
   /**

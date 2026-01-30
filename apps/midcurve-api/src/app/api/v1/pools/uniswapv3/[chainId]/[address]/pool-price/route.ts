@@ -81,7 +81,7 @@ export async function GET(
       // 2. Fetch current pool price from blockchain
       let priceData;
       try {
-        priceData = await getUniswapV3PoolService().getPoolPrice(validatedChainId, validatedAddress);
+        priceData = await getUniswapV3PoolService().fetchPoolPrice(validatedChainId, validatedAddress);
       } catch (error) {
         // Handle specific error cases
         if (error instanceof Error) {
@@ -132,7 +132,7 @@ export async function GET(
 
       // 3. Build response
       const responseData: GetPoolPriceResponse = {
-        sqrtPriceX96: priceData.sqrtPriceX96,
+        sqrtPriceX96: priceData.sqrtPriceX96.toString(),
         currentTick: priceData.currentTick,
         timestamp: new Date().toISOString(),
       };

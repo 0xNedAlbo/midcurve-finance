@@ -64,9 +64,7 @@ export type CreateErc20TokenResponse = ApiResponse<CreateErc20TokenData>;
 /**
  * Token search candidate from CoinGecko (lightweight, not in database yet)
  *
- * This represents a token found in CoinGecko's catalog that matches
- * the search criteria. To add it to the database, use POST /api/v1/tokens/erc20
- * with the address and chainId from this candidate.
+ * @deprecated Use TokenSymbolResult instead - this type will be removed
  */
 export interface TokenSearchCandidate {
   /** CoinGecko coin ID */
@@ -86,65 +84,88 @@ export interface TokenSearchCandidate {
 }
 
 /**
+ * Token address on a specific chain
+ */
+export interface TokenAddress {
+  /** EVM chain ID */
+  chainId: number;
+  /** Contract address (EIP-55 checksummed) */
+  address: string;
+}
+
+/**
+ * Token search result grouped by symbol
+ *
+ * Returns a token symbol with all its addresses across the requested chains.
+ * Results are sorted by market cap (MAX across chains) in descending order.
+ */
+export interface TokenSymbolResult {
+  /** Token symbol (uppercase, e.g., "WETH") */
+  symbol: string;
+  /** Token name (e.g., "Wrapped Ether") */
+  name: string;
+  /** CoinGecko coin ID */
+  coingeckoId: string;
+  /** Token logo URL from CoinGecko (if available) */
+  logoUrl?: string;
+  /** Market cap in USD (MAX across all chains, used for sorting) */
+  marketCap?: number;
+  /** All addresses for this token across the requested chains */
+  addresses: TokenAddress[];
+}
+
+/**
  * GET /api/v1/tokens/erc20/search - Query params
  */
 export interface SearchErc20TokensQuery {
   /**
-   * REQUIRED - Chain to search within
+   * REQUIRED - Chain IDs to search within (comma-separated in URL)
+   * Example: ?chainIds=1,42161,8453
    */
-  chainId: number;
+  chainIds: number[];
 
   /**
-   * Optional - search query (searches both symbol AND name with OR logic)
-   * Can also be a full contract address for exact match
+   * REQUIRED - search query (searches symbol, case-insensitive partial match)
    */
-  query?: string;
-
-  /**
-   * Optional - contract address to search for (exact match, case-insensitive)
-   * Deprecated: Use `query` parameter instead
-   */
-  address?: string;
+  query: string;
 }
 
 /**
  * GET /api/v1/tokens/erc20/search - Query validation
  *
- * chainId is REQUIRED
- * At least one of query or address must be provided
+ * chainIds is REQUIRED (comma-separated string, e.g., "1,42161,8453")
+ * query is REQUIRED (minimum 1 character)
  */
-export const SearchErc20TokensQuerySchema = z
-  .object({
-    chainId: z.coerce
-      .number()
-      .int('Chain ID must be an integer')
-      .positive('Chain ID must be positive'),
-    query: z.string().min(1, 'Query must not be empty').optional(),
-    address: z
-      .string()
-      .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format')
-      .optional(),
-  })
-  .refine(
-    (data) => data.query !== undefined || data.address !== undefined,
-    {
-      message: 'At least one of query or address must be provided',
-      path: ['query', 'address'],
-    }
-  );
+export const SearchErc20TokensQuerySchema = z.object({
+  chainIds: z
+    .string()
+    .min(1, 'Chain IDs are required')
+    .transform((val) =>
+      val
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => parseInt(s, 10))
+    )
+    .refine(
+      (arr) => arr.length > 0 && arr.every((n) => Number.isInteger(n) && n > 0),
+      { message: 'Chain IDs must be positive integers' }
+    ),
+  query: z.string().min(1, 'Query must not be empty'),
+});
 
 /**
- * GET /api/v1/tokens/erc20/search - Response data (array of search candidates)
+ * GET /api/v1/tokens/erc20/search - Response data (array of token symbols with addresses)
  */
-export type SearchErc20TokensData = TokenSearchCandidate[];
+export type SearchErc20TokensData = TokenSymbolResult[];
 
 /**
  * GET /api/v1/tokens/erc20/search - Response
  */
 export interface SearchErc20TokensResponse extends ApiResponse<SearchErc20TokensData> {
   meta?: {
-    count: number; // Number of results returned
-    limit: number; // Max results (always 10)
+    count: number; // Number of unique symbols returned
+    limit: number; // Max symbols (always 10)
     timestamp: string;
   };
 }
