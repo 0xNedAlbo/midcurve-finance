@@ -22,3 +22,7 @@ export {
   positionStateToJSON,
   positionStateFromJSON,
 } from './uniswapv3-position-state.js';
+
+export { type UniswapV3PositionMetrics } from './uniswapv3-position-metrics.js';
+
+export { type UniswapV3PositionPnLSummary } from './uniswapv3-position-pnl-summary.js';

@@ -9,6 +9,9 @@ import { PrismaClient } from "@midcurve/database";
 import type {
     UniswapV3PositionConfigData,
     UniswapV3PositionState,
+    UniswapV3PositionMetrics,
+    UniswapV3PositionPnLSummary,
+    AprSummary,
     PositionProtocol,
     PositionInterface,
     PositionRow,
@@ -51,6 +54,7 @@ import {
     UNISWAP_V3_POSITION_EVENT_SIGNATURES,
     type RawLogInput,
 } from "../position-ledger/uniswapv3-ledger-service.js";
+import { UniswapV3AprService } from "../position-apr/uniswapv3-apr-service.js";
 import type { Address, PublicClient } from "viem";
 import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
@@ -933,7 +937,7 @@ export class UniswapV3PositionService {
             await this.refreshFeeState(id, resolvedBlockNumber, dbTx);
 
             // 6. Refresh metrics (common fields: value, PnL, fees, price range)
-            await this.refreshMetrics(id, dbTx);
+            await this.refreshMetrics(id, resolvedBlockNumber, dbTx);
 
             // 7. Check if position should be marked as closed
             const refreshedPosition = await this.findById(id);
@@ -1491,6 +1495,347 @@ export class UniswapV3PositionService {
             blockNumber,
         );
         return onChainState.liquidity;
+    }
+
+    /**
+     * Fetch current position metrics without persisting to database.
+     *
+     * Calculates metrics at a specific block number using on-chain data:
+     * - currentValue: Position value in quote token (from on-chain liquidity + pool price)
+     * - currentCostBasis: Cost basis from ledger events up to block
+     * - realizedPnl: Realized PnL from ledger events up to block
+     * - unrealizedPnl: currentValue - costBasis
+     * - collectedFees: Total collected fees from ledger events up to block
+     * - unClaimedFees: Unclaimed fee value from on-chain fee state
+     * - lastFeesCollectedAt: Timestamp of last fee collection up to block
+     * - priceRangeLower/Upper: Position bounds in quote token price
+     *
+     * @param id - Position ID
+     * @param blockNumber - Block number to fetch state at, or 'latest' for current block
+     * @param tx - Optional Prisma transaction client
+     * @returns Position metrics (not persisted)
+     * @throws Error if position not found
+     */
+    async fetchMetrics(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<UniswapV3PositionMetrics> {
+        log.methodEntry(this.logger, "fetchMetrics", { id, blockNumber });
+
+        try {
+            // 1. Get existing position (DB read for config/metadata only)
+            const position = await this.findById(id);
+            if (!position) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            const { chainId, poolAddress, nftId } = position.typedConfig;
+
+            // 2. Fetch on-chain pool state at specified block
+            const poolState = await this.poolService.fetchPoolState(
+                chainId,
+                poolAddress,
+                blockNumber,
+            );
+
+            // 3. Fetch on-chain position liquidity at specified block
+            const liquidity = await this.fetchLiquidity(
+                chainId,
+                nftId,
+                blockNumber,
+            );
+
+            // 4. Fetch fee state (unclaimed fees) at specified block
+            const feeState = await this.fetchFeeState(id, blockNumber, tx);
+
+            // 5. Get ledger data up to specified block
+            const ledgerService = new UniswapV3LedgerService(
+                { positionId: id },
+                { prisma: this._prisma },
+            );
+            const latestEvent = await ledgerService.fetchLatestEvent(
+                blockNumber,
+                tx,
+            );
+            const lastCollectEvent = await ledgerService.fetchLastCollectEvent(
+                blockNumber,
+                tx,
+            );
+
+            // 6. Extract values from ledger events (or defaults)
+            const currentCostBasis = latestEvent?.costBasisAfter ?? 0n;
+            const realizedPnl = latestEvent?.pnlAfter ?? 0n;
+            const collectedFees = latestEvent?.collectedFeesAfter ?? 0n;
+            const lastFeesCollectedAt =
+                lastCollectEvent?.timestamp ?? position.positionOpenedAt;
+
+            // 7. Calculate current position value using fetched on-chain data
+            const currentValue = calculatePositionValue(
+                liquidity,
+                poolState.sqrtPriceX96,
+                position.tickLower,
+                position.tickUpper,
+                !position.isToken0Quote, // baseIsToken0
+            );
+
+            // 8. Calculate unrealized PnL
+            const unrealizedPnl = currentValue - currentCostBasis;
+
+            // 9. Calculate unclaimed fees in quote token from fee state
+            const unClaimedFees = calculateTokenValueInQuote(
+                feeState.unclaimedFees0,
+                feeState.unclaimedFees1,
+                poolState.sqrtPriceX96,
+                position.isToken0Quote,
+                position.pool.token0.decimals,
+                position.pool.token1.decimals,
+            );
+
+            // 10. Calculate price range (uses static token decimals from position.pool)
+            const { priceRangeLower, priceRangeUpper } =
+                this.calculatePriceRange(position, position.pool);
+
+            const metrics: UniswapV3PositionMetrics = {
+                currentValue,
+                currentCostBasis,
+                realizedPnl,
+                unrealizedPnl,
+                collectedFees,
+                unClaimedFees,
+                lastFeesCollectedAt,
+                priceRangeLower,
+                priceRangeUpper,
+            };
+
+            this.logger.info(
+                {
+                    id,
+                    blockNumber,
+                    currentValue: currentValue.toString(),
+                    currentCostBasis: currentCostBasis.toString(),
+                    unrealizedPnl: unrealizedPnl.toString(),
+                    unClaimedFees: unClaimedFees.toString(),
+                },
+                "Position metrics fetched",
+            );
+
+            log.methodExit(this.logger, "fetchMetrics", { id });
+            return metrics;
+        } catch (error) {
+            if (
+                !(error instanceof Error && error.message.includes("not found"))
+            ) {
+                log.methodError(this.logger, "fetchMetrics", error as Error, {
+                    id,
+                });
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Fetch PnL summary breakdown without persisting to database.
+     *
+     * Returns:
+     * - Realized PnL: collectedFees + realizedPnl (from withdrawn assets)
+     * - Unrealized PnL: unClaimedFees + currentValue - currentCostBasis
+     * - Total PnL: realized + unrealized
+     *
+     * @param id - Position ID
+     * @param blockNumber - Block number to fetch state at, or 'latest' for current block
+     * @param tx - Optional Prisma transaction client
+     * @returns PnL summary breakdown (not persisted)
+     * @throws Error if position not found
+     */
+    async fetchPnLSummary(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<UniswapV3PositionPnLSummary> {
+        log.methodEntry(this.logger, "fetchPnLSummary", { id, blockNumber });
+
+        try {
+            // 1. Fetch all metrics (reuse existing method)
+            const metrics = await this.fetchMetrics(id, blockNumber, tx);
+
+            // 2. Calculate subtotals
+            const realizedSubtotal = metrics.collectedFees + metrics.realizedPnl;
+            const unrealizedSubtotal =
+                metrics.unClaimedFees +
+                metrics.currentValue -
+                metrics.currentCostBasis;
+            const totalPnl = realizedSubtotal + unrealizedSubtotal;
+
+            const summary: UniswapV3PositionPnLSummary = {
+                // Realized
+                collectedFees: metrics.collectedFees,
+                realizedPnl: metrics.realizedPnl,
+                realizedSubtotal,
+                // Unrealized
+                unClaimedFees: metrics.unClaimedFees,
+                currentValue: metrics.currentValue,
+                currentCostBasis: metrics.currentCostBasis,
+                unrealizedSubtotal,
+                // Total
+                totalPnl,
+            };
+
+            this.logger.info(
+                {
+                    id,
+                    blockNumber,
+                    totalPnl: totalPnl.toString(),
+                    realizedSubtotal: realizedSubtotal.toString(),
+                    unrealizedSubtotal: unrealizedSubtotal.toString(),
+                },
+                "Position PnL summary fetched",
+            );
+
+            log.methodExit(this.logger, "fetchPnLSummary", { id });
+            return summary;
+        } catch (error) {
+            log.methodError(this.logger, "fetchPnLSummary", error as Error, {
+                id,
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Fetch APR summary breakdown without persisting to database.
+     *
+     * Returns:
+     * - Realized APR: from completed APR periods (fee collections)
+     * - Unrealized APR: from current unclaimed fees since last collection
+     * - Total APR: time-weighted combination
+     *
+     * @param id - Position ID
+     * @param blockNumber - Block number to fetch state at, or 'latest' for current block
+     * @param tx - Optional Prisma transaction client
+     * @returns APR summary breakdown (not persisted)
+     * @throws Error if position not found
+     */
+    async fetchAprSummary(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<AprSummary> {
+        log.methodEntry(this.logger, "fetchAprSummary", { id, blockNumber });
+
+        try {
+            // 1. Get position for opened date
+            const position = await this.findById(id);
+            if (!position) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            // 2. Fetch metrics for current cost basis and unclaimed fees
+            const metrics = await this.fetchMetrics(id, blockNumber, tx);
+
+            // 3. Fetch APR periods
+            const aprService = new UniswapV3AprService(
+                { positionId: id },
+                { prisma: this._prisma },
+            );
+            const aprPeriods = await aprService.fetchAprPeriods(blockNumber, tx);
+
+            // 4. Calculate realized metrics from APR periods
+            let realizedFees = 0n;
+            let realizedWeightedCostBasisSum = 0n;
+            let realizedTotalSeconds = 0;
+
+            for (const period of aprPeriods) {
+                realizedFees += period.collectedFeeValue;
+                realizedWeightedCostBasisSum +=
+                    period.costBasis * BigInt(period.durationSeconds);
+                realizedTotalSeconds += period.durationSeconds;
+            }
+
+            const realizedTWCostBasis =
+                realizedTotalSeconds > 0
+                    ? realizedWeightedCostBasisSum / BigInt(realizedTotalSeconds)
+                    : 0n;
+
+            const realizedActiveDays = realizedTotalSeconds / 86400;
+
+            // Calculate realized APR: (fees / costBasis) * (365 / days) * 100
+            const realizedApr =
+                realizedTWCostBasis > 0n && realizedActiveDays > 0
+                    ? (Number(realizedFees) / Number(realizedTWCostBasis)) *
+                      (365 / realizedActiveDays) *
+                      100
+                    : 0;
+
+            // 5. Calculate unrealized metrics
+            const unrealizedFees = metrics.unClaimedFees;
+            const unrealizedCostBasis = metrics.currentCostBasis;
+
+            // Days since last period end (or position start if no periods)
+            const firstPeriod = aprPeriods[0];
+            const lastPeriodEnd = firstPeriod
+                ? firstPeriod.endTimestamp
+                : position.positionOpenedAt;
+            const unrealizedSeconds = Math.max(
+                0,
+                (Date.now() - lastPeriodEnd.getTime()) / 1000,
+            );
+            const unrealizedActiveDays = unrealizedSeconds / 86400;
+
+            // Calculate unrealized APR
+            const unrealizedApr =
+                unrealizedCostBasis > 0n && unrealizedActiveDays > 0
+                    ? (Number(unrealizedFees) / Number(unrealizedCostBasis)) *
+                      (365 / unrealizedActiveDays) *
+                      100
+                    : 0;
+
+            // 6. Calculate total (time-weighted average)
+            const totalActiveDays = realizedActiveDays + unrealizedActiveDays;
+            const totalApr =
+                totalActiveDays > 0
+                    ? (realizedApr * realizedActiveDays +
+                          unrealizedApr * unrealizedActiveDays) /
+                      totalActiveDays
+                    : 0;
+
+            // Minimum threshold: 5 minutes = 300 seconds = 0.00347 days
+            const belowThreshold = totalActiveDays < 0.00347;
+
+            const summary: AprSummary = {
+                realizedFees,
+                realizedTWCostBasis,
+                realizedActiveDays: Math.round(realizedActiveDays * 10) / 10,
+                realizedApr,
+                unrealizedFees,
+                unrealizedCostBasis,
+                unrealizedActiveDays: Math.round(unrealizedActiveDays * 10) / 10,
+                unrealizedApr,
+                totalApr,
+                totalActiveDays: Math.round(totalActiveDays * 10) / 10,
+                belowThreshold,
+            };
+
+            this.logger.info(
+                {
+                    id,
+                    blockNumber,
+                    totalApr: totalApr.toFixed(2),
+                    realizedApr: realizedApr.toFixed(2),
+                    unrealizedApr: unrealizedApr.toFixed(2),
+                    totalActiveDays: totalActiveDays.toFixed(1),
+                },
+                "Position APR summary fetched",
+            );
+
+            log.methodExit(this.logger, "fetchAprSummary", { id });
+            return summary;
+        } catch (error) {
+            log.methodError(this.logger, "fetchAprSummary", error as Error, {
+                id,
+            });
+            throw error;
+        }
     }
 
     /**
@@ -2066,7 +2411,7 @@ export class UniswapV3PositionService {
         );
 
         // Refresh metrics to recalculate position value
-        await this.refreshMetrics(id, tx);
+        await this.refreshMetrics(id, "latest", tx);
 
         // Return the updated position
         const burnedPosition = await this.findById(id);
@@ -2464,67 +2809,21 @@ export class UniswapV3PositionService {
      * Note: Does NOT update totalApr, isActive, or positionClosedAt.
      *
      * @param id - Position database ID
+     * @param blockNumber - Block number to fetch state at, or 'latest' for current block
      * @param tx - Optional Prisma transaction client
      */
     private async refreshMetrics(
         id: string,
+        blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
     ): Promise<void> {
-        log.methodEntry(this.logger, "refreshMetrics", { id });
+        log.methodEntry(this.logger, "refreshMetrics", { id, blockNumber });
 
         try {
-            // 1. Get existing position
-            const position = await this.findById(id);
-            if (!position) {
-                throw new Error(`Position not found: ${id}`);
-            }
+            // 1. Fetch metrics at specified block (does not persist)
+            const metrics = await this.fetchMetrics(id, blockNumber, tx);
 
-            // 2. Load pool state from database (already refreshed by caller)
-            const pool = await this.poolService.findById(position.pool.id, tx);
-            if (!pool) {
-                throw new Error(`Pool not found: ${position.pool.id}`);
-            }
-
-            // 3. Get ledger data from latest events
-            const ledgerService = new UniswapV3LedgerService(
-                { positionId: id },
-                { prisma: this._prisma },
-            );
-            const latestEvent = await ledgerService.fetchLatestEvent(
-                "latest",
-                tx,
-            );
-            const lastCollectEvent = await ledgerService.fetchLastCollectEvent(
-                "latest",
-                tx,
-            );
-
-            // Extract values from latest event (or use zeros if no events)
-            const costBasis = latestEvent?.costBasisAfter ?? 0n;
-            const realizedPnl = latestEvent?.pnlAfter ?? 0n;
-            const collectedFees = latestEvent?.collectedFeesAfter ?? 0n;
-
-            // 4. Calculate current position value
-            const currentValue = this.calculateCurrentPositionValue(
-                position,
-                pool,
-            );
-
-            // 5. Calculate unrealized PnL
-            const unrealizedPnl = currentValue - costBasis;
-
-            // 6. Calculate unclaimed fees (total value in quote token)
-            const unClaimedFees = this.calculateUnclaimedFees(position, pool);
-
-            // 7. Calculate price range
-            const { priceRangeLower, priceRangeUpper } =
-                this.calculatePriceRange(position, pool);
-
-            // 8. Determine lastFeesCollectedAt (use positionOpenedAt if no collections)
-            const lastFeesCollectedAt =
-                lastCollectEvent?.timestamp ?? position.positionOpenedAt;
-
-            // 9. Update database with calculated metrics (skip APR calculation)
+            // 2. Persist metrics to database
             const db = tx ?? this.prisma;
 
             log.dbOperation(this.logger, "update", "Position", {
@@ -2545,27 +2844,27 @@ export class UniswapV3PositionService {
             await db.position.update({
                 where: { id },
                 data: {
-                    currentValue: currentValue.toString(),
-                    currentCostBasis: costBasis.toString(),
-                    realizedPnl: realizedPnl.toString(),
-                    unrealizedPnl: unrealizedPnl.toString(),
+                    currentValue: metrics.currentValue.toString(),
+                    currentCostBasis: metrics.currentCostBasis.toString(),
+                    realizedPnl: metrics.realizedPnl.toString(),
+                    unrealizedPnl: metrics.unrealizedPnl.toString(),
                     realizedCashflow: "0",
                     unrealizedCashflow: "0",
-                    collectedFees: collectedFees.toString(),
-                    unClaimedFees: unClaimedFees.toString(),
-                    lastFeesCollectedAt,
-                    priceRangeLower: priceRangeLower.toString(),
-                    priceRangeUpper: priceRangeUpper.toString(),
+                    collectedFees: metrics.collectedFees.toString(),
+                    unClaimedFees: metrics.unClaimedFees.toString(),
+                    lastFeesCollectedAt: metrics.lastFeesCollectedAt,
+                    priceRangeLower: metrics.priceRangeLower.toString(),
+                    priceRangeUpper: metrics.priceRangeUpper.toString(),
                 },
             });
 
             this.logger.info(
                 {
                     id,
-                    currentValue: currentValue.toString(),
-                    costBasis: costBasis.toString(),
-                    unrealizedPnl: unrealizedPnl.toString(),
-                    unClaimedFees: unClaimedFees.toString(),
+                    currentValue: metrics.currentValue.toString(),
+                    currentCostBasis: metrics.currentCostBasis.toString(),
+                    unrealizedPnl: metrics.unrealizedPnl.toString(),
+                    unClaimedFees: metrics.unClaimedFees.toString(),
                 },
                 "Position metrics refreshed",
             );
@@ -2850,44 +3149,6 @@ export class UniswapV3PositionService {
     // ============================================================================
 
     /**
-     * Calculate current position value
-     *
-     * Uses liquidity utility to calculate token amounts and convert to quote value.
-     *
-     * @param position - Position object with config and state
-     * @param pool - Pool object with current state
-     * @returns Current position value in quote token units
-     */
-    private calculateCurrentPositionValue(
-        position: UniswapV3Position,
-        pool: UniswapV3Pool,
-    ): bigint {
-        const tickLower = position.tickLower;
-        const tickUpper = position.tickUpper;
-        const liquidity = position.liquidity;
-        const sqrtPriceX96 = pool.sqrtPriceX96;
-
-        if (liquidity === 0n) {
-            return 0n;
-        }
-
-        // Determine token roles
-        const baseIsToken0 = !position.isToken0Quote;
-
-        // Calculate position value using utility function
-        // Converts all token amounts to quote token value using sqrtPriceX96
-        const positionValue = calculatePositionValue(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            baseIsToken0,
-        );
-
-        return positionValue;
-    }
-
-    /**
      * Calculate price range bounds
      *
      * Converts tick bounds to prices in quote token.
@@ -2926,34 +3187,6 @@ export class UniswapV3PositionService {
         );
 
         return { priceRangeLower, priceRangeUpper };
-    }
-
-    /**
-     * Calculate unclaimed fees value in quote token
-     *
-     * Extracts unclaimed fee amounts from position state and converts
-     * to total quote token value using the current pool price.
-     *
-     * @param position - Position object with state containing unclaimed fees
-     * @param pool - Pool object with current price data
-     * @returns Total unclaimed fees value in quote token units
-     */
-    private calculateUnclaimedFees(
-        position: UniswapV3Position,
-        pool: UniswapV3Pool,
-    ): bigint {
-        const { unclaimedFees0, unclaimedFees1 } = position.typedState;
-        const sqrtPriceX96 = pool.sqrtPriceX96;
-
-        // Convert both fee amounts to quote token value
-        return calculateTokenValueInQuote(
-            unclaimedFees0,
-            unclaimedFees1,
-            sqrtPriceX96,
-            position.isToken0Quote,
-            pool.token0.decimals,
-            pool.token1.decimals,
-        );
     }
 
     // ============================================================================
