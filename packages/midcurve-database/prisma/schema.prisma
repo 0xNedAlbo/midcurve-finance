@@ -102,6 +102,9 @@ model User {
   notifications UserNotification[]
   webhookConfig UserWebhookConfig?
 
+  // Favorite pools
+  favoritePools FavoritePool[]
+
   // Indexes for efficient queries
   @@index([name])
   @@index([email])
@@ -207,6 +210,7 @@ model Pool {
   priceSubscription PoolPriceSubscription? // 1:1 relation for automation price monitoring
   priceSubscribers  PoolPriceSubscribers[] @relation("PoolPriceSubscribers") // 1:N relation for WebSocket price subscriptions
   pricesUniswapV3   PoolPricesUniswapV3[]  @relation("PoolPricesUniswapV3") // Historical prices from Swap events
+  favoritedBy       FavoritePool[] // Users who favorited this pool
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -982,6 +986,35 @@ model PositionRangeStatus {
 // =============================================================================
 // Pool Price History Models
 // =============================================================================
+
+// =============================================================================
+// User Favorite Pools
+// =============================================================================
+
+// FavoritePool - User's saved/bookmarked pools for quick access
+// Simple junction table linking users to pools they want to track
+model FavoritePool {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User reference
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Pool reference
+  poolId String
+  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  // Unique constraint: one favorite per user+pool combination
+  @@unique([userId, poolId])
+
+  // Indexes for efficient queries
+  @@index([userId])
+  @@index([poolId])
+  @@index([userId, createdAt]) // For listing user's favorites in order
+  @@map("favorite_pools")
+}
 
 // PoolPricesUniswapV3 - Historical pool prices from Swap events
 // Prices are sourced by subscribing to Swap events the pool contract emits
