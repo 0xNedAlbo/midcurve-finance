@@ -54,6 +54,19 @@ export function buildBlockUrl(chainId: number, blockNumber: string | number): st
 }
 
 /**
+ * Build an address URL for a given chain and address
+ *
+ * @param chainId - The EVM chain ID
+ * @param address - The address (0x...)
+ * @returns The full URL to the address on the block explorer, or '#' if chain is unsupported
+ */
+export function buildAddressUrl(chainId: number, address: string): string {
+  const explorer = getExplorerUrl(chainId);
+  if (!explorer) return '#';
+  return `${explorer}/address/${address}`;
+}
+
+/**
  * Truncate a transaction hash for display
  * Format: 0x142dc6...5d25eb (first 6 chars + last 6 chars after 0x)
  *

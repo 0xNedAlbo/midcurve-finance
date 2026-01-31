@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-shared';
+import type { UniswapV3Pool } from '@midcurve/shared';
 import type { WizardStep } from '@/components/layout/wizard';
 
 // ----- Types -----
@@ -27,6 +28,9 @@ export interface CreatePositionWizardState {
   // Pool Selection (Step A)
   poolSelectionTab: PoolSelectionTab;
   selectedPool: PoolSearchResultItem | null;
+  discoveredPool: UniswapV3Pool | null;
+  isDiscovering: boolean;
+  discoverError: string | null;
   baseToken: PoolSearchTokenInfo | null;
   quoteToken: PoolSearchTokenInfo | null;
 
@@ -71,6 +75,9 @@ type WizardAction =
   | { type: 'SET_POOL_TAB'; tab: PoolSelectionTab }
   | { type: 'SELECT_POOL'; pool: PoolSearchResultItem }
   | { type: 'CLEAR_POOL' }
+  | { type: 'SET_IS_DISCOVERING'; isDiscovering: boolean }
+  | { type: 'SET_DISCOVERED_POOL'; pool: UniswapV3Pool }
+  | { type: 'SET_DISCOVER_ERROR'; error: string }
   | { type: 'SET_INVESTMENT_MODE'; mode: InvestmentMode }
   | { type: 'SET_TOKEN_A_AMOUNT'; amount: string; isMax: boolean }
   | { type: 'SET_TOKEN_B_AMOUNT'; amount: string; isMax: boolean }
@@ -94,6 +101,9 @@ const initialState: CreatePositionWizardState = {
   currentStepIndex: 0,
   poolSelectionTab: 'search',
   selectedPool: null,
+  discoveredPool: null,
+  isDiscovering: false,
+  discoverError: null,
   baseToken: null,
   quoteToken: null,
   investmentMode: 'matched',
@@ -152,8 +162,34 @@ function wizardReducer(
       return {
         ...state,
         selectedPool: null,
+        discoveredPool: null,
+        isDiscovering: false,
+        discoverError: null,
         baseToken: null,
         quoteToken: null,
+      };
+
+    case 'SET_IS_DISCOVERING':
+      return {
+        ...state,
+        isDiscovering: action.isDiscovering,
+        discoverError: action.isDiscovering ? null : state.discoverError,
+      };
+
+    case 'SET_DISCOVERED_POOL':
+      return {
+        ...state,
+        discoveredPool: action.pool,
+        isDiscovering: false,
+        discoverError: null,
+      };
+
+    case 'SET_DISCOVER_ERROR':
+      return {
+        ...state,
+        discoveredPool: null,
+        isDiscovering: false,
+        discoverError: action.error,
       };
 
     case 'SET_INVESTMENT_MODE':
@@ -314,6 +350,9 @@ interface CreatePositionWizardContextValue {
   setPoolTab: (tab: PoolSelectionTab) => void;
   selectPool: (pool: PoolSearchResultItem) => void;
   clearPool: () => void;
+  setIsDiscovering: (isDiscovering: boolean) => void;
+  setDiscoveredPool: (pool: UniswapV3Pool) => void;
+  setDiscoverError: (error: string) => void;
 
   // Investment
   setInvestmentMode: (mode: InvestmentMode) => void;
@@ -393,6 +432,18 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
 
   const clearPool = useCallback(() => {
     dispatch({ type: 'CLEAR_POOL' });
+  }, []);
+
+  const setIsDiscovering = useCallback((isDiscovering: boolean) => {
+    dispatch({ type: 'SET_IS_DISCOVERING', isDiscovering });
+  }, []);
+
+  const setDiscoveredPool = useCallback((pool: UniswapV3Pool) => {
+    dispatch({ type: 'SET_DISCOVERED_POOL', pool });
+  }, []);
+
+  const setDiscoverError = useCallback((error: string) => {
+    dispatch({ type: 'SET_DISCOVER_ERROR', error });
   }, []);
 
   // Investment
@@ -488,6 +539,9 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setPoolTab,
     selectPool,
     clearPool,
+    setIsDiscovering,
+    setDiscoveredPool,
+    setDiscoverError,
     setInvestmentMode,
     setTokenAAmount,
     setTokenBAmount,

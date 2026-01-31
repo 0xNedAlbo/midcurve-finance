@@ -10,6 +10,7 @@ import { PoolTable } from '../shared/PoolTable';
 import { TokenSetSearchInput } from '../shared/TokenSetSearchInput';
 import { usePoolSearch } from '@/hooks/pools/usePoolSearch';
 import { usePoolLookup } from '@/hooks/pools/usePoolLookup';
+import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { usePoolFavorites, useTogglePoolFavorite } from '@/hooks/pools/usePoolFavorites';
 import type { TokenSearchResult } from '@/hooks/tokens/useMultiChainTokenSearch';
 import { getChainMetadataByChainId, type EvmChainSlug } from '@/config/chains';
@@ -36,7 +37,13 @@ export function PoolSelectionStep() {
     setPoolTab,
     selectPool,
     setStepValid,
+    setIsDiscovering,
+    setDiscoveredPool,
+    setDiscoverError,
   } = useCreatePositionWizard();
+
+  // Pool discovery mutation
+  const discoverPool = useDiscoverPool();
 
   // Token set state - arrays of selected tokens
   const [tokenSetA, setTokenSetA] = useState<TokenSearchResult[]>([]);
@@ -179,15 +186,33 @@ export function PoolSelectionStep() {
     [toggleFavorite]
   );
 
-  // Update validation when pool is selected
+  // Update validation when pool is discovered (not just selected)
   useEffect(() => {
-    setStepValid('pool', state.selectedPool !== null);
-  }, [state.selectedPool, setStepValid]);
+    setStepValid('pool', state.discoveredPool !== null);
+  }, [state.discoveredPool, setStepValid]);
 
-  const handleSelectPool = (pool: PoolSearchResultItem) => {
-    // Convert PoolSearchResultItem to the format expected by the wizard context
-    selectPool(pool);
-  };
+  // Handle pool selection - triggers discover call
+  const handleSelectPool = useCallback(
+    async (pool: PoolSearchResultItem) => {
+      // Store the selected pool info immediately for UI feedback
+      selectPool(pool);
+
+      // Start discovery
+      setIsDiscovering(true);
+
+      try {
+        const result = await discoverPool.mutateAsync({
+          chainId: pool.chainId,
+          address: pool.poolAddress,
+        });
+        setDiscoveredPool(result.pool);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to discover pool';
+        setDiscoverError(message);
+      }
+    },
+    [selectPool, setIsDiscovering, setDiscoveredPool, setDiscoverError, discoverPool]
+  );
 
   const renderInteractive = () => (
     <div className="space-y-4" style={{ zoom: fontScale }}>
@@ -389,7 +414,7 @@ export function PoolSelectionStep() {
   };
 
   const renderSummary = () => (
-    <WizardSummaryPanel nextDisabled={!state.selectedPool} />
+    <WizardSummaryPanel nextDisabled={!state.discoveredPool || state.isDiscovering} />
   );
 
   return {
