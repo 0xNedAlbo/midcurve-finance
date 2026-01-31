@@ -186,28 +186,48 @@ export interface ToggleFavoriteInput {
  * React Query mutation hook for toggling a pool's favorite status
  *
  * Combines add/remove based on current state.
+ * Makes direct API calls to ensure proper cache invalidation.
  */
 export function useTogglePoolFavorite() {
-  const addMutation = useAddPoolFavorite();
-  const removeMutation = useRemovePoolFavorite();
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (input: ToggleFavoriteInput) => {
       if (input.isFavorite) {
         // Currently favorited, so remove
-        return removeMutation.mutateAsync({
+        const params = new URLSearchParams({
           protocol: input.protocol,
-          chainId: input.chainId,
-          poolAddress: input.poolAddress,
+          chainId: String(input.chainId),
+          address: input.poolAddress,
         });
+
+        const response = await apiClient.delete<RemoveFavoritePoolData>(
+          `/api/v1/pools/favorites?${params.toString()}`
+        );
+        return { action: 'removed' as const, data: response.data };
       } else {
         // Not favorited, so add
-        return addMutation.mutateAsync({
-          protocol: input.protocol,
-          chainId: input.chainId,
-          poolAddress: input.poolAddress,
-        });
+        const response = await apiClient.post<AddFavoritePoolData>(
+          '/api/v1/pools/favorites',
+          {
+            protocol: input.protocol,
+            chainId: input.chainId,
+            poolAddress: input.poolAddress,
+          }
+        );
+        return { action: 'added' as const, data: response.data };
       }
+    },
+    onSuccess: () => {
+      // Invalidate favorites list
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.pools.favorites.all(),
+      });
+
+      // Invalidate pool search to update isFavorite status
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.pools.uniswapv3.searches(),
+      });
     },
   });
 }

@@ -43,6 +43,24 @@ export function PoolTable({
     return `${(feeTier / 10000).toFixed(2)}%`;
   };
 
+  /**
+   * Check if APR warning should be shown
+   * APR may be unreliable when pool has low/no liquidity, volume, or fees
+   */
+  const shouldShowAprWarning = (pool: PoolSearchResultItem): boolean => {
+    const tvl = parseFloat(pool.tvlUSD) || 0;
+    const volume = parseFloat(pool.volume24hUSD) || 0;
+    const fees = parseFloat(pool.fees24hUSD) || 0;
+    const apr = pool.apr7d || 0;
+
+    // Warning if APR > 0 but pool metrics suggest unreliable data
+    if (apr > 0 && tvl === 0) return true; // Empty pool
+    if (apr > 0 && fees === 0) return true; // No recent fees
+    if (volume === 0) return true; // No trading activity
+
+    return false;
+  };
+
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
       // Toggle direction if clicking same column
@@ -195,8 +213,20 @@ export function PoolTable({
                   <td className="py-3 text-right">{formatCurrency(pool.tvlUSD)}</td>
                   <td className="py-3 text-right">{formatCurrency(pool.volume24hUSD)}</td>
                   <td className="py-3 text-right">{formatCurrency(pool.fees24hUSD)}</td>
-                  <td className="py-3 text-right text-green-400">
-                    {formatPercent(pool.apr7d)}
+                  <td className="py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <span className="text-green-400">
+                        {formatPercent(pool.apr7d)}
+                      </span>
+                      {shouldShowAprWarning(pool) && (
+                        <span
+                          className="text-yellow-400 text-xs font-bold cursor-help"
+                          title="APR may be unreliable: low TVL, volume, or fees"
+                        >
+                          !
+                        </span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

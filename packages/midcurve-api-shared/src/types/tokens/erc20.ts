@@ -169,3 +169,75 @@ export interface SearchErc20TokensResponse extends ApiResponse<SearchErc20Tokens
     timestamp: string;
   };
 }
+
+// ============================================================================
+// Address-based Token Search
+// ============================================================================
+
+/**
+ * GET /api/v1/tokens/erc20/search-by-address - Query params
+ *
+ * Search for a token by its contract address across multiple chains.
+ */
+export interface SearchTokenByAddressQuery {
+  /**
+   * REQUIRED - Token contract address (0x + 40 hex chars)
+   */
+  address: string;
+
+  /**
+   * OPTIONAL - Chain IDs to search within (comma-separated in URL)
+   * If not provided, searches all supported chains.
+   * Example: ?chainIds=1,42161,8453
+   */
+  chainIds?: number[];
+}
+
+/**
+ * GET /api/v1/tokens/erc20/search-by-address - Query validation
+ *
+ * address is REQUIRED (valid Ethereum address format)
+ * chainIds is OPTIONAL (comma-separated string, e.g., "1,42161,8453")
+ */
+export const SearchTokenByAddressQuerySchema = z.object({
+  address: z
+    .string()
+    .min(1, 'Address is required')
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address format'),
+  chainIds: z
+    .string()
+    .optional()
+    .transform((val) =>
+      val
+        ? val
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+            .map((s) => parseInt(s, 10))
+        : undefined
+    )
+    .refine((arr) => !arr || arr.every((n) => Number.isInteger(n) && n > 0), {
+      message: 'Chain IDs must be positive integers',
+    }),
+});
+
+/**
+ * GET /api/v1/tokens/erc20/search-by-address - Response data
+ *
+ * Returns array of TokenSymbolResult for consistency with symbol search.
+ * Each result represents a unique symbol found, with addresses on each chain.
+ */
+export type SearchTokenByAddressData = TokenSymbolResult[];
+
+/**
+ * GET /api/v1/tokens/erc20/search-by-address - Response
+ */
+export interface SearchTokenByAddressResponse
+  extends ApiResponse<SearchTokenByAddressData> {
+  meta?: {
+    address: string; // Normalized address searched
+    chainsSearched: number; // Number of chains checked
+    chainsWithResults: number; // Number of chains where token was found
+    timestamp: string;
+  };
+}

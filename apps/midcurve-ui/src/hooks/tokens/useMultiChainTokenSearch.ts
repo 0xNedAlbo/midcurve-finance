@@ -2,12 +2,23 @@
  * Multi-Chain Token Search Hook
  *
  * Hook for searching tokens across multiple chains with debouncing.
- * Used in the pool selection wizard to find tokens by symbol.
+ * Used in the pool selection wizard to find tokens by symbol or address.
+ *
+ * Supports:
+ * - Symbol search: Partial match on token symbol (e.g., "WETH", "USD")
+ * - Address search: Exact match on token contract address (e.g., "0x...")
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDebounce } from 'use-debounce';
 import { apiClient } from '@/lib/api-client';
+
+/**
+ * Check if a string is a valid Ethereum address format
+ */
+function isEthereumAddress(query: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(query);
+}
 
 /**
  * Token search result - simplified version for display
@@ -93,17 +104,33 @@ export function useMultiChainTokenSearch({
       setError(null);
 
       try {
-        const params = new URLSearchParams({
-          chainIds: chainIds.join(','),
-          query: searchQuery,
-        });
+        let tokens: TokenSearchResult[];
 
-        const response = await apiClient.get<TokenSearchResult[]>(
-          `/api/v1/tokens/erc20/search?${params.toString()}`
-        );
+        if (isEthereumAddress(searchQuery)) {
+          // Address-based search
+          const params = new URLSearchParams({
+            address: searchQuery,
+            chainIds: chainIds.join(','),
+          });
 
-        // API returns TokenSymbolResult[] with: symbol, name, coingeckoId, logoUrl, marketCap, addresses[]
-        const tokens = response.data || [];
+          const response = await apiClient.get<TokenSearchResult[]>(
+            `/api/v1/tokens/erc20/search-by-address?${params.toString()}`
+          );
+
+          tokens = response.data || [];
+        } else {
+          // Symbol-based search
+          const params = new URLSearchParams({
+            chainIds: chainIds.join(','),
+            query: searchQuery,
+          });
+
+          const response = await apiClient.get<TokenSearchResult[]>(
+            `/api/v1/tokens/erc20/search?${params.toString()}`
+          );
+
+          tokens = response.data || [];
+        }
 
         // Results are already sorted by market cap from the API
         setResults(tokens);
@@ -122,12 +149,24 @@ export function useMultiChainTokenSearch({
 
   // Search when debounced query changes and is long enough
   useEffect(() => {
-    if (enabled && debouncedQuery !== undefined && debouncedQuery.length >= 2) {
-      search(debouncedQuery);
-    } else if (debouncedQuery.length === 0) {
+    if (!enabled) return;
+
+    if (debouncedQuery.length === 0) {
       // Clear results when query is cleared
       setResults([]);
       setHasSearched(false);
+      return;
+    }
+
+    // For addresses: only search when complete (42 chars: 0x + 40 hex)
+    // For symbols: search when >= 2 chars
+    const isAddress = debouncedQuery.startsWith('0x');
+    const shouldSearch = isAddress
+      ? isEthereumAddress(debouncedQuery)
+      : debouncedQuery.length >= 2;
+
+    if (shouldSearch) {
+      search(debouncedQuery);
     }
   }, [debouncedQuery, search, enabled]);
 

@@ -935,6 +935,25 @@ export class UniswapV3PoolService implements PoolServiceInterface {
           'Pool already exists, refreshing state from on-chain'
         );
 
+        // Backfill poolHash if missing (for pools created before poolHash was added)
+        const client = tx ?? this.prisma;
+        const dbPool = await client.pool.findUnique({
+          where: { id: existing.id },
+          select: { poolHash: true },
+        });
+
+        if (!dbPool?.poolHash) {
+          const poolHash = this.createHash({ chainId, address: normalizedAddress });
+          await client.pool.update({
+            where: { id: existing.id },
+            data: { poolHash },
+          });
+          this.logger.info(
+            { id: existing.id, poolHash },
+            'Backfilled missing poolHash'
+          );
+        }
+
         // Refresh pool state to get current price/liquidity/tick
         const refreshed = await this.refresh(existing.id, "latest", tx);
 
@@ -1245,9 +1264,16 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       // Serialize state
       const stateDB = stateToJSON(input.state);
 
+      // Generate poolHash for fast lookups
+      const poolHash = this.createHash({
+        chainId: input.config.chainId,
+        address: input.config.address,
+      });
+
       log.dbOperation(this.logger, 'create', 'Pool', {
         protocol: input.protocol,
         poolType: input.poolType,
+        poolHash,
       });
 
       const result = await client.pool.create({
@@ -1257,6 +1283,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
           token0Id: input.token0Id,
           token1Id: input.token1Id,
           feeBps: input.feeBps,
+          poolHash,
           config: config.toJSON() as object,
           state: stateDB as object,
         },

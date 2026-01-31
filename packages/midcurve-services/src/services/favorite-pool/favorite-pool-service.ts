@@ -478,13 +478,15 @@ export class FavoritePoolService {
     }
 
     try {
-      // Build poolHash values for efficient lookup
-      // Format: "uniswapv3/{chainId}/{poolAddress}" (lowercase address)
+      // Build poolHash values for efficient lookup using pool service's createHash
       const poolHashToInput = new Map<string, { chainId: number; poolAddress: string }>();
       const poolHashes: string[] = [];
 
       for (const pool of pools) {
-        const poolHash = `uniswapv3/${pool.chainId}/${pool.poolAddress.toLowerCase()}`;
+        const poolHash = this.poolService.createHash({
+          chainId: pool.chainId,
+          address: pool.poolAddress,
+        });
         poolHashes.push(poolHash);
         poolHashToInput.set(poolHash, pool);
       }
@@ -531,7 +533,7 @@ export class FavoritePoolService {
       const result = new Set<string>();
       for (const pool of matchingPools) {
         if (favoritedPoolIds.has(pool.id) && pool.poolHash) {
-          // Get original input from poolHash lookup
+          // Get original input from poolHash lookup (both use normalized addresses)
           const original = poolHashToInput.get(pool.poolHash);
           if (original) {
             result.add(`${original.chainId}:${original.poolAddress}`);

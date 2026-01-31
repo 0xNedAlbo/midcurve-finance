@@ -389,6 +389,72 @@ export class CoingeckoTokenService {
   }
 
   /**
+   * Search for a token by address across multiple chains
+   *
+   * Performs parallel lookups across all specified chains to find tokens
+   * with the given address. Uses the CoingeckoToken lookup table.
+   *
+   * @param address - Token contract address (will be normalized)
+   * @param chainIds - Optional chain IDs to search (defaults to all supported)
+   * @returns Array of tokens found (one per chain where token exists)
+   */
+  async searchByAddressAcrossChains(
+    address: string,
+    chainIds?: number[]
+  ): Promise<CoingeckoToken[]> {
+    log.methodEntry(this.logger, 'searchByAddressAcrossChains', {
+      address,
+      chainIds,
+    });
+
+    // Validate address format
+    if (!isAddress(address)) {
+      this.logger.warn({ address }, 'Invalid address format');
+      log.methodExit(this.logger, 'searchByAddressAcrossChains', { found: 0 });
+      return [];
+    }
+
+    // Normalize address
+    let normalizedAddress: string;
+    try {
+      normalizedAddress = getAddress(address);
+    } catch {
+      log.methodExit(this.logger, 'searchByAddressAcrossChains', { found: 0 });
+      return [];
+    }
+
+    const chainsToSearch = chainIds ?? [...SUPPORTED_CHAIN_IDS];
+
+    // Parallel search across all chains using existing findByChainAndAddress
+    const results = await Promise.all(
+      chainsToSearch.map((chainId) =>
+        this.findByChainAndAddress(chainId, normalizedAddress)
+      )
+    );
+
+    // Filter out nulls (chains where address wasn't found)
+    const foundTokens = results.filter(
+      (t): t is CoingeckoToken => t !== null
+    );
+
+    this.logger.info(
+      {
+        address: normalizedAddress.slice(0, 10) + '...',
+        chainsSearched: chainsToSearch.length,
+        found: foundTokens.length,
+      },
+      'Address search completed'
+    );
+
+    log.methodExit(this.logger, 'searchByAddressAcrossChains', {
+      found: foundTokens.length,
+      chains: foundTokens.map((t) => t.config.chainId),
+    });
+
+    return foundTokens;
+  }
+
+  /**
    * Find all addresses for a given CoinGecko ID
    *
    * Returns all chain+address mappings for a single CoinGecko token.
