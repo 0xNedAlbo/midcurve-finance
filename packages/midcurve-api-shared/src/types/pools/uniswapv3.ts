@@ -1,11 +1,14 @@
 /**
- * Type definitions for Uniswap V3 Pool Lookup Endpoint
+ * Type definitions for Uniswap V3 Pool Endpoints
  *
- * GET /api/pools/uniswapv3/:chainId/:address
+ * GET /api/v1/pools/uniswapv3/:chainId/:address - Single pool lookup
+ * GET /api/v1/pools/uniswapv3/lookup?address=... - Multi-chain address lookup
  */
 
 import { z } from 'zod';
 import type { UniswapV3Pool } from '@midcurve/shared';
+import type { ApiResponse } from '../common/index.js';
+import type { PoolSearchResultItem } from './pool-search.js';
 
 /**
  * Path parameters for pool lookup
@@ -166,3 +169,64 @@ export const GetUniswapV3PoolQuerySchema = z.object({
     .transform((val) => val === 'true')
     .pipe(z.boolean()),
 });
+
+// ============================================================================
+// LOOKUP BY ADDRESS (MULTI-CHAIN)
+// ============================================================================
+
+/**
+ * GET /api/v1/pools/uniswapv3/lookup - Query params
+ *
+ * Lookup a pool address across all supported chains.
+ */
+export interface LookupPoolByAddressQuery {
+  /**
+   * Pool contract address (EIP-55 checksummed or lowercase)
+   * @example "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
+   */
+  address: string;
+}
+
+/**
+ * GET /api/v1/pools/uniswapv3/lookup - Query validation schema
+ */
+export const LookupPoolByAddressQuerySchema = z.object({
+  address: z
+    .string()
+    .min(1, 'Address is required')
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address format'),
+});
+
+/**
+ * Inferred type from LookupPoolByAddressQuerySchema
+ */
+export type LookupPoolByAddressQueryValidated = z.infer<typeof LookupPoolByAddressQuerySchema>;
+
+/**
+ * GET /api/v1/pools/uniswapv3/lookup - Response data
+ *
+ * Returns array of pools found across all chains.
+ */
+export interface LookupPoolByAddressData {
+  /**
+   * Pools found matching the address across chains
+   *
+   * Empty array if no pools found on any chain.
+   * Max 5 results (one per supported chain: Ethereum, Arbitrum, Base, Polygon, Optimism).
+   */
+  pools: PoolSearchResultItem[];
+}
+
+/**
+ * GET /api/v1/pools/uniswapv3/lookup - Full response
+ */
+export interface LookupPoolByAddressResponse extends ApiResponse<LookupPoolByAddressData> {
+  meta?: {
+    /** Timestamp of the request */
+    timestamp?: string;
+    /** Number of chains searched */
+    chainsSearched?: number;
+    /** Number of chains that returned results */
+    chainsWithResults?: number;
+  };
+}

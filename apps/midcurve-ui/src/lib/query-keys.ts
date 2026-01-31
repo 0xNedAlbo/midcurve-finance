@@ -109,6 +109,11 @@ export const queryKeys = {
         sortBy?: string;
         limit?: number;
       }) => [...queryKeys.pools.uniswapv3.searches(), params] as const,
+
+      // Lookup (address → multi-chain search)
+      lookups: () => [...queryKeys.pools.uniswapv3.all, 'lookup'] as const,
+      lookup: (address: string) =>
+        [...queryKeys.pools.uniswapv3.lookups(), address.toLowerCase()] as const,
     },
 
     // Future: Orca, Raydium, etc.

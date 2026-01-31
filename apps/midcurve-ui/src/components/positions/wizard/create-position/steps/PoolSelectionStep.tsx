@@ -9,9 +9,11 @@ import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { PoolTable } from '../shared/PoolTable';
 import { TokenSetSearchInput } from '../shared/TokenSetSearchInput';
 import { usePoolSearch } from '@/hooks/pools/usePoolSearch';
+import { usePoolLookup } from '@/hooks/pools/usePoolLookup';
 import { usePoolFavorites, useTogglePoolFavorite } from '@/hooks/pools/usePoolFavorites';
 import type { TokenSearchResult } from '@/hooks/tokens/useMultiChainTokenSearch';
 import { getChainMetadataByChainId, type EvmChainSlug } from '@/config/chains';
+import { isValidEthereumAddress } from '@/utils/evm';
 
 const TAB_CONFIG: { id: PoolSelectionTab; label: string; icon: React.ReactNode }[] = [
   { id: 'favorites', label: 'Favorites', icon: <Star className="w-4 h-4" /> },
@@ -65,6 +67,27 @@ export function PoolSelectionStep() {
   const { data: favoritesData, isLoading: isFavoritesLoading } = usePoolFavorites({
     protocol: 'uniswapv3',
     enabled: state.poolSelectionTab === 'favorites',
+  });
+
+  // Direct address lookup state
+  const [debouncedAddress, setDebouncedAddress] = useState('');
+
+  // Debounce the address input (500ms delay)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedAddress(directAddress);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [directAddress]);
+
+  // Validate address format
+  const isAddressValid = isValidEthereumAddress(directAddress);
+  const showAddressError = directAddress.length > 0 && !isAddressValid;
+
+  // Lookup pools by address across all chains
+  const { pools: lookupPools, isLoading: isLookupLoading } = usePoolLookup({
+    address: debouncedAddress,
+    enabled: state.poolSelectionTab === 'direct' && isValidEthereumAddress(debouncedAddress),
   });
 
   // Transform FavoritePoolItem to PoolSearchResultItem for PoolTable
@@ -281,17 +304,49 @@ export function PoolSelectionStep() {
         <div className="space-y-4">
           <div className="flex items-center gap-4">
             <label className="text-slate-400 w-32 shrink-0">Pool Address:</label>
-            <input
-              type="text"
-              value={directAddress}
-              onChange={(e) => setDirectAddress(e.target.value)}
-              placeholder="0x..."
-              className="flex-1 px-4 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono text-sm"
-            />
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={directAddress}
+                onChange={(e) => setDirectAddress(e.target.value)}
+                placeholder="0x..."
+                className={`w-full px-4 py-2 bg-slate-700/50 border rounded-lg text-white placeholder-slate-500 focus:outline-none font-mono text-sm ${
+                  showAddressError
+                    ? 'border-red-500 focus:border-red-500'
+                    : 'border-slate-600 focus:border-blue-500'
+                }`}
+              />
+              {isLookupLoading && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+            </div>
           </div>
-          <p className="text-sm text-slate-400">
-            Enter the pool contract address directly to load pool information.
-          </p>
+
+          {showAddressError && (
+            <p className="text-sm text-red-400">
+              Invalid address format. Expected: 0x followed by 40 hex characters
+            </p>
+          )}
+
+          {isAddressValid && !isLookupLoading && debouncedAddress && (
+            <div className="text-sm text-slate-400">
+              {lookupPools.length > 0 ? (
+                <span>
+                  Found {lookupPools.length} pool{lookupPools.length !== 1 ? 's' : ''} across {lookupPools.length} chain{lookupPools.length !== 1 ? 's' : ''}
+                </span>
+              ) : (
+                <span>No pools found with this address on any supported chain.</span>
+              )}
+            </div>
+          )}
+
+          {!directAddress && (
+            <p className="text-sm text-slate-400">
+              Enter a pool contract address to search across all supported chains.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -306,6 +361,18 @@ export function PoolSelectionStep() {
           onSelectPool={handleSelectPool}
           onToggleFavorite={handleToggleFavorite}
           isLoading={isFavoritesLoading}
+        />
+      );
+    }
+
+    if (state.poolSelectionTab === 'direct') {
+      return (
+        <PoolTable
+          pools={lookupPools}
+          selectedPoolAddress={state.selectedPool?.poolAddress || null}
+          onSelectPool={handleSelectPool}
+          onToggleFavorite={handleToggleFavorite}
+          isLoading={isLookupLoading}
         />
       );
     }
