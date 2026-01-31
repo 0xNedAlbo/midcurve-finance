@@ -85,10 +85,16 @@ export function getSessionService(): SessionService {
 
 /**
  * Get singleton instance of Erc20TokenService
+ *
+ * Injects CoingeckoTokenService for cache integration:
+ * - discover() checks coingecko_tokens cache before CoinGecko API calls
+ * - discover() writes enrichment data back to cache after successful API calls
  */
 export function getErc20TokenService(): Erc20TokenService {
   if (!_erc20TokenService) {
-    _erc20TokenService = new Erc20TokenService();
+    _erc20TokenService = new Erc20TokenService({
+      coingeckoTokenService: getCoingeckoTokenService(),
+    });
   }
   return _erc20TokenService;
 }

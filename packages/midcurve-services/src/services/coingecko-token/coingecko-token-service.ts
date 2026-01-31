@@ -733,6 +733,79 @@ export class CoingeckoTokenService {
   }
 
   /**
+   * Upsert a single token's CoinGecko data
+   *
+   * Used by Erc20TokenService.discover() to cache enrichment data
+   * after fetching from CoinGecko API. This enables data sharing
+   * between the on-demand discovery flow and batch refresh flow.
+   *
+   * @param params - Token data to upsert
+   * @param params.chainId - Chain ID where token exists
+   * @param params.address - Token contract address (will be normalized)
+   * @param params.coingeckoId - CoinGecko coin ID
+   * @param params.symbol - Token symbol
+   * @param params.name - Token name
+   * @param params.logoUrl - Token logo URL from CoinGecko
+   * @param params.marketCapUsd - Market cap in USD
+   */
+  async upsertToken(params: {
+    chainId: number;
+    address: string;
+    coingeckoId: string;
+    symbol: string;
+    name: string;
+    logoUrl: string | null;
+    marketCapUsd: number | null;
+  }): Promise<void> {
+    const { chainId, address, coingeckoId, symbol, name, logoUrl, marketCapUsd } = params;
+    log.methodEntry(this.logger, 'upsertToken', { chainId, address: address.slice(0, 10) + '...' });
+
+    // Normalize address
+    let normalizedAddress: string;
+    try {
+      normalizedAddress = getAddress(address);
+    } catch {
+      this.logger.warn({ chainId, address }, 'Invalid address format, skipping upsert');
+      log.methodExit(this.logger, 'upsertToken', { success: false });
+      return;
+    }
+
+    const id = CoingeckoToken.createId(chainId, normalizedAddress);
+    const config = new CoingeckoTokenConfig({
+      chainId,
+      tokenAddress: normalizedAddress,
+    });
+
+    await this.prisma.coingeckoToken.upsert({
+      where: { id },
+      create: {
+        id,
+        coingeckoId,
+        name,
+        symbol: symbol.toUpperCase(),
+        config: config.toJSON() as object,
+        imageUrl: logoUrl,
+        marketCapUsd: marketCapUsd,
+        enrichedAt: new Date(),
+      },
+      update: {
+        coingeckoId,
+        name,
+        symbol: symbol.toUpperCase(),
+        imageUrl: logoUrl,
+        marketCapUsd: marketCapUsd,
+        enrichedAt: new Date(),
+      },
+    });
+
+    this.logger.info(
+      { chainId, address: normalizedAddress.slice(0, 10) + '...', coingeckoId },
+      'Token upserted to coingecko_tokens cache'
+    );
+    log.methodExit(this.logger, 'upsertToken', { success: true });
+  }
+
+  /**
    * Delete all CoingeckoToken records
    *
    * Useful for testing or resetting the lookup table.

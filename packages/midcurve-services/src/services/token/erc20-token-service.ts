@@ -27,6 +27,7 @@ import {
 } from "../../utils/evm/index.js";
 import { EvmConfig, isLocalChain } from "../../config/evm.js";
 import { CoinGeckoClient } from "../../clients/coingecko/index.js";
+import { CoingeckoTokenService } from "../coingecko-token/coingecko-token-service.js";
 import { log } from "../../logging/index.js";
 
 /**
@@ -51,6 +52,13 @@ export interface Erc20TokenServiceDependencies {
      * If not provided, the singleton CoinGeckoClient instance will be used
      */
     coinGeckoClient?: CoinGeckoClient;
+
+    /**
+     * CoingeckoTokenService for caching enrichment data
+     * If provided, discover() will check coingecko_tokens cache before API calls
+     * and write enrichment data back to cache after successful API calls
+     */
+    coingeckoTokenService?: CoingeckoTokenService;
 }
 
 /**
@@ -63,6 +71,7 @@ export class Erc20TokenService extends TokenService {
     protected readonly tokenType = 'erc20' as const;
     private readonly _evmConfig: EvmConfig;
     private readonly _coinGeckoClient: CoinGeckoClient;
+    private readonly _coingeckoTokenService: CoingeckoTokenService | null;
 
     /**
      * Creates a new Erc20TokenService instance
@@ -71,12 +80,14 @@ export class Erc20TokenService extends TokenService {
      * @param dependencies.prisma - Prisma client instance (creates default if not provided)
      * @param dependencies.evmConfig - EVM configuration instance (uses singleton if not provided)
      * @param dependencies.coinGeckoClient - CoinGecko client instance (uses singleton if not provided)
+     * @param dependencies.coingeckoTokenService - CoingeckoTokenService for cache integration (optional)
      */
     constructor(dependencies: Erc20TokenServiceDependencies = {}) {
         super(dependencies);
         this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
         this._coinGeckoClient =
             dependencies.coinGeckoClient ?? CoinGeckoClient.getInstance();
+        this._coingeckoTokenService = dependencies.coingeckoTokenService ?? null;
     }
 
     /**
@@ -91,6 +102,13 @@ export class Erc20TokenService extends TokenService {
      */
     protected get coinGeckoClient(): CoinGeckoClient {
         return this._coinGeckoClient;
+    }
+
+    /**
+     * Get the CoingeckoTokenService instance (may be null)
+     */
+    protected get coingeckoTokenService(): CoingeckoTokenService | null {
+        return this._coingeckoTokenService;
     }
 
     // ============================================================================
@@ -275,6 +293,10 @@ export class Erc20TokenService extends TokenService {
                 coingeckoId: string | null;
                 logoUrl: string | null | undefined;
                 marketCap: number | null | undefined;
+            } = {
+                coingeckoId: null,
+                logoUrl: undefined,
+                marketCap: undefined,
             };
 
             if (isLocalChain(chainId)) {
@@ -289,23 +311,77 @@ export class Erc20TokenService extends TokenService {
                     metadata.symbol
                 );
             } else {
-                this.logger.debug(
-                    { address: normalizedAddress, chainId },
-                    "Fetching CoinGecko enrichment data"
-                );
+                // Check coingecko_tokens cache first (if service is available)
+                let cacheHit = false;
+                if (this._coingeckoTokenService) {
+                    this.logger.debug(
+                        { address: normalizedAddress, chainId },
+                        "Checking coingecko_tokens cache for enrichment data"
+                    );
 
-                enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
-                    chainId,
-                    normalizedAddress
-                );
+                    const cachedToken = await this._coingeckoTokenService.findByChainAndAddress(
+                        chainId,
+                        normalizedAddress
+                    );
 
-                this.logger.info(
-                    {
-                        coingeckoId: enrichmentData.coingeckoId,
-                        marketCap: enrichmentData.marketCap,
-                    },
-                    "CoinGecko enrichment data fetched"
-                );
+                    if (cachedToken && cachedToken.coingeckoId) {
+                        enrichmentData = {
+                            coingeckoId: cachedToken.coingeckoId,
+                            logoUrl: cachedToken.imageUrl,
+                            marketCap: cachedToken.marketCapUsd,
+                        };
+                        cacheHit = true;
+                        this.logger.info(
+                            {
+                                coingeckoId: cachedToken.coingeckoId,
+                                marketCap: cachedToken.marketCapUsd,
+                            },
+                            "CoinGecko enrichment data found in cache"
+                        );
+                    }
+                }
+
+                // Cache miss - fetch from CoinGecko API
+                if (!cacheHit) {
+                    this.logger.debug(
+                        { address: normalizedAddress, chainId },
+                        "Fetching CoinGecko enrichment data from API"
+                    );
+
+                    enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
+                        chainId,
+                        normalizedAddress
+                    );
+
+                    this.logger.info(
+                        {
+                            coingeckoId: enrichmentData.coingeckoId,
+                            marketCap: enrichmentData.marketCap,
+                        },
+                        "CoinGecko enrichment data fetched from API"
+                    );
+
+                    // Write back to coingecko_tokens cache (if service is available and we got data)
+                    if (this._coingeckoTokenService && enrichmentData.coingeckoId) {
+                        try {
+                            await this._coingeckoTokenService.upsertToken({
+                                chainId,
+                                address: normalizedAddress,
+                                coingeckoId: enrichmentData.coingeckoId,
+                                symbol: metadata.symbol,
+                                name: metadata.name,
+                                logoUrl: enrichmentData.logoUrl ?? null,
+                                marketCapUsd: enrichmentData.marketCap ?? null,
+                            });
+                        } catch (cacheError) {
+                            // Log but don't fail - cache write is non-critical
+                            this.logger.warn(
+                                { error: (cacheError as Error).message },
+                                "Failed to write enrichment data to coingecko_tokens cache"
+                            );
+                        }
+                    }
+                }
             }
 
             // 7. Check for auto-linking to basic currency
@@ -888,6 +964,10 @@ export class Erc20TokenService extends TokenService {
                 coingeckoId: string | null;
                 logoUrl: string | null | undefined;
                 marketCap: number | null | undefined;
+            } = {
+                coingeckoId: null,
+                logoUrl: undefined,
+                marketCap: undefined,
             };
 
             if (isLocalChain(chainId)) {
@@ -901,11 +981,63 @@ export class Erc20TokenService extends TokenService {
                     existing.symbol
                 );
             } else {
-                // Standard CoinGecko enrichment for production chains
-                enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
-                    chainId,
-                    address
-                );
+                // Check coingecko_tokens cache first (if service is available)
+                let cacheHit = false;
+                if (this._coingeckoTokenService) {
+                    this.logger.debug(
+                        { tokenId, address, chainId },
+                        "Checking coingecko_tokens cache for enrichment data"
+                    );
+
+                    const cachedToken = await this._coingeckoTokenService.findByChainAndAddress(
+                        chainId,
+                        address
+                    );
+
+                    if (cachedToken && cachedToken.coingeckoId) {
+                        enrichmentData = {
+                            coingeckoId: cachedToken.coingeckoId,
+                            logoUrl: cachedToken.imageUrl,
+                            marketCap: cachedToken.marketCapUsd,
+                        };
+                        cacheHit = true;
+                        this.logger.info(
+                            {
+                                tokenId,
+                                coingeckoId: cachedToken.coingeckoId,
+                            },
+                            "Enrichment data found in coingecko_tokens cache"
+                        );
+                    }
+                }
+
+                // Cache miss - fetch from CoinGecko API
+                if (!cacheHit) {
+                    enrichmentData = await this.coinGeckoClient.getErc20EnrichmentData(
+                        chainId,
+                        address
+                    );
+
+                    // Write back to coingecko_tokens cache (if service is available and we got data)
+                    if (this._coingeckoTokenService && enrichmentData.coingeckoId) {
+                        try {
+                            await this._coingeckoTokenService.upsertToken({
+                                chainId,
+                                address,
+                                coingeckoId: enrichmentData.coingeckoId,
+                                symbol: existing.symbol,
+                                name: existing.name,
+                                logoUrl: enrichmentData.logoUrl ?? null,
+                                marketCapUsd: enrichmentData.marketCap ?? null,
+                            });
+                        } catch (cacheError) {
+                            this.logger.warn(
+                                { error: (cacheError as Error).message },
+                                "Failed to write enrichment data to coingecko_tokens cache"
+                            );
+                        }
+                    }
+                }
             }
 
             // Update token in database
