@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FullPageWizardLayout } from '@/components/layout/wizard';
 import {
@@ -100,8 +101,63 @@ function StepRenderer({ content }: { content: StepContent }) {
 
 // Main content component that conditionally renders the current step
 function CreatePositionWizardContent() {
-  const { steps, state } = useCreatePositionWizard();
+  const navigate = useNavigate();
+  const { steps, state, goBack, goToStep } = useCreatePositionWizard();
   const currentStepId = steps[state.currentStepIndex]?.id;
+
+  // Track whether we're handling a popstate event to prevent pushing duplicate history
+  const isPopstateRef = useRef(false);
+  // Track the previous step index to detect forward navigation
+  const prevStepIndexRef = useRef(state.currentStepIndex);
+
+  // Push history entry when navigating forward to a new step (via UI buttons)
+  useEffect(() => {
+    // Skip if this change was triggered by popstate (back/forward button)
+    if (isPopstateRef.current) {
+      isPopstateRef.current = false;
+      prevStepIndexRef.current = state.currentStepIndex;
+      return;
+    }
+
+    // Only push history when moving forward (not on initial mount at step 0)
+    if (state.currentStepIndex > prevStepIndexRef.current) {
+      window.history.pushState(
+        { wizardStep: state.currentStepIndex },
+        '',
+        window.location.href
+      );
+    }
+
+    prevStepIndexRef.current = state.currentStepIndex;
+  }, [state.currentStepIndex]);
+
+  // Listen for browser back/forward buttons (popstate)
+  useEffect(() => {
+    const handlePopstate = (event: PopStateEvent) => {
+      const historyStep = event.state?.wizardStep;
+
+      // Forward navigation: history has a step index we should go to
+      if (typeof historyStep === 'number' && historyStep !== state.currentStepIndex) {
+        isPopstateRef.current = true;
+        goToStep(historyStep);
+        return;
+      }
+
+      // Back navigation: no wizard state means we went back before step 1
+      if (historyStep === undefined) {
+        if (state.currentStepIndex > 0) {
+          isPopstateRef.current = true;
+          goBack();
+        } else {
+          // On first step with no history, exit wizard
+          navigate('/dashboard', { replace: true });
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopstate);
+    return () => window.removeEventListener('popstate', handlePopstate);
+  }, [state.currentStepIndex, goBack, goToStep, navigate]);
 
   // Render only the current step component - each step is its own component
   // with its own isolated hooks
