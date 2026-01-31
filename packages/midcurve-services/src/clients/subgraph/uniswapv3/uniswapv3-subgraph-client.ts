@@ -42,7 +42,9 @@ import {
   POOL_METRICS_QUERY,
   POOL_FEE_DATA_QUERY,
   POOLS_BY_TOKEN_SETS_QUERY,
+  FACTORY_QUERY,
 } from './queries.js';
+import { getFactoryAddress } from '../../../config/uniswapv3.js';
 import {
   PoolNotFoundInSubgraphError,
 } from './types.js';
@@ -75,6 +77,24 @@ export interface UniswapV3SubgraphClientDependencies {
 }
 
 /**
+ * Cached factory validation result.
+ * Stores both the validation result and the config values at validation time.
+ * On lookup, compare cached config values with current config to detect changes.
+ */
+export interface FactoryValidationCache {
+  /** Factory address returned by the subgraph */
+  subgraphFactory: string;
+  /** Our hardcoded factory address at validation time */
+  expectedFactory: string;
+  /** Subgraph deployment ID at validation time */
+  subgraphId: string;
+  /** Whether factory addresses matched */
+  isValid: boolean;
+  /** Timestamp when validation occurred */
+  validatedAt: number;
+}
+
+/**
  * Uniswap V3 Subgraph Client
  *
  * Provides access to Uniswap V3 pool data from The Graph subgraphs.
@@ -86,6 +106,7 @@ export class UniswapV3SubgraphClient {
   private readonly cacheService: CacheService;
   private readonly fetchFn: typeof fetch;
   private readonly cacheTtl = 300; // 5 minutes in seconds
+  private readonly factoryCacheTtl = 86400; // 24 hours in seconds
   private readonly logger: ServiceLogger;
 
   /**
@@ -644,6 +665,141 @@ export class UniswapV3SubgraphClient {
   getSupportedChainIds(): number[] {
     return getSupportedUniswapV3SubgraphChains();
   }
+
+  // ============================================================================
+  // FACTORY VALIDATION
+  // ============================================================================
+
+  /**
+   * Validate that the subgraph's factory address matches our expected factory.
+   *
+   * Uses a fixed cache key per chain. On lookup, compares cached config values
+   * with current config to detect changes (subgraph ID or factory address).
+   *
+   * @param chainId - Chain ID to validate
+   * @returns true if factory addresses match, false otherwise
+   *
+   * @example
+   * ```typescript
+   * const isValid = await client.validateSubgraphFactory(1);
+   * if (!isValid) {
+   *   console.warn('Subgraph factory mismatch - skipping chain');
+   * }
+   * ```
+   */
+  async validateSubgraphFactory(chainId: number): Promise<boolean> {
+    const cacheKey = `subgraph:factory-validation:${chainId}`;
+
+    // Get current expected values from config
+    const currentSubgraphId = this.extractSubgraphId(chainId);
+    const currentExpectedFactory = getFactoryAddress(chainId).toLowerCase();
+
+    // Check cache
+    const cached = await this.cacheService.get<FactoryValidationCache>(cacheKey);
+
+    if (cached) {
+      // Compare cached config values with current config
+      const configChanged =
+        cached.subgraphId !== currentSubgraphId ||
+        cached.expectedFactory !== currentExpectedFactory;
+
+      if (!configChanged) {
+        // Config unchanged, use cached validation result
+        this.logger.debug(
+          { chainId, isValid: cached.isValid },
+          'Using cached factory validation'
+        );
+        return cached.isValid;
+      }
+
+      // Config changed - need to revalidate
+      this.logger.info(
+        {
+          chainId,
+          oldSubgraphId: cached.subgraphId,
+          newSubgraphId: currentSubgraphId,
+          oldFactory: cached.expectedFactory,
+          newFactory: currentExpectedFactory,
+        },
+        'Config changed, revalidating subgraph factory'
+      );
+    }
+
+    // Query subgraph for factory address
+    this.logger.info({ chainId }, 'Validating subgraph factory address');
+
+    try {
+      const response = await this.query<{ factories: Array<{ id: string }> }>(
+        chainId,
+        FACTORY_QUERY,
+        {}
+      );
+
+      const subgraphFactory = response.data?.factories?.[0]?.id?.toLowerCase() ?? '';
+      const isValid = subgraphFactory === currentExpectedFactory;
+
+      if (!isValid) {
+        this.logger.error(
+          {
+            chainId,
+            subgraphFactory,
+            expectedFactory: currentExpectedFactory,
+            subgraphId: currentSubgraphId,
+          },
+          'Subgraph factory mismatch! Subgraph may be indexing a different protocol.'
+        );
+      } else {
+        this.logger.info(
+          { chainId, factory: subgraphFactory },
+          'Subgraph factory validation successful'
+        );
+      }
+
+      // Cache result with all comparison values
+      const cacheEntry: FactoryValidationCache = {
+        subgraphFactory,
+        expectedFactory: currentExpectedFactory,
+        subgraphId: currentSubgraphId,
+        isValid,
+        validatedAt: Date.now(),
+      };
+      await this.cacheService.set(cacheKey, cacheEntry, this.factoryCacheTtl);
+
+      return isValid;
+    } catch (error) {
+      this.logger.error(
+        { chainId, error: error instanceof Error ? error.message : 'Unknown error' },
+        'Failed to validate subgraph factory'
+      );
+      // On error, reject the chain to be safe
+      return false;
+    }
+  }
+
+  /**
+   * Extract subgraph deployment ID from endpoint URL.
+   *
+   * The subgraph ID is part of the cache key to detect when a new
+   * subgraph version is deployed.
+   *
+   * @param chainId - Chain ID
+   * @returns Subgraph deployment ID (e.g., "5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV")
+   * @private
+   */
+  private extractSubgraphId(chainId: number): string {
+    try {
+      const endpoint = getUniswapV3SubgraphEndpoint(chainId);
+      // Extract ID from URL like: .../subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV
+      const match = endpoint.match(/\/id\/([A-Za-z0-9]+)(?:\?|$)/);
+      return match?.[1] ?? 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  // ============================================================================
+  // INTERNAL UTILITIES
+  // ============================================================================
 
   /**
    * Build cache key from query and variables

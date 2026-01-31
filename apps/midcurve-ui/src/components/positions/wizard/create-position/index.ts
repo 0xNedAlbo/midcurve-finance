@@ -6,13 +6,14 @@ export {
   CreatePositionWizardProvider,
   useCreatePositionWizard,
   getVisibleSteps,
-  type MockToken,
-  type MockPool,
   type TransactionRecord,
   type CreatePositionWizardState,
   type InvestmentMode,
   type PoolSelectionTab,
 } from './context/CreatePositionWizardContext';
+
+// Re-export pool types from API shared
+export type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-shared';
 
 // Steps (for direct access if needed)
 export { PoolSelectionStep } from './steps/PoolSelectionStep';

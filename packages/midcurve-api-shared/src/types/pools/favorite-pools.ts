@@ -2,9 +2,9 @@
  * Favorite Pools Endpoint Types
  *
  * Types for the favorite pool management endpoints:
- * - POST /api/v1/pools/uniswapv3/favorites - Add pool to favorites
- * - DELETE /api/v1/pools/uniswapv3/favorites/:chainId/:address - Remove from favorites
- * - GET /api/v1/pools/uniswapv3/favorites - List favorite pools
+ * - POST /api/v1/pools/favorites - Add pool to favorites
+ * - GET /api/v1/pools/favorites - List favorite pools (with optional protocol filter)
+ * - DELETE /api/v1/pools/favorites?protocol=...&chainId=...&address=... - Remove from favorites
  */
 
 import { z } from 'zod';
@@ -397,3 +397,139 @@ export const RemoveFavoritePoolQuerySchema = z.object({
  * Inferred type from RemoveFavoritePoolQuerySchema
  */
 export type RemoveFavoritePoolQueryValidated = z.infer<typeof RemoveFavoritePoolQuerySchema>;
+
+/**
+ * POST /api/v1/pools/favorites - Request body
+ *
+ * Generic endpoint to add a pool to favorites with protocol specification.
+ */
+export interface GenericAddFavoritePoolRequest {
+  /**
+   * Protocol identifier
+   * @example "uniswapv3"
+   */
+  protocol: string;
+
+  /**
+   * Chain ID where the pool is deployed
+   * @example 1
+   */
+  chainId: number;
+
+  /**
+   * Pool contract address (EIP-55 checksummed or lowercase)
+   * @example "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
+   */
+  poolAddress: string;
+}
+
+/**
+ * POST /api/v1/pools/favorites - Request body validation
+ */
+export const GenericAddFavoritePoolRequestSchema = z.object({
+  protocol: z
+    .string()
+    .min(1, 'Protocol is required')
+    .refine(
+      (p) => SUPPORTED_PROTOCOLS.includes(p as (typeof SUPPORTED_PROTOCOLS)[number]),
+      (p) => ({
+        message: `Protocol "${p}" is not supported. Supported: ${SUPPORTED_PROTOCOLS.join(', ')}`,
+      })
+    ),
+
+  chainId: z
+    .number()
+    .int('Chain ID must be an integer')
+    .positive('Chain ID must be positive')
+    .refine(
+      (id) => SUPPORTED_CHAIN_IDS.includes(id as (typeof SUPPORTED_CHAIN_IDS)[number]),
+      (id) => ({
+        message: `Chain ID ${id} is not supported. Supported: ${SUPPORTED_CHAIN_IDS.join(', ')}`,
+      })
+    ),
+
+  poolAddress: z
+    .string()
+    .min(1, 'Pool address is required')
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address format'),
+});
+
+/**
+ * Inferred type from GenericAddFavoritePoolRequestSchema
+ */
+export type GenericAddFavoritePoolRequestValidated = z.infer<typeof GenericAddFavoritePoolRequestSchema>;
+
+/**
+ * GET /api/v1/pools/favorites - Query params
+ *
+ * Generic endpoint to list favorite pools with optional protocol filter.
+ */
+export interface GenericListFavoritePoolsQuery {
+  /**
+   * Optional protocol filter
+   *
+   * If provided, only returns favorites for that protocol.
+   * If omitted, returns favorites for all protocols.
+   *
+   * @example "uniswapv3"
+   */
+  protocol?: string;
+
+  /**
+   * Maximum number of results to return
+   * @default 50
+   * @max 100
+   */
+  limit?: number;
+
+  /**
+   * Offset for pagination
+   * @default 0
+   */
+  offset?: number;
+}
+
+/**
+ * GET /api/v1/pools/favorites - Query params validation
+ */
+export const GenericListFavoritePoolsQuerySchema = z.object({
+  protocol: z
+    .string()
+    .optional()
+    .refine(
+      (p) => p === undefined || SUPPORTED_PROTOCOLS.includes(p as (typeof SUPPORTED_PROTOCOLS)[number]),
+      (p) => ({
+        message: `Protocol "${p}" is not supported. Supported: ${SUPPORTED_PROTOCOLS.join(', ')}`,
+      })
+    ),
+
+  limit: z
+    .string()
+    .optional()
+    .default('50')
+    .transform((val) => parseInt(val, 10))
+    .pipe(
+      z
+        .number()
+        .int('Limit must be an integer')
+        .min(1, 'Limit must be at least 1')
+        .max(100, 'Limit cannot exceed 100')
+    ),
+
+  offset: z
+    .string()
+    .optional()
+    .default('0')
+    .transform((val) => parseInt(val, 10))
+    .pipe(
+      z
+        .number()
+        .int('Offset must be an integer')
+        .min(0, 'Offset cannot be negative')
+    ),
+});
+
+/**
+ * Inferred type from GenericListFavoritePoolsQuerySchema
+ */
+export type GenericListFavoritePoolsQueryValidated = z.infer<typeof GenericListFavoritePoolsQuerySchema>;

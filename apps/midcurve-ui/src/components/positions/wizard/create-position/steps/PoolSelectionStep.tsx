@@ -1,124 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Star, Hash, PlusCircle, MinusCircle } from 'lucide-react';
+import type { PoolSearchResultItem } from '@midcurve/api-shared';
 import {
   useCreatePositionWizard,
   type PoolSelectionTab,
-  type MockPool,
-  type MockToken,
 } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { PoolTable } from '../shared/PoolTable';
 import { TokenSetSearchInput } from '../shared/TokenSetSearchInput';
+import { usePoolSearch } from '@/hooks/pools/usePoolSearch';
+import { useTogglePoolFavorite } from '@/hooks/pools/usePoolFavorites';
 import type { TokenSearchResult } from '@/hooks/tokens/useMultiChainTokenSearch';
 import type { EvmChainSlug } from '@/config/chains';
-
-// Mock data for demonstration
-const MOCK_POOLS: MockPool[] = [
-  {
-    id: '1',
-    address: '0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640',
-    chainId: 1,
-    chainName: 'Ethereum',
-    feeTier: '0.05%',
-    feeBps: 500,
-    token0: {
-      address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
-      symbol: 'WETH',
-      name: 'Wrapped Ether',
-      decimals: 18,
-    },
-    token1: {
-      address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
-      symbol: 'USDC',
-      name: 'USD Coin',
-      decimals: 6,
-    },
-    tvlUsd: 312_100_000,
-    volume24hUsd: 89_500_000,
-    fees24hUsd: 44_750,
-    apr7d: 19.8,
-    currentTick: 201234,
-    sqrtPriceX96: '1234567890123456789012345678',
-  },
-  {
-    id: '2',
-    address: '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8',
-    chainId: 42161,
-    chainName: 'Arbitrum',
-    feeTier: '0.05%',
-    feeBps: 500,
-    token0: {
-      address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1',
-      symbol: 'WETH',
-      name: 'Wrapped Ether',
-      decimals: 18,
-    },
-    token1: {
-      address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
-      symbol: 'USDC',
-      name: 'USD Coin',
-      decimals: 6,
-    },
-    tvlUsd: 124_500_000,
-    volume24hUsd: 156_200_000,
-    fees24hUsd: 78_100,
-    apr7d: 37.2,
-    currentTick: 201234,
-    sqrtPriceX96: '1234567890123456789012345678',
-  },
-  {
-    id: '3',
-    address: '0x4c36388be6f416a29c8d8eee81c771ce6be14b18',
-    chainId: 8453,
-    chainName: 'Base',
-    feeTier: '0.05%',
-    feeBps: 500,
-    token0: {
-      address: '0x4200000000000000000000000000000000000006',
-      symbol: 'WETH',
-      name: 'Wrapped Ether',
-      decimals: 18,
-    },
-    token1: {
-      address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-      symbol: 'USDC',
-      name: 'USD Coin',
-      decimals: 6,
-    },
-    tvlUsd: 89_300_000,
-    volume24hUsd: 42_100_000,
-    fees24hUsd: 21_050,
-    apr7d: 24.5,
-    currentTick: 201234,
-    sqrtPriceX96: '1234567890123456789012345678',
-  },
-  {
-    id: '4',
-    address: '0xcbcdf9626bc03e24f779434178a73a0b4bad62ed',
-    chainId: 1,
-    chainName: 'Ethereum',
-    feeTier: '0.3%',
-    feeBps: 3000,
-    token0: {
-      address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599',
-      symbol: 'WBTC',
-      name: 'Wrapped Bitcoin',
-      decimals: 8,
-    },
-    token1: {
-      address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
-      symbol: 'WETH',
-      name: 'Wrapped Ether',
-      decimals: 18,
-    },
-    tvlUsd: 45_600_000,
-    volume24hUsd: 12_300_000,
-    fees24hUsd: 36_900,
-    apr7d: 28.4,
-    currentTick: -12345,
-    sqrtPriceX96: '987654321098765432109876543',
-  },
-];
 
 const TAB_CONFIG: { id: PoolSelectionTab; label: string; icon: React.ReactNode }[] = [
   { id: 'favorites', label: 'Favorites', icon: <Star className="w-4 h-4" /> },
@@ -154,6 +47,19 @@ export function PoolSelectionStep() {
   const MIN_SCALE = 0.75;
   const MAX_SCALE = 1.25;
   const SCALE_STEP = 0.125;
+
+  // Pool search hook
+  const { pools, isLoading } = usePoolSearch({
+    tokenSetA: tokenSetA.map((t) => t.symbol),
+    tokenSetB: tokenSetB.map((t) => t.symbol),
+    chainIds: selectedChainIds,
+    sortBy: 'tvlUSD',
+    limit: 50,
+    enabled: state.poolSelectionTab === 'search' && tokenSetA.length > 0 && tokenSetB.length > 0,
+  });
+
+  // Toggle favorite mutation
+  const toggleFavorite = useTogglePoolFavorite();
 
   const handleZoomIn = useCallback(() => {
     setFontScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE));
@@ -195,41 +101,27 @@ export function PoolSelectionStep() {
     );
   }, []);
 
-  // Filter pools based on search
-  const filteredPools = MOCK_POOLS.filter((pool) => {
-    if (state.poolSelectionTab === 'favorites') {
-      // TODO: Implement favorites filtering
-      return false;
-    }
-    if (state.poolSelectionTab === 'direct') {
-      return pool.address.toLowerCase() === directAddress.toLowerCase();
-    }
-    // Search tab - pool must have tokens from both sets (if sets are non-empty)
-    const poolTokenSymbols = [pool.token0.symbol.toUpperCase(), pool.token1.symbol.toUpperCase()];
-
-    const hasSetAToken =
-      tokenSetA.length === 0 ||
-      tokenSetA.some((t) => poolTokenSymbols.includes(t.symbol.toUpperCase()));
-
-    const hasSetBToken =
-      tokenSetB.length === 0 ||
-      tokenSetB.some((t) => poolTokenSymbols.includes(t.symbol.toUpperCase()));
-
-    const matchesChain = selectedChainIds.includes(pool.chainId);
-
-    return hasSetAToken && hasSetBToken && matchesChain;
-  });
+  // Handle favorite toggle
+  const handleToggleFavorite = useCallback(
+    (pool: PoolSearchResultItem) => {
+      toggleFavorite.mutate({
+        protocol: 'uniswapv3',
+        chainId: pool.chainId,
+        poolAddress: pool.poolAddress,
+        isFavorite: pool.isFavorite ?? false,
+      });
+    },
+    [toggleFavorite]
+  );
 
   // Update validation when pool is selected
   useEffect(() => {
     setStepValid('pool', state.selectedPool !== null);
   }, [state.selectedPool, setStepValid]);
 
-  const handleSelectPool = (pool: MockPool) => {
-    // Determine base and quote tokens (for now, token0 is base, token1 is quote)
-    const baseToken: MockToken = pool.token0;
-    const quoteToken: MockToken = pool.token1;
-    selectPool(pool, baseToken, quoteToken);
+  const handleSelectPool = (pool: PoolSearchResultItem) => {
+    // Convert PoolSearchResultItem to the format expected by the wizard context
+    selectPool(pool);
   };
 
   const renderInteractive = () => (
@@ -361,9 +253,11 @@ export function PoolSelectionStep() {
 
   const renderVisual = () => (
     <PoolTable
-      pools={filteredPools}
-      selectedPoolId={state.selectedPool?.id || null}
+      pools={pools}
+      selectedPoolAddress={state.selectedPool?.poolAddress || null}
       onSelectPool={handleSelectPool}
+      onToggleFavorite={handleToggleFavorite}
+      isLoading={isLoading}
     />
   );
 

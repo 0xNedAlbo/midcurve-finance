@@ -15,8 +15,9 @@ import {
   ErrorCodeToHttpStatus,
   PoolSearchRequestSchema,
 } from '@midcurve/api-shared';
+import type { PoolSearchResultItem } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getUniswapV3PoolSearchService } from '@/lib/services';
+import { getUniswapV3PoolSearchService, getFavoritePoolService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -41,7 +42,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - limit (optional): Maximum results to return (1-100, default: 20)
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (_user, requestId) => {
+  return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -121,8 +122,20 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
       );
 
+      // Enrich results with favorite status
+      const favoriteService = getFavoritePoolService();
+      const favoriteKeys = await favoriteService.areFavorites(
+        user.id,
+        results.map((p) => ({ chainId: p.chainId, poolAddress: p.poolAddress }))
+      );
+
+      const enrichedResults: PoolSearchResultItem[] = results.map((pool) => ({
+        ...pool,
+        isFavorite: favoriteKeys.has(`${pool.chainId}:${pool.poolAddress}`),
+      }));
+
       // Build response
-      const response = createSuccessResponse(results, {
+      const response = createSuccessResponse(enrichedResults, {
         totalFound: results.length,
         count: results.length,
         sortBy,

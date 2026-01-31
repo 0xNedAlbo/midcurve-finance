@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ArrowLeftRight } from 'lucide-react';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
+import { usePoolPrice } from '@/hooks/pools/usePoolPrice';
 
 const RANGE_PRESETS = [
   { label: '±5%', value: 5 },
@@ -21,7 +22,14 @@ export function RangeStep() {
 
   const baseToken = state.baseToken;
   const quoteToken = state.quoteToken;
-  const currentTick = state.selectedPool?.currentTick || 0;
+
+  // Fetch current tick from pool
+  const { currentTick: fetchedTick } = usePoolPrice({
+    chainId: state.selectedPool?.chainId?.toString(),
+    poolAddress: state.selectedPool?.poolAddress,
+    enabled: !!state.selectedPool,
+  });
+  const currentTick = fetchedTick ?? 0;
 
   // Calculate ticks from percentage
   const calculateTicks = (lowerPct: number, upperPct: number) => {

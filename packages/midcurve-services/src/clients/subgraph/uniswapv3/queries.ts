@@ -287,3 +287,38 @@ export const POOLS_BY_TOKEN_SETS_QUERY = `
     }
   }
 `;
+
+// ============================================================================
+// FACTORY VALIDATION
+// ============================================================================
+
+/**
+ * Query to get the factory address from the subgraph.
+ *
+ * Used to validate that the subgraph is indexing pools from the expected
+ * Uniswap V3 factory contract. The Factory entity's `id` field is the
+ * factory contract address (lowercase).
+ *
+ * @see https://github.com/Uniswap/v3-subgraph/blob/main/src/v3/schema.graphql
+ *
+ * @returns Factory address from the subgraph
+ *
+ * @example
+ * ```graphql
+ * # Response:
+ * {
+ *   "data": {
+ *     "factories": [{
+ *       "id": "0x1f98431c8ad98523631ae4a59f267346ea31f984"
+ *     }]
+ *   }
+ * }
+ * ```
+ */
+export const FACTORY_QUERY = `
+  query Factory {
+    factories(first: 1) {
+      id
+    }
+  }
+`;

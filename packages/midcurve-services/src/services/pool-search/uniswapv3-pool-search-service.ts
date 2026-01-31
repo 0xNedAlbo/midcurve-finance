@@ -133,6 +133,16 @@ export class UniswapV3PoolSearchService {
         return [];
       }
 
+      // Validate subgraph factory before querying
+      const isValidFactory = await this.subgraphClient.validateSubgraphFactory(chainId);
+      if (!isValidFactory) {
+        this.logger.warn(
+          { chainId },
+          'Skipping chain - subgraph factory mismatch'
+        );
+        return [];
+      }
+
       try {
         return await this.subgraphClient.searchPoolsByTokenSets(
           chainId,

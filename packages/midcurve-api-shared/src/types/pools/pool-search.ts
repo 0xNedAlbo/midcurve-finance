@@ -125,6 +125,14 @@ export interface PoolSearchResultItem {
    * Rounded to 2 decimal places.
    */
   apr7d: number;
+
+  /**
+   * Whether this pool is in user's favorites
+   *
+   * Only populated when user is authenticated.
+   * undefined/missing when not authenticated.
+   */
+  isFavorite?: boolean;
 }
 
 /**

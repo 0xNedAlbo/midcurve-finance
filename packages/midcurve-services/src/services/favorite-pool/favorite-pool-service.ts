@@ -443,6 +443,120 @@ export class FavoritePoolService {
   }
 
   // ============================================================================
+  // ARE FAVORITES (BATCH CHECK)
+  // ============================================================================
+
+  /**
+   * Check which pools from a list are in user's favorites
+   *
+   * Efficient batch lookup for checking multiple pools at once.
+   * Useful for enriching search results with favorite status.
+   *
+   * @param userId - User ID to check favorites for
+   * @param pools - Array of pool identifiers with chainId and poolAddress
+   * @returns Set of "chainId:address" keys for pools that are favorited
+   *
+   * @example
+   * ```typescript
+   * const favorites = await service.areFavorites('user123', [
+   *   { chainId: 1, poolAddress: '0x123...' },
+   *   { chainId: 42161, poolAddress: '0x456...' },
+   * ]);
+   * // Returns Set { "1:0x123...", "42161:0x456..." } if both are favorited
+   * ```
+   */
+  async areFavorites(
+    userId: string,
+    pools: Array<{ chainId: number; poolAddress: string }>
+  ): Promise<Set<string>> {
+    log.methodEntry(this.logger, 'areFavorites', { userId, poolCount: pools.length });
+
+    // Early return for empty array
+    if (pools.length === 0) {
+      log.methodExit(this.logger, 'areFavorites', { count: 0 });
+      return new Set();
+    }
+
+    try {
+      // Build poolHash values for efficient lookup
+      // Format: "uniswapv3/{chainId}/{poolAddress}" (lowercase address)
+      const poolHashToInput = new Map<string, { chainId: number; poolAddress: string }>();
+      const poolHashes: string[] = [];
+
+      for (const pool of pools) {
+        const poolHash = `uniswapv3/${pool.chainId}/${pool.poolAddress.toLowerCase()}`;
+        poolHashes.push(poolHash);
+        poolHashToInput.set(poolHash, pool);
+      }
+
+      // Query all matching pools from database using poolHash
+      log.dbOperation(this.logger, 'findMany', 'Pool', { poolCount: pools.length });
+
+      const matchingPools = await this.prisma.pool.findMany({
+        where: {
+          poolHash: { in: poolHashes },
+        },
+        select: {
+          id: true,
+          poolHash: true,
+        },
+      });
+
+      if (matchingPools.length === 0) {
+        this.logger.debug({ userId }, 'No matching pools found in database');
+        log.methodExit(this.logger, 'areFavorites', { count: 0 });
+        return new Set();
+      }
+
+      // Get pool IDs
+      const poolIds = matchingPools.map((p) => p.id);
+
+      // Query favorites for these pools
+      log.dbOperation(this.logger, 'findMany', 'FavoritePool', { userId, poolIds: poolIds.length });
+
+      const favorites = await this.prisma.favoritePool.findMany({
+        where: {
+          userId,
+          poolId: { in: poolIds },
+        },
+        select: {
+          poolId: true,
+        },
+      });
+
+      // Build set of favorited pool IDs
+      const favoritedPoolIds = new Set(favorites.map((f) => f.poolId));
+
+      // Map back to "chainId:address" keys
+      const result = new Set<string>();
+      for (const pool of matchingPools) {
+        if (favoritedPoolIds.has(pool.id) && pool.poolHash) {
+          // Get original input from poolHash lookup
+          const original = poolHashToInput.get(pool.poolHash);
+          if (original) {
+            result.add(`${original.chainId}:${original.poolAddress}`);
+          }
+        }
+      }
+
+      this.logger.debug(
+        { userId, poolsChecked: pools.length, favoritesFound: result.size },
+        'Batch favorite check completed'
+      );
+
+      log.methodExit(this.logger, 'areFavorites', { count: result.size });
+
+      return result;
+    } catch (error) {
+      log.methodError(this.logger, 'areFavorites', error as Error, {
+        userId,
+        poolCount: pools.length,
+      });
+      throw error;
+    }
+  }
+
+  // ============================================================================
   // COUNT FAVORITES
   // ============================================================================
 

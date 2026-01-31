@@ -5,37 +5,13 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
+import type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-shared';
 import type { WizardStep } from '@/components/layout/wizard';
 
 // ----- Types -----
 
 export type InvestmentMode = 'tokenA' | 'tokenB' | 'matched' | 'independent';
 export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
-
-export interface MockToken {
-  address: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  logoUrl?: string;
-}
-
-export interface MockPool {
-  id: string;
-  address: string;
-  chainId: number;
-  chainName: string;
-  feeTier: string;
-  feeBps: number;
-  token0: MockToken;
-  token1: MockToken;
-  tvlUsd: number;
-  volume24hUsd: number;
-  fees24hUsd: number;
-  apr7d: number;
-  currentTick: number;
-  sqrtPriceX96: string;
-}
 
 export interface TransactionRecord {
   hash: string;
@@ -50,9 +26,9 @@ export interface CreatePositionWizardState {
 
   // Pool Selection (Step A)
   poolSelectionTab: PoolSelectionTab;
-  selectedPool: MockPool | null;
-  baseToken: MockToken | null;
-  quoteToken: MockToken | null;
+  selectedPool: PoolSearchResultItem | null;
+  baseToken: PoolSearchTokenInfo | null;
+  quoteToken: PoolSearchTokenInfo | null;
 
   // Investment (Step B)
   investmentMode: InvestmentMode;
@@ -93,7 +69,7 @@ type WizardAction =
   | { type: 'GO_NEXT' }
   | { type: 'GO_BACK' }
   | { type: 'SET_POOL_TAB'; tab: PoolSelectionTab }
-  | { type: 'SELECT_POOL'; pool: MockPool; baseToken: MockToken; quoteToken: MockToken }
+  | { type: 'SELECT_POOL'; pool: PoolSearchResultItem }
   | { type: 'CLEAR_POOL' }
   | { type: 'SET_INVESTMENT_MODE'; mode: InvestmentMode }
   | { type: 'SET_TOKEN_A_AMOUNT'; amount: string; isMax: boolean }
@@ -161,14 +137,15 @@ function wizardReducer(
       return { ...state, poolSelectionTab: action.tab };
 
     case 'SELECT_POOL':
+      // Default: token0 is base, token1 is quote (user can swap later)
       return {
         ...state,
         selectedPool: action.pool,
-        baseToken: action.baseToken,
-        quoteToken: action.quoteToken,
-        // Reset dependent state when pool changes
-        tickLower: action.pool.currentTick - 1000,
-        tickUpper: action.pool.currentTick + 1000,
+        baseToken: action.pool.token0,
+        quoteToken: action.pool.token1,
+        // Reset tick range (will be set when current tick is fetched)
+        tickLower: 0,
+        tickUpper: 0,
       };
 
     case 'CLEAR_POOL':
@@ -335,7 +312,7 @@ interface CreatePositionWizardContextValue {
 
   // Pool selection
   setPoolTab: (tab: PoolSelectionTab) => void;
-  selectPool: (pool: MockPool, baseToken: MockToken, quoteToken: MockToken) => void;
+  selectPool: (pool: PoolSearchResultItem) => void;
   clearPool: () => void;
 
   // Investment
@@ -408,8 +385,8 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
   }, []);
 
   const selectPool = useCallback(
-    (pool: MockPool, baseToken: MockToken, quoteToken: MockToken) => {
-      dispatch({ type: 'SELECT_POOL', pool, baseToken, quoteToken });
+    (pool: PoolSearchResultItem) => {
+      dispatch({ type: 'SELECT_POOL', pool });
     },
     []
   );

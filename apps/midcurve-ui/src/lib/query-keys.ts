@@ -80,6 +80,13 @@ export const queryKeys = {
   pools: {
     all: ['pools'] as const,
 
+    // Protocol-agnostic favorites (works across all protocols)
+    favorites: {
+      all: () => [...queryKeys.pools.all, 'favorites'] as const,
+      list: (protocol?: string) =>
+        [...queryKeys.pools.favorites.all(), 'list', protocol] as const,
+    },
+
     uniswapv3: {
       all: ['pools', 'uniswapv3'] as const,
 
@@ -92,6 +99,16 @@ export const queryKeys = {
       details: () => [...queryKeys.pools.uniswapv3.all, 'detail'] as const,
       detail: (chainId: number, address: string) =>
         [...queryKeys.pools.uniswapv3.details(), chainId, address] as const,
+
+      // Search (token sets + chain IDs → list of pools)
+      searches: () => [...queryKeys.pools.uniswapv3.all, 'search'] as const,
+      search: (params: {
+        tokenSetA: string[];
+        tokenSetB: string[];
+        chainIds: number[];
+        sortBy?: string;
+        limit?: number;
+      }) => [...queryKeys.pools.uniswapv3.searches(), params] as const,
     },
 
     // Future: Orca, Raydium, etc.
