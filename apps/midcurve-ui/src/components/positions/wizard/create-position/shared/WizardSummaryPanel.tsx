@@ -32,7 +32,7 @@ export function WizardSummaryPanel({
   onFinish,
   children,
 }: WizardSummaryPanelProps) {
-  const { state, setSummaryZoom } = useCreatePositionWizard();
+  const { state, setSummaryZoom, swapQuoteBase } = useCreatePositionWizard();
 
   // Zoom handlers
   const handleZoomIn = useCallback(() => {
@@ -83,6 +83,9 @@ export function WizardSummaryPanel({
           discoveredPool={state.discoveredPool}
           isDiscovering={state.isDiscovering}
           discoverError={state.discoverError}
+          onFlip={swapQuoteBase}
+          baseToken={state.baseToken}
+          quoteToken={state.quoteToken}
         />
 
         {/* Custom content from step */}

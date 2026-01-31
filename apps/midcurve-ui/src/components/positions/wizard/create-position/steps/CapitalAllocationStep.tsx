@@ -8,7 +8,6 @@ import {
   type CapitalAllocationMode,
 } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
-import { QuoteTokenSection } from '../shared/QuoteTokenSection';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
 import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
@@ -32,7 +31,6 @@ export function CapitalAllocationStep() {
     setAllocatedAmounts,
     setDefaultTickRange,
     setLiquidity,
-    swapQuoteBase,
     setStepValid,
     setInteractiveZoom,
   } = useCreatePositionWizard();
@@ -379,23 +377,15 @@ export function CapitalAllocationStep() {
 
   const renderSummary = () => (
     <WizardSummaryPanel nextDisabled={!calculations.isValid}>
-      <QuoteTokenSection
-        quoteToken={state.quoteToken}
+      <AllocatedCapitalSection
+        allocatedBaseAmount={state.allocatedBaseAmount}
+        allocatedQuoteAmount={state.allocatedQuoteAmount}
+        totalQuoteValue={state.totalQuoteValue}
         baseToken={state.baseToken}
-        onSwap={swapQuoteBase}
+        quoteToken={state.quoteToken}
+        baseLogoUrl={baseLogoUrl}
         quoteLogoUrl={quoteLogoUrl}
       />
-      <div className="mt-3">
-        <AllocatedCapitalSection
-          allocatedBaseAmount={state.allocatedBaseAmount}
-          allocatedQuoteAmount={state.allocatedQuoteAmount}
-          totalQuoteValue={state.totalQuoteValue}
-          baseToken={state.baseToken}
-          quoteToken={state.quoteToken}
-          baseLogoUrl={baseLogoUrl}
-          quoteLogoUrl={quoteLogoUrl}
-        />
-      </div>
     </WizardSummaryPanel>
   );
 

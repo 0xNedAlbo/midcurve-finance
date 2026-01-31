@@ -5,9 +5,9 @@
  * Shows loading state during discovery, error state if failed, or pool info if successful.
  */
 
-import { ExternalLink, AlertCircle, Loader2, Coins } from 'lucide-react';
+import { ExternalLink, AlertCircle, Loader2, Coins, ArrowLeftRight } from 'lucide-react';
 import type { UniswapV3Pool } from '@midcurve/shared';
-import type { PoolSearchResultItem } from '@midcurve/api-shared';
+import type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-shared';
 import { buildAddressUrl } from '@/lib/explorer-utils';
 import { getChainMetadataByChainId } from '@/config/chains';
 
@@ -86,6 +86,21 @@ interface SelectedPoolSummaryProps {
    * Error message if discovery failed
    */
   discoverError: string | null;
+
+  /**
+   * Callback to flip quote/base token assignment
+   */
+  onFlip?: () => void;
+
+  /**
+   * The base token (shown on left)
+   */
+  baseToken?: PoolSearchTokenInfo | null;
+
+  /**
+   * The quote token (shown on right)
+   */
+  quoteToken?: PoolSearchTokenInfo | null;
 }
 
 /**
@@ -100,6 +115,9 @@ export function SelectedPoolSummary({
   discoveredPool,
   isDiscovering,
   discoverError,
+  onFlip,
+  baseToken,
+  quoteToken,
 }: SelectedPoolSummaryProps) {
   // No pool selected yet
   if (!selectedPool && !discoveredPool) {
@@ -145,28 +163,48 @@ export function SelectedPoolSummary({
     // Access config properties (pool is serialized as plain JSON, not class instance)
     const chainId = discoveredPool.config.chainId as number;
     const address = discoveredPool.config.address as string;
-    const token0Symbol = discoveredPool.token0.symbol;
-    const token1Symbol = discoveredPool.token1.symbol;
+    const token0Address = (discoveredPool.token0.config.address as string).toLowerCase();
     const token0Logo = discoveredPool.token0.logoUrl;
     const token1Logo = discoveredPool.token1.logoUrl;
     const feeBps = discoveredPool.feeBps;
     const chainMeta = getChainMetadataByChainId(chainId);
     const chainName = chainMeta?.shortName ?? `Chain ${chainId}`;
 
+    // Use base/quote tokens from state if available, fallback to token0/token1
+    const baseSymbol = baseToken?.symbol ?? discoveredPool.token0.symbol;
+    const quoteSymbol = quoteToken?.symbol ?? discoveredPool.token1.symbol;
+
+    // Map logos based on which token is base/quote
+    const baseAddress = baseToken?.address.toLowerCase();
+    const baseLogo = baseAddress === token0Address ? token0Logo : token1Logo;
+    const quoteLogo = baseAddress === token0Address ? token1Logo : token0Logo;
+
     return (
       <div className="p-3 bg-slate-700/30 rounded-lg">
-        <p className="text-xs text-slate-400 mb-2">Selected Pool</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-slate-400">Selected Pool</p>
+          {onFlip && (
+            <button
+              onClick={onFlip}
+              className="flex items-center gap-1 px-2 py-1 bg-slate-600/50 rounded text-xs text-slate-300 hover:bg-slate-600 hover:text-white transition-colors cursor-pointer"
+              title="Flip quote/base token"
+            >
+              <ArrowLeftRight className="w-3 h-3" />
+              Flip
+            </button>
+          )}
+        </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center">
             <TokenLogoPair
-              logo0={token0Logo}
-              logo1={token1Logo}
-              symbol0={token0Symbol}
-              symbol1={token1Symbol}
+              logo0={baseLogo}
+              logo1={quoteLogo}
+              symbol0={baseSymbol}
+              symbol1={quoteSymbol}
             />
             <div>
               <span className="text-white font-medium">
-                {token0Symbol} / {token1Symbol}
+                {baseSymbol} / {quoteSymbol}
               </span>
               <span className="text-slate-400 text-sm ml-2">
                 {chainName} · {formatFeeTier(feeBps)}
