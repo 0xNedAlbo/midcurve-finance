@@ -40,7 +40,22 @@ export function PoolSelectionStep() {
     setIsDiscovering,
     setDiscoveredPool,
     setDiscoverError,
+    setInteractiveZoom,
   } = useCreatePositionWizard();
+
+  // Zoom constants
+  const ZOOM_MIN = 0.75;
+  const ZOOM_MAX = 1.25;
+  const ZOOM_STEP = 0.125;
+
+  // Zoom handlers using context state
+  const handleZoomIn = useCallback(() => {
+    setInteractiveZoom(Math.min(state.interactiveZoom + ZOOM_STEP, ZOOM_MAX));
+  }, [state.interactiveZoom, setInteractiveZoom]);
+
+  const handleZoomOut = useCallback(() => {
+    setInteractiveZoom(Math.max(state.interactiveZoom - ZOOM_STEP, ZOOM_MIN));
+  }, [state.interactiveZoom, setInteractiveZoom]);
 
   // Pool discovery mutation
   const discoverPool = useDiscoverPool();
@@ -50,12 +65,6 @@ export function PoolSelectionStep() {
   const [tokenSetB, setTokenSetB] = useState<TokenSearchResult[]>([]);
   const [directAddress, setDirectAddress] = useState('');
   const [selectedChainIds, setSelectedChainIds] = useState<number[]>([1, 42161, 8453]); // Ethereum, Arbitrum, Base
-
-  // Font size scale (0.75 = 75%, 1.0 = 100%, 1.25 = 125%)
-  const [fontScale, setFontScale] = useState(1.0);
-  const MIN_SCALE = 0.75;
-  const MAX_SCALE = 1.25;
-  const SCALE_STEP = 0.125;
 
   // Pool search hook
   const { pools, isLoading } = usePoolSearch({
@@ -133,14 +142,6 @@ export function PoolSelectionStep() {
     [favoritesData?.favorites, transformFavoriteToSearchResult]
   );
 
-  const handleZoomIn = useCallback(() => {
-    setFontScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE));
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setFontScale((prev) => Math.max(prev - SCALE_STEP, MIN_SCALE));
-  }, []);
-
   // Token selection handlers
   const handleTokenASelect = useCallback((token: TokenSearchResult) => {
     setTokenSetA((prev) => {
@@ -215,7 +216,7 @@ export function PoolSelectionStep() {
   );
 
   const renderInteractive = () => (
-    <div className="space-y-4" style={{ zoom: fontScale }}>
+    <div className="space-y-4">
       {/* Header with tabs and zoom controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-8">
@@ -242,25 +243,25 @@ export function PoolSelectionStep() {
         <div className="flex items-center gap-1">
           <button
             onClick={handleZoomOut}
-            disabled={fontScale <= MIN_SCALE}
+            disabled={state.interactiveZoom <= ZOOM_MIN}
             className={`p-1 rounded transition-colors cursor-pointer ${
-              fontScale <= MIN_SCALE
+              state.interactiveZoom <= ZOOM_MIN
                 ? 'text-slate-600 cursor-not-allowed'
                 : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
-            title="Decrease font size"
+            title="Zoom out"
           >
             <MinusCircle className="w-4 h-4" />
           </button>
           <button
             onClick={handleZoomIn}
-            disabled={fontScale >= MAX_SCALE}
+            disabled={state.interactiveZoom >= ZOOM_MAX}
             className={`p-1 rounded transition-colors cursor-pointer ${
-              fontScale >= MAX_SCALE
+              state.interactiveZoom >= ZOOM_MAX
                 ? 'text-slate-600 cursor-not-allowed'
                 : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
             }`}
-            title="Increase font size"
+            title="Zoom in"
           >
             <PlusCircle className="w-4 h-4" />
           </button>

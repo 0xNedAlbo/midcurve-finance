@@ -1,7 +1,8 @@
 import { useEffect, useCallback } from 'react';
-import { Wallet, ArrowLeftRight } from 'lucide-react';
+import { Wallet, ArrowLeftRight, Activity, Banknote, Scale, Sigma, PlusCircle, MinusCircle } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
+import { formatCompactValue } from '@midcurve/shared';
 import {
   useCreatePositionWizard,
   type CapitalAllocationMode,
@@ -13,25 +14,12 @@ import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
 import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 
-const MODE_TABS: { id: CapitalAllocationMode; label: string; description: string }[] = [
-  { id: 'quoteOnly', label: 'Quote Only', description: 'Enter total investment in quote token' },
-  { id: 'baseOnly', label: 'Base Only', description: 'Enter base token amount to invest' },
-  { id: 'matched', label: 'Matched', description: 'Enter one token, calculate matching amount' },
-  { id: 'custom', label: 'Custom', description: 'Enter both token amounts independently' },
+const MODE_TABS: { id: CapitalAllocationMode; label: string; description: string; icon: typeof Banknote }[] = [
+  { id: 'quoteOnly', label: 'Quote Only', description: 'Enter total investment in quote token', icon: Banknote },
+  { id: 'baseOnly', label: 'Base Only', description: 'Enter base token amount to invest', icon: Activity },
+  { id: 'matched', label: 'Matched', description: 'Enter one token, calculate matching amount', icon: Scale },
+  { id: 'custom', label: 'Custom', description: 'Enter both token amounts independently', icon: Sigma },
 ];
-
-/**
- * Format a balance for display
- */
-function formatBalance(balance: bigint | undefined, decimals: number): string {
-  if (balance === undefined || balance === 0n) return '0';
-  const formatted = formatUnits(balance, decimals);
-  const num = parseFloat(formatted);
-  if (num < 0.0001) return '<0.0001';
-  if (num < 1) return num.toFixed(6);
-  if (num < 1000) return num.toFixed(4);
-  return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
 
 export function CapitalAllocationStep() {
   const {
@@ -46,23 +34,39 @@ export function CapitalAllocationStep() {
     setLiquidity,
     swapQuoteBase,
     setStepValid,
+    setInteractiveZoom,
   } = useCreatePositionWizard();
 
-  const { address: walletAddress } = useAccount();
+  const { address: walletAddress, isConnected } = useAccount();
+
+  // Zoom constants
+  const ZOOM_MIN = 0.75;
+  const ZOOM_MAX = 1.25;
+  const ZOOM_STEP = 0.125;
+
+  // Zoom handlers using context state
+  const handleZoomIn = useCallback(() => {
+    setInteractiveZoom(Math.min(state.interactiveZoom + ZOOM_STEP, ZOOM_MAX));
+  }, [state.interactiveZoom, setInteractiveZoom]);
+
+  const handleZoomOut = useCallback(() => {
+    setInteractiveZoom(Math.max(state.interactiveZoom - ZOOM_STEP, ZOOM_MIN));
+  }, [state.interactiveZoom, setInteractiveZoom]);
 
   // Get token balances for MAX buttons
+  // Balance fetching uses backend RPC, so it works regardless of connected network
   const { balanceBigInt: baseBalance, isLoading: isBaseBalanceLoading } = useErc20TokenBalance({
     walletAddress: walletAddress ?? null,
     tokenAddress: state.baseToken?.address ?? null,
     chainId: state.selectedPool?.chainId ?? 1,
-    enabled: !!walletAddress && !!state.baseToken?.address,
+    enabled: isConnected && !!state.baseToken?.address,
   });
 
   const { balanceBigInt: quoteBalance, isLoading: isQuoteBalanceLoading } = useErc20TokenBalance({
     walletAddress: walletAddress ?? null,
     tokenAddress: state.quoteToken?.address ?? null,
     chainId: state.selectedPool?.chainId ?? 1,
-    enabled: !!walletAddress && !!state.quoteToken?.address,
+    enabled: isConnected && !!state.quoteToken?.address,
   });
 
   // Calculate default tick range (±20%) when pool is discovered
@@ -169,24 +173,58 @@ export function CapitalAllocationStep() {
 
   const renderInteractive = () => (
     <div className="space-y-4">
-      {/* Header with tabs inline */}
-      <div className="flex items-center gap-8">
-        <h3 className="text-lg font-semibold text-white">Allocate Capital</h3>
-        <div className="flex items-center gap-6">
-          {MODE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setCapitalAllocationMode(tab.id)}
-              className={`flex items-center gap-2 pb-2 text-sm font-medium transition-colors cursor-pointer border-b-2 ${
-                state.capitalAllocationMode === tab.id
-                  ? 'text-blue-400 border-blue-300'
-                  : 'text-slate-400 border-transparent hover:text-slate-200'
-              }`}
-              title={tab.description}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {/* Header with tabs and zoom controls */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-8">
+          <h3 className="text-lg font-semibold text-white">Allocate Capital</h3>
+          <div className="flex items-center gap-6">
+            {MODE_TABS.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setCapitalAllocationMode(tab.id)}
+                  className={`flex items-center gap-1.5 pb-2 text-sm font-medium transition-colors cursor-pointer border-b-2 ${
+                    state.capitalAllocationMode === tab.id
+                      ? 'text-blue-400 border-blue-300'
+                      : 'text-slate-400 border-transparent hover:text-slate-200'
+                  }`}
+                  title={tab.description}
+                >
+                  <Icon className="w-4 h-4" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Zoom controls */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleZoomOut}
+            disabled={state.interactiveZoom <= ZOOM_MIN}
+            className={`p-1 rounded transition-colors cursor-pointer ${
+              state.interactiveZoom <= ZOOM_MIN
+                ? 'text-slate-600 cursor-not-allowed'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+            }`}
+            title="Zoom out"
+          >
+            <MinusCircle className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleZoomIn}
+            disabled={state.interactiveZoom >= ZOOM_MAX}
+            className={`p-1 rounded transition-colors cursor-pointer ${
+              state.interactiveZoom >= ZOOM_MAX
+                ? 'text-slate-600 cursor-not-allowed'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+            }`}
+            title="Zoom in"
+          >
+            <PlusCircle className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -208,6 +246,7 @@ export function CapitalAllocationStep() {
             decimals={state.quoteToken?.decimals ?? 18}
             symbol={state.quoteToken?.symbol ?? ''}
             isBalanceLoading={isQuoteBalanceLoading}
+            isConnected={isConnected}
             placeholder="0.0"
           />
         )}
@@ -223,6 +262,7 @@ export function CapitalAllocationStep() {
             decimals={state.baseToken?.decimals ?? 18}
             symbol={state.baseToken?.symbol ?? ''}
             isBalanceLoading={isBaseBalanceLoading}
+            isConnected={isConnected}
             placeholder="0.0"
           />
         )}
@@ -253,6 +293,7 @@ export function CapitalAllocationStep() {
                 decimals={state.baseToken?.decimals ?? 18}
                 symbol={state.baseToken?.symbol ?? ''}
                 isBalanceLoading={isBaseBalanceLoading}
+                isConnected={isConnected}
                 placeholder="0.0"
               />
             ) : (
@@ -265,6 +306,7 @@ export function CapitalAllocationStep() {
                 decimals={state.quoteToken?.decimals ?? 18}
                 symbol={state.quoteToken?.symbol ?? ''}
                 isBalanceLoading={isQuoteBalanceLoading}
+                isConnected={isConnected}
                 placeholder="0.0"
               />
             )}
@@ -283,6 +325,7 @@ export function CapitalAllocationStep() {
               decimals={state.baseToken?.decimals ?? 18}
               symbol={state.baseToken?.symbol ?? ''}
               isBalanceLoading={isBaseBalanceLoading}
+              isConnected={isConnected}
               placeholder="0.0"
             />
             <TokenAmountInput
@@ -294,6 +337,7 @@ export function CapitalAllocationStep() {
               decimals={state.quoteToken?.decimals ?? 18}
               symbol={state.quoteToken?.symbol ?? ''}
               isBalanceLoading={isQuoteBalanceLoading}
+              isConnected={isConnected}
               placeholder="0.0"
             />
           </div>
@@ -308,20 +352,50 @@ export function CapitalAllocationStep() {
     </div>
   );
 
+  // Get logo URLs from the discovered pool
+  const getLogoUrls = () => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return { baseLogoUrl: null, quoteLogoUrl: null };
+    }
+    const pool = state.discoveredPool;
+    const token0Address = (pool.token0.config.address as string).toLowerCase();
+    const baseAddress = state.baseToken.address.toLowerCase();
+
+    // Map base/quote to token0/token1
+    if (token0Address === baseAddress) {
+      return {
+        baseLogoUrl: pool.token0.logoUrl,
+        quoteLogoUrl: pool.token1.logoUrl,
+      };
+    } else {
+      return {
+        baseLogoUrl: pool.token1.logoUrl,
+        quoteLogoUrl: pool.token0.logoUrl,
+      };
+    }
+  };
+
+  const { baseLogoUrl, quoteLogoUrl } = getLogoUrls();
+
   const renderSummary = () => (
     <WizardSummaryPanel nextDisabled={!calculations.isValid}>
       <QuoteTokenSection
         quoteToken={state.quoteToken}
         baseToken={state.baseToken}
         onSwap={swapQuoteBase}
+        quoteLogoUrl={quoteLogoUrl}
       />
-      <AllocatedCapitalSection
-        allocatedBaseAmount={state.allocatedBaseAmount}
-        allocatedQuoteAmount={state.allocatedQuoteAmount}
-        totalQuoteValue={state.totalQuoteValue}
-        baseToken={state.baseToken}
-        quoteToken={state.quoteToken}
-      />
+      <div className="mt-3">
+        <AllocatedCapitalSection
+          allocatedBaseAmount={state.allocatedBaseAmount}
+          allocatedQuoteAmount={state.allocatedQuoteAmount}
+          totalQuoteValue={state.totalQuoteValue}
+          baseToken={state.baseToken}
+          quoteToken={state.quoteToken}
+          baseLogoUrl={baseLogoUrl}
+          quoteLogoUrl={quoteLogoUrl}
+        />
+      </div>
     </WizardSummaryPanel>
   );
 
@@ -345,6 +419,7 @@ interface TokenAmountInputProps {
   decimals: number;
   symbol: string;
   isBalanceLoading: boolean;
+  isConnected: boolean;
   placeholder?: string;
 }
 
@@ -357,21 +432,34 @@ function TokenAmountInput({
   decimals,
   symbol,
   isBalanceLoading,
+  isConnected,
   placeholder = '0.0',
 }: TokenAmountInputProps) {
+  // Determine what to show for the balance
+  const renderBalance = () => {
+    if (!isConnected) {
+      return <span className="text-slate-500">-- {symbol}</span>;
+    }
+    if (isBalanceLoading) {
+      return <span>Loading...</span>;
+    }
+    return (
+      <span>
+        {formatCompactValue(balance ?? 0n, decimals)} {symbol}
+      </span>
+    );
+  };
+
+  // MAX button is disabled when: not connected or no balance
+  const isMaxDisabled = !isConnected || !balance || balance === 0n;
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <label className="text-sm text-slate-400">{label}</label>
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <Wallet className="w-3 h-3" />
-          {isBalanceLoading ? (
-            <span>Loading...</span>
-          ) : (
-            <span>
-              {formatBalance(balance, decimals)} {symbol}
-            </span>
-          )}
+          {renderBalance()}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -391,7 +479,7 @@ function TokenAmountInput({
         />
         <button
           onClick={onMax}
-          disabled={!balance || balance === 0n}
+          disabled={isMaxDisabled}
           className="px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           MAX

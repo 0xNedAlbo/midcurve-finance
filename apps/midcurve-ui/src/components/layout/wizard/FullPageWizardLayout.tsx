@@ -17,6 +17,9 @@ export interface FullPageWizardLayoutProps {
   visualContent: React.ReactNode;
   summaryContent: React.ReactNode;
   className?: string;
+  // Zoom values using CSS zoom property (affects layout, controls are in step content)
+  interactiveZoom?: number;
+  summaryZoom?: number;
 }
 
 export function FullPageWizardLayout({
@@ -28,6 +31,8 @@ export function FullPageWizardLayout({
   visualContent,
   summaryContent,
   className = '',
+  interactiveZoom,
+  summaryZoom,
 }: FullPageWizardLayoutProps) {
   const navigate = useNavigate();
 
@@ -51,16 +56,17 @@ export function FullPageWizardLayout({
       {/* Content Area - fills remaining space */}
       <div className="flex-1 p-6 min-h-0">
         <div className="h-full flex flex-col lg:flex-row gap-6">
-          {/* Left Column - Golden Ratio Major (61.8%) */}
-          <div className="w-full lg:w-[61.8%] h-full flex flex-col gap-6 min-h-0">
-            {/* Interactive Content - sizes to content */}
-            <div className="shrink-0 relative z-10">
-              <div className="bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6">
-                {interactiveContent}
-              </div>
+          {/* Left Column - expands to fill available space */}
+          <div className="w-full lg:flex-1 h-full flex flex-col gap-6 min-h-0">
+            {/* Interactive Content - sizes to content, with zoom */}
+            <div
+              className="shrink-0 relative z-10 bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6"
+              style={interactiveZoom && interactiveZoom !== 1 ? { zoom: interactiveZoom } : undefined}
+            >
+              {interactiveContent}
             </div>
 
-            {/* Visual Content - fills remaining space */}
+            {/* Visual Content - fills remaining space (no zoom) */}
             <div className="flex-1 min-h-0">
               <div className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-auto">
                 {visualContent}
@@ -68,9 +74,17 @@ export function FullPageWizardLayout({
             </div>
           </div>
 
-          {/* Right Column - Golden Ratio Minor (38.2%) */}
-          <div className="w-full lg:w-[38.2%] h-full min-h-0">
-            <div className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-auto">
+          {/* Right Column - fixed width that scales with zoom, shrinks from right */}
+          <div
+            className="h-full min-h-0 shrink-0"
+            style={{
+              width: summaryZoom ? `calc(26% * ${summaryZoom})` : '26%',
+            }}
+          >
+            <div
+              className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-auto"
+              style={summaryZoom && summaryZoom !== 1 ? { zoom: summaryZoom } : undefined}
+            >
               {summaryContent}
             </div>
           </div>

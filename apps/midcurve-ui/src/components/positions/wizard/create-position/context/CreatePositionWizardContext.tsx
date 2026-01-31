@@ -3,11 +3,14 @@ import {
   useContext,
   useReducer,
   useCallback,
+  useEffect,
   type ReactNode,
 } from 'react';
 import type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-shared';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import type { WizardStep } from '@/components/layout/wizard';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { ZOOM_STORAGE_KEYS, ZOOM_DEFAULTS } from '@/lib/zoom-settings';
 
 // ----- Types -----
 
@@ -75,6 +78,10 @@ export interface CreatePositionWizardState {
 
   // Validation
   stepValidation: Record<string, boolean>;
+
+  // UI zoom settings (persist across steps)
+  interactiveZoom: number;  // Font scale for interactive area (default: 1.0)
+  summaryZoom: number;      // Font scale for summary section (default: 1.0)
 }
 
 // ----- Actions -----
@@ -108,6 +115,8 @@ type WizardAction =
   | { type: 'UPDATE_TRANSACTION'; hash: string; status: TransactionRecord['status'] }
   | { type: 'SET_POSITION_CREATED'; positionId: string; nftId: string }
   | { type: 'SET_STEP_VALID'; stepId: string; valid: boolean }
+  | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
+  | { type: 'SET_SUMMARY_ZOOM'; zoom: number }
   | { type: 'RESET' };
 
 // ----- Initial State -----
@@ -147,6 +156,8 @@ const initialState: CreatePositionWizardState = {
   positionId: null,
   nftId: null,
   stepValidation: {},
+  interactiveZoom: 1.0,
+  summaryZoom: 1.0,
 };
 
 // ----- Reducer -----
@@ -350,6 +361,12 @@ function wizardReducer(
         },
       };
 
+    case 'SET_INTERACTIVE_ZOOM':
+      return { ...state, interactiveZoom: action.zoom };
+
+    case 'SET_SUMMARY_ZOOM':
+      return { ...state, summaryZoom: action.zoom };
+
     case 'RESET':
       return initialState;
 
@@ -451,6 +468,10 @@ interface CreatePositionWizardContextValue {
   setStepValid: (stepId: string, valid: boolean) => void;
   isStepValid: (stepId: string) => boolean;
 
+  // Zoom
+  setInteractiveZoom: (zoom: number) => void;
+  setSummaryZoom: (zoom: number) => void;
+
   // Reset
   reset: () => void;
 }
@@ -466,7 +487,31 @@ interface CreatePositionWizardProviderProps {
 }
 
 export function CreatePositionWizardProvider({ children }: CreatePositionWizardProviderProps) {
-  const [state, dispatch] = useReducer(wizardReducer, initialState);
+  // Persisted zoom settings from localStorage
+  const [persistedInteractiveZoom, setPersistedInteractiveZoom] = useLocalStorage(
+    ZOOM_STORAGE_KEYS.interactive,
+    ZOOM_DEFAULTS.interactive
+  );
+  const [persistedSummaryZoom, setPersistedSummaryZoom] = useLocalStorage(
+    ZOOM_STORAGE_KEYS.summary,
+    ZOOM_DEFAULTS.summary
+  );
+
+  // Initialize reducer with persisted zoom values
+  const [state, dispatch] = useReducer(wizardReducer, {
+    ...initialState,
+    interactiveZoom: persistedInteractiveZoom,
+    summaryZoom: persistedSummaryZoom,
+  });
+
+  // Sync zoom changes to localStorage
+  useEffect(() => {
+    setPersistedInteractiveZoom(state.interactiveZoom);
+  }, [state.interactiveZoom, setPersistedInteractiveZoom]);
+
+  useEffect(() => {
+    setPersistedSummaryZoom(state.summaryZoom);
+  }, [state.summaryZoom, setPersistedSummaryZoom]);
 
   const steps = getVisibleSteps(state);
   const currentStep = steps[state.currentStepIndex] || steps[0];
@@ -607,6 +652,15 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     [state.stepValidation]
   );
 
+  // Zoom
+  const setInteractiveZoom = useCallback((zoom: number) => {
+    dispatch({ type: 'SET_INTERACTIVE_ZOOM', zoom });
+  }, []);
+
+  const setSummaryZoom = useCallback((zoom: number) => {
+    dispatch({ type: 'SET_SUMMARY_ZOOM', zoom });
+  }, []);
+
   // Reset
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' });
@@ -647,6 +701,8 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setPositionCreated,
     setStepValid,
     isStepValid,
+    setInteractiveZoom,
+    setSummaryZoom,
     reset,
   };
 

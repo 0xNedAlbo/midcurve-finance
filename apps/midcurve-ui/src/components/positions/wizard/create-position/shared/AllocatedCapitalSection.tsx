@@ -1,5 +1,6 @@
-import { formatUnits } from 'viem';
+import { Coins } from 'lucide-react';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
+import { formatCompactValue } from '@midcurve/shared';
 
 interface AllocatedCapitalSectionProps {
   allocatedBaseAmount: string;
@@ -7,29 +8,44 @@ interface AllocatedCapitalSectionProps {
   totalQuoteValue: string;
   baseToken: PoolSearchTokenInfo | null;
   quoteToken: PoolSearchTokenInfo | null;
+  baseLogoUrl?: string | null;
+  quoteLogoUrl?: string | null;
 }
 
 /**
- * Format a bigint amount as a human-readable number
+ * Format a bigint amount (as string) as a human-readable number
  */
 function formatTokenAmount(rawAmount: string, decimals: number): string {
   try {
     const amount = BigInt(rawAmount);
-    if (amount === 0n) return '0';
-
-    const formatted = formatUnits(amount, decimals);
-    const num = parseFloat(formatted);
-
-    // Format based on magnitude
-    if (num === 0) return '0';
-    if (num < 0.0001) return '<0.0001';
-    if (num < 1) return num.toFixed(6);
-    if (num < 1000) return num.toFixed(4);
-    if (num < 1000000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    return num.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    return formatCompactValue(amount, decimals);
   } catch {
     return '0';
   }
+}
+
+/**
+ * Small token logo with fallback
+ */
+function TokenLogo({ logoUrl, symbol }: { logoUrl?: string | null; symbol: string }) {
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt={symbol}
+        className="w-4 h-4 rounded-full bg-slate-700"
+        onError={(e) => {
+          e.currentTarget.style.display = 'none';
+          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+        }}
+      />
+    );
+  }
+  return (
+    <div className="w-4 h-4 rounded-full bg-slate-600 flex items-center justify-center">
+      <Coins className="w-2.5 h-2.5 text-slate-400" />
+    </div>
+  );
 }
 
 export function AllocatedCapitalSection({
@@ -38,6 +54,8 @@ export function AllocatedCapitalSection({
   totalQuoteValue,
   baseToken,
   quoteToken,
+  baseLogoUrl,
+  quoteLogoUrl,
 }: AllocatedCapitalSectionProps) {
   // Show placeholder if no tokens or no allocation
   if (!baseToken || !quoteToken) {
@@ -71,16 +89,18 @@ export function AllocatedCapitalSection({
     <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
       <p className="text-xs text-slate-400">Allocated Capital</p>
 
-      {/* Base amount */}
+      {/* Token pair amounts on single line */}
       <div className="flex justify-between items-center">
-        <span className="text-slate-400 text-sm">{baseToken.symbol}</span>
-        <span className="text-white font-medium text-sm">{baseFormatted}</span>
-      </div>
-
-      {/* Quote amount */}
-      <div className="flex justify-between items-center">
-        <span className="text-slate-400 text-sm">{quoteToken.symbol}</span>
-        <span className="text-white font-medium text-sm">{quoteFormatted}</span>
+        <div className="flex items-center gap-1">
+          <TokenLogo logoUrl={baseLogoUrl} symbol={baseToken.symbol} />
+          <span className="text-slate-400">{baseToken.symbol}</span>
+          <span className="text-slate-500 mx-0.5">+</span>
+          <TokenLogo logoUrl={quoteLogoUrl} symbol={quoteToken.symbol} />
+          <span className="text-slate-400">{quoteToken.symbol}</span>
+        </div>
+        <span className="text-white font-medium">
+          {baseFormatted} + {quoteFormatted}
+        </span>
       </div>
 
       {/* Divider */}

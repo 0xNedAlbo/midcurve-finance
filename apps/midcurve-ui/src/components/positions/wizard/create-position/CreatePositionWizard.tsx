@@ -92,6 +92,8 @@ function StepRenderer({ content }: { content: StepContent }) {
       interactiveContent={content.interactive}
       visualContent={content.visual}
       summaryContent={content.summary}
+      interactiveZoom={state.interactiveZoom}
+      summaryZoom={state.summaryZoom}
     />
   );
 }

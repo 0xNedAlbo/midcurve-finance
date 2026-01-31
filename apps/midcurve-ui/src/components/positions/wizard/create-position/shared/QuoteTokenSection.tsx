@@ -1,13 +1,38 @@
-import { ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, Coins } from 'lucide-react';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
 
 interface QuoteTokenSectionProps {
   quoteToken: PoolSearchTokenInfo | null;
   baseToken: PoolSearchTokenInfo | null;
   onSwap: () => void;
+  quoteLogoUrl?: string | null;
 }
 
-export function QuoteTokenSection({ quoteToken, baseToken, onSwap }: QuoteTokenSectionProps) {
+/**
+ * Small token logo with fallback
+ */
+function TokenLogo({ logoUrl, symbol }: { logoUrl?: string | null; symbol: string }) {
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt={symbol}
+        className="w-5 h-5 rounded-full bg-slate-700"
+        onError={(e) => {
+          e.currentTarget.style.display = 'none';
+          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+        }}
+      />
+    );
+  }
+  return (
+    <div className="w-5 h-5 rounded-full bg-slate-600 flex items-center justify-center">
+      <Coins className="w-3 h-3 text-slate-400" />
+    </div>
+  );
+}
+
+export function QuoteTokenSection({ quoteToken, baseToken, onSwap, quoteLogoUrl }: QuoteTokenSectionProps) {
   if (!quoteToken) {
     return (
       <div className="p-3 bg-slate-700/30 rounded-lg">
@@ -23,6 +48,7 @@ export function QuoteTokenSection({ quoteToken, baseToken, onSwap }: QuoteTokenS
         <div>
           <p className="text-xs text-slate-400 mb-1">Quote Token</p>
           <div className="flex items-center gap-2">
+            <TokenLogo logoUrl={quoteLogoUrl} symbol={quoteToken.symbol} />
             <span className="text-white font-medium">{quoteToken.symbol}</span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
