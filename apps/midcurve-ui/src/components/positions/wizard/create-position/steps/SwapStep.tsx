@@ -52,14 +52,14 @@ export function SwapStep() {
       {/* Required amounts */}
       <div className="grid grid-cols-2 gap-4">
         <div className="p-3 bg-slate-700/30 rounded-lg">
-          <p className="text-sm text-slate-400">Required {token0?.symbol}</p>
-          <p className="text-white font-medium">{state.tokenAAmount || '0'}</p>
-          <p className="text-xs text-slate-500 mt-1">Balance: 15,234.56</p>
+          <p className="text-sm text-slate-400">Required {state.baseToken?.symbol}</p>
+          <p className="text-white font-medium">{state.baseInputAmount || '0'}</p>
+          <p className="text-xs text-slate-500 mt-1">Balance: --</p>
         </div>
         <div className="p-3 bg-slate-700/30 rounded-lg">
-          <p className="text-sm text-slate-400">Required {token1?.symbol}</p>
-          <p className="text-white font-medium">{state.tokenBAmount || '0'}</p>
-          <p className="text-xs text-slate-500 mt-1">Balance: 4.2345</p>
+          <p className="text-sm text-slate-400">Required {state.quoteToken?.symbol}</p>
+          <p className="text-white font-medium">{state.quoteInputAmount || '0'}</p>
+          <p className="text-xs text-slate-500 mt-1">Balance: --</p>
         </div>
       </div>
 

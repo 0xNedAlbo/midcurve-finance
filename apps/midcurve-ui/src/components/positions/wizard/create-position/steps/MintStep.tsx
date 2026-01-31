@@ -77,12 +77,12 @@ export function MintStep() {
           <span className="text-white">{state.selectedPool?.chainName}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-400">{token0?.symbol} Amount</span>
-          <span className="text-white">{state.tokenAAmount || '0'}</span>
+          <span className="text-slate-400">{state.baseToken?.symbol} Amount</span>
+          <span className="text-white">{state.baseInputAmount || '0'}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-400">{token1?.symbol} Amount</span>
-          <span className="text-white">{state.tokenBAmount || '0'}</span>
+          <span className="text-slate-400">{state.quoteToken?.symbol} Amount</span>
+          <span className="text-white">{state.quoteInputAmount || '0'}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-slate-400">Tick Range</span>

@@ -8,7 +8,7 @@ export {
   getVisibleSteps,
   type TransactionRecord,
   type CreatePositionWizardState,
-  type InvestmentMode,
+  type CapitalAllocationMode,
   type PoolSelectionTab,
 } from './context/CreatePositionWizardContext';
 
@@ -17,7 +17,7 @@ export type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-sh
 
 // Steps (for direct access if needed)
 export { PoolSelectionStep } from './steps/PoolSelectionStep';
-export { InvestmentStep } from './steps/InvestmentStep';
+export { CapitalAllocationStep } from './steps/CapitalAllocationStep';
 export { RangeStep } from './steps/RangeStep';
 export { AutomationStep } from './steps/AutomationStep';
 export { SwapStep } from './steps/SwapStep';

@@ -50,7 +50,9 @@ export function ApprovalsStep() {
     onApprove: () => void
   ) => {
     const token = tokenIndex === 0 ? token0 : token1;
-    const amount = tokenIndex === 0 ? state.tokenAAmount : state.tokenBAmount;
+    // Note: For display, we show the user's input amounts
+    // The actual approval will use allocatedBaseAmount/allocatedQuoteAmount
+    const amount = tokenIndex === 0 ? state.baseInputAmount : state.quoteInputAmount;
 
     return (
       <div

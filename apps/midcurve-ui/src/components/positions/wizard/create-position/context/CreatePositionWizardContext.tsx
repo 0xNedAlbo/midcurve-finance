@@ -11,7 +11,7 @@ import type { WizardStep } from '@/components/layout/wizard';
 
 // ----- Types -----
 
-export type InvestmentMode = 'tokenA' | 'tokenB' | 'matched' | 'independent';
+export type CapitalAllocationMode = 'quoteOnly' | 'baseOnly' | 'matched' | 'custom';
 export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
 
 export interface TransactionRecord {
@@ -34,12 +34,23 @@ export interface CreatePositionWizardState {
   baseToken: PoolSearchTokenInfo | null;
   quoteToken: PoolSearchTokenInfo | null;
 
-  // Investment (Step B)
-  investmentMode: InvestmentMode;
-  tokenAAmount: string;
-  tokenBAmount: string;
-  tokenAIsMax: boolean;
-  tokenBIsMax: boolean;
+  // Capital Allocation (Step B)
+  capitalAllocationMode: CapitalAllocationMode;
+  baseInputAmount: string;     // User input for base token (human-readable)
+  quoteInputAmount: string;    // User input for quote token (human-readable)
+  baseUsedMax: boolean;        // MAX button clicked for base
+  quoteUsedMax: boolean;       // MAX button clicked for quote
+  matchedInputSide: 'base' | 'quote';  // For matched mode: which token user is entering
+  matchedUsedMax: boolean;     // For matched mode: MAX button clicked
+
+  // Calculated allocation results
+  allocatedBaseAmount: string;   // Calculated base amount (raw bigint as string)
+  allocatedQuoteAmount: string;  // Calculated quote amount (raw bigint as string)
+  totalQuoteValue: string;       // Total position value in quote (raw bigint as string)
+
+  // Default price range (±20% from current price, used before range step)
+  defaultTickLower: number;
+  defaultTickUpper: number;
 
   // Range (Step C)
   tickLower: number;
@@ -78,9 +89,13 @@ type WizardAction =
   | { type: 'SET_IS_DISCOVERING'; isDiscovering: boolean }
   | { type: 'SET_DISCOVERED_POOL'; pool: UniswapV3Pool }
   | { type: 'SET_DISCOVER_ERROR'; error: string }
-  | { type: 'SET_INVESTMENT_MODE'; mode: InvestmentMode }
-  | { type: 'SET_TOKEN_A_AMOUNT'; amount: string; isMax: boolean }
-  | { type: 'SET_TOKEN_B_AMOUNT'; amount: string; isMax: boolean }
+  | { type: 'SET_CAPITAL_ALLOCATION_MODE'; mode: CapitalAllocationMode }
+  | { type: 'SET_BASE_INPUT'; amount: string; usedMax: boolean }
+  | { type: 'SET_QUOTE_INPUT'; amount: string; usedMax: boolean }
+  | { type: 'SET_MATCHED_INPUT_SIDE'; side: 'base' | 'quote' }
+  | { type: 'SET_MATCHED_USED_MAX'; usedMax: boolean }
+  | { type: 'SET_ALLOCATED_AMOUNTS'; base: string; quote: string; total: string }
+  | { type: 'SET_DEFAULT_TICK_RANGE'; tickLower: number; tickUpper: number }
   | { type: 'SET_TICK_RANGE'; tickLower: number; tickUpper: number }
   | { type: 'SET_LIQUIDITY'; liquidity: string }
   | { type: 'SWAP_QUOTE_BASE' }
@@ -106,11 +121,18 @@ const initialState: CreatePositionWizardState = {
   discoverError: null,
   baseToken: null,
   quoteToken: null,
-  investmentMode: 'matched',
-  tokenAAmount: '',
-  tokenBAmount: '',
-  tokenAIsMax: false,
-  tokenBIsMax: false,
+  capitalAllocationMode: 'quoteOnly',
+  baseInputAmount: '',
+  quoteInputAmount: '',
+  baseUsedMax: false,
+  quoteUsedMax: false,
+  matchedInputSide: 'quote',
+  matchedUsedMax: false,
+  allocatedBaseAmount: '0',
+  allocatedQuoteAmount: '0',
+  totalQuoteValue: '0',
+  defaultTickLower: 0,
+  defaultTickUpper: 0,
   tickLower: 0,
   tickUpper: 0,
   liquidity: '0',
@@ -192,21 +214,55 @@ function wizardReducer(
         discoverError: action.error,
       };
 
-    case 'SET_INVESTMENT_MODE':
-      return { ...state, investmentMode: action.mode };
-
-    case 'SET_TOKEN_A_AMOUNT':
+    case 'SET_CAPITAL_ALLOCATION_MODE':
       return {
         ...state,
-        tokenAAmount: action.amount,
-        tokenAIsMax: action.isMax,
+        capitalAllocationMode: action.mode,
+        // Clear calculated amounts when mode changes
+        allocatedBaseAmount: '0',
+        allocatedQuoteAmount: '0',
+        totalQuoteValue: '0',
       };
 
-    case 'SET_TOKEN_B_AMOUNT':
+    case 'SET_BASE_INPUT':
       return {
         ...state,
-        tokenBAmount: action.amount,
-        tokenBIsMax: action.isMax,
+        baseInputAmount: action.amount,
+        baseUsedMax: action.usedMax,
+      };
+
+    case 'SET_QUOTE_INPUT':
+      return {
+        ...state,
+        quoteInputAmount: action.amount,
+        quoteUsedMax: action.usedMax,
+      };
+
+    case 'SET_MATCHED_INPUT_SIDE':
+      return {
+        ...state,
+        matchedInputSide: action.side,
+      };
+
+    case 'SET_MATCHED_USED_MAX':
+      return {
+        ...state,
+        matchedUsedMax: action.usedMax,
+      };
+
+    case 'SET_ALLOCATED_AMOUNTS':
+      return {
+        ...state,
+        allocatedBaseAmount: action.base,
+        allocatedQuoteAmount: action.quote,
+        totalQuoteValue: action.total,
+      };
+
+    case 'SET_DEFAULT_TICK_RANGE':
+      return {
+        ...state,
+        defaultTickLower: action.tickLower,
+        defaultTickUpper: action.tickUpper,
       };
 
     case 'SET_TICK_RANGE':
@@ -224,6 +280,15 @@ function wizardReducer(
         ...state,
         baseToken: state.quoteToken,
         quoteToken: state.baseToken,
+        // Swap input amounts to maintain user intent
+        baseInputAmount: state.quoteInputAmount,
+        quoteInputAmount: state.baseInputAmount,
+        baseUsedMax: state.quoteUsedMax,
+        quoteUsedMax: state.baseUsedMax,
+        // Clear calculated amounts (will be recalculated)
+        allocatedBaseAmount: '0',
+        allocatedQuoteAmount: '0',
+        totalQuoteValue: '0',
       };
 
     case 'SET_AUTOMATION_ENABLED':
@@ -354,10 +419,14 @@ interface CreatePositionWizardContextValue {
   setDiscoveredPool: (pool: UniswapV3Pool) => void;
   setDiscoverError: (error: string) => void;
 
-  // Investment
-  setInvestmentMode: (mode: InvestmentMode) => void;
-  setTokenAAmount: (amount: string, isMax: boolean) => void;
-  setTokenBAmount: (amount: string, isMax: boolean) => void;
+  // Capital Allocation
+  setCapitalAllocationMode: (mode: CapitalAllocationMode) => void;
+  setBaseInput: (amount: string, usedMax: boolean) => void;
+  setQuoteInput: (amount: string, usedMax: boolean) => void;
+  setMatchedInputSide: (side: 'base' | 'quote') => void;
+  setMatchedUsedMax: (usedMax: boolean) => void;
+  setAllocatedAmounts: (base: string, quote: string, total: string) => void;
+  setDefaultTickRange: (tickLower: number, tickUpper: number) => void;
 
   // Range
   setTickRange: (tickLower: number, tickUpper: number) => void;
@@ -446,17 +515,33 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     dispatch({ type: 'SET_DISCOVER_ERROR', error });
   }, []);
 
-  // Investment
-  const setInvestmentMode = useCallback((mode: InvestmentMode) => {
-    dispatch({ type: 'SET_INVESTMENT_MODE', mode });
+  // Capital Allocation
+  const setCapitalAllocationMode = useCallback((mode: CapitalAllocationMode) => {
+    dispatch({ type: 'SET_CAPITAL_ALLOCATION_MODE', mode });
   }, []);
 
-  const setTokenAAmount = useCallback((amount: string, isMax: boolean) => {
-    dispatch({ type: 'SET_TOKEN_A_AMOUNT', amount, isMax });
+  const setBaseInput = useCallback((amount: string, usedMax: boolean) => {
+    dispatch({ type: 'SET_BASE_INPUT', amount, usedMax });
   }, []);
 
-  const setTokenBAmount = useCallback((amount: string, isMax: boolean) => {
-    dispatch({ type: 'SET_TOKEN_B_AMOUNT', amount, isMax });
+  const setQuoteInput = useCallback((amount: string, usedMax: boolean) => {
+    dispatch({ type: 'SET_QUOTE_INPUT', amount, usedMax });
+  }, []);
+
+  const setMatchedInputSide = useCallback((side: 'base' | 'quote') => {
+    dispatch({ type: 'SET_MATCHED_INPUT_SIDE', side });
+  }, []);
+
+  const setMatchedUsedMax = useCallback((usedMax: boolean) => {
+    dispatch({ type: 'SET_MATCHED_USED_MAX', usedMax });
+  }, []);
+
+  const setAllocatedAmounts = useCallback((base: string, quote: string, total: string) => {
+    dispatch({ type: 'SET_ALLOCATED_AMOUNTS', base, quote, total });
+  }, []);
+
+  const setDefaultTickRange = useCallback((tickLower: number, tickUpper: number) => {
+    dispatch({ type: 'SET_DEFAULT_TICK_RANGE', tickLower, tickUpper });
   }, []);
 
   // Range
@@ -542,9 +627,13 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setIsDiscovering,
     setDiscoveredPool,
     setDiscoverError,
-    setInvestmentMode,
-    setTokenAAmount,
-    setTokenBAmount,
+    setCapitalAllocationMode,
+    setBaseInput,
+    setQuoteInput,
+    setMatchedInputSide,
+    setMatchedUsedMax,
+    setAllocatedAmounts,
+    setDefaultTickRange,
     setTickRange,
     setLiquidity,
     swapQuoteBase,
