@@ -100,7 +100,8 @@ export type SerializedUniswapV3Pool = BigIntToString<UniswapV3Pool>;
 /**
  * Single favorite pool item
  *
- * Contains pool identification (poolHash, chainId, poolAddress) and the full pool data.
+ * Contains pool identification (poolHash, chainId, poolAddress), full pool data,
+ * and current metrics from The Graph subgraph.
  * Note: Does NOT include database IDs.
  */
 export interface FavoritePoolItem {
@@ -137,6 +138,42 @@ export interface FavoritePoolItem {
    * BigInt fields (sqrtPriceX96, liquidity, etc.) are serialized as strings.
    */
   pool: SerializedUniswapV3Pool;
+
+  // =========================================================================
+  // Pool metrics from subgraph
+  // =========================================================================
+
+  /**
+   * Total Value Locked in USD
+   * @example "1234567.89"
+   */
+  tvlUSD: string;
+
+  /**
+   * 24-hour trading volume in USD
+   * @example "456789.12"
+   */
+  volume24hUSD: string;
+
+  /**
+   * 24-hour fees collected in USD
+   * @example "1234.56"
+   */
+  fees24hUSD: string;
+
+  /**
+   * 7-day fees collected in USD
+   * @example "8642.15"
+   */
+  fees7dUSD: string;
+
+  /**
+   * 7-day average APR percentage
+   *
+   * Calculated as: (fees7d / 7 * 365) / tvl * 100
+   * @example 12.34
+   */
+  apr7d: number;
 }
 
 /**

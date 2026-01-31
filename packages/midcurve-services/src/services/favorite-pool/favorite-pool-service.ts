@@ -16,6 +16,7 @@ import type { UniswapV3Pool } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { UniswapV3PoolService } from '../pool/uniswapv3-pool-service.js';
+import { UniswapV3SubgraphClient } from '../../clients/subgraph/uniswapv3/uniswapv3-subgraph-client.js';
 import type {
   AddFavoritePoolInput,
   RemoveFavoritePoolInput,
@@ -47,6 +48,25 @@ export interface FavoritePoolResult {
 }
 
 /**
+ * Pool metrics from subgraph
+ */
+export interface PoolMetricsData {
+  tvlUSD: string;
+  volume24hUSD: string;
+  fees24hUSD: string;
+  fees7dUSD: string;
+  apr7d: number;
+}
+
+/**
+ * FavoritePoolResult with metrics from subgraph
+ */
+export interface FavoritePoolWithMetrics extends FavoritePoolResult {
+  /** Pool metrics from subgraph */
+  metrics: PoolMetricsData;
+}
+
+/**
  * Dependencies for FavoritePoolService
  * All dependencies are optional and will use defaults if not provided
  */
@@ -62,6 +82,12 @@ export interface FavoritePoolServiceDependencies {
    * If not provided, a new UniswapV3PoolService instance will be created
    */
   poolService?: UniswapV3PoolService;
+
+  /**
+   * UniswapV3SubgraphClient for fetching pool metrics
+   * If not provided, the singleton instance will be used
+   */
+  subgraphClient?: UniswapV3SubgraphClient;
 }
 
 // ============================================================================
@@ -77,6 +103,7 @@ export class FavoritePoolService {
   protected readonly _prisma: PrismaClient;
   protected readonly logger: ServiceLogger;
   protected readonly _poolService: UniswapV3PoolService;
+  protected readonly _subgraphClient: UniswapV3SubgraphClient;
 
   /**
    * Creates a new FavoritePoolService instance
@@ -84,6 +111,7 @@ export class FavoritePoolService {
    * @param dependencies - Optional dependencies object
    * @param dependencies.prisma - Prisma client instance (creates default if not provided)
    * @param dependencies.poolService - UniswapV3PoolService instance (creates default if not provided)
+   * @param dependencies.subgraphClient - UniswapV3SubgraphClient instance (uses singleton if not provided)
    */
   constructor(dependencies: FavoritePoolServiceDependencies = {}) {
     this._prisma = dependencies.prisma ?? new PrismaClient();
@@ -91,6 +119,8 @@ export class FavoritePoolService {
     this._poolService =
       dependencies.poolService ??
       new UniswapV3PoolService({ prisma: this._prisma });
+    this._subgraphClient =
+      dependencies.subgraphClient ?? UniswapV3SubgraphClient.getInstance();
   }
 
   /**
@@ -105,6 +135,13 @@ export class FavoritePoolService {
    */
   protected get poolService(): UniswapV3PoolService {
     return this._poolService;
+  }
+
+  /**
+   * Get the subgraph client instance
+   */
+  protected get subgraphClient(): UniswapV3SubgraphClient {
+    return this._subgraphClient;
   }
 
   // ============================================================================
@@ -322,14 +359,15 @@ export class FavoritePoolService {
   // ============================================================================
 
   /**
-   * List all favorite pools for a user
+   * List all favorite pools for a user with metrics from subgraph
    *
    * Returns pools ordered by when they were favorited (most recent first).
+   * Each pool includes metrics (TVL, volume, fees, APR) fetched from the subgraph.
    *
    * @param input - ListFavoritePoolsInput with userId and optional pagination
-   * @returns Array of FavoritePoolResult objects
+   * @returns Array of FavoritePoolWithMetrics objects
    */
-  async listFavorites(input: ListFavoritePoolsInput): Promise<FavoritePoolResult[]> {
+  async listFavorites(input: ListFavoritePoolsInput): Promise<FavoritePoolWithMetrics[]> {
     const { userId, limit = 50, offset = 0 } = input;
     log.methodEntry(this.logger, 'listFavorites', { userId, limit, offset });
 
@@ -383,14 +421,67 @@ export class FavoritePoolService {
         });
       }
 
-      this.logger.debug(
-        { userId, count: results.length, limit, offset },
-        'Favorite pools listed'
+      // Enrich with metrics from subgraph
+      // Group by chainId for efficient batch queries
+      const poolsByChain = new Map<number, Array<{ address: string; index: number }>>();
+      results.forEach((result, index) => {
+        const chainId = result.pool.chainId;
+        if (!poolsByChain.has(chainId)) {
+          poolsByChain.set(chainId, []);
+        }
+        poolsByChain.get(chainId)!.push({ address: result.pool.address, index });
+      });
+
+      // Fetch metrics for each chain in parallel
+      const metricsPromises = Array.from(poolsByChain.entries()).map(
+        async ([chainId, pools]) => {
+          const addresses = pools.map((p) => p.address);
+          const metrics = await this.subgraphClient.getPoolsMetricsBatch(chainId, addresses);
+          return { chainId, pools, metrics };
+        }
       );
 
-      log.methodExit(this.logger, 'listFavorites', { count: results.length });
+      const chainMetrics = await Promise.all(metricsPromises);
 
-      return results;
+      // Default metrics for pools without subgraph data
+      const defaultMetrics: PoolMetricsData = {
+        tvlUSD: '0',
+        volume24hUSD: '0',
+        fees24hUSD: '0',
+        fees7dUSD: '0',
+        apr7d: 0,
+      };
+
+      // Build enriched results
+      const enrichedResults: FavoritePoolWithMetrics[] = results.map((result) => ({
+        ...result,
+        metrics: { ...defaultMetrics },
+      }));
+
+      // Merge metrics from subgraph
+      for (const { pools, metrics } of chainMetrics) {
+        for (const { address, index } of pools) {
+          const poolMetrics = metrics.get(address.toLowerCase());
+          if (poolMetrics) {
+            enrichedResults[index]!.metrics = {
+              tvlUSD: poolMetrics.tvlUSD,
+              volume24hUSD: poolMetrics.volume24hUSD,
+              fees24hUSD: poolMetrics.fees24hUSD,
+              fees7dUSD: poolMetrics.fees7dUSD,
+              apr7d: poolMetrics.apr7d,
+            };
+          }
+        }
+      }
+
+      this.logger.debug(
+        { userId, count: enrichedResults.length, limit, offset },
+        'Favorite pools listed with metrics'
+      );
+
+      log.methodExit(this.logger, 'listFavorites', { count: enrichedResults.length });
+
+      return enrichedResults;
     } catch (error) {
       log.methodError(this.logger, 'listFavorites', error as Error, {
         userId,

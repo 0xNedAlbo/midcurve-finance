@@ -28,7 +28,7 @@ import {
 } from '@midcurve/api-shared';
 import { serializeUniswapV3Pool } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getFavoritePoolService } from '@/lib/services';
+import { getFavoritePoolService, getSubgraphClient } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -164,7 +164,29 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
       }
 
-      // 3. Build response
+      // 3. Fetch metrics from subgraph
+      const subgraphClient = getSubgraphClient();
+      const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [poolAddress]);
+      const poolMetrics = metricsMap.get(poolAddress.toLowerCase());
+
+      // Default metrics if subgraph data unavailable
+      const metrics = poolMetrics
+        ? {
+            tvlUSD: poolMetrics.tvlUSD,
+            volume24hUSD: poolMetrics.volume24hUSD,
+            fees24hUSD: poolMetrics.fees24hUSD,
+            fees7dUSD: poolMetrics.fees7dUSD,
+            apr7d: poolMetrics.apr7d,
+          }
+        : {
+            tvlUSD: '0',
+            volume24hUSD: '0',
+            fees24hUSD: '0',
+            fees7dUSD: '0',
+            apr7d: 0,
+          };
+
+      // 4. Build response
       const poolHash = `${protocol}/${chainId}/${result.pool.address}`;
       const serializedPool = serializeUniswapV3Pool(result.pool);
 
@@ -174,6 +196,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         poolAddress: result.pool.address,
         favoritedAt: result.createdAt.toISOString(),
         pool: serializedPool as unknown as FavoritePoolItem['pool'],
+        ...metrics,
       };
 
       const responseData: AddFavoritePoolData = {
@@ -288,6 +311,12 @@ export async function GET(request: NextRequest): Promise<Response> {
           poolAddress: fav.pool.address,
           favoritedAt: fav.createdAt.toISOString(),
           pool: serializedPool as unknown as FavoritePoolItem['pool'],
+          // Include metrics from subgraph
+          tvlUSD: fav.metrics.tvlUSD,
+          volume24hUSD: fav.metrics.volume24hUSD,
+          fees24hUSD: fav.metrics.fees24hUSD,
+          fees7dUSD: fav.metrics.fees7dUSD,
+          apr7d: fav.metrics.apr7d,
         });
       }
 

@@ -18,9 +18,7 @@ import {
   UniswapV3PoolDiscoveryService,
   UniswapV3PoolSearchService,
   UniswapV3PositionService,
-  UniswapV3PositionLedgerService,
   PositionListService,
-  PositionAprService,
   CloseOrderService,
   SharedContractService,
   PoolSubscriptionService,
@@ -30,6 +28,7 @@ import {
   WebhookConfigService,
   WebhookDeliveryService,
   FavoritePoolService,
+  UniswapV3SubgraphClient,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -43,9 +42,7 @@ let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _uniswapV3PoolDiscoveryService: UniswapV3PoolDiscoveryService | null = null;
 let _uniswapV3PoolSearchService: UniswapV3PoolSearchService | null = null;
 let _uniswapV3PositionService: UniswapV3PositionService | null = null;
-let _uniswapV3PositionLedgerService: UniswapV3PositionLedgerService | null = null;
 let _positionListService: PositionListService | null = null;
-let _positionAprService: PositionAprService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
@@ -127,16 +124,6 @@ export function getUniswapV3PositionService(): UniswapV3PositionService {
 }
 
 /**
- * Get singleton instance of PositionAprService
- */
-export function getPositionAprService(): PositionAprService {
-  if (!_positionAprService) {
-    _positionAprService = new PositionAprService();
-  }
-  return _positionAprService;
-}
-
-/**
  * Get singleton instance of UserTokenBalanceService
  */
 export function getUserTokenBalanceService(): UserTokenBalanceService {
@@ -164,16 +151,6 @@ export function getUniswapV3PoolSearchService(): UniswapV3PoolSearchService {
     _uniswapV3PoolSearchService = new UniswapV3PoolSearchService();
   }
   return _uniswapV3PoolSearchService;
-}
-
-/**
- * Get singleton instance of UniswapV3PositionLedgerService
- */
-export function getUniswapV3PositionLedgerService(): UniswapV3PositionLedgerService {
-  if (!_uniswapV3PositionLedgerService) {
-    _uniswapV3PositionLedgerService = new UniswapV3PositionLedgerService();
-  }
-  return _uniswapV3PositionLedgerService;
 }
 
 /**
@@ -274,4 +251,11 @@ export function getFavoritePoolService(): FavoritePoolService {
     _favoritePoolService = new FavoritePoolService();
   }
   return _favoritePoolService;
+}
+
+/**
+ * Get singleton instance of UniswapV3SubgraphClient
+ */
+export function getSubgraphClient(): UniswapV3SubgraphClient {
+  return UniswapV3SubgraphClient.getInstance();
 }

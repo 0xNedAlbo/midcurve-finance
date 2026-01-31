@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search, Star, Hash, PlusCircle, MinusCircle } from 'lucide-react';
-import type { PoolSearchResultItem } from '@midcurve/api-shared';
+import type { PoolSearchResultItem, FavoritePoolItem } from '@midcurve/api-shared';
 import {
   useCreatePositionWizard,
   type PoolSelectionTab,
@@ -9,9 +9,9 @@ import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { PoolTable } from '../shared/PoolTable';
 import { TokenSetSearchInput } from '../shared/TokenSetSearchInput';
 import { usePoolSearch } from '@/hooks/pools/usePoolSearch';
-import { useTogglePoolFavorite } from '@/hooks/pools/usePoolFavorites';
+import { usePoolFavorites, useTogglePoolFavorite } from '@/hooks/pools/usePoolFavorites';
 import type { TokenSearchResult } from '@/hooks/tokens/useMultiChainTokenSearch';
-import type { EvmChainSlug } from '@/config/chains';
+import { getChainMetadataByChainId, type EvmChainSlug } from '@/config/chains';
 
 const TAB_CONFIG: { id: PoolSelectionTab; label: string; icon: React.ReactNode }[] = [
   { id: 'favorites', label: 'Favorites', icon: <Star className="w-4 h-4" /> },
@@ -60,6 +60,48 @@ export function PoolSelectionStep() {
 
   // Toggle favorite mutation
   const toggleFavorite = useTogglePoolFavorite();
+
+  // Fetch favorites when tab is active
+  const { data: favoritesData, isLoading: isFavoritesLoading } = usePoolFavorites({
+    protocol: 'uniswapv3',
+    enabled: state.poolSelectionTab === 'favorites',
+  });
+
+  // Transform FavoritePoolItem to PoolSearchResultItem for PoolTable
+  const transformFavoriteToSearchResult = useCallback(
+    (favorite: FavoritePoolItem): PoolSearchResultItem => {
+      const chainMeta = getChainMetadataByChainId(favorite.chainId);
+      return {
+        poolAddress: favorite.poolAddress,
+        chainId: favorite.chainId,
+        chainName: chainMeta?.shortName ?? `Chain ${favorite.chainId}`,
+        feeTier: favorite.pool.feeBps,
+        token0: {
+          address: favorite.pool.token0.config.address as string,
+          symbol: favorite.pool.token0.symbol,
+          decimals: favorite.pool.token0.decimals,
+        },
+        token1: {
+          address: favorite.pool.token1.config.address as string,
+          symbol: favorite.pool.token1.symbol,
+          decimals: favorite.pool.token1.decimals,
+        },
+        tvlUSD: favorite.tvlUSD,
+        volume24hUSD: favorite.volume24hUSD,
+        fees24hUSD: favorite.fees24hUSD,
+        fees7dUSD: favorite.fees7dUSD,
+        apr7d: favorite.apr7d,
+        isFavorite: true,
+      };
+    },
+    []
+  );
+
+  // Transform favorites for PoolTable
+  const favoritePools = useMemo(
+    () => (favoritesData?.favorites ?? []).map(transformFavoriteToSearchResult),
+    [favoritesData?.favorites, transformFavoriteToSearchResult]
+  );
 
   const handleZoomIn = useCallback(() => {
     setFontScale((prev) => Math.min(prev + SCALE_STEP, MAX_SCALE));
@@ -179,10 +221,14 @@ export function PoolSelectionStep() {
 
       {/* Tab content */}
       {state.poolSelectionTab === 'favorites' && (
-        <div className="p-4 bg-slate-700/30 rounded-lg border border-slate-600/50">
-          <p className="text-slate-400 text-center">
-            Favorites feature coming soon. Use the Search tab to find pools.
-          </p>
+        <div className="text-sm text-slate-400">
+          {isFavoritesLoading ? (
+            <span>Loading favorites...</span>
+          ) : favoritePools.length > 0 ? (
+            <span>{favoritePools.length} favorite pool{favoritePools.length !== 1 ? 's' : ''}</span>
+          ) : (
+            <span>No favorites yet. Use the Search tab to find and star pools.</span>
+          )}
         </div>
       )}
 
@@ -251,15 +297,29 @@ export function PoolSelectionStep() {
     </div>
   );
 
-  const renderVisual = () => (
-    <PoolTable
-      pools={pools}
-      selectedPoolAddress={state.selectedPool?.poolAddress || null}
-      onSelectPool={handleSelectPool}
-      onToggleFavorite={handleToggleFavorite}
-      isLoading={isLoading}
-    />
-  );
+  const renderVisual = () => {
+    if (state.poolSelectionTab === 'favorites') {
+      return (
+        <PoolTable
+          pools={favoritePools}
+          selectedPoolAddress={state.selectedPool?.poolAddress || null}
+          onSelectPool={handleSelectPool}
+          onToggleFavorite={handleToggleFavorite}
+          isLoading={isFavoritesLoading}
+        />
+      );
+    }
+
+    return (
+      <PoolTable
+        pools={pools}
+        selectedPoolAddress={state.selectedPool?.poolAddress || null}
+        onSelectPool={handleSelectPool}
+        onToggleFavorite={handleToggleFavorite}
+        isLoading={isLoading}
+      />
+    );
+  };
 
   const renderSummary = () => (
     <WizardSummaryPanel nextDisabled={!state.selectedPool} />

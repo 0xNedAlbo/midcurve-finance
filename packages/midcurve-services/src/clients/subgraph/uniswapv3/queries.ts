@@ -155,6 +155,57 @@ export const POOLS_BATCH_QUERY = `
 `;
 
 /**
+ * Get pool data with 7-day metrics for multiple pools
+ *
+ * Used by favorites endpoint to fetch full metrics including APR.
+ * Returns 7 days of poolDayData for APR calculation.
+ *
+ * Variables:
+ * - $poolIds: Array of pool addresses (lowercase)
+ *
+ * Returns:
+ * - Array of pool objects with 7-day metrics for APR calculation
+ *
+ * Note: The Graph limits array inputs to ~1000 items. For larger batches,
+ * split into multiple queries.
+ *
+ * Example usage:
+ * ```typescript
+ * const response = await query(POOLS_BATCH_WITH_METRICS_QUERY, {
+ *   poolIds: [
+ *     '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8',
+ *     '0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640'
+ *   ]
+ * });
+ * ```
+ */
+export const POOLS_BATCH_WITH_METRICS_QUERY = `
+  query GetPoolsBatchWithMetrics($poolIds: [ID!]!) {
+    pools(where: {id_in: $poolIds}) {
+      id
+      feeTier
+      totalValueLockedUSD
+      token0 {
+        id
+        symbol
+        decimals
+      }
+      token1 {
+        id
+        symbol
+        decimals
+      }
+      poolDayData(orderBy: date, orderDirection: desc, first: 7) {
+        date
+        volumeUSD
+        feesUSD
+        tvlUSD
+      }
+    }
+  }
+`;
+
+/**
  * Get historical pool day data
  *
  * Returns daily snapshots of pool metrics for charting and analysis.

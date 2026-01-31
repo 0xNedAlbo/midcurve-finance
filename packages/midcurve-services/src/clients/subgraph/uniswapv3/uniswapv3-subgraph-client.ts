@@ -42,6 +42,7 @@ import {
   POOL_METRICS_QUERY,
   POOL_FEE_DATA_QUERY,
   POOLS_BY_TOKEN_SETS_QUERY,
+  POOLS_BATCH_WITH_METRICS_QUERY,
   FACTORY_QUERY,
 } from './queries.js';
 import { getFactoryAddress } from '../../../config/uniswapv3.js';
@@ -616,6 +617,132 @@ export class UniswapV3SubgraphClient {
     } catch (error) {
       // Errors already logged
       throw error;
+    }
+  }
+
+  /**
+   * Get metrics for multiple pools by address (batch)
+   *
+   * Efficient batch query for fetching metrics for multiple pools.
+   * Returns TVL, volume, fees, and calculated 7-day APR.
+   *
+   * @param chainId - Chain ID
+   * @param poolAddresses - Array of pool addresses (any case)
+   * @returns Map of lowercase poolAddress -> PoolSearchSubgraphResult
+   *
+   * @example
+   * ```typescript
+   * const metrics = await client.getPoolsMetricsBatch(1, [
+   *   '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8',
+   *   '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'
+   * ]);
+   * const pool = metrics.get('0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8');
+   * console.log(`TVL: $${pool?.tvlUSD}`);
+   * ```
+   */
+  async getPoolsMetricsBatch(
+    chainId: number,
+    poolAddresses: string[]
+  ): Promise<Map<string, PoolSearchSubgraphResult>> {
+    log.methodEntry(this.logger, 'getPoolsMetricsBatch', {
+      chainId,
+      poolCount: poolAddresses.length,
+    });
+
+    // Empty input
+    if (poolAddresses.length === 0) {
+      log.methodExit(this.logger, 'getPoolsMetricsBatch', { count: 0 });
+      return new Map();
+    }
+
+    // Local chain - return empty map
+    if (isLocalChain(chainId)) {
+      this.logger.warn({ chainId }, 'Subgraph not available for local chain');
+      log.methodExit(this.logger, 'getPoolsMetricsBatch', { reason: 'local_chain' });
+      return new Map();
+    }
+
+    try {
+      // Normalize addresses to lowercase
+      const poolIds = poolAddresses.map((addr) => normalizeAddress(addr).toLowerCase());
+
+      log.externalApiCall(
+        this.logger,
+        'UniswapV3Subgraph',
+        'POOLS_BATCH_WITH_METRICS_QUERY',
+        { chainId, poolCount: poolIds.length }
+      );
+
+      const response = await this.query<{ pools: RawPoolSearchData[] }>(
+        chainId,
+        POOLS_BATCH_WITH_METRICS_QUERY,
+        { poolIds }
+      );
+
+      // Handle errors
+      if (response.errors && response.errors.length > 0) {
+        this.logger.error({ errors: response.errors }, 'Subgraph query failed');
+        return new Map();
+      }
+
+      // No pools found
+      if (!response.data?.pools || response.data.pools.length === 0) {
+        this.logger.debug({ chainId }, 'No pools found in subgraph');
+        log.methodExit(this.logger, 'getPoolsMetricsBatch', { found: 0 });
+        return new Map();
+      }
+
+      // Process each pool (same logic as searchPoolsByTokenSets)
+      const results = new Map<string, PoolSearchSubgraphResult>();
+
+      for (const pool of response.data.pools) {
+        // Calculate 7-day fees sum
+        const fees7d = pool.poolDayData.reduce((sum, day) => {
+          return sum + parseFloat(day.feesUSD || '0');
+        }, 0);
+
+        // Get most recent day data
+        const latestDay = pool.poolDayData[0];
+        const volume24h = latestDay?.volumeUSD || '0';
+        const fees24h = latestDay?.feesUSD || '0';
+        const currentTvl = parseFloat(pool.totalValueLockedUSD || '0');
+
+        // Calculate 7-day average APR
+        let apr7d = 0;
+        if (currentTvl > 0 && fees7d > 0) {
+          const avgDailyFees = fees7d / 7;
+          apr7d = (avgDailyFees * 365 / currentTvl) * 100;
+        }
+
+        const poolAddress = normalizeAddress(pool.id);
+        results.set(poolAddress.toLowerCase(), {
+          poolAddress,
+          chainId,
+          feeTier: parseInt(pool.feeTier),
+          token0: {
+            address: normalizeAddress(pool.token0.id),
+            symbol: pool.token0.symbol,
+            decimals: parseInt(pool.token0.decimals),
+          },
+          token1: {
+            address: normalizeAddress(pool.token1.id),
+            symbol: pool.token1.symbol,
+            decimals: parseInt(pool.token1.decimals),
+          },
+          tvlUSD: pool.totalValueLockedUSD || '0',
+          volume24hUSD: volume24h,
+          fees24hUSD: fees24h,
+          fees7dUSD: fees7d.toFixed(2),
+          apr7d: Math.round(apr7d * 100) / 100,
+        });
+      }
+
+      this.logger.debug({ chainId, found: results.size }, 'Batch metrics fetched');
+      log.methodExit(this.logger, 'getPoolsMetricsBatch', { found: results.size });
+      return results;
+    } catch (error) {
+      log.methodError(this.logger, 'getPoolsMetricsBatch', error as Error, { chainId });
+      return new Map();
     }
   }
 
