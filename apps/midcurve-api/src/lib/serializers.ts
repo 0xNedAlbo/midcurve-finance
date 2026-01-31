@@ -11,7 +11,6 @@ import type {
   UniswapV3Position,
   UniswapV3PositionState,
   Erc20Token,
-  PoolDiscoveryResult,
   CloseOrderInterface,
 } from '@midcurve/shared';
 
@@ -149,27 +148,6 @@ export function serializeErc20Token(token: Erc20Token) {
     },
     createdAt: token.createdAt.toISOString(),
     updatedAt: token.updatedAt.toISOString(),
-  };
-}
-
-/**
- * Serialize PoolDiscoveryResult for JSON response
- *
- * Converts the full pool discovery result including nested pool data.
- * Handles all bigint conversions in pool state.
- *
- * @param result - PoolDiscoveryResult from service layer
- * @returns JSON-serializable discovery result
- */
-export function serializePoolDiscoveryResult(result: PoolDiscoveryResult<'uniswapv3'>) {
-  return {
-    poolName: result.poolName,
-    fee: result.fee,
-    protocol: result.protocol,
-    tvlUSD: result.tvlUSD,
-    volumeUSD: result.volumeUSD,
-    feesUSD: result.feesUSD,
-    pool: serializeUniswapV3Pool(result.pool),
   };
 }
 
