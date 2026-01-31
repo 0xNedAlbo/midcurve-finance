@@ -19,6 +19,7 @@ import { UniswapV3PoolService } from '../pool/uniswapv3-pool-service.js';
 import type {
   AddFavoritePoolInput,
   RemoveFavoritePoolInput,
+  RemoveFavoritePoolByAddressInput,
   ListFavoritePoolsInput,
   IsFavoritePoolInput,
 } from '../types/favorite-pool/index.js';
@@ -252,6 +253,65 @@ export class FavoritePoolService {
       log.methodError(this.logger, 'removeFavorite', error as Error, {
         userId,
         poolId,
+      });
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // REMOVE FAVORITE BY ADDRESS
+  // ============================================================================
+
+  /**
+   * Remove a pool from user's favorites using chainId and poolAddress
+   *
+   * This method is used by API endpoints that identify pools by chainId + poolAddress
+   * instead of database IDs.
+   *
+   * Silently succeeds if the pool or favorite doesn't exist (idempotent).
+   *
+   * @param input - RemoveFavoritePoolByAddressInput with userId, chainId, poolAddress
+   * @returns void
+   */
+  async removeFavoriteByAddress(input: RemoveFavoritePoolByAddressInput): Promise<void> {
+    const { userId, chainId, poolAddress } = input;
+    log.methodEntry(this.logger, 'removeFavoriteByAddress', { userId, chainId, poolAddress });
+
+    try {
+      // 1. Find the pool by address and chain
+      const pool = await this.poolService.findByAddressAndChain(poolAddress, chainId);
+
+      if (!pool) {
+        // Pool doesn't exist, so favorite can't exist either
+        this.logger.debug(
+          { chainId, poolAddress },
+          'Pool not found, nothing to remove from favorites'
+        );
+        log.methodExit(this.logger, 'removeFavoriteByAddress', { poolNotFound: true });
+        return;
+      }
+
+      // 2. Delete the favorite using the existing logic
+      log.dbOperation(this.logger, 'delete', 'FavoritePool', { userId, poolId: pool.id });
+
+      await this.prisma.favoritePool.deleteMany({
+        where: {
+          userId,
+          poolId: pool.id,
+        },
+      });
+
+      this.logger.info(
+        { userId, poolId: pool.id, chainId, poolAddress },
+        'Pool removed from favorites by address'
+      );
+
+      log.methodExit(this.logger, 'removeFavoriteByAddress', { userId, poolId: pool.id });
+    } catch (error) {
+      log.methodError(this.logger, 'removeFavoriteByAddress', error as Error, {
+        userId,
+        chainId,
+        poolAddress,
       });
       throw error;
     }

@@ -29,6 +29,7 @@ import {
   NotificationService,
   WebhookConfigService,
   WebhookDeliveryService,
+  FavoritePoolService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -53,6 +54,7 @@ let _pnlCurveService: PnLCurveService | null = null;
 let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _webhookDeliveryService: WebhookDeliveryService | null = null;
+let _favoritePoolService: FavoritePoolService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -262,4 +264,14 @@ export function getWebhookDeliveryService(): WebhookDeliveryService {
     _webhookDeliveryService = new WebhookDeliveryService();
   }
   return _webhookDeliveryService;
+}
+
+/**
+ * Get singleton instance of FavoritePoolService
+ */
+export function getFavoritePoolService(): FavoritePoolService {
+  if (!_favoritePoolService) {
+    _favoritePoolService = new FavoritePoolService();
+  }
+  return _favoritePoolService;
 }

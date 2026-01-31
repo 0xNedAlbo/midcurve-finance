@@ -22,7 +22,7 @@ export interface AddFavoritePoolInput {
 }
 
 /**
- * Input for removing a pool from favorites
+ * Input for removing a pool from favorites by database ID
  */
 export interface RemoveFavoritePoolInput {
   /** User ID who is removing the favorite */
@@ -30,6 +30,23 @@ export interface RemoveFavoritePoolInput {
 
   /** Pool database ID to remove from favorites */
   poolId: string;
+}
+
+/**
+ * Input for removing a pool from favorites by chain and address
+ *
+ * Used by API endpoints that identify pools by chainId + poolAddress
+ * instead of database IDs.
+ */
+export interface RemoveFavoritePoolByAddressInput {
+  /** User ID who is removing the favorite */
+  userId: string;
+
+  /** Chain ID where the pool is deployed */
+  chainId: number;
+
+  /** Pool contract address (will be validated and normalized) */
+  poolAddress: string;
 }
 
 /**
