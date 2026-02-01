@@ -23,6 +23,7 @@ import {
   positionStateToJSON,
   positionStateFromJSON,
 } from './uniswapv3-position-state.js';
+import { calculatePositionValueAtPrice } from '../../../utils/uniswapv3/position.js';
 
 // ============================================================================
 // CONSTRUCTOR PARAMS
@@ -208,6 +209,35 @@ export class UniswapV3Position extends BasePosition {
   /** Unclaimed fees in token1 (more accurate than tokensOwed1) */
   get unclaimedFees1(): bigint {
     return this._state.unclaimedFees1;
+  }
+
+  // ============================================================================
+  // PnL Simulation
+  // ============================================================================
+
+  /**
+   * Simulate the position's PnL at a given price.
+   * Used for interactive PnL curve visualization.
+   *
+   * @param price - The base token price in quote token units (scaled by quote token decimals)
+   * @returns The simulated PnL at the given price in quote token units
+   */
+  simulatePnLAtPrice(price: bigint): bigint {
+    const baseToken = this.getBaseToken();
+    const quoteToken = this.getQuoteToken();
+
+    const positionValue = calculatePositionValueAtPrice(
+      this.liquidity,
+      this.tickLower,
+      this.tickUpper,
+      price,
+      baseToken.address,
+      quoteToken.address,
+      baseToken.decimals,
+      this.pool.tickSpacing
+    );
+
+    return positionValue - this.currentCostBasis;
   }
 
   // ============================================================================

@@ -19,6 +19,3 @@ export * from './format/index.js';
 
 // Position helpers
 export * from './position-helpers.js';
-
-// PnL Simulation
-export * from './pnl-simulation/index.js';

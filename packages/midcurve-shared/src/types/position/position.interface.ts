@@ -201,4 +201,13 @@ export interface PositionInterface {
    * Get total unrealized PnL including accrued cashflow
    */
   getTotalUnrealizedPnl(): bigint;
+
+  /**
+   * Simulate the position's PnL at a given price.
+   * Used for interactive PnL curve visualization.
+   *
+   * @param price - The base token price in quote token units (scaled by quote token decimals)
+   * @returns The simulated PnL at the given price in quote token units
+   */
+  simulatePnLAtPrice(price: bigint): bigint;
 }

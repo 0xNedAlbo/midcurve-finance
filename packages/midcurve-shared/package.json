@@ -26,10 +26,6 @@
       "types": "./dist/abis/uniswap-v3-position-closer/index.d.ts",
       "import": "./dist/abis/uniswap-v3-position-closer/index.js"
     },
-    "./utils/pnl-simulation": {
-      "types": "./dist/utils/pnl-simulation/index.d.ts",
-      "import": "./dist/utils/pnl-simulation/index.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [

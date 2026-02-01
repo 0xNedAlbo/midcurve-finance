@@ -44,6 +44,13 @@ export {
   positionStateFromJSON,
 } from './uniswapv3/index.js';
 
+// Simulation overlay
+export {
+  CloseOrderSimulationOverlay,
+  type CloseOrderTriggerState,
+  type CloseOrderSimulationOverlayParams,
+} from './close-order-simulation/index.js';
+
 // Import for use in type alias
 import type { UniswapV3Position as UniswapV3PositionType } from './uniswapv3/index.js';
 
