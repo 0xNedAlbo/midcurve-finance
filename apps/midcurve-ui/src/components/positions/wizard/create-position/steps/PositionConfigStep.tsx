@@ -1,8 +1,9 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
-import { formatCompactValue } from '@midcurve/shared';
+import { formatCompactValue, calculatePositionValue, tickToPrice, compareAddresses } from '@midcurve/shared';
+import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import {
   useCreatePositionWizard,
   type ConfigurationTab,
@@ -118,6 +119,85 @@ export function PositionConfigStep() {
   useEffect(() => {
     setStepValid('configure', calculations.isValid);
   }, [calculations.isValid, setStepValid]);
+
+  // ============================================================================
+  // PnL Curve Data Calculations
+  // ============================================================================
+
+  // Slider bounds for PnL curve visualization
+  const [sliderBounds, setSliderBounds] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
+
+  // Determine if base token is token0
+  const isToken0Base = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken) return false;
+    return compareAddresses(
+      state.discoveredPool.token0.config.address as string,
+      state.baseToken.address
+    ) === 0;
+  }, [state.discoveredPool, state.baseToken]);
+
+  // Calculate current price for slider bounds initialization
+  const currentPrice = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return 0;
+    }
+
+    try {
+      const pool = state.discoveredPool;
+      // Access currentTick from raw state (consistent with useDefaultTickRange)
+      const currentTick = pool.state.currentTick as number;
+      const baseTokenDecimals = isToken0Base
+        ? pool.token0.decimals
+        : pool.token1.decimals;
+
+      const priceBigInt = tickToPrice(
+        currentTick,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+
+      const divisor = 10n ** BigInt(state.quoteToken.decimals);
+      return Number(priceBigInt) / Number(divisor);
+    } catch (error) {
+      console.error("Error calculating current price:", error);
+      return 0;
+    }
+  }, [state.discoveredPool, state.baseToken, state.quoteToken, isToken0Base]);
+
+  // Initialize slider bounds when current price is available
+  useEffect(() => {
+    if (currentPrice > 0 && sliderBounds.min === 0 && sliderBounds.max === 0) {
+      // Asymmetric default range: -50% to +25% of current price
+      setSliderBounds({
+        min: currentPrice * 0.5,   // -50%
+        max: currentPrice * 1.25,  // +25%
+      });
+    }
+  }, [currentPrice, sliderBounds.min, sliderBounds.max]);
+
+  // Calculate cost basis (position value at current price)
+  const costBasis = useMemo(() => {
+    const liquidityBigInt = BigInt(state.liquidity || '0');
+    if (liquidityBigInt === 0n || !state.discoveredPool) {
+      return 0n;
+    }
+
+    try {
+      // Access sqrtPriceX96 from raw state and convert to bigint (consistent with useCapitalCalculations)
+      const sqrtPriceX96 = BigInt(state.discoveredPool.state.sqrtPriceX96 as string);
+      return calculatePositionValue(
+        liquidityBigInt,
+        sqrtPriceX96,
+        effectiveTickLower,
+        effectiveTickUpper,
+        isToken0Base
+      );
+    } catch (error) {
+      console.error("Error calculating cost basis:", error);
+      return 0n;
+    }
+  }, [state.liquidity, state.discoveredPool, effectiveTickLower, effectiveTickUpper, isToken0Base]);
 
   // Handle base input change
   const handleBaseInputChange = useCallback(
@@ -278,58 +358,97 @@ export function PositionConfigStep() {
     </div>
   );
 
-  const renderVisual = () => (
-    <div className="h-full flex flex-col items-center justify-center text-slate-500">
-      {/* PnL Curve Placeholder */}
-      <div className="w-full max-w-md space-y-6">
-        {/* Mock chart axes */}
-        <div className="relative h-48 border-l-2 border-b-2 border-slate-700">
-          {/* Y-axis label */}
-          <div className="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-xs text-slate-600 whitespace-nowrap">
-            Position Value
-          </div>
+  const renderVisual = () => {
+    // Check if we have enough data to render the curve (pool and tokens are required, liquidity is optional)
+    const liquidityBigInt = BigInt(state.liquidity || '0');
+    const hasPoolData = state.discoveredPool &&
+      state.baseToken &&
+      state.quoteToken &&
+      sliderBounds.min > 0;
 
-          {/* Mock curve path */}
-          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-            {/* Dashed placeholder curve */}
-            <path
-              d="M 0 80 Q 20 75 35 50 T 50 30 T 65 30 T 100 30"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeDasharray="4 4"
-              className="text-slate-600"
-            />
-            {/* Current price marker */}
-            <line
-              x1="50"
-              y1="0"
-              x2="50"
-              y2="100"
-              stroke="currentColor"
-              strokeWidth="1"
-              strokeDasharray="2 2"
-              className="text-blue-500/50"
-            />
-          </svg>
-
-          {/* X-axis label */}
-          <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-600">
-            Base Token Price
-          </div>
-        </div>
-
-        {/* Icon and text */}
-        <div className="text-center space-y-2">
-          <TrendingDown className="w-8 h-8 mx-auto text-slate-600" />
-          <p className="text-sm font-medium text-slate-400">PnL Curve Visualization</p>
-          <p className="text-xs text-slate-500">
-            Interactive risk profile chart coming in Phase 2
+    if (hasPoolData) {
+      const pool = state.discoveredPool!;
+      return (
+        <div className="h-full flex flex-col">
+          <InteractivePnLCurve
+            poolData={{
+              token0Address: pool.token0.config.address as string,
+              token0Decimals: pool.token0.decimals,
+              token1Address: pool.token1.config.address as string,
+              token1Decimals: pool.token1.decimals,
+              feeBps: pool.feeBps,
+              currentTick: pool.state.currentTick as number,
+              sqrtPriceX96: pool.state.sqrtPriceX96 as string,
+            }}
+            baseToken={{
+              address: state.baseToken!.address,
+              symbol: state.baseToken!.symbol,
+              decimals: state.baseToken!.decimals,
+            }}
+            quoteToken={{
+              address: state.quoteToken!.address,
+              symbol: state.quoteToken!.symbol,
+              decimals: state.quoteToken!.decimals,
+            }}
+            tickLower={effectiveTickLower}
+            tickUpper={effectiveTickUpper}
+            liquidity={liquidityBigInt}
+            costBasis={costBasis}
+            sliderBounds={sliderBounds}
+            onSliderBoundsChange={setSliderBounds}
+            height={400}
+          />
+          <p className="text-xs text-slate-400 mt-2 text-center">
+            <span className="font-semibold">Risk Profile.</span> Shows how your position value changes with price movements.
           </p>
         </div>
+      );
+    }
+
+    // Placeholder when no data
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-slate-500">
+        <div className="w-full max-w-md space-y-6">
+          {/* Mock chart axes */}
+          <div className="relative h-48 border-l-2 border-b-2 border-slate-700">
+            <div className="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-xs text-slate-600 whitespace-nowrap">
+              Position Value
+            </div>
+            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <path
+                d="M 0 80 Q 20 75 35 50 T 50 30 T 65 30 T 100 30"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeDasharray="4 4"
+                className="text-slate-600"
+              />
+              <line
+                x1="50"
+                y1="0"
+                x2="50"
+                y2="100"
+                stroke="currentColor"
+                strokeWidth="1"
+                strokeDasharray="2 2"
+                className="text-blue-500/50"
+              />
+            </svg>
+            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-600">
+              Base Token Price
+            </div>
+          </div>
+          <div className="text-center space-y-2">
+            <TrendingDown className="w-8 h-8 mx-auto text-slate-600" />
+            <p className="text-sm font-medium text-slate-400">PnL Curve Visualization</p>
+            <p className="text-xs text-slate-500">
+              Enter token amounts to see the risk profile
+            </p>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Get logo URLs from the discovered pool
   const getLogoUrls = () => {

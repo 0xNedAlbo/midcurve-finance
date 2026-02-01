@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import type { UniswapV3PoolDiscoveryResultResponse, Erc20TokenResponse } from "@midcurve/api-shared";
 import type { EvmChainSlug } from "@/config/chains";
 import { TickMath } from "@uniswap/v3-sdk";
-import { getTickSpacing, compareAddresses } from "@midcurve/shared";
+import { getTickSpacing, compareAddresses, calculatePositionValue, tickToPrice } from "@midcurve/shared";
 import { Eye } from "lucide-react";
 
 import { PositionRangeConfig } from "./position-range-config";
 import { PositionSizeConfig } from "./position-size-config";
+import { InteractivePnLCurve } from "@/components/positions/pnl-curve/uniswapv3";
 import type { TokenSearchResult } from "@/hooks/positions/uniswapv3/wizard/useTokenSearch";
 import { usePositionAprCalculation } from "@/hooks/positions/uniswapv3/wizard/usePositionAprCalculation";
 import { usePoolPrice } from "@/hooks/pools/usePoolPrice";
@@ -70,6 +71,9 @@ export function PositionConfigStep({
 
   const [liquidity, setLiquidity] = useState<bigint>(initialLiquidity);
 
+  // Slider bounds for PnL curve visualization
+  const [sliderBounds, setSliderBounds] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
+
   // Hook for fetching current pool price (for refresh button)
   const {
     sqrtPriceX96: latestSqrtPriceX96,
@@ -123,6 +127,72 @@ export function PositionConfigStep({
     }
   }, [pool, baseToken.address]);
 
+  // Determine if base token is token0
+  const isToken0Base = useMemo(() => {
+    return compareAddresses(pool.pool.token0.config.address, baseToken.address) === 0;
+  }, [pool.pool.token0.config.address, baseToken.address]);
+
+  // Calculate current price for slider bounds initialization
+  const currentPrice = useMemo(() => {
+    if (!pool?.pool?.state?.currentTick || !basePoolToken || !quotePoolToken) {
+      return 0;
+    }
+
+    try {
+      const baseTokenDecimals = isToken0Base
+        ? pool.pool.token0.decimals
+        : pool.pool.token1.decimals;
+
+      const priceBigInt = tickToPrice(
+        pool.pool.state.currentTick,
+        basePoolToken.config.address,
+        quotePoolToken.config.address,
+        baseTokenDecimals
+      );
+
+      const divisor = 10n ** BigInt(quotePoolToken.decimals);
+      return Number(priceBigInt) / Number(divisor);
+    } catch (error) {
+      console.error("Error calculating current price:", error);
+      return 0;
+    }
+  }, [pool, basePoolToken, quotePoolToken, isToken0Base]);
+
+  // Initialize slider bounds when current price is available
+  useEffect(() => {
+    if (currentPrice > 0 && sliderBounds.min === 0 && sliderBounds.max === 0) {
+      const DEFAULT_RANGE_PERCENT = 50; // ±50% default range
+      setSliderBounds({
+        min: currentPrice * (1 - DEFAULT_RANGE_PERCENT / 100),
+        max: currentPrice * (1 + DEFAULT_RANGE_PERCENT / 100),
+      });
+    }
+  }, [currentPrice, sliderBounds.min, sliderBounds.max]);
+
+  // Calculate cost basis (position value at current price)
+  const costBasis = useMemo(() => {
+    if (!liquidity || liquidity === 0n || !pool?.pool?.state?.sqrtPriceX96) {
+      return 0n;
+    }
+
+    try {
+      const sqrtPriceX96 = typeof pool.pool.state.sqrtPriceX96 === "bigint"
+        ? pool.pool.state.sqrtPriceX96
+        : BigInt(pool.pool.state.sqrtPriceX96);
+
+      return calculatePositionValue(
+        liquidity,
+        sqrtPriceX96,
+        tickLower,
+        tickUpper,
+        isToken0Base
+      );
+    } catch (error) {
+      console.error("Error calculating cost basis:", error);
+      return 0n;
+    }
+  }, [liquidity, pool?.pool?.state?.sqrtPriceX96, tickLower, tickUpper, isToken0Base]);
+
   // Calculate prospective APR
   const aprCalculation = usePositionAprCalculation({
     chain,
@@ -170,6 +240,43 @@ export function PositionConfigStep({
 
   return (
     <div className="space-y-6">
+      {/* Risk Profile Visualization - Always visible when position has liquidity */}
+      {liquidity > 0n && costBasis > 0n && sliderBounds.min > 0 && (
+        <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-lg p-4">
+          <InteractivePnLCurve
+            poolData={{
+              token0Address: pool.pool.token0.config.address,
+              token0Decimals: pool.pool.token0.decimals,
+              token1Address: pool.pool.token1.config.address,
+              token1Decimals: pool.pool.token1.decimals,
+              feeBps: pool.pool.feeBps,
+              currentTick: pool.pool.state.currentTick,
+              sqrtPriceX96: pool.pool.state.sqrtPriceX96,
+            }}
+            baseToken={{
+              address: basePoolToken.config.address,
+              symbol: basePoolToken.symbol,
+              decimals: basePoolToken.decimals,
+            }}
+            quoteToken={{
+              address: quotePoolToken.config.address,
+              symbol: quotePoolToken.symbol,
+              decimals: quotePoolToken.decimals,
+            }}
+            tickLower={tickLower}
+            tickUpper={tickUpper}
+            liquidity={liquidity}
+            costBasis={costBasis}
+            sliderBounds={sliderBounds}
+            onSliderBoundsChange={setSliderBounds}
+            height={320}
+          />
+          <p className="text-xs text-slate-400 mt-2 text-center">
+            <span className="font-semibold">Risk Profile.</span> Shows how your position value changes with price movements.
+          </p>
+        </div>
+      )}
+
       {/* Position Size Configuration */}
       <PositionSizeConfig
         pool={pool.pool}

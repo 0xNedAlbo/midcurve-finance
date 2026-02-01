@@ -12,8 +12,6 @@ import {
 import { formatCompactValue } from "@/lib/fraction-format";
 import { TickMath } from "@uniswap/v3-sdk";
 import { RangeSlider } from "./shared/range-slider";
-import { PositionPnLCurve } from "./shared/position-pnl-curve";
-import { calculatePositionValue } from "@midcurve/shared";
 
 interface SliderBounds {
   min: number;
@@ -265,32 +263,6 @@ export function PositionRangeConfig({
     return pool.state.currentTick < tickLower || pool.state.currentTick > tickUpper;
   }, [pool?.state.currentTick, tickLower, tickUpper]);
 
-  // Calculate cost basis (initial position value at current price)
-  const costBasis = useMemo(() => {
-    if (!_liquidity || _liquidity === 0n || !pool?.state?.sqrtPriceX96) {
-      return 0n;
-    }
-
-    try {
-      // Ensure sqrtPriceX96 is BigInt (may come from API as string)
-      const sqrtPriceX96 = typeof pool.state.sqrtPriceX96 === 'bigint'
-        ? pool.state.sqrtPriceX96
-        : BigInt(pool.state.sqrtPriceX96);
-
-      // Calculate position value at current price
-      return calculatePositionValue(
-        _liquidity,
-        sqrtPriceX96,
-        tickLower,
-        tickUpper,
-        isToken0Base
-      );
-    } catch (error) {
-      console.error("Error calculating cost basis:", error);
-      return 0n;
-    }
-  }, [_liquidity, pool?.state?.sqrtPriceX96, tickLower, tickUpper, isToken0Base]);
-
   return (
     <div className="space-y-4">
       {/* Header with Price Range display */}
@@ -354,27 +326,6 @@ export function PositionRangeConfig({
               onBoundsChange={setSliderBounds}
               className=""
             />
-
-            {/* Risk Profile Section with PnL Curve */}
-            {_liquidity && _liquidity > 0n && costBasis > 0n && (
-              <div className="mt-4 pt-4 border-t border-slate-700/50">
-                <PositionPnLCurve
-                  pool={pool}
-                  baseToken={baseToken}
-                  quoteToken={quoteToken}
-                  tickLower={tickLower}
-                  tickUpper={tickUpper}
-                  liquidity={_liquidity}
-                  costBasis={costBasis}
-                  sliderBounds={sliderBounds}
-                  height={320}
-                  className=""
-                />
-                <p className="text-xs text-slate-400 mt-2 text-center">
-                  <span className="font-semibold">Risk Profile: PnL Curve.</span> Shows how your position value changes with price movements.
-                </p>
-              </div>
-            )}
           </div>
         </div>
       )}
