@@ -2,7 +2,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react';
 import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
-import { formatCompactValue, calculatePositionValue, tickToPrice, compareAddresses } from '@midcurve/shared';
+import { formatCompactValue, calculatePositionValue, tickToPrice, compareAddresses, generatePnLCurve, getTickSpacing } from '@midcurve/shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import {
   useCreatePositionWizard,
@@ -29,6 +29,7 @@ export function PositionConfigStep() {
     setQuoteInput,
     setAllocatedAmounts,
     setDefaultTickRange,
+    setTickRange,
     setLiquidity,
     setStepValid,
     setInteractiveZoom,
@@ -66,7 +67,7 @@ export function PositionConfigStep() {
     enabled: isConnected && !!state.quoteToken?.address,
   });
 
-  // Calculate default tick range (±20%) when pool is discovered
+  // Calculate default tick range (-20% / +10%) when pool is discovered
   const handleDefaultRangeCalculated = useCallback(
     (tickLower: number, tickUpper: number) => {
       setDefaultTickRange(tickLower, tickUpper);
@@ -168,10 +169,10 @@ export function PositionConfigStep() {
   // Initialize slider bounds when current price is available
   useEffect(() => {
     if (currentPrice > 0 && sliderBounds.min === 0 && sliderBounds.max === 0) {
-      // Asymmetric default range: -50% to +25% of current price
+      // Symmetric default x-axis range: ±35% of current price
       setSliderBounds({
-        min: currentPrice * 0.5,   // -50%
-        max: currentPrice * 1.25,  // +25%
+        min: currentPrice * 0.65,  // -35%
+        max: currentPrice * 1.35,  // +35%
       });
     }
   }, [currentPrice, sliderBounds.min, sliderBounds.max]);
@@ -229,6 +230,26 @@ export function PositionConfigStep() {
     setQuoteInput(formatted, true);
   }, [quoteBalance, state.quoteToken, setQuoteInput]);
 
+  // Handle tick range boundary changes from PnL curve drag
+  const handleTickLowerChange = useCallback(
+    (newTickLower: number) => {
+      setTickRange(newTickLower, effectiveTickUpper);
+    },
+    [setTickRange, effectiveTickUpper]
+  );
+
+  const handleTickUpperChange = useCallback(
+    (newTickUpper: number) => {
+      setTickRange(effectiveTickLower, newTickUpper);
+    },
+    [setTickRange, effectiveTickLower]
+  );
+
+  // Handle range boundary interaction - switch to Range tab
+  const handleRangeBoundaryInteraction = useCallback(() => {
+    setConfigurationTab('range');
+  }, [setConfigurationTab]);
+
   // Render Capital Allocation tab content
   const renderCapitalTab = () => (
     <div className="grid grid-cols-2 gap-4">
@@ -259,17 +280,175 @@ export function PositionConfigStep() {
     </div>
   );
 
-  // Render Position Range tab content (placeholder)
-  const renderRangeTab = () => (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
-      <TrendingUp className="w-12 h-12 text-slate-600 mb-4" />
-      <h4 className="text-lg font-medium text-slate-300 mb-2">Position Range</h4>
-      <p className="text-sm text-slate-500 max-w-md">
-        Configure the price range for your concentrated liquidity position.
-        This section will be implemented in Phase 2.
-      </p>
-    </div>
-  );
+  // Calculate boundary prices and PnL for Range tab
+  const rangeBoundaryInfo = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return null;
+    }
+
+    try {
+      const baseTokenDecimals = isToken0Base
+        ? state.discoveredPool.token0.decimals
+        : state.discoveredPool.token1.decimals;
+
+      // Calculate lower and upper prices from ticks
+      const lowerPriceBigInt = tickToPrice(
+        effectiveTickLower,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+      const upperPriceBigInt = tickToPrice(
+        effectiveTickUpper,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+
+      const quoteDecimals = state.quoteToken.decimals;
+      const divisor = 10n ** BigInt(quoteDecimals);
+
+      // Adjust for token order (same logic as in InteractivePnLCurve)
+      // Keep bigint for formatCompactValue
+      const lowerPriceBigIntAdjusted = isToken0Base ? lowerPriceBigInt : upperPriceBigInt;
+      const upperPriceBigIntAdjusted = isToken0Base ? upperPriceBigInt : lowerPriceBigInt;
+      const lowerPrice = Number(lowerPriceBigIntAdjusted) / Number(divisor);
+      const upperPrice = Number(upperPriceBigIntAdjusted) / Number(divisor);
+
+      // Calculate PnL at boundary prices using generatePnLCurve
+      const liquidityBigInt = BigInt(state.liquidity || '0');
+      if (liquidityBigInt === 0n) {
+        return {
+          lowerPriceBigInt: lowerPriceBigIntAdjusted,
+          upperPriceBigInt: upperPriceBigIntAdjusted,
+          lowerPrice,
+          upperPrice,
+          lowerPnlValue: 0n,
+          upperPnlValue: 0n,
+          lowerPnlPercent: 0,
+          upperPnlPercent: 0,
+        };
+      }
+
+      const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+
+      // Generate curve with just a few points around the boundaries
+      const lowerPriceMinBigInt = BigInt(Math.floor(lowerPrice * 0.99 * Number(divisor)));
+      const lowerPriceMaxBigInt = BigInt(Math.floor(lowerPrice * 1.01 * Number(divisor)));
+      const upperPriceMinBigInt = BigInt(Math.floor(upperPrice * 0.99 * Number(divisor)));
+      const upperPriceMaxBigInt = BigInt(Math.floor(upperPrice * 1.01 * Number(divisor)));
+
+      // Get PnL at lower boundary
+      const lowerCurve = generatePnLCurve(
+        liquidityBigInt,
+        effectiveTickLower,
+        effectiveTickUpper,
+        costBasis,
+        state.baseToken.address,
+        state.quoteToken.address,
+        state.baseToken.decimals,
+        tickSpacing,
+        { min: lowerPriceMinBigInt > 0n ? lowerPriceMinBigInt : 1n, max: lowerPriceMaxBigInt }
+      );
+
+      // Get PnL at upper boundary
+      const upperCurve = generatePnLCurve(
+        liquidityBigInt,
+        effectiveTickLower,
+        effectiveTickUpper,
+        costBasis,
+        state.baseToken.address,
+        state.quoteToken.address,
+        state.baseToken.decimals,
+        tickSpacing,
+        { min: upperPriceMinBigInt > 0n ? upperPriceMinBigInt : 1n, max: upperPriceMaxBigInt }
+      );
+
+      // Find the closest point to our target prices
+      const lowerPoint = lowerCurve.length > 0 ? lowerCurve[Math.floor(lowerCurve.length / 2)] : null;
+      const upperPoint = upperCurve.length > 0 ? upperCurve[Math.floor(upperCurve.length / 2)] : null;
+
+      return {
+        lowerPriceBigInt: lowerPriceBigIntAdjusted,
+        upperPriceBigInt: upperPriceBigIntAdjusted,
+        lowerPrice,
+        upperPrice,
+        lowerPnlValue: lowerPoint?.pnl ?? 0n,
+        upperPnlValue: upperPoint?.pnl ?? 0n,
+        lowerPnlPercent: lowerPoint?.pnlPercent ?? 0,
+        upperPnlPercent: upperPoint?.pnlPercent ?? 0,
+      };
+    } catch (error) {
+      console.error("Error calculating range boundary info:", error);
+      return null;
+    }
+  }, [
+    state.discoveredPool,
+    state.baseToken,
+    state.quoteToken,
+    state.liquidity,
+    effectiveTickLower,
+    effectiveTickUpper,
+    costBasis,
+    isToken0Base,
+  ]);
+
+  // Render Position Range tab content
+  const renderRangeTab = () => {
+    if (!rangeBoundaryInfo) {
+      return (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <TrendingUp className="w-8 h-8 text-slate-600 mb-3" />
+          <h4 className="text-sm font-medium text-slate-300 mb-1">Position Range</h4>
+          <p className="text-xs text-slate-500 max-w-md">
+            Select a pool to configure the price range.
+          </p>
+        </div>
+      );
+    }
+
+    const { lowerPriceBigInt, upperPriceBigInt, lowerPnlValue, upperPnlValue, lowerPnlPercent, upperPnlPercent } = rangeBoundaryInfo;
+    const quoteSymbol = state.quoteToken?.symbol || 'Quote';
+    const quoteDecimals = state.quoteToken?.decimals ?? 18;
+
+    return (
+      <div className="grid grid-cols-2 gap-4">
+        {/* Lower Price Column */}
+        <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
+          <div className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Lower Price</div>
+          <div className="text-sm font-medium text-teal-400">
+            {formatCompactValue(lowerPriceBigInt, quoteDecimals)} {quoteSymbol}
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-600/50">
+            <div className="text-[10px] text-slate-400 mb-0.5">PnL at boundary</div>
+            <div className={`text-sm font-medium ${lowerPnlValue >= 0n ? 'text-green-400' : 'text-red-400'}`}>
+              {lowerPnlValue >= 0n ? '+' : ''}{formatCompactValue(lowerPnlValue, quoteDecimals)} {quoteSymbol}
+              <span className="text-xs text-slate-500 ml-1">
+                ({lowerPnlPercent >= 0 ? '+' : ''}{lowerPnlPercent.toFixed(1)}%)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Upper Price Column */}
+        <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
+          <div className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Upper Price</div>
+          <div className="text-sm font-medium text-teal-400">
+            {formatCompactValue(upperPriceBigInt, quoteDecimals)} {quoteSymbol}
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-600/50">
+            <div className="text-[10px] text-slate-400 mb-0.5">PnL at boundary</div>
+            <div className={`text-sm font-medium ${upperPnlValue >= 0n ? 'text-green-400' : 'text-red-400'}`}>
+              {upperPnlValue >= 0n ? '+' : ''}{formatCompactValue(upperPnlValue, quoteDecimals)} {quoteSymbol}
+              <span className="text-xs text-slate-500 ml-1">
+                ({upperPnlPercent >= 0 ? '+' : ''}{upperPnlPercent.toFixed(1)}%)
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // Render SL/TP Setup tab content (placeholder)
   const renderSltpTab = () => (
@@ -369,7 +548,7 @@ export function PositionConfigStep() {
     if (hasPoolData) {
       const pool = state.discoveredPool!;
       return (
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col min-h-0">
           <InteractivePnLCurve
             poolData={{
               token0Address: pool.token0.config.address as string,
@@ -396,9 +575,12 @@ export function PositionConfigStep() {
             costBasis={costBasis}
             sliderBounds={sliderBounds}
             onSliderBoundsChange={setSliderBounds}
-            height={400}
+            onTickLowerChange={handleTickLowerChange}
+            onTickUpperChange={handleTickUpperChange}
+            onRangeBoundaryInteraction={handleRangeBoundaryInteraction}
+            className="flex-1 min-h-0"
           />
-          <p className="text-xs text-slate-400 mt-2 text-center">
+          <p className="text-xs text-slate-400 mt-2 text-center shrink-0">
             <span className="font-semibold">Risk Profile.</span> Shows how your position value changes with price movements.
           </p>
         </div>

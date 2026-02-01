@@ -54,31 +54,32 @@ export function FullPageWizardLayout({
       />
 
       {/* Content Area - fills remaining space */}
-      <div className="flex-1 p-6 min-h-0">
-        <div className="h-full flex flex-col lg:flex-row gap-6">
+      <div className="flex-1 p-6 min-h-0 overflow-hidden">
+        <div className="h-full flex flex-row gap-6">
           {/* Left Column - expands to fill available space */}
-          <div className="w-full lg:flex-1 h-full flex flex-col gap-6 min-h-0">
+          <div className="flex-1 min-w-0 h-full flex flex-col gap-6 min-h-0">
             {/* Interactive Content - sizes to content, with zoom */}
             <div
-              className="shrink-0 relative z-10 bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6"
+              className="shrink-0 relative z-10 bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-hidden"
               style={interactiveZoom && interactiveZoom !== 1 ? { zoom: interactiveZoom } : undefined}
             >
               {interactiveContent}
             </div>
 
             {/* Visual Content - fills remaining space (no zoom) */}
-            <div className="flex-1 min-h-0">
-              <div className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-auto">
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <div className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6">
                 {visualContent}
               </div>
             </div>
           </div>
 
-          {/* Right Column - fixed width that scales with zoom, shrinks from right */}
+          {/* Right Column - fixed width with min-width, shrinks with zoom */}
           <div
-            className="h-full min-h-0 shrink-0"
+            className="h-full min-h-0 shrink-0 overflow-hidden"
             style={{
-              width: summaryZoom ? `calc(26% * ${summaryZoom})` : '26%',
+              width: summaryZoom ? `calc(380px * ${summaryZoom})` : '380px',
+              minWidth: '280px',
             }}
           >
             <div

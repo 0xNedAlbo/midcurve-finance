@@ -13,6 +13,7 @@ import {
   tickToPrice,
   compareAddresses,
   getTickSpacing,
+  priceToTick,
 } from "@midcurve/shared";
 
 // ============================================================================
@@ -58,6 +59,11 @@ export interface InteractivePnLCurveProps {
   sliderBounds?: { min: number; max: number };
   // Callback for X-axis zoom
   onSliderBoundsChange?: (bounds: { min: number; max: number }) => void;
+  // Callbacks for range boundary changes
+  onTickLowerChange?: (newTickLower: number) => void;
+  onTickUpperChange?: (newTickUpper: number) => void;
+  // Callback when user starts interacting with range boundaries
+  onRangeBoundaryInteraction?: () => void;
   // Dimensions
   height?: number;
   className?: string;
@@ -90,6 +96,9 @@ function InteractivePnLCurveInner({
   costBasis,
   sliderBounds,
   onSliderBoundsChange,
+  onTickLowerChange,
+  onTickUpperChange,
+  onRangeBoundaryInteraction,
 }: InteractivePnLCurveProps & { width: number }) {
   // Calculate chart dimensions
   const chartWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
@@ -290,6 +299,22 @@ function InteractivePnLCurveInner({
   // State for pan cursor feedback
   const [isPanning, setIsPanning] = useState(false);
 
+  // SVG ref for calculating mouse positions
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Ref for range boundary dragging
+  const rangeDragRef = useRef<{
+    isDragging: boolean;
+    boundary: 'lower' | 'upper' | null;
+    startX: number;
+    startPrice: number;
+  }>({
+    isDragging: false,
+    boundary: null,
+    startX: 0,
+    startPrice: 0,
+  });
+
   // X-axis drag handlers
   const handleXAxisMouseDown = useCallback((e: React.MouseEvent) => {
     if (!onSliderBoundsChange || !sliderBounds) return;
@@ -434,18 +459,86 @@ function InteractivePnLCurveInner({
     setIsPanning(false);
   }, []);
 
+  // Range boundary drag handlers
+  const handleRangeBoundaryMouseDown = useCallback(
+    (boundary: 'lower' | 'upper', e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const price = boundary === 'lower' ? lowerPrice : upperPrice;
+      rangeDragRef.current = {
+        isDragging: true,
+        boundary,
+        startX: e.clientX,
+        startPrice: price,
+      };
+      // Notify parent that user is interacting with range boundaries
+      onRangeBoundaryInteraction?.();
+    },
+    [lowerPrice, upperPrice, onRangeBoundaryInteraction]
+  );
+
+  const handleRangeBoundaryMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!rangeDragRef.current.isDragging) return;
+      const { boundary } = rangeDragRef.current;
+      if (!boundary) return;
+
+      // Calculate new price from mouse position
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (!svgRect) return;
+
+      const mouseX = e.clientX - svgRect.left - MARGIN.left;
+      const newPrice = xScale.invert(mouseX);
+
+      // Convert to tick (with snapping)
+      const tickSpacing = getTickSpacing(poolData.feeBps);
+      const priceBigInt = BigInt(
+        Math.floor(Math.max(0.0001, newPrice) * Number(10n ** BigInt(quoteToken.decimals)))
+      );
+
+      try {
+        const newTick = priceToTick(
+          priceBigInt,
+          tickSpacing,
+          baseToken.address,
+          quoteToken.address,
+          baseToken.decimals
+        );
+
+        // Apply constraints: lower < upper (with at least one tick spacing gap)
+        if (boundary === 'lower') {
+          const constrainedTick = Math.min(newTick, tickUpper - tickSpacing);
+          onTickLowerChange?.(constrainedTick);
+        } else {
+          const constrainedTick = Math.max(newTick, tickLower + tickSpacing);
+          onTickUpperChange?.(constrainedTick);
+        }
+      } catch {
+        // Invalid tick calculation - ignore
+      }
+    },
+    [xScale, poolData.feeBps, baseToken, quoteToken, tickLower, tickUpper, onTickLowerChange, onTickUpperChange]
+  );
+
+  const handleRangeBoundaryMouseUp = useCallback(() => {
+    rangeDragRef.current.isDragging = false;
+    rangeDragRef.current.boundary = null;
+  }, []);
+
   // Attach document-level listeners for drag operations
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       handleXAxisMouseMove(e);
       handleYAxisMouseMove(e);
       handleChartPanMouseMove(e);
+      handleRangeBoundaryMouseMove(e);
     };
 
     const handleMouseUp = () => {
       handleXAxisMouseUp();
       handleYAxisMouseUp();
       handleChartPanMouseUp();
+      handleRangeBoundaryMouseUp();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -457,7 +550,8 @@ function InteractivePnLCurveInner({
     };
   }, [
     handleXAxisMouseMove, handleYAxisMouseMove, handleChartPanMouseMove,
-    handleXAxisMouseUp, handleYAxisMouseUp, handleChartPanMouseUp
+    handleXAxisMouseUp, handleYAxisMouseUp, handleChartPanMouseUp,
+    handleRangeBoundaryMouseMove, handleRangeBoundaryMouseUp
   ]);
 
   if (width < 10 || chartHeight < 10) {
@@ -468,7 +562,7 @@ function InteractivePnLCurveInner({
   const hasPosition = liquidity > 0n && curveData.length > 0;
 
   return (
-    <svg width={width} height={height}>
+    <svg ref={svgRef} width={width} height={height}>
       {/* Background */}
       <rect
         x={0}
@@ -635,6 +729,79 @@ function InteractivePnLCurveInner({
           </g>
         )}
 
+        {/* Range boundary markers - draggable vertical lines */}
+        {hasPosition && (
+          <>
+            {/* Lower boundary - visual line (clipped) */}
+            <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
+              <line
+                x1={xScale(lowerPrice)}
+                y1={0}
+                x2={xScale(lowerPrice)}
+                y2={chartHeight}
+                stroke="#14b8a6"
+                strokeWidth={2}
+                strokeDasharray="4,4"
+              />
+            </g>
+            {/* Lower boundary - interactive elements (not clipped for better hit detection) */}
+            <rect
+              x={xScale(lowerPrice) - 10}
+              y={0}
+              width={20}
+              height={chartHeight}
+              fill="transparent"
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
+            />
+            {/* Triangle handle pointing right (base on line) at top */}
+            <polygon
+              points={`${xScale(lowerPrice)},2 ${xScale(lowerPrice)},14 ${xScale(lowerPrice) + 10},8`}
+              fill="#14b8a6"
+              stroke="#fff"
+              strokeWidth={1.5}
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
+            />
+
+            {/* Upper boundary - visual line (clipped) */}
+            <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
+              <line
+                x1={xScale(upperPrice)}
+                y1={0}
+                x2={xScale(upperPrice)}
+                y2={chartHeight}
+                stroke="#14b8a6"
+                strokeWidth={2}
+                strokeDasharray="4,4"
+              />
+            </g>
+            {/* Upper boundary - interactive elements (not clipped for better hit detection) */}
+            <rect
+              x={xScale(upperPrice) - 10}
+              y={0}
+              width={20}
+              height={chartHeight}
+              fill="transparent"
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
+            />
+            {/* Triangle handle pointing left (base on line) at top */}
+            <polygon
+              points={`${xScale(upperPrice)},2 ${xScale(upperPrice)},14 ${xScale(upperPrice) - 10},8`}
+              fill="#14b8a6"
+              stroke="#fff"
+              strokeWidth={1.5}
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
+            />
+          </>
+        )}
+
         {/* Placeholder text when no position */}
         {!hasPosition && (
           <text
@@ -677,17 +844,23 @@ function InteractivePnLCurveInner({
 
 // Main component with responsive wrapper
 export function InteractivePnLCurve({
-  height = 320,
+  height,
   className,
   ...props
 }: InteractivePnLCurveProps) {
+  // If height is provided, use fixed height mode; otherwise fill container
+  const isResponsive = height === undefined;
+
   return (
-    <div className={`w-full ${className ?? ""}`} style={{ height }}>
+    <div
+      className={`w-full ${isResponsive ? 'h-full' : ''} ${className ?? ""}`}
+      style={isResponsive ? undefined : { height }}
+    >
       <ParentSize>
-        {({ width }) => (
+        {({ width, height: parentHeight }) => (
           <InteractivePnLCurveInner
             width={width}
-            height={height}
+            height={isResponsive ? parentHeight : height!}
             {...props}
           />
         )}
