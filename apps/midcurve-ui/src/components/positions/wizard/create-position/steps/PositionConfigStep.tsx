@@ -1,11 +1,11 @@
 import { useEffect, useCallback } from 'react';
-import { Wallet, ArrowLeftRight, Activity, Banknote, Scale, Sigma, PlusCircle, MinusCircle } from 'lucide-react';
+import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
 import { formatCompactValue } from '@midcurve/shared';
 import {
   useCreatePositionWizard,
-  type CapitalAllocationMode,
+  type ConfigurationTab,
 } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
@@ -13,21 +13,19 @@ import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
 import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 
-const MODE_TABS: { id: CapitalAllocationMode; label: string; description: string; icon: typeof Banknote }[] = [
-  { id: 'quoteOnly', label: 'Quote Only', description: 'Enter total investment in quote token', icon: Banknote },
-  { id: 'baseOnly', label: 'Base Only', description: 'Enter base token amount to invest', icon: Activity },
-  { id: 'matched', label: 'Matched', description: 'Enter one token, calculate matching amount', icon: Scale },
-  { id: 'custom', label: 'Custom', description: 'Enter both token amounts independently', icon: Sigma },
+// Configuration section tabs
+const CONFIG_TABS: { id: ConfigurationTab; label: string; description: string; icon: typeof Banknote }[] = [
+  { id: 'capital', label: 'Capital Allocation', description: 'Enter the token amounts for your position', icon: Banknote },
+  { id: 'range', label: 'Position Range', description: 'Configure the price range for your position', icon: TrendingUp },
+  { id: 'sltp', label: 'SL/TP Setup', description: 'Set stop loss and take profit triggers', icon: Shield },
 ];
 
-export function CapitalAllocationStep() {
+export function PositionConfigStep() {
   const {
     state,
-    setCapitalAllocationMode,
+    setConfigurationTab,
     setBaseInput,
     setQuoteInput,
-    setMatchedInputSide,
-    setMatchedUsedMax,
     setAllocatedAmounts,
     setDefaultTickRange,
     setLiquidity,
@@ -88,12 +86,10 @@ export function CapitalAllocationStep() {
       ? state.tickUpper
       : state.defaultTickUpper;
 
-  // Calculate allocations
+  // Calculate allocations (always uses custom/independent mode now)
   const calculations = useCapitalCalculations({
-    mode: state.capitalAllocationMode,
     baseInputAmount: state.baseInputAmount,
     quoteInputAmount: state.quoteInputAmount,
-    matchedInputSide: state.matchedInputSide,
     discoveredPool: state.discoveredPool,
     baseToken: state.baseToken,
     quoteToken: state.quoteToken,
@@ -120,7 +116,7 @@ export function CapitalAllocationStep() {
 
   // Update step validation
   useEffect(() => {
-    setStepValid('investment', calculations.isValid);
+    setStepValid('configure', calculations.isValid);
   }, [calculations.isValid, setStepValid]);
 
   // Handle base input change
@@ -144,57 +140,106 @@ export function CapitalAllocationStep() {
     if (!baseBalance || !state.baseToken) return;
     const formatted = formatUnits(baseBalance, state.baseToken.decimals);
     setBaseInput(formatted, true);
-    if (state.capitalAllocationMode === 'matched') {
-      setMatchedUsedMax(true);
-    }
-  }, [baseBalance, state.baseToken, state.capitalAllocationMode, setBaseInput, setMatchedUsedMax]);
+  }, [baseBalance, state.baseToken, setBaseInput]);
 
   // Handle MAX button for quote token
   const handleQuoteMax = useCallback(() => {
     if (!quoteBalance || !state.quoteToken) return;
     const formatted = formatUnits(quoteBalance, state.quoteToken.decimals);
     setQuoteInput(formatted, true);
-    if (state.capitalAllocationMode === 'matched') {
-      setMatchedUsedMax(true);
-    }
-  }, [quoteBalance, state.quoteToken, state.capitalAllocationMode, setQuoteInput, setMatchedUsedMax]);
+  }, [quoteBalance, state.quoteToken, setQuoteInput]);
 
-  // Handle matched mode input side toggle
-  const handleToggleMatchedSide = useCallback(() => {
-    const newSide = state.matchedInputSide === 'base' ? 'quote' : 'base';
-    setMatchedInputSide(newSide);
-    // Clear inputs when switching sides
-    setBaseInput('', false);
-    setQuoteInput('', false);
-    setMatchedUsedMax(false);
-  }, [state.matchedInputSide, setMatchedInputSide, setBaseInput, setQuoteInput, setMatchedUsedMax]);
+  // Render Capital Allocation tab content
+  const renderCapitalTab = () => (
+    <div className="grid grid-cols-2 gap-4">
+      <TokenAmountInput
+        label={`${state.baseToken?.symbol || 'Base'} Amount`}
+        value={state.baseInputAmount}
+        onChange={handleBaseInputChange}
+        onMax={handleBaseMax}
+        balance={baseBalance}
+        decimals={state.baseToken?.decimals ?? 18}
+        symbol={state.baseToken?.symbol ?? ''}
+        isBalanceLoading={isBaseBalanceLoading}
+        isConnected={isConnected}
+        placeholder="0.0"
+      />
+      <TokenAmountInput
+        label={`${state.quoteToken?.symbol || 'Quote'} Amount`}
+        value={state.quoteInputAmount}
+        onChange={handleQuoteInputChange}
+        onMax={handleQuoteMax}
+        balance={quoteBalance}
+        decimals={state.quoteToken?.decimals ?? 18}
+        symbol={state.quoteToken?.symbol ?? ''}
+        isBalanceLoading={isQuoteBalanceLoading}
+        isConnected={isConnected}
+        placeholder="0.0"
+      />
+    </div>
+  );
+
+  // Render Position Range tab content (placeholder)
+  const renderRangeTab = () => (
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <TrendingUp className="w-12 h-12 text-slate-600 mb-4" />
+      <h4 className="text-lg font-medium text-slate-300 mb-2">Position Range</h4>
+      <p className="text-sm text-slate-500 max-w-md">
+        Configure the price range for your concentrated liquidity position.
+        This section will be implemented in Phase 2.
+      </p>
+    </div>
+  );
+
+  // Render SL/TP Setup tab content (placeholder)
+  const renderSltpTab = () => (
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <Shield className="w-12 h-12 text-slate-600 mb-4" />
+      <h4 className="text-lg font-medium text-slate-300 mb-2">Stop Loss / Take Profit</h4>
+      <p className="text-sm text-slate-500 max-w-md">
+        Set automatic triggers to close your position when price reaches your targets.
+        This section will be implemented in Phase 2.
+      </p>
+    </div>
+  );
+
+  // Render tab content based on current configuration tab
+  const renderTabContent = () => {
+    switch (state.configurationTab) {
+      case 'capital':
+        return renderCapitalTab();
+      case 'range':
+        return renderRangeTab();
+      case 'sltp':
+        return renderSltpTab();
+      default:
+        return renderCapitalTab();
+    }
+  };
 
   const renderInteractive = () => (
     <div className="space-y-4">
       {/* Header with tabs and zoom controls */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-8">
-          <h3 className="text-lg font-semibold text-white">Allocate Capital</h3>
-          <div className="flex items-center gap-6">
-            {MODE_TABS.map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setCapitalAllocationMode(tab.id)}
-                  className={`flex items-center gap-1.5 pb-2 text-sm font-medium transition-colors cursor-pointer border-b-2 ${
-                    state.capitalAllocationMode === tab.id
-                      ? 'text-blue-400 border-blue-300'
-                      : 'text-slate-400 border-transparent hover:text-slate-200'
-                  }`}
-                  title={tab.description}
-                >
-                  <Icon className="w-4 h-4" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+        <div className="flex items-center gap-6">
+          {CONFIG_TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setConfigurationTab(tab.id)}
+                className={`flex items-center gap-1.5 pb-2 text-sm font-medium transition-colors cursor-pointer border-b-2 ${
+                  state.configurationTab === tab.id
+                    ? 'text-blue-400 border-blue-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+                title={tab.description}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Zoom controls */}
@@ -226,127 +271,63 @@ export function CapitalAllocationStep() {
         </div>
       </div>
 
-      {/* Mode description */}
-      <p className="text-sm text-slate-400">
-        {MODE_TABS.find((t) => t.id === state.capitalAllocationMode)?.description}
-      </p>
-
-      {/* Input forms based on mode */}
-      <div className="space-y-4 pt-2">
-        {/* Quote Only mode */}
-        {state.capitalAllocationMode === 'quoteOnly' && (
-          <TokenAmountInput
-            label={`${state.quoteToken?.symbol || 'Quote'} Amount`}
-            value={state.quoteInputAmount}
-            onChange={handleQuoteInputChange}
-            onMax={handleQuoteMax}
-            balance={quoteBalance}
-            decimals={state.quoteToken?.decimals ?? 18}
-            symbol={state.quoteToken?.symbol ?? ''}
-            isBalanceLoading={isQuoteBalanceLoading}
-            isConnected={isConnected}
-            placeholder="0.0"
-          />
-        )}
-
-        {/* Base Only mode */}
-        {state.capitalAllocationMode === 'baseOnly' && (
-          <TokenAmountInput
-            label={`${state.baseToken?.symbol || 'Base'} Amount`}
-            value={state.baseInputAmount}
-            onChange={handleBaseInputChange}
-            onMax={handleBaseMax}
-            balance={baseBalance}
-            decimals={state.baseToken?.decimals ?? 18}
-            symbol={state.baseToken?.symbol ?? ''}
-            isBalanceLoading={isBaseBalanceLoading}
-            isConnected={isConnected}
-            placeholder="0.0"
-          />
-        )}
-
-        {/* Matched mode */}
-        {state.capitalAllocationMode === 'matched' && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-400">Input token:</span>
-              <button
-                onClick={handleToggleMatchedSide}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-700/50 rounded text-sm text-slate-300 hover:bg-slate-700 transition-colors cursor-pointer"
-              >
-                {state.matchedInputSide === 'base'
-                  ? state.baseToken?.symbol || 'Base'
-                  : state.quoteToken?.symbol || 'Quote'}
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {state.matchedInputSide === 'base' ? (
-              <TokenAmountInput
-                label={`${state.baseToken?.symbol || 'Base'} Amount`}
-                value={state.baseInputAmount}
-                onChange={handleBaseInputChange}
-                onMax={handleBaseMax}
-                balance={baseBalance}
-                decimals={state.baseToken?.decimals ?? 18}
-                symbol={state.baseToken?.symbol ?? ''}
-                isBalanceLoading={isBaseBalanceLoading}
-                isConnected={isConnected}
-                placeholder="0.0"
-              />
-            ) : (
-              <TokenAmountInput
-                label={`${state.quoteToken?.symbol || 'Quote'} Amount`}
-                value={state.quoteInputAmount}
-                onChange={handleQuoteInputChange}
-                onMax={handleQuoteMax}
-                balance={quoteBalance}
-                decimals={state.quoteToken?.decimals ?? 18}
-                symbol={state.quoteToken?.symbol ?? ''}
-                isBalanceLoading={isQuoteBalanceLoading}
-                isConnected={isConnected}
-                placeholder="0.0"
-              />
-            )}
-          </div>
-        )}
-
-        {/* Custom mode */}
-        {state.capitalAllocationMode === 'custom' && (
-          <div className="space-y-4">
-            <TokenAmountInput
-              label={`${state.baseToken?.symbol || 'Base'} Amount`}
-              value={state.baseInputAmount}
-              onChange={handleBaseInputChange}
-              onMax={handleBaseMax}
-              balance={baseBalance}
-              decimals={state.baseToken?.decimals ?? 18}
-              symbol={state.baseToken?.symbol ?? ''}
-              isBalanceLoading={isBaseBalanceLoading}
-              isConnected={isConnected}
-              placeholder="0.0"
-            />
-            <TokenAmountInput
-              label={`${state.quoteToken?.symbol || 'Quote'} Amount`}
-              value={state.quoteInputAmount}
-              onChange={handleQuoteInputChange}
-              onMax={handleQuoteMax}
-              balance={quoteBalance}
-              decimals={state.quoteToken?.decimals ?? 18}
-              symbol={state.quoteToken?.symbol ?? ''}
-              isBalanceLoading={isQuoteBalanceLoading}
-              isConnected={isConnected}
-              placeholder="0.0"
-            />
-          </div>
-        )}
+      {/* Tab content */}
+      <div className="pt-2">
+        {renderTabContent()}
       </div>
     </div>
   );
 
   const renderVisual = () => (
-    <div className="h-full flex items-center justify-center text-slate-500">
-      <p className="text-sm">Position visualization coming soon</p>
+    <div className="h-full flex flex-col items-center justify-center text-slate-500">
+      {/* PnL Curve Placeholder */}
+      <div className="w-full max-w-md space-y-6">
+        {/* Mock chart axes */}
+        <div className="relative h-48 border-l-2 border-b-2 border-slate-700">
+          {/* Y-axis label */}
+          <div className="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-xs text-slate-600 whitespace-nowrap">
+            Position Value
+          </div>
+
+          {/* Mock curve path */}
+          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {/* Dashed placeholder curve */}
+            <path
+              d="M 0 80 Q 20 75 35 50 T 50 30 T 65 30 T 100 30"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeDasharray="4 4"
+              className="text-slate-600"
+            />
+            {/* Current price marker */}
+            <line
+              x1="50"
+              y1="0"
+              x2="50"
+              y2="100"
+              stroke="currentColor"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+              className="text-blue-500/50"
+            />
+          </svg>
+
+          {/* X-axis label */}
+          <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-slate-600">
+            Base Token Price
+          </div>
+        </div>
+
+        {/* Icon and text */}
+        <div className="text-center space-y-2">
+          <TrendingDown className="w-8 h-8 mx-auto text-slate-600" />
+          <p className="text-sm font-medium text-slate-400">PnL Curve Visualization</p>
+          <p className="text-xs text-slate-500">
+            Interactive risk profile chart coming in Phase 2
+          </p>
+        </div>
+      </div>
     </div>
   );
 
@@ -452,7 +433,7 @@ function TokenAmountInput({
           {renderBalance()}
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="relative">
         <input
           type="text"
           inputMode="decimal"
@@ -465,12 +446,12 @@ function TokenAmountInput({
             }
           }}
           placeholder={placeholder}
-          className="flex-1 px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+          className="w-full px-3 py-2 pr-14 bg-slate-700/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
         />
         <button
           onClick={onMax}
           disabled={isMaxDisabled}
-          className="px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:text-slate-500"
         >
           MAX
         </button>

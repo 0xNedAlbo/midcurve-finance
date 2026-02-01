@@ -8,9 +8,7 @@ import {
 
 // Steps
 import { PoolSelectionStep } from './steps/PoolSelectionStep';
-import { CapitalAllocationStep } from './steps/CapitalAllocationStep';
-import { RangeStep } from './steps/RangeStep';
-import { AutomationStep } from './steps/AutomationStep';
+import { PositionConfigStep } from './steps/PositionConfigStep';
 import { SwapStep } from './steps/SwapStep';
 import { ApprovalsStep } from './steps/ApprovalsStep';
 import { MintStep } from './steps/MintStep';
@@ -24,18 +22,8 @@ function PoolStepRenderer() {
   return <StepRenderer content={content} />;
 }
 
-function CapitalAllocationStepRenderer() {
-  const content = CapitalAllocationStep();
-  return <StepRenderer content={content} />;
-}
-
-function RangeStepRenderer() {
-  const content = RangeStep();
-  return <StepRenderer content={content} />;
-}
-
-function AutomationStepRenderer() {
-  const content = AutomationStep();
+function PositionConfigStepRenderer() {
+  const content = PositionConfigStep();
   return <StepRenderer content={content} />;
 }
 
@@ -164,12 +152,8 @@ function CreatePositionWizardContent() {
   switch (currentStepId) {
     case 'pool':
       return <PoolStepRenderer />;
-    case 'investment':
-      return <CapitalAllocationStepRenderer />;
-    case 'range':
-      return <RangeStepRenderer />;
-    case 'automation':
-      return <AutomationStepRenderer />;
+    case 'configure':
+      return <PositionConfigStepRenderer />;
     case 'swap':
       return <SwapStepRenderer />;
     case 'approvals':

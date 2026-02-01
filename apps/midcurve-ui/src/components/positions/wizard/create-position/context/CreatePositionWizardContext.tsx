@@ -14,7 +14,7 @@ import { ZOOM_STORAGE_KEYS, ZOOM_DEFAULTS } from '@/lib/zoom-settings';
 
 // ----- Types -----
 
-export type CapitalAllocationMode = 'quoteOnly' | 'baseOnly' | 'matched' | 'custom';
+export type ConfigurationTab = 'capital' | 'range' | 'sltp';
 export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
 
 export interface TransactionRecord {
@@ -37,14 +37,12 @@ export interface CreatePositionWizardState {
   baseToken: PoolSearchTokenInfo | null;
   quoteToken: PoolSearchTokenInfo | null;
 
-  // Capital Allocation (Step B)
-  capitalAllocationMode: CapitalAllocationMode;
+  // Position Configuration (Step B) - consolidated capital, range, and SL/TP
+  configurationTab: ConfigurationTab;  // Current sub-tab within position config step
   baseInputAmount: string;     // User input for base token (human-readable)
   quoteInputAmount: string;    // User input for quote token (human-readable)
   baseUsedMax: boolean;        // MAX button clicked for base
   quoteUsedMax: boolean;       // MAX button clicked for quote
-  matchedInputSide: 'base' | 'quote';  // For matched mode: which token user is entering
-  matchedUsedMax: boolean;     // For matched mode: MAX button clicked
 
   // Calculated allocation results
   allocatedBaseAmount: string;   // Calculated base amount (raw bigint as string)
@@ -96,11 +94,9 @@ type WizardAction =
   | { type: 'SET_IS_DISCOVERING'; isDiscovering: boolean }
   | { type: 'SET_DISCOVERED_POOL'; pool: UniswapV3Pool }
   | { type: 'SET_DISCOVER_ERROR'; error: string }
-  | { type: 'SET_CAPITAL_ALLOCATION_MODE'; mode: CapitalAllocationMode }
+  | { type: 'SET_CONFIGURATION_TAB'; tab: ConfigurationTab }
   | { type: 'SET_BASE_INPUT'; amount: string; usedMax: boolean }
   | { type: 'SET_QUOTE_INPUT'; amount: string; usedMax: boolean }
-  | { type: 'SET_MATCHED_INPUT_SIDE'; side: 'base' | 'quote' }
-  | { type: 'SET_MATCHED_USED_MAX'; usedMax: boolean }
   | { type: 'SET_ALLOCATED_AMOUNTS'; base: string; quote: string; total: string }
   | { type: 'SET_DEFAULT_TICK_RANGE'; tickLower: number; tickUpper: number }
   | { type: 'SET_TICK_RANGE'; tickLower: number; tickUpper: number }
@@ -130,13 +126,11 @@ const initialState: CreatePositionWizardState = {
   discoverError: null,
   baseToken: null,
   quoteToken: null,
-  capitalAllocationMode: 'quoteOnly',
+  configurationTab: 'capital',
   baseInputAmount: '',
   quoteInputAmount: '',
   baseUsedMax: false,
   quoteUsedMax: false,
-  matchedInputSide: 'quote',
-  matchedUsedMax: false,
   allocatedBaseAmount: '0',
   allocatedQuoteAmount: '0',
   totalQuoteValue: '0',
@@ -225,14 +219,10 @@ function wizardReducer(
         discoverError: action.error,
       };
 
-    case 'SET_CAPITAL_ALLOCATION_MODE':
+    case 'SET_CONFIGURATION_TAB':
       return {
         ...state,
-        capitalAllocationMode: action.mode,
-        // Clear calculated amounts when mode changes
-        allocatedBaseAmount: '0',
-        allocatedQuoteAmount: '0',
-        totalQuoteValue: '0',
+        configurationTab: action.tab,
       };
 
     case 'SET_BASE_INPUT':
@@ -247,18 +237,6 @@ function wizardReducer(
         ...state,
         quoteInputAmount: action.amount,
         quoteUsedMax: action.usedMax,
-      };
-
-    case 'SET_MATCHED_INPUT_SIDE':
-      return {
-        ...state,
-        matchedInputSide: action.side,
-      };
-
-    case 'SET_MATCHED_USED_MAX':
-      return {
-        ...state,
-        matchedUsedMax: action.usedMax,
       };
 
     case 'SET_ALLOCATED_AMOUNTS':
@@ -379,9 +357,7 @@ function wizardReducer(
 
 const BASE_STEPS: WizardStep[] = [
   { id: 'pool', label: 'Select Pool' },
-  { id: 'investment', label: 'Investment' },
-  { id: 'range', label: 'Set Range' },
-  { id: 'automation', label: 'Automation' },
+  { id: 'configure', label: 'Configure Position' },
 ];
 
 export function getVisibleSteps(state: CreatePositionWizardState): WizardStep[] {
@@ -436,12 +412,10 @@ interface CreatePositionWizardContextValue {
   setDiscoveredPool: (pool: UniswapV3Pool) => void;
   setDiscoverError: (error: string) => void;
 
-  // Capital Allocation
-  setCapitalAllocationMode: (mode: CapitalAllocationMode) => void;
+  // Position Configuration
+  setConfigurationTab: (tab: ConfigurationTab) => void;
   setBaseInput: (amount: string, usedMax: boolean) => void;
   setQuoteInput: (amount: string, usedMax: boolean) => void;
-  setMatchedInputSide: (side: 'base' | 'quote') => void;
-  setMatchedUsedMax: (usedMax: boolean) => void;
   setAllocatedAmounts: (base: string, quote: string, total: string) => void;
   setDefaultTickRange: (tickLower: number, tickUpper: number) => void;
 
@@ -560,9 +534,9 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     dispatch({ type: 'SET_DISCOVER_ERROR', error });
   }, []);
 
-  // Capital Allocation
-  const setCapitalAllocationMode = useCallback((mode: CapitalAllocationMode) => {
-    dispatch({ type: 'SET_CAPITAL_ALLOCATION_MODE', mode });
+  // Position Configuration
+  const setConfigurationTab = useCallback((tab: ConfigurationTab) => {
+    dispatch({ type: 'SET_CONFIGURATION_TAB', tab });
   }, []);
 
   const setBaseInput = useCallback((amount: string, usedMax: boolean) => {
@@ -571,14 +545,6 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
 
   const setQuoteInput = useCallback((amount: string, usedMax: boolean) => {
     dispatch({ type: 'SET_QUOTE_INPUT', amount, usedMax });
-  }, []);
-
-  const setMatchedInputSide = useCallback((side: 'base' | 'quote') => {
-    dispatch({ type: 'SET_MATCHED_INPUT_SIDE', side });
-  }, []);
-
-  const setMatchedUsedMax = useCallback((usedMax: boolean) => {
-    dispatch({ type: 'SET_MATCHED_USED_MAX', usedMax });
   }, []);
 
   const setAllocatedAmounts = useCallback((base: string, quote: string, total: string) => {
@@ -681,11 +647,9 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setIsDiscovering,
     setDiscoveredPool,
     setDiscoverError,
-    setCapitalAllocationMode,
+    setConfigurationTab,
     setBaseInput,
     setQuoteInput,
-    setMatchedInputSide,
-    setMatchedUsedMax,
     setAllocatedAmounts,
     setDefaultTickRange,
     setTickRange,

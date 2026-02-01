@@ -7,19 +7,14 @@ import {
   getLiquidityFromInvestmentAmounts,
   getTokenAmountsFromLiquidity,
   calculatePositionValue,
-  getLiquidityFromAmount0,
-  getLiquidityFromAmount1,
 } from '@midcurve/shared';
-import type { CapitalAllocationMode } from '../context/CreatePositionWizardContext';
 
 // Q192 constant for price calculations
 const Q192 = 2n ** 192n;
 
 interface UseCapitalCalculationsParams {
-  mode: CapitalAllocationMode;
   baseInputAmount: string;      // Human-readable input (e.g., "1.5")
   quoteInputAmount: string;     // Human-readable input (e.g., "1000")
-  matchedInputSide: 'base' | 'quote';
   discoveredPool: UniswapV3Pool | null;
   baseToken: PoolSearchTokenInfo | null;
   quoteToken: PoolSearchTokenInfo | null;
@@ -63,14 +58,13 @@ function isQuoteToken0(
 }
 
 /**
- * Hook to calculate capital allocation based on the selected mode.
- * Returns the allocated amounts, liquidity, and total quote value.
+ * Hook to calculate capital allocation using independent/custom mode.
+ * User enters both token amounts, and we calculate the resulting liquidity
+ * and position value.
  */
 export function useCapitalCalculations({
-  mode,
   baseInputAmount,
   quoteInputAmount,
-  matchedInputSide,
   discoveredPool,
   baseToken,
   quoteToken,
@@ -107,209 +101,84 @@ export function useCapitalCalculations({
     let totalQuoteValue = 0n;
 
     try {
-      switch (mode) {
-        case 'quoteOnly': {
-          // User enters quote amount only
-          if (quoteAmountRaw <= 0n) break;
-
-          // Calculate liquidity from quote-only investment (base = 0)
-          liquidity = getLiquidityFromInvestmentAmounts(
-            0n,                    // baseAmount = 0
-            baseToken.decimals,
-            quoteAmountRaw,
-            quoteToken.decimals,
-            quoteIsToken0,
-            sqrtPriceLowerX96,
-            sqrtPriceUpperX96,
-            sqrtPriceX96
-          );
-
-          if (liquidity <= 0n) break;
-
-          // Get token amounts from liquidity
-          const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper
-          );
-
-          // Map to base/quote
-          allocatedBaseAmount = baseIsToken0 ? token0Amount : token1Amount;
-          allocatedQuoteAmount = quoteIsToken0 ? token0Amount : token1Amount;
-
-          // Calculate total value
-          totalQuoteValue = calculatePositionValue(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            baseIsToken0
-          );
-          break;
-        }
-
-        case 'baseOnly': {
-          // User enters base amount only
-          if (baseAmountRaw <= 0n) break;
-
-          // Calculate liquidity from base-only investment (quote = 0)
-          liquidity = getLiquidityFromInvestmentAmounts(
-            baseAmountRaw,
-            baseToken.decimals,
-            0n,                    // quoteAmount = 0
-            quoteToken.decimals,
-            quoteIsToken0,
-            sqrtPriceLowerX96,
-            sqrtPriceUpperX96,
-            sqrtPriceX96
-          );
-
-          if (liquidity <= 0n) break;
-
-          // Get token amounts from liquidity
-          const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper
-          );
-
-          // Map to base/quote
-          allocatedBaseAmount = baseIsToken0 ? token0Amount : token1Amount;
-          allocatedQuoteAmount = quoteIsToken0 ? token0Amount : token1Amount;
-
-          // Calculate total value
-          totalQuoteValue = calculatePositionValue(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            baseIsToken0
-          );
-          break;
-        }
-
-        case 'matched': {
-          // User enters one token, calculate the matching amount for the other
-          const inputAmount = matchedInputSide === 'base' ? baseAmountRaw : quoteAmountRaw;
-          if (inputAmount <= 0n) break;
-
-          // Determine which token is being input and calculate liquidity from that single token
-          if (matchedInputSide === 'base') {
-            // User entered base token amount
-            // Calculate liquidity from base token only
-            if (baseIsToken0) {
-              // Base is token0: use getLiquidityFromAmount0
-              // For in-range, token0 contributes between current price and upper bound
-              liquidity = sqrtPriceX96 < sqrtPriceUpperX96
-                ? getLiquidityFromAmount0(sqrtPriceX96, sqrtPriceUpperX96, baseAmountRaw)
-                : getLiquidityFromAmount0(sqrtPriceLowerX96, sqrtPriceUpperX96, baseAmountRaw);
-            } else {
-              // Base is token1: use getLiquidityFromAmount1
-              // For in-range, token1 contributes between lower bound and current price
-              liquidity = sqrtPriceX96 > sqrtPriceLowerX96
-                ? getLiquidityFromAmount1(sqrtPriceLowerX96, sqrtPriceX96, baseAmountRaw)
-                : getLiquidityFromAmount1(sqrtPriceLowerX96, sqrtPriceUpperX96, baseAmountRaw);
-            }
-          } else {
-            // User entered quote token amount
-            if (quoteIsToken0) {
-              // Quote is token0
-              liquidity = sqrtPriceX96 < sqrtPriceUpperX96
-                ? getLiquidityFromAmount0(sqrtPriceX96, sqrtPriceUpperX96, quoteAmountRaw)
-                : getLiquidityFromAmount0(sqrtPriceLowerX96, sqrtPriceUpperX96, quoteAmountRaw);
-            } else {
-              // Quote is token1
-              liquidity = sqrtPriceX96 > sqrtPriceLowerX96
-                ? getLiquidityFromAmount1(sqrtPriceLowerX96, sqrtPriceX96, quoteAmountRaw)
-                : getLiquidityFromAmount1(sqrtPriceLowerX96, sqrtPriceUpperX96, quoteAmountRaw);
-            }
-          }
-
-          if (liquidity <= 0n) break;
-
-          // Get both token amounts from calculated liquidity
-          const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper
-          );
-
-          // Map to base/quote
-          allocatedBaseAmount = baseIsToken0 ? token0Amount : token1Amount;
-          allocatedQuoteAmount = quoteIsToken0 ? token0Amount : token1Amount;
-
-          // Calculate total value
-          totalQuoteValue = calculatePositionValue(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            baseIsToken0
-          );
-          break;
-        }
-
-        case 'custom': {
-          // User enters both amounts independently
-          // Sum to total quote value, then use quote-only logic
-          if (baseAmountRaw <= 0n && quoteAmountRaw <= 0n) break;
-
-          // Convert base amount to quote value at current price
-          const sqrtP2 = sqrtPriceX96 * sqrtPriceX96;
-          let baseAsQuote: bigint;
-
-          if (quoteIsToken0) {
-            // quote=token0, base=token1 -> price (quote/base) = Q192 / S^2
-            baseAsQuote = (baseAmountRaw * Q192) / sqrtP2;
-          } else {
-            // quote=token1, base=token0 -> price (quote/base) = S^2 / Q192
-            baseAsQuote = (baseAmountRaw * sqrtP2) / Q192;
-          }
-
-          // Total investment in quote terms
-          const totalQuoteInput = quoteAmountRaw + baseAsQuote;
-          if (totalQuoteInput <= 0n) break;
-
-          // Use quote-only logic with total investment
-          liquidity = getLiquidityFromInvestmentAmounts(
-            0n,
-            baseToken.decimals,
-            totalQuoteInput,
-            quoteToken.decimals,
-            quoteIsToken0,
-            sqrtPriceLowerX96,
-            sqrtPriceUpperX96,
-            sqrtPriceX96
-          );
-
-          if (liquidity <= 0n) break;
-
-          // Get optimal token amounts from liquidity
-          const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper
-          );
-
-          // Map to base/quote
-          allocatedBaseAmount = baseIsToken0 ? token0Amount : token1Amount;
-          allocatedQuoteAmount = quoteIsToken0 ? token0Amount : token1Amount;
-
-          // Calculate total value
-          totalQuoteValue = calculatePositionValue(
-            liquidity,
-            sqrtPriceX96,
-            tickLower,
-            tickUpper,
-            baseIsToken0
-          );
-          break;
-        }
+      // Custom/independent mode: User enters both amounts independently
+      // Sum to total quote value, then calculate optimal allocation
+      if (baseAmountRaw <= 0n && quoteAmountRaw <= 0n) {
+        return {
+          allocatedBaseAmount: '0',
+          allocatedQuoteAmount: '0',
+          totalQuoteValue: '0',
+          liquidity: '0',
+          isValid: false,
+        };
       }
+
+      // Convert base amount to quote value at current price
+      const sqrtP2 = sqrtPriceX96 * sqrtPriceX96;
+      let baseAsQuote: bigint;
+
+      if (quoteIsToken0) {
+        // quote=token0, base=token1 -> price (quote/base) = Q192 / S^2
+        baseAsQuote = (baseAmountRaw * Q192) / sqrtP2;
+      } else {
+        // quote=token1, base=token0 -> price (quote/base) = S^2 / Q192
+        baseAsQuote = (baseAmountRaw * sqrtP2) / Q192;
+      }
+
+      // Total investment in quote terms
+      const totalQuoteInput = quoteAmountRaw + baseAsQuote;
+      if (totalQuoteInput <= 0n) {
+        return {
+          allocatedBaseAmount: '0',
+          allocatedQuoteAmount: '0',
+          totalQuoteValue: '0',
+          liquidity: '0',
+          isValid: false,
+        };
+      }
+
+      // Calculate liquidity from total investment
+      liquidity = getLiquidityFromInvestmentAmounts(
+        0n,
+        baseToken.decimals,
+        totalQuoteInput,
+        quoteToken.decimals,
+        quoteIsToken0,
+        sqrtPriceLowerX96,
+        sqrtPriceUpperX96,
+        sqrtPriceX96
+      );
+
+      if (liquidity <= 0n) {
+        return {
+          allocatedBaseAmount: '0',
+          allocatedQuoteAmount: '0',
+          totalQuoteValue: '0',
+          liquidity: '0',
+          isValid: false,
+        };
+      }
+
+      // Get optimal token amounts from liquidity
+      const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
+        liquidity,
+        sqrtPriceX96,
+        tickLower,
+        tickUpper
+      );
+
+      // Map to base/quote
+      allocatedBaseAmount = baseIsToken0 ? token0Amount : token1Amount;
+      allocatedQuoteAmount = quoteIsToken0 ? token0Amount : token1Amount;
+
+      // Calculate total value
+      totalQuoteValue = calculatePositionValue(
+        liquidity,
+        sqrtPriceX96,
+        tickLower,
+        tickUpper,
+        baseIsToken0
+      );
     } catch (error) {
       console.error('Capital calculation error:', error);
       return {
@@ -331,10 +200,8 @@ export function useCapitalCalculations({
       isValid,
     };
   }, [
-    mode,
     baseInputAmount,
     quoteInputAmount,
-    matchedInputSide,
     discoveredPool,
     baseToken,
     quoteToken,
