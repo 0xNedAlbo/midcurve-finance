@@ -270,6 +270,24 @@ function InteractivePnLCurveInner({
     startBounds: { min: 0, max: 0 },
   });
 
+  // Ref for chart panning
+  const chartPanRef = useRef<{
+    isDragging: boolean;
+    startX: number;
+    startY: number;
+    startXBounds: { min: number; max: number };
+    startYBounds: { min: number; max: number };
+  }>({
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    startXBounds: { min: 0, max: 0 },
+    startYBounds: { min: 0, max: 0 },
+  });
+
+  // State for pan cursor feedback
+  const [isPanning, setIsPanning] = useState(false);
+
   // X-axis drag handlers
   const handleXAxisMouseDown = useCallback((e: React.MouseEvent) => {
     if (!onSliderBoundsChange || !sliderBounds) return;
@@ -356,16 +374,76 @@ function InteractivePnLCurveInner({
     yDragRef.current.isDragging = false;
   }, []);
 
+  // Chart pan handlers (drag to move visible area)
+  const handleChartPanMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!onSliderBoundsChange || !sliderBounds) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsPanning(true);
+    chartPanRef.current = {
+      isDragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      startXBounds: { ...sliderBounds },
+      startYBounds: { ...yBounds },
+    };
+  }, [sliderBounds, yBounds, onSliderBoundsChange]);
+
+  const handleChartPanMouseMove = useCallback((e: MouseEvent) => {
+    if (!chartPanRef.current.isDragging || !onSliderBoundsChange) return;
+
+    const deltaX = e.clientX - chartPanRef.current.startX;
+    const deltaY = e.clientY - chartPanRef.current.startY;
+
+    // Calculate how much to shift based on pixels moved vs chart dimensions
+    const xRange = chartPanRef.current.startXBounds.max - chartPanRef.current.startXBounds.min;
+    const yRange = chartPanRef.current.startYBounds.max - chartPanRef.current.startYBounds.min;
+
+    // Convert pixel movement to data units (negative because drag left = move view right)
+    const xShift = -(deltaX / chartWidth) * xRange;
+    const yShift = (deltaY / chartHeight) * yRange; // positive because SVG Y is inverted
+
+    let newXMin = chartPanRef.current.startXBounds.min + xShift;
+    let newXMax = chartPanRef.current.startXBounds.max + xShift;
+    let newYMin = chartPanRef.current.startYBounds.min + yShift;
+    let newYMax = chartPanRef.current.startYBounds.max + yShift;
+
+    // Constrain X: prices cannot be negative or zero
+    const minPrice = 0.0001;
+    if (newXMin < minPrice) {
+      const shift = minPrice - newXMin;
+      newXMin = minPrice;
+      newXMax += shift;
+    }
+
+    // Constrain Y: min cannot go below -100%
+    if (newYMin < -100) {
+      const shift = -100 - newYMin;
+      newYMin = -100;
+      newYMax += shift;
+    }
+
+    onSliderBoundsChange({ min: newXMin, max: newXMax });
+    setYBounds({ min: newYMin, max: newYMax });
+  }, [chartWidth, chartHeight, onSliderBoundsChange]);
+
+  const handleChartPanMouseUp = useCallback(() => {
+    chartPanRef.current.isDragging = false;
+    setIsPanning(false);
+  }, []);
+
   // Attach document-level listeners for drag operations
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       handleXAxisMouseMove(e);
       handleYAxisMouseMove(e);
+      handleChartPanMouseMove(e);
     };
 
     const handleMouseUp = () => {
       handleXAxisMouseUp();
       handleYAxisMouseUp();
+      handleChartPanMouseUp();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -375,7 +453,10 @@ function InteractivePnLCurveInner({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [handleXAxisMouseMove, handleYAxisMouseMove, handleXAxisMouseUp, handleYAxisMouseUp]);
+  }, [
+    handleXAxisMouseMove, handleYAxisMouseMove, handleChartPanMouseMove,
+    handleXAxisMouseUp, handleYAxisMouseUp, handleChartPanMouseUp
+  ]);
 
   if (width < 10 || chartHeight < 10) {
     return null;
@@ -397,6 +478,17 @@ function InteractivePnLCurveInner({
       />
 
       <Group left={MARGIN.left} top={MARGIN.top}>
+        {/* Chart pan hit area - FIRST so other interactive elements can override it */}
+        <rect
+          x={0}
+          y={0}
+          width={chartWidth}
+          height={chartHeight}
+          fill="transparent"
+          style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+          onMouseDown={handleChartPanMouseDown}
+        />
+
         {/* Grid background */}
         <GridRows
           scale={yScale}
