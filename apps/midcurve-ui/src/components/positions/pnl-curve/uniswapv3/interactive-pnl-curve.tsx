@@ -6,6 +6,8 @@ import { scaleLinear } from "@visx/scale";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { GridRows, GridColumns } from "@visx/grid";
 import { ParentSize } from "@visx/responsive";
+import { LinePath } from "@visx/shape";
+import { curveMonotoneX } from "@visx/curve";
 import {
   generatePnLCurve,
   tickToPrice,
@@ -566,7 +568,28 @@ function InteractivePnLCurveInner({
           labelOffset={45}
         />
 
-        {/* Placeholder text - shows different message based on position state */}
+        {/* Clip path for curve */}
+        <defs>
+          <clipPath id="pnl-curve-clip">
+            <rect x={0} y={0} width={chartWidth} height={chartHeight} />
+          </clipPath>
+        </defs>
+
+        {/* PnL Curve Line */}
+        {hasPosition && curveData.length > 0 && (
+          <g clipPath="url(#pnl-curve-clip)">
+            <LinePath
+              data={curveData}
+              x={(d) => xScale(d.price)}
+              y={(d) => yScale(d.pnlPercent)}
+              stroke="#3b82f6"
+              strokeWidth={2}
+              curve={curveMonotoneX}
+            />
+          </g>
+        )}
+
+        {/* Placeholder text when no position */}
         {!hasPosition && (
           <text
             x={chartWidth / 2}
@@ -577,18 +600,6 @@ function InteractivePnLCurveInner({
             dominantBaseline="middle"
           >
             Enter token amounts to see PnL curve
-          </text>
-        )}
-        {hasPosition && (
-          <text
-            x={chartWidth / 2}
-            y={chartHeight / 2}
-            fill="#475569"
-            fontSize={14}
-            textAnchor="middle"
-            dominantBaseline="middle"
-          >
-            Curve will render here (Step 2)
           </text>
         )}
       </Group>

@@ -5,6 +5,7 @@
  * Extends BasePosition with Uniswap V3 specific configuration and state.
  */
 
+import { TickMath } from '@uniswap/v3-sdk';
 import { BasePosition } from '../base-position.js';
 import type { UniswapV3Pool } from '../../pool/index.js';
 import type {
@@ -12,6 +13,7 @@ import type {
   PositionType,
   BasePositionParams,
   PositionRow,
+  PnLSimulationResult,
 } from '../position.types.js';
 import {
   UniswapV3PositionConfig,
@@ -23,7 +25,30 @@ import {
   positionStateToJSON,
   positionStateFromJSON,
 } from './uniswapv3-position-state.js';
-import { calculatePositionValueAtPrice } from '../../../utils/uniswapv3/position.js';
+import {
+  calculatePositionValueAtPrice,
+  determinePhase,
+} from '../../../utils/uniswapv3/position.js';
+import { getTokenAmountsFromLiquidity } from '../../../utils/uniswapv3/liquidity.js';
+import { priceToTick } from '../../../utils/uniswapv3/price.js';
+import type { PositionPhase } from '../../../utils/uniswapv3/types.js';
+
+// ============================================================================
+// PNL SIMULATION RESULT
+// ============================================================================
+
+/**
+ * UniswapV3-specific simulation result with token amounts.
+ * Extends base PnLSimulationResult with protocol-specific data.
+ */
+export interface UniswapV3PnLSimulationResult extends PnLSimulationResult {
+  /** Amount of base token held at this price */
+  baseTokenAmount: bigint;
+  /** Amount of quote token held at this price */
+  quoteTokenAmount: bigint;
+  /** Position phase relative to range */
+  phase: PositionPhase;
+}
 
 // ============================================================================
 // CONSTRUCTOR PARAMS
@@ -35,6 +60,18 @@ import { calculatePositionValueAtPrice } from '../../../utils/uniswapv3/position
 export interface UniswapV3PositionParams extends BasePositionParams {
   config: UniswapV3PositionConfig;
   state: UniswapV3PositionState;
+}
+
+/**
+ * Parameters for creating a simulation position (no database required).
+ */
+export interface UniswapV3SimulationParams {
+  pool: UniswapV3Pool;
+  isToken0Quote: boolean;
+  tickLower: number;
+  tickUpper: number;
+  liquidity: bigint;
+  costBasis: bigint;
 }
 
 // ============================================================================
@@ -216,16 +253,17 @@ export class UniswapV3Position extends BasePosition {
   // ============================================================================
 
   /**
-   * Simulate the position's PnL at a given price.
+   * Simulate the position at a given price.
    * Used for interactive PnL curve visualization.
    *
    * @param price - The base token price in quote token units (scaled by quote token decimals)
-   * @returns The simulated PnL at the given price in quote token units
+   * @returns Full simulation result including value, PnL, percent, and token amounts
    */
-  simulatePnLAtPrice(price: bigint): bigint {
+  simulatePnLAtPrice(price: bigint): UniswapV3PnLSimulationResult {
     const baseToken = this.getBaseToken();
     const quoteToken = this.getQuoteToken();
 
+    // Calculate position value at target price
     const positionValue = calculatePositionValueAtPrice(
       this.liquidity,
       this.tickLower,
@@ -237,7 +275,46 @@ export class UniswapV3Position extends BasePosition {
       this.pool.tickSpacing
     );
 
-    return positionValue - this.currentCostBasis;
+    // Calculate PnL
+    const pnlValue = positionValue - this.currentCostBasis;
+    const pnlPercent = this.currentCostBasis > 0n
+      ? Number((pnlValue * 10000n) / this.currentCostBasis) / 100
+      : 0;
+
+    // Calculate tick at target price for token amounts and phase
+    const targetTick = priceToTick(
+      price,
+      this.pool.tickSpacing,
+      baseToken.address,
+      quoteToken.address,
+      baseToken.decimals
+    );
+
+    // Get token amounts at this price
+    const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(targetTick).toString());
+    const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
+      this.liquidity,
+      sqrtPriceX96,
+      this.tickLower,
+      this.tickUpper
+    );
+
+    // Map to base/quote based on token order
+    const baseIsToken0 = !this.isToken0Quote;
+    const baseTokenAmount = baseIsToken0 ? token0Amount : token1Amount;
+    const quoteTokenAmount = baseIsToken0 ? token1Amount : token0Amount;
+
+    // Determine phase
+    const phase = determinePhase(targetTick, this.tickLower, this.tickUpper);
+
+    return {
+      positionValue,
+      pnlValue,
+      pnlPercent,
+      baseTokenAmount,
+      quoteTokenAmount,
+      phase,
+    };
   }
 
   // ============================================================================
@@ -299,6 +376,101 @@ export class UniswapV3Position extends BasePosition {
       // Timestamps
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+    });
+  }
+
+  /**
+   * Create a position for simulation purposes.
+   * Does not require database identity fields - uses placeholder values.
+   *
+   * Use this factory when you need to simulate PnL curves for positions
+   * that don't yet exist (e.g., in a wizard or preview mode).
+   *
+   * @param params - Simulation parameters (pool, ticks, liquidity, cost basis)
+   * @returns UniswapV3Position instance suitable for simulation
+   *
+   * @example
+   * ```typescript
+   * const simulationPosition = UniswapV3Position.forSimulation({
+   *   pool: discoveredPool,
+   *   isToken0Quote: true,
+   *   tickLower: 200000,
+   *   tickUpper: 210000,
+   *   liquidity: 1000000n,
+   *   costBasis: 5000000000n, // 5000 USDC (6 decimals)
+   * });
+   *
+   * // Use for PnL curve generation
+   * const result = simulationPosition.simulatePnLAtPrice(2000000000n);
+   * console.log(result.pnlPercent); // -5.23
+   * ```
+   */
+  static forSimulation(params: UniswapV3SimulationParams): UniswapV3Position {
+    const now = new Date();
+
+    return new UniswapV3Position({
+      // Identity (placeholder values for simulation)
+      id: 'simulation',
+      positionHash: 'simulation',
+      userId: 'simulation',
+      positionType: 'CL_TICKS',
+
+      // Pool reference
+      pool: params.pool,
+      isToken0Quote: params.isToken0Quote,
+
+      // PnL fields (costBasis is the key input)
+      currentValue: params.costBasis, // At creation, value equals cost
+      currentCostBasis: params.costBasis,
+      realizedPnl: 0n,
+      unrealizedPnl: 0n,
+      realizedCashflow: 0n,
+      unrealizedCashflow: 0n,
+
+      // Fee fields (not used in simulation)
+      collectedFees: 0n,
+      unClaimedFees: 0n,
+      lastFeesCollectedAt: now,
+      totalApr: null,
+
+      // Price range (placeholder - actual calculation uses ticks)
+      priceRangeLower: 0n,
+      priceRangeUpper: 0n,
+
+      // Lifecycle
+      positionOpenedAt: now,
+      positionClosedAt: null,
+      isActive: true,
+
+      // Protocol-specific
+      config: new UniswapV3PositionConfig({
+        chainId: params.pool.chainId,
+        nftId: 0, // Placeholder for simulation
+        poolAddress: params.pool.address,
+        tickLower: params.tickLower,
+        tickUpper: params.tickUpper,
+      }),
+      state: {
+        ownerAddress: '0x0000000000000000000000000000000000000000',
+        operator: '0x0000000000000000000000000000000000000000',
+        liquidity: params.liquidity,
+        feeGrowthInside0LastX128: 0n,
+        feeGrowthInside1LastX128: 0n,
+        tokensOwed0: 0n,
+        tokensOwed1: 0n,
+        unclaimedFees0: 0n,
+        unclaimedFees1: 0n,
+        tickLowerFeeGrowthOutside0X128: 0n,
+        tickLowerFeeGrowthOutside1X128: 0n,
+        tickUpperFeeGrowthOutside0X128: 0n,
+        tickUpperFeeGrowthOutside1X128: 0n,
+        isBurned: false,
+        isClosed: false,
+      },
+
+      // Timestamps
+      createdAt: now,
+      updatedAt: now,
     });
   }
 }

@@ -8,6 +8,8 @@ export {
   UniswapV3Position,
   type UniswapV3PositionParams,
   type UniswapV3PositionRow,
+  type UniswapV3PnLSimulationResult,
+  type UniswapV3SimulationParams,
 } from './uniswapv3-position.js';
 
 export {

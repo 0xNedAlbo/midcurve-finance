@@ -20,6 +20,7 @@ export type {
   PositionJSON,
   BasePositionParams,
   PositionRow,
+  PnLSimulationResult,
 } from './position.types.js';
 
 // Base class
@@ -40,6 +41,8 @@ export {
   type UniswapV3PositionStateJSON,
   type UniswapV3PositionMetrics,
   type UniswapV3PositionPnLSummary,
+  type UniswapV3PnLSimulationResult,
+  type UniswapV3SimulationParams,
   positionStateToJSON,
   positionStateFromJSON,
 } from './uniswapv3/index.js';

@@ -26,6 +26,23 @@ export type PositionProtocol = 'uniswapv3';
 export type PositionType = 'CL_TICKS';
 
 // ============================================================================
+// PNL SIMULATION
+// ============================================================================
+
+/**
+ * Base simulation result for any position type.
+ * Returned by simulatePnLAtPrice() on PositionInterface.
+ */
+export interface PnLSimulationResult {
+  /** Position value at the simulated price (quote token units) */
+  positionValue: bigint;
+  /** PnL at the simulated price (quote token units) */
+  pnlValue: bigint;
+  /** PnL as percentage of cost basis */
+  pnlPercent: number;
+}
+
+// ============================================================================
 // JSON SERIALIZATION
 // ============================================================================
 

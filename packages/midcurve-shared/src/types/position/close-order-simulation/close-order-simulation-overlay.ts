@@ -11,7 +11,7 @@
 import type { Erc20Token } from '../../token/index.js';
 import type { UniswapV3Pool } from '../../pool/index.js';
 import type { PositionInterface } from '../position.interface.js';
-import type { PositionProtocol, PositionType, PositionJSON } from '../position.types.js';
+import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from '../position.types.js';
 
 // ============================================================================
 // TYPES
@@ -89,12 +89,10 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   private readonly _stopLossPrice: bigint | null;
   private _triggerState: CloseOrderTriggerState = 'IN_POSITION';
 
-  // Cached simulated values (calculated lazily)
-  // undefined = not calculated yet, bigint = calculated value
-  private _cachedPnLAtTP: bigint | undefined = undefined;
-  private _cachedPnLAtSL: bigint | undefined = undefined;
-  private _cachedValueAtTP: bigint | undefined = undefined;
-  private _cachedValueAtSL: bigint | undefined = undefined;
+  // Cached simulated results (calculated lazily)
+  // undefined = not calculated yet
+  private _cachedResultAtTP: PnLSimulationResult | undefined = undefined;
+  private _cachedResultAtSL: PnLSimulationResult | undefined = undefined;
 
   constructor(params: CloseOrderSimulationOverlayParams) {
     this._underlying = params.underlyingPosition;
@@ -161,65 +159,31 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   // ============================================================================
 
   /**
-   * Get the cached PnL at take-profit price (lazy calculation).
+   * Get the cached simulation result at take-profit price (lazy calculation).
    * Returns null if TP is not configured.
    */
-  private get pnlAtTP(): bigint | null {
+  private get resultAtTP(): PnLSimulationResult | null {
     if (this._takeProfitPrice === null) {
       return null;
     }
-    if (this._cachedPnLAtTP === undefined) {
-      this._cachedPnLAtTP = this._underlying.simulatePnLAtPrice(this._takeProfitPrice);
+    if (this._cachedResultAtTP === undefined) {
+      this._cachedResultAtTP = this._underlying.simulatePnLAtPrice(this._takeProfitPrice);
     }
-    return this._cachedPnLAtTP;
+    return this._cachedResultAtTP;
   }
 
   /**
-   * Get the cached PnL at stop-loss price (lazy calculation).
+   * Get the cached simulation result at stop-loss price (lazy calculation).
    * Returns null if SL is not configured.
    */
-  private get pnlAtSL(): bigint | null {
+  private get resultAtSL(): PnLSimulationResult | null {
     if (this._stopLossPrice === null) {
       return null;
     }
-    if (this._cachedPnLAtSL === undefined) {
-      this._cachedPnLAtSL = this._underlying.simulatePnLAtPrice(this._stopLossPrice);
+    if (this._cachedResultAtSL === undefined) {
+      this._cachedResultAtSL = this._underlying.simulatePnLAtPrice(this._stopLossPrice);
     }
-    return this._cachedPnLAtSL;
-  }
-
-  /**
-   * Get the cached position value at take-profit price (lazy calculation).
-   * Returns null if TP is not configured.
-   */
-  private get valueAtTP(): bigint | null {
-    if (this._takeProfitPrice === null) {
-      return null;
-    }
-    if (this._cachedValueAtTP === undefined) {
-      // Value = PnL + CostBasis
-      const pnl = this.pnlAtTP;
-      if (pnl === null) return null;
-      this._cachedValueAtTP = pnl + this._underlying.currentCostBasis;
-    }
-    return this._cachedValueAtTP;
-  }
-
-  /**
-   * Get the cached position value at stop-loss price (lazy calculation).
-   * Returns null if SL is not configured.
-   */
-  private get valueAtSL(): bigint | null {
-    if (this._stopLossPrice === null) {
-      return null;
-    }
-    if (this._cachedValueAtSL === undefined) {
-      // Value = PnL + CostBasis
-      const pnl = this.pnlAtSL;
-      if (pnl === null) return null;
-      this._cachedValueAtSL = pnl + this._underlying.currentCostBasis;
-    }
-    return this._cachedValueAtSL;
+    return this._cachedResultAtSL;
   }
 
   /**
@@ -240,19 +204,26 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   /**
+   * Get the simulated result at the active trigger price.
+   * Returns null if trigger price is not defined.
+   */
+  private get simulatedResult(): PnLSimulationResult | null {
+    if (this._triggerState === 'TP_TRIGGERED') {
+      return this.resultAtTP;
+    }
+    if (this._triggerState === 'SL_TRIGGERED') {
+      return this.resultAtSL;
+    }
+    return null;
+  }
+
+  /**
    * Get the simulated PnL at the active trigger price.
    * Returns underlying's current unrealizedPnl if trigger price is not defined.
    */
   private get simulatedPnL(): bigint {
-    if (this._triggerState === 'TP_TRIGGERED') {
-      const pnl = this.pnlAtTP;
-      return pnl !== null ? pnl : this._underlying.unrealizedPnl;
-    }
-    if (this._triggerState === 'SL_TRIGGERED') {
-      const pnl = this.pnlAtSL;
-      return pnl !== null ? pnl : this._underlying.unrealizedPnl;
-    }
-    return this._underlying.unrealizedPnl;
+    const result = this.simulatedResult;
+    return result !== null ? result.pnlValue : this._underlying.unrealizedPnl;
   }
 
   /**
@@ -260,15 +231,8 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
    * Returns underlying's current value if trigger price is not defined.
    */
   private get simulatedValue(): bigint {
-    if (this._triggerState === 'TP_TRIGGERED') {
-      const value = this.valueAtTP;
-      return value !== null ? value : this._underlying.currentValue;
-    }
-    if (this._triggerState === 'SL_TRIGGERED') {
-      const value = this.valueAtSL;
-      return value !== null ? value : this._underlying.currentValue;
-    }
-    return this._underlying.currentValue;
+    const result = this.simulatedResult;
+    return result !== null ? result.positionValue : this._underlying.currentValue;
   }
 
   // ============================================================================
@@ -513,26 +477,32 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   /**
-   * Simulate PnL at a given price.
+   * Simulate position at a given price.
    *
    * Behavior by trigger state:
-   * - IN_POSITION: Returns curved PnL from underlying position
-   * - TP_TRIGGERED (with TP defined): Returns fixed PnL at TP price (flat line)
-   * - SL_TRIGGERED (with SL defined): Returns fixed PnL at SL price (flat line)
-   * - TP_TRIGGERED/SL_TRIGGERED (without trigger defined): Returns curved PnL (fallback)
+   * - IN_POSITION: Returns curved result from underlying position
+   * - TP_TRIGGERED (with TP defined): Returns fixed result at TP price (flat line)
+   * - SL_TRIGGERED (with SL defined): Returns fixed result at SL price (flat line)
+   * - TP_TRIGGERED/SL_TRIGGERED (without trigger defined): Returns curved result (fallback)
    *
    * @param price - The base token price in quote token units
-   * @returns The simulated PnL (fixed when effectively triggered, curved otherwise)
+   * @returns Full simulation result (fixed when effectively triggered, curved otherwise)
    */
-  simulatePnLAtPrice(price: bigint): bigint {
+  simulatePnLAtPrice(price: bigint): PnLSimulationResult {
     // If not effectively triggered (either IN_POSITION or trigger price is null),
-    // return the normal curved PnL from underlying
+    // return the normal curved result from underlying
     if (!this.isEffectivelyTriggered) {
       return this._underlying.simulatePnLAtPrice(price);
     }
 
-    // When effectively triggered, return fixed PnL regardless of input price
+    // When effectively triggered, return fixed result at trigger price
     // This creates the flat horizontal line in the PnL curve
-    return this.simulatedPnL;
+    const result = this.simulatedResult;
+    if (result !== null) {
+      return result;
+    }
+
+    // Fallback to underlying if no trigger result (shouldn't happen if isEffectivelyTriggered is true)
+    return this._underlying.simulatePnLAtPrice(price);
   }
 }

@@ -16,6 +16,7 @@ import type {
   PositionType,
   PositionJSON,
   BasePositionParams,
+  PnLSimulationResult,
 } from './position.types.js';
 
 /**
@@ -113,13 +114,13 @@ export abstract class BasePosition implements PositionInterface {
   abstract get state(): Record<string, unknown>;
 
   /**
-   * Simulate the position's PnL at a given price.
+   * Simulate the position at a given price.
    * Must be implemented by protocol-specific subclasses.
    *
    * @param price - The base token price in quote token units (scaled by quote token decimals)
-   * @returns The simulated PnL at the given price in quote token units
+   * @returns Full simulation result including value, PnL, and percent
    */
-  abstract simulatePnLAtPrice(price: bigint): bigint;
+  abstract simulatePnLAtPrice(price: bigint): PnLSimulationResult;
 
   // ============================================================================
   // Constructor

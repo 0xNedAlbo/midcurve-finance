@@ -7,7 +7,7 @@
 
 import type { Erc20Token } from '../token/index.js';
 import type { UniswapV3Pool } from '../pool/index.js';
-import type { PositionProtocol, PositionType, PositionJSON } from './position.types.js';
+import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from './position.types.js';
 
 /**
  * PositionInterface
@@ -203,11 +203,11 @@ export interface PositionInterface {
   getTotalUnrealizedPnl(): bigint;
 
   /**
-   * Simulate the position's PnL at a given price.
+   * Simulate the position at a given price.
    * Used for interactive PnL curve visualization.
    *
    * @param price - The base token price in quote token units (scaled by quote token decimals)
-   * @returns The simulated PnL at the given price in quote token units
+   * @returns Full simulation result including value, PnL, and percent
    */
-  simulatePnLAtPrice(price: bigint): bigint;
+  simulatePnLAtPrice(price: bigint): PnLSimulationResult;
 }
