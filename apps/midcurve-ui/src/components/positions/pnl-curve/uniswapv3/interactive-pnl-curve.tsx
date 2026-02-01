@@ -105,7 +105,7 @@ function InteractivePnLCurveInner({
   const chartHeight = Math.max(0, height! - MARGIN.top - MARGIN.bottom);
 
   // Local state for Y-axis bounds (PnL percentage range)
-  const [yBounds, setYBounds] = useState({ min: -70, max: 30 });
+  const [yBounds, setYBounds] = useState({ min: -50, max: 15 });
 
   // Determine token roles
   const isBaseToken0 = useMemo(() => {
@@ -219,22 +219,26 @@ function InteractivePnLCurveInner({
   ]);
 
   // Calculate data bounds for scales
-  // Y-axis uses yBounds state (zoomable), X-axis uses sliderBounds prop
+  // Y-axis uses yBounds state (zoomable), X-axis uses sliderBounds prop directly
   const { priceMin, priceMax } = useMemo(() => {
-    if (curveData.length === 0) {
-      const fallbackMin = sliderBounds?.min ?? 0;
-      const fallbackMax = sliderBounds?.max ?? 100;
+    // Use sliderBounds directly to ensure symmetric x-axis around current price
+    if (sliderBounds && sliderBounds.min > 0 && sliderBounds.max > 0) {
       return {
-        priceMin: fallbackMin,
-        priceMax: fallbackMax,
+        priceMin: sliderBounds.min,
+        priceMax: sliderBounds.max,
       };
     }
 
-    const prices = curveData.map((d) => d.price);
-    return {
-      priceMin: Math.min(...prices),
-      priceMax: Math.max(...prices),
-    };
+    // Fallback to curve data if sliderBounds not available
+    if (curveData.length > 0) {
+      const prices = curveData.map((d) => d.price);
+      return {
+        priceMin: Math.min(...prices),
+        priceMax: Math.max(...prices),
+      };
+    }
+
+    return { priceMin: 0, priceMax: 100 };
   }, [curveData, sliderBounds]);
 
   // Create scales

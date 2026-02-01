@@ -125,8 +125,10 @@ export function PositionConfigStep() {
   // PnL Curve Data Calculations
   // ============================================================================
 
-  // Slider bounds for PnL curve visualization
+  // Slider bounds for PnL curve visualization (can be adjusted by user via drag)
   const [sliderBounds, setSliderBounds] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
+  // Track whether user has manually adjusted the bounds
+  const [userAdjustedBounds, setUserAdjustedBounds] = useState(false);
 
   // Determine if base token is token0
   const isToken0Base = useMemo(() => {
@@ -137,7 +139,9 @@ export function PositionConfigStep() {
     ) === 0;
   }, [state.discoveredPool, state.baseToken]);
 
-  // Calculate current price for slider bounds initialization
+  // Calculate current price for slider bounds
+  // IMPORTANT: Use sqrtPriceX96 (same source as cost basis calculation) to ensure
+  // the x-axis center matches where 0% PnL occurs
   const currentPrice = useMemo(() => {
     if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
       return 0;
@@ -145,37 +149,71 @@ export function PositionConfigStep() {
 
     try {
       const pool = state.discoveredPool;
-      // Access currentTick from raw state (consistent with useDefaultTickRange)
-      const currentTick = pool.state.currentTick as number;
-      const baseTokenDecimals = isToken0Base
-        ? pool.token0.decimals
-        : pool.token1.decimals;
+      const sqrtPriceX96 = BigInt(pool.state.sqrtPriceX96 as string);
 
-      const priceBigInt = tickToPrice(
-        currentTick,
-        state.baseToken.address,
-        state.quoteToken.address,
-        baseTokenDecimals
-      );
+      // price = (sqrtPriceX96 / 2^96)^2
+      // For precision, we compute: price = sqrtPriceX96^2 / 2^192
+      const Q96 = 2n ** 96n;
+      const Q192 = Q96 * Q96;
 
-      const divisor = 10n ** BigInt(state.quoteToken.decimals);
-      return Number(priceBigInt) / Number(divisor);
+      // Raw price is token1/token0 ratio (amount of token1 per token0)
+      const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+
+      // Adjust for decimals
+      const token0Decimals = pool.token0.decimals;
+      const token1Decimals = pool.token1.decimals;
+
+      let priceInQuote: number;
+      if (isToken0Base) {
+        // Base is token0, quote is token1
+        // price = amount of token1 per token0 (which is what sqrtPriceX96 represents)
+        // Adjust: raw_price * 10^(token0Decimals - token1Decimals)
+        const decimalDiff = token0Decimals - token1Decimals;
+        if (decimalDiff >= 0) {
+          const adjustment = 10n ** BigInt(decimalDiff);
+          priceInQuote = Number(rawPriceNum * adjustment) / Number(Q192);
+        } else {
+          const adjustment = 10n ** BigInt(-decimalDiff);
+          priceInQuote = Number(rawPriceNum) / Number(Q192 * adjustment);
+        }
+      } else {
+        // Base is token1, quote is token0
+        // price = amount of token0 per token1 = 1 / (token1/token0 price)
+        // Adjust: (1 / raw_price) * 10^(token1Decimals - token0Decimals)
+        const decimalDiff = token1Decimals - token0Decimals;
+        if (decimalDiff >= 0) {
+          const adjustment = 10n ** BigInt(decimalDiff);
+          priceInQuote = Number(Q192 * adjustment) / Number(rawPriceNum);
+        } else {
+          const adjustment = 10n ** BigInt(-decimalDiff);
+          priceInQuote = Number(Q192) / Number(rawPriceNum * adjustment);
+        }
+      }
+
+      return priceInQuote;
     } catch (error) {
       console.error("Error calculating current price:", error);
       return 0;
     }
   }, [state.discoveredPool, state.baseToken, state.quoteToken, isToken0Base]);
 
-  // Initialize slider bounds when current price is available
+  // Initialize/update slider bounds when current price is available
+  // Only auto-update if user hasn't manually adjusted the bounds
   useEffect(() => {
-    if (currentPrice > 0 && sliderBounds.min === 0 && sliderBounds.max === 0) {
-      // Symmetric default x-axis range: ±35% of current price
+    if (currentPrice > 0 && !userAdjustedBounds) {
+      // Symmetric default x-axis range: ±50% of current price
       setSliderBounds({
-        min: currentPrice * 0.65,  // -35%
-        max: currentPrice * 1.35,  // +35%
+        min: currentPrice * 0.5,  // -50%
+        max: currentPrice * 1.5,  // +50%
       });
     }
-  }, [currentPrice, sliderBounds.min, sliderBounds.max]);
+  }, [currentPrice, userAdjustedBounds]);
+
+  // Handler for when user adjusts bounds via drag
+  const handleSliderBoundsChange = useCallback((bounds: { min: number; max: number }) => {
+    setSliderBounds(bounds);
+    setUserAdjustedBounds(true);
+  }, []);
 
   // Calculate cost basis (position value at current price)
   const costBasis = useMemo(() => {
@@ -574,7 +612,7 @@ export function PositionConfigStep() {
             liquidity={liquidityBigInt}
             costBasis={costBasis}
             sliderBounds={sliderBounds}
-            onSliderBoundsChange={setSliderBounds}
+            onSliderBoundsChange={handleSliderBoundsChange}
             onTickLowerChange={handleTickLowerChange}
             onTickUpperChange={handleTickUpperChange}
             onRangeBoundaryInteraction={handleRangeBoundaryInteraction}
