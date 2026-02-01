@@ -6,7 +6,7 @@ import { scaleLinear } from "@visx/scale";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { GridRows, GridColumns } from "@visx/grid";
 import { ParentSize } from "@visx/responsive";
-import { LinePath } from "@visx/shape";
+import { LinePath, Area } from "@visx/shape";
 import { curveMonotoneX } from "@visx/curve";
 import {
   generatePnLCurve,
@@ -568,16 +568,62 @@ function InteractivePnLCurveInner({
           labelOffset={45}
         />
 
-        {/* Clip path for curve */}
+        {/* Clip paths for curve and area fills */}
         <defs>
           <clipPath id="pnl-curve-clip">
             <rect x={0} y={0} width={chartWidth} height={chartHeight} />
           </clipPath>
+          {/* Clip for positive PnL area (above zero line) */}
+          <clipPath id="pnl-positive-clip">
+            <rect
+              x={0}
+              y={0}
+              width={chartWidth}
+              height={Math.max(0, Math.min(yScale(0), chartHeight))}
+            />
+          </clipPath>
+          {/* Clip for negative PnL area (below zero line) */}
+          <clipPath id="pnl-negative-clip">
+            <rect
+              x={0}
+              y={Math.max(0, Math.min(yScale(0), chartHeight))}
+              width={chartWidth}
+              height={Math.max(0, chartHeight - Math.max(0, Math.min(yScale(0), chartHeight)))}
+            />
+          </clipPath>
         </defs>
+
+        {/* PnL Area Fills - Green for profit, Red for loss */}
+        {hasPosition && curveData.length > 0 && (
+          <>
+            {/* Green area for positive PnL (profit) */}
+            <g clipPath="url(#pnl-positive-clip)" pointerEvents="none">
+              <Area<CurveDataPoint>
+                data={curveData}
+                x={(d) => xScale(d.price)}
+                y0={() => yScale(0)}
+                y1={(d) => yScale(d.pnlPercent)}
+                fill="rgba(34, 197, 94, 0.25)"
+                curve={curveMonotoneX}
+              />
+            </g>
+            {/* Red area for negative PnL (loss) */}
+            <g clipPath="url(#pnl-negative-clip)" pointerEvents="none">
+              <Area<CurveDataPoint>
+                data={curveData}
+                x={(d) => xScale(d.price)}
+                y0={() => yScale(0)}
+                y1={(d) => yScale(d.pnlPercent)}
+                fill="rgba(239, 68, 68, 0.25)"
+                curve={curveMonotoneX}
+              />
+            </g>
+          </>
+        )}
 
         {/* PnL Curve Line */}
         {hasPosition && curveData.length > 0 && (
-          <g clipPath="url(#pnl-curve-clip)">
+          <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
             <LinePath
               data={curveData}
               x={(d) => xScale(d.price)}
