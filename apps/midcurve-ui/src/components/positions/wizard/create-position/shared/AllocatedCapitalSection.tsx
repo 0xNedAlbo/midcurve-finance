@@ -89,18 +89,24 @@ export function AllocatedCapitalSection({
     <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
       <p className="text-xs text-slate-400">Allocated Capital</p>
 
-      {/* Token pair amounts on single line */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-1">
-          <TokenLogo logoUrl={baseLogoUrl} symbol={baseToken.symbol} />
-          <span className="text-slate-400">{baseToken.symbol}</span>
-          <span className="text-slate-500 mx-0.5">+</span>
-          <TokenLogo logoUrl={quoteLogoUrl} symbol={quoteToken.symbol} />
-          <span className="text-slate-400">{quoteToken.symbol}</span>
+      {/* Token amounts - each on its own line */}
+      <div className="space-y-1.5">
+        {/* Base token line */}
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-1.5">
+            <TokenLogo logoUrl={baseLogoUrl} symbol={baseToken.symbol} />
+            <span className="text-slate-400">{baseToken.symbol}</span>
+          </div>
+          <span className="text-white font-medium">{baseFormatted}</span>
         </div>
-        <span className="text-white font-medium">
-          {baseFormatted} + {quoteFormatted}
-        </span>
+        {/* Quote token line */}
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-1.5">
+            <TokenLogo logoUrl={quoteLogoUrl} symbol={quoteToken.symbol} />
+            <span className="text-slate-400">{quoteToken.symbol}</span>
+          </div>
+          <span className="text-white font-medium">{quoteFormatted}</span>
+        </div>
       </div>
 
       {/* Divider */}
