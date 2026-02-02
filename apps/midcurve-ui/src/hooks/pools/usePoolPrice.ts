@@ -80,9 +80,9 @@ export interface UsePoolPriceReturn {
 
   /**
    * Manually refetch the pool price
-   * Returns a promise that resolves when the fetch is complete
+   * Returns a promise that resolves with the fresh data
    */
-  refetch: () => Promise<void>;
+  refetch: () => Promise<{ data: GetPoolPriceResponse | undefined }>;
 }
 
 /**
@@ -142,7 +142,8 @@ export function usePoolPrice({
     refetch: async () => {
       // Force refetch by canceling stale time
       // This ensures the refresh button always fetches fresh data
-      await query.refetch({ cancelRefetch: true });
+      const result = await query.refetch({ cancelRefetch: true });
+      return { data: result.data };
     },
   };
 }

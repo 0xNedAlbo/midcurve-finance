@@ -1,7 +1,8 @@
-import { useCallback, useMemo } from 'react';
-import { PlusCircle, MinusCircle, ArrowLeftRight } from 'lucide-react';
-import { compareAddresses, formatCompactValue } from '@midcurve/shared';
+import { useCallback, useMemo, useState } from 'react';
+import { PlusCircle, MinusCircle, ArrowLeftRight, RefreshCw } from 'lucide-react';
+import { compareAddresses, formatCompactValue, UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
+import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { StepNavigationButtons } from './StepNavigationButtons';
 import { SelectedPoolSummary } from './SelectedPoolSummary';
 
@@ -33,7 +34,32 @@ export function WizardSummaryPanel({
   onFinish,
   children,
 }: WizardSummaryPanelProps) {
-  const { state, setSummaryZoom, swapQuoteBase } = useCreatePositionWizard();
+  const { state, setSummaryZoom, swapQuoteBase, setDiscoveredPool } = useCreatePositionWizard();
+  const [isRefreshingPool, setIsRefreshingPool] = useState(false);
+
+  // Hook to fetch fresh pool data
+  const discoverPool = useDiscoverPool();
+
+  // Handler for refresh button - fetches entire pool with fresh state
+  const handleRefreshPool = useCallback(async () => {
+    if (!state.discoveredPool) return;
+
+    const chainId = state.discoveredPool.typedConfig.chainId;
+    const address = state.discoveredPool.typedConfig.address;
+
+    setIsRefreshingPool(true);
+    try {
+      const result = await discoverPool.mutateAsync({ chainId, address });
+      // Deserialize JSON to class instance for proper method access
+      const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
+      setDiscoveredPool(poolInstance);
+    } catch (error) {
+      // Silently fail - pool stays at current state
+      console.error('Failed to refresh pool:', error);
+    } finally {
+      setIsRefreshingPool(false);
+    }
+  }, [state.discoveredPool, discoverPool, setDiscoveredPool]);
 
   // Calculate current price from sqrtPriceX96
   const currentPriceBigint = useMemo(() => {
@@ -147,16 +173,33 @@ export function WizardSummaryPanel({
         {state.quoteToken && currentPriceBigint !== null && (
           <div className="flex items-center justify-between px-3 py-2 bg-slate-700/30 rounded-lg">
             <span className="text-xs text-slate-400">
-              Current Price: <span className="text-white font-medium">{formatCompactValue(currentPriceBigint, state.quoteToken.decimals)}</span>
+              Current Price:{' '}
+              <span className="text-white font-medium">
+                {formatCompactValue(currentPriceBigint, state.quoteToken.decimals)}
+              </span>
             </span>
-            <button
-              onClick={swapQuoteBase}
-              className="flex items-center gap-1 px-2 py-1 bg-slate-600/50 rounded text-xs text-slate-300 hover:bg-slate-600 hover:text-white transition-colors cursor-pointer"
-              title="Flip quote/base token"
-            >
-              <ArrowLeftRight className="w-3 h-3" />
-              Flip
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleRefreshPool}
+                disabled={isRefreshingPool}
+                className={`p-1 rounded transition-colors cursor-pointer ${
+                  isRefreshingPool
+                    ? 'text-slate-600 cursor-not-allowed'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                }`}
+                title="Refresh price"
+              >
+                <RefreshCw className={`w-3 h-3 ${isRefreshingPool ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={swapQuoteBase}
+                className="flex items-center gap-1 px-2 py-1 bg-slate-600/50 rounded text-xs text-slate-300 hover:bg-slate-600 hover:text-white transition-colors cursor-pointer"
+                title="Flip quote/base token"
+              >
+                <ArrowLeftRight className="w-3 h-3" />
+                Flip
+              </button>
+            </div>
           </div>
         )}
 
