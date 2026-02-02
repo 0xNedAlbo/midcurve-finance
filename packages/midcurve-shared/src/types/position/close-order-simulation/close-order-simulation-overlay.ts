@@ -479,30 +479,39 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   /**
    * Simulate position at a given price.
    *
-   * Behavior by trigger state:
-   * - IN_POSITION: Returns curved result from underlying position
-   * - TP_TRIGGERED (with TP defined): Returns fixed result at TP price (flat line)
-   * - SL_TRIGGERED (with SL defined): Returns fixed result at SL price (flat line)
-   * - TP_TRIGGERED/SL_TRIGGERED (without trigger defined): Returns curved result (fallback)
+   * Automatically determines trigger effects based on the price parameter:
+   * - If price <= stopLossPrice (and SL defined): Returns fixed result at SL price (flat line)
+   * - If price >= takeProfitPrice (and TP defined): Returns fixed result at TP price (flat line)
+   * - Otherwise: Returns curved result from underlying position
+   *
+   * This creates the expected PnL curve visualization:
+   * - Flat horizontal line left of SL (position would be closed at SL)
+   * - Curved line between SL and TP (normal position behavior)
+   * - Flat horizontal line right of TP (position would be closed at TP)
    *
    * @param price - The base token price in quote token units
-   * @returns Full simulation result (fixed when effectively triggered, curved otherwise)
+   * @returns Full simulation result (fixed at trigger prices, curved in between)
    */
   simulatePnLAtPrice(price: bigint): PnLSimulationResult {
-    // If not effectively triggered (either IN_POSITION or trigger price is null),
-    // return the normal curved result from underlying
-    if (!this.isEffectivelyTriggered) {
-      return this._underlying.simulatePnLAtPrice(price);
+    // Check if stop-loss is defined and price is at or below SL trigger
+    // This creates the flat line on the left side of the curve
+    if (this._stopLossPrice !== null && price <= this._stopLossPrice) {
+      const slResult = this.resultAtSL;
+      if (slResult !== null) {
+        return slResult;
+      }
     }
 
-    // When effectively triggered, return fixed result at trigger price
-    // This creates the flat horizontal line in the PnL curve
-    const result = this.simulatedResult;
-    if (result !== null) {
-      return result;
+    // Check if take-profit is defined and price is at or above TP trigger
+    // This creates the flat line on the right side of the curve
+    if (this._takeProfitPrice !== null && price >= this._takeProfitPrice) {
+      const tpResult = this.resultAtTP;
+      if (tpResult !== null) {
+        return tpResult;
+      }
     }
 
-    // Fallback to underlying if no trigger result (shouldn't happen if isEffectivelyTriggered is true)
+    // Otherwise return the curved result from underlying position
     return this._underlying.simulatePnLAtPrice(price);
   }
 }
