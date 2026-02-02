@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
-import { PlusCircle, MinusCircle } from 'lucide-react';
+import { useCallback, useMemo } from 'react';
+import { PlusCircle, MinusCircle, ArrowLeftRight } from 'lucide-react';
+import { compareAddresses, formatCompactValue } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { StepNavigationButtons } from './StepNavigationButtons';
 import { SelectedPoolSummary } from './SelectedPoolSummary';
@@ -33,6 +34,61 @@ export function WizardSummaryPanel({
   children,
 }: WizardSummaryPanelProps) {
   const { state, setSummaryZoom, swapQuoteBase } = useCreatePositionWizard();
+
+  // Calculate current price from sqrtPriceX96
+  const currentPriceBigint = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return null;
+    }
+
+    try {
+      const pool = state.discoveredPool;
+      const sqrtPriceX96 = BigInt(pool.state.sqrtPriceX96 as string);
+
+      const isToken0Base = compareAddresses(
+        pool.token0.config.address as string,
+        state.baseToken.address
+      ) === 0;
+
+      // price = (sqrtPriceX96 / 2^96)^2
+      const Q96 = 2n ** 96n;
+      const Q192 = Q96 * Q96;
+
+      const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+
+      const token0Decimals = pool.token0.decimals;
+      const token1Decimals = pool.token1.decimals;
+      const quoteDecimals = state.quoteToken.decimals;
+
+      // Calculate price as bigint with quote token decimals precision
+      let priceBigint: bigint;
+      if (isToken0Base) {
+        // Price is token1/token0 (quote per base)
+        const decimalDiff = token0Decimals - token1Decimals;
+        if (decimalDiff >= 0) {
+          const adjustment = 10n ** BigInt(decimalDiff);
+          priceBigint = (rawPriceNum * adjustment * (10n ** BigInt(quoteDecimals))) / Q192;
+        } else {
+          const adjustment = 10n ** BigInt(-decimalDiff);
+          priceBigint = (rawPriceNum * (10n ** BigInt(quoteDecimals))) / (Q192 * adjustment);
+        }
+      } else {
+        // Price is token0/token1 (quote per base) = 1 / (token1/token0)
+        const decimalDiff = token1Decimals - token0Decimals;
+        if (decimalDiff >= 0) {
+          const adjustment = 10n ** BigInt(decimalDiff);
+          priceBigint = (Q192 * adjustment * (10n ** BigInt(quoteDecimals))) / rawPriceNum;
+        } else {
+          const adjustment = 10n ** BigInt(-decimalDiff);
+          priceBigint = (Q192 * (10n ** BigInt(quoteDecimals))) / (rawPriceNum * adjustment);
+        }
+      }
+
+      return priceBigint;
+    } catch {
+      return null;
+    }
+  }, [state.discoveredPool, state.baseToken, state.quoteToken]);
 
   // Zoom handlers
   const handleZoomIn = useCallback(() => {
@@ -83,10 +139,26 @@ export function WizardSummaryPanel({
           discoveredPool={state.discoveredPool}
           isDiscovering={state.isDiscovering}
           discoverError={state.discoverError}
-          onFlip={swapQuoteBase}
           baseToken={state.baseToken}
           quoteToken={state.quoteToken}
         />
+
+        {/* Current Price Line */}
+        {state.quoteToken && currentPriceBigint !== null && (
+          <div className="flex items-center justify-between px-3 py-2 bg-slate-700/30 rounded-lg">
+            <span className="text-xs text-slate-400">
+              Current Price: <span className="text-white font-medium">{formatCompactValue(currentPriceBigint, state.quoteToken.decimals)}</span>
+            </span>
+            <button
+              onClick={swapQuoteBase}
+              className="flex items-center gap-1 px-2 py-1 bg-slate-600/50 rounded text-xs text-slate-300 hover:bg-slate-600 hover:text-white transition-colors cursor-pointer"
+              title="Flip quote/base token"
+            >
+              <ArrowLeftRight className="w-3 h-3" />
+              Flip
+            </button>
+          </div>
+        )}
 
         {/* Custom content from step */}
         {children}

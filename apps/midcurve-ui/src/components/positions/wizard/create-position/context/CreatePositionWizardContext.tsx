@@ -278,6 +278,10 @@ function wizardReducer(
         allocatedBaseAmount: '0',
         allocatedQuoteAmount: '0',
         totalQuoteValue: '0',
+        // Reset tick range (will use defaults)
+        tickLower: 0,
+        tickUpper: 0,
+        liquidity: '0',
       };
 
     case 'SET_AUTOMATION_ENABLED':
