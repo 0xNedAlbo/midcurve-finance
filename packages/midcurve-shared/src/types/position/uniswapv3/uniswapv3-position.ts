@@ -7,13 +7,14 @@
 
 import { TickMath } from '@uniswap/v3-sdk';
 import { BasePosition } from '../base-position.js';
-import type { UniswapV3Pool } from '../../pool/index.js';
+import { UniswapV3Pool } from '../../pool/index.js';
 import type {
   PositionProtocol,
   PositionType,
   BasePositionParams,
   PositionRow,
   PnLSimulationResult,
+  PositionJSON,
 } from '../position.types.js';
 import {
   UniswapV3PositionConfig,
@@ -471,6 +472,77 @@ export class UniswapV3Position extends BasePosition {
       // Timestamps
       createdAt: now,
       updatedAt: now,
+    });
+  }
+
+  /**
+   * Create UniswapV3Position from JSON (API response).
+   *
+   * Deserializes a PositionJSON object back into a UniswapV3Position instance.
+   * Recursively reconstructs nested pool and token instances.
+   * Converts string representations back to bigint and Date types.
+   *
+   * @param json - JSON data from API response
+   * @returns UniswapV3Position instance
+   * @throws Error if protocol is not 'uniswapv3'
+   *
+   * @example
+   * ```typescript
+   * const response = await fetch('/api/v1/positions/...');
+   * const json = await response.json();
+   * const position = UniswapV3Position.fromJSON(json.data);
+   *
+   * // Class methods now work
+   * const result = position.simulatePnLAtPrice(2000000000n);
+   * console.log(result.pnlPercent);
+   * ```
+   */
+  static fromJSON(json: PositionJSON): UniswapV3Position {
+    if (json.protocol !== 'uniswapv3') {
+      throw new Error(`Expected protocol 'uniswapv3', got '${json.protocol}'`);
+    }
+
+    return new UniswapV3Position({
+      // Identity
+      id: json.id,
+      positionHash: json.positionHash,
+      userId: json.userId,
+      positionType: json.positionType,
+
+      // Pool reference
+      pool: UniswapV3Pool.fromJSON(json.pool),
+      isToken0Quote: json.isToken0Quote,
+
+      // PnL fields (string → bigint)
+      currentValue: BigInt(json.currentValue),
+      currentCostBasis: BigInt(json.currentCostBasis),
+      realizedPnl: BigInt(json.realizedPnl),
+      unrealizedPnl: BigInt(json.unrealizedPnl),
+      realizedCashflow: BigInt(json.realizedCashflow),
+      unrealizedCashflow: BigInt(json.unrealizedCashflow),
+
+      // Fee fields
+      collectedFees: BigInt(json.collectedFees),
+      unClaimedFees: BigInt(json.unClaimedFees),
+      lastFeesCollectedAt: new Date(json.lastFeesCollectedAt),
+      totalApr: json.totalApr,
+
+      // Price range (string → bigint)
+      priceRangeLower: BigInt(json.priceRangeLower),
+      priceRangeUpper: BigInt(json.priceRangeUpper),
+
+      // Lifecycle
+      positionOpenedAt: new Date(json.positionOpenedAt),
+      positionClosedAt: json.positionClosedAt ? new Date(json.positionClosedAt) : null,
+      isActive: json.isActive,
+
+      // Protocol-specific
+      config: UniswapV3PositionConfig.fromJSON(json.config as unknown as UniswapV3PositionConfigJSON),
+      state: positionStateFromJSON(json.state as unknown as UniswapV3PositionStateJSON),
+
+      // Timestamps
+      createdAt: new Date(json.createdAt),
+      updatedAt: new Date(json.updatedAt),
     });
   }
 }

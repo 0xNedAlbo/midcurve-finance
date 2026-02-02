@@ -1,5 +1,5 @@
 import { BaseToken } from '../base-token';
-import type { BaseTokenParams, TokenType } from '../token.types';
+import type { BaseTokenParams, TokenType, TokenJSON } from '../token.types';
 import {
   Erc20TokenConfig,
   type Erc20TokenConfigJSON,
@@ -131,6 +131,43 @@ export class Erc20Token extends BaseToken {
       ),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+    });
+  }
+
+  /**
+   * Create Erc20Token from JSON (API response).
+   *
+   * Deserializes a TokenJSON object back into an Erc20Token instance.
+   * Converts ISO date strings back to Date objects.
+   *
+   * @param json - JSON data from API response
+   * @returns Erc20Token instance
+   * @throws Error if tokenType is not 'erc20'
+   *
+   * @example
+   * ```typescript
+   * const response = await fetch('/api/v1/tokens/erc20/...');
+   * const json = await response.json();
+   * const token = Erc20Token.fromJSON(json.data);
+   * console.log(token.address); // '0x...'
+   * ```
+   */
+  static fromJSON(json: TokenJSON): Erc20Token {
+    if (json.tokenType !== 'erc20') {
+      throw new Error(`Expected tokenType 'erc20', got '${json.tokenType}'`);
+    }
+
+    return new Erc20Token({
+      id: json.id,
+      name: json.name,
+      symbol: json.symbol,
+      decimals: json.decimals,
+      logoUrl: json.logoUrl,
+      coingeckoId: json.coingeckoId,
+      marketCap: json.marketCap,
+      config: Erc20TokenConfig.fromJSON(json.config as unknown as Erc20TokenConfigJSON),
+      createdAt: new Date(json.createdAt),
+      updatedAt: new Date(json.updatedAt),
     });
   }
 }

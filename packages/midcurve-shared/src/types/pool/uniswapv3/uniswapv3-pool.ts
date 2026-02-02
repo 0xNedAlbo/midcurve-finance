@@ -7,7 +7,7 @@
 
 import { Erc20Token, type Erc20TokenRow } from '../../token/index.js';
 import { BasePool } from '../base-pool.js';
-import type { Protocol, PoolType, BasePoolParams, PoolRow } from '../pool.types.js';
+import type { Protocol, PoolType, BasePoolParams, PoolRow, PoolJSON } from '../pool.types.js';
 import {
   UniswapV3PoolConfig,
   type UniswapV3PoolConfigJSON,
@@ -227,5 +227,41 @@ export class UniswapV3Pool extends BasePool {
     const token1 = Erc20Token.fromDB(row.token1 as Erc20TokenRow);
 
     return UniswapV3Pool.fromDB(row, token0, token1);
+  }
+
+  /**
+   * Create UniswapV3Pool from JSON (API response).
+   *
+   * Deserializes a PoolJSON object back into a UniswapV3Pool instance.
+   * Recursively reconstructs nested token instances.
+   *
+   * @param json - JSON data from API response
+   * @returns UniswapV3Pool instance
+   * @throws Error if protocol is not 'uniswapv3'
+   *
+   * @example
+   * ```typescript
+   * const response = await fetch('/api/v1/pools/uniswapv3/...');
+   * const json = await response.json();
+   * const pool = UniswapV3Pool.fromJSON(json.data);
+   * console.log(pool.sqrtPriceX96); // bigint value
+   * ```
+   */
+  static fromJSON(json: PoolJSON): UniswapV3Pool {
+    if (json.protocol !== 'uniswapv3') {
+      throw new Error(`Expected protocol 'uniswapv3', got '${json.protocol}'`);
+    }
+
+    return new UniswapV3Pool({
+      id: json.id,
+      poolType: json.poolType,
+      token0: Erc20Token.fromJSON(json.token0),
+      token1: Erc20Token.fromJSON(json.token1),
+      feeBps: json.feeBps,
+      config: UniswapV3PoolConfig.fromJSON(json.config as unknown as UniswapV3PoolConfigJSON),
+      state: stateFromJSON(json.state as unknown as UniswapV3PoolStateJSON),
+      createdAt: new Date(json.createdAt),
+      updatedAt: new Date(json.updatedAt),
+    });
   }
 }
