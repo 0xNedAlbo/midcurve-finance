@@ -45,6 +45,7 @@ export * from './services/block/index.js';
 export * from './services/automation/index.js';
 export * from './services/pnl-curve/index.js';
 export * from './services/notifications/index.js';
+export * from './services/transaction/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';

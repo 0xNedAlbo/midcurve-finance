@@ -14,6 +14,8 @@ import {
   Erc20TokenService,
   CoingeckoTokenService,
   UserTokenBalanceService,
+  Erc20ApprovalService,
+  Erc721ApprovalService,
   UniswapV3PoolService,
   UniswapV3PoolDiscoveryService,
   UniswapV3PoolSearchService,
@@ -29,6 +31,7 @@ import {
   WebhookDeliveryService,
   FavoritePoolService,
   UniswapV3SubgraphClient,
+  EvmTransactionStatusService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -38,6 +41,9 @@ let _sessionService: SessionService | null = null;
 let _erc20TokenService: Erc20TokenService | null = null;
 let _coingeckoTokenService: CoingeckoTokenService | null = null;
 let _userTokenBalanceService: UserTokenBalanceService | null = null;
+let _erc20ApprovalService: Erc20ApprovalService | null = null;
+let _erc721ApprovalService: Erc721ApprovalService | null = null;
+let _evmTransactionStatusService: EvmTransactionStatusService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _uniswapV3PoolDiscoveryService: UniswapV3PoolDiscoveryService | null = null;
 let _uniswapV3PoolSearchService: UniswapV3PoolSearchService | null = null;
@@ -137,6 +143,36 @@ export function getUserTokenBalanceService(): UserTokenBalanceService {
     _userTokenBalanceService = new UserTokenBalanceService();
   }
   return _userTokenBalanceService;
+}
+
+/**
+ * Get singleton instance of Erc20ApprovalService
+ */
+export function getErc20ApprovalService(): Erc20ApprovalService {
+  if (!_erc20ApprovalService) {
+    _erc20ApprovalService = new Erc20ApprovalService();
+  }
+  return _erc20ApprovalService;
+}
+
+/**
+ * Get singleton instance of Erc721ApprovalService
+ */
+export function getErc721ApprovalService(): Erc721ApprovalService {
+  if (!_erc721ApprovalService) {
+    _erc721ApprovalService = new Erc721ApprovalService();
+  }
+  return _erc721ApprovalService;
+}
+
+/**
+ * Get singleton instance of EvmTransactionStatusService
+ */
+export function getEvmTransactionStatusService(): EvmTransactionStatusService {
+  if (!_evmTransactionStatusService) {
+    _evmTransactionStatusService = new EvmTransactionStatusService();
+  }
+  return _evmTransactionStatusService;
 }
 
 /**
