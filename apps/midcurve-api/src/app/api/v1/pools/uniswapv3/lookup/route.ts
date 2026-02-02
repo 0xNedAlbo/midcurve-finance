@@ -3,8 +3,9 @@
  *
  * GET /api/v1/pools/uniswapv3/lookup?address=0x...
  *
- * Searches for a pool address across all supported Uniswap V3 chains using on-chain discovery.
- * Returns pools found with optional metrics from subgraph (graceful degradation to zero values).
+ * Searches for a pool address across all supported Uniswap V3 chains.
+ * Priority: 1) Subgraph (efficient), 2) On-chain discovery (fallback).
+ * Returns pools with metrics, or zero metrics if only found on-chain.
  * Includes isFavorite status for each pool.
  *
  * Authentication: Required (session only)
@@ -85,13 +86,39 @@ export async function GET(request: NextRequest): Promise<Response> {
         { address, chainCount: LOOKUP_CHAINS.length }
       );
 
-      // Query all chains in parallel using on-chain discovery + optional subgraph metrics
+      // Query all chains in parallel: subgraph first, on-chain fallback
       const subgraphClient = getSubgraphClient();
       const poolService = getUniswapV3PoolService();
 
       const chainPromises = LOOKUP_CHAINS.map(async (chainId) => {
         try {
-          // 1. Try to discover pool on-chain (RPC)
+          // 1. Try subgraph first (more efficient)
+          try {
+            const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [address]);
+            const poolMetrics = metricsMap.get(address.toLowerCase());
+
+            if (poolMetrics) {
+              // Pool found in subgraph - return with full metrics
+              return {
+                poolAddress: poolMetrics.poolAddress,
+                chainId,
+                chainName: CHAIN_NAMES[chainId] ?? `Chain ${chainId}`,
+                feeTier: poolMetrics.feeTier,
+                token0: poolMetrics.token0,
+                token1: poolMetrics.token1,
+                tvlUSD: poolMetrics.tvlUSD,
+                volume24hUSD: poolMetrics.volume24hUSD,
+                fees24hUSD: poolMetrics.fees24hUSD,
+                fees7dUSD: poolMetrics.fees7dUSD,
+                apr7d: poolMetrics.apr7d,
+                isFavorite: false, // Will be enriched below
+              } as PoolSearchResultItem;
+            }
+          } catch (error) {
+            apiLogger.warn({ chainId, address, error }, 'Subgraph lookup failed, trying on-chain discovery');
+          }
+
+          // 2. Fallback to on-chain discovery (subgraph failed or pool not indexed)
           let pool;
           try {
             pool = await poolService.discover({
@@ -103,28 +130,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             return null;
           }
 
-          // 2. Pool exists - try to fetch metrics from subgraph (optional)
-          let tvlUSD = '0';
-          let volume24hUSD = '0';
-          let fees24hUSD = '0';
-          let fees7dUSD = '0';
-          let apr7d = '0';
-
-          try {
-            const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [address]);
-            const poolMetrics = metricsMap.get(address.toLowerCase());
-            if (poolMetrics) {
-              tvlUSD = poolMetrics.tvlUSD;
-              volume24hUSD = poolMetrics.volume24hUSD;
-              fees24hUSD = poolMetrics.fees24hUSD;
-              fees7dUSD = poolMetrics.fees7dUSD;
-              apr7d = poolMetrics.apr7d;
-            }
-          } catch (error) {
-            apiLogger.warn({ chainId, address, error }, 'Failed to fetch metrics, using zero values');
-          }
-
-          // 3. Build result from discovered pool + metrics
+          // 3. Pool found on-chain but not in subgraph - return with zero metrics
           return {
             poolAddress: pool.config.address,
             chainId,
@@ -140,11 +146,11 @@ export async function GET(request: NextRequest): Promise<Response> {
               symbol: pool.token1.symbol,
               decimals: pool.token1.decimals,
             },
-            tvlUSD,
-            volume24hUSD,
-            fees24hUSD,
-            fees7dUSD,
-            apr7d,
+            tvlUSD: '0',
+            volume24hUSD: '0',
+            fees24hUSD: '0',
+            fees7dUSD: '0',
+            apr7d: '0',
             isFavorite: false, // Will be enriched below
           } as PoolSearchResultItem;
         } catch (error) {
