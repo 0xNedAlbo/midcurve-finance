@@ -1,5 +1,5 @@
 import type { TokenInterface } from './token.interface';
-import type { TokenRow, TokenType } from './token.types';
+import type { TokenRow, TokenType, TokenJSON } from './token.types';
 import { BasicCurrencyToken } from './basic-currency';
 import { Erc20Token } from './erc20';
 
@@ -40,6 +40,31 @@ export class TokenFactory {
 
       default:
         throw new Error(`Unknown token type: ${row.tokenType}`);
+    }
+  }
+
+  /**
+   * Create a token instance from JSON (API response).
+   *
+   * Deserializes a TokenJSON object back into a token instance.
+   * Routes to the appropriate concrete class based on tokenType.
+   *
+   * @param json - JSON data from API response
+   * @returns TokenInterface instance (Erc20Token or BasicCurrencyToken)
+   * @throws Error if tokenType is unknown
+   */
+  static fromJSON(json: TokenJSON): TokenInterface {
+    const tokenType = json.tokenType as TokenType;
+
+    switch (tokenType) {
+      case 'erc20':
+        return Erc20Token.fromJSON(json);
+
+      case 'basic-currency':
+        return BasicCurrencyToken.fromJSON(json);
+
+      default:
+        throw new Error(`Unknown token type: ${json.tokenType}`);
     }
   }
 

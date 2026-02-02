@@ -1,5 +1,5 @@
 import { BaseToken } from '../base-token';
-import type { BaseTokenParams, TokenType } from '../token.types';
+import type { BaseTokenParams, TokenType, TokenJSON } from '../token.types';
 import {
   BasicCurrencyConfig,
   type BasicCurrencyConfigJSON,
@@ -112,6 +112,35 @@ export class BasicCurrencyToken extends BaseToken {
       ),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+    });
+  }
+
+  /**
+   * Create BasicCurrencyToken from JSON (API response).
+   *
+   * Deserializes a TokenJSON object back into a BasicCurrencyToken instance.
+   * Converts ISO date strings back to Date objects.
+   *
+   * @param json - JSON data from API response
+   * @returns BasicCurrencyToken instance
+   * @throws Error if tokenType is not 'basic-currency'
+   */
+  static fromJSON(json: TokenJSON): BasicCurrencyToken {
+    if (json.tokenType !== 'basic-currency') {
+      throw new Error(`Expected tokenType 'basic-currency', got '${json.tokenType}'`);
+    }
+
+    return new BasicCurrencyToken({
+      id: json.id,
+      name: json.name,
+      symbol: json.symbol,
+      decimals: json.decimals,
+      logoUrl: json.logoUrl,
+      coingeckoId: json.coingeckoId,
+      marketCap: json.marketCap,
+      config: BasicCurrencyConfig.fromJSON(json.config as unknown as BasicCurrencyConfigJSON),
+      createdAt: new Date(json.createdAt),
+      updatedAt: new Date(json.updatedAt),
     });
   }
 }

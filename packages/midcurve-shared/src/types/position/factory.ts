@@ -7,7 +7,7 @@
 
 import type { UniswapV3Pool } from '../pool/index.js';
 import type { PositionInterface } from './position.interface.js';
-import type { PositionProtocol, PositionRow } from './position.types.js';
+import type { PositionProtocol, PositionRow, PositionJSON } from './position.types.js';
 import {
   UniswapV3Position,
   type UniswapV3PositionRow,
@@ -63,6 +63,28 @@ export class PositionFactory {
 
       default:
         throw new Error(`Unknown position protocol: ${row.protocol}`);
+    }
+  }
+
+  /**
+   * Create a position instance from JSON (API response).
+   *
+   * Deserializes a PositionJSON object back into a position instance.
+   * Routes to the appropriate concrete class based on protocol.
+   *
+   * @param json - JSON data from API response
+   * @returns PositionInterface instance (concrete type based on protocol)
+   * @throws Error if protocol is unknown
+   */
+  static fromJSON(json: PositionJSON): PositionInterface {
+    const protocol = json.protocol as PositionProtocol;
+
+    switch (protocol) {
+      case 'uniswapv3':
+        return UniswapV3Position.fromJSON(json);
+
+      default:
+        throw new Error(`Unknown position protocol: ${json.protocol}`);
     }
   }
 

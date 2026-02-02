@@ -7,7 +7,7 @@
 
 import type { Erc20Token } from '../token/index.js';
 import type { PoolInterface } from './pool.interface.js';
-import type { Protocol, PoolRow } from './pool.types.js';
+import type { Protocol, PoolRow, PoolJSON } from './pool.types.js';
 import { UniswapV3Pool, type UniswapV3PoolRow } from './uniswapv3/index.js';
 
 /**
@@ -54,6 +54,28 @@ export class PoolFactory {
 
       default:
         throw new Error(`Unknown protocol: ${row.protocol}`);
+    }
+  }
+
+  /**
+   * Create a pool instance from JSON (API response).
+   *
+   * Deserializes a PoolJSON object back into a pool instance.
+   * Routes to the appropriate concrete class based on protocol.
+   *
+   * @param json - JSON data from API response
+   * @returns Protocol-specific pool instance
+   * @throws Error if protocol is unknown
+   */
+  static fromJSON(json: PoolJSON): PoolInterface {
+    const protocol = json.protocol as Protocol;
+
+    switch (protocol) {
+      case 'uniswapv3':
+        return UniswapV3Pool.fromJSON(json);
+
+      default:
+        throw new Error(`Unknown protocol: ${json.protocol}`);
     }
   }
 
