@@ -1,8 +1,17 @@
 import { useEffect, useCallback, useMemo, useState } from 'react';
-import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
+import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown, Trash2, Plus } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
-import { formatCompactValue, calculatePositionValue, tickToPrice, compareAddresses, generatePnLCurve, getTickSpacing } from '@midcurve/shared';
+import {
+  formatCompactValue,
+  calculatePositionValue,
+  tickToPrice,
+  compareAddresses,
+  generatePnLCurve,
+  getTickSpacing,
+  UniswapV3Position,
+  CloseOrderSimulationOverlay,
+} from '@midcurve/shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import {
   useCreatePositionWizard,
@@ -130,6 +139,10 @@ export function PositionConfigStep() {
   // Track whether user has manually adjusted the bounds
   const [userAdjustedBounds, setUserAdjustedBounds] = useState(false);
 
+  // SL/TP state for close order simulation
+  const [stopLossPrice, setStopLossPrice] = useState<bigint | null>(null);
+  const [takeProfitPrice, setTakeProfitPrice] = useState<bigint | null>(null);
+
   // Determine if base token is token0
   const isToken0Base = useMemo(() => {
     if (!state.discoveredPool || !state.baseToken) return false;
@@ -237,6 +250,47 @@ export function PositionConfigStep() {
       return 0n;
     }
   }, [state.liquidity, state.discoveredPool, effectiveTickLower, effectiveTickUpper, isToken0Base]);
+
+  // Create simulation position wrapped in CloseOrderSimulationOverlay
+  // This handles SL/TP curve flattening automatically via simulatePnLAtPrice()
+  // Note: state.discoveredPool is already a UniswapV3Pool instance (deserialized in PoolSelectionStep)
+  const simulationPosition = useMemo(() => {
+    const liquidityBigInt = BigInt(state.liquidity || '0');
+    if (!state.discoveredPool || liquidityBigInt === 0n || costBasis === 0n) {
+      return null;
+    }
+
+    try {
+      // Create base position using forSimulation factory
+      const basePosition = UniswapV3Position.forSimulation({
+        pool: state.discoveredPool,
+        isToken0Quote: !isToken0Base,
+        tickLower: effectiveTickLower,
+        tickUpper: effectiveTickUpper,
+        liquidity: liquidityBigInt,
+        costBasis,
+      });
+
+      // Always wrap in overlay (handles null SL/TP gracefully)
+      return new CloseOrderSimulationOverlay({
+        underlyingPosition: basePosition,
+        takeProfitPrice,
+        stopLossPrice,
+      });
+    } catch (error) {
+      console.error("Error creating simulation position:", error);
+      return null;
+    }
+  }, [
+    state.discoveredPool,
+    state.liquidity,
+    isToken0Base,
+    effectiveTickLower,
+    effectiveTickUpper,
+    costBasis,
+    stopLossPrice,
+    takeProfitPrice,
+  ]);
 
   // Handle base input change
   const handleBaseInputChange = useCallback(
@@ -488,17 +542,184 @@ export function PositionConfigStep() {
     );
   };
 
-  // Render SL/TP Setup tab content (placeholder)
-  const renderSltpTab = () => (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
-      <Shield className="w-12 h-12 text-slate-600 mb-4" />
-      <h4 className="text-lg font-medium text-slate-300 mb-2">Stop Loss / Take Profit</h4>
-      <p className="text-sm text-slate-500 max-w-md">
-        Set automatic triggers to close your position when price reaches your targets.
-        This section will be implemented in Phase 2.
-      </p>
-    </div>
-  );
+  // Convert price to bigint (quote token units)
+  const priceToBigint = useCallback((price: number): bigint => {
+    const quoteDecimals = state.quoteToken?.decimals ?? 18;
+    return BigInt(Math.floor(price * Number(10n ** BigInt(quoteDecimals))));
+  }, [state.quoteToken?.decimals]);
+
+  // Add SL at -10% from current price
+  const handleAddStopLoss = useCallback(() => {
+    if (currentPrice <= 0) return;
+    const slPrice = currentPrice * 0.9; // -10%
+    setStopLossPrice(priceToBigint(slPrice));
+  }, [currentPrice, priceToBigint]);
+
+  // Add TP at +10% from current price
+  const handleAddTakeProfit = useCallback(() => {
+    if (currentPrice <= 0) return;
+    const tpPrice = currentPrice * 1.1; // +10%
+    setTakeProfitPrice(priceToBigint(tpPrice));
+  }, [currentPrice, priceToBigint]);
+
+  // Clear SL/TP handlers
+  const handleClearStopLoss = useCallback(() => {
+    setStopLossPrice(null);
+  }, []);
+
+  const handleClearTakeProfit = useCallback(() => {
+    setTakeProfitPrice(null);
+  }, []);
+
+  // Calculate max drawdown (loss at SL price)
+  const slDrawdown = useMemo(() => {
+    if (!stopLossPrice || !simulationPosition) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(stopLossPrice);
+      return {
+        pnlValue: result.pnlValue,
+        pnlPercent: result.pnlPercent,
+      };
+    } catch {
+      return null;
+    }
+  }, [stopLossPrice, simulationPosition]);
+
+  // Calculate max runup (profit at TP price)
+  const tpRunup = useMemo(() => {
+    if (!takeProfitPrice || !simulationPosition) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(takeProfitPrice);
+      return {
+        pnlValue: result.pnlValue,
+        pnlPercent: result.pnlPercent,
+      };
+    } catch {
+      return null;
+    }
+  }, [takeProfitPrice, simulationPosition]);
+
+  // Render SL/TP Setup tab content
+  const renderSltpTab = () => {
+    const quoteSymbol = state.quoteToken?.symbol || 'Quote';
+    const quoteDecimals = state.quoteToken?.decimals ?? 18;
+    const hasSl = stopLossPrice !== null;
+    const hasTp = takeProfitPrice !== null;
+
+    return (
+      <div className="grid grid-cols-2 gap-4">
+        {/* Stop Loss Column */}
+        <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] text-slate-400 uppercase tracking-wide">Stop Loss</div>
+            {hasSl ? (
+              <button
+                onClick={handleClearStopLoss}
+                className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
+                title="Clear stop loss"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            ) : (
+              <button
+                onClick={handleAddStopLoss}
+                disabled={currentPrice <= 0}
+                className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Add stop loss at -10%"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          {hasSl ? (
+            <>
+              <div className="text-sm font-medium text-red-400">
+                {formatCompactValue(stopLossPrice, quoteDecimals)} {quoteSymbol}
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-600/50">
+                <div className="text-[10px] text-slate-400 mb-0.5">Max Drawdown</div>
+                <div className="text-sm font-medium text-red-400">
+                  {slDrawdown ? (
+                    <>
+                      {formatCompactValue(slDrawdown.pnlValue, quoteDecimals)} {quoteSymbol}
+                      <span className="text-xs text-slate-500 ml-1">
+                        ({slDrawdown.pnlPercent >= 0 ? '+' : ''}{slDrawdown.pnlPercent.toFixed(1)}%)
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-500">--</span>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-medium text-slate-500">Not set</div>
+              <div className="mt-2 pt-2 border-t border-slate-600/50">
+                <div className="text-[10px] text-slate-400 mb-0.5">Max Drawdown</div>
+                <div className="text-sm font-medium text-slate-500">--</div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Take Profit Column */}
+        <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] text-slate-400 uppercase tracking-wide">Take Profit</div>
+            {hasTp ? (
+              <button
+                onClick={handleClearTakeProfit}
+                className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
+                title="Clear take profit"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            ) : (
+              <button
+                onClick={handleAddTakeProfit}
+                disabled={currentPrice <= 0}
+                className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Add take profit at +10%"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          {hasTp ? (
+            <>
+              <div className="text-sm font-medium text-green-400">
+                {formatCompactValue(takeProfitPrice, quoteDecimals)} {quoteSymbol}
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-600/50">
+                <div className="text-[10px] text-slate-400 mb-0.5">Max Runup</div>
+                <div className="text-sm font-medium text-green-400">
+                  {tpRunup ? (
+                    <>
+                      {tpRunup.pnlValue >= 0n ? '+' : ''}{formatCompactValue(tpRunup.pnlValue, quoteDecimals)} {quoteSymbol}
+                      <span className="text-xs text-slate-500 ml-1">
+                        ({tpRunup.pnlPercent >= 0 ? '+' : ''}{tpRunup.pnlPercent.toFixed(1)}%)
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-500">--</span>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-medium text-slate-500">Not set</div>
+              <div className="mt-2 pt-2 border-t border-slate-600/50">
+                <div className="text-[10px] text-slate-400 mb-0.5">Max Runup</div>
+                <div className="text-sm font-medium text-slate-500">--</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Render tab content based on current configuration tab
   const renderTabContent = () => {
@@ -576,8 +797,7 @@ export function PositionConfigStep() {
   );
 
   const renderVisual = () => {
-    // Check if we have enough data to render the curve (pool and tokens are required, liquidity is optional)
-    const liquidityBigInt = BigInt(state.liquidity || '0');
+    // Check if we have enough data to render the curve (pool and tokens are required, position is optional)
     const hasPoolData = state.discoveredPool &&
       state.baseToken &&
       state.quoteToken &&
@@ -607,15 +827,15 @@ export function PositionConfigStep() {
               symbol: state.quoteToken!.symbol,
               decimals: state.quoteToken!.decimals,
             }}
-            tickLower={effectiveTickLower}
-            tickUpper={effectiveTickUpper}
-            liquidity={liquidityBigInt}
-            costBasis={costBasis}
+            position={simulationPosition}
             sliderBounds={sliderBounds}
             onSliderBoundsChange={handleSliderBoundsChange}
             onTickLowerChange={handleTickLowerChange}
             onTickUpperChange={handleTickUpperChange}
             onRangeBoundaryInteraction={handleRangeBoundaryInteraction}
+            onStopLossPriceChange={setStopLossPrice}
+            onTakeProfitPriceChange={setTakeProfitPrice}
+            enableSLTPInteraction={state.configurationTab === 'sltp'}
             className="flex-1 min-h-0"
           />
           <p className="text-xs text-slate-400 mt-2 text-center shrink-0">

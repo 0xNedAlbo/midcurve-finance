@@ -263,10 +263,7 @@ export function PositionConfigStep({
               symbol: quotePoolToken.symbol,
               decimals: quotePoolToken.decimals,
             }}
-            tickLower={tickLower}
-            tickUpper={tickUpper}
-            liquidity={liquidity}
-            costBasis={costBasis}
+            position={null}
             sliderBounds={sliderBounds}
             onSliderBoundsChange={setSliderBounds}
             height={320}

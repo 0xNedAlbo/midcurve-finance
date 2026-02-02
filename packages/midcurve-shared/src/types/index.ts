@@ -100,6 +100,13 @@ export type {
 export {
   positionStateToJSON,
   positionStateFromJSON,
+  CloseOrderSimulationOverlay,
+} from './position/index.js';
+export type {
+  CloseOrderTriggerState,
+  CloseOrderSimulationOverlayParams,
+  UniswapV3SimulationParams,
+  PnLSimulationResult,
 } from './position/index.js';
 
 // ============================================================================

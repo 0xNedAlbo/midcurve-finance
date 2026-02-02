@@ -9,12 +9,12 @@ import { ParentSize } from "@visx/responsive";
 import { LinePath, Area } from "@visx/shape";
 import { curveMonotoneX } from "@visx/curve";
 import {
-  generatePnLCurve,
   tickToPrice,
   compareAddresses,
   getTickSpacing,
   priceToTick,
   formatCompactValue,
+  CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
 
 // ============================================================================
@@ -51,11 +51,9 @@ export interface InteractivePnLCurveProps {
   // Token info (simpler interface)
   baseToken: PnLCurveTokenData;
   quoteToken: PnLCurveTokenData;
-  // Position parameters
-  tickLower: number;
-  tickUpper: number;
-  liquidity: bigint;
-  costBasis: bigint;
+  // Position object (CloseOrderSimulationOverlay wrapping UniswapV3Position)
+  // Used for curve generation via simulatePnLAtPrice()
+  position: CloseOrderSimulationOverlay | null;
   // Visual bounds
   sliderBounds?: { min: number; max: number };
   // Callback for X-axis zoom
@@ -65,6 +63,11 @@ export interface InteractivePnLCurveProps {
   onTickUpperChange?: (newTickUpper: number) => void;
   // Callback when user starts interacting with range boundaries
   onRangeBoundaryInteraction?: () => void;
+  // Callbacks for SL/TP changes
+  onStopLossPriceChange?: (price: bigint | null) => void;
+  onTakeProfitPriceChange?: (price: bigint | null) => void;
+  // Enable SL/TP interaction mode (default: true if SL/TP callbacks provided)
+  enableSLTPInteraction?: boolean;
   // Dimensions
   height?: number;
   className?: string;
@@ -91,16 +94,28 @@ function InteractivePnLCurveInner({
   poolData,
   baseToken,
   quoteToken,
-  tickLower,
-  tickUpper,
-  liquidity,
-  costBasis,
+  position,
   sliderBounds,
   onSliderBoundsChange,
   onTickLowerChange,
   onTickUpperChange,
   onRangeBoundaryInteraction,
+  onStopLossPriceChange,
+  onTakeProfitPriceChange,
+  enableSLTPInteraction = false,
 }: InteractivePnLCurveProps & { width: number }) {
+  // Extract position properties (null-safe)
+  const positionConfig = position?.config as { tickLower?: number; tickUpper?: number } | undefined;
+  const positionState = position?.state as { liquidity?: string } | undefined;
+  const tickLower = positionConfig?.tickLower ?? 0;
+  const tickUpper = positionConfig?.tickUpper ?? 0;
+  // Liquidity from state is stringified bigint, parse it
+  const liquidity = positionState?.liquidity ? BigInt(positionState.liquidity) : 0n;
+
+  // Extract SL/TP prices from the overlay (these are bigint | null)
+  const stopLossPrice = position?.stopLossPrice ?? null;
+  const takeProfitPrice = position?.takeProfitPrice ?? null;
+
   // Calculate chart dimensions
   const chartWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
   const chartHeight = Math.max(0, height! - MARGIN.top - MARGIN.bottom);
@@ -176,71 +191,67 @@ function InteractivePnLCurveInner({
     }
   }, [poolData.currentTick, baseToken.address, quoteToken.address, baseTokenDecimals, quoteToken.decimals]);
 
-  // Generate PnL curve data
+  // Generate PnL curve data using position.simulatePnLAtPrice()
   const curveData = useMemo((): CurveDataPoint[] => {
-    if (liquidity === 0n) {
+    // Need position with liquidity to generate curve
+    if (!position || liquidity === 0n) {
       return [];
     }
 
     try {
-      const tickSpacing = getTickSpacing(poolData.feeBps);
       const visualMin = sliderBounds?.min ?? lowerPrice;
       const visualMax = sliderBounds?.max ?? upperPrice;
 
-      const priceMinBigInt = BigInt(
-        Math.floor(visualMin * Number(10n ** BigInt(quoteToken.decimals)))
-      );
-      const priceMaxBigInt = BigInt(
-        Math.floor(visualMax * Number(10n ** BigInt(quoteToken.decimals)))
-      );
+      // Ensure valid bounds
+      if (visualMin <= 0 || visualMax <= 0 || visualMin >= visualMax) {
+        return [];
+      }
 
-      const priceMin = priceMinBigInt > 0n ? priceMinBigInt : 1n;
-      const priceMax = priceMaxBigInt;
+      const quoteDecimalsDivisor = 10n ** BigInt(quoteToken.decimals);
 
-      const data = generatePnLCurve(
-        liquidity,
-        tickLower,
-        tickUpper,
-        costBasis,
-        baseToken.address,
-        quoteToken.address,
-        baseToken.decimals,
-        tickSpacing,
-        { min: priceMin > 0n ? priceMin : 1n, max: priceMax }
-      );
+      // Generate evenly spaced price points (100 points for smooth curve)
+      const numPoints = 100;
+      const points: CurveDataPoint[] = [];
 
-      return data.map((point) => {
-        const priceDisplay =
-          Number(point.price) / Number(10n ** BigInt(quoteToken.decimals));
-        const pnlDisplay =
-          Number(point.pnl) / Number(10n ** BigInt(quoteToken.decimals));
-        const positionValueDisplay =
-          Number(point.positionValue) /
-          Number(10n ** BigInt(quoteToken.decimals));
+      for (let i = 0; i <= numPoints; i++) {
+        const priceDisplay = visualMin + (visualMax - visualMin) * (i / numPoints);
 
-        return {
+        // Convert display price to bigint (quote token units)
+        const priceBigint = BigInt(
+          Math.floor(priceDisplay * Number(quoteDecimalsDivisor))
+        );
+
+        // Skip invalid prices
+        if (priceBigint <= 0n) continue;
+
+        // Use position's simulation method (handles SL/TP flattening automatically)
+        const result = position.simulatePnLAtPrice(priceBigint);
+
+        // Convert bigint values to display numbers
+        const positionValueDisplay = Number(result.positionValue) / Number(quoteDecimalsDivisor);
+        const pnlDisplay = Number(result.pnlValue) / Number(quoteDecimalsDivisor);
+
+        points.push({
           price: priceDisplay,
           positionValue: positionValueDisplay,
           pnl: pnlDisplay,
-          pnlPercent: point.pnlPercent,
-          phase: point.phase,
-        };
-      });
+          pnlPercent: result.pnlPercent,
+          phase: 'in', // Phase could be extracted from UniswapV3PnLSimulationResult if needed
+        });
+      }
+
+      return points;
     } catch (error) {
       console.error("Error generating PnL curve:", error);
       return [];
     }
   }, [
-    baseToken,
-    quoteToken,
+    position,
     liquidity,
-    tickLower,
-    tickUpper,
-    costBasis,
     lowerPrice,
     upperPrice,
     sliderBounds,
-    poolData.feeBps,
+    quoteToken.decimals,
   ]);
 
   // Find the PnL percentage at the current price by interpolating from curve data
@@ -384,6 +395,13 @@ function InteractivePnLCurveInner({
     startX: 0,
     startPrice: 0,
   });
+
+  // Ref for SL/TP drag operations (dragging existing SL/TP lines)
+  const slTpDragRef = useRef<{
+    isDragging: boolean;
+    triggerType: 'sl' | 'tp' | null;
+    startX: number;
+  }>({ isDragging: false, triggerType: null, startX: 0 });
 
   // X-axis drag handlers
   const handleXAxisMouseDown = useCallback((e: React.MouseEvent) => {
@@ -595,6 +613,75 @@ function InteractivePnLCurveInner({
     rangeDragRef.current.boundary = null;
   }, []);
 
+  // ============================================================================
+  // SL/TP Interaction Handlers
+  // ============================================================================
+
+  // Convert display price to bigint (quote token units)
+  const displayPriceToBigint = useCallback((price: number): bigint => {
+    return BigInt(Math.floor(price * Number(10n ** BigInt(quoteToken.decimals))));
+  }, [quoteToken.decimals]);
+
+  // Convert bigint price to display price
+  const bigintPriceToDisplay = useCallback((price: bigint): number => {
+    return Number(price) / Number(10n ** BigInt(quoteToken.decimals));
+  }, [quoteToken.decimals]);
+
+  // Handle mouse down on existing SL/TP line to start dragging
+  const handleSlTpLineMouseDown = useCallback(
+    (triggerType: 'sl' | 'tp', e: React.MouseEvent) => {
+      if (!enableSLTPInteraction) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      slTpDragRef.current = {
+        isDragging: true,
+        triggerType,
+        startX: e.clientX,
+      };
+    },
+    [enableSLTPInteraction]
+  );
+
+  // Handle mouse move while dragging existing SL/TP line
+  const handleSlTpDragMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!slTpDragRef.current.isDragging) return;
+
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (!svgRect) return;
+
+      const mouseX = e.clientX - svgRect.left - MARGIN.left;
+      const newPrice = xScale.invert(mouseX);
+
+      const { triggerType } = slTpDragRef.current;
+      let constrainedPrice = newPrice;
+
+      if (triggerType === 'sl') {
+        // SL must be below current price
+        constrainedPrice = Math.min(newPrice, currentPrice * 0.9999);
+      } else if (triggerType === 'tp') {
+        // TP must be above current price
+        constrainedPrice = Math.max(newPrice, currentPrice * 1.0001);
+      }
+
+      constrainedPrice = Math.max(0.0001, constrainedPrice);
+      const priceBigint = displayPriceToBigint(constrainedPrice);
+
+      if (triggerType === 'sl') {
+        onStopLossPriceChange?.(priceBigint);
+      } else if (triggerType === 'tp') {
+        onTakeProfitPriceChange?.(priceBigint);
+      }
+    },
+    [xScale, currentPrice, displayPriceToBigint, onStopLossPriceChange, onTakeProfitPriceChange]
+  );
+
+  // Handle mouse up to end SL/TP line dragging
+  const handleSlTpDragMouseUp = useCallback(() => {
+    slTpDragRef.current = { isDragging: false, triggerType: null, startX: 0 };
+  }, []);
+
   // Tooltip hover handler - find closest data point to mouse X position
   const handleTooltipMouseMove = useCallback(
     (e: React.MouseEvent) => {
@@ -648,6 +735,7 @@ function InteractivePnLCurveInner({
       handleYAxisMouseMove(e);
       handleChartPanMouseMove(e);
       handleRangeBoundaryMouseMove(e);
+      handleSlTpDragMouseMove(e);
     };
 
     const handleMouseUp = () => {
@@ -655,6 +743,7 @@ function InteractivePnLCurveInner({
       handleYAxisMouseUp();
       handleChartPanMouseUp();
       handleRangeBoundaryMouseUp();
+      handleSlTpDragMouseUp();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -667,7 +756,8 @@ function InteractivePnLCurveInner({
   }, [
     handleXAxisMouseMove, handleYAxisMouseMove, handleChartPanMouseMove,
     handleXAxisMouseUp, handleYAxisMouseUp, handleChartPanMouseUp,
-    handleRangeBoundaryMouseMove, handleRangeBoundaryMouseUp
+    handleRangeBoundaryMouseMove, handleRangeBoundaryMouseUp,
+    handleSlTpDragMouseMove, handleSlTpDragMouseUp
   ]);
 
   if (width < 10 || chartHeight < 10) {
@@ -676,6 +766,10 @@ function InteractivePnLCurveInner({
 
   // When liquidity is 0, we still show the grid with a flat line at 0%
   const hasPosition = liquidity > 0n && curveData.length > 0;
+
+  // Calculate display prices for SL/TP lines
+  const slDisplayPrice = stopLossPrice !== null ? bigintPriceToDisplay(stopLossPrice) : null;
+  const tpDisplayPrice = takeProfitPrice !== null ? bigintPriceToDisplay(takeProfitPrice) : null;
 
   return (
     <svg ref={svgRef} width={width} height={height}>
@@ -1001,6 +1095,116 @@ function InteractivePnLCurveInner({
             >
               {formatCompactValue(upperPriceBigint, quoteToken.decimals)}
             </text>
+          </>
+        )}
+
+        {/* Stop Loss (SL) trigger line */}
+        {hasPosition && slDisplayPrice !== null && (
+          <>
+            {/* SL line - visual (clipped) */}
+            <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
+              <line
+                x1={xScale(slDisplayPrice)}
+                y1={0}
+                x2={xScale(slDisplayPrice)}
+                y2={chartHeight}
+                stroke="#ef4444"
+                strokeWidth={2}
+                strokeDasharray="6,4"
+              />
+            </g>
+            {/* SL - interactive hit area */}
+            <rect
+              x={xScale(slDisplayPrice) - 10}
+              y={0}
+              width={20}
+              height={chartHeight}
+              fill="transparent"
+              pointerEvents={enableSLTPInteraction ? "all" : "none"}
+              style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+              onMouseDown={(e) => handleSlTpLineMouseDown('sl', e)}
+            />
+            {/* SL label and handle at bottom */}
+            <g>
+              {/* SL triangle handle - base on line, pointing left */}
+              <polygon
+                points={`${xScale(slDisplayPrice)},${chartHeight - 28} ${xScale(slDisplayPrice)},${chartHeight - 12} ${xScale(slDisplayPrice) - 12},${chartHeight - 20}`}
+                fill="#ef4444"
+                stroke="#f87171"
+                strokeWidth={2}
+                strokeLinejoin="round"
+                pointerEvents={enableSLTPInteraction ? "all" : "none"}
+                style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+                onMouseDown={(e) => handleSlTpLineMouseDown('sl', e)}
+              />
+              {/* SL price label to the left of handle */}
+              <text
+                x={xScale(slDisplayPrice) - 16}
+                y={chartHeight - 16}
+                fill="#ef4444"
+                fontSize={10}
+                fontWeight={500}
+                textAnchor="end"
+                pointerEvents="none"
+              >
+                {formatCompactValue(displayPriceToBigint(slDisplayPrice), quoteToken.decimals)}
+              </text>
+            </g>
+          </>
+        )}
+
+        {/* Take Profit (TP) trigger line */}
+        {hasPosition && tpDisplayPrice !== null && (
+          <>
+            {/* TP line - visual (clipped) */}
+            <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
+              <line
+                x1={xScale(tpDisplayPrice)}
+                y1={0}
+                x2={xScale(tpDisplayPrice)}
+                y2={chartHeight}
+                stroke="#22c55e"
+                strokeWidth={2}
+                strokeDasharray="6,4"
+              />
+            </g>
+            {/* TP - interactive hit area */}
+            <rect
+              x={xScale(tpDisplayPrice) - 10}
+              y={0}
+              width={20}
+              height={chartHeight}
+              fill="transparent"
+              pointerEvents={enableSLTPInteraction ? "all" : "none"}
+              style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+              onMouseDown={(e) => handleSlTpLineMouseDown('tp', e)}
+            />
+            {/* TP label and handle at bottom */}
+            <g>
+              {/* TP triangle handle - base on line, pointing right */}
+              <polygon
+                points={`${xScale(tpDisplayPrice)},${chartHeight - 28} ${xScale(tpDisplayPrice)},${chartHeight - 12} ${xScale(tpDisplayPrice) + 12},${chartHeight - 20}`}
+                fill="#22c55e"
+                stroke="#4ade80"
+                strokeWidth={2}
+                strokeLinejoin="round"
+                pointerEvents={enableSLTPInteraction ? "all" : "none"}
+                style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+                onMouseDown={(e) => handleSlTpLineMouseDown('tp', e)}
+              />
+              {/* TP price label to the right of handle */}
+              <text
+                x={xScale(tpDisplayPrice) + 16}
+                y={chartHeight - 16}
+                fill="#22c55e"
+                fontSize={10}
+                fontWeight={500}
+                textAnchor="start"
+                pointerEvents="none"
+              >
+                {formatCompactValue(displayPriceToBigint(tpDisplayPrice), quoteToken.decimals)}
+              </text>
+            </g>
           </>
         )}
 
