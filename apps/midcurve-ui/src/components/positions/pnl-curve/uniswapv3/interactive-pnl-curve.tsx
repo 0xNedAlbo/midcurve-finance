@@ -1272,7 +1272,7 @@ function InteractivePnLCurveInner({
                   >
                     <tspan fontWeight="500">Price:</tspan>
                     <tspan fill="#e2e8f0" dx={4}>
-                      {hoveredPoint.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quoteToken.symbol}
+                      {formatCompactValue(displayPriceToBigint(hoveredPoint.price), quoteToken.decimals)} {quoteToken.symbol}
                     </tspan>
                   </text>
                   {/* Position Value */}
@@ -1284,7 +1284,7 @@ function InteractivePnLCurveInner({
                   >
                     <tspan fontWeight="500">Position Value:</tspan>
                     <tspan fill="#e2e8f0" dx={4}>
-                      {hoveredPoint.positionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quoteToken.symbol}
+                      {formatCompactValue(displayPriceToBigint(hoveredPoint.positionValue), quoteToken.decimals)} {quoteToken.symbol}
                     </tspan>
                   </text>
                   {/* PnL */}
@@ -1296,7 +1296,7 @@ function InteractivePnLCurveInner({
                   >
                     <tspan fontWeight="500">PnL:</tspan>
                     <tspan fill={pnlColor} dx={4}>
-                      {hoveredPoint.pnl >= 0 ? '+' : ''}{hoveredPoint.pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quoteToken.symbol} ({hoveredPoint.pnlPercent >= 0 ? '+' : ''}{hoveredPoint.pnlPercent.toFixed(2)}%)
+                      {hoveredPoint.pnl >= 0 ? '+' : ''}{formatCompactValue(displayPriceToBigint(Math.abs(hoveredPoint.pnl)), quoteToken.decimals)} {quoteToken.symbol} ({hoveredPoint.pnlPercent >= 0 ? '+' : ''}{hoveredPoint.pnlPercent.toFixed(2)}%)
                     </tspan>
                   </text>
                 </g>
