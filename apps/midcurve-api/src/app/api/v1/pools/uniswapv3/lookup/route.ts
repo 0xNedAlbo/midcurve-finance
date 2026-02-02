@@ -3,8 +3,8 @@
  *
  * GET /api/v1/pools/uniswapv3/lookup?address=0x...
  *
- * Searches for a pool address across all supported Uniswap V3 chains.
- * Returns pools found with full metrics from subgraph.
+ * Searches for a pool address across all supported Uniswap V3 chains using on-chain discovery.
+ * Returns pools found with optional metrics from subgraph (graceful degradation to zero values).
  * Includes isFavorite status for each pool.
  *
  * Authentication: Required (session only)
@@ -21,7 +21,7 @@ import {
 } from '@midcurve/api-shared';
 import type { LookupPoolByAddressData, PoolSearchResultItem } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getSubgraphClient, getFavoritePoolService } from '@/lib/services';
+import { getSubgraphClient, getFavoritePoolService, getUniswapV3PoolService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -85,30 +85,66 @@ export async function GET(request: NextRequest): Promise<Response> {
         { address, chainCount: LOOKUP_CHAINS.length }
       );
 
-      // Query all chains in parallel via subgraph
+      // Query all chains in parallel using on-chain discovery + optional subgraph metrics
       const subgraphClient = getSubgraphClient();
+      const poolService = getUniswapV3PoolService();
 
       const chainPromises = LOOKUP_CHAINS.map(async (chainId) => {
         try {
-          const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [address]);
-          const poolMetrics = metricsMap.get(address.toLowerCase());
-
-          if (!poolMetrics) {
+          // 1. Try to discover pool on-chain (RPC)
+          let pool;
+          try {
+            pool = await poolService.discover({
+              poolAddress: address,
+              chainId,
+            });
+          } catch {
+            // Pool doesn't exist on this chain
             return null;
           }
 
+          // 2. Pool exists - try to fetch metrics from subgraph (optional)
+          let tvlUSD = '0';
+          let volume24hUSD = '0';
+          let fees24hUSD = '0';
+          let fees7dUSD = '0';
+          let apr7d = '0';
+
+          try {
+            const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [address]);
+            const poolMetrics = metricsMap.get(address.toLowerCase());
+            if (poolMetrics) {
+              tvlUSD = poolMetrics.tvlUSD;
+              volume24hUSD = poolMetrics.volume24hUSD;
+              fees24hUSD = poolMetrics.fees24hUSD;
+              fees7dUSD = poolMetrics.fees7dUSD;
+              apr7d = poolMetrics.apr7d;
+            }
+          } catch (error) {
+            apiLogger.warn({ chainId, address, error }, 'Failed to fetch metrics, using zero values');
+          }
+
+          // 3. Build result from discovered pool + metrics
           return {
-            poolAddress: poolMetrics.poolAddress,
+            poolAddress: pool.config.address,
             chainId,
             chainName: CHAIN_NAMES[chainId] ?? `Chain ${chainId}`,
-            feeTier: poolMetrics.feeTier,
-            token0: poolMetrics.token0,
-            token1: poolMetrics.token1,
-            tvlUSD: poolMetrics.tvlUSD,
-            volume24hUSD: poolMetrics.volume24hUSD,
-            fees24hUSD: poolMetrics.fees24hUSD,
-            fees7dUSD: poolMetrics.fees7dUSD,
-            apr7d: poolMetrics.apr7d,
+            feeTier: pool.feeBps,
+            token0: {
+              address: pool.token0.config.address,
+              symbol: pool.token0.symbol,
+              decimals: pool.token0.decimals,
+            },
+            token1: {
+              address: pool.token1.config.address,
+              symbol: pool.token1.symbol,
+              decimals: pool.token1.decimals,
+            },
+            tvlUSD,
+            volume24hUSD,
+            fees24hUSD,
+            fees7dUSD,
+            apr7d,
             isFavorite: false, // Will be enriched below
           } as PoolSearchResultItem;
         } catch (error) {
@@ -164,40 +200,6 @@ export async function GET(request: NextRequest): Promise<Response> {
         requestId,
       });
 
-      // Map service errors to API error codes
-      if (error instanceof Error) {
-        // Subgraph unavailable (transient network error)
-        if (error.name === 'UniswapV3SubgraphUnavailableError') {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.SERVICE_UNAVAILABLE,
-            'Uniswap V3 subgraph temporarily unavailable',
-            error.message
-          );
-
-          apiLog.requestEnd(apiLogger, requestId, 503, Date.now() - startTime);
-
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.SERVICE_UNAVAILABLE],
-          });
-        }
-
-        // Subgraph API error
-        if (error.name === 'UniswapV3SubgraphApiError') {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.EXTERNAL_SERVICE_ERROR,
-            'Uniswap V3 subgraph returned an error',
-            error.message
-          );
-
-          apiLog.requestEnd(apiLogger, requestId, 502, Date.now() - startTime);
-
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.EXTERNAL_SERVICE_ERROR],
-          });
-        }
-      }
-
-      // Generic error
       const errorResponse = createErrorResponse(
         ApiErrorCode.INTERNAL_SERVER_ERROR,
         'Failed to lookup pool',
