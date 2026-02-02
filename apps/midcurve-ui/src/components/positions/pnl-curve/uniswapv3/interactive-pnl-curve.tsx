@@ -14,6 +14,7 @@ import {
   compareAddresses,
   getTickSpacing,
   priceToTick,
+  formatCompactValue,
 } from "@midcurve/shared";
 
 // ============================================================================
@@ -105,7 +106,7 @@ function InteractivePnLCurveInner({
   const chartHeight = Math.max(0, height! - MARGIN.top - MARGIN.bottom);
 
   // Local state for Y-axis bounds (PnL percentage range)
-  const [yBounds, setYBounds] = useState({ min: -50, max: 15 });
+  const [yBounds, setYBounds] = useState({ min: -30, max: 15 });
 
   // Determine token roles
   const isBaseToken0 = useMemo(() => {
@@ -117,8 +118,8 @@ function InteractivePnLCurveInner({
     ? poolData.token0Decimals
     : poolData.token1Decimals;
 
-  // Calculate lower and upper prices
-  const { lowerPrice, upperPrice } = useMemo(() => {
+  // Calculate lower and upper prices (both bigint for formatting and float for scales)
+  const { lowerPrice, upperPrice, lowerPriceBigint, upperPriceBigint } = useMemo(() => {
     try {
       const priceAtTickLower = tickToPrice(
         tickLower,
@@ -137,19 +138,43 @@ function InteractivePnLCurveInner({
       const divisor = 10n ** BigInt(quoteToken.decimals);
       const isToken0Quote = !isBaseToken0;
 
+      // Bigint prices in quote currency units (with decimals)
+      const lowerBigint = isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+      const upperBigint = isToken0Quote ? priceAtTickLower : priceAtTickUpper;
+
       return {
-        lowerPrice: isToken0Quote
-          ? Number(priceAtTickUpper) / Number(divisor)
-          : Number(priceAtTickLower) / Number(divisor),
-        upperPrice: isToken0Quote
-          ? Number(priceAtTickLower) / Number(divisor)
-          : Number(priceAtTickUpper) / Number(divisor),
+        lowerPrice: Number(lowerBigint) / Number(divisor),
+        upperPrice: Number(upperBigint) / Number(divisor),
+        lowerPriceBigint: lowerBigint,
+        upperPriceBigint: upperBigint,
       };
     } catch (error) {
       console.error("Error calculating range prices:", error);
-      return { lowerPrice: 0, upperPrice: 0 };
+      return { lowerPrice: 0, upperPrice: 0, lowerPriceBigint: 0n, upperPriceBigint: 0n };
     }
   }, [baseToken, quoteToken, tickLower, tickUpper, baseTokenDecimals, isBaseToken0]);
+
+  // Calculate current price from pool's current tick
+  const { currentPrice, currentPriceBigint } = useMemo(() => {
+    try {
+      const priceAtCurrentTick = tickToPrice(
+        poolData.currentTick,
+        baseToken.address,
+        quoteToken.address,
+        baseTokenDecimals
+      );
+
+      const divisor = 10n ** BigInt(quoteToken.decimals);
+
+      return {
+        currentPrice: Number(priceAtCurrentTick) / Number(divisor),
+        currentPriceBigint: priceAtCurrentTick,
+      };
+    } catch (error) {
+      console.error("Error calculating current price:", error);
+      return { currentPrice: 0, currentPriceBigint: 0n };
+    }
+  }, [poolData.currentTick, baseToken.address, quoteToken.address, baseTokenDecimals, quoteToken.decimals]);
 
   // Generate PnL curve data
   const curveData = useMemo((): CurveDataPoint[] => {
@@ -302,6 +327,10 @@ function InteractivePnLCurveInner({
 
   // State for pan cursor feedback
   const [isPanning, setIsPanning] = useState(false);
+
+  // State for tooltip hover
+  const [hoveredPoint, setHoveredPoint] = useState<CurveDataPoint | null>(null);
+  const [hoverX, setHoverX] = useState<number | null>(null);
 
   // SVG ref for calculating mouse positions
   const svgRef = useRef<SVGSVGElement>(null);
@@ -529,6 +558,52 @@ function InteractivePnLCurveInner({
     rangeDragRef.current.boundary = null;
   }, []);
 
+  // Tooltip hover handler - find closest data point to mouse X position
+  const handleTooltipMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (liquidity === 0n || curveData.length === 0) {
+        setHoveredPoint(null);
+        setHoverX(null);
+        return;
+      }
+
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      if (!svgRect) return;
+
+      const mouseX = e.clientX - svgRect.left - MARGIN.left;
+
+      // Check if mouse is within chart area
+      if (mouseX < 0 || mouseX > chartWidth) {
+        setHoveredPoint(null);
+        setHoverX(null);
+        return;
+      }
+
+      const priceAtMouse = xScale.invert(mouseX);
+
+      // Find closest data point by price
+      let closestPoint = curveData[0];
+      let closestDistance = Math.abs(curveData[0].price - priceAtMouse);
+
+      for (const point of curveData) {
+        const distance = Math.abs(point.price - priceAtMouse);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestPoint = point;
+        }
+      }
+
+      setHoveredPoint(closestPoint);
+      setHoverX(xScale(closestPoint.price));
+    },
+    [curveData, xScale, chartWidth, liquidity]
+  );
+
+  const handleTooltipMouseLeave = useCallback(() => {
+    setHoveredPoint(null);
+    setHoverX(null);
+  }, []);
+
   // Attach document-level listeners for drag operations
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -578,17 +653,6 @@ function InteractivePnLCurveInner({
       />
 
       <Group left={MARGIN.left} top={MARGIN.top}>
-        {/* Chart pan hit area - FIRST so other interactive elements can override it */}
-        <rect
-          x={0}
-          y={0}
-          width={chartWidth}
-          height={chartHeight}
-          fill="transparent"
-          style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
-          onMouseDown={handleChartPanMouseDown}
-        />
-
         {/* Grid background */}
         <GridRows
           scale={yScale}
@@ -642,6 +706,31 @@ function InteractivePnLCurveInner({
           }}
           labelOffset={25}
         />
+
+        {/* Current price marker above x-axis */}
+        {currentPrice > 0 && (
+          <g pointerEvents="none">
+            {/* Small vertical line upward from axis */}
+            <line
+              x1={xScale(currentPrice)}
+              y1={chartHeight}
+              x2={xScale(currentPrice)}
+              y2={chartHeight - 8}
+              stroke="#94a3b8"
+              strokeWidth={1}
+            />
+            {/* Current price label (above the line, inside chart) */}
+            <text
+              x={xScale(currentPrice)}
+              y={chartHeight - 12}
+              fill="#94a3b8"
+              fontSize={11}
+              textAnchor="middle"
+            >
+              {formatCompactValue(currentPriceBigint, quoteToken.decimals)}
+            </text>
+          </g>
+        )}
 
         {/* Y-Axis (PnL %) */}
         <AxisLeft
@@ -726,17 +815,17 @@ function InteractivePnLCurveInner({
               data={curveData}
               x={(d) => xScale(d.price)}
               y={(d) => yScale(d.pnlPercent)}
-              stroke="#3b82f6"
+              stroke="#ffffff"
               strokeWidth={2}
               curve={curveMonotoneX}
             />
           </g>
         )}
 
-        {/* Range boundary markers - draggable vertical lines */}
+        {/* Range boundary markers - visual lines only (clipped) */}
         {hasPosition && (
           <>
-            {/* Lower boundary - visual line (clipped) */}
+            {/* Lower boundary - visual line */}
             <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
               <line
                 x1={xScale(lowerPrice)}
@@ -748,29 +837,7 @@ function InteractivePnLCurveInner({
                 strokeDasharray="4,4"
               />
             </g>
-            {/* Lower boundary - interactive elements (not clipped for better hit detection) */}
-            <rect
-              x={xScale(lowerPrice) - 10}
-              y={0}
-              width={20}
-              height={chartHeight}
-              fill="transparent"
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
-            />
-            {/* Triangle handle pointing right (base on line) at top */}
-            <polygon
-              points={`${xScale(lowerPrice)},2 ${xScale(lowerPrice)},14 ${xScale(lowerPrice) + 10},8`}
-              fill="#14b8a6"
-              stroke="#fff"
-              strokeWidth={1.5}
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
-            />
-
-            {/* Upper boundary - visual line (clipped) */}
+            {/* Upper boundary - visual line */}
             <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
               <line
                 x1={xScale(upperPrice)}
@@ -782,27 +849,6 @@ function InteractivePnLCurveInner({
                 strokeDasharray="4,4"
               />
             </g>
-            {/* Upper boundary - interactive elements (not clipped for better hit detection) */}
-            <rect
-              x={xScale(upperPrice) - 10}
-              y={0}
-              width={20}
-              height={chartHeight}
-              fill="transparent"
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
-            />
-            {/* Triangle handle pointing left (base on line) at top */}
-            <polygon
-              points={`${xScale(upperPrice)},2 ${xScale(upperPrice)},14 ${xScale(upperPrice) - 10},8`}
-              fill="#14b8a6"
-              stroke="#fff"
-              strokeWidth={1.5}
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
-            />
           </>
         )}
 
@@ -818,6 +864,190 @@ function InteractivePnLCurveInner({
           >
             Enter token amounts to see PnL curve
           </text>
+        )}
+
+        {/* Tooltip hover overlay - captures mouse events for tooltip (below range handles) */}
+        <rect
+          x={0}
+          y={0}
+          width={chartWidth}
+          height={chartHeight}
+          fill="transparent"
+          pointerEvents="all"
+          style={{ cursor: isPanning ? 'grabbing' : 'crosshair' }}
+          onMouseMove={handleTooltipMouseMove}
+          onMouseLeave={handleTooltipMouseLeave}
+          onMouseDown={handleChartPanMouseDown}
+        />
+
+        {/* Range boundary interactive elements - ON TOP of tooltip overlay */}
+        {hasPosition && (
+          <>
+            {/* Lower boundary - interactive hit area */}
+            <rect
+              x={xScale(lowerPrice) - 10}
+              y={0}
+              width={20}
+              height={chartHeight}
+              fill="transparent"
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
+            />
+            {/* Lower boundary - triangle handle */}
+            <polygon
+              points={`${xScale(lowerPrice)},2 ${xScale(lowerPrice)},14 ${xScale(lowerPrice) + 10},8`}
+              fill="#14b8a6"
+              stroke="#5eead4"
+              strokeWidth={1.5}
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
+            />
+            {/* Lower boundary - price label (left of triangle) */}
+            <text
+              x={xScale(lowerPrice) - 4}
+              y={10}
+              fill="#14b8a6"
+              fontSize={11}
+              fontWeight={500}
+              textAnchor="end"
+              pointerEvents="none"
+            >
+              {formatCompactValue(lowerPriceBigint, quoteToken.decimals)}
+            </text>
+
+            {/* Upper boundary - interactive hit area */}
+            <rect
+              x={xScale(upperPrice) - 10}
+              y={0}
+              width={20}
+              height={chartHeight}
+              fill="transparent"
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
+            />
+            {/* Upper boundary - triangle handle */}
+            <polygon
+              points={`${xScale(upperPrice)},2 ${xScale(upperPrice)},14 ${xScale(upperPrice) - 10},8`}
+              fill="#14b8a6"
+              stroke="#5eead4"
+              strokeWidth={1.5}
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
+              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
+            />
+            {/* Upper boundary - price label (right of triangle) */}
+            <text
+              x={xScale(upperPrice) + 4}
+              y={10}
+              fill="#14b8a6"
+              fontSize={11}
+              fontWeight={500}
+              textAnchor="start"
+              pointerEvents="none"
+            >
+              {formatCompactValue(upperPriceBigint, quoteToken.decimals)}
+            </text>
+          </>
+        )}
+
+        {/* Tooltip vertical line and marker - visual only, on top */}
+        {hoveredPoint && hoverX !== null && (
+          <>
+            {/* Vertical line */}
+            <line
+              x1={hoverX}
+              y1={0}
+              x2={hoverX}
+              y2={chartHeight}
+              stroke="#94a3b8"
+              strokeWidth={1}
+              strokeDasharray="3,3"
+              pointerEvents="none"
+            />
+            {/* Circle marker on the curve */}
+            <circle
+              cx={hoverX}
+              cy={yScale(hoveredPoint.pnlPercent)}
+              r={6}
+              fill="#3b82f6"
+              stroke="#fff"
+              strokeWidth={2}
+              pointerEvents="none"
+            />
+            {/* Tooltip box */}
+            {(() => {
+              const tooltipWidth = 180;
+              const tooltipHeight = 70;
+              const padding = 10;
+              // Position tooltip to the right of cursor, flip if near right edge
+              let tooltipX = hoverX + 15;
+              if (tooltipX + tooltipWidth > chartWidth) {
+                tooltipX = hoverX - tooltipWidth - 15;
+              }
+              // Position tooltip below cursor, flip if near bottom
+              let tooltipY = yScale(hoveredPoint.pnlPercent) - tooltipHeight / 2;
+              if (tooltipY < 0) tooltipY = 0;
+              if (tooltipY + tooltipHeight > chartHeight) {
+                tooltipY = chartHeight - tooltipHeight;
+              }
+              const pnlColor = hoveredPoint.pnl >= 0 ? '#22c55e' : '#ef4444';
+
+              return (
+                <g pointerEvents="none">
+                  {/* Tooltip background */}
+                  <rect
+                    x={tooltipX}
+                    y={tooltipY}
+                    width={tooltipWidth}
+                    height={tooltipHeight}
+                    fill="#1e293b"
+                    stroke="#475569"
+                    strokeWidth={1}
+                    rx={4}
+                  />
+                  {/* Price */}
+                  <text
+                    x={tooltipX + padding}
+                    y={tooltipY + 18}
+                    fill="#94a3b8"
+                    fontSize={11}
+                  >
+                    <tspan fontWeight="500">Price:</tspan>
+                    <tspan fill="#e2e8f0" dx={4}>
+                      {hoveredPoint.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quoteToken.symbol}
+                    </tspan>
+                  </text>
+                  {/* Position Value */}
+                  <text
+                    x={tooltipX + padding}
+                    y={tooltipY + 36}
+                    fill="#94a3b8"
+                    fontSize={11}
+                  >
+                    <tspan fontWeight="500">Position Value:</tspan>
+                    <tspan fill="#e2e8f0" dx={4}>
+                      {hoveredPoint.positionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quoteToken.symbol}
+                    </tspan>
+                  </text>
+                  {/* PnL */}
+                  <text
+                    x={tooltipX + padding}
+                    y={tooltipY + 54}
+                    fill="#94a3b8"
+                    fontSize={11}
+                  >
+                    <tspan fontWeight="500">PnL:</tspan>
+                    <tspan fill={pnlColor} dx={4}>
+                      {hoveredPoint.pnl >= 0 ? '+' : ''}{hoveredPoint.pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quoteToken.symbol} ({hoveredPoint.pnlPercent >= 0 ? '+' : ''}{hoveredPoint.pnlPercent.toFixed(2)}%)
+                    </tspan>
+                  </text>
+                </g>
+              );
+            })()}
+          </>
         )}
       </Group>
 
