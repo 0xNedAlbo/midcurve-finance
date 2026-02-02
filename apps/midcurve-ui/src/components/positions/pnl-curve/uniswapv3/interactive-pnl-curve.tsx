@@ -243,6 +243,43 @@ function InteractivePnLCurveInner({
     poolData.feeBps,
   ]);
 
+  // Find the PnL percentage at the current price by interpolating from curve data
+  const currentPricePnlPercent = useMemo(() => {
+    if (curveData.length === 0 || currentPrice <= 0) return null;
+
+    // Find the two closest points for interpolation
+    let lowerPoint: CurveDataPoint | null = null;
+    let upperPoint: CurveDataPoint | null = null;
+
+    for (const point of curveData) {
+      if (point.price <= currentPrice) {
+        if (!lowerPoint || point.price > lowerPoint.price) {
+          lowerPoint = point;
+        }
+      }
+      if (point.price >= currentPrice) {
+        if (!upperPoint || point.price < upperPoint.price) {
+          upperPoint = point;
+        }
+      }
+    }
+
+    // Interpolate between the two points
+    if (lowerPoint && upperPoint) {
+      if (lowerPoint.price === upperPoint.price) {
+        return lowerPoint.pnlPercent;
+      }
+      const ratio = (currentPrice - lowerPoint.price) / (upperPoint.price - lowerPoint.price);
+      return lowerPoint.pnlPercent + ratio * (upperPoint.pnlPercent - lowerPoint.pnlPercent);
+    } else if (lowerPoint) {
+      return lowerPoint.pnlPercent;
+    } else if (upperPoint) {
+      return upperPoint.pnlPercent;
+    }
+
+    return null;
+  }, [curveData, currentPrice]);
+
   // Calculate data bounds for scales
   // Y-axis uses yBounds state (zoomable), X-axis uses sliderBounds prop directly
   const { priceMin, priceMax } = useMemo(() => {
@@ -818,6 +855,20 @@ function InteractivePnLCurveInner({
               stroke="#ffffff"
               strokeWidth={2}
               curve={curveMonotoneX}
+            />
+          </g>
+        )}
+
+        {/* Current price marker on the curve */}
+        {hasPosition && currentPricePnlPercent !== null && (
+          <g clipPath="url(#pnl-curve-clip)" pointerEvents="none">
+            <line
+              x1={xScale(currentPrice)}
+              y1={yScale(currentPricePnlPercent) - 8}
+              x2={xScale(currentPrice)}
+              y2={yScale(currentPricePnlPercent) + 8}
+              stroke="#94a3b8"
+              strokeWidth={2}
             />
           </g>
         )}
