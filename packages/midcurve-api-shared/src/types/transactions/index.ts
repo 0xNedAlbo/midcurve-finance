@@ -5,3 +5,4 @@
  */
 
 export * from './evm-status.js';
+export * from './evm-status-watch.js';

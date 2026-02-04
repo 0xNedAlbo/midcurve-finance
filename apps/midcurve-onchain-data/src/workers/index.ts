@@ -8,6 +8,8 @@
  * - PoolPriceSubscriber: Subscribes to Swap events for pools with active positions
  * - PositionLiquiditySubscriber: Subscribes to NFPM events for active positions
  * - Erc20ApprovalSubscriber: Subscribes to ERC-20 Approval events for token approvals
+ * - Erc20BalanceSubscriber: Subscribes to ERC-20 Transfer events for token balances
+ * - EvmTxStatusSubscriber: Polls RPC for EVM transaction status updates
  *
  * Event Consumers:
  * - PositionEventHandler: Handles position.created, position.closed, and position.deleted
@@ -20,6 +22,8 @@ import { PositionEventHandler } from '../events';
 import { PoolPriceSubscriber } from './pool-price-subscriber';
 import { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
 import { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
+import { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
+import { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
 
 const log = onchainDataLogger.child({ component: 'WorkerManager' });
 
@@ -30,6 +34,8 @@ export class WorkerManager {
   private poolPriceSubscriber: PoolPriceSubscriber;
   private positionLiquiditySubscriber: PositionLiquiditySubscriber;
   private erc20ApprovalSubscriber: Erc20ApprovalSubscriber;
+  private erc20BalanceSubscriber: Erc20BalanceSubscriber;
+  private evmTxStatusSubscriber: EvmTxStatusSubscriber;
   private positionEventHandler: PositionEventHandler;
   private isRunning = false;
 
@@ -37,6 +43,8 @@ export class WorkerManager {
     this.poolPriceSubscriber = new PoolPriceSubscriber();
     this.positionLiquiditySubscriber = new PositionLiquiditySubscriber();
     this.erc20ApprovalSubscriber = new Erc20ApprovalSubscriber();
+    this.erc20BalanceSubscriber = new Erc20BalanceSubscriber();
+    this.evmTxStatusSubscriber = new EvmTxStatusSubscriber();
     this.positionEventHandler = new PositionEventHandler();
 
     // Wire both subscribers to event handler
@@ -76,6 +84,8 @@ export class WorkerManager {
         this.poolPriceSubscriber.start(),
         this.positionLiquiditySubscriber.start(),
         this.erc20ApprovalSubscriber.start(),
+        this.erc20BalanceSubscriber.start(),
+        this.evmTxStatusSubscriber.start(),
       ]);
 
       this.isRunning = true;
@@ -111,6 +121,8 @@ export class WorkerManager {
         this.poolPriceSubscriber.stop(),
         this.positionLiquiditySubscriber.stop(),
         this.erc20ApprovalSubscriber.stop(),
+        this.erc20BalanceSubscriber.stop(),
+        this.evmTxStatusSubscriber.stop(),
       ]);
 
       // Close RabbitMQ connection
@@ -136,6 +148,8 @@ export class WorkerManager {
     poolPriceSubscriber: ReturnType<PoolPriceSubscriber['getStatus']>;
     positionLiquiditySubscriber: ReturnType<PositionLiquiditySubscriber['getStatus']>;
     erc20ApprovalSubscriber: ReturnType<Erc20ApprovalSubscriber['getStatus']>;
+    erc20BalanceSubscriber: ReturnType<Erc20BalanceSubscriber['getStatus']>;
+    evmTxStatusSubscriber: ReturnType<EvmTxStatusSubscriber['getStatus']>;
     eventConsumer: {
       positionEvents: { isRunning: boolean };
     };
@@ -150,6 +164,8 @@ export class WorkerManager {
       poolPriceSubscriber: this.poolPriceSubscriber.getStatus(),
       positionLiquiditySubscriber: this.positionLiquiditySubscriber.getStatus(),
       erc20ApprovalSubscriber: this.erc20ApprovalSubscriber.getStatus(),
+      erc20BalanceSubscriber: this.erc20BalanceSubscriber.getStatus(),
+      evmTxStatusSubscriber: this.evmTxStatusSubscriber.getStatus(),
       eventConsumer: {
         positionEvents: { isRunning: this.positionEventHandler.isRunning() },
       },
@@ -173,3 +189,5 @@ export class WorkerManager {
 export { PoolPriceSubscriber } from './pool-price-subscriber';
 export { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
 export { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
+export { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
+export { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';

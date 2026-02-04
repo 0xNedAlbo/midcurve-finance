@@ -13,8 +13,10 @@
  * Discriminator for subscription types.
  * Determines the schema of config and state JSON fields.
  */
-export type OnchainSubscriptionType = 'erc20-approval';
-// Future: | 'erc20-transfer' | 'nft-transfer' | 'pool-price';
+export type OnchainSubscriptionType =
+  | 'erc20-approval'
+  | 'erc20-balance'
+  | 'evm-tx-status';
 
 /**
  * Subscription lifecycle status.
@@ -106,6 +108,125 @@ export interface Erc20ApprovalSubscriptionJSON extends Omit<OnchainSubscriptionJ
 }
 
 // ============================================================================
+// ERC-20 Balance Subscription Types
+// ============================================================================
+
+/**
+ * Config for ERC-20 balance subscriptions (immutable after creation).
+ */
+export interface Erc20BalanceSubscriptionConfig {
+  /** EVM chain ID */
+  chainId: number;
+  /** ERC-20 token contract address (EIP-55 normalized) */
+  tokenAddress: string;
+  /** Wallet address to watch balance for */
+  walletAddress: string;
+  /** ISO 8601 timestamp when subscription was started */
+  startedAt: string;
+}
+
+/**
+ * State for ERC-20 balance subscriptions (mutable).
+ */
+export interface Erc20BalanceSubscriptionState {
+  /** Current balance (bigint as string) */
+  balance: string;
+  /** Block number of last Transfer event */
+  lastEventBlock: number | null;
+  /** Transaction hash of last Transfer event */
+  lastEventTxHash: string | null;
+  /** ISO 8601 timestamp of last state update */
+  lastUpdatedAt: string;
+}
+
+/**
+ * Complete ERC-20 balance subscription data.
+ */
+export interface Erc20BalanceSubscriptionData extends Omit<OnchainSubscriptionData, 'config' | 'state'> {
+  subscriptionType: 'erc20-balance';
+  config: Erc20BalanceSubscriptionConfig;
+  state: Erc20BalanceSubscriptionState;
+}
+
+/**
+ * JSON representation for API responses.
+ */
+export interface Erc20BalanceSubscriptionJSON extends Omit<OnchainSubscriptionJSON, 'config' | 'state'> {
+  subscriptionType: 'erc20-balance';
+  config: Erc20BalanceSubscriptionConfig;
+  state: Erc20BalanceSubscriptionState;
+}
+
+// ============================================================================
+// EVM Transaction Status Subscription Types
+// ============================================================================
+
+/**
+ * Transaction status values.
+ */
+export type TxStatusValue = 'pending' | 'success' | 'reverted' | 'not_found';
+
+/**
+ * Config for EVM transaction status subscriptions (immutable after creation).
+ */
+export interface EvmTxStatusSubscriptionConfig {
+  /** EVM chain ID */
+  chainId: number;
+  /** Transaction hash to monitor */
+  txHash: string;
+  /** Target confirmations before completion (default: 12) */
+  targetConfirmations: number;
+  /** ISO 8601 timestamp when subscription was started */
+  startedAt: string;
+}
+
+/**
+ * State for EVM transaction status subscriptions (mutable).
+ */
+export interface EvmTxStatusSubscriptionState {
+  /** Current transaction status */
+  status: TxStatusValue;
+  /** Block number where tx was mined (null if pending) */
+  blockNumber: number | null;
+  /** Block hash where tx was mined */
+  blockHash: string | null;
+  /** Number of confirmations */
+  confirmations: number;
+  /** Gas used by the transaction (bigint as string) */
+  gasUsed: string | null;
+  /** Effective gas price paid (bigint as string) */
+  effectiveGasPrice: string | null;
+  /** Number of logs emitted */
+  logsCount: number | null;
+  /** Contract address if contract creation */
+  contractAddress: string | null;
+  /** ISO 8601 timestamp of last check */
+  lastCheckedAt: string;
+  /** Whether subscription is complete (status !== pending && confirmations >= target) */
+  isComplete: boolean;
+  /** ISO 8601 timestamp when subscription completed (for auto-delete) */
+  completedAt: string | null;
+}
+
+/**
+ * Complete EVM tx status subscription data.
+ */
+export interface EvmTxStatusSubscriptionData extends Omit<OnchainSubscriptionData, 'config' | 'state'> {
+  subscriptionType: 'evm-tx-status';
+  config: EvmTxStatusSubscriptionConfig;
+  state: EvmTxStatusSubscriptionState;
+}
+
+/**
+ * JSON representation for API responses.
+ */
+export interface EvmTxStatusSubscriptionJSON extends Omit<OnchainSubscriptionJSON, 'config' | 'state'> {
+  subscriptionType: 'evm-tx-status';
+  config: EvmTxStatusSubscriptionConfig;
+  state: EvmTxStatusSubscriptionState;
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -164,6 +285,55 @@ export function isErc20ApprovalSubscription(
   data: OnchainSubscriptionData
 ): data is Erc20ApprovalSubscriptionData {
   return data.subscriptionType === 'erc20-approval';
+}
+
+/**
+ * Create an empty ERC-20 balance subscription state.
+ */
+export function emptyErc20BalanceState(): Erc20BalanceSubscriptionState {
+  return {
+    balance: '0',
+    lastEventBlock: null,
+    lastEventTxHash: null,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Type guard for ERC-20 balance subscription.
+ */
+export function isErc20BalanceSubscription(
+  data: OnchainSubscriptionData
+): data is Erc20BalanceSubscriptionData {
+  return data.subscriptionType === 'erc20-balance';
+}
+
+/**
+ * Create an empty EVM tx status subscription state.
+ */
+export function emptyEvmTxStatusState(): EvmTxStatusSubscriptionState {
+  return {
+    status: 'pending',
+    blockNumber: null,
+    blockHash: null,
+    confirmations: 0,
+    gasUsed: null,
+    effectiveGasPrice: null,
+    logsCount: null,
+    contractAddress: null,
+    lastCheckedAt: new Date().toISOString(),
+    isComplete: false,
+    completedAt: null,
+  };
+}
+
+/**
+ * Type guard for EVM tx status subscription.
+ */
+export function isEvmTxStatusSubscription(
+  data: OnchainSubscriptionData
+): data is EvmTxStatusSubscriptionData {
+  return data.subscriptionType === 'evm-tx-status';
 }
 
 /**
