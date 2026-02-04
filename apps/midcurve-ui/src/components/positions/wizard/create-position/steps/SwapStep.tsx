@@ -429,42 +429,21 @@ export function SwapStep() {
     // Loading state
     const isLoading = isBaseBalanceLoading || isQuoteBalanceLoading;
 
-    // All balances sufficient
-    if (bothSatisfied && !isLoading) {
-      return (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-white">Acquire Required Tokens</h3>
-            {zoomControls}
-          </div>
-
-          <div className="text-center py-8 bg-slate-800/30 rounded-lg border border-slate-700/50">
-            <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Check className="w-6 h-6 text-green-400" />
-            </div>
-            <h4 className="text-lg font-semibold text-white mb-2">
-              Token Balances Sufficient
-            </h4>
-            <p className="text-slate-400 text-sm">
-              You have enough tokens to open this position. Click Next to continue.
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    // Main content: Token balance table
+    // Main content: Token balance table (always shown)
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-semibold text-white">Acquire Required Tokens</h3>
-            <button
-              onClick={handleSkip}
-              className="text-sm text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              Skip
-            </button>
+            {/* Only show Skip button when balances are insufficient */}
+            {!bothSatisfied && !isLoading && (
+              <button
+                onClick={handleSkip}
+                className="text-sm text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Skip
+              </button>
+            )}
           </div>
           {zoomControls}
         </div>
