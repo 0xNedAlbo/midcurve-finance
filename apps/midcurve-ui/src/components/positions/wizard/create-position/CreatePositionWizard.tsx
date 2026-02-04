@@ -10,10 +10,8 @@ import {
 import { PoolSelectionStep } from './steps/PoolSelectionStep';
 import { PositionConfigStep } from './steps/PositionConfigStep';
 import { SwapStep } from './steps/SwapStep';
-import { ApprovalsStep } from './steps/ApprovalsStep';
-import { MintStep } from './steps/MintStep';
 import { AutowalletStep } from './steps/AutowalletStep';
-import { RegisterOrdersStep } from './steps/RegisterOrdersStep';
+import { TransactionStep } from './steps/TransactionStep';
 import { SummaryStep } from './steps/SummaryStep';
 
 // Individual step wrapper components - each one properly handles its own hooks
@@ -32,23 +30,13 @@ function SwapStepRenderer() {
   return <StepRenderer content={content} />;
 }
 
-function ApprovalsStepRenderer() {
-  const content = ApprovalsStep();
-  return <StepRenderer content={content} />;
-}
-
-function MintStepRenderer() {
-  const content = MintStep();
-  return <StepRenderer content={content} />;
-}
-
 function AutowalletStepRenderer() {
   const content = AutowalletStep();
   return <StepRenderer content={content} />;
 }
 
-function RegisterOrdersStepRenderer() {
-  const content = RegisterOrdersStep();
+function TransactionStepRenderer() {
+  const content = TransactionStep();
   return <StepRenderer content={content} />;
 }
 
@@ -156,14 +144,10 @@ function CreatePositionWizardContent() {
       return <PositionConfigStepRenderer />;
     case 'swap':
       return <SwapStepRenderer />;
-    case 'approvals':
-      return <ApprovalsStepRenderer />;
-    case 'mint':
-      return <MintStepRenderer />;
     case 'autowallet':
       return <AutowalletStepRenderer />;
-    case 'register':
-      return <RegisterOrdersStepRenderer />;
+    case 'transactions':
+      return <TransactionStepRenderer />;
     case 'summary':
       return <SummaryStepRenderer />;
     default:

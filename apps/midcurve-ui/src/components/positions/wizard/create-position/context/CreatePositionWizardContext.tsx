@@ -370,21 +370,13 @@ export function getVisibleSteps(state: CreatePositionWizardState): WizardStep[] 
   // Always: Swap step (checks balances and allows swapping if needed)
   steps.push({ id: 'swap', label: 'Acquire Tokens' });
 
-  // Always: Approvals
-  steps.push({ id: 'approvals', label: 'Approve Tokens' });
-
-  // Always: Mint
-  steps.push({ id: 'mint', label: 'Open Position' });
-
-  // Conditional: Autowallet
+  // Conditional: Autowallet (must be before transactions if automation is enabled)
   if (state.automationEnabled && state.needsAutowallet) {
     steps.push({ id: 'autowallet', label: 'Setup Automation' });
   }
 
-  // Conditional: Register orders
-  if (state.automationEnabled && (state.stopLossEnabled || state.takeProfitEnabled)) {
-    steps.push({ id: 'register', label: 'Register Orders' });
-  }
+  // Always: Transactions step (handles approvals, mint, and SL/TP registration)
+  steps.push({ id: 'transactions', label: 'Execute' });
 
   // Always: Summary
   steps.push({ id: 'summary', label: 'Summary' });

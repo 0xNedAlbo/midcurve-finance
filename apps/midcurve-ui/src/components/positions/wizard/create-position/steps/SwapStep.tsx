@@ -24,6 +24,7 @@ import {
   compareAddresses,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
+  tickToPrice,
 } from '@midcurve/shared';
 
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
@@ -296,6 +297,82 @@ export function SwapStep() {
     }
   }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base]);
 
+  // Calculate range boundary prices for summary display
+  const rangeBoundaryInfo = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return null;
+    }
+
+    try {
+      const effectiveTickLower = state.tickLower !== 0 ? state.tickLower : state.defaultTickLower;
+      const effectiveTickUpper = state.tickUpper !== 0 ? state.tickUpper : state.defaultTickUpper;
+
+      if (effectiveTickLower === 0 && effectiveTickUpper === 0) {
+        return null;
+      }
+
+      const baseTokenDecimals = isToken0Base
+        ? state.discoveredPool.token0.decimals
+        : state.discoveredPool.token1.decimals;
+
+      // Calculate lower and upper prices from ticks
+      const lowerPriceBigInt = tickToPrice(
+        effectiveTickLower,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+      const upperPriceBigInt = tickToPrice(
+        effectiveTickUpper,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+
+      return { lowerPriceBigInt, upperPriceBigInt };
+    } catch {
+      return null;
+    }
+  }, [state.discoveredPool, state.baseToken, state.quoteToken, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, isToken0Base]);
+
+  // Calculate SL/TP prices from ticks for summary display
+  const slTpPrices = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return { stopLossPrice: null, takeProfitPrice: null };
+    }
+
+    const baseTokenDecimals = isToken0Base
+      ? state.discoveredPool.token0.decimals
+      : state.discoveredPool.token1.decimals;
+
+    let stopLossPrice: bigint | null = null;
+    let takeProfitPrice: bigint | null = null;
+
+    try {
+      if (state.stopLossEnabled && state.stopLossTick !== null) {
+        stopLossPrice = tickToPrice(
+          state.stopLossTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseTokenDecimals
+        );
+      }
+
+      if (state.takeProfitEnabled && state.takeProfitTick !== null) {
+        takeProfitPrice = tickToPrice(
+          state.takeProfitTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseTokenDecimals
+        );
+      }
+    } catch {
+      // Ignore conversion errors
+    }
+
+    return { stopLossPrice, takeProfitPrice };
+  }, [state.discoveredPool, state.baseToken, state.quoteToken, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, isToken0Base]);
+
   // Calculate current price for slider bounds (same logic as PositionConfigStep)
   const currentPrice = useMemo(() => {
     if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
@@ -566,6 +643,52 @@ export function SwapStep() {
           baseLogoUrl={actualBaseLogoUrl}
           quoteLogoUrl={actualQuoteLogoUrl}
         />
+
+        {/* Position Range */}
+        {rangeBoundaryInfo && (
+          <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
+            <p className="text-xs text-slate-400">Position Range</p>
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-400">Lower</span>
+                <span className="text-teal-400 font-medium">
+                  {formatCompactValue(rangeBoundaryInfo.lowerPriceBigInt, state.quoteToken?.decimals ?? 18)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-400">Upper</span>
+                <span className="text-teal-400 font-medium">
+                  {formatCompactValue(rangeBoundaryInfo.upperPriceBigInt, state.quoteToken?.decimals ?? 18)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SL/TP Triggers */}
+        {(slTpPrices.stopLossPrice !== null || slTpPrices.takeProfitPrice !== null) && (
+          <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
+            <p className="text-xs text-slate-400">Risk Triggers</p>
+            <div className="space-y-1.5">
+              {slTpPrices.stopLossPrice !== null && (
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-400">Stop Loss</span>
+                  <span className="text-red-400 font-medium">
+                    {formatCompactValue(slTpPrices.stopLossPrice, state.quoteToken?.decimals ?? 18)}
+                  </span>
+                </div>
+              )}
+              {slTpPrices.takeProfitPrice !== null && (
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-400">Take Profit</span>
+                  <span className="text-green-400 font-medium">
+                    {formatCompactValue(slTpPrices.takeProfitPrice, state.quoteToken?.decimals ?? 18)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </WizardSummaryPanel>
     );
   };

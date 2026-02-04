@@ -58,20 +58,22 @@ export function FullPageWizardLayout({
         <div className="h-full flex flex-row gap-6">
           {/* Left Column - expands to fill available space */}
           <div className="flex-1 min-w-0 h-full flex flex-col gap-6 min-h-0">
-            {/* Interactive Content - sizes to content, with zoom */}
+            {/* Interactive Content - fills space when no visual, otherwise sizes to content */}
             <div
-              className="shrink-0 relative z-10 bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-hidden"
+              className={`${visualContent ? 'shrink-0' : 'flex-1'} relative z-10 bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 overflow-hidden`}
               style={interactiveZoom && interactiveZoom !== 1 ? { zoom: interactiveZoom } : undefined}
             >
               {interactiveContent}
             </div>
 
-            {/* Visual Content - fills remaining space (no zoom) */}
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <div className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6">
-                {visualContent}
+            {/* Visual Content - fills remaining space (no zoom), hidden when null */}
+            {visualContent && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <div className="h-full bg-slate-800/30 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6">
+                  {visualContent}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Right Column - fixed width with min-width, shrinks with zoom */}

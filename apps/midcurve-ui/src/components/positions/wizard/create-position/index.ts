@@ -19,10 +19,8 @@ export type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-sh
 export { PoolSelectionStep } from './steps/PoolSelectionStep';
 export { PositionConfigStep } from './steps/PositionConfigStep';
 export { SwapStep } from './steps/SwapStep';
-export { ApprovalsStep } from './steps/ApprovalsStep';
-export { MintStep } from './steps/MintStep';
 export { AutowalletStep } from './steps/AutowalletStep';
-export { RegisterOrdersStep } from './steps/RegisterOrdersStep';
+export { TransactionStep } from './steps/TransactionStep';
 export { SummaryStep } from './steps/SummaryStep';
 
 // Shared components
