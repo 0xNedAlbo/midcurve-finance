@@ -33,7 +33,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { TokenBalanceData } from '@midcurve/api-shared';
+import type { TokenBalanceBatchData, TokenBalanceItem } from '@midcurve/api-shared';
 import { apiClient } from '@/lib/api-client';
 
 /**
@@ -74,9 +74,9 @@ export interface UseErc20TokenBalanceOptions {
  */
 export interface UseErc20TokenBalanceReturn {
   /**
-   * Token balance data from API (undefined while loading)
+   * Token balance item from API (undefined while loading)
    */
-  balance: TokenBalanceData | undefined;
+  balance: TokenBalanceItem | undefined;
 
   /**
    * Balance as BigInt (parsed from string)
@@ -139,7 +139,7 @@ export function useErc20TokenBalance(
   ];
 
   // Fetch balance from backend API
-  const queryFn = async (): Promise<TokenBalanceData> => {
+  const queryFn = async (): Promise<TokenBalanceItem> => {
     if (!walletAddress || !tokenAddress) {
       throw new Error('Wallet address and token address are required');
     }
@@ -150,11 +150,22 @@ export function useErc20TokenBalance(
       chainId: chainId.toString(),
     });
 
-    const response = await apiClient.get<TokenBalanceData>(
+    const response = await apiClient.get<TokenBalanceBatchData>(
       `/api/v1/tokens/erc20/balance?${params.toString()}`
     );
 
-    return response.data;
+    // Extract the first (and only) balance item from the batch response
+    const balanceItem = response.data.balances[0];
+    if (!balanceItem) {
+      throw new Error('No balance data returned');
+    }
+
+    // Check for per-token error
+    if (balanceItem.error) {
+      throw new Error(balanceItem.error);
+    }
+
+    return balanceItem;
   };
 
   // Set up TanStack Query

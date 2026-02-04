@@ -367,10 +367,8 @@ const BASE_STEPS: WizardStep[] = [
 export function getVisibleSteps(state: CreatePositionWizardState): WizardStep[] {
   const steps = [...BASE_STEPS];
 
-  // Conditional: Swap step
-  if (state.needsSwap) {
-    steps.push({ id: 'swap', label: 'Swap Tokens' });
-  }
+  // Always: Swap step (checks balances and allows swapping if needed)
+  steps.push({ id: 'swap', label: 'Acquire Tokens' });
 
   // Always: Approvals
   steps.push({ id: 'approvals', label: 'Approve Tokens' });

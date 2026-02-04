@@ -25,7 +25,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Erc20BalanceWatchBatchResponseData,
@@ -150,13 +150,11 @@ export function useWatchErc20TokenBalance(
   const [createError, setCreateError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
-  // Query key for this subscription
-  const subscriptionQueryKey = [
-    'erc20-balance-watch',
-    chainId,
-    tokenAddress,
-    walletAddress,
-  ];
+  // Query key for this subscription (memoized to prevent unnecessary re-renders)
+  const subscriptionQueryKey = useMemo(
+    () => ['erc20-balance-watch', chainId, tokenAddress, walletAddress],
+    [chainId, tokenAddress, walletAddress]
+  );
 
   // Create subscription when component mounts
   useEffect(() => {

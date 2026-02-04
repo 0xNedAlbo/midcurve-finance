@@ -27,7 +27,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Erc20ApprovalWatchBatchResponseData,
@@ -167,14 +167,11 @@ export function useWatchErc20TokenApproval(
   const [createError, setCreateError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
-  // Query key for this subscription
-  const subscriptionQueryKey = [
-    'erc20-approval-watch',
-    chainId,
-    tokenAddress,
-    ownerAddress,
-    spenderAddress,
-  ];
+  // Query key for this subscription (memoized to prevent unnecessary re-renders)
+  const subscriptionQueryKey = useMemo(
+    () => ['erc20-approval-watch', chainId, tokenAddress, ownerAddress, spenderAddress],
+    [chainId, tokenAddress, ownerAddress, spenderAddress]
+  );
 
   // Create subscription when component mounts
   useEffect(() => {

@@ -27,7 +27,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   EvmTxStatusWatchResponseData,
@@ -207,12 +207,11 @@ export function useWatchTransactionStatus(
   const confirmedCalledRef = useRef(false);
   const completeCalledRef = useRef(false);
 
-  // Query key for this subscription
-  const subscriptionQueryKey = [
-    'evm-tx-status-watch',
-    chainId,
-    txHash,
-  ];
+  // Query key for this subscription (memoized to prevent unnecessary re-renders)
+  const subscriptionQueryKey = useMemo(
+    () => ['evm-tx-status-watch', chainId, txHash],
+    [chainId, txHash]
+  );
 
   // Create subscription when component mounts
   useEffect(() => {
