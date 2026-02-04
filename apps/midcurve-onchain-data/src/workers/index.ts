@@ -7,6 +7,7 @@
  * Workers:
  * - PoolPriceSubscriber: Subscribes to Swap events for pools with active positions
  * - PositionLiquiditySubscriber: Subscribes to NFPM events for active positions
+ * - Erc20ApprovalSubscriber: Subscribes to ERC-20 Approval events for token approvals
  *
  * Event Consumers:
  * - PositionEventHandler: Handles position.created, position.closed, and position.deleted
@@ -18,6 +19,7 @@ import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PositionEventHandler } from '../events';
 import { PoolPriceSubscriber } from './pool-price-subscriber';
 import { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
+import { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 
 const log = onchainDataLogger.child({ component: 'WorkerManager' });
 
@@ -27,12 +29,14 @@ const log = onchainDataLogger.child({ component: 'WorkerManager' });
 export class WorkerManager {
   private poolPriceSubscriber: PoolPriceSubscriber;
   private positionLiquiditySubscriber: PositionLiquiditySubscriber;
+  private erc20ApprovalSubscriber: Erc20ApprovalSubscriber;
   private positionEventHandler: PositionEventHandler;
   private isRunning = false;
 
   constructor() {
     this.poolPriceSubscriber = new PoolPriceSubscriber();
     this.positionLiquiditySubscriber = new PositionLiquiditySubscriber();
+    this.erc20ApprovalSubscriber = new Erc20ApprovalSubscriber();
     this.positionEventHandler = new PositionEventHandler();
 
     // Wire both subscribers to event handler
@@ -66,11 +70,12 @@ export class WorkerManager {
       log.info({ msg: 'Starting domain event consumer...' });
       await this.positionEventHandler.start(channel);
 
-      // Start both subscribers in parallel (initial DB load + WebSocket connections)
+      // Start all subscribers in parallel (initial DB load + WebSocket connections)
       log.info({ msg: 'Starting subscribers...' });
       await Promise.all([
         this.poolPriceSubscriber.start(),
         this.positionLiquiditySubscriber.start(),
+        this.erc20ApprovalSubscriber.start(),
       ]);
 
       this.isRunning = true;
@@ -100,11 +105,12 @@ export class WorkerManager {
       log.info({ msg: 'Stopping domain event consumer...' });
       await this.positionEventHandler.stop();
 
-      // Stop both subscribers in parallel
+      // Stop all subscribers in parallel
       log.info({ msg: 'Stopping subscribers...' });
       await Promise.all([
         this.poolPriceSubscriber.stop(),
         this.positionLiquiditySubscriber.stop(),
+        this.erc20ApprovalSubscriber.stop(),
       ]);
 
       // Close RabbitMQ connection
@@ -129,6 +135,7 @@ export class WorkerManager {
     isRunning: boolean;
     poolPriceSubscriber: ReturnType<PoolPriceSubscriber['getStatus']>;
     positionLiquiditySubscriber: ReturnType<PositionLiquiditySubscriber['getStatus']>;
+    erc20ApprovalSubscriber: ReturnType<Erc20ApprovalSubscriber['getStatus']>;
     eventConsumer: {
       positionEvents: { isRunning: boolean };
     };
@@ -142,6 +149,7 @@ export class WorkerManager {
       isRunning: this.isRunning,
       poolPriceSubscriber: this.poolPriceSubscriber.getStatus(),
       positionLiquiditySubscriber: this.positionLiquiditySubscriber.getStatus(),
+      erc20ApprovalSubscriber: this.erc20ApprovalSubscriber.getStatus(),
       eventConsumer: {
         positionEvents: { isRunning: this.positionEventHandler.isRunning() },
       },
@@ -164,3 +172,4 @@ export class WorkerManager {
  */
 export { PoolPriceSubscriber } from './pool-price-subscriber';
 export { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
+export { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';

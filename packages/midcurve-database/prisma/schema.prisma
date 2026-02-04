@@ -691,6 +691,47 @@ model PoolPriceSubscribers {
   @@map("pool_price_subscribers")
 }
 
+// OnchainDataSubscribers - Generic table for onchain event subscriptions
+// Discriminator pattern: 'erc20-approval', future: 'erc20-transfer', etc.
+// Used by midcurve-onchain-data to manage WebSocket subscriptions for various event types
+model OnchainDataSubscribers {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Discriminator - determines subscription type and config/state schema
+  subscriptionType String // 'erc20-approval', future: 'erc20-transfer', etc.
+
+  // Client-facing ID for polling (short, URL-safe)
+  subscriptionId String @unique
+
+  // Lifecycle state
+  // active: currently subscribed to WebSocket
+  // paused: removed from WebSocket (subscriber stopped polling)
+  // deleted: marked for cleanup (will be removed by pruning job)
+  status String @default("active") // 'active', 'paused', 'deleted'
+
+  // Heartbeat tracking
+  lastPolledAt DateTime? // Updated when client polls GET endpoint
+  pausedAt     DateTime? // When subscription was paused
+
+  // Platform-specific config (JSON) - Immutable after creation
+  // For erc20-approval: { chainId, tokenAddress, walletAddress, spenderAddress, startedAt }
+  config Json
+
+  // Platform-specific state (JSON) - Mutable
+  // For erc20-approval: { approvalAmount, lastEventBlock, lastEventTxHash, lastUpdatedAt }
+  state Json
+
+  // Indexes for efficient queries
+  @@index([subscriptionType])
+  @@index([status])
+  @@index([subscriptionType, status])
+  @@index([lastPolledAt])
+  @@index([pausedAt])
+  @@map("onchain_data_subscribers")
+}
+
 // AutomationLog - User-facing automation event logs
 // Scoped to positions, tracks lifecycle events for close orders
 model AutomationLog {

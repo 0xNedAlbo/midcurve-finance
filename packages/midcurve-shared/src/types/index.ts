@@ -348,3 +348,28 @@ export {
   CoingeckoTokenConfig,
   CoingeckoToken,
 } from './coingecko-token/index.js';
+
+// ============================================================================
+// Onchain Subscription Types (WebSocket event subscriptions)
+// ============================================================================
+
+export type {
+  OnchainSubscriptionType,
+  OnchainSubscriptionStatus,
+  OnchainSubscriptionData,
+  OnchainSubscriptionJSON,
+  Erc20ApprovalSubscriptionConfig,
+  Erc20ApprovalSubscriptionState,
+  Erc20ApprovalSubscriptionData,
+  Erc20ApprovalSubscriptionJSON,
+} from './onchain-subscription/index.js';
+
+export {
+  emptyErc20ApprovalState,
+  subscriptionToJSON,
+  subscriptionFromJSON,
+  isErc20ApprovalSubscription,
+  MAX_UINT256,
+  isUnlimitedApproval,
+  hasApproval,
+} from './onchain-subscription/index.js';
