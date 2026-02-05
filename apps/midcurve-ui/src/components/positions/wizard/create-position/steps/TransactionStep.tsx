@@ -14,9 +14,10 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Circle, Check, Loader2, ExternalLink, AlertCircle } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, formatCompactValue, tickToPrice } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
+import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
@@ -151,6 +152,164 @@ export function TransactionStep() {
     // If quote is token1, swap token0 → token1
     return isQuoteToken0 ? SwapDirection.TOKEN1_TO_0 : SwapDirection.TOKEN0_TO_1;
   }, [state.discoveredPool, quoteTokenAddress]);
+
+  // Determine correct logo based on which token is base/quote
+  const getTokenLogoUrl = (tokenAddress: string | undefined) => {
+    if (!tokenAddress || !state.discoveredPool) return null;
+    const normalizedAddress = tokenAddress.toLowerCase();
+    if (state.discoveredPool.token0.address.toLowerCase() === normalizedAddress) {
+      return state.discoveredPool.token0.logoUrl;
+    }
+    if (state.discoveredPool.token1.address.toLowerCase() === normalizedAddress) {
+      return state.discoveredPool.token1.logoUrl;
+    }
+    return null;
+  };
+
+  const actualBaseLogoUrl = getTokenLogoUrl(state.baseToken?.address);
+  const actualQuoteLogoUrl = getTokenLogoUrl(state.quoteToken?.address);
+
+  // Determine if token0 is base (for price calculations)
+  const isToken0Base = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken) return true;
+    return compareAddresses(
+      state.discoveredPool.token0.config.address as string,
+      state.baseToken.address
+    ) === 0;
+  }, [state.discoveredPool, state.baseToken]);
+
+  // Calculate SL/TP prices from ticks for summary panel display
+  const slTpPrices = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return { stopLossPrice: null, takeProfitPrice: null };
+    }
+
+    const baseTokenDecimals = isToken0Base
+      ? state.discoveredPool.token0.decimals
+      : state.discoveredPool.token1.decimals;
+
+    let stopLossPrice: bigint | null = null;
+    let takeProfitPrice: bigint | null = null;
+
+    try {
+      if (state.stopLossEnabled && state.stopLossTick !== null) {
+        stopLossPrice = tickToPrice(
+          state.stopLossTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseTokenDecimals
+        );
+      }
+
+      if (state.takeProfitEnabled && state.takeProfitTick !== null) {
+        takeProfitPrice = tickToPrice(
+          state.takeProfitTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseTokenDecimals
+        );
+      }
+    } catch {
+      // Ignore conversion errors
+    }
+
+    return { stopLossPrice, takeProfitPrice };
+  }, [state.discoveredPool, state.baseToken, state.quoteToken, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, isToken0Base]);
+
+  // Calculate range boundary prices for summary display
+  const rangeBoundaryInfo = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return null;
+    }
+
+    try {
+      const effectiveTickLower = state.tickLower !== 0 ? state.tickLower : state.defaultTickLower;
+      const effectiveTickUpper = state.tickUpper !== 0 ? state.tickUpper : state.defaultTickUpper;
+
+      if (effectiveTickLower === 0 && effectiveTickUpper === 0) {
+        return null;
+      }
+
+      const baseTokenDecimals = isToken0Base
+        ? state.discoveredPool.token0.decimals
+        : state.discoveredPool.token1.decimals;
+
+      const lowerPriceBigInt = tickToPrice(
+        effectiveTickLower,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+      const upperPriceBigInt = tickToPrice(
+        effectiveTickUpper,
+        state.baseToken.address,
+        state.quoteToken.address,
+        baseTokenDecimals
+      );
+
+      return { lowerPriceBigInt, upperPriceBigInt };
+    } catch {
+      return null;
+    }
+  }, [state.discoveredPool, state.baseToken, state.quoteToken, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, isToken0Base]);
+
+  // Create simulation position for PnL calculations
+  const simulationPosition = useMemo(() => {
+    const liquidityBigInt = BigInt(state.liquidity || '0');
+    if (!state.discoveredPool || liquidityBigInt === 0n) {
+      return null;
+    }
+
+    try {
+      const effectiveTickLower = state.tickLower !== 0 ? state.tickLower : state.defaultTickLower;
+      const effectiveTickUpper = state.tickUpper !== 0 ? state.tickUpper : state.defaultTickUpper;
+
+      if (effectiveTickLower === 0 && effectiveTickUpper === 0) {
+        return null;
+      }
+
+      const costBasis = BigInt(state.totalQuoteValue || '0');
+
+      return UniswapV3Position.forSimulation({
+        pool: state.discoveredPool,
+        isToken0Quote: !isToken0Base,
+        tickLower: effectiveTickLower,
+        tickUpper: effectiveTickUpper,
+        liquidity: liquidityBigInt,
+        costBasis,
+      });
+    } catch {
+      return null;
+    }
+  }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base]);
+
+  // Calculate max drawdown (loss at SL price)
+  const slDrawdown = useMemo(() => {
+    if (!slTpPrices.stopLossPrice || !simulationPosition) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(slTpPrices.stopLossPrice);
+      return {
+        pnlValue: result.pnlValue,
+        pnlPercent: result.pnlPercent,
+      };
+    } catch {
+      return null;
+    }
+  }, [slTpPrices.stopLossPrice, simulationPosition]);
+
+  // Calculate max runup (profit at TP price)
+  const tpRunup = useMemo(() => {
+    if (!slTpPrices.takeProfitPrice || !simulationPosition) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(slTpPrices.takeProfitPrice);
+      return {
+        pnlValue: result.pnlValue,
+        pnlPercent: result.pnlPercent,
+      };
+    } catch {
+      return null;
+    }
+  }, [slTpPrices.takeProfitPrice, simulationPosition]);
 
   // Build transaction list
   const transactions = useMemo((): TransactionItem[] => {
@@ -681,7 +840,73 @@ export function TransactionStep() {
       nextDisabled={!isComplete}
       nextLabel="View Summary"
       onNext={goNext}
-    />
+    >
+      <AllocatedCapitalSection
+        allocatedBaseAmount={state.allocatedBaseAmount}
+        allocatedQuoteAmount={state.allocatedQuoteAmount}
+        totalQuoteValue={state.totalQuoteValue}
+        baseToken={state.baseToken}
+        quoteToken={state.quoteToken}
+        baseLogoUrl={actualBaseLogoUrl}
+        quoteLogoUrl={actualQuoteLogoUrl}
+      />
+
+      {/* Position Range */}
+      {rangeBoundaryInfo && (
+        <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
+          <p className="text-xs text-slate-400">Position Range</p>
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-slate-400">Lower</span>
+              <span className="text-teal-400 font-medium">
+                {formatCompactValue(rangeBoundaryInfo.lowerPriceBigInt, state.quoteToken?.decimals ?? 18)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-slate-400">Upper</span>
+              <span className="text-teal-400 font-medium">
+                {formatCompactValue(rangeBoundaryInfo.upperPriceBigInt, state.quoteToken?.decimals ?? 18)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SL/TP Triggers */}
+      {(slTpPrices.stopLossPrice !== null || slTpPrices.takeProfitPrice !== null) && (
+        <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
+          <p className="text-xs text-slate-400">Risk Triggers</p>
+          <div className="space-y-1.5">
+            {slTpPrices.stopLossPrice !== null && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-400">Stop Loss</span>
+                <span className="text-red-400 font-medium">
+                  {formatCompactValue(slTpPrices.stopLossPrice, state.quoteToken?.decimals ?? 18)}
+                  {slDrawdown && (
+                    <span className="text-slate-500 font-normal ml-1">
+                      ({formatCompactValue(slDrawdown.pnlValue, state.quoteToken?.decimals ?? 18)})
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+            {slTpPrices.takeProfitPrice !== null && (
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-400">Take Profit</span>
+                <span className="text-green-400 font-medium">
+                  {formatCompactValue(slTpPrices.takeProfitPrice, state.quoteToken?.decimals ?? 18)}
+                  {tpRunup && (
+                    <span className="text-slate-500 font-normal ml-1">
+                      (+{formatCompactValue(tpRunup.pnlValue, state.quoteToken?.decimals ?? 18)})
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </WizardSummaryPanel>
   );
 
   return {

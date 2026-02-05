@@ -335,6 +335,34 @@ export function SwapStep() {
     }
   }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base, slTpPrices]);
 
+  // Calculate max drawdown (loss at SL price)
+  const slDrawdown = useMemo(() => {
+    if (!slTpPrices.stopLossPrice || !simulationPosition) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(slTpPrices.stopLossPrice);
+      return {
+        pnlValue: result.pnlValue,
+        pnlPercent: result.pnlPercent,
+      };
+    } catch {
+      return null;
+    }
+  }, [slTpPrices.stopLossPrice, simulationPosition]);
+
+  // Calculate max runup (profit at TP price)
+  const tpRunup = useMemo(() => {
+    if (!slTpPrices.takeProfitPrice || !simulationPosition) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(slTpPrices.takeProfitPrice);
+      return {
+        pnlValue: result.pnlValue,
+        pnlPercent: result.pnlPercent,
+      };
+    } catch {
+      return null;
+    }
+  }, [slTpPrices.takeProfitPrice, simulationPosition]);
+
   // Calculate range boundary prices for summary display
   const rangeBoundaryInfo = useMemo(() => {
     if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
@@ -675,6 +703,11 @@ export function SwapStep() {
                   <span className="text-slate-400">Stop Loss</span>
                   <span className="text-red-400 font-medium">
                     {formatCompactValue(slTpPrices.stopLossPrice, state.quoteToken?.decimals ?? 18)}
+                    {slDrawdown && (
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({formatCompactValue(slDrawdown.pnlValue, state.quoteToken?.decimals ?? 18)})
+                      </span>
+                    )}
                   </span>
                 </div>
               )}
@@ -683,6 +716,11 @@ export function SwapStep() {
                   <span className="text-slate-400">Take Profit</span>
                   <span className="text-green-400 font-medium">
                     {formatCompactValue(slTpPrices.takeProfitPrice, state.quoteToken?.decimals ?? 18)}
+                    {tpRunup && (
+                      <span className="text-slate-500 font-normal ml-1">
+                        (+{formatCompactValue(tpRunup.pnlValue, state.quoteToken?.decimals ?? 18)})
+                      </span>
+                    )}
                   </span>
                 </div>
               )}
