@@ -3,8 +3,9 @@
  *
  * PUT /api/v1/positions/uniswapv3/{chainId}/{nftId}
  *
- * Allows users to manually create a position from their transaction receipt
- * after sending an INCREASE_LIQUIDITY transaction on-chain.
+ * Creates a position record in the database after the user mints a position on-chain.
+ * The position is created with default values; a business rule will fetch historical
+ * ledger events asynchronously via the position.created domain event.
  *
  * Uses typed response types for full type safety in UI components.
  */
@@ -16,8 +17,8 @@ import { z } from 'zod';
 /**
  * PUT /api/v1/positions/uniswapv3/{chainId}/{nftId} - Request body
  *
- * The user provides data from their transaction receipt after creating a position on-chain.
- * This endpoint creates the position in the database and calculates PnL from the ledger event.
+ * The user provides position configuration data after minting a position on-chain.
+ * All data is available from the UI wizard state and the mint transaction receipt.
  */
 export interface CreateUniswapV3PositionRequest {
   /**
@@ -43,102 +44,27 @@ export interface CreateUniswapV3PositionRequest {
   /**
    * Owner address (wallet that owns the NFT)
    * EIP-55 checksummed address
-   * This is the address that sent the INCREASE_LIQUIDITY transaction (msg.sender)
+   * This is the address that sent the mint transaction (msg.sender)
    *
    * @example "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"
    */
   ownerAddress: string;
 
   /**
-   * OPTIONAL: Address of the quote token (the token used as unit of account)
+   * Whether token0 is the quote token (unit of account)
+   * Determined by the UI based on user selection or token role comparison
    *
-   * If provided:
-   * - Will be validated and normalized to EIP-55 checksum format
-   * - Must match either token0 or token1 in the pool
-   * - Service will use this address to determine isToken0Quote
-   *
-   * If omitted:
-   * - Quote token will be determined automatically using QuoteTokenService
-   * - Respects user preferences → chain defaults → token0 fallback
-   *
-   * @example "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" (USDC)
+   * @example true (token0 is quote token, e.g., USDC in USDC/WETH pool)
    */
-  quoteTokenAddress?: string;
+  isToken0Quote: boolean;
 
   /**
-   * INCREASE_LIQUIDITY event data from the transaction receipt
+   * Initial liquidity amount from the mint transaction
+   * bigint as string - extracted from IncreaseLiquidity event in tx receipt
    *
-   * This event is emitted by the NonfungiblePositionManager contract when
-   * liquidity is added to a position. All data is available in the transaction receipt.
+   * @example "1000000000000000000"
    */
-  increaseEvent: {
-    /**
-     * Block timestamp when the event occurred
-     * ISO 8601 date string
-     *
-     * @example "2025-01-15T10:30:00Z"
-     */
-    timestamp: string;
-
-    /**
-     * Block number where the event occurred
-     * bigint as string
-     *
-     * @example "12345678"
-     */
-    blockNumber: string;
-
-    /**
-     * Transaction index within the block
-     * Used for event ordering
-     *
-     * @example 42
-     */
-    transactionIndex: number;
-
-    /**
-     * Log index within the transaction
-     * Used for event ordering
-     *
-     * @example 5
-     */
-    logIndex: number;
-
-    /**
-     * Transaction hash
-     * For reference and verification
-     *
-     * @example "0x1234567890abcdef..."
-     */
-    transactionHash: string;
-
-    /**
-     * Amount of liquidity added
-     * bigint as string
-     * This value comes directly from the INCREASE_LIQUIDITY event data
-     *
-     * @example "1000000000000000000"
-     */
-    liquidity: string;
-
-    /**
-     * Amount of token0 deposited
-     * bigint as string (in smallest token units)
-     * This value comes directly from the INCREASE_LIQUIDITY event data
-     *
-     * @example "500000000" (500 USDC with 6 decimals)
-     */
-    amount0: string;
-
-    /**
-     * Amount of token1 deposited
-     * bigint as string (in smallest token units)
-     * This value comes directly from the INCREASE_LIQUIDITY event data
-     *
-     * @example "250000000000000000" (0.25 WETH with 18 decimals)
-     */
-    amount1: string;
-  };
+  liquidity: string;
 }
 
 /**
@@ -167,12 +93,6 @@ export type CreateUniswapV3PositionResponse = ApiResponse<CreateUniswapV3Positio
 const ethereumAddressRegex = /^(0x)?[0-9a-fA-F]{40}$/;
 
 /**
- * Transaction hash validation regex
- * Matches hex hashes with or without 0x prefix
- */
-const txHashRegex = /^(0x)?[0-9a-fA-F]{64}$/;
-
-/**
  * BigInt string validation regex
  * Matches numeric strings (no scientific notation)
  */
@@ -181,15 +101,9 @@ const bigIntStringRegex = /^[0-9]+$/;
 /**
  * PUT /api/v1/positions/uniswapv3/{chainId}/{nftId} - Request validation
  *
- * Validates the request body for creating a position from user-provided event data.
- *
- * Position state fields are derived from the event data:
- * - liquidity = increaseEvent.liquidity
- * - ownerAddress = user-provided
- * - feeGrowthInside0LastX128 = 0 (new position)
- * - feeGrowthInside1LastX128 = 0 (new position)
- * - tokensOwed0 = 0 (new position)
- * - tokensOwed1 = 0 (new position)
+ * Validates the request body for creating a position record.
+ * Position is created with default state values; historical ledger events
+ * are fetched asynchronously by a business rule.
  */
 export const CreateUniswapV3PositionRequestSchema = z.object({
   // Position Config
@@ -210,48 +124,13 @@ export const CreateUniswapV3PositionRequestSchema = z.object({
     .string()
     .regex(ethereumAddressRegex, 'Owner address must be a valid Ethereum address'),
 
-  // Optional: Quote Token Selection
-  quoteTokenAddress: z
+  // Quote token selection (determined by UI)
+  isToken0Quote: z.boolean(),
+
+  // Initial liquidity from mint transaction
+  liquidity: z
     .string()
-    .regex(ethereumAddressRegex, 'Quote token address must be a valid Ethereum address')
-    .optional(),
-
-  // INCREASE_LIQUIDITY Event Data
-  increaseEvent: z.object({
-    timestamp: z
-      .string()
-      .datetime({ message: 'Timestamp must be a valid ISO 8601 date string' }),
-
-    blockNumber: z
-      .string()
-      .regex(bigIntStringRegex, 'Block number must be a numeric string'),
-
-    transactionIndex: z
-      .number()
-      .int('Transaction index must be an integer')
-      .nonnegative('Transaction index must be non-negative'),
-
-    logIndex: z
-      .number()
-      .int('Log index must be an integer')
-      .nonnegative('Log index must be non-negative'),
-
-    transactionHash: z
-      .string()
-      .regex(txHashRegex, 'Transaction hash must be a valid hex string'),
-
-    liquidity: z
-      .string()
-      .regex(bigIntStringRegex, 'Liquidity must be a numeric string'),
-
-    amount0: z
-      .string()
-      .regex(bigIntStringRegex, 'Amount0 must be a numeric string'),
-
-    amount1: z
-      .string()
-      .regex(bigIntStringRegex, 'Amount1 must be a numeric string'),
-  }),
+    .regex(bigIntStringRegex, 'Liquidity must be a numeric string'),
 });
 
 /**
