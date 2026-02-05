@@ -185,6 +185,23 @@ function wizardReducer(
         // Reset tick range (will be set when current tick is fetched)
         tickLower: 0,
         tickUpper: 0,
+        defaultTickLower: 0,
+        defaultTickUpper: 0,
+        // Reset SL/TP
+        stopLossTick: null,
+        takeProfitTick: null,
+        stopLossEnabled: false,
+        takeProfitEnabled: false,
+        automationEnabled: false,
+        // Reset capital allocation
+        baseInputAmount: '',
+        quoteInputAmount: '',
+        baseUsedMax: false,
+        quoteUsedMax: false,
+        allocatedBaseAmount: '0',
+        allocatedQuoteAmount: '0',
+        totalQuoteValue: '0',
+        liquidity: '0',
       };
 
     case 'CLEAR_POOL':
@@ -196,6 +213,26 @@ function wizardReducer(
         discoverError: null,
         baseToken: null,
         quoteToken: null,
+        // Reset tick range
+        tickLower: 0,
+        tickUpper: 0,
+        defaultTickLower: 0,
+        defaultTickUpper: 0,
+        // Reset SL/TP
+        stopLossTick: null,
+        takeProfitTick: null,
+        stopLossEnabled: false,
+        takeProfitEnabled: false,
+        automationEnabled: false,
+        // Reset capital allocation
+        baseInputAmount: '',
+        quoteInputAmount: '',
+        baseUsedMax: false,
+        quoteUsedMax: false,
+        allocatedBaseAmount: '0',
+        allocatedQuoteAmount: '0',
+        totalQuoteValue: '0',
+        liquidity: '0',
       };
 
     case 'SET_IS_DISCOVERING':

@@ -257,6 +257,44 @@ export function SwapStep() {
     ) === 0;
   }, [state.discoveredPool, state.baseToken]);
 
+  // Calculate SL/TP prices from ticks for chart display and summary panel
+  const slTpPrices = useMemo(() => {
+    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
+      return { stopLossPrice: null, takeProfitPrice: null };
+    }
+
+    const baseTokenDecimals = isToken0Base
+      ? state.discoveredPool.token0.decimals
+      : state.discoveredPool.token1.decimals;
+
+    let stopLossPrice: bigint | null = null;
+    let takeProfitPrice: bigint | null = null;
+
+    try {
+      if (state.stopLossEnabled && state.stopLossTick !== null) {
+        stopLossPrice = tickToPrice(
+          state.stopLossTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseTokenDecimals
+        );
+      }
+
+      if (state.takeProfitEnabled && state.takeProfitTick !== null) {
+        takeProfitPrice = tickToPrice(
+          state.takeProfitTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseTokenDecimals
+        );
+      }
+    } catch {
+      // Ignore conversion errors
+    }
+
+    return { stopLossPrice, takeProfitPrice };
+  }, [state.discoveredPool, state.baseToken, state.quoteToken, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, isToken0Base]);
+
   // Create simulation position for PnL curve (non-interactive display)
   const simulationPosition = useMemo(() => {
     const liquidityBigInt = BigInt(state.liquidity || '0');
@@ -286,16 +324,16 @@ export function SwapStep() {
         costBasis,
       });
 
-      // Wrap in overlay (no SL/TP for display purposes)
+      // Wrap in overlay with SL/TP prices for chart display
       return new CloseOrderSimulationOverlay({
         underlyingPosition: basePosition,
-        takeProfitPrice: null,
-        stopLossPrice: null,
+        takeProfitPrice: slTpPrices.takeProfitPrice,
+        stopLossPrice: slTpPrices.stopLossPrice,
       });
     } catch {
       return null;
     }
-  }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base]);
+  }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base, slTpPrices]);
 
   // Calculate range boundary prices for summary display
   const rangeBoundaryInfo = useMemo(() => {
@@ -334,44 +372,6 @@ export function SwapStep() {
       return null;
     }
   }, [state.discoveredPool, state.baseToken, state.quoteToken, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, isToken0Base]);
-
-  // Calculate SL/TP prices from ticks for summary display
-  const slTpPrices = useMemo(() => {
-    if (!state.discoveredPool || !state.baseToken || !state.quoteToken) {
-      return { stopLossPrice: null, takeProfitPrice: null };
-    }
-
-    const baseTokenDecimals = isToken0Base
-      ? state.discoveredPool.token0.decimals
-      : state.discoveredPool.token1.decimals;
-
-    let stopLossPrice: bigint | null = null;
-    let takeProfitPrice: bigint | null = null;
-
-    try {
-      if (state.stopLossEnabled && state.stopLossTick !== null) {
-        stopLossPrice = tickToPrice(
-          state.stopLossTick,
-          state.baseToken.address,
-          state.quoteToken.address,
-          baseTokenDecimals
-        );
-      }
-
-      if (state.takeProfitEnabled && state.takeProfitTick !== null) {
-        takeProfitPrice = tickToPrice(
-          state.takeProfitTick,
-          state.baseToken.address,
-          state.quoteToken.address,
-          baseTokenDecimals
-        );
-      }
-    } catch {
-      // Ignore conversion errors
-    }
-
-    return { stopLossPrice, takeProfitPrice };
-  }, [state.discoveredPool, state.baseToken, state.quoteToken, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, isToken0Base]);
 
   // Calculate current price for slider bounds (same logic as PositionConfigStep)
   const currentPrice = useMemo(() => {
