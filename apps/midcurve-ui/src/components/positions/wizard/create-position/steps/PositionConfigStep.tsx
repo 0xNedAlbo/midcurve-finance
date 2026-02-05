@@ -350,6 +350,11 @@ export function PositionConfigStep() {
     setConfigurationTab('range');
   }, [setConfigurationTab]);
 
+  // Handle SL/TP interaction - switch to SL/TP Setup tab
+  const handleSlTpInteraction = useCallback(() => {
+    setConfigurationTab('sltp');
+  }, [setConfigurationTab]);
+
   // Render Capital Allocation tab content
   const renderCapitalTab = () => (
     <div className="grid grid-cols-2 gap-4">
@@ -843,7 +848,7 @@ export function PositionConfigStep() {
             onRangeBoundaryInteraction={handleRangeBoundaryInteraction}
             onStopLossPriceChange={setStopLossPrice}
             onTakeProfitPriceChange={setTakeProfitPrice}
-            enableSLTPInteraction={state.configurationTab === 'sltp'}
+            onSlTpInteraction={handleSlTpInteraction}
             className="flex-1 min-h-0"
           />
           <p className="text-xs text-slate-400 mt-2 text-center shrink-0">

@@ -68,6 +68,8 @@ export interface InteractivePnLCurveProps {
   onTakeProfitPriceChange?: (price: bigint | null) => void;
   // Enable SL/TP interaction mode (default: true if SL/TP callbacks provided)
   enableSLTPInteraction?: boolean;
+  // Callback when user starts interacting with SL/TP lines
+  onSlTpInteraction?: () => void;
   // Dimensions
   height?: number;
   className?: string;
@@ -102,7 +104,7 @@ function InteractivePnLCurveInner({
   onRangeBoundaryInteraction,
   onStopLossPriceChange,
   onTakeProfitPriceChange,
-  enableSLTPInteraction = false,
+  onSlTpInteraction,
 }: InteractivePnLCurveProps & { width: number }) {
   // Extract position properties (null-safe)
   const positionConfig = position?.config as { tickLower?: number; tickUpper?: number } | undefined;
@@ -630,9 +632,11 @@ function InteractivePnLCurveInner({
   // Handle mouse down on existing SL/TP line to start dragging
   const handleSlTpLineMouseDown = useCallback(
     (triggerType: 'sl' | 'tp', e: React.MouseEvent) => {
-      if (!enableSLTPInteraction) return;
       e.preventDefault();
       e.stopPropagation();
+
+      // Notify parent that SL/TP interaction started (e.g., to switch tabs)
+      onSlTpInteraction?.();
 
       slTpDragRef.current = {
         isDragging: true,
@@ -640,7 +644,7 @@ function InteractivePnLCurveInner({
         startX: e.clientX,
       };
     },
-    [enableSLTPInteraction]
+    [onSlTpInteraction]
   );
 
   // Handle mouse move while dragging existing SL/TP line
@@ -1120,8 +1124,8 @@ function InteractivePnLCurveInner({
               width={20}
               height={chartHeight}
               fill="transparent"
-              pointerEvents={enableSLTPInteraction ? "all" : "none"}
-              style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
               onMouseDown={(e) => handleSlTpLineMouseDown('sl', e)}
             />
             {/* SL label and handle at bottom */}
@@ -1133,8 +1137,8 @@ function InteractivePnLCurveInner({
                 stroke="#f87171"
                 strokeWidth={2}
                 strokeLinejoin="round"
-                pointerEvents={enableSLTPInteraction ? "all" : "none"}
-                style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+                pointerEvents="all"
+                style={{ cursor: 'ew-resize' }}
                 onMouseDown={(e) => handleSlTpLineMouseDown('sl', e)}
               />
               {/* SL price label to the left of handle */}
@@ -1175,8 +1179,8 @@ function InteractivePnLCurveInner({
               width={20}
               height={chartHeight}
               fill="transparent"
-              pointerEvents={enableSLTPInteraction ? "all" : "none"}
-              style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+              pointerEvents="all"
+              style={{ cursor: 'ew-resize' }}
               onMouseDown={(e) => handleSlTpLineMouseDown('tp', e)}
             />
             {/* TP label and handle at bottom */}
@@ -1188,8 +1192,8 @@ function InteractivePnLCurveInner({
                 stroke="#4ade80"
                 strokeWidth={2}
                 strokeLinejoin="round"
-                pointerEvents={enableSLTPInteraction ? "all" : "none"}
-                style={{ cursor: enableSLTPInteraction ? 'ew-resize' : 'default' }}
+                pointerEvents="all"
+                style={{ cursor: 'ew-resize' }}
                 onMouseDown={(e) => handleSlTpLineMouseDown('tp', e)}
               />
               {/* TP price label to the right of handle */}
