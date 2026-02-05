@@ -81,6 +81,19 @@ export interface CreatePositionWizardState {
   // UI zoom settings (persist across steps)
   interactiveZoom: number;  // Font scale for interactive area (default: 1.0)
   summaryZoom: number;      // Font scale for summary section (default: 1.0)
+
+  // Price Adjustment Step - original amounts saved as constraints (max values)
+  originalAllocatedBaseAmount: string;   // Saved when leaving swap step
+  originalAllocatedQuoteAmount: string;  // Saved when leaving swap step
+  originalLiquidity: string;             // Saved when leaving swap step
+  originalTotalQuoteValue: string;       // Saved when leaving swap step
+
+  // Price Adjustment Step - recalculated amounts for current price
+  adjustedBaseAmount: string;
+  adjustedQuoteAmount: string;
+  adjustedLiquidity: string;
+  adjustedTotalQuoteValue: string;
+  priceAdjustmentStatus: 'idle' | 'calculating' | 'ready' | 'error';
 }
 
 // ----- Actions -----
@@ -115,7 +128,12 @@ type WizardAction =
   | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
   | { type: 'SET_SUMMARY_ZOOM'; zoom: number }
   | { type: 'RESET' }
-  | { type: 'HYDRATE_FROM_URL'; payload: HydrationPayload };
+  | { type: 'HYDRATE_FROM_URL'; payload: HydrationPayload }
+  // Price Adjustment Step actions
+  | { type: 'SAVE_ORIGINAL_AMOUNTS' }
+  | { type: 'SET_ADJUSTED_AMOUNTS'; base: string; quote: string; liquidity: string; totalValue: string }
+  | { type: 'SET_PRICE_ADJUSTMENT_STATUS'; status: 'idle' | 'calculating' | 'ready' | 'error' }
+  | { type: 'CLEAR_PRICE_ADJUSTMENT' };
 
 // ----- Initial State -----
 
@@ -154,6 +172,16 @@ const initialState: CreatePositionWizardState = {
   stepValidation: {},
   interactiveZoom: 1.0,
   summaryZoom: 1.0,
+  // Price Adjustment Step
+  originalAllocatedBaseAmount: '0',
+  originalAllocatedQuoteAmount: '0',
+  originalLiquidity: '0',
+  originalTotalQuoteValue: '0',
+  adjustedBaseAmount: '0',
+  adjustedQuoteAmount: '0',
+  adjustedLiquidity: '0',
+  adjustedTotalQuoteValue: '0',
+  priceAdjustmentStatus: 'idle',
 };
 
 // ----- Reducer -----
@@ -421,6 +449,47 @@ function wizardReducer(
       };
     }
 
+    // Price Adjustment Step actions
+    case 'SAVE_ORIGINAL_AMOUNTS':
+      return {
+        ...state,
+        originalAllocatedBaseAmount: state.allocatedBaseAmount,
+        originalAllocatedQuoteAmount: state.allocatedQuoteAmount,
+        originalLiquidity: state.liquidity,
+        originalTotalQuoteValue: state.totalQuoteValue,
+        // Clear any previous adjustments
+        adjustedBaseAmount: '0',
+        adjustedQuoteAmount: '0',
+        adjustedLiquidity: '0',
+        adjustedTotalQuoteValue: '0',
+        priceAdjustmentStatus: 'idle',
+      };
+
+    case 'SET_ADJUSTED_AMOUNTS':
+      return {
+        ...state,
+        adjustedBaseAmount: action.base,
+        adjustedQuoteAmount: action.quote,
+        adjustedLiquidity: action.liquidity,
+        adjustedTotalQuoteValue: action.totalValue,
+      };
+
+    case 'SET_PRICE_ADJUSTMENT_STATUS':
+      return {
+        ...state,
+        priceAdjustmentStatus: action.status,
+      };
+
+    case 'CLEAR_PRICE_ADJUSTMENT':
+      return {
+        ...state,
+        adjustedBaseAmount: '0',
+        adjustedQuoteAmount: '0',
+        adjustedLiquidity: '0',
+        adjustedTotalQuoteValue: '0',
+        priceAdjustmentStatus: 'idle',
+      };
+
     default:
       return state;
   }
@@ -511,6 +580,12 @@ interface CreatePositionWizardContextValue {
   // Zoom
   setInteractiveZoom: (zoom: number) => void;
   setSummaryZoom: (zoom: number) => void;
+
+  // Price Adjustment Step
+  saveOriginalAmounts: () => void;
+  setAdjustedAmounts: (base: string, quote: string, liquidity: string, totalValue: string) => void;
+  setPriceAdjustmentStatus: (status: 'idle' | 'calculating' | 'ready' | 'error') => void;
+  clearPriceAdjustment: () => void;
 
   // Reset
   reset: () => void;
@@ -693,6 +768,29 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     dispatch({ type: 'SET_SUMMARY_ZOOM', zoom });
   }, []);
 
+  // Price Adjustment Step
+  const saveOriginalAmounts = useCallback(() => {
+    dispatch({ type: 'SAVE_ORIGINAL_AMOUNTS' });
+  }, []);
+
+  const setAdjustedAmounts = useCallback(
+    (base: string, quote: string, liquidity: string, totalValue: string) => {
+      dispatch({ type: 'SET_ADJUSTED_AMOUNTS', base, quote, liquidity, totalValue });
+    },
+    []
+  );
+
+  const setPriceAdjustmentStatus = useCallback(
+    (status: 'idle' | 'calculating' | 'ready' | 'error') => {
+      dispatch({ type: 'SET_PRICE_ADJUSTMENT_STATUS', status });
+    },
+    []
+  );
+
+  const clearPriceAdjustment = useCallback(() => {
+    dispatch({ type: 'CLEAR_PRICE_ADJUSTMENT' });
+  }, []);
+
   // Reset
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' });
@@ -747,6 +845,10 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     isStepValid,
     setInteractiveZoom,
     setSummaryZoom,
+    saveOriginalAmounts,
+    setAdjustedAmounts,
+    setPriceAdjustmentStatus,
+    clearPriceAdjustment,
     reset,
   };
 

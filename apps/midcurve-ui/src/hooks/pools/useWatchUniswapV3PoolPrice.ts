@@ -143,6 +143,7 @@ export function useWatchUniswapV3PoolPrice(
   const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const mountedRef = useRef(true);
 
   // Query key for this subscription (memoized to prevent unnecessary re-renders)
@@ -205,7 +206,7 @@ export function useWatchUniswapV3PoolPrice(
 
       return response.data;
     },
-    enabled: enabled && !!subscriptionId && !!poolAddress,
+    enabled: enabled && !!subscriptionId && !!poolAddress && !cancelled,
     refetchInterval: pollIntervalMs,
     staleTime: pollIntervalMs / 2,
     gcTime: 5 * 60 * 1000,
@@ -236,6 +237,9 @@ export function useWatchUniswapV3PoolPrice(
   // Cancel callback
   const cancel = useCallback(async () => {
     if (!subscriptionId || !poolAddress) return;
+
+    // Immediately disable polling to prevent 404 race conditions
+    setCancelled(true);
 
     try {
       await apiClient.delete(

@@ -14,12 +14,13 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Circle, Check, Loader2, ExternalLink, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, tickToPrice } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, tickToPrice, formatCompactValue } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { PositionRangeSection } from '../shared/PositionRangeSection';
 import { RiskTriggersSection } from '../shared/RiskTriggersSection';
+import { usePriceAdjustment } from '../hooks/usePriceAdjustment';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
@@ -46,6 +47,7 @@ interface TransactionItem {
 
 // Transaction IDs
 const TX_IDS = {
+  PRICE_ADJUST: 'price-adjust',
   APPROVE_BASE: 'approve-base',
   APPROVE_QUOTE: 'approve-quote',
   REFRESH_POOL: 'refresh-pool',
@@ -57,7 +59,7 @@ const TX_IDS = {
 
 export function TransactionStep() {
   const { address: walletAddress } = useAccount();
-  const { state, setStepValid, setDiscoveredPool, setPositionCreated, goNext, addTransaction } = useCreatePositionWizard();
+  const { state, setStepValid, setDiscoveredPool, setPositionCreated, goNext, addTransaction, setAdjustedAmounts, saveOriginalAmounts, setPriceAdjustmentStatus } = useCreatePositionWizard();
 
   // Current phase of execution
   const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'done'>('idle');
@@ -69,8 +71,24 @@ export function TransactionStep() {
   // Track minted token ID
   const [mintedTokenId, setMintedTokenId] = useState<bigint | undefined>(undefined);
 
+  // Track if mint was successful (used to show success state on all pre-mint items after canceling subscriptions)
+  const [mintSucceeded, setMintSucceeded] = useState(false);
+
   // Get chain ID from discovered pool
   const chainId = state.discoveredPool?.typedConfig.chainId;
+
+  // Save original amounts when first entering this step (if not already saved)
+  useEffect(() => {
+    if (state.originalAllocatedBaseAmount === '0' && state.originalAllocatedQuoteAmount === '0') {
+      if (state.allocatedBaseAmount !== '0' || state.allocatedQuoteAmount !== '0') {
+        saveOriginalAmounts();
+      }
+    }
+  }, [state.originalAllocatedBaseAmount, state.originalAllocatedQuoteAmount, state.allocatedBaseAmount, state.allocatedQuoteAmount, saveOriginalAmounts]);
+
+  // Get effective tick range (use configured or defaults)
+  const effectiveTickLower = state.tickLower !== 0 ? state.tickLower : state.defaultTickLower;
+  const effectiveTickUpper = state.tickUpper !== 0 ? state.tickUpper : state.defaultTickUpper;
 
   // Get automation wallet
   const { data: autowallet } = useAutowallet();
@@ -84,34 +102,48 @@ export function TransactionStep() {
   const positionCloserAddress = chainId ? getPositionCloserAddress(chainId) : null;
 
   // Determine base/quote token addresses and amounts
+  // Use adjusted amounts if available (from PriceAdjustmentStep), otherwise fall back to allocated amounts
   const baseTokenAddress = state.baseToken?.address as Address | undefined;
   const quoteTokenAddress = state.quoteToken?.address as Address | undefined;
 
-  const baseAmount = state.allocatedBaseAmount ? BigInt(state.allocatedBaseAmount) : 0n;
-  const quoteAmount = state.allocatedQuoteAmount ? BigInt(state.allocatedQuoteAmount) : 0n;
+  const baseAmount = state.adjustedBaseAmount && state.adjustedBaseAmount !== '0'
+    ? BigInt(state.adjustedBaseAmount)
+    : state.allocatedBaseAmount ? BigInt(state.allocatedBaseAmount) : 0n;
+  const quoteAmount = state.adjustedQuoteAmount && state.adjustedQuoteAmount !== '0'
+    ? BigInt(state.adjustedQuoteAmount)
+    : state.allocatedQuoteAmount ? BigInt(state.allocatedQuoteAmount) : 0n;
 
   // Get spender address for approvals (NonfungiblePositionManager)
   const spenderAddress = chainId ? getNonfungiblePositionManagerAddress(chainId) : null;
+
+  // Use ORIGINAL allocated amounts for approval required amount
+  // This ensures approval is sufficient for any price movement (adjusted amounts are always <= original)
+  const originalBaseAmount = state.originalAllocatedBaseAmount && state.originalAllocatedBaseAmount !== '0'
+    ? BigInt(state.originalAllocatedBaseAmount)
+    : state.allocatedBaseAmount ? BigInt(state.allocatedBaseAmount) : 0n;
+  const originalQuoteAmount = state.originalAllocatedQuoteAmount && state.originalAllocatedQuoteAmount !== '0'
+    ? BigInt(state.originalAllocatedQuoteAmount)
+    : state.allocatedQuoteAmount ? BigInt(state.allocatedQuoteAmount) : 0n;
 
   // Token approval hooks using the unified approval prompt component
   const baseApprovalPrompt = useErc20TokenApprovalPrompt({
     tokenAddress: baseTokenAddress ?? null,
     tokenSymbol: state.baseToken?.symbol || 'Base Token',
     tokenDecimals: state.baseToken?.decimals ?? 18,
-    requiredAmount: baseAmount,
+    requiredAmount: originalBaseAmount,
     spenderAddress: spenderAddress ?? null,
     chainId,
-    enabled: !!baseTokenAddress && !!walletAddress && !!chainId && baseAmount > 0n,
+    enabled: !!baseTokenAddress && !!walletAddress && !!chainId && originalBaseAmount > 0n,
   });
 
   const quoteApprovalPrompt = useErc20TokenApprovalPrompt({
     tokenAddress: quoteTokenAddress ?? null,
     tokenSymbol: state.quoteToken?.symbol || 'Quote Token',
     tokenDecimals: state.quoteToken?.decimals ?? 18,
-    requiredAmount: quoteAmount,
+    requiredAmount: originalQuoteAmount,
     spenderAddress: spenderAddress ?? null,
     chainId,
-    enabled: !!quoteTokenAddress && !!walletAddress && !!chainId && quoteAmount > 0n,
+    enabled: !!quoteTokenAddress && !!walletAddress && !!chainId && originalQuoteAmount > 0n,
   });
 
   // Combined approval status from the unified hooks
@@ -146,21 +178,54 @@ export function TransactionStep() {
       token0: token0Address as Address,
       token1: token1Address as Address,
       fee: pool.typedConfig.feeBps,
-      tickLower: state.tickLower,
-      tickUpper: state.tickUpper,
+      tickLower: effectiveTickLower,
+      tickUpper: effectiveTickUpper,
       amount0Desired: amount0,
       amount1Desired: amount1,
       tickSpacing: pool.typedConfig.tickSpacing,
       recipient: walletAddress,
       chainId,
+      slippageBps: 100, // 1% slippage tolerance
     };
-  }, [state.discoveredPool, walletAddress, chainId, baseTokenAddress, quoteTokenAddress, baseAmount, quoteAmount, state.tickLower, state.tickUpper]);
+  }, [state.discoveredPool, walletAddress, chainId, baseTokenAddress, quoteTokenAddress, baseAmount, quoteAmount, effectiveTickLower, effectiveTickUpper]);
 
   // Mint position hook
   const mint = useMintPosition(mintParams);
 
   // Check if approvals are complete (for showing mint button when approvals were already done)
   const approvalsComplete = (baseAmount === 0n || isBaseApproved) && (quoteAmount === 0n || isQuoteApproved);
+
+  // Use the price adjustment hook to watch for price changes and recalculate amounts
+  // Enable when approvals are complete so amounts are ready BEFORE user clicks mint
+  const priceAdjustmentEnabled = approvalsComplete || currentPhase === 'refresh' || currentPhase === 'mint';
+  const priceAdjustment = usePriceAdjustment({
+    discoveredPool: state.discoveredPool,
+    originalBaseAmount: state.originalAllocatedBaseAmount || state.allocatedBaseAmount,
+    originalQuoteAmount: state.originalAllocatedQuoteAmount || state.allocatedQuoteAmount,
+    tickLower: effectiveTickLower,
+    tickUpper: effectiveTickUpper,
+    baseToken: state.baseToken,
+    quoteToken: state.quoteToken,
+    enabled: priceAdjustmentEnabled,
+    pollIntervalMs: 1000, // Poll once per second as requested
+  });
+
+  // Update context with adjusted amounts when price adjustment is ready
+  useEffect(() => {
+    if (priceAdjustment.status === 'ready') {
+      setAdjustedAmounts(
+        priceAdjustment.adjustedBaseAmount,
+        priceAdjustment.adjustedQuoteAmount,
+        priceAdjustment.adjustedLiquidity,
+        priceAdjustment.adjustedTotalQuoteValue
+      );
+      setPriceAdjustmentStatus('ready');
+    } else if (priceAdjustment.status === 'calculating') {
+      setPriceAdjustmentStatus('calculating');
+    } else if (priceAdjustment.status === 'error') {
+      setPriceAdjustmentStatus('error');
+    }
+  }, [priceAdjustment.status, priceAdjustment.adjustedBaseAmount, priceAdjustment.adjustedQuoteAmount, priceAdjustment.adjustedLiquidity, priceAdjustment.adjustedTotalQuoteValue, setAdjustedAmounts, setPriceAdjustmentStatus]);
 
   // Mint transaction prompt using the unified component
   const mintPrompt = useEvmTransactionPrompt({
@@ -314,7 +379,10 @@ export function TransactionStep() {
 
   // Create simulation position for PnL calculations
   const simulationPosition = useMemo(() => {
-    const liquidityBigInt = BigInt(state.liquidity || '0');
+    // Use adjusted liquidity if available, otherwise fall back to original
+    const liquidityBigInt = state.adjustedLiquidity && state.adjustedLiquidity !== '0'
+      ? BigInt(state.adjustedLiquidity)
+      : BigInt(state.liquidity || '0');
     if (!state.discoveredPool || liquidityBigInt === 0n) {
       return null;
     }
@@ -327,7 +395,10 @@ export function TransactionStep() {
         return null;
       }
 
-      const costBasis = BigInt(state.totalQuoteValue || '0');
+      // Use adjusted total value if available, otherwise fall back to original
+      const costBasis = state.adjustedTotalQuoteValue && state.adjustedTotalQuoteValue !== '0'
+        ? BigInt(state.adjustedTotalQuoteValue)
+        : BigInt(state.totalQuoteValue || '0');
 
       return UniswapV3Position.forSimulation({
         pool: state.discoveredPool,
@@ -373,6 +444,14 @@ export function TransactionStep() {
   // Build transaction list
   const transactions = useMemo((): TransactionItem[] => {
     const txs: TransactionItem[] = [];
+
+    // Price adjustment (first item - confirms current pool price)
+    txs.push({
+      id: TX_IDS.PRICE_ADJUST,
+      label: 'Confirm Pool Price',
+      status: getPriceAdjustStatus(priceAdjustment.status, currentPhase),
+      error: priceAdjustment.error || undefined,
+    });
 
     // Token approvals are rendered separately via useErc20TokenApprovalPrompt hooks
     // Pool price refresh runs in background - not shown in list
@@ -425,12 +504,22 @@ export function TransactionStep() {
 
     return txs;
   }, [
+    priceAdjustment.status, priceAdjustment.error,
     mint, nftApproval, registerSL, registerTP,
     currentPhase, hasAutomation, state.stopLossEnabled, state.takeProfitEnabled,
     isUserRejection,
   ]);
 
   // Helper functions for status
+
+  function getPriceAdjustStatus(status: typeof priceAdjustment.status, phase: typeof currentPhase): TxStatus {
+    if (status === 'error') return 'error';
+    if (status === 'ready') return 'success';
+    if (status === 'calculating') return 'confirming';
+    // Show as pending until we're in refresh/mint phase where price adjustment is active
+    if (phase === 'refresh' || phase === 'mint') return 'waiting';
+    return 'pending';
+  }
 
   function getMintStatus(m: typeof mint, phase: typeof currentPhase): TxStatus {
     // Filter user rejection errors
@@ -470,9 +559,6 @@ export function TransactionStep() {
     if (!chainId || !walletAddress) return;
 
     setActiveError(null);
-
-    // Phase 1: Token Approvals (handled by Erc20TokenApprovalPrompt hooks)
-    // The hooks render approval buttons that users interact with
     setCurrentPhase('approvals');
   }, [chainId, walletAddress]);
 
@@ -518,8 +604,7 @@ export function TransactionStep() {
 
         // Move to mint phase
         setCurrentPhase('mint');
-      } catch (error) {
-        console.error('Failed to refresh pool:', error);
+      } catch {
         // Continue anyway - use existing pool state
         setCurrentPhase('mint');
       }
@@ -531,8 +616,12 @@ export function TransactionStep() {
   // Trigger mint when entering mint phase
   useEffect(() => {
     if (currentPhase !== 'mint') return;
-    if (mint.isMinting || mint.isWaitingForConfirmation || mint.isSuccess || mint.mintError) return;
-    if (attemptedTxs.has(TX_IDS.MINT_POSITION)) return;
+    if (mint.isMinting || mint.isWaitingForConfirmation || mint.isSuccess || mint.mintError) {
+      return;
+    }
+    if (attemptedTxs.has(TX_IDS.MINT_POSITION)) {
+      return;
+    }
 
     setAttemptedTxs(prev => new Set(prev).add(TX_IDS.MINT_POSITION));
     mint.mint();
@@ -551,6 +640,12 @@ export function TransactionStep() {
 
     if (mint.isSuccess && mint.tokenId !== undefined) {
       setMintedTokenId(mint.tokenId);
+      setMintSucceeded(true);
+
+      // Cancel all polling subscriptions - transaction is complete, no need to keep watching
+      baseApprovalPrompt.cancel();
+      quoteApprovalPrompt.cancel();
+      priceAdjustment.cancel();
 
       // Record transaction
       if (mint.mintTxHash) {
@@ -573,7 +668,7 @@ export function TransactionStep() {
         setCurrentPhase('done');
       }
     }
-  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, hasAutomation, setPositionCreated, addTransaction]);
+  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment]);
 
   // NFT approval phase
   useEffect(() => {
@@ -707,6 +802,154 @@ export function TransactionStep() {
 
   const isComplete = currentPhase === 'done';
   const visibleTxs = transactions.filter((tx) => !tx.hidden);
+
+  // Render price adjustment item (special handling for pool price confirmation)
+  const renderPriceAdjustmentItem = () => {
+    const hookStatus = priceAdjustment.status;
+    const isEnabled = priceAdjustmentEnabled;
+
+    // Determine display status:
+    // - Mint succeeded: always show success (subscriptions are cancelled)
+    // - Not enabled yet (approvals not done): pending
+    // - Enabled and calculating: calculating
+    // - Enabled and ready: success
+    // - Error: error
+    const displayStatus = mintSucceeded
+      ? 'success'
+      : !isEnabled
+        ? 'pending'
+        : hookStatus === 'calculating'
+          ? 'calculating'
+          : hookStatus === 'error'
+            ? 'error'
+            : hookStatus === 'ready'
+              ? 'success'
+              : 'pending';
+
+    const isActive = displayStatus === 'calculating';
+    const isError = displayStatus === 'error';
+    const isSuccess = displayStatus === 'success';
+    const isPending = displayStatus === 'pending';
+
+    // Calculate current price from sqrtPriceX96
+    const currentPriceText = useMemo(() => {
+      if (!priceAdjustment.currentSqrtPriceX96 || !state.discoveredPool || !state.baseToken || !state.quoteToken) {
+        return null;
+      }
+
+      try {
+        const pool = state.discoveredPool;
+        const sqrtPriceX96 = priceAdjustment.currentSqrtPriceX96;
+
+        const isToken0Base = compareAddresses(
+          pool.token0.config.address as string,
+          state.baseToken.address
+        ) === 0;
+
+        // price = (sqrtPriceX96 / 2^96)^2
+        const Q96 = 2n ** 96n;
+        const Q192 = Q96 * Q96;
+        const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+
+        const token0Decimals = pool.token0.decimals;
+        const token1Decimals = pool.token1.decimals;
+        const quoteDecimals = state.quoteToken.decimals;
+
+        // Calculate price as bigint with quote token decimals precision
+        let priceBigint: bigint;
+        if (isToken0Base) {
+          // Price is token1/token0 (quote per base)
+          const decimalDiff = token0Decimals - token1Decimals;
+          if (decimalDiff >= 0) {
+            const adjustment = 10n ** BigInt(decimalDiff);
+            priceBigint = (rawPriceNum * adjustment * (10n ** BigInt(quoteDecimals))) / Q192;
+          } else {
+            const adjustment = 10n ** BigInt(-decimalDiff);
+            priceBigint = (rawPriceNum * (10n ** BigInt(quoteDecimals))) / (Q192 * adjustment);
+          }
+        } else {
+          // Price is token0/token1 (quote per base) = 1 / (token1/token0)
+          const decimalDiff = token1Decimals - token0Decimals;
+          if (decimalDiff >= 0) {
+            const adjustment = 10n ** BigInt(decimalDiff);
+            priceBigint = (Q192 * adjustment * (10n ** BigInt(quoteDecimals))) / rawPriceNum;
+          } else {
+            const adjustment = 10n ** BigInt(-decimalDiff);
+            priceBigint = (Q192 * (10n ** BigInt(quoteDecimals))) / (rawPriceNum * adjustment);
+          }
+        }
+
+        return formatCompactValue(priceBigint, quoteDecimals);
+      } catch {
+        return null;
+      }
+    }, [priceAdjustment.currentSqrtPriceX96, state.discoveredPool, state.baseToken, state.quoteToken]);
+
+    return (
+      <div
+        className={`py-3 px-4 rounded-lg transition-colors ${
+          isError
+            ? 'bg-red-500/10 border border-red-500/30'
+            : isSuccess
+            ? 'bg-green-500/10 border border-green-500/20'
+            : isActive
+            ? 'bg-blue-500/10 border border-blue-500/20'
+            : 'bg-slate-700/30 border border-slate-600/20'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {/* Status Icon */}
+            {isPending && <Circle className="w-5 h-5 text-slate-500" />}
+            {isActive && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+            {isSuccess && <Check className="w-5 h-5 text-green-400" />}
+            {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
+
+            {/* Label */}
+            <span
+              className={
+                isSuccess
+                  ? 'text-slate-400'
+                  : isError
+                  ? 'text-red-300'
+                  : 'text-white'
+              }
+            >
+              Confirm Pool Price
+            </span>
+          </div>
+
+          {/* Current price display */}
+          <div className="flex items-center gap-2">
+            {isSuccess && currentPriceText && (
+              <span className="text-sm text-slate-300">
+                {currentPriceText} {state.quoteToken?.symbol}
+              </span>
+            )}
+            {isActive && (
+              <span className="text-sm text-blue-400">Calculating...</span>
+            )}
+          </div>
+        </div>
+
+        {/* Error message */}
+        {isError && priceAdjustment.error && (
+          <div className="mt-2 pl-8 flex gap-2">
+            <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
+              {priceAdjustment.error}
+            </div>
+            <button
+              onClick={() => navigator.clipboard.writeText(priceAdjustment.error || '')}
+              className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
+              title="Copy error to clipboard"
+            >
+              <Copy className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Render transaction item (for non-approval transactions)
   const renderTransactionItem = (tx: TransactionItem) => {
@@ -862,41 +1105,54 @@ export function TransactionStep() {
 
         {/* Transaction List */}
         <div className="flex-1 space-y-3 overflow-auto">
-          {/* Base token approval (rendered by hook) */}
-          {baseAmount > 0n && baseApprovalPrompt.element}
+          {/* Base token approval - show static success after mint, otherwise hook element */}
+          {baseAmount > 0n && (mintSucceeded ? (
+            <div className="py-3 px-4 rounded-lg bg-green-500/10 border border-green-500/20">
+              <div className="flex items-center gap-3">
+                <Check className="w-5 h-5 text-green-400" />
+                <span className="text-slate-400">Approve {state.baseToken?.symbol}</span>
+              </div>
+            </div>
+          ) : baseApprovalPrompt.element)}
 
-          {/* Quote token approval (rendered by hook) */}
-          {quoteAmount > 0n && quoteApprovalPrompt.element}
+          {/* Quote token approval - show static success after mint, otherwise hook element */}
+          {quoteAmount > 0n && (mintSucceeded ? (
+            <div className="py-3 px-4 rounded-lg bg-green-500/10 border border-green-500/20">
+              <div className="flex items-center gap-3">
+                <Check className="w-5 h-5 text-green-400" />
+                <span className="text-slate-400">Approve {state.quoteToken?.symbol}</span>
+              </div>
+            </div>
+          ) : quoteApprovalPrompt.element)}
+
+          {/* Price adjustment (confirms current pool price) - between approvals and mint */}
+          {renderPriceAdjustmentItem()}
 
           {/* Mint position (rendered by hook) */}
           {mintPrompt.element}
 
           {/* Other transactions (NFT approval, SL/TP registration) */}
           {visibleTxs
-            .filter((tx) => tx.id !== TX_IDS.MINT_POSITION)
+            .filter((tx) => tx.id !== TX_IDS.MINT_POSITION && tx.id !== TX_IDS.PRICE_ADJUST)
             .map((tx) => renderTransactionItem(tx))}
         </div>
-
-        {/* Success Message */}
-        {isComplete && (
-          <div className="mt-4 p-4 bg-green-600/10 border border-green-500/30 rounded-lg">
-            <div className="flex items-center gap-3">
-              <Check className="w-5 h-5 text-green-400" />
-              <div>
-                <p className="text-white font-medium">Position Created Successfully!</p>
-                {mintedTokenId && (
-                  <p className="text-sm text-slate-400">NFT ID: #{mintedTokenId.toString()}</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
 
   // Visual area is hidden - return null
   const renderVisual = () => null;
+
+  // Determine amounts to display in summary - use adjusted if available
+  const displayBaseAmount = state.adjustedBaseAmount && state.adjustedBaseAmount !== '0'
+    ? state.adjustedBaseAmount
+    : state.allocatedBaseAmount;
+  const displayQuoteAmount = state.adjustedQuoteAmount && state.adjustedQuoteAmount !== '0'
+    ? state.adjustedQuoteAmount
+    : state.allocatedQuoteAmount;
+  const displayTotalValue = state.adjustedTotalQuoteValue && state.adjustedTotalQuoteValue !== '0'
+    ? state.adjustedTotalQuoteValue
+    : state.totalQuoteValue;
 
   const renderSummary = () => (
     <WizardSummaryPanel
@@ -905,9 +1161,9 @@ export function TransactionStep() {
       onNext={goNext}
     >
       <AllocatedCapitalSection
-        allocatedBaseAmount={state.allocatedBaseAmount}
-        allocatedQuoteAmount={state.allocatedQuoteAmount}
-        totalQuoteValue={state.totalQuoteValue}
+        allocatedBaseAmount={displayBaseAmount}
+        allocatedQuoteAmount={displayQuoteAmount}
+        totalQuoteValue={displayTotalValue}
         baseToken={state.baseToken}
         quoteToken={state.quoteToken}
         baseLogoUrl={actualBaseLogoUrl}

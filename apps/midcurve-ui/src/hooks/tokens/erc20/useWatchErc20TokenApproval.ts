@@ -165,6 +165,7 @@ export function useWatchErc20TokenApproval(
   const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const mountedRef = useRef(true);
 
   // Query key for this subscription (memoized to prevent unnecessary re-renders)
@@ -232,7 +233,7 @@ export function useWatchErc20TokenApproval(
 
       return response.data;
     },
-    enabled: enabled && !!subscriptionId,
+    enabled: enabled && !!subscriptionId && !cancelled,
     refetchInterval: pollIntervalMs,
     staleTime: pollIntervalMs / 2,
     gcTime: 5 * 60 * 1000,
@@ -268,6 +269,9 @@ export function useWatchErc20TokenApproval(
   // Cancel callback
   const cancel = useCallback(async () => {
     if (!subscriptionId) return;
+
+    // Immediately disable polling to prevent 404 race conditions
+    setCancelled(true);
 
     try {
       await apiClient.delete(`/api/v1/tokens/erc20/approval/watch/${subscriptionId}`);

@@ -154,7 +154,7 @@ const ZOOM_MAX = 1.25;
 const ZOOM_STEP = 0.125;
 
 export function SwapStep() {
-  const { state, setStepValid, goNext, setNeedsSwap, setInteractiveZoom } = useCreatePositionWizard();
+  const { state, setStepValid, goNext, setNeedsSwap, setInteractiveZoom, saveOriginalAmounts } = useCreatePositionWizard();
   const { address: walletAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
 
@@ -469,8 +469,15 @@ export function SwapStep() {
   // Handle skip - proceed without swapping
   const handleSkip = () => {
     setNeedsSwap(false);
+    saveOriginalAmounts();
     goNext();
   };
+
+  // Handle next - save original amounts for price adjustment step
+  const handleNext = useCallback(() => {
+    saveOriginalAmounts();
+    goNext();
+  }, [saveOriginalAmounts, goNext]);
 
   // ===== Render Functions =====
 
@@ -663,7 +670,7 @@ export function SwapStep() {
     const nextDisabled = !isConnected || isWrongNetwork || !bothSatisfied || isLoading;
 
     return (
-      <WizardSummaryPanel nextDisabled={nextDisabled}>
+      <WizardSummaryPanel nextDisabled={nextDisabled} onNext={handleNext}>
         <AllocatedCapitalSection
           allocatedBaseAmount={state.allocatedBaseAmount}
           allocatedQuoteAmount={state.allocatedQuoteAmount}

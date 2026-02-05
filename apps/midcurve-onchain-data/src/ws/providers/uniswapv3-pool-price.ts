@@ -134,9 +134,17 @@ export class UniswapV3PoolPriceSubscriptionBatch {
       msg: 'Added pool to batch',
     });
 
-    // Reconnect to update the subscription filter
+    // Reconnect to update the subscription filter, or restart if batch was stopped
     if (this.isRunning) {
       await this.reconnect();
+    } else {
+      // Batch was stopped (e.g., all pools were removed), restart it
+      log.info({
+        chainId: this.chainId,
+        batchIndex: this.batchIndex,
+        msg: 'Restarting stopped batch for new pool',
+      });
+      await this.start();
     }
   }
 

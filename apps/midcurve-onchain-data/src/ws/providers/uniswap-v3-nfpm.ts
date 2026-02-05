@@ -342,9 +342,17 @@ export class UniswapV3NfpmSubscriptionBatch {
       msg: 'Added position to batch',
     });
 
-    // Reconnect to update the subscription filter
+    // Reconnect to update the subscription filter, or restart if batch was stopped
     if (this.isRunning) {
       await this.reconnect();
+    } else {
+      // Batch was stopped (e.g., all positions were removed), restart it
+      log.info({
+        chainId: this.chainId,
+        batchIndex: this.batchIndex,
+        msg: 'Restarting stopped batch for new position',
+      });
+      await this.start();
     }
   }
 

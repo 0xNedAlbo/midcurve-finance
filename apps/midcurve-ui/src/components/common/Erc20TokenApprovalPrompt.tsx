@@ -87,6 +87,11 @@ export interface UseErc20TokenApprovalPromptResult {
    * Any error that occurred (filtered - no user rejections)
    */
   error: string | null;
+
+  /**
+   * Cancel the approval watch subscription (calls DELETE endpoint)
+   */
+  cancel: () => Promise<void>;
 }
 
 /**
@@ -175,8 +180,9 @@ export function useErc20TokenApprovalPrompt({
     chainId,
   });
 
-  // Combined approval status (watch hook + approval hook)
-  const isApproved = approvalWatch.isApproved || approval.isApproved || requiredAmount === 0n;
+  // Combined approval status - prioritize watch hook (on-chain state) over local state
+  // Local approval.isApproved is only used as fallback when watch hasn't loaded yet
+  const isApproved = requiredAmount === 0n || approvalWatch.isApproved || (approval.isApproved && approvalWatch.allowance === undefined);
 
   // Filter user rejection errors
   const approvalErrorFiltered = isUserRejection(approval.approvalError) ? null : approval.approvalError;
@@ -326,5 +332,6 @@ export function useErc20TokenApprovalPrompt({
     isApproved,
     status,
     error,
+    cancel: approvalWatch.cancel,
   };
 }
