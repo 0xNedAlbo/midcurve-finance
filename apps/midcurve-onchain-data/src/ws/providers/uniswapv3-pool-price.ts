@@ -180,6 +180,27 @@ export class UniswapV3PoolPriceSubscriptionBatch {
   }
 
   /**
+   * Update the subscriptionId for a pool without removing it from the batch.
+   * Used when one subscription is removed but others for the same pool remain.
+   */
+  updatePoolSubscriptionId(oldSubscriptionId: string, newSubscriptionId: string): void {
+    for (const [poolAddr, info] of this.pools.entries()) {
+      if (info.subscriptionId === oldSubscriptionId) {
+        this.pools.set(poolAddr, { ...info, subscriptionId: newSubscriptionId });
+        log.info({
+          chainId: this.chainId,
+          batchIndex: this.batchIndex,
+          oldSubscriptionId,
+          newSubscriptionId,
+          poolAddress: poolAddr,
+          msg: 'Updated pool subscription ID in batch',
+        });
+        return;
+      }
+    }
+  }
+
+  /**
    * Remove a pool subscription from this batch.
    * Reconnects the WebSocket to update the filter.
    */
