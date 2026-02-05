@@ -16,7 +16,8 @@
 export type OnchainSubscriptionType =
   | 'erc20-approval'
   | 'erc20-balance'
-  | 'evm-tx-status';
+  | 'evm-tx-status'
+  | 'uniswapv3-pool-price';
 
 /**
  * Subscription lifecycle status.
@@ -227,6 +228,58 @@ export interface EvmTxStatusSubscriptionJSON extends Omit<OnchainSubscriptionJSO
 }
 
 // ============================================================================
+// Uniswap V3 Pool Price Subscription Types
+// ============================================================================
+
+/**
+ * Config for Uniswap V3 pool price subscriptions (immutable after creation).
+ */
+export interface UniswapV3PoolPriceSubscriptionConfig {
+  /** EVM chain ID */
+  chainId: number;
+  /** Pool contract address (EIP-55 normalized) */
+  poolAddress: string;
+  /** ISO 8601 timestamp when subscription was started */
+  startedAt: string;
+}
+
+/**
+ * State for Uniswap V3 pool price subscriptions (mutable).
+ */
+export interface UniswapV3PoolPriceSubscriptionState {
+  /** Current sqrtPriceX96 (bigint as string) */
+  sqrtPriceX96: string;
+  /** Current tick */
+  tick: number;
+  /** Block number of last Swap event */
+  lastEventBlock: number | null;
+  /** Transaction hash of last Swap event */
+  lastEventTxHash: string | null;
+  /** ISO 8601 timestamp of last state update */
+  lastUpdatedAt: string;
+}
+
+/**
+ * Complete Uniswap V3 pool price subscription data.
+ */
+export interface UniswapV3PoolPriceSubscriptionData
+  extends Omit<OnchainSubscriptionData, 'config' | 'state'> {
+  subscriptionType: 'uniswapv3-pool-price';
+  config: UniswapV3PoolPriceSubscriptionConfig;
+  state: UniswapV3PoolPriceSubscriptionState;
+}
+
+/**
+ * JSON representation for API responses.
+ */
+export interface UniswapV3PoolPriceSubscriptionJSON
+  extends Omit<OnchainSubscriptionJSON, 'config' | 'state'> {
+  subscriptionType: 'uniswapv3-pool-price';
+  config: UniswapV3PoolPriceSubscriptionConfig;
+  state: UniswapV3PoolPriceSubscriptionState;
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -334,6 +387,28 @@ export function isEvmTxStatusSubscription(
   data: OnchainSubscriptionData
 ): data is EvmTxStatusSubscriptionData {
   return data.subscriptionType === 'evm-tx-status';
+}
+
+/**
+ * Create an empty Uniswap V3 pool price subscription state.
+ */
+export function emptyUniswapV3PoolPriceState(): UniswapV3PoolPriceSubscriptionState {
+  return {
+    sqrtPriceX96: '0',
+    tick: 0,
+    lastEventBlock: null,
+    lastEventTxHash: null,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Type guard for Uniswap V3 pool price subscription.
+ */
+export function isUniswapV3PoolPriceSubscription(
+  data: OnchainSubscriptionData
+): data is UniswapV3PoolPriceSubscriptionData {
+  return data.subscriptionType === 'uniswapv3-pool-price';
 }
 
 /**
