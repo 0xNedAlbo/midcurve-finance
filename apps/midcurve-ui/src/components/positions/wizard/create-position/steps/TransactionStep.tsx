@@ -1216,6 +1216,7 @@ export function TransactionStep() {
     <WizardSummaryPanel
       showFinish={isComplete}
       onFinish={handleFinish}
+      showCurrentPrice={false}
     >
       <AllocatedCapitalSection
         allocatedBaseAmount={displayBaseAmount}

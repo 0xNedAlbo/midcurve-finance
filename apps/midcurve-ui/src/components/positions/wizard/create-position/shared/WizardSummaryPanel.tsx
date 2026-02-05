@@ -20,6 +20,7 @@ interface WizardSummaryPanelProps {
   onNext?: () => void;
   showFinish?: boolean;
   onFinish?: () => void;
+  showCurrentPrice?: boolean;
   children?: React.ReactNode;
 }
 
@@ -32,6 +33,7 @@ export function WizardSummaryPanel({
   onNext,
   showFinish,
   onFinish,
+  showCurrentPrice = true,
   children,
 }: WizardSummaryPanelProps) {
   const { state, setSummaryZoom, swapQuoteBase, setDiscoveredPool } = useCreatePositionWizard();
@@ -170,7 +172,7 @@ export function WizardSummaryPanel({
         />
 
         {/* Current Price Line */}
-        {state.quoteToken && currentPriceBigint !== null && (
+        {showCurrentPrice && state.quoteToken && currentPriceBigint !== null && (
           <div className="flex items-center justify-between px-3 py-2 bg-slate-700/30 rounded-lg">
             <span className="text-xs text-slate-400">
               Current Price:{' '}
