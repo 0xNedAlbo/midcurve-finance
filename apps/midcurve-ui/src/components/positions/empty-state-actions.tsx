@@ -2,7 +2,7 @@
 
 import { Wand2, FileText, ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { UniswapV3PositionWizard } from "./wizard/uniswapv3/uniswapv3-position-wizard";
+import { useNavigate } from "react-router-dom";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
 import {
   getAllUniswapV3Chains,
@@ -28,8 +28,8 @@ export function EmptyStateActions({
   // Import mutation hook
   const importMutation = useImportPositionByNftId();
 
-  // Wizard state
-  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  // Navigation for wizard
+  const navigate = useNavigate();
 
   // Real import handler using API
   const handleImportNft = () => {
@@ -102,7 +102,7 @@ export function EmptyStateActions({
 
             {/* Action Button */}
             <button
-              onClick={() => setIsWizardOpen(true)}
+              onClick={() => navigate('/positions/create')}
               className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
             >
               Start Wizard
@@ -217,16 +217,6 @@ export function EmptyStateActions({
           </div>
         </div>
       </div>
-
-      {/* Wizard Modal */}
-      <UniswapV3PositionWizard
-        isOpen={isWizardOpen}
-        onClose={() => setIsWizardOpen(false)}
-        onPositionCreated={(position) => {
-          // Don't auto-close - let user click "Finish" button
-          onImportSuccess?.(position);
-        }}
-      />
     </div>
   );
 }

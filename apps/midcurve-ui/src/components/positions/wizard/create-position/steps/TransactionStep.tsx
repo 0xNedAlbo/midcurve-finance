@@ -32,7 +32,7 @@ import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { getPositionCloserAddress, TriggerMode, SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { getChainSlugByChainId } from '@/config/chains';
-import { AddToPortfolioSection } from '../../uniswapv3/shared/add-to-portfolio-section';
+import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
