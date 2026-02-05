@@ -37,8 +37,11 @@ export function FullPageWizardLayout({
   const navigate = useNavigate();
 
   const handleClose = () => {
-    onClose?.();
-    navigate(-1);
+    if (onClose) {
+      onClose();
+    } else {
+      navigate(-1);
+    }
   };
 
   return (
