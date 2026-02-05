@@ -52,14 +52,17 @@ export interface PoolPriceInfo {
 /**
  * Uniswap V3 Pool Price subscription batch for a single chain.
  * Each batch handles up to MAX_POOLS_PER_SUBSCRIPTION pools.
+ *
+ * Multiple subscriptions can exist for the same pool (different users/tabs).
+ * When a Swap event comes in, ALL subscriptions for that pool are updated.
  */
 export class UniswapV3PoolPriceSubscriptionBatch {
   private readonly chainId: SupportedChainId;
   private readonly wssUrl: string;
   private readonly batchIndex: number;
-  // Map: poolAddress -> PoolPriceInfo
-  // Each pool should have only one subscription
-  private pools: Map<string, PoolPriceInfo>;
+  // Map: poolAddress -> PoolPriceInfo[]
+  // Multiple subscriptions can exist for the same pool
+  private pools: Map<string, PoolPriceInfo[]>;
   private wsClient: PublicClient | null = null;
   private unwatch: WatchEventReturnType | null = null;
   private isRunning = false;
@@ -78,13 +81,15 @@ export class UniswapV3PoolPriceSubscriptionBatch {
     this.batchIndex = batchIndex;
     this.pools = new Map();
 
-    // Index pools by address
+    // Index pools by address, grouping multiple subscriptions per pool
     for (const pool of pools) {
       const poolAddr = pool.poolAddress.toLowerCase();
-      this.pools.set(poolAddr, pool);
+      const existing = this.pools.get(poolAddr) || [];
+      existing.push(pool);
+      this.pools.set(poolAddr, existing);
     }
 
-    // Check total subscription count
+    // Check total pool count (unique addresses)
     if (this.pools.size > MAX_POOLS_PER_SUBSCRIPTION) {
       throw new Error(
         `Batch exceeds max pools: ${this.pools.size} > ${MAX_POOLS_PER_SUBSCRIPTION}`
@@ -101,29 +106,45 @@ export class UniswapV3PoolPriceSubscriptionBatch {
 
   /**
    * Add a pool subscription to this batch dynamically.
-   * Reconnects the WebSocket to include the new pool in the filter.
+   * If the pool already exists, adds the subscription to the list.
+   * If it's a new pool, reconnects the WebSocket to include it in the filter.
    */
   async addPool(pool: PoolPriceInfo): Promise<void> {
     const poolAddr = pool.poolAddress.toLowerCase();
+    const existing = this.pools.get(poolAddr);
 
-    // Check if this pool already exists
-    if (this.pools.has(poolAddr)) {
-      log.debug({
+    if (existing) {
+      // Check if this exact subscription already exists
+      if (existing.some((p) => p.subscriptionId === pool.subscriptionId)) {
+        log.debug({
+          subscriptionId: pool.subscriptionId,
+          msg: 'Subscription already in batch, skipping',
+        });
+        return;
+      }
+
+      // Pool already exists, just add the subscription to the list
+      existing.push(pool);
+      log.info({
+        chainId: this.chainId,
+        batchIndex: this.batchIndex,
         subscriptionId: pool.subscriptionId,
-        msg: 'Pool subscription already in batch, skipping',
+        poolAddress: pool.poolAddress,
+        subscriptionCount: existing.length,
+        msg: 'Added subscription to existing pool in batch',
       });
       return;
     }
 
-    // Check batch capacity
+    // New pool - check batch capacity
     if (this.poolCount >= MAX_POOLS_PER_SUBSCRIPTION) {
       throw new Error(
         `Batch at max capacity: ${this.poolCount} >= ${MAX_POOLS_PER_SUBSCRIPTION}`
       );
     }
 
-    // Add to pools map
-    this.pools.set(poolAddr, pool);
+    // Add new pool with this subscription
+    this.pools.set(poolAddr, [pool]);
 
     log.info({
       chainId: this.chainId,
@@ -131,7 +152,7 @@ export class UniswapV3PoolPriceSubscriptionBatch {
       subscriptionId: pool.subscriptionId,
       poolAddress: pool.poolAddress,
       newPoolCount: this.poolCount,
-      msg: 'Added pool to batch',
+      msg: 'Added new pool to batch',
     });
 
     // Reconnect to update the subscription filter, or restart if batch was stopped
@@ -152,12 +173,19 @@ export class UniswapV3PoolPriceSubscriptionBatch {
    * Check if this batch contains a subscription.
    */
   hasPool(subscriptionId: string): boolean {
-    for (const info of this.pools.values()) {
-      if (info.subscriptionId === subscriptionId) {
+    for (const subscriptions of this.pools.values()) {
+      if (subscriptions.some((s) => s.subscriptionId === subscriptionId)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Check if this batch contains a pool address.
+   */
+  hasPoolAddress(poolAddress: string): boolean {
+    return this.pools.has(poolAddress.toLowerCase());
   }
 
   /**
@@ -171,84 +199,81 @@ export class UniswapV3PoolPriceSubscriptionBatch {
    * Get pool info by subscription ID.
    */
   getPoolInfo(subscriptionId: string): PoolPriceInfo | undefined {
-    for (const info of this.pools.values()) {
-      if (info.subscriptionId === subscriptionId) {
-        return info;
+    for (const subscriptions of this.pools.values()) {
+      const found = subscriptions.find((s) => s.subscriptionId === subscriptionId);
+      if (found) {
+        return found;
       }
     }
     return undefined;
   }
 
   /**
-   * Update the subscription info for a pool without removing it from the batch.
-   * Used when one subscription is removed but others for the same pool remain.
-   *
-   * Updates both the subscriptionId and the database row id, so that Swap events
-   * update the correct database record.
+   * Get all subscriptions for a pool address.
    */
-  updatePoolSubscription(
-    oldSubscriptionId: string,
-    newSubscriptionId: string,
-    newId: string
-  ): void {
-    for (const [poolAddr, info] of this.pools.entries()) {
-      if (info.subscriptionId === oldSubscriptionId) {
-        this.pools.set(poolAddr, {
-          ...info,
-          id: newId,
-          subscriptionId: newSubscriptionId,
-        });
-        log.info({
-          chainId: this.chainId,
-          batchIndex: this.batchIndex,
-          oldSubscriptionId,
-          newSubscriptionId,
-          newId,
-          poolAddress: poolAddr,
-          msg: 'Updated pool subscription in batch',
-        });
-        return;
-      }
-    }
+  getPoolSubscriptions(poolAddress: string): PoolPriceInfo[] {
+    return this.pools.get(poolAddress.toLowerCase()) || [];
   }
 
   /**
-   * Remove a pool subscription from this batch.
-   * Reconnects the WebSocket to update the filter.
+   * Remove a subscription from this batch.
+   * If other subscriptions exist for the same pool, the pool stays in the batch.
+   * Only removes the pool from the WebSocket filter when no subscriptions remain.
    */
-  async removePool(subscriptionId: string): Promise<void> {
-    let poolAddrToRemove: string | null = null;
+  async removeSubscription(subscriptionId: string): Promise<void> {
+    let poolAddr: string | null = null;
+    let subscriptions: PoolPriceInfo[] | null = null;
 
-    for (const [poolAddr, info] of this.pools.entries()) {
-      if (info.subscriptionId === subscriptionId) {
-        poolAddrToRemove = poolAddr;
+    // Find the pool containing this subscription
+    for (const [addr, subs] of this.pools.entries()) {
+      const idx = subs.findIndex((s) => s.subscriptionId === subscriptionId);
+      if (idx !== -1) {
+        poolAddr = addr;
+        subscriptions = subs;
+        // Remove the subscription from the array
+        subs.splice(idx, 1);
         break;
       }
     }
 
-    if (!poolAddrToRemove) {
+    if (!poolAddr || !subscriptions) {
       log.debug({
         subscriptionId,
-        msg: 'Pool not found in batch',
+        msg: 'Subscription not found in batch',
       });
       return;
     }
 
-    this.pools.delete(poolAddrToRemove);
+    // If there are still subscriptions for this pool, just log and return
+    if (subscriptions.length > 0) {
+      log.info({
+        chainId: this.chainId,
+        batchIndex: this.batchIndex,
+        subscriptionId,
+        poolAddress: poolAddr,
+        remainingSubscriptions: subscriptions.length,
+        msg: 'Removed subscription but kept pool in batch (other subscriptions exist)',
+      });
+      return;
+    }
+
+    // No more subscriptions for this pool - remove the pool entirely
+    this.pools.delete(poolAddr);
 
     log.info({
       chainId: this.chainId,
       batchIndex: this.batchIndex,
       subscriptionId,
+      poolAddress: poolAddr,
       remainingPoolCount: this.poolCount,
-      msg: 'Removed pool from batch',
+      msg: 'Removed pool from batch (no more subscriptions)',
     });
 
     // Reconnect to update the subscription filter (if still running and has pools)
     if (this.isRunning && this.pools.size > 0) {
       await this.reconnect();
     } else if (this.isRunning && this.pools.size === 0) {
-      // Stop the batch if no subscriptions remain
+      // Stop the batch if no pools remain
       await this.stop();
       log.info({
         chainId: this.chainId,
@@ -390,6 +415,7 @@ export class UniswapV3PoolPriceSubscriptionBatch {
 
   /**
    * Handle incoming log events.
+   * Updates ALL subscriptions for the pool that received the event.
    */
   private handleLogs(logs: unknown[]): void {
     for (const rawLog of logs) {
@@ -447,73 +473,51 @@ export class UniswapV3PoolPriceSubscriptionBatch {
         continue;
       }
 
-      // Find matching subscription
-      const poolInfo = this.pools.get(poolAddress);
-      if (!poolInfo) {
+      // Find ALL subscriptions for this pool
+      const subscriptions = this.pools.get(poolAddress);
+      if (!subscriptions || subscriptions.length === 0) {
         log.debug({
           chainId: this.chainId,
           poolAddress,
-          msg: 'No subscription found for pool',
+          msg: 'No subscriptions found for pool',
         });
         continue;
       }
 
-      // Update database state
-      this.updatePoolPriceState(poolInfo, sqrtPriceX96, tick, blockNumber, txHash).catch(
-        (err) => {
-          log.error({
-            error: err instanceof Error ? err.message : String(err),
-            chainId: this.chainId,
-            subscriptionId: poolInfo.subscriptionId,
-            msg: 'Failed to update pool price state',
-          });
-        }
-      );
+      // Update ALL subscriptions for this pool
+      this.updateAllPoolSubscriptions(
+        poolAddress,
+        subscriptions,
+        sqrtPriceX96,
+        tick,
+        blockNumber,
+        txHash
+      ).catch((err) => {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          chainId: this.chainId,
+          poolAddress,
+          subscriptionCount: subscriptions.length,
+          msg: 'Failed to update pool price state',
+        });
+      });
     }
   }
 
   /**
-   * Update pool price state in database.
+   * Update pool price state for ALL subscriptions of a pool.
    * No RPC call needed - Swap event contains the price directly.
    */
-  private async updatePoolPriceState(
-    pool: PoolPriceInfo,
+  private async updateAllPoolSubscriptions(
+    poolAddress: string,
+    subscriptions: PoolPriceInfo[],
     sqrtPriceX96: bigint,
     tick: number,
     blockNumber: number | null,
     txHash: string | null
   ): Promise<void> {
     const now = new Date();
-
-    // Get current state
-    const subscription = await prisma.onchainDataSubscribers.findUnique({
-      where: { id: pool.id },
-    });
-
-    if (!subscription || subscription.status === 'deleted') {
-      log.warn({
-        subscriptionId: pool.subscriptionId,
-        msg: 'Subscription not found or deleted, skipping update',
-      });
-      return;
-    }
-
-    const currentState = subscription.state as unknown as UniswapV3PoolPriceSubscriptionState;
-
-    // Only update if this event is newer (by block number)
-    if (
-      currentState.lastEventBlock !== null &&
-      blockNumber !== null &&
-      blockNumber < currentState.lastEventBlock
-    ) {
-      log.debug({
-        subscriptionId: pool.subscriptionId,
-        currentBlock: currentState.lastEventBlock,
-        eventBlock: blockNumber,
-        msg: 'Skipping older event',
-      });
-      return;
-    }
+    const subscriptionIds = subscriptions.map((s) => s.id);
 
     const newState: UniswapV3PoolPriceSubscriptionState = {
       sqrtPriceX96: sqrtPriceX96.toString(),
@@ -523,8 +527,12 @@ export class UniswapV3PoolPriceSubscriptionBatch {
       lastUpdatedAt: now.toISOString(),
     };
 
-    await prisma.onchainDataSubscribers.update({
-      where: { id: pool.id },
+    // Update all subscriptions in a single query
+    const result = await prisma.onchainDataSubscribers.updateMany({
+      where: {
+        id: { in: subscriptionIds },
+        status: { not: 'deleted' },
+      },
       data: {
         state: newState as unknown as Prisma.InputJsonValue,
         updatedAt: now,
@@ -533,12 +541,13 @@ export class UniswapV3PoolPriceSubscriptionBatch {
 
     log.info({
       chainId: this.chainId,
-      subscriptionId: pool.subscriptionId,
-      poolAddress: pool.poolAddress,
+      poolAddress,
       sqrtPriceX96: sqrtPriceX96.toString(),
       tick,
       blockNumber,
-      msg: 'Updated pool price state',
+      subscriptionsUpdated: result.count,
+      totalSubscriptions: subscriptions.length,
+      msg: 'Updated pool price state for all subscriptions',
     });
   }
 
@@ -605,18 +614,37 @@ export class UniswapV3PoolPriceSubscriptionBatch {
 
 /**
  * Create subscription batches for a chain.
- * Splits pools into batches of MAX_POOLS_PER_SUBSCRIPTION.
+ * Splits pools into batches of MAX_POOLS_PER_SUBSCRIPTION unique pool addresses.
+ * Multiple subscriptions for the same pool are grouped together in one batch.
  */
 export function createPoolPriceSubscriptionBatches(
   chainId: SupportedChainId,
   wssUrl: string,
   pools: PoolPriceInfo[]
 ): UniswapV3PoolPriceSubscriptionBatch[] {
+  // Group subscriptions by pool address
+  const poolsByAddress = new Map<string, PoolPriceInfo[]>();
+  for (const pool of pools) {
+    const addr = pool.poolAddress.toLowerCase();
+    const existing = poolsByAddress.get(addr) || [];
+    existing.push(pool);
+    poolsByAddress.set(addr, existing);
+  }
+
+  // Split unique pool addresses into batches
+  const uniqueAddresses = Array.from(poolsByAddress.keys());
   const batches: UniswapV3PoolPriceSubscriptionBatch[] = [];
 
-  for (let i = 0; i < pools.length; i += MAX_POOLS_PER_SUBSCRIPTION) {
-    const batchPools = pools.slice(i, i + MAX_POOLS_PER_SUBSCRIPTION);
+  for (let i = 0; i < uniqueAddresses.length; i += MAX_POOLS_PER_SUBSCRIPTION) {
+    const batchAddresses = uniqueAddresses.slice(i, i + MAX_POOLS_PER_SUBSCRIPTION);
     const batchIndex = Math.floor(i / MAX_POOLS_PER_SUBSCRIPTION);
+
+    // Collect all subscriptions for pools in this batch
+    const batchPools: PoolPriceInfo[] = [];
+    for (const addr of batchAddresses) {
+      const subscriptions = poolsByAddress.get(addr) || [];
+      batchPools.push(...subscriptions);
+    }
 
     batches.push(
       new UniswapV3PoolPriceSubscriptionBatch(chainId, wssUrl, batchIndex, batchPools)
@@ -625,7 +653,8 @@ export function createPoolPriceSubscriptionBatches(
 
   log.info({
     chainId,
-    totalPools: pools.length,
+    totalSubscriptions: pools.length,
+    uniquePools: uniqueAddresses.length,
     batchCount: batches.length,
     msg: `Created ${batches.length} pool price subscription batches`,
   });

@@ -322,9 +322,8 @@ export class UniswapV3PoolPriceSubscriber {
    * Remove a pool subscription from the worker.
    * Called when subscription is paused or deleted.
    *
-   * If other subscriptions exist for the same pool address, the pool is kept
-   * in the WebSocket batch (only the subscriptionId is updated).
-   * The pool is only removed from the batch when no subscriptions remain.
+   * The batch handles multiple subscriptions per pool internally - it will only
+   * remove the pool from the WebSocket filter when no subscriptions remain.
    */
   async removePool(subscriptionId: string): Promise<void> {
     const poolInfo = this.subscribedPools.get(subscriptionId);
@@ -336,47 +335,12 @@ export class UniswapV3PoolPriceSubscriber {
     // Remove from internal tracking
     this.subscribedPools.delete(subscriptionId);
 
-    // Check if other subscriptions exist for the same pool address
-    const otherSubscriptionsForPool = Array.from(this.subscribedPools.values()).filter(
-      (p) => p.poolAddress === poolInfo.poolAddress && p.chainId === poolInfo.chainId
-    );
-
+    // Remove from batch (batch handles multi-subscription logic internally)
     const chainBatches = this.batchesByChain.get(poolInfo.chainId);
-
-    const nextSubscription = otherSubscriptionsForPool[0];
-    if (nextSubscription) {
-      // Other subscriptions exist - update the batch's tracked subscription info
-      // (both subscriptionId and id, so Swap events update the correct DB record)
-      if (chainBatches) {
-        for (const batch of chainBatches) {
-          if (batch.hasPool(subscriptionId)) {
-            // Update to use another subscription's ID and database row ID
-            batch.updatePoolSubscription(
-              subscriptionId,
-              nextSubscription.subscriptionId,
-              nextSubscription.id
-            );
-            break;
-          }
-        }
-      }
-      log.info({
-        chainId: poolInfo.chainId,
-        subscriptionId,
-        poolAddress: poolInfo.poolAddress,
-        newSubscriptionId: nextSubscription.subscriptionId,
-        newId: nextSubscription.id,
-        remainingSubscriptions: otherSubscriptionsForPool.length,
-        msg: 'Removed subscription but kept pool in batch (other subscriptions exist)',
-      });
-      return;
-    }
-
-    // No other subscriptions - remove from batch
     if (chainBatches) {
       for (const batch of chainBatches) {
         if (batch.hasPool(subscriptionId)) {
-          await batch.removePool(subscriptionId);
+          await batch.removeSubscription(subscriptionId);
           break;
         }
       }
@@ -385,6 +349,7 @@ export class UniswapV3PoolPriceSubscriber {
     log.info({
       chainId: poolInfo.chainId,
       subscriptionId,
+      poolAddress: poolInfo.poolAddress,
       msg: 'Removed pool subscription',
     });
   }
