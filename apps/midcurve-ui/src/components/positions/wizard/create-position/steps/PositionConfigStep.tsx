@@ -20,6 +20,8 @@ import {
 } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
+import { PositionRangeSection } from '../shared/PositionRangeSection';
+import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
 import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
@@ -1052,59 +1054,21 @@ export function PositionConfigStep() {
 
       {/* Position Range */}
       {rangeBoundaryInfo && (
-        <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-          <p className="text-xs text-slate-400">Position Range</p>
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-slate-400">Lower</span>
-              <span className="text-teal-400 font-medium">
-                {formatCompactValue(rangeBoundaryInfo.lowerPriceBigInt, state.quoteToken?.decimals ?? 18)}
-              </span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-slate-400">Upper</span>
-              <span className="text-teal-400 font-medium">
-                {formatCompactValue(rangeBoundaryInfo.upperPriceBigInt, state.quoteToken?.decimals ?? 18)}
-              </span>
-            </div>
-          </div>
-        </div>
+        <PositionRangeSection
+          lowerPriceBigInt={rangeBoundaryInfo.lowerPriceBigInt}
+          upperPriceBigInt={rangeBoundaryInfo.upperPriceBigInt}
+          quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
+        />
       )}
 
       {/* SL/TP Triggers */}
-      {(stopLossPrice !== null || takeProfitPrice !== null) && (
-        <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-          <p className="text-xs text-slate-400">Risk Triggers</p>
-          <div className="space-y-1.5">
-            {stopLossPrice !== null && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Stop Loss</span>
-                <span className="text-red-400 font-medium">
-                  {formatCompactValue(stopLossPrice, state.quoteToken?.decimals ?? 18)}
-                  {slDrawdown && (
-                    <span className="text-slate-500 font-normal ml-1">
-                      ({formatCompactValue(slDrawdown.pnlValue, state.quoteToken?.decimals ?? 18)})
-                    </span>
-                  )}
-                </span>
-              </div>
-            )}
-            {takeProfitPrice !== null && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Take Profit</span>
-                <span className="text-green-400 font-medium">
-                  {formatCompactValue(takeProfitPrice, state.quoteToken?.decimals ?? 18)}
-                  {tpRunup && (
-                    <span className="text-slate-500 font-normal ml-1">
-                      (+{formatCompactValue(tpRunup.pnlValue, state.quoteToken?.decimals ?? 18)})
-                    </span>
-                  )}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <RiskTriggersSection
+        stopLossPrice={stopLossPrice}
+        takeProfitPrice={takeProfitPrice}
+        slDrawdown={slDrawdown}
+        tpRunup={tpRunup}
+        quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
+      />
     </WizardSummaryPanel>
   );
 

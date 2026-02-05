@@ -11,14 +11,16 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Circle, Check, Loader2, ExternalLink, AlertCircle } from 'lucide-react';
+import { Circle, Check, Loader2, ExternalLink, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, formatCompactValue, tickToPrice } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, tickToPrice } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
-import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
+import { PositionRangeSection } from '../shared/PositionRangeSection';
+import { RiskTriggersSection } from '../shared/RiskTriggersSection';
+import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useRegisterCloseOrder } from '@/hooks/automation/useRegisterCloseOrder';
@@ -27,6 +29,8 @@ import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { getPositionCloserAddress, TriggerMode, SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
+import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
+import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 
 // Transaction item status
 type TxStatus = 'pending' | 'waiting' | 'confirming' | 'success' | 'error' | 'skipped';
@@ -59,6 +63,9 @@ export function TransactionStep() {
   const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'done'>('idle');
   const [activeError, setActiveError] = useState<{ txId: string; message: string } | null>(null);
 
+  // Track which transactions have been attempted (prevents infinite retry loops on cancel)
+  const [attemptedTxs, setAttemptedTxs] = useState<Set<string>>(new Set());
+
   // Track minted token ID
   const [mintedTokenId, setMintedTokenId] = useState<bigint | undefined>(undefined);
 
@@ -83,22 +90,40 @@ export function TransactionStep() {
   const baseAmount = state.allocatedBaseAmount ? BigInt(state.allocatedBaseAmount) : 0n;
   const quoteAmount = state.allocatedQuoteAmount ? BigInt(state.allocatedQuoteAmount) : 0n;
 
-  // Token approval hooks
-  const baseApproval = useTokenApproval({
+  // Get spender address for approvals (NonfungiblePositionManager)
+  const spenderAddress = chainId ? getNonfungiblePositionManagerAddress(chainId) : null;
+
+  // Token approval hooks using the unified approval prompt component
+  const baseApprovalPrompt = useErc20TokenApprovalPrompt({
     tokenAddress: baseTokenAddress ?? null,
-    ownerAddress: walletAddress ?? null,
+    tokenSymbol: state.baseToken?.symbol || 'Base Token',
+    tokenDecimals: state.baseToken?.decimals ?? 18,
     requiredAmount: baseAmount,
+    spenderAddress: spenderAddress ?? null,
     chainId,
     enabled: !!baseTokenAddress && !!walletAddress && !!chainId && baseAmount > 0n,
   });
 
-  const quoteApproval = useTokenApproval({
+  const quoteApprovalPrompt = useErc20TokenApprovalPrompt({
     tokenAddress: quoteTokenAddress ?? null,
-    ownerAddress: walletAddress ?? null,
+    tokenSymbol: state.quoteToken?.symbol || 'Quote Token',
+    tokenDecimals: state.quoteToken?.decimals ?? 18,
     requiredAmount: quoteAmount,
+    spenderAddress: spenderAddress ?? null,
     chainId,
     enabled: !!quoteTokenAddress && !!walletAddress && !!chainId && quoteAmount > 0n,
   });
+
+  // Combined approval status from the unified hooks
+  const isBaseApproved = baseApprovalPrompt.isApproved;
+  const isQuoteApproved = quoteApprovalPrompt.isApproved;
+
+  // Helper to check if error is user rejection (not a real error)
+  const isUserRejection = (error: Error | null | undefined): boolean => {
+    if (!error) return false;
+    const message = error.message?.toLowerCase() || '';
+    return message.includes('user rejected') || message.includes('user denied');
+  };
 
   // Determine token0/token1 based on pool ordering
   const mintParams = useMemo((): MintPositionParams | null => {
@@ -133,6 +158,40 @@ export function TransactionStep() {
 
   // Mint position hook
   const mint = useMintPosition(mintParams);
+
+  // Check if approvals are complete (for showing mint button when approvals were already done)
+  const approvalsComplete = (baseAmount === 0n || isBaseApproved) && (quoteAmount === 0n || isQuoteApproved);
+
+  // Mint transaction prompt using the unified component
+  const mintPrompt = useEvmTransactionPrompt({
+    label: 'Open UniswapV3 Position',
+    buttonLabel: 'Open',
+    chainId,
+    enabled: !!mintParams,
+    // Show button when in mint phase OR when idle but approvals are already complete
+    showActionButton: currentPhase === 'mint' || (currentPhase === 'idle' && approvalsComplete),
+    txHash: mint.mintTxHash,
+    isSubmitting: mint.isMinting,
+    isWaitingForConfirmation: mint.isWaitingForConfirmation,
+    isSuccess: mint.isSuccess,
+    error: mint.mintError,
+    onExecute: () => {
+      // Ensure we're in mint phase (in case we started from idle with approvals already done)
+      if (currentPhase === 'idle') {
+        setCurrentPhase('mint');
+      }
+      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.MINT_POSITION));
+      mint.mint();
+    },
+    onReset: () => {
+      setAttemptedTxs(prev => {
+        const next = new Set(prev);
+        next.delete(TX_IDS.MINT_POSITION);
+        return next;
+      });
+      mint.reset();
+    },
+  });
 
   // NFT operator approval hook (for automation contract)
   const nftApproval = useOperatorApproval(chainId, positionCloserAddress ?? undefined);
@@ -315,92 +374,68 @@ export function TransactionStep() {
   const transactions = useMemo((): TransactionItem[] => {
     const txs: TransactionItem[] = [];
 
-    // Base token approval
-    const baseApprovalStatus = getApprovalStatus(baseApproval, currentPhase === 'approvals');
-    txs.push({
-      id: TX_IDS.APPROVE_BASE,
-      label: `Approve ${state.baseToken?.symbol || 'Base Token'}`,
-      status: baseApproval.isApproved && currentPhase === 'idle' ? 'skipped' : baseApprovalStatus,
-      txHash: baseApproval.approvalTxHash,
-      error: baseApproval.approvalError?.message,
-      hidden: baseAmount === 0n || (baseApproval.isApproved && currentPhase === 'idle'),
-    });
-
-    // Quote token approval
-    const quoteApprovalStatus = getApprovalStatus(quoteApproval, currentPhase === 'approvals');
-    txs.push({
-      id: TX_IDS.APPROVE_QUOTE,
-      label: `Approve ${state.quoteToken?.symbol || 'Quote Token'}`,
-      status: quoteApproval.isApproved && currentPhase === 'idle' ? 'skipped' : quoteApprovalStatus,
-      txHash: quoteApproval.approvalTxHash,
-      error: quoteApproval.approvalError?.message,
-      hidden: quoteAmount === 0n || (quoteApproval.isApproved && currentPhase === 'idle'),
-    });
-
+    // Token approvals are rendered separately via useErc20TokenApprovalPrompt hooks
     // Pool price refresh runs in background - not shown in list
-    // (still tracked internally for state management)
 
     // Mint position
+    const mintErrorFiltered = isUserRejection(mint.mintError) ? null : mint.mintError;
     txs.push({
       id: TX_IDS.MINT_POSITION,
-      label: 'Open Position',
+      label: 'Open UniswapV3 Position',
       status: getMintStatus(mint, currentPhase),
       txHash: mint.mintTxHash,
-      error: mint.mintError?.message,
+      error: mintErrorFiltered?.message,
     });
 
     // NFT approval for automation
     if (hasAutomation) {
+      const nftErrorFiltered = isUserRejection(nftApproval.error) ? null : nftApproval.error;
       txs.push({
         id: TX_IDS.APPROVE_NFT,
         label: 'Approve Position for Automation',
         status: getNftApprovalStatus(nftApproval, currentPhase),
         txHash: nftApproval.txHash,
-        error: nftApproval.error?.message,
+        error: nftErrorFiltered?.message,
       });
     }
 
     // Register Stop Loss
     if (state.stopLossEnabled) {
+      const slErrorFiltered = isUserRejection(registerSL.error) ? null : registerSL.error;
       txs.push({
         id: TX_IDS.REGISTER_SL,
         label: 'Register Stop Loss',
         status: getRegisterStatus(registerSL, currentPhase),
         txHash: registerSL.txHash,
-        error: registerSL.error?.message,
+        error: slErrorFiltered?.message,
       });
     }
 
     // Register Take Profit
     if (state.takeProfitEnabled) {
+      const tpErrorFiltered = isUserRejection(registerTP.error) ? null : registerTP.error;
       txs.push({
         id: TX_IDS.REGISTER_TP,
         label: 'Register Take Profit',
         status: getRegisterStatus(registerTP, currentPhase),
         txHash: registerTP.txHash,
-        error: registerTP.error?.message,
+        error: tpErrorFiltered?.message,
       });
     }
 
     return txs;
   }, [
-    state.baseToken, state.quoteToken, baseAmount, quoteAmount,
-    baseApproval, quoteApproval, mint, nftApproval, registerSL, registerTP,
+    mint, nftApproval, registerSL, registerTP,
     currentPhase, hasAutomation, state.stopLossEnabled, state.takeProfitEnabled,
+    isUserRejection,
   ]);
 
   // Helper functions for status
-  function getApprovalStatus(approval: typeof baseApproval, isActive: boolean): TxStatus {
-    if (approval.approvalError) return 'error';
-    if (approval.isApproved) return 'success';
-    if (approval.isWaitingForConfirmation) return 'confirming';
-    if (approval.isApproving) return 'waiting';
-    if (isActive && approval.needsApproval) return 'pending';
-    return 'pending';
-  }
 
   function getMintStatus(m: typeof mint, phase: typeof currentPhase): TxStatus {
-    if (m.mintError) return 'error';
+    // Filter user rejection errors
+    const mintErrorFiltered = isUserRejection(m.mintError) ? null : m.mintError;
+    if (mintErrorFiltered) return 'error';
     if (m.isSuccess) return 'success';
     if (m.isWaitingForConfirmation) return 'confirming';
     if (m.isMinting) return 'waiting';
@@ -409,7 +444,9 @@ export function TransactionStep() {
   }
 
   function getNftApprovalStatus(approval: typeof nftApproval, phase: typeof currentPhase): TxStatus {
-    if (approval.error) return 'error';
+    // Filter user rejection errors
+    const nftErrorFiltered = isUserRejection(approval.error) ? null : approval.error;
+    if (nftErrorFiltered) return 'error';
     if (approval.isApproved || approval.isApprovalSuccess) return 'success';
     if (approval.isWaitingForConfirmation) return 'confirming';
     if (approval.isApproving) return 'waiting';
@@ -418,7 +455,9 @@ export function TransactionStep() {
   }
 
   function getRegisterStatus(reg: typeof registerSL, phase: typeof currentPhase): TxStatus {
-    if (reg.error) return 'error';
+    // Filter user rejection errors
+    const regErrorFiltered = isUserRejection(reg.error) ? null : reg.error;
+    if (regErrorFiltered) return 'error';
     if (reg.isSuccess) return 'success';
     if (reg.isWaitingForConfirmation) return 'confirming';
     if (reg.isRegistering) return 'waiting';
@@ -426,49 +465,40 @@ export function TransactionStep() {
     return 'pending';
   }
 
-  // Execute all transactions
+  // Execute all transactions - approvals are handled by the hook components
   const executeTransactions = useCallback(async () => {
     if (!chainId || !walletAddress) return;
 
     setActiveError(null);
 
-    // Phase 1: Token Approvals
+    // Phase 1: Token Approvals (handled by Erc20TokenApprovalPrompt hooks)
+    // The hooks render approval buttons that users interact with
     setCurrentPhase('approvals');
-
-    // Approve base token if needed
-    if (baseAmount > 0n && baseApproval.needsApproval) {
-      baseApproval.approve();
-    }
-
-    // Approve quote token if needed
-    if (quoteAmount > 0n && quoteApproval.needsApproval) {
-      quoteApproval.approve();
-    }
-  }, [chainId, walletAddress, baseAmount, quoteAmount, baseApproval, quoteApproval]);
+  }, [chainId, walletAddress]);
 
   // Track approval completion and move to next phase
   useEffect(() => {
     if (currentPhase !== 'approvals') return;
 
-    // Check for errors
-    if (baseApproval.approvalError) {
-      setActiveError({ txId: TX_IDS.APPROVE_BASE, message: baseApproval.approvalError.message });
+    // Check for errors from approval hooks
+    if (baseApprovalPrompt.error) {
+      setActiveError({ txId: TX_IDS.APPROVE_BASE, message: baseApprovalPrompt.error });
       return;
     }
-    if (quoteApproval.approvalError) {
-      setActiveError({ txId: TX_IDS.APPROVE_QUOTE, message: quoteApproval.approvalError.message });
+    if (quoteApprovalPrompt.error) {
+      setActiveError({ txId: TX_IDS.APPROVE_QUOTE, message: quoteApprovalPrompt.error });
       return;
     }
 
     // Check if all approvals are complete
-    const baseOk = baseAmount === 0n || baseApproval.isApproved;
-    const quoteOk = quoteAmount === 0n || quoteApproval.isApproved;
+    const baseOk = baseAmount === 0n || isBaseApproved;
+    const quoteOk = quoteAmount === 0n || isQuoteApproved;
 
     if (baseOk && quoteOk) {
       // Move to pool refresh phase
       setCurrentPhase('refresh');
     }
-  }, [currentPhase, baseAmount, quoteAmount, baseApproval.isApproved, quoteApproval.isApproved, baseApproval.approvalError, quoteApproval.approvalError]);
+  }, [currentPhase, baseAmount, quoteAmount, isBaseApproved, isQuoteApproved, baseApprovalPrompt.error, quoteApprovalPrompt.error]);
 
   // Pool price refresh
   useEffect(() => {
@@ -501,17 +531,21 @@ export function TransactionStep() {
   // Trigger mint when entering mint phase
   useEffect(() => {
     if (currentPhase !== 'mint') return;
-    if (mint.isMinting || mint.isWaitingForConfirmation || mint.isSuccess) return;
+    if (mint.isMinting || mint.isWaitingForConfirmation || mint.isSuccess || mint.mintError) return;
+    if (attemptedTxs.has(TX_IDS.MINT_POSITION)) return;
 
+    setAttemptedTxs(prev => new Set(prev).add(TX_IDS.MINT_POSITION));
     mint.mint();
-  }, [currentPhase, mint]);
+  }, [currentPhase, mint, attemptedTxs]);
 
   // Track mint completion
   useEffect(() => {
     if (currentPhase !== 'mint') return;
 
-    if (mint.mintError) {
-      setActiveError({ txId: TX_IDS.MINT_POSITION, message: mint.mintError.message });
+    // Filter user rejection errors (silently ignored)
+    const mintErrorFiltered = isUserRejection(mint.mintError) ? null : mint.mintError;
+    if (mintErrorFiltered) {
+      setActiveError({ txId: TX_IDS.MINT_POSITION, message: mintErrorFiltered.message });
       return;
     }
 
@@ -552,17 +586,22 @@ export function TransactionStep() {
       return;
     }
 
-    if (!nftApproval.isApproving && !nftApproval.isWaitingForConfirmation) {
+    if (!nftApproval.isApproving && !nftApproval.isWaitingForConfirmation && !nftApproval.error) {
+      if (attemptedTxs.has(TX_IDS.APPROVE_NFT)) return;
+
+      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.APPROVE_NFT));
       nftApproval.approve();
     }
-  }, [currentPhase, hasAutomation, nftApproval]);
+  }, [currentPhase, hasAutomation, nftApproval, attemptedTxs]);
 
   // Track NFT approval completion
   useEffect(() => {
     if (currentPhase !== 'nft-approval') return;
 
-    if (nftApproval.error) {
-      setActiveError({ txId: TX_IDS.APPROVE_NFT, message: nftApproval.error.message });
+    // Filter user rejection errors (silently ignored)
+    const nftErrorFiltered = isUserRejection(nftApproval.error) ? null : nftApproval.error;
+    if (nftErrorFiltered) {
+      setActiveError({ txId: TX_IDS.APPROVE_NFT, message: nftErrorFiltered.message });
       return;
     }
 
@@ -580,7 +619,8 @@ export function TransactionStep() {
     if (!poolAddress) return;
 
     // Register Stop Loss
-    if (state.stopLossEnabled && state.stopLossTick !== null && !registerSL.isRegistering && !registerSL.isWaitingForConfirmation && !registerSL.isSuccess && !registerSL.error) {
+    if (state.stopLossEnabled && state.stopLossTick !== null && !registerSL.isRegistering && !registerSL.isWaitingForConfirmation && !registerSL.isSuccess && !registerSL.error && !attemptedTxs.has(TX_IDS.REGISTER_SL)) {
+      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_SL));
       registerSL.register({
         nftId: mintedTokenId,
         poolAddress,
@@ -596,7 +636,8 @@ export function TransactionStep() {
     }
 
     // Register Take Profit
-    if (state.takeProfitEnabled && state.takeProfitTick !== null && !registerTP.isRegistering && !registerTP.isWaitingForConfirmation && !registerTP.isSuccess && !registerTP.error) {
+    if (state.takeProfitEnabled && state.takeProfitTick !== null && !registerTP.isRegistering && !registerTP.isWaitingForConfirmation && !registerTP.isSuccess && !registerTP.error && !attemptedTxs.has(TX_IDS.REGISTER_TP)) {
+      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_TP));
       registerTP.register({
         nftId: mintedTokenId,
         poolAddress,
@@ -613,20 +654,22 @@ export function TransactionStep() {
   }, [
     currentPhase, mintedTokenId, walletAddress, autowalletAddress, chainId,
     state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick,
-    swapDirection, registerSL, registerTP,
+    swapDirection, registerSL, registerTP, attemptedTxs,
   ]);
 
   // Track SL/TP registration completion
   useEffect(() => {
     if (currentPhase !== 'automation') return;
 
-    // Check for errors
-    if (registerSL.error) {
-      setActiveError({ txId: TX_IDS.REGISTER_SL, message: registerSL.error.message });
+    // Check for errors (filter user rejections - silently ignored)
+    const slErrorFiltered = isUserRejection(registerSL.error) ? null : registerSL.error;
+    const tpErrorFiltered = isUserRejection(registerTP.error) ? null : registerTP.error;
+    if (slErrorFiltered) {
+      setActiveError({ txId: TX_IDS.REGISTER_SL, message: slErrorFiltered.message });
       return;
     }
-    if (registerTP.error) {
-      setActiveError({ txId: TX_IDS.REGISTER_TP, message: registerTP.error.message });
+    if (tpErrorFiltered) {
+      setActiveError({ txId: TX_IDS.REGISTER_TP, message: tpErrorFiltered.message });
       return;
     }
 
@@ -662,49 +705,64 @@ export function TransactionStep() {
     setStepValid('transactions', currentPhase === 'done');
   }, [currentPhase, setStepValid]);
 
-  // Retry handler
-  const handleRetry = useCallback(() => {
-    if (!activeError) return;
+  const isComplete = currentPhase === 'done';
+  const visibleTxs = transactions.filter((tx) => !tx.hidden);
 
-    setActiveError(null);
-
-    switch (activeError.txId) {
-      case TX_IDS.APPROVE_BASE:
-        baseApproval.approve();
-        break;
-      case TX_IDS.APPROVE_QUOTE:
-        quoteApproval.approve();
-        break;
-      case TX_IDS.MINT_POSITION:
-        mint.reset();
-        mint.mint();
-        break;
-      case TX_IDS.APPROVE_NFT:
-        nftApproval.reset();
-        nftApproval.approve();
-        break;
-      case TX_IDS.REGISTER_SL:
-        registerSL.reset();
-        // Will auto-retry in effect
-        break;
-      case TX_IDS.REGISTER_TP:
-        registerTP.reset();
-        // Will auto-retry in effect
-        break;
-    }
-  }, [activeError, baseApproval, quoteApproval, mint, nftApproval, registerSL, registerTP]);
-
-  // Render transaction item
+  // Render transaction item (for non-approval transactions)
   const renderTransactionItem = (tx: TransactionItem) => {
     if (tx.hidden) return null;
 
     const isActive = tx.status === 'waiting' || tx.status === 'confirming';
     const isError = tx.status === 'error';
 
+    // Determine if this transaction is ready to be executed based on the current phase
+    // Each transaction should only be actionable when it's that step's turn
+    const isReadyForAction = (() => {
+      if (tx.id === TX_IDS.MINT_POSITION) {
+        // Mint is ready when we're in mint phase (approvals are done)
+        return currentPhase === 'mint';
+      }
+      if (tx.id === TX_IDS.APPROVE_NFT) {
+        // NFT approval is ready when we're in nft-approval phase (mint is done)
+        return currentPhase === 'nft-approval';
+      }
+      if (tx.id === TX_IDS.REGISTER_SL || tx.id === TX_IDS.REGISTER_TP) {
+        // SL/TP registration is ready when we're in automation phase (NFT approval is done)
+        return currentPhase === 'automation';
+      }
+      return false;
+    })();
+
+    const showActionButtons = !activeError && tx.status === 'pending' && isReadyForAction;
+
+    // Handler for non-approval transaction retry
+    const handleRetry = () => {
+      setActiveError(null);
+      setAttemptedTxs(prev => {
+        const next = new Set(prev);
+        next.delete(tx.id);
+        return next;
+      });
+      if (tx.id === TX_IDS.MINT_POSITION) {
+        mint.reset();
+        mint.mint();
+      } else if (tx.id === TX_IDS.APPROVE_NFT) {
+        nftApproval.reset();
+        nftApproval.approve();
+      } else if (tx.id === TX_IDS.REGISTER_SL) {
+        registerSL.reset();
+      } else if (tx.id === TX_IDS.REGISTER_TP) {
+        registerTP.reset();
+      }
+    };
+
+    // Show buttons when pending and ready OR when there's an error (for retry) and it's the current phase
+    const showButtons = (showActionButtons || (isError && isReadyForAction)) && !isActive;
+
     return (
       <div
         key={tx.id}
-        className={`flex items-center justify-between py-3 px-4 rounded-lg transition-colors ${
+        className={`py-3 px-4 rounded-lg transition-colors ${
           isError
             ? 'bg-red-500/10 border border-red-500/30'
             : tx.status === 'success'
@@ -714,52 +772,74 @@ export function TransactionStep() {
             : 'bg-slate-700/30 border border-slate-600/20'
         }`}
       >
-        <div className="flex items-center gap-3">
-          {/* Status Icon */}
-          {tx.status === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
-          {tx.status === 'waiting' && <Circle className="w-5 h-5 text-blue-400" />}
-          {tx.status === 'confirming' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
-          {tx.status === 'success' && <Check className="w-5 h-5 text-green-400" />}
-          {tx.status === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
-          {tx.status === 'skipped' && <Check className="w-5 h-5 text-slate-500" />}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {/* Status Icon */}
+            {tx.status === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
+            {tx.status === 'waiting' && <Circle className="w-5 h-5 text-blue-400" />}
+            {tx.status === 'confirming' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+            {tx.status === 'success' && <Check className="w-5 h-5 text-green-400" />}
+            {tx.status === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
+            {tx.status === 'skipped' && <Check className="w-5 h-5 text-slate-500" />}
 
-          {/* Label */}
-          <span
-            className={
-              tx.status === 'success'
-                ? 'text-slate-400'
-                : tx.status === 'skipped'
-                ? 'text-slate-500'
-                : tx.status === 'error'
-                ? 'text-red-300'
-                : 'text-white'
-            }
-          >
-            {tx.label}
-          </span>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          {tx.txHash && chainId && (
-            <a
-              href={buildTxUrl(chainId, tx.txHash)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+            {/* Label */}
+            <span
+              className={
+                tx.status === 'success'
+                  ? 'text-slate-400'
+                  : tx.status === 'skipped'
+                  ? 'text-slate-500'
+                  : tx.status === 'error'
+                  ? 'text-red-300'
+                  : 'text-white'
+              }
             >
-              {truncateTxHash(tx.txHash)}
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
+              {tx.label}
+            </span>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            {tx.txHash && chainId && (
+              <a
+                href={buildTxUrl(chainId, tx.txHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+              >
+                {truncateTxHash(tx.txHash)}
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+            {showButtons && (
+              <button
+                onClick={isError ? handleRetry : executeTransactions}
+                className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                {isError ? 'Retry' : 'Start'}
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Error message */}
+        {isError && tx.error && (
+          <div className="mt-2 pl-8 flex gap-2">
+            <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
+              {tx.error}
+            </div>
+            <button
+              onClick={() => navigator.clipboard.writeText(tx.error || '')}
+              className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
+              title="Copy error to clipboard"
+            >
+              <Copy className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     );
   };
-
-  const isComplete = currentPhase === 'done';
-  const isStarted = currentPhase !== 'idle';
-  const visibleTxs = transactions.filter((tx) => !tx.hidden);
 
   const renderInteractive = () => {
     if (!walletAddress) {
@@ -782,37 +862,20 @@ export function TransactionStep() {
 
         {/* Transaction List */}
         <div className="flex-1 space-y-3 overflow-auto">
-          {visibleTxs.map(renderTransactionItem)}
+          {/* Base token approval (rendered by hook) */}
+          {baseAmount > 0n && baseApprovalPrompt.element}
+
+          {/* Quote token approval (rendered by hook) */}
+          {quoteAmount > 0n && quoteApprovalPrompt.element}
+
+          {/* Mint position (rendered by hook) */}
+          {mintPrompt.element}
+
+          {/* Other transactions (NFT approval, SL/TP registration) */}
+          {visibleTxs
+            .filter((tx) => tx.id !== TX_IDS.MINT_POSITION)
+            .map((tx) => renderTransactionItem(tx))}
         </div>
-
-        {/* Error Display */}
-        {activeError && (
-          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-sm text-red-300 font-medium mb-1">Transaction Failed</p>
-                <p className="text-sm text-red-400/80">{activeError.message}</p>
-              </div>
-            </div>
-            <button
-              onClick={handleRetry}
-              className="mt-3 w-full py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors cursor-pointer"
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {/* Start Button */}
-        {!isStarted && !activeError && (
-          <button
-            onClick={executeTransactions}
-            className="mt-4 w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
-          >
-            Execute Transactions
-          </button>
-        )}
 
         {/* Success Message */}
         {isComplete && (
@@ -853,59 +916,21 @@ export function TransactionStep() {
 
       {/* Position Range */}
       {rangeBoundaryInfo && (
-        <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-          <p className="text-xs text-slate-400">Position Range</p>
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-slate-400">Lower</span>
-              <span className="text-teal-400 font-medium">
-                {formatCompactValue(rangeBoundaryInfo.lowerPriceBigInt, state.quoteToken?.decimals ?? 18)}
-              </span>
-            </div>
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-slate-400">Upper</span>
-              <span className="text-teal-400 font-medium">
-                {formatCompactValue(rangeBoundaryInfo.upperPriceBigInt, state.quoteToken?.decimals ?? 18)}
-              </span>
-            </div>
-          </div>
-        </div>
+        <PositionRangeSection
+          lowerPriceBigInt={rangeBoundaryInfo.lowerPriceBigInt}
+          upperPriceBigInt={rangeBoundaryInfo.upperPriceBigInt}
+          quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
+        />
       )}
 
       {/* SL/TP Triggers */}
-      {(slTpPrices.stopLossPrice !== null || slTpPrices.takeProfitPrice !== null) && (
-        <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-          <p className="text-xs text-slate-400">Risk Triggers</p>
-          <div className="space-y-1.5">
-            {slTpPrices.stopLossPrice !== null && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Stop Loss</span>
-                <span className="text-red-400 font-medium">
-                  {formatCompactValue(slTpPrices.stopLossPrice, state.quoteToken?.decimals ?? 18)}
-                  {slDrawdown && (
-                    <span className="text-slate-500 font-normal ml-1">
-                      ({formatCompactValue(slDrawdown.pnlValue, state.quoteToken?.decimals ?? 18)})
-                    </span>
-                  )}
-                </span>
-              </div>
-            )}
-            {slTpPrices.takeProfitPrice !== null && (
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Take Profit</span>
-                <span className="text-green-400 font-medium">
-                  {formatCompactValue(slTpPrices.takeProfitPrice, state.quoteToken?.decimals ?? 18)}
-                  {tpRunup && (
-                    <span className="text-slate-500 font-normal ml-1">
-                      (+{formatCompactValue(tpRunup.pnlValue, state.quoteToken?.decimals ?? 18)})
-                    </span>
-                  )}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <RiskTriggersSection
+        stopLossPrice={slTpPrices.stopLossPrice}
+        takeProfitPrice={slTpPrices.takeProfitPrice}
+        slDrawdown={slDrawdown}
+        tpRunup={tpRunup}
+        quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
+      />
     </WizardSummaryPanel>
   );
 
