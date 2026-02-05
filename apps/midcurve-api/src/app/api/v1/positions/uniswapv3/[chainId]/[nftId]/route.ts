@@ -127,7 +127,7 @@ export async function GET(
 
       const { chainId, nftId } = validation.data;
 
-      // 2. Generate position hash and look up position
+      // 2. Generate position hash for lookup
       // Format: "uniswapv3/{chainId}/{nftId}"
       const positionHash = `uniswapv3/${chainId}/${nftId}`;
 
@@ -137,11 +137,40 @@ export async function GET(
         userId: user.id,
       });
 
-      // Fast indexed lookup by positionHash
-      const dbPosition = await getUniswapV3PositionService().findByPositionHash(user.id, positionHash);
+      // 3. Execute lookup and refresh within a transaction for consistency
+      // This ensures all state updates succeed or fail atomically
+      const position = await prisma.$transaction(async (tx) => {
+        // 3a. Fast indexed lookup by positionHash
+        const dbPosition = await getUniswapV3PositionService().findByPositionHash(
+          user.id,
+          positionHash,
+          tx
+        );
 
-      // Verify position exists
-      if (!dbPosition) {
+        // Verify position exists
+        if (!dbPosition) {
+          return null;
+        }
+
+        apiLog.businessOperation(apiLogger, requestId, 'fetch', 'position', dbPosition.id, {
+          chainId,
+          nftId,
+          positionHash,
+        });
+
+        // 3b. Refresh position from on-chain data
+        // This fetches current liquidity, fees, PnL, and updates the database
+        const refreshedPosition = await getUniswapV3PositionService().refresh(
+          dbPosition.id,
+          'latest',
+          tx
+        );
+
+        return refreshedPosition;
+      });
+
+      // Handle position not found (outside transaction)
+      if (!position) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.POSITION_NOT_FOUND,
           'Position not found',
@@ -154,16 +183,6 @@ export async function GET(
           status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND],
         });
       }
-
-      apiLog.businessOperation(apiLogger, requestId, 'fetch', 'position', dbPosition.id, {
-        chainId,
-        nftId,
-        positionHash,
-      });
-
-      // 3. Refresh position from on-chain data
-      // This fetches current liquidity, fees, PnL, and updates the database
-      const position = await getUniswapV3PositionService().refresh(dbPosition.id);
 
       apiLog.businessOperation(apiLogger, requestId, 'refreshed', 'position', position.id, {
         chainId,
