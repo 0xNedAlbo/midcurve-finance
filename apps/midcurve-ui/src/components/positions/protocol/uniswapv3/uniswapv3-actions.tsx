@@ -226,7 +226,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         position={position}
         onIncreaseSuccess={() => {
           // Don't auto-close - user will click Finish button
-          // Cache invalidation is handled by useUpdatePositionWithEvents
+          // Position data will be refreshed on next view
         }}
       />
 
@@ -237,7 +237,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         position={position}
         onWithdrawSuccess={() => {
           // Don't auto-close - user will click Finish button
-          // Cache invalidation is handled by useUpdatePositionWithEvents
+          // Position data will be refreshed on next view
         }}
       />
 
@@ -248,7 +248,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         position={position}
         onCollectSuccess={() => {
           // Don't auto-close - user will click Finish button
-          // Cache invalidation is handled by useUpdatePositionWithEvents
+          // Position data will be refreshed on next view
         }}
       />
 

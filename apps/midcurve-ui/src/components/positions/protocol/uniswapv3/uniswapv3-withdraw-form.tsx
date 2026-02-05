@@ -11,9 +11,6 @@ import type { ListPositionData } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useDecreaseLiquidity } from '@/hooks/positions/uniswapv3/useDecreaseLiquidity';
-import { useUpdatePositionWithEvents } from '@/hooks/positions/uniswapv3/useUpdatePositionWithEvents';
-import { parsePositionEvents } from '@/lib/uniswapv3/parse-position-events';
-import { NONFUNGIBLE_POSITION_MANAGER_ADDRESSES } from '@/config/contracts/nonfungible-position-manager';
 import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
 import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
@@ -52,8 +49,6 @@ export function UniswapV3WithdrawForm({
     isConnected,
     chainId: connectedChainId,
   } = useAccount();
-
-  const updateMutation = useUpdatePositionWithEvents();
 
   // Type assertion for config (we know it's Uniswap V3)
   const config = position.config as { chainId: number; nftId: number; tickLower: number; tickUpper: number };
@@ -232,7 +227,6 @@ export function UniswapV3WithdrawForm({
 
   // Reset state when form opens
   useEffect(() => {
-    updateMutation.reset();
     decreaseLiquidity.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
@@ -288,49 +282,12 @@ export function UniswapV3WithdrawForm({
     decreaseLiquidity.withdraw();
   }, [decreaseLiquidity]);
 
-  // Handle successful withdrawal - seed events via PATCH endpoint (MUST be called before any returns)
+  // Handle successful withdrawal - call success callback
   useEffect(() => {
-    if (
-      decreaseLiquidity.isSuccess &&
-      decreaseLiquidity.receipt &&
-      !updateMutation.isPending &&
-      !updateMutation.isSuccess
-    ) {
-      const nftManagerAddress = NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[config.chainId];
-
-      if (!nftManagerAddress) {
-        console.error('NFT Manager address not found for chain');
-        return;
-      }
-
-      // Parse all events from multicall receipt (automatically extracts DECREASE_LIQUIDITY and COLLECT)
-      const events = parsePositionEvents(decreaseLiquidity.receipt);
-
-      if (events.length > 0) {
-        updateMutation.mutate(
-          {
-            chainId: config.chainId,
-            nftId: config.nftId.toString(),
-            events,
-          },
-          {
-            onSuccess: () => {
-              // Trigger success callback when position update completes
-              onWithdrawSuccess?.();
-            },
-          }
-        );
-      }
+    if (decreaseLiquidity.isSuccess) {
+      onWithdrawSuccess?.();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    decreaseLiquidity.isSuccess,
-    decreaseLiquidity.receipt,
-    config.chainId,
-    config.nftId,
-    onWithdrawSuccess,
-    // Don't include updateMutation in dependencies to prevent infinite loop
-  ]);
+  }, [decreaseLiquidity.isSuccess, onWithdrawSuccess]);
 
   // Validate chain configuration
   if (!chain || !chainConfig) {
@@ -468,18 +425,6 @@ export function UniswapV3WithdrawForm({
             chain={chain}
           />
 
-          {/* Update Position (Backend) */}
-          {decreaseLiquidity.isSuccess && (
-            <TransactionStep
-              title="Update Position"
-              description="Updating position data..."
-              isLoading={updateMutation.isPending}
-              isComplete={updateMutation.isSuccess}
-              isDisabled={true}
-              onExecute={() => {}}
-              showExecute={false}
-            />
-          )}
         </div>
 
         {/* Error Display */}
@@ -499,8 +444,8 @@ export function UniswapV3WithdrawForm({
         </div>
       )}
 
-      {/* Finish Button - Small green button at bottom right, only shown after position update completes */}
-      {updateMutation.isSuccess && (
+      {/* Finish Button - Small green button at bottom right, only shown after withdrawal completes */}
+      {decreaseLiquidity.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}

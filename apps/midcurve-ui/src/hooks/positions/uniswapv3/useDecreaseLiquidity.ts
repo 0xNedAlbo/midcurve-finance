@@ -5,8 +5,6 @@ import {
   NONFUNGIBLE_POSITION_MANAGER_ADDRESSES,
   NONFUNGIBLE_POSITION_MANAGER_ABI,
 } from '@/config/contracts/nonfungible-position-manager';
-import { useUpdatePositionWithEvents } from './useUpdatePositionWithEvents';
-import { parsePositionEvents } from '@/lib/uniswapv3/parse-position-events';
 
 export interface DecreaseLiquidityParams {
   tokenId: bigint;
@@ -65,9 +63,6 @@ export function useDecreaseLiquidity(params: DecreaseLiquidityParams | null): Us
     ? NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[params.chainId]
     : undefined;
 
-  // Hook to update position with missing events
-  const { mutate: updatePosition } = useUpdatePositionWithEvents();
-
   // Write contract for multicall transaction
   const {
     writeContract,
@@ -104,23 +99,6 @@ export function useDecreaseLiquidity(params: DecreaseLiquidityParams | null): Us
       setCurrentStep('complete');
     }
   }, [isWithdrawing, isWaitingForWithdraw, withdrawSuccess]);
-
-  // Send transaction events to API after successful withdrawal
-  useEffect(() => {
-    if (withdrawSuccess && receipt && params) {
-      // Parse events from transaction receipt
-      const events = parsePositionEvents(receipt);
-
-      // Only send if we found relevant events
-      if (events.length > 0) {
-        updatePosition({
-          chainId: params.chainId,
-          nftId: params.tokenId.toString(),
-          events,
-        });
-      }
-    }
-  }, [withdrawSuccess, receipt, params, updatePosition]);
 
   // Withdraw function using multicall
   const withdraw = () => {

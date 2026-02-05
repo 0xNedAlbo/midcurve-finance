@@ -10,7 +10,6 @@ import type { ListPositionData } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useCollectFees } from '@/hooks/positions/uniswapv3/useCollectFees';
-import { useUpdatePositionWithEvents } from '@/hooks/positions/uniswapv3/useUpdatePositionWithEvents';
 import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
 import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
@@ -43,8 +42,6 @@ export function UniswapV3CollectFeesForm({
     isConnected,
     chainId: connectedChainId,
   } = useAccount();
-
-  const updateMutation = useUpdatePositionWithEvents();
 
   // Type assertion for config (we know it's Uniswap V3)
   const config = position.config as { chainId: number; nftId: number };
@@ -96,72 +93,16 @@ export function UniswapV3CollectFeesForm({
 
   // Reset state when form opens (MUST be called before any returns)
   useEffect(() => {
-    updateMutation.reset();
     collectFees.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // Handle successful collection - seed events via PATCH endpoint (MUST be called before any returns)
+  // Handle successful collection - call success callback
   useEffect(() => {
-    if (
-      collectFees.isSuccess &&
-      collectFees.receipt &&
-      collectFees.collectedAmount0 !== undefined &&
-      collectFees.collectedAmount1 !== undefined &&
-      collectFees.collectLogIndex !== undefined &&
-      !updateMutation.isPending &&
-      !updateMutation.isSuccess
-    ) {
-      const normalizedWalletAddress = walletAddress
-        ? normalizeAddress(walletAddress)
-        : null;
-
-      if (!normalizedWalletAddress) {
-        console.error('Wallet address not available');
-        return;
-      }
-
-      // Parse Collect event and seed via PATCH endpoint
-      // Note: Transaction receipts don't include timestamps
-      // Use current time as approximation - sync service will correct it later
-      const collectEvent = {
-        eventType: 'COLLECT' as const,
-        timestamp: new Date().toISOString(),
-        blockNumber: collectFees.receipt.blockNumber.toString(),
-        transactionIndex: collectFees.receipt.transactionIndex,
-        logIndex: collectFees.collectLogIndex,
-        transactionHash: collectFees.receipt.transactionHash,
-        amount0: collectFees.collectedAmount0.toString(),
-        amount1: collectFees.collectedAmount1.toString(),
-        recipient: normalizedWalletAddress,
-      };
-
-      updateMutation.mutate(
-        {
-          chainId: config.chainId,
-          nftId: config.nftId.toString(),
-          events: [collectEvent],
-        },
-        {
-          onSuccess: () => {
-            // Trigger success callback when position update completes
-            onCollectSuccess?.();
-          },
-        }
-      );
+    if (collectFees.isSuccess) {
+      onCollectSuccess?.();
     }
-  }, [
-    collectFees.isSuccess,
-    collectFees.receipt,
-    collectFees.collectedAmount0,
-    collectFees.collectedAmount1,
-    collectFees.collectLogIndex,
-    config.chainId,
-    config.nftId,
-    walletAddress,
-    onCollectSuccess,
-    updateMutation,
-  ]);
+  }, [collectFees.isSuccess, onCollectSuccess]);
 
   // Validate chain configuration
   if (!chain || !chainConfig) {
@@ -309,18 +250,6 @@ export function UniswapV3CollectFeesForm({
               chain={chain}
             />
 
-            {/* Update Position (Backend) */}
-            {collectFees.isSuccess && (
-              <TransactionStep
-                title="Update Position"
-                description="Updating position data..."
-                isLoading={updateMutation.isPending}
-                isComplete={updateMutation.isSuccess}
-                isDisabled={true}
-                onExecute={() => {}}
-                showExecute={false}
-              />
-            )}
           </div>
 
           {/* Error Display */}
@@ -340,8 +269,8 @@ export function UniswapV3CollectFeesForm({
         </div>
       )}
 
-      {/* Finish Button - Small green button at bottom right, only shown after position update completes */}
-      {updateMutation.isSuccess && (
+      {/* Finish Button - Small green button at bottom right, only shown after collection completes */}
+      {collectFees.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}

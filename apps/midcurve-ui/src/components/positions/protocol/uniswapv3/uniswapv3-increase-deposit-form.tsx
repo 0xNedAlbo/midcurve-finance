@@ -10,8 +10,6 @@ import type { ListPositionData } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useIncreaseLiquidity } from '@/hooks/positions/uniswapv3/useIncreaseLiquidity';
-import { useUpdatePositionWithEvents } from '@/hooks/positions/uniswapv3/useUpdatePositionWithEvents';
-import { parsePositionEvents } from '@/lib/uniswapv3/parse-position-events';
 import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
 import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
@@ -54,8 +52,6 @@ export function UniswapV3IncreaseDepositForm({
     isConnected,
     chainId: connectedChainId,
   } = useAccount();
-
-  const updateMutation = useUpdatePositionWithEvents();
 
   // Get pool address for price queries
   const poolAddress = (position.pool.config as { address: string }).address;
@@ -255,33 +251,12 @@ export function UniswapV3IncreaseDepositForm({
 
   const increaseLiquidity = useIncreaseLiquidity(increaseLiquidityParams);
 
-  // Update position via PATCH endpoint when transaction succeeds (MUST be called before any returns)
+  // Handle successful increase - call success callback
   useEffect(() => {
-    if (increaseLiquidity.isSuccess && increaseLiquidity.receipt && !updateMutation.isPending && !updateMutation.isSuccess) {
-      const events = parsePositionEvents(increaseLiquidity.receipt);
-
-      updateMutation.mutate(
-        {
-          chainId: config.chainId,
-          nftId: config.nftId.toString(),
-          events,
-        },
-        {
-          onSuccess: () => {
-            onIncreaseSuccess?.();
-          },
-          onError: (error) => {
-            console.error('Failed to update position:', error);
-          },
-        }
-      );
+    if (increaseLiquidity.isSuccess) {
+      onIncreaseSuccess?.();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    increaseLiquidity.isSuccess,
-    increaseLiquidity.receipt,
-    // Don't include updateMutation in dependencies to prevent infinite loop
-  ]);
+  }, [increaseLiquidity.isSuccess, onIncreaseSuccess]);
 
   // Validate chain configuration
   if (!chain || !chainConfig) {
@@ -449,18 +424,6 @@ export function UniswapV3IncreaseDepositForm({
           chain={chain}
         />
 
-        {/* Update Position (Backend) */}
-        {increaseLiquidity.isSuccess && (
-          <TransactionStep
-            title="Update Position"
-            description="Updating position data..."
-            isLoading={updateMutation.isPending}
-            isComplete={updateMutation.isSuccess}
-            isDisabled={true}
-            onExecute={() => {}}
-            showExecute={false}
-          />
-        )}
         </div>
       </div>
 
@@ -498,23 +461,22 @@ export function UniswapV3IncreaseDepositForm({
       )}
 
       {/* Error Message */}
-      {(increaseLiquidity.increaseError || updateMutation.isError) && (
+      {increaseLiquidity.increaseError && (
         <div className="bg-red-900/20 border border-red-600/50 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-red-200 font-medium">Transaction Failed</p>
               <p className="text-red-300/80 text-sm mt-1">
-                {increaseLiquidity.increaseError?.message ||
-                  'Failed to update position data. Please try again.'}
+                {increaseLiquidity.increaseError.message}
               </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Finish Button - Small green button at bottom right, only shown after position update completes */}
-      {updateMutation.isSuccess && (
+      {/* Finish Button - Small green button at bottom right, only shown after increase completes */}
+      {increaseLiquidity.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}
