@@ -516,9 +516,6 @@ export function getVisibleSteps(state: CreatePositionWizardState): WizardStep[] 
   // Always: Transactions step (handles approvals, mint, and SL/TP registration)
   steps.push({ id: 'transactions', label: 'Execute' });
 
-  // Always: Summary
-  steps.push({ id: 'summary', label: 'Summary' });
-
   return steps;
 }
 

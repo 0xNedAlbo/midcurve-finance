@@ -65,7 +65,7 @@ export function StepNavigationButtons({
           onClick={handleFinish}
           className="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors cursor-pointer"
         >
-          View Position
+          Finish
         </button>
       ) : (
         <button

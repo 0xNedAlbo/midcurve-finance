@@ -166,7 +166,8 @@ export function useWatchUniswapV3PoolPrice(
 
       try {
         const response = await apiClient.post<UniswapV3PoolPriceWatchResponseData>(
-          `/api/v1/pools/uniswapv3/${chainId}/${poolAddress}/pool-price/watch`
+          `/api/v1/pools/uniswapv3/${chainId}/${poolAddress}/pool-price/watch`,
+          {}
         );
 
         if (!mountedRef.current) return;

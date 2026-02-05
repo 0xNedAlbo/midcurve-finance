@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Circle, Check, Loader2, ExternalLink, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
@@ -23,12 +24,15 @@ import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { usePriceAdjustment } from '../hooks/usePriceAdjustment';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
+import { useCreatePositionAPI, extractLiquidityFromReceipt } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useRegisterCloseOrder } from '@/hooks/automation/useRegisterCloseOrder';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { getPositionCloserAddress, TriggerMode, SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
+import { getChainSlugByChainId } from '@/config/chains';
+import { AddToPortfolioSection } from '../../uniswapv3/shared/add-to-portfolio-section';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
@@ -58,8 +62,9 @@ const TX_IDS = {
 } as const;
 
 export function TransactionStep() {
+  const navigate = useNavigate();
   const { address: walletAddress } = useAccount();
-  const { state, setStepValid, setDiscoveredPool, setPositionCreated, goNext, addTransaction, setAdjustedAmounts, saveOriginalAmounts, setPriceAdjustmentStatus } = useCreatePositionWizard();
+  const { state, setStepValid, setDiscoveredPool, setPositionCreated, addTransaction, setAdjustedAmounts, saveOriginalAmounts, setPriceAdjustmentStatus } = useCreatePositionWizard();
 
   // Current phase of execution
   const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'done'>('idle');
@@ -191,6 +196,9 @@ export function TransactionStep() {
 
   // Mint position hook
   const mint = useMintPosition(mintParams);
+
+  // API hook for creating position in database
+  const createPositionAPI = useCreatePositionAPI();
 
   // Check if approvals are complete (for showing mint button when approvals were already done)
   const approvalsComplete = (baseAmount === 0n || isBaseApproved) && (quoteAmount === 0n || isQuoteApproved);
@@ -657,6 +665,36 @@ export function TransactionStep() {
         });
       }
 
+      // Call API to save position to database
+      if (
+        mint.receipt &&
+        chainId &&
+        walletAddress &&
+        state.discoveredPool &&
+        quoteTokenAddress &&
+        !createPositionAPI.isPending &&
+        !createPositionAPI.isSuccess
+      ) {
+        const chainSlug = getChainSlugByChainId(chainId);
+        if (chainSlug) {
+          const liquidity = extractLiquidityFromReceipt(mint.receipt);
+          const isToken0Quote =
+            (state.discoveredPool.token0.config.address as string).toLowerCase() ===
+            quoteTokenAddress.toLowerCase();
+
+          createPositionAPI.mutate({
+            chainId: chainSlug,
+            nftId: mint.tokenId.toString(),
+            poolAddress: state.discoveredPool.typedConfig.address as Address,
+            tickLower: effectiveTickLower,
+            tickUpper: effectiveTickUpper,
+            ownerAddress: walletAddress,
+            isToken0Quote,
+            liquidity,
+          });
+        }
+      }
+
       // Set position created in wizard state
       setPositionCreated(`pos_${mint.tokenId.toString()}`, mint.tokenId.toString());
 
@@ -668,7 +706,7 @@ export function TransactionStep() {
         setCurrentPhase('done');
       }
     }
-  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment]);
+  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.receipt, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
 
   // NFT approval phase
   useEffect(() => {
@@ -800,7 +838,8 @@ export function TransactionStep() {
     setStepValid('transactions', currentPhase === 'done');
   }, [currentPhase, setStepValid]);
 
-  const isComplete = currentPhase === 'done';
+  // Complete when all transactions done AND position added to portfolio
+  const isComplete = currentPhase === 'done' && createPositionAPI.isSuccess;
   const visibleTxs = transactions.filter((tx) => !tx.hidden);
 
   // Render price adjustment item (special handling for pool price confirmation)
@@ -1131,6 +1170,20 @@ export function TransactionStep() {
           {/* Mint position (rendered by hook) */}
           {mintPrompt.element}
 
+          {/* Add to Portfolio Section - Only show after mint success */}
+          {mintSucceeded && mintedTokenId && (
+            <AddToPortfolioSection
+              isPending={createPositionAPI.isPending}
+              isSuccess={createPositionAPI.isSuccess}
+              isError={createPositionAPI.isError}
+              error={
+                createPositionAPI.error instanceof Error
+                  ? createPositionAPI.error
+                  : null
+              }
+            />
+          )}
+
           {/* Other transactions (NFT approval, SL/TP registration) */}
           {visibleTxs
             .filter((tx) => tx.id !== TX_IDS.MINT_POSITION && tx.id !== TX_IDS.PRICE_ADJUST)
@@ -1154,11 +1207,15 @@ export function TransactionStep() {
     ? state.adjustedTotalQuoteValue
     : state.totalQuoteValue;
 
+  // Handle finish - navigate to dashboard
+  const handleFinish = useCallback(() => {
+    navigate('/dashboard');
+  }, [navigate]);
+
   const renderSummary = () => (
     <WizardSummaryPanel
-      nextDisabled={!isComplete}
-      nextLabel="View Summary"
-      onNext={goNext}
+      showFinish={isComplete}
+      onFinish={handleFinish}
     >
       <AllocatedCapitalSection
         allocatedBaseAmount={displayBaseAmount}

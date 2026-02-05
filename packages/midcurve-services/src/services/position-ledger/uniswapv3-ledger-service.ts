@@ -885,7 +885,8 @@ export class UniswapV3LedgerService {
                 positionId: this.positionId,
                 config: {
                     path: ["blockNumber"],
-                    lte: blockNumber,
+                    // blockNumber is stored as string in JSON, must compare as string
+                    lte: blockNumber.toString(),
                 },
             },
             orderBy: [{ timestamp: "desc" }],
@@ -920,7 +921,7 @@ export class UniswapV3LedgerService {
         const whereClause: {
             positionId: string;
             eventType: string;
-            config?: { path: string[]; lte: number };
+            config?: { path: string[]; lte: string };
         } = {
             positionId: this.positionId,
             eventType: "COLLECT",
@@ -930,7 +931,8 @@ export class UniswapV3LedgerService {
         if (blockNumber !== "latest") {
             whereClause.config = {
                 path: ["blockNumber"],
-                lte: blockNumber,
+                // blockNumber is stored as string in JSON, must compare as string
+                lte: blockNumber.toString(),
             };
         }
 

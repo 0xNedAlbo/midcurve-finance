@@ -27,14 +27,20 @@ export interface CreatePositionData {
     tickLower: number;
     tickUpper: number;
     ownerAddress: Address;
-    quoteTokenAddress: Address;
-    receipt: TransactionReceipt;
+    /** Whether token0 is the quote token (determined by UI based on user selection) */
+    isToken0Quote: boolean;
+    /** Initial liquidity from the mint transaction (extracted from IncreaseLiquidity event) */
+    liquidity: string;
 }
 
 /**
- * Extract INCREASE_LIQUIDITY event data from mint transaction receipt
+ * Extract liquidity from IncreaseLiquidity event in mint transaction receipt
+ *
+ * @param receipt - Transaction receipt from the mint transaction
+ * @returns Liquidity as a string (for API serialization)
+ * @throws Error if IncreaseLiquidity event is not found
  */
-async function extractIncreaseEventFromReceipt(receipt: TransactionReceipt) {
+export function extractLiquidityFromReceipt(receipt: TransactionReceipt): string {
     // Find the IncreaseLiquidity event
     // Event signature: 0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f
     const increaseLiquidityLog = receipt.logs.find(
@@ -56,28 +62,14 @@ async function extractIncreaseEventFromReceipt(receipt: TransactionReceipt) {
         topics: increaseLiquidityLog.topics,
     });
 
-    // Extract the actual values from the decoded event
-    const { liquidity, amount0, amount1 } = decodedEvent.args;
-
-    // Use current timestamp as approximation
-    // The backend will fetch the accurate block timestamp from the blockchain
-    const timestamp = new Date().toISOString();
+    const { liquidity } = decodedEvent.args;
 
     // Validate that we have real values
     if (liquidity === 0n) {
         console.warn("Warning: IncreaseLiquidity event has zero liquidity");
     }
 
-    return {
-        timestamp,
-        blockNumber: receipt.blockNumber.toString(),
-        transactionIndex: receipt.transactionIndex,
-        logIndex: increaseLiquidityLog.logIndex || 0,
-        transactionHash: receipt.transactionHash,
-        liquidity: liquidity.toString(),
-        amount0: amount0.toString(),
-        amount1: amount1.toString(),
-    };
+    return liquidity.toString();
 }
 
 /**
@@ -95,10 +87,6 @@ export function useCreatePositionAPI() {
 
     return useMutation({
         mutationFn: async (data: CreatePositionData) => {
-            const increaseEvent = await extractIncreaseEventFromReceipt(
-                data.receipt
-            );
-
             // Convert chain slug to numeric chain ID for API
             const numericChainId = getChainId(data.chainId);
 
@@ -109,8 +97,8 @@ export function useCreatePositionAPI() {
                     tickUpper: data.tickUpper,
                     tickLower: data.tickLower,
                     ownerAddress: data.ownerAddress,
-                    quoteTokenAddress: data.quoteTokenAddress,
-                    increaseEvent,
+                    isToken0Quote: data.isToken0Quote,
+                    liquidity: data.liquidity,
                 }
             );
 

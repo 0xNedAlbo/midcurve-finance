@@ -10,7 +10,10 @@ import { getTokenAmountsFromLiquidity, getTokenMapping } from '@midcurve/shared'
 import type { TokenSearchResult } from '@/hooks/positions/uniswapv3/wizard/useTokenSearch';
 import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
 import { useMintPosition } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
-import { useCreatePositionAPI } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
+import {
+  useCreatePositionAPI,
+  extractLiquidityFromReceipt,
+} from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { usePoolPrice } from '@/hooks/pools/usePoolPrice';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 import { WalletBalanceSection } from './shared/wallet-balance-section';
@@ -19,6 +22,7 @@ import {
   type InsufficientFundsInfo,
 } from './shared/insufficient-funds-alert';
 import { TransactionStepsList } from './shared/transaction-steps-list';
+import { AddToPortfolioSection } from './shared/add-to-portfolio-section';
 import { PositionSizeConfig } from './position-size-config';
 import { CHAIN_METADATA } from '@/config/chains';
 
@@ -246,6 +250,14 @@ export function OpenPositionStep({
       !createPositionAPI.isPending &&
       !createPositionAPI.isSuccess
     ) {
+      // Extract liquidity from the mint transaction receipt
+      const liquidity = extractLiquidityFromReceipt(mintPosition.receipt);
+
+      // Compute isToken0Quote: true if quoteToken is token0 in the pool
+      const isToken0Quote =
+        pool.pool.token0.config.address.toLowerCase() ===
+        quoteToken.address.toLowerCase();
+
       createPositionAPI.mutate({
         chainId: chain,
         nftId: mintPosition.tokenId.toString(),
@@ -253,8 +265,8 @@ export function OpenPositionStep({
         tickLower,
         tickUpper,
         ownerAddress: userAddress,
-        quoteTokenAddress: quoteToken.address as Address,
-        receipt: mintPosition.receipt,
+        isToken0Quote,
+        liquidity,
       });
     }
   }, [
@@ -266,6 +278,7 @@ export function OpenPositionStep({
     createPositionAPI.isSuccess,
     chain,
     pool.pool.config.address,
+    pool.pool.token0.config.address,
     tickLower,
     tickUpper,
     quoteToken.address,
@@ -389,7 +402,6 @@ export function OpenPositionStep({
           baseApproval={baseApproval}
           quoteApproval={quoteApproval}
           mintPosition={mintPosition}
-          createPositionAPI={createPositionAPI}
           canExecuteTransactions={canExecuteTransactions}
           isConnected={isConnected}
           chain={chain}
@@ -402,16 +414,18 @@ export function OpenPositionStep({
         </div>
       )}
 
-      {/* API Error */}
-      {createPositionAPI.isError && (
-        <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-4">
-          <p className="text-red-400 text-sm">
-            Error creating position in database:{' '}
-            {createPositionAPI.error instanceof Error
-              ? createPositionAPI.error.message
-              : 'Unknown error'}
-          </p>
-        </div>
+      {/* Add to Portfolio Section - Only show after mint success */}
+      {mintPosition.isSuccess && mintPosition.tokenId && (
+        <AddToPortfolioSection
+          isPending={createPositionAPI.isPending}
+          isSuccess={createPositionAPI.isSuccess}
+          isError={createPositionAPI.isError}
+          error={
+            createPositionAPI.error instanceof Error
+              ? createPositionAPI.error
+              : null
+          }
+        />
       )}
     </div>
   );

@@ -7,7 +7,6 @@ import type { EvmChainSlug } from '@/config/chains';
 import { formatCompactValue } from '@/lib/fraction-format';
 import type { UseTokenApprovalResult } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
 import type { UseMintPositionResult } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
-import type { UseCreatePositionAPIResult } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { CHAIN_METADATA } from '@/config/chains';
 import { parseTransactionError } from '@/utils/parse-evm-transaction-error';
 
@@ -33,7 +32,6 @@ interface TransactionStepsListProps {
   baseApproval: UseTokenApprovalResult;
   quoteApproval: UseTokenApprovalResult;
   mintPosition: UseMintPositionResult;
-  createPositionAPI: UseCreatePositionAPIResult;
   canExecuteTransactions: boolean;
   isConnected: boolean;
   chain: EvmChainSlug;
@@ -64,7 +62,6 @@ export function TransactionStepsList({
   baseApproval,
   quoteApproval,
   mintPosition,
-  createPositionAPI,
   canExecuteTransactions,
   isConnected,
   chain,
@@ -95,7 +92,7 @@ export function TransactionStepsList({
   return (
     <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg p-4">
       <h4 className="text-lg font-semibold text-white mb-4">
-        Transaction Steps
+        Open UniswapV3 Position
       </h4>
 
       <div
@@ -309,20 +306,6 @@ export function TransactionStepsList({
             </div>
           )}
         </div>
-
-        {/* Step 4: Creating Position (Backend API) - Only shown after successful mint */}
-        {mintPosition.isSuccess && (
-          <div className="flex items-center gap-3">
-            {createPositionAPI.isSuccess ? (
-              <Check className="w-5 h-5 text-green-500" />
-            ) : createPositionAPI.isPending ? (
-              <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
-            ) : (
-              <Circle className="w-5 h-5 text-slate-400" />
-            )}
-            <span className="text-white flex-1">Creating Position</span>
-          </div>
-        )}
       </div>
 
       {!isConnected && (
