@@ -25,6 +25,11 @@ export type {
   EvmTxStatusSubscriptionState,
   EvmTxStatusSubscriptionData,
   EvmTxStatusSubscriptionJSON,
+  // Uniswap V3 Pool Price
+  UniswapV3PoolPriceSubscriptionConfig,
+  UniswapV3PoolPriceSubscriptionState,
+  UniswapV3PoolPriceSubscriptionData,
+  UniswapV3PoolPriceSubscriptionJSON,
 } from './types.js';
 
 export {
@@ -37,6 +42,9 @@ export {
   // EVM Transaction Status
   emptyEvmTxStatusState,
   isEvmTxStatusSubscription,
+  // Uniswap V3 Pool Price
+  emptyUniswapV3PoolPriceState,
+  isUniswapV3PoolPriceSubscription,
   // Common
   subscriptionToJSON,
   subscriptionFromJSON,
