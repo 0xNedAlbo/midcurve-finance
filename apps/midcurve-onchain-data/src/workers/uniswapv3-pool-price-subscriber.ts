@@ -480,14 +480,16 @@ export class UniswapV3PoolPriceSubscriber {
    */
   private startCleanup(): void {
     this.cleanupTimer = setInterval(() => {
-      Promise.all([this.pauseStaleSubscriptions(), this.pruneDeletedSubscriptions()]).catch(
-        (err) => {
-          log.error({
-            error: err instanceof Error ? err.message : String(err),
-            msg: 'Error during cleanup',
-          });
-        }
-      );
+      Promise.all([
+        this.pauseStaleSubscriptions(),
+        this.pruneDeletedSubscriptions(),
+        this.removeDeletedFromBatches(),
+      ]).catch((err) => {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Error during cleanup',
+        });
+      });
     }, CLEANUP_INTERVAL_MS);
 
     log.info({
@@ -593,5 +595,48 @@ export class UniswapV3PoolPriceSubscriber {
     });
 
     log.info({ count: toDelete.length, msg: 'Pruned paused subscriptions' });
+  }
+
+  /**
+   * Remove subscriptions from WebSocket batches that were marked as 'deleted' via API.
+   * This handles the case where the API DELETE endpoint marks a subscription as deleted
+   * but the worker still has it in its subscribedPools map.
+   */
+  private async removeDeletedFromBatches(): Promise<void> {
+    if (this.subscribedPools.size === 0) {
+      return;
+    }
+
+    // Get subscription IDs that we're currently tracking
+    const trackedIds = Array.from(this.subscribedPools.keys());
+
+    // Find which of these have been marked as 'deleted' in the database
+    const deletedSubscriptions = await prisma.onchainDataSubscribers.findMany({
+      where: {
+        subscriptionType: 'uniswapv3-pool-price',
+        subscriptionId: { in: trackedIds },
+        status: 'deleted',
+      },
+      select: {
+        subscriptionId: true,
+      },
+    });
+
+    if (deletedSubscriptions.length === 0) {
+      return;
+    }
+
+    log.info({
+      count: deletedSubscriptions.length,
+      msg: 'Removing deleted subscriptions from WebSocket batches',
+    });
+
+    for (const sub of deletedSubscriptions) {
+      await this.removePool(sub.subscriptionId);
+      log.info({
+        subscriptionId: sub.subscriptionId,
+        msg: 'Removed deleted subscription from WebSocket batch',
+      });
+    }
   }
 }
