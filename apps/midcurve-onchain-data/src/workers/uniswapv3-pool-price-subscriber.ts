@@ -345,12 +345,17 @@ export class UniswapV3PoolPriceSubscriber {
 
     const nextSubscription = otherSubscriptionsForPool[0];
     if (nextSubscription) {
-      // Other subscriptions exist - update the batch's tracked subscriptionId
+      // Other subscriptions exist - update the batch's tracked subscription info
+      // (both subscriptionId and id, so Swap events update the correct DB record)
       if (chainBatches) {
         for (const batch of chainBatches) {
           if (batch.hasPool(subscriptionId)) {
-            // Update to use another subscription's ID (don't remove from batch!)
-            batch.updatePoolSubscriptionId(subscriptionId, nextSubscription.subscriptionId);
+            // Update to use another subscription's ID and database row ID
+            batch.updatePoolSubscription(
+              subscriptionId,
+              nextSubscription.subscriptionId,
+              nextSubscription.id
+            );
             break;
           }
         }
@@ -360,6 +365,7 @@ export class UniswapV3PoolPriceSubscriber {
         subscriptionId,
         poolAddress: poolInfo.poolAddress,
         newSubscriptionId: nextSubscription.subscriptionId,
+        newId: nextSubscription.id,
         remainingSubscriptions: otherSubscriptionsForPool.length,
         msg: 'Removed subscription but kept pool in batch (other subscriptions exist)',
       });

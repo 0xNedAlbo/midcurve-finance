@@ -180,20 +180,32 @@ export class UniswapV3PoolPriceSubscriptionBatch {
   }
 
   /**
-   * Update the subscriptionId for a pool without removing it from the batch.
+   * Update the subscription info for a pool without removing it from the batch.
    * Used when one subscription is removed but others for the same pool remain.
+   *
+   * Updates both the subscriptionId and the database row id, so that Swap events
+   * update the correct database record.
    */
-  updatePoolSubscriptionId(oldSubscriptionId: string, newSubscriptionId: string): void {
+  updatePoolSubscription(
+    oldSubscriptionId: string,
+    newSubscriptionId: string,
+    newId: string
+  ): void {
     for (const [poolAddr, info] of this.pools.entries()) {
       if (info.subscriptionId === oldSubscriptionId) {
-        this.pools.set(poolAddr, { ...info, subscriptionId: newSubscriptionId });
+        this.pools.set(poolAddr, {
+          ...info,
+          id: newId,
+          subscriptionId: newSubscriptionId,
+        });
         log.info({
           chainId: this.chainId,
           batchIndex: this.batchIndex,
           oldSubscriptionId,
           newSubscriptionId,
+          newId,
           poolAddress: poolAddr,
-          msg: 'Updated pool subscription ID in batch',
+          msg: 'Updated pool subscription in batch',
         });
         return;
       }
