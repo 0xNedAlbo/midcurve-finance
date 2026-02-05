@@ -11,6 +11,7 @@ import type { UniswapV3Pool } from '@midcurve/shared';
 import type { WizardStep } from '@/components/layout/wizard';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { ZOOM_STORAGE_KEYS, ZOOM_DEFAULTS } from '@/lib/zoom-settings';
+import { useWizardUrlState, type HydrationPayload } from '../hooks/useWizardUrlState';
 
 // ----- Types -----
 
@@ -113,7 +114,8 @@ type WizardAction =
   | { type: 'SET_STEP_VALID'; stepId: string; valid: boolean }
   | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
   | { type: 'SET_SUMMARY_ZOOM'; zoom: number }
-  | { type: 'RESET' };
+  | { type: 'RESET' }
+  | { type: 'HYDRATE_FROM_URL'; payload: HydrationPayload };
 
 // ----- Initial State -----
 
@@ -352,6 +354,36 @@ function wizardReducer(
     case 'RESET':
       return initialState;
 
+    case 'HYDRATE_FROM_URL': {
+      const { isToken0Quote } = action.payload;
+      // Swap tokens if isToken0Quote differs from current assumption
+      // selectPool already set baseToken=token0, quoteToken=token1
+      // So we need to swap if isToken0Quote=true (meaning token0 should be quote)
+      const needsSwap = isToken0Quote;
+
+      return {
+        ...state,
+        // Token role swap if needed
+        baseToken: needsSwap ? state.quoteToken : state.baseToken,
+        quoteToken: needsSwap ? state.baseToken : state.quoteToken,
+        // Capital inputs
+        baseInputAmount: action.payload.baseInputAmount,
+        quoteInputAmount: action.payload.quoteInputAmount,
+        // Range (0 means use defaults from pool discovery)
+        tickLower: action.payload.tickLower,
+        tickUpper: action.payload.tickUpper,
+        // SL/TP
+        stopLossTick: action.payload.stopLossTick,
+        takeProfitTick: action.payload.takeProfitTick,
+        stopLossEnabled: action.payload.stopLossTick !== null,
+        takeProfitEnabled: action.payload.takeProfitTick !== null,
+        automationEnabled: action.payload.stopLossTick !== null || action.payload.takeProfitTick !== null,
+        // Navigation
+        currentStepIndex: action.payload.currentStepIndex,
+        configurationTab: action.payload.configurationTab,
+      };
+    }
+
     default:
       return state;
   }
@@ -390,6 +422,9 @@ interface CreatePositionWizardContextValue {
   state: CreatePositionWizardState;
   steps: WizardStep[];
   currentStep: WizardStep;
+
+  // URL hydration state
+  isHydrating: boolean;
 
   // Navigation
   goToStep: (stepIndex: number) => void;
@@ -626,8 +661,22 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     dispatch({ type: 'RESET' });
   }, []);
 
+  // Hydration callback for URL state hook
+  const handleHydrate = useCallback((payload: HydrationPayload) => {
+    dispatch({ type: 'HYDRATE_FROM_URL', payload });
+  }, []);
+
+  // URL state sync - bidirectional sync between URL and wizard state
+  const { isHydrating } = useWizardUrlState({
+    state,
+    selectPool,
+    setDiscoveredPool,
+    onHydrate: handleHydrate,
+  });
+
   const value: CreatePositionWizardContextValue = {
     state,
+    isHydrating,
     steps,
     currentStep,
     goToStep,

@@ -75,10 +75,36 @@ function StepRenderer({ content }: { content: StepContent }) {
   );
 }
 
+// Loading component shown during URL hydration
+function HydrationLoading() {
+  const navigate = useNavigate();
+
+  return (
+    <FullPageWizardLayout
+      title="Create Uniswap V3 Position"
+      steps={[]}
+      currentStep={0}
+      onClose={() => navigate('/dashboard')}
+      interactiveContent={
+        <div className="flex items-center justify-center h-full min-h-[400px]">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-slate-400">Loading position configuration...</p>
+          </div>
+        </div>
+      }
+      visualContent={null}
+      summaryContent={null}
+      interactiveZoom={1}
+      summaryZoom={1}
+    />
+  );
+}
+
 // Main content component that conditionally renders the current step
 function CreatePositionWizardContent() {
   const navigate = useNavigate();
-  const { steps, state, goBack, goToStep } = useCreatePositionWizard();
+  const { steps, state, goBack, goToStep, isHydrating } = useCreatePositionWizard();
   const currentStepId = steps[state.currentStepIndex]?.id;
 
   // Track whether we're handling a popstate event to prevent pushing duplicate history
@@ -134,6 +160,11 @@ function CreatePositionWizardContent() {
     window.addEventListener('popstate', handlePopstate);
     return () => window.removeEventListener('popstate', handlePopstate);
   }, [state.currentStepIndex, goBack, goToStep, navigate]);
+
+  // Show loading state during URL hydration
+  if (isHydrating) {
+    return <HydrationLoading />;
+  }
 
   // Render only the current step component - each step is its own component
   // with its own isolated hooks

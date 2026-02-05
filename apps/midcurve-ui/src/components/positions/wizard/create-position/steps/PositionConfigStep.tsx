@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo, useState } from 'react';
+import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown, Trash2, Plus } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
@@ -6,6 +6,7 @@ import {
   formatCompactValue,
   calculatePositionValue,
   tickToPrice,
+  priceToTick,
   compareAddresses,
   generatePnLCurve,
   getTickSpacing,
@@ -42,6 +43,8 @@ export function PositionConfigStep() {
     setLiquidity,
     setStepValid,
     setInteractiveZoom,
+    setStopLoss,
+    setTakeProfit,
   } = useCreatePositionWizard();
 
   const { address: walletAddress, isConnected } = useAccount();
@@ -142,14 +145,121 @@ export function PositionConfigStep() {
   // SL/TP state for close order simulation
   const [stopLossPrice, setStopLossPrice] = useState<bigint | null>(null);
   const [takeProfitPrice, setTakeProfitPrice] = useState<bigint | null>(null);
+  // Track if we've initialized from context (to avoid overwriting URL-hydrated values)
+  const [slTpInitialized, setSlTpInitialized] = useState(false);
+  // Track previous quote token address to detect actual changes (not initial mount)
+  const prevQuoteAddressRef = useRef<string | undefined>(undefined);
 
-  // Reset SL/TP and slider bounds when quote token changes (e.g., after flip)
+  // Initialize local SL/TP prices from context ticks (for URL hydration)
   useEffect(() => {
+    // Only initialize once when pool is discovered and we haven't initialized yet
+    if (slTpInitialized || !state.discoveredPool || !state.baseToken || !state.quoteToken) return;
+
+    const baseDecimals = state.baseToken.decimals;
+
+    // Convert context SL tick to price
+    if (state.stopLossTick !== null) {
+      try {
+        const slPrice = tickToPrice(
+          state.stopLossTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseDecimals
+        );
+        setStopLossPrice(slPrice);
+      } catch {
+        // Ignore conversion errors
+      }
+    }
+
+    // Convert context TP tick to price
+    if (state.takeProfitTick !== null) {
+      try {
+        const tpPrice = tickToPrice(
+          state.takeProfitTick,
+          state.baseToken.address,
+          state.quoteToken.address,
+          baseDecimals
+        );
+        setTakeProfitPrice(tpPrice);
+      } catch {
+        // Ignore conversion errors
+      }
+    }
+
+    setSlTpInitialized(true);
+  }, [
+    slTpInitialized,
+    state.discoveredPool,
+    state.baseToken,
+    state.quoteToken,
+    state.stopLossTick,
+    state.takeProfitTick,
+  ]);
+
+  // Reset SL/TP and slider bounds when quote token CHANGES (e.g., after flip)
+  // Skip on initial mount - only reset when user actually flips tokens
+  useEffect(() => {
+    const currentAddress = state.quoteToken?.address;
+    const prevAddress = prevQuoteAddressRef.current;
+
+    // Update ref for next comparison
+    prevQuoteAddressRef.current = currentAddress;
+
+    // Skip if this is initial mount (prev was undefined) or address didn't change
+    if (prevAddress === undefined || prevAddress === currentAddress) return;
+
+    // User flipped tokens - reset everything
     setStopLossPrice(null);
     setTakeProfitPrice(null);
     setSliderBounds({ min: 0, max: 0 });
     setUserAdjustedBounds(false);
+    setSlTpInitialized(false); // Allow re-initialization after flip
   }, [state.quoteToken?.address]);
+
+  // Sync local SL/TP prices to context as ticks (for URL persistence)
+  // Skip sync until we've initialized from context to avoid overwriting URL values
+  useEffect(() => {
+    if (!slTpInitialized || !state.discoveredPool || !state.baseToken || !state.quoteToken) return;
+
+    const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+    const baseAddress = state.baseToken.address;
+    const quoteAddress = state.quoteToken.address;
+    const baseDecimals = state.baseToken.decimals;
+
+    // Convert SL price to tick
+    if (stopLossPrice !== null) {
+      try {
+        const slTick = priceToTick(stopLossPrice, tickSpacing, baseAddress, quoteAddress, baseDecimals);
+        setStopLoss(true, slTick);
+      } catch {
+        setStopLoss(false, null);
+      }
+    } else {
+      setStopLoss(false, null);
+    }
+
+    // Convert TP price to tick
+    if (takeProfitPrice !== null) {
+      try {
+        const tpTick = priceToTick(takeProfitPrice, tickSpacing, baseAddress, quoteAddress, baseDecimals);
+        setTakeProfit(true, tpTick);
+      } catch {
+        setTakeProfit(false, null);
+      }
+    } else {
+      setTakeProfit(false, null);
+    }
+  }, [
+    slTpInitialized,
+    stopLossPrice,
+    takeProfitPrice,
+    state.discoveredPool,
+    state.baseToken,
+    state.quoteToken,
+    setStopLoss,
+    setTakeProfit,
+  ]);
 
   // Determine if base token is token0
   const isToken0Base = useMemo(() => {
