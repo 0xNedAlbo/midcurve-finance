@@ -9,7 +9,7 @@ import { AlertCircle, TrendingDown, TrendingUp, ArrowRightLeft, Info, AlertTrian
 import type { TriggerMode } from '@midcurve/api-shared';
 import type { CloseOrderFormData } from '../CloseOrderModal';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
-import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { CHAIN_METADATA } from '@/config/chains';
 import type { EvmChainSlug } from '@/config/chains';
 
@@ -266,7 +266,7 @@ export function CloseOrderReviewStep({
 
       {/* 3. Network Switch Prompt - shown when connected to wrong network */}
       {isConnected && !isWrongAccount && chain && (
-        <NetworkSwitchStep chain={chain} isWrongNetwork={isWrongNetwork} />
+        <EvmSwitchNetworkPrompt chain={chain} isWrongNetwork={isWrongNetwork} />
       )}
 
       {/* Setup Notice - shown when approval is needed */}

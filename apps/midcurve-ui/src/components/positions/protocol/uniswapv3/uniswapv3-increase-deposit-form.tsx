@@ -10,7 +10,7 @@ import type { ListPositionData } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useIncreaseLiquidity } from '@/hooks/positions/uniswapv3/useIncreaseLiquidity';
-import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
@@ -350,7 +350,7 @@ export function UniswapV3IncreaseDepositForm({
       )}
 
       {/* Network Switch */}
-      <NetworkSwitchStep chain={chain} isWrongNetwork={isWrongNetwork} />
+      <EvmSwitchNetworkPrompt chain={chain} isWrongNetwork={isWrongNetwork} />
 
       {/* Transaction Steps */}
       <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg p-4">

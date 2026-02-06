@@ -8,8 +8,9 @@
 import { useState } from 'react';
 import { X, Loader2, ExternalLink, Copy, Check } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
-import { useSendTransaction, useWaitForTransactionReceipt, useBalance } from 'wagmi';
-import { getChainMetadataByChainId } from '@/config/chains';
+import { useSendTransaction, useWaitForTransactionReceipt, useBalance, useAccount } from 'wagmi';
+import { getChainMetadataByChainId, getChainSlugByChainId } from '@/config/chains';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useQueryClient } from '@tanstack/react-query';
 import { autowalletQueryKey } from '@/hooks/automation';
 
@@ -32,6 +33,9 @@ export function FundAutowalletModal({
 
   const chainMetadata = getChainMetadataByChainId(chainId);
   const symbol = chainId === 56 ? 'BNB' : chainId === 137 ? 'MATIC' : 'ETH';
+  const { chainId: connectedChainId } = useAccount();
+  const chainSlug = getChainSlugByChainId(chainId);
+  const isWrongNetwork = connectedChainId !== chainId;
 
   // Get user's balance on this chain
   const { data: balance } = useBalance({
@@ -136,6 +140,11 @@ export function FundAutowalletModal({
             </div>
           </div>
 
+          {/* Network switch prompt */}
+          {chainSlug && (
+            <EvmSwitchNetworkPrompt chain={chainSlug} isWrongNetwork={isWrongNetwork} />
+          )}
+
           {/* Amount input */}
           {!isConfirmed && (
             <div>
@@ -205,7 +214,7 @@ export function FundAutowalletModal({
           ) : (
             <button
               onClick={handleFund}
-              disabled={!amount || parseFloat(amount) <= 0 || isSending || isConfirming}
+              disabled={!amount || parseFloat(amount) <= 0 || isSending || isConfirming || isWrongNetwork}
               className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isSending || isConfirming ? (

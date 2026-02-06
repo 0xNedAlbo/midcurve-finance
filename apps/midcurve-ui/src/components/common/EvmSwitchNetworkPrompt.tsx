@@ -4,19 +4,19 @@ import { useSwitchChain } from 'wagmi';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 
-interface NetworkSwitchStepProps {
+interface EvmSwitchNetworkPromptProps {
   chain: EvmChainSlug;
   isWrongNetwork: boolean;
 }
 
 /**
- * Network Switch Step Component
+ * EVM Switch Network Prompt
  *
  * Displays a compact notice when the user's wallet is connected to the wrong network
  * and provides a small button to switch to the correct network.
  * Uses a single-line layout matching the position size config pattern.
  */
-export function NetworkSwitchStep({ chain, isWrongNetwork }: NetworkSwitchStepProps) {
+export function EvmSwitchNetworkPrompt({ chain, isWrongNetwork }: EvmSwitchNetworkPromptProps) {
   const { switchChain } = useSwitchChain();
   const chainConfig = CHAIN_METADATA[chain];
 

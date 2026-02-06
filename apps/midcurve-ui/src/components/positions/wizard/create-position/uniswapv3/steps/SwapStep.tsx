@@ -34,7 +34,7 @@ import { PositionRangeSection } from '../shared/PositionRangeSection';
 import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
-import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { getChainSlugByChainId } from '@/config/chains';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 
@@ -535,7 +535,7 @@ export function SwapStep() {
             <h3 className="text-lg font-semibold text-white">Acquire Required Tokens</h3>
             {zoomControls}
           </div>
-          <NetworkSwitchStep chain={chainSlug} isWrongNetwork={isWrongNetwork} />
+          <EvmSwitchNetworkPrompt chain={chainSlug} isWrongNetwork={isWrongNetwork} />
         </div>
       );
     }

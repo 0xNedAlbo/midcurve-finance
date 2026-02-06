@@ -11,7 +11,7 @@ import type { ListPositionData } from '@midcurve/api-shared';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useDecreaseLiquidity } from '@/hooks/positions/uniswapv3/useDecreaseLiquidity';
-import { NetworkSwitchStep } from '@/components/positions/NetworkSwitchStep';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
@@ -395,7 +395,7 @@ export function UniswapV3WithdrawForm({
 
       {/* Network Switch */}
       {isConnected && !isWrongAccount && (
-        <NetworkSwitchStep chain={chain} isWrongNetwork={isWrongNetwork} />
+        <EvmSwitchNetworkPrompt chain={chain} isWrongNetwork={isWrongNetwork} />
       )}
 
       {/* Transaction Steps */}
