@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { Circle, Check, Loader2, ExternalLink, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, tickToPrice, formatCompactValue } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, tickToPrice, tickToSqrtRatioX96, formatCompactValue } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
@@ -36,6 +36,7 @@ import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
+import { automationApi } from '@/lib/api-client';
 
 // Transaction item status
 type TxStatus = 'pending' | 'waiting' | 'confirming' | 'success' | 'error' | 'skipped';
@@ -78,6 +79,10 @@ export function TransactionStep() {
 
   // Track if mint was successful (used to show success state on all pre-mint items after canceling subscriptions)
   const [mintSucceeded, setMintSucceeded] = useState(false);
+
+  // Track API notification status for SL/TP orders
+  const [slApiDone, setSlApiDone] = useState(false);
+  const [tpApiDone, setTpApiDone] = useState(false);
 
   // Get chain ID from discovered pool
   const chainId = state.discoveredPool?.typedConfig.chainId;
@@ -284,6 +289,20 @@ export function TransactionStep() {
     // If quote is token1, swap token0 → token1
     return isQuoteToken0 ? SwapDirection.TOKEN1_TO_0 : SwapDirection.TOKEN0_TO_1;
   }, [state.discoveredPool, quoteTokenAddress]);
+
+  // Map numeric swap direction to API swap config
+  const apiSwapConfig = useMemo(() => {
+    if (swapDirection === SwapDirection.NONE) return undefined;
+    const directionMap: Record<number, 'TOKEN0_TO_1' | 'TOKEN1_TO_0'> = {
+      [SwapDirection.TOKEN0_TO_1]: 'TOKEN0_TO_1',
+      [SwapDirection.TOKEN1_TO_0]: 'TOKEN1_TO_0',
+    };
+    return {
+      enabled: true,
+      direction: directionMap[swapDirection],
+      slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
+    };
+  }, [swapDirection]);
 
   // Determine correct logo based on which token is base/quote
   const getTokenLogoUrl = (tokenAddress: string | undefined) => {
@@ -790,7 +809,83 @@ export function TransactionStep() {
     swapDirection, registerSL, registerTP, attemptedTxs,
   ]);
 
-  // Track SL/TP registration completion
+  // Notify API after SL on-chain registration succeeds
+  useEffect(() => {
+    if (!registerSL.isSuccess || !registerSL.txHash || slApiDone) return;
+    if (!mintedTokenId || !chainId || !walletAddress || !autowalletAddress) return;
+    if (state.stopLossTick === null) return;
+
+    const poolAddress = state.discoveredPool?.typedConfig.address as string | undefined;
+    const nfpmAddress = getNonfungiblePositionManagerAddress(chainId);
+    if (!poolAddress || !nfpmAddress) return;
+
+    const closeOrderHash = `sl@${state.stopLossTick}`;
+    const sqrtPriceX96 = tickToSqrtRatioX96(state.stopLossTick).toString();
+
+    automationApi.positionCloseOrders.create(
+      chainId,
+      mintedTokenId.toString(),
+      closeOrderHash,
+      {
+        poolAddress,
+        operatorAddress: autowalletAddress,
+        positionManager: nfpmAddress,
+        triggerMode: 'LOWER',
+        sqrtPriceX96,
+        payoutAddress: walletAddress,
+        validUntil: new Date(0).toISOString(), // 0 = no expiry
+        slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
+        registrationTxHash: registerSL.txHash,
+        swapConfig: apiSwapConfig,
+      }
+    ).then(() => {
+      setSlApiDone(true);
+    }).catch((err) => {
+      console.error('Failed to notify API of SL order:', err);
+      // Don't block wizard — order is registered on-chain regardless
+      setSlApiDone(true);
+    });
+  }, [registerSL.isSuccess, registerSL.txHash, slApiDone, mintedTokenId, chainId, walletAddress, autowalletAddress, state.stopLossTick, state.discoveredPool, apiSwapConfig]);
+
+  // Notify API after TP on-chain registration succeeds
+  useEffect(() => {
+    if (!registerTP.isSuccess || !registerTP.txHash || tpApiDone) return;
+    if (!mintedTokenId || !chainId || !walletAddress || !autowalletAddress) return;
+    if (state.takeProfitTick === null) return;
+
+    const poolAddress = state.discoveredPool?.typedConfig.address as string | undefined;
+    const nfpmAddress = getNonfungiblePositionManagerAddress(chainId);
+    if (!poolAddress || !nfpmAddress) return;
+
+    const closeOrderHash = `tp@${state.takeProfitTick}`;
+    const sqrtPriceX96 = tickToSqrtRatioX96(state.takeProfitTick).toString();
+
+    automationApi.positionCloseOrders.create(
+      chainId,
+      mintedTokenId.toString(),
+      closeOrderHash,
+      {
+        poolAddress,
+        operatorAddress: autowalletAddress,
+        positionManager: nfpmAddress,
+        triggerMode: 'UPPER',
+        sqrtPriceX96,
+        payoutAddress: walletAddress,
+        validUntil: new Date(0).toISOString(), // 0 = no expiry
+        slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
+        registrationTxHash: registerTP.txHash,
+        swapConfig: apiSwapConfig,
+      }
+    ).then(() => {
+      setTpApiDone(true);
+    }).catch((err) => {
+      console.error('Failed to notify API of TP order:', err);
+      // Don't block wizard — order is registered on-chain regardless
+      setTpApiDone(true);
+    });
+  }, [registerTP.isSuccess, registerTP.txHash, tpApiDone, mintedTokenId, chainId, walletAddress, autowalletAddress, state.takeProfitTick, state.discoveredPool, apiSwapConfig]);
+
+  // Track SL/TP registration + API notification completion
   useEffect(() => {
     if (currentPhase !== 'automation') return;
 
@@ -806,9 +901,9 @@ export function TransactionStep() {
       return;
     }
 
-    // Check if all registrations are complete
-    const slDone = !state.stopLossEnabled || registerSL.isSuccess;
-    const tpDone = !state.takeProfitEnabled || registerTP.isSuccess;
+    // Check if all registrations AND API notifications are complete
+    const slDone = !state.stopLossEnabled || (registerSL.isSuccess && slApiDone);
+    const tpDone = !state.takeProfitEnabled || (registerTP.isSuccess && tpApiDone);
 
     if (slDone && tpDone) {
       // Record transactions
@@ -831,7 +926,7 @@ export function TransactionStep() {
 
       setCurrentPhase('done');
     }
-  }, [currentPhase, state.stopLossEnabled, state.takeProfitEnabled, registerSL, registerTP, addTransaction]);
+  }, [currentPhase, state.stopLossEnabled, state.takeProfitEnabled, registerSL, registerTP, slApiDone, tpApiDone, addTransaction]);
 
   // Update step validation
   useEffect(() => {
