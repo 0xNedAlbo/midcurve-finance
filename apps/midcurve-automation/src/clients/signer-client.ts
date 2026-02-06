@@ -4,8 +4,8 @@
  * HTTP client for communicating with the midcurve-signer service.
  * Handles signing of deployment and execution transactions.
  *
- * Note: registerClose and cancelClose are owner-only functions that users
- * sign with their own EOA wallet. Only executeClose (operator-only) needs
+ * Note: registerOrder and cancelOrder are owner-only functions that users
+ * sign with their own EOA wallet. Only executeOrder (operator-only) needs
  * to be signed by the automation wallet via this client.
  *
  * Gas estimation is done here before calling the signer, keeping the
@@ -32,20 +32,25 @@ export interface SignedTransaction {
 }
 
 /**
- * Swap parameters for executeClose with swap
+ * Swap parameters for executeOrder with post-close swap
+ *
+ * When augustus is the zero address (0x0000...0000), the contract executes a direct
+ * pool swap (fallback mode) instead of routing through Paraswap. In this mode,
+ * swapCalldata and deadline are ignored, and minAmountOut provides slippage protection.
  */
 export interface SwapParamsInput {
-  augustus: string;       // Augustus swapper address
-  swapCalldata: string;   // Hex-encoded calldata
+  augustus: string;       // Augustus swapper address, or 0x0 for direct pool swap
+  swapCalldata: string;   // Hex-encoded calldata (ignored when augustus == 0x0)
   deadline: number;       // Unix timestamp or 0 for no deadline
   minAmountOut: string;   // Minimum output amount (slippage protection)
 }
 
-export interface ExecuteCloseParams {
+export interface ExecuteOrderParams {
   userId: string;
   chainId: number;
   contractAddress: string;
-  closeId: number;
+  nftId: bigint;
+  triggerMode: number; // 0=LOWER, 1=UPPER
   feeRecipient: string;
   feeBps: number;
   // Operator address for gas estimation
@@ -63,9 +68,10 @@ export interface ExecuteCloseParams {
 const POSITION_CLOSER_ABI = [
   {
     type: 'function',
-    name: 'executeClose',
+    name: 'executeOrder',
     inputs: [
-      { name: 'closeId', type: 'uint256' },
+      { name: 'nftId', type: 'uint256' },
+      { name: 'triggerMode', type: 'uint8' },
       { name: 'feeRecipient', type: 'address' },
       { name: 'feeBps', type: 'uint16' },
       {
@@ -155,7 +161,7 @@ class SignerClient {
   }
 
   /**
-   * Sign an executeClose transaction
+   * Sign an executeOrder transaction
    *
    * Gas estimation is performed here before calling the signer.
    * This keeps the signer isolated from external RPC endpoints.
@@ -163,18 +169,19 @@ class SignerClient {
    * The caller must fetch the on-chain nonce and pass it to this method.
    * The signer service is stateless and does not manage nonces.
    */
-  async signExecuteClose(params: ExecuteCloseParams): Promise<SignedTransaction> {
-    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, operatorAddress, nonce, swapParams } =
+  async signExecuteOrder(params: ExecuteOrderParams): Promise<SignedTransaction> {
+    const { userId, chainId, contractAddress, nftId, triggerMode, feeRecipient, feeBps, operatorAddress, nonce, swapParams } =
       params;
 
     log.info({
       userId,
       chainId,
       contractAddress,
-      closeId,
+      nftId: nftId.toString(),
+      triggerMode,
       explicitNonce: nonce,
       hasSwap: !!swapParams,
-      msg: 'Estimating gas for close order execution',
+      msg: 'Estimating gas for order execution',
     });
 
     // Estimate gas locally (automation service has RPC access)
@@ -192,8 +199,8 @@ class SignerClient {
 
     const callData = encodeFunctionData({
       abi: POSITION_CLOSER_ABI,
-      functionName: 'executeClose',
-      args: [BigInt(closeId), feeRecipient as Address, feeBps, swapParamsTuple],
+      functionName: 'executeOrder',
+      args: [nftId, triggerMode, feeRecipient as Address, feeBps, swapParamsTuple],
     });
 
     let gasLimit: bigint;
@@ -215,7 +222,8 @@ class SignerClient {
         userId,
         chainId,
         contractAddress,
-        closeId,
+        nftId: nftId.toString(),
+        triggerMode,
         error: error instanceof Error ? error.message : 'Unknown error',
         msg: 'Gas estimation failed, using fallback values',
       });
@@ -228,18 +236,20 @@ class SignerClient {
       userId,
       chainId,
       contractAddress,
-      closeId,
+      nftId: nftId.toString(),
+      triggerMode,
       gasLimit: gasLimit.toString(),
       gasPrice: gasPrice.toString(),
-      msg: 'Signing close order execution',
+      msg: 'Signing order execution',
     });
 
     // Call signer with gas params and nonce (nonce always required, fetched from chain by caller)
-    return this.request<SignedTransaction>('POST', '/api/sign/automation/execute-close', {
+    return this.request<SignedTransaction>('POST', '/api/sign/automation/uniswapv3/position-closer/execute-order', {
       userId,
       chainId,
       contractAddress,
-      closeId,
+      nftId: nftId.toString(),
+      triggerMode,
       feeRecipient,
       feeBps,
       gasLimit: gasLimit.toString(),

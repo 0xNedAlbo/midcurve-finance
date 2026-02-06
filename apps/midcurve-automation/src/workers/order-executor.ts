@@ -13,10 +13,11 @@ import {
   waitForTransaction,
   getRevertReason,
   validatePositionForClose,
-  simulateExecuteClose,
+  simulateExecuteOrder,
+  calculatePoolSwapMinAmountOut,
   checkContractTokenBalances,
   getOnChainNonce,
-  getOnChainCloseOrder,
+  getOnChainOrder,
   readPoolPrice,
   type SupportedChainId,
   type PreflightValidation,
@@ -314,6 +315,13 @@ export class OrderExecutor {
       throw new Error(`Order not found: ${orderId}`);
     }
 
+    // Read current retry count to determine if pool swap fallback is available
+    const currentRetryCount = ((order.state as Record<string, unknown>).retryCount as number) || 0;
+    const isLastAttempt = currentRetryCount >= MAX_EXECUTION_ATTEMPTS - 1;
+
+    // Derive triggerMode from triggerSide for contract calls (0=LOWER, 1=UPPER)
+    const triggerMode = triggerSide === 'upper' ? 1 : 0;
+
     // Get contract address from automationContractConfig (immutable at registration)
     const contractConfig = order.automationContractConfig as AutomationContractConfig;
     const contractAddress = contractConfig.contractAddress;
@@ -337,15 +345,37 @@ export class OrderExecutor {
       throw new Error(`Operator address not configured for order: ${orderId}`);
     }
 
+    // Get full position data (needed for signer service + price formatting)
+    const positionService = getPositionService();
+    const positionData = await positionService.findById(positionId);
+    if (!positionData) {
+      throw new Error(`Position not found: ${positionId}`);
+    }
+    // Cast to UniswapV3Position for typed config/state access
+    const position = positionData as UniswapV3Position;
+    const userId = position.userId;
+
+    // Get quote token decimals for human-readable price formatting
+    const quoteTokenDecimals = position.isToken0Quote
+      ? position.pool.token0.decimals
+      : position.pool.token1.decimals;
+
+    // Get nftId from position config (required for executeOrder contract call)
+    if (!position.typedConfig.nftId) {
+      throw new Error(`Position has no nftId: ${positionId}`);
+    }
+    const nftId = BigInt(position.typedConfig.nftId);
+
     // =========================================================================
     // ON-CHAIN SWAP STATE: Read swap configuration from on-chain order
     // IMPORTANT: The contract decides whether to swap based on on-chain swapDirection,
     // not database config. We MUST use on-chain state to determine if swap params are needed.
     // =========================================================================
-    const onChainOrder = await getOnChainCloseOrder(
+    const onChainOrder = await getOnChainOrder(
       chainId as SupportedChainId,
       contractAddress as `0x${string}`,
-      closeId
+      nftId,
+      triggerMode
     );
 
     // SwapDirection enum: 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0
@@ -364,31 +394,13 @@ export class OrderExecutor {
       msg: 'On-chain swap configuration',
     });
 
-    // Get full position data (needed for signer service + price formatting)
-    const positionService = getPositionService();
-    const positionData = await positionService.findById(positionId);
-    if (!positionData) {
-      throw new Error(`Position not found: ${positionId}`);
-    }
-    // Cast to UniswapV3Position for typed config/state access
-    const position = positionData as UniswapV3Position;
-    const userId = position.userId;
-
-    // Get quote token decimals for human-readable price formatting
-    const quoteTokenDecimals = position.isToken0Quote
-      ? position.pool.token0.decimals
-      : position.pool.token1.decimals;
-
-    // Get nftId from position config (using typedConfig for type safety)
-    const nftId = position.typedConfig.nftId ? BigInt(position.typedConfig.nftId) : undefined;
-
     // Declare preflight outside if block so it's accessible in swap params section
     let preflight: PreflightValidation | undefined;
 
     // =========================================================================
     // PRE-FLIGHT VALIDATION: Check position state before execution
     // =========================================================================
-    if (nftId) {
+    {
       log.info({
         orderId,
         positionId,
@@ -533,14 +545,15 @@ export class OrderExecutor {
         // Calculate expected swap amount from preflight position data
         // This uses the same Uniswap V3 math the contract uses to determine actual amounts
         let swapAmount: bigint;
+        let freshPoolPrice: bigint; // Hoisted for access in pool swap fallback
 
         if (nftId && preflight?.positionData) {
           // Fetch FRESH pool price at execution time for accurate amount calculation
           // The trigger price (_currentPrice) can be stale by seconds/minutes due to queue latency
-          const { sqrtPriceX96: freshPoolPrice } = await readPoolPrice(
+          ({ sqrtPriceX96: freshPoolPrice } = await readPoolPrice(
             chainId as SupportedChainId,
             poolAddress as `0x${string}`
-          );
+          ));
 
           log.info({
             orderId,
@@ -616,14 +629,57 @@ export class OrderExecutor {
             msg: 'Swap params obtained',
           });
         } catch (swapErr) {
-          log.error({
+          if (!isLastAttempt) {
+            // Not final attempt — throw and let retry mechanism handle it
+            log.warn({
+              orderId,
+              positionId,
+              error: (swapErr as Error).message,
+              retryCount: currentRetryCount,
+              msg: 'Paraswap failed, will retry',
+            });
+            throw new Error(
+              `Paraswap failed (attempt ${currentRetryCount + 1}/${MAX_EXECUTION_ATTEMPTS}): ${(swapErr as Error).message}`
+            );
+          }
+
+          // Final attempt — fall back to direct pool swap
+          log.warn({
             orderId,
             positionId,
             error: (swapErr as Error).message,
-            msg: 'Failed to get swap params - on-chain swap required but API failed',
+            retryCount: currentRetryCount,
+            msg: 'Paraswap failed on final attempt, falling back to direct pool swap',
           });
-          // Throw error since on-chain swap is required but we can't get params
-          throw new Error(`Swap required on-chain but failed to get swap params: ${(swapErr as Error).message}`);
+
+          const minAmountOut = calculatePoolSwapMinAmountOut(
+            swapAmount,
+            freshPoolPrice,
+            swapDirection as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+            token0Decimals,
+            token1Decimals,
+            swapSlippageBps
+          );
+
+          swapParams = {
+            augustusAddress: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+            spenderAddress: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+            swapCalldata: '0x' as `0x${string}`,
+            srcToken: srcToken as `0x${string}`,
+            destToken: destToken as `0x${string}`,
+            srcAmount: swapAmount.toString(),
+            destAmount: minAmountOut.toString(),
+            minDestAmount: minAmountOut.toString(),
+            swapAllBalanceOffset: 0,
+          };
+
+          log.info({
+            orderId,
+            positionId,
+            minAmountOut: minAmountOut.toString(),
+            swapDirection,
+            msg: 'Pool swap fallback params built',
+          });
         }
       }
     }
@@ -644,16 +700,18 @@ export class OrderExecutor {
     log.info({
       orderId,
       positionId,
-      closeId,
+      nftId: nftId.toString(),
+      triggerMode,
       contractAddress,
       operatorAddress,
-      msg: 'Simulating executeClose transaction',
+      msg: 'Simulating executeOrder transaction',
     });
 
-    const simulation = await simulateExecuteClose(
+    const simulation = await simulateExecuteOrder(
       chainId as SupportedChainId,
       contractAddress as `0x${string}`,
-      closeId,
+      nftId,
+      triggerMode,
       feeConfig.recipient as `0x${string}`,
       feeConfig.bps,
       operatorAddress as `0x${string}`,
@@ -664,7 +722,8 @@ export class OrderExecutor {
       log.error({
         orderId,
         positionId,
-        closeId,
+        nftId: nftId.toString(),
+        triggerMode,
         simulation,
         msg: 'Transaction simulation failed',
       });
@@ -753,11 +812,12 @@ export class OrderExecutor {
 
     // Sign the execution transaction (gas estimation done in signer-client)
     // Nonce is always fetched from chain - signer service is stateless
-    const signedTx = await signerClient.signExecuteClose({
+    const signedTx = await signerClient.signExecuteOrder({
       userId,
       chainId,
       contractAddress,
-      closeId,
+      nftId,
+      triggerMode,
       feeRecipient: feeConfig.recipient,
       feeBps: feeConfig.bps,
       operatorAddress,

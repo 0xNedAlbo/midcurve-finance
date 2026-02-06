@@ -55,11 +55,14 @@ interface IUniswapV3PositionCloserV1 {
     // ========================================
 
     /// @notice Parameters for swap execution
+    /// @dev When augustus == address(0), the contract executes a direct pool swap (fallback mode)
+    ///      instead of routing through Paraswap. In this mode, swapCalldata and deadline are ignored,
+    ///      and minAmountOut provides slippage protection against the pool price.
     struct SwapParams {
-        address augustus;           // AugustusSwapper address (verified against registry)
-        bytes swapCalldata;         // Fresh calldata from Paraswap API
-        uint256 deadline;           // Swap deadline (0 = no deadline)
-        uint256 minAmountOut;       // Minimum output amount (slippage protection)
+        address augustus;           // AugustusSwapper address (verified against registry), or address(0) for direct pool swap
+        bytes swapCalldata;         // Fresh calldata from Paraswap API (ignored when augustus == address(0))
+        uint256 deadline;           // Swap deadline (0 = no deadline, ignored when augustus == address(0))
+        uint256 minAmountOut;       // Minimum output amount (slippage protection, used in both modes)
     }
 
     /// @notice Execute a close order when trigger condition is met
@@ -255,8 +258,18 @@ interface IUniswapV3PositionCloserV1 {
         uint256 feeAmount1
     );
 
-    /// @notice Emitted when post-close swap is executed
+    /// @notice Emitted when post-close swap is executed via Paraswap
     event SwapExecuted(
+        uint256 indexed nftId,
+        TriggerMode indexed triggerMode,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOut
+    );
+
+    /// @notice Emitted when post-close swap is executed via direct pool swap (fallback)
+    event PoolSwapExecuted(
         uint256 indexed nftId,
         TriggerMode indexed triggerMode,
         address tokenIn,

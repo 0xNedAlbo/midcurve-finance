@@ -1,7 +1,7 @@
 /**
- * POST /api/sign/automation/execute-close - Sign Close Order Execution
+ * POST /api/sign/automation/uniswapv3/position-closer/execute-order
  *
- * Signs an executeClose() transaction for a UniswapV3PositionCloser contract.
+ * Sign an executeOrder() transaction for a UniswapV3PositionCloser contract.
  * Does NOT broadcast the transaction - that is handled by the caller.
  *
  * Called by the automation service when a price trigger is met.
@@ -21,14 +21,15 @@
  *     userId: string,
  *     chainId: number,
  *     contractAddress: string,
- *     closeId: number,
+ *     nftId: string (bigint as string),
+ *     triggerMode: number (0=LOWER, 1=UPPER),
  *     feeRecipient: string,
  *     feeBps: number (0-100, max 1%),
  *     gasLimit: string (bigint as string),
  *     gasPrice: string (bigint as string),
  *     nonce: number (required, caller fetches from chain),
  *     swapParams?: {
- *       augustus: string (swap contract address),
+ *       augustus: string (swap contract address, or 0x0 for direct pool swap),
  *       swapCalldata: string (hex-encoded calldata),
  *       deadline: number (unix timestamp or 0),
  *       minAmountOut: string (minimum output amount for slippage protection)
@@ -61,16 +62,10 @@ import {
 import { signerLogger } from '@/lib/logger';
 import type { Address } from 'viem';
 
-const logger = signerLogger.child({ endpoint: 'sign-automation-execute-close' });
+const logger = signerLogger.child({ endpoint: 'sign-automation-execute-order' });
 
 /**
- * Request body schema
- *
- * Gas parameters are provided as strings and transformed to BigInt.
- * This allows JSON transport of bigint values.
- */
-/**
- * Swap params schema for executeClose with post-close swap
+ * Swap params schema for executeOrder with post-close swap
  */
 const SwapParamsSchema = z.object({
   augustus: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid augustus address'),
@@ -79,11 +74,18 @@ const SwapParamsSchema = z.object({
   minAmountOut: z.string().regex(/^\d+$/, 'minAmountOut must be numeric string'),
 });
 
-const SignExecuteCloseSchema = z.object({
+/**
+ * Request body schema
+ *
+ * Gas parameters are provided as strings and transformed to BigInt.
+ * This allows JSON transport of bigint values.
+ */
+const SignExecuteOrderSchema = z.object({
   userId: z.string().min(1, 'userId is required'),
   chainId: z.number().int().positive('chainId must be a positive integer'),
   contractAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid contract address'),
-  closeId: z.number().int().nonnegative('closeId must be a non-negative integer'),
+  nftId: z.string().regex(/^\d+$/, 'nftId must be a numeric string').transform((val) => BigInt(val)),
+  triggerMode: z.number().int().min(0).max(1, 'triggerMode must be 0 (LOWER) or 1 (UPPER)'),
   feeRecipient: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid fee recipient address'),
   feeBps: z.number().int().min(0).max(100, 'feeBps must be 0-100 (max 1%)'),
   // Gas parameters from caller (signer does not access RPC)
@@ -91,20 +93,20 @@ const SignExecuteCloseSchema = z.object({
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
   // Nonce is required - caller fetches from chain (signer is stateless)
   nonce: z.number().int().nonnegative('nonce is required'),
-  // Optional swap params for post-close swap via Paraswap
+  // Optional swap params for post-close swap via Paraswap or direct pool swap
   swapParams: SwapParamsSchema.optional(),
 });
 
-type SignExecuteCloseRequest = z.infer<typeof SignExecuteCloseSchema>;
+type SignExecuteOrderRequest = z.infer<typeof SignExecuteOrderSchema>;
 
 /**
- * POST /api/sign/automation/execute-close
+ * POST /api/sign/automation/uniswapv3/position-closer/execute-order
  */
 export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   const { requestId, request } = ctx;
 
   // 1. Parse request body
-  const bodyResult = await parseJsonBody<SignExecuteCloseRequest>(request);
+  const bodyResult = await parseJsonBody<SignExecuteOrderRequest>(request);
   if (!bodyResult.success) {
     return NextResponse.json(
       {
@@ -120,7 +122,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
   }
 
   // 2. Validate request schema
-  const validation = SignExecuteCloseSchema.safeParse(bodyResult.data);
+  const validation = SignExecuteOrderSchema.safeParse(bodyResult.data);
   if (!validation.success) {
     return NextResponse.json(
       {
@@ -135,29 +137,31 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = validation.data;
+  const { userId, chainId, contractAddress, nftId, triggerMode, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = validation.data;
 
   logger.info({
     requestId,
     userId,
     chainId,
     contractAddress,
-    closeId,
+    nftId: nftId.toString(),
+    triggerMode,
     feeBps,
     gasLimit: gasLimit.toString(),
     gasPrice: gasPrice.toString(),
     explicitNonce: nonce,
     hasSwap: !!swapParams,
-    msg: 'Processing execute-close signing request',
+    msg: 'Processing execute-order signing request',
   });
 
   try {
-    // 3. Sign executeClose transaction
-    const result = await automationSigningService.signExecuteClose({
+    // 3. Sign executeOrder transaction
+    const result = await automationSigningService.signExecuteOrder({
       userId,
       chainId,
       contractAddress: contractAddress as Address,
-      closeId,
+      nftId,
+      triggerMode,
       feeRecipient: feeRecipient as Address,
       feeBps,
       gasLimit,
@@ -178,9 +182,10 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       userId,
       chainId,
       contractAddress,
-      closeId,
+      nftId: nftId.toString(),
+      triggerMode,
       nonce: result.nonce,
-      msg: 'Execute-close transaction signed successfully',
+      msg: 'Execute-order transaction signed successfully',
     });
 
     return NextResponse.json({
@@ -202,7 +207,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
         chainId,
         errorCode: error.code,
         errorMessage: error.message,
-        msg: 'Execute-close signing failed with known error',
+        msg: 'Execute-order signing failed with known error',
       });
 
       return NextResponse.json(
@@ -226,7 +231,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       chainId,
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      msg: 'Unexpected error during execute-close signing',
+      msg: 'Unexpected error during execute-order signing',
     });
 
     return NextResponse.json(

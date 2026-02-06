@@ -217,7 +217,7 @@ contract UniswapV3PositionCloserFactory {
 
     function _getRegistrationSelectors() internal pure returns (bytes4[] memory selectors) {
         selectors = new bytes4[](2);
-        selectors[0] = bytes4(keccak256("registerOrder((uint256,address,uint8,int24,address,address,uint256,uint16,uint8,address,uint16))"));
+        selectors[0] = bytes4(keccak256("registerOrder((uint256,address,uint8,int24,address,address,uint256,uint16,uint8,uint16))"));
         selectors[1] = bytes4(keccak256("cancelOrder(uint256,uint8)"));
     }
 
@@ -234,7 +234,7 @@ contract UniswapV3PositionCloserFactory {
         selectors[2] = bytes4(keccak256("setTriggerTick(uint256,uint8,int24)"));
         selectors[3] = bytes4(keccak256("setValidUntil(uint256,uint8,uint256)"));
         selectors[4] = bytes4(keccak256("setSlippage(uint256,uint8,uint16)"));
-        selectors[5] = bytes4(keccak256("setSwapIntent(uint256,uint8,uint8,address,uint16)"));
+        selectors[5] = bytes4(keccak256("setSwapIntent(uint256,uint8,uint8,uint16)"));
     }
 
     function _getViewSelectors() internal pure returns (bytes4[] memory selectors) {

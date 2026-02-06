@@ -618,16 +618,17 @@ export async function checkContractTokenBalances(
 }
 
 /**
- * PositionCloser ABI for executeClose simulation and order reading
+ * PositionCloser ABI for executeOrder simulation and order reading
  */
 const POSITION_CLOSER_ABI = [
   {
     inputs: [
-      { internalType: 'uint256', name: 'closeId', type: 'uint256' },
+      { internalType: 'uint256', name: 'nftId', type: 'uint256' },
+      { internalType: 'uint8', name: 'triggerMode', type: 'uint8' },
       { internalType: 'address', name: 'feeRecipient', type: 'address' },
       { internalType: 'uint16', name: 'feeBps', type: 'uint16' },
       {
-        internalType: 'struct IUniswapV3PositionCloser.SwapParams',
+        internalType: 'struct IUniswapV3PositionCloserV1.SwapParams',
         name: 'swapParams',
         type: 'tuple',
         components: [
@@ -638,33 +639,33 @@ const POSITION_CLOSER_ABI = [
         ],
       },
     ],
-    name: 'executeClose',
+    name: 'executeOrder',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },
   {
-    inputs: [{ internalType: 'uint256', name: 'closeId', type: 'uint256' }],
-    name: 'getCloseOrder',
+    inputs: [
+      { internalType: 'uint256', name: 'nftId', type: 'uint256' },
+      { internalType: 'uint8', name: 'triggerMode', type: 'uint8' },
+    ],
+    name: 'getOrder',
     outputs: [
       {
-        internalType: 'struct IUniswapV3PositionCloser.CloseOrder',
-        name: '',
+        internalType: 'struct CloseOrder',
+        name: 'order',
         type: 'tuple',
         components: [
-          { internalType: 'enum IUniswapV3PositionCloser.CloseStatus', name: 'status', type: 'uint8' },
-          { internalType: 'uint256', name: 'tokenId', type: 'uint256' },
+          { internalType: 'enum OrderStatus', name: 'status', type: 'uint8' },
+          { internalType: 'uint256', name: 'nftId', type: 'uint256' },
           { internalType: 'address', name: 'owner', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
+          { internalType: 'int24', name: 'triggerTick', type: 'int24' },
           { internalType: 'address', name: 'payout', type: 'address' },
           { internalType: 'address', name: 'operator', type: 'address' },
-          { internalType: 'address', name: 'pool', type: 'address' },
-          { internalType: 'uint160', name: 'lower', type: 'uint160' },
-          { internalType: 'uint160', name: 'upper', type: 'uint160' },
-          { internalType: 'enum IUniswapV3PositionCloser.TriggerMode', name: 'mode', type: 'uint8' },
           { internalType: 'uint256', name: 'validUntil', type: 'uint256' },
           { internalType: 'uint16', name: 'slippageBps', type: 'uint16' },
-          { internalType: 'enum IUniswapV3PositionCloser.SwapDirection', name: 'swapDirection', type: 'uint8' },
-          { internalType: 'address', name: 'swapQuoteToken', type: 'address' },
+          { internalType: 'enum SwapDirection', name: 'swapDirection', type: 'uint8' },
           { internalType: 'uint16', name: 'swapSlippageBps', type: 'uint16' },
         ],
       },
@@ -695,21 +696,23 @@ export interface SimulationSwapParams {
 }
 
 /**
- * Simulate executeClose transaction to catch errors before broadcasting
+ * Simulate executeOrder transaction to catch errors before broadcasting
  *
  * @param chainId - Chain ID
  * @param contractAddress - PositionCloser contract address
- * @param closeId - Close order ID
+ * @param nftId - Position NFT ID
+ * @param triggerMode - Trigger mode (0=LOWER, 1=UPPER)
  * @param feeRecipient - Fee recipient address
  * @param feeBps - Fee in basis points
  * @param operatorAddress - Operator address (caller)
  * @param swapParams - Optional swap parameters (defaults to empty/no-swap)
  * @returns Simulation result
  */
-export async function simulateExecuteClose(
+export async function simulateExecuteOrder(
   chainId: SupportedChainId,
   contractAddress: `0x${string}`,
-  closeId: number,
+  nftId: bigint,
+  triggerMode: number,
   feeRecipient: `0x${string}`,
   feeBps: number,
   operatorAddress: `0x${string}`,
@@ -725,8 +728,8 @@ export async function simulateExecuteClose(
     await client.simulateContract({
       address: contractAddress,
       abi: POSITION_CLOSER_ABI,
-      functionName: 'executeClose',
-      args: [BigInt(closeId), feeRecipient, feeBps, swapParamsTuple],
+      functionName: 'executeOrder',
+      args: [nftId, triggerMode, feeRecipient, feeBps, swapParamsTuple],
       account: operatorAddress,
     });
 
@@ -772,6 +775,72 @@ export async function simulateExecuteClose(
 }
 
 /**
+ * Calculate minimum output amount for a direct pool swap (fallback mode)
+ *
+ * Uses the current pool price (sqrtPriceX96) and slippage tolerance to determine
+ * the minimum acceptable output. This replaces the Paraswap quote when falling
+ * back to direct pool swaps.
+ *
+ * @param srcAmount - Amount of source token to swap
+ * @param sqrtPriceX96 - Current pool price as sqrtPriceX96
+ * @param direction - Swap direction: 'TOKEN0_TO_1' or 'TOKEN1_TO_0'
+ * @param token0Decimals - Decimals of token0
+ * @param token1Decimals - Decimals of token1
+ * @param slippageBps - Slippage tolerance in basis points (e.g., 100 = 1%)
+ * @returns Minimum output amount with slippage applied
+ */
+export function calculatePoolSwapMinAmountOut(
+  srcAmount: bigint,
+  sqrtPriceX96: bigint,
+  direction: 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+  token0Decimals: number,
+  token1Decimals: number,
+  slippageBps: number
+): bigint {
+  // sqrtPriceX96 = sqrt(price) * 2^96
+  // price = token1/token0 = (sqrtPriceX96 / 2^96)^2
+  //
+  // For TOKEN0_TO_1: expectedOut = srcAmount * price * (10^token1Decimals / 10^token0Decimals)
+  //   = srcAmount * sqrtPriceX96^2 / 2^192 * 10^(token1Decimals - token0Decimals)
+  //
+  // For TOKEN1_TO_0: expectedOut = srcAmount / price * (10^token0Decimals / 10^token1Decimals)
+  //   = srcAmount * 2^192 / sqrtPriceX96^2 * 10^(token0Decimals - token1Decimals)
+
+  const Q96 = 1n << 96n;
+  let expectedOut: bigint;
+
+  if (direction === 'TOKEN0_TO_1') {
+    // token0 → token1: multiply by price
+    // expectedOut = srcAmount * sqrtPriceX96^2 / 2^192
+    // Adjust for decimal difference
+    const decimalDiff = token1Decimals - token0Decimals;
+    const numerator = srcAmount * sqrtPriceX96 * sqrtPriceX96;
+    expectedOut = numerator / (Q96 * Q96);
+    if (decimalDiff > 0) {
+      expectedOut = expectedOut * (10n ** BigInt(decimalDiff));
+    } else if (decimalDiff < 0) {
+      expectedOut = expectedOut / (10n ** BigInt(-decimalDiff));
+    }
+  } else {
+    // token1 → token0: divide by price
+    // expectedOut = srcAmount * 2^192 / sqrtPriceX96^2
+    const decimalDiff = token0Decimals - token1Decimals;
+    const numerator = srcAmount * Q96 * Q96;
+    expectedOut = numerator / (sqrtPriceX96 * sqrtPriceX96);
+    if (decimalDiff > 0) {
+      expectedOut = expectedOut * (10n ** BigInt(decimalDiff));
+    } else if (decimalDiff < 0) {
+      expectedOut = expectedOut / (10n ** BigInt(-decimalDiff));
+    }
+  }
+
+  // Apply slippage: minOut = expectedOut * (10000 - slippageBps) / 10000
+  const minAmountOut = (expectedOut * BigInt(10000 - slippageBps)) / 10000n;
+
+  return minAmountOut;
+}
+
+/**
  * On-chain close order data (relevant swap fields)
  */
 export interface OnChainCloseOrderSwapInfo {
@@ -782,35 +851,32 @@ export interface OnChainCloseOrderSwapInfo {
 }
 
 /**
- * Read on-chain close order to get swap configuration
+ * Read on-chain order to get swap configuration
  *
  * This is used to determine if a swap is needed at execution time,
  * regardless of what's stored in the database.
  *
  * @param chainId - Chain ID
  * @param contractAddress - PositionCloser contract address
- * @param closeId - Close order ID
+ * @param nftId - Position NFT ID
+ * @param triggerMode - Trigger mode (0=LOWER, 1=UPPER)
  * @returns Swap configuration from on-chain order
  */
-export async function getOnChainCloseOrder(
+export async function getOnChainOrder(
   chainId: SupportedChainId,
   contractAddress: `0x${string}`,
-  closeId: number
+  nftId: bigint,
+  triggerMode: number
 ): Promise<OnChainCloseOrderSwapInfo> {
   const client = getPublicClient(chainId);
 
   const result = await client.readContract({
     address: contractAddress,
     abi: POSITION_CLOSER_ABI,
-    functionName: 'getCloseOrder',
-    args: [BigInt(closeId)],
+    functionName: 'getOrder',
+    args: [nftId, triggerMode],
   });
 
-  // Result is a tuple matching CloseOrder struct
-  // Index mapping from ABI:
-  // 0: status, 1: tokenId, 2: owner, 3: payout, 4: operator
-  // 5: pool, 6: lower, 7: upper, 8: mode, 9: validUntil
-  // 10: slippageBps, 11: swapDirection, 12: swapSlippageBps
   return {
     swapDirection: Number(result.swapDirection),
     swapSlippageBps: Number(result.swapSlippageBps),

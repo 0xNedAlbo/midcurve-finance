@@ -5,7 +5,7 @@
  *
  * Transaction Signing Architecture:
  * - registerClose, cancelClose, setClose* - User signs via Wagmi (msg.sender == owner)
- * - executeClose - Automation wallet signs (msg.sender == operator)
+ * - executeOrder - Automation wallet signs (msg.sender == operator)
  *
  * Flow:
  * 1. User initiates action in UI

@@ -5,9 +5,9 @@
  * Unlike strategy signing (which uses SEMSEE), this service works with
  * real mainnet chains (Ethereum, Arbitrum, etc).
  *
- * This service ONLY signs executeClose transactions for the automation operator.
- * - registerClose and cancelClose are owner-only functions signed by user's EOA
- * - executeClose is operator-only and signed by the automation wallet
+ * This service ONLY signs executeOrder transactions for the automation operator.
+ * - registerOrder and cancelOrder are owner-only functions signed by user's EOA
+ * - executeOrder is operator-only and signed by the automation wallet
  *
  * Security: This service has NO RPC access. Gas parameters (gasLimit, gasPrice)
  * must be provided by the caller (automation service).
@@ -42,7 +42,7 @@ export interface SignTransactionResult {
 }
 
 /**
- * Swap params for executeClose with post-close swap via Paraswap
+ * Swap params for executeOrder with post-close swap via Paraswap
  */
 export interface SwapParams {
   augustus: Address;
@@ -52,16 +52,17 @@ export interface SwapParams {
 }
 
 /**
- * Input for signing an executeClose transaction
+ * Input for signing an executeOrder transaction
  *
  * Based on contract function:
- * executeClose(uint256 closeId, address feeRecipient, uint16 feeBps, SwapParams calldata swapParams)
+ * executeOrder(uint256 nftId, TriggerMode triggerMode, address feeRecipient, uint16 feeBps, SwapParams calldata swapParams)
  */
-export interface SignExecuteCloseInput {
+export interface SignExecuteOrderInput {
   userId: string;
   chainId: number;
   contractAddress: Address;
-  closeId: number;
+  nftId: bigint;
+  triggerMode: number; // 0=LOWER, 1=UPPER
   feeRecipient: Address;
   feeBps: number;
   // Gas parameters from caller (signer does not access RPC)
@@ -69,7 +70,7 @@ export interface SignExecuteCloseInput {
   gasPrice: bigint;
   // Nonce is required - caller fetches from chain (signer is stateless)
   nonce: number;
-  // Optional swap params for post-close swap via Paraswap
+  // Optional swap params for post-close swap via Paraswap or direct pool swap (augustus == address(0))
   swapParams?: SwapParams;
 }
 
@@ -101,17 +102,18 @@ export class AutomationSigningError extends Error {
 // =============================================================================
 
 /**
- * UniswapV3PositionCloser ABI (minimal - only executeClose needed)
+ * UniswapV3PositionCloser ABI (minimal - only executeOrder needed)
  *
- * Only executeClose is signed by the automation wallet (operator).
- * registerClose and cancelClose are signed by user's EOA (owner).
+ * Only executeOrder is signed by the automation wallet (operator).
+ * registerOrder and cancelOrder are signed by user's EOA (owner).
  */
 const POSITION_CLOSER_ABI = [
   {
     type: 'function',
-    name: 'executeClose',
+    name: 'executeOrder',
     inputs: [
-      { name: 'closeId', type: 'uint256' },
+      { name: 'nftId', type: 'uint256' },
+      { name: 'triggerMode', type: 'uint8' },
       { name: 'feeRecipient', type: 'address' },
       { name: 'feeBps', type: 'uint16' },
       {
@@ -125,10 +127,7 @@ const POSITION_CLOSER_ABI = [
         ],
       },
     ],
-    outputs: [
-      { name: 'amount0', type: 'uint256' },
-      { name: 'amount1', type: 'uint256' },
-    ],
+    outputs: [],
     stateMutability: 'nonpayable',
   },
 ] as const;
@@ -149,14 +148,14 @@ class AutomationSigningServiceImpl {
   private readonly logger = signerLogger.child({ service: 'AutomationSigningService' });
 
   /**
-   * Sign an executeClose transaction
+   * Sign an executeOrder transaction
    *
    * @param input - Execution input
    * @returns Signed transaction
    */
-  async signExecuteClose(input: SignExecuteCloseInput): Promise<SignTransactionResult> {
-    const { userId, chainId, contractAddress, closeId, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = input;
-    signerLog.methodEntry(this.logger, 'signExecuteClose', { userId, chainId, contractAddress, closeId, nonce, hasSwap: !!swapParams });
+  async signExecuteOrder(input: SignExecuteOrderInput): Promise<SignTransactionResult> {
+    const { userId, chainId, contractAddress, nftId, triggerMode, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = input;
+    signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, nonce, hasSwap: !!swapParams });
 
     // 1. Get wallet
     const wallet = await automationWalletService.getWalletByUserId(userId);
@@ -181,8 +180,8 @@ class AutomationSigningServiceImpl {
     // 3. Encode function call
     const callData = encodeFunctionData({
       abi: POSITION_CLOSER_ABI,
-      functionName: 'executeClose',
-      args: [BigInt(closeId), feeRecipient, feeBps, swapParamsTuple],
+      functionName: 'executeOrder',
+      args: [nftId, triggerMode, feeRecipient, feeBps, swapParamsTuple],
     });
 
     // 4. Sign and return (gas params and nonce provided by caller)
@@ -201,12 +200,13 @@ class AutomationSigningServiceImpl {
       userId,
       chainId,
       contractAddress,
-      closeId,
+      nftId: nftId.toString(),
+      triggerMode,
       nonce: result.nonce,
-      msg: 'executeClose transaction signed',
+      msg: 'executeOrder transaction signed',
     });
 
-    signerLog.methodExit(this.logger, 'signExecuteClose', { nonce: result.nonce });
+    signerLog.methodExit(this.logger, 'signExecuteOrder', { nonce: result.nonce });
 
     return result;
   }

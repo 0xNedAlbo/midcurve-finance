@@ -98,6 +98,15 @@ contract ExecutionFacet is Modifiers {
         uint256 dustOut
     );
 
+    event PoolSwapExecuted(
+        uint256 indexed nftId,
+        TriggerMode indexed triggerMode,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOut
+    );
+
     // ========================================
     // EXECUTION
     // ========================================
@@ -361,7 +370,9 @@ contract ExecutionFacet is Modifiers {
         }
     }
 
-    /// @dev Execute post-close swap via Paraswap
+    /// @dev Execute post-close swap via Paraswap or direct pool swap
+    /// @notice When params.augustus == address(0), executes a direct pool swap (fallback mode).
+    ///         Otherwise, routes through Paraswap Augustus as the primary swap method.
     function _executeSwap(
         AppStorage storage s,
         uint256 nftId,
@@ -374,6 +385,14 @@ contract ExecutionFacet is Modifiers {
         uint256 amount1,
         IUniswapV3PositionCloserV1.SwapParams calldata params
     ) internal returns (uint256 finalAmount0, uint256 finalAmount1) {
+        // Pool swap mode: augustus == address(0) signals direct pool swap fallback
+        if (params.augustus == address(0)) {
+            return _executePoolSwap(
+                s, nftId, triggerMode, pool, direction,
+                token0, token1, amount0, amount1, params.minAmountOut
+            );
+        }
+
         // 1) Validate Augustus address against registry
         if (!IAugustusRegistry(s.augustusRegistry).isValidAugustus(params.augustus)) {
             revert InvalidAugustus(params.augustus);
@@ -485,6 +504,92 @@ contract ExecutionFacet is Modifiers {
         // Slippage protection
         if (amountOut < ctx.minAmountOut) {
             revert SlippageExceeded(ctx.minAmountOut, amountOut);
+        }
+    }
+
+    /// @dev Execute swap via direct Uniswap V3 pool (fallback when Paraswap unavailable)
+    /// @notice Unlike _sweepDustViaPool, this handles the full swap amount and reverts on failure.
+    ///         Slippage is protected via minAmountOut (calculated off-chain from pool price + swapSlippageBps).
+    function _executePoolSwap(
+        AppStorage storage s,
+        uint256 nftId,
+        TriggerMode triggerMode,
+        address pool,
+        SwapDirection direction,
+        address token0,
+        address token1,
+        uint256 amount0,
+        uint256 amount1,
+        uint256 minAmountOut
+    ) internal returns (uint256 finalAmount0, uint256 finalAmount1) {
+        // Determine swap tokens and amount from direction
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        if (direction == SwapDirection.TOKEN0_TO_1) {
+            tokenIn = token0;
+            tokenOut = token1;
+            amountIn = amount0;
+        } else {
+            tokenIn = token1;
+            tokenOut = token0;
+            amountIn = amount1;
+        }
+
+        // Nothing to swap if amountIn is 0
+        if (amountIn == 0) {
+            return (amount0, amount1);
+        }
+
+        // Determine swap direction for Uniswap V3 pool
+        address poolToken0 = IUniswapV3PoolMinimal(pool).token0();
+        bool zeroForOne = (tokenIn == poolToken0);
+
+        // Use extreme price limits (accept any price — slippage enforced via minAmountOut)
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_RATIO + 1
+            : TickMath.MAX_SQRT_RATIO - 1;
+
+        // Set expected pool for callback validation
+        s.expectedSwapPool = pool;
+
+        // Record output balance before swap
+        uint256 balanceBefore = IERC20Minimal(tokenOut).balanceOf(address(this));
+
+        // Execute swap — reverts on failure (no try/catch, unlike dust sweep)
+        IUniswapV3PoolMinimal(pool).swap(
+            address(this),
+            zeroForOne,
+            int256(amountIn),
+            sqrtPriceLimitX96,
+            ""
+        );
+
+        // Clear expected pool
+        s.expectedSwapPool = address(0);
+
+        // Calculate amount received
+        uint256 balanceAfter = IERC20Minimal(tokenOut).balanceOf(address(this));
+        uint256 amountOut = balanceAfter - balanceBefore;
+
+        if (amountOut == 0) {
+            revert SwapOutputZero();
+        }
+
+        // Enforce slippage protection
+        if (amountOut < minAmountOut) {
+            revert SlippageExceeded(minAmountOut, amountOut);
+        }
+
+        emit PoolSwapExecuted(nftId, triggerMode, tokenIn, tokenOut, amountIn, amountOut);
+
+        // Compute final amounts
+        if (tokenIn == token0) {
+            finalAmount0 = 0;
+            finalAmount1 = amount1 + amountOut;
+        } else {
+            finalAmount0 = amount0 + amountOut;
+            finalAmount1 = 0;
         }
     }
 
