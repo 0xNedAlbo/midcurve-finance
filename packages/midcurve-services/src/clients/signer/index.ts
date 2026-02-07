@@ -7,6 +7,8 @@ export { SignerClient, SignerClientError } from './signer-client.js';
 export type {
   SignerConfig,
   SignerClientDependencies,
+  SignerCreateAutomationWalletRequest,
+  SignerCreateAutomationWalletResponse,
   SignerDeployStrategyRequest,
   SignerDeployStrategyResponse,
   SignerErrorResponse,

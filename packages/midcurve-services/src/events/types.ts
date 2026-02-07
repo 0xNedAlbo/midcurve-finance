@@ -35,14 +35,19 @@ export type OrderEventType =
   | 'order.failed';
 
 /**
+ * User event types - emitted when user lifecycle changes occur
+ */
+export type UserEventType = 'user.registered';
+
+/**
  * All supported domain event types
  */
-export type DomainEventType = PositionEventType | OrderEventType;
+export type DomainEventType = PositionEventType | OrderEventType | UserEventType;
 
 /**
  * Entity types for routing and filtering
  */
-export type DomainEntityType = 'position' | 'order' | 'pool';
+export type DomainEntityType = 'position' | 'order' | 'pool' | 'user';
 
 /**
  * Source services that can publish events
@@ -345,6 +350,29 @@ export type OrderTriggeredEvent = DomainEvent<OrderTriggeredPayload>;
  * Order executed event with typed payload
  */
 export type OrderExecutedEvent = DomainEvent<OrderExecutedPayload>;
+
+// ============================================================
+// User Event Payloads
+// ============================================================
+
+/**
+ * Payload for user.registered event
+ * Emitted when a new user is created via SIWE authentication
+ */
+export interface UserRegisteredPayload {
+  userId: string;
+  /** Primary wallet address used to register (EIP-55 checksummed) */
+  walletAddress: string;
+  /** Chain ID of the wallet used to register */
+  walletChainId: number;
+  /** ISO 8601 timestamp of registration */
+  registeredAt: string;
+}
+
+/**
+ * User registered event with typed payload
+ */
+export type UserRegisteredEvent = DomainEvent<UserRegisteredPayload>;
 
 // ============================================================
 // Outbox Status

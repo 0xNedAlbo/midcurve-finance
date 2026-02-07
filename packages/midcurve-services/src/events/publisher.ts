@@ -22,6 +22,7 @@ import {
   DOMAIN_EVENTS_EXCHANGE,
   buildPositionRoutingKey,
   buildOrderRoutingKey,
+  buildUserRoutingKey,
   getEventSuffix,
 } from './topology.js';
 
@@ -261,6 +262,9 @@ export class DomainEventPublisher {
         );
       }
       routingKey = buildPositionRoutingKey(event.type, payload.positionHash);
+    } else if (event.entityType === 'user') {
+      // User events: use userId from entityId
+      routingKey = buildUserRoutingKey(event.type, event.entityId);
     } else {
       // Order events: use legacy format
       const eventSuffix = getEventSuffix(event.type);

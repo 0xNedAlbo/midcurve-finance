@@ -35,6 +35,7 @@ import {
   ErrorCodeToHttpStatus,
   type SessionUser,
 } from '@midcurve/api-shared';
+import { getDomainEventPublisher } from '@midcurve/services';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getAuthNonceService, getAuthUserService, getSessionService } from '@/lib/services';
 import { getCorsHeaders, createPreflightResponse } from '@/lib/cors';
@@ -148,6 +149,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
 
       apiLog.businessOperation(apiLogger, requestId, 'created', 'user', user.id, { address });
+
+      // Emit user.registered domain event via outbox
+      try {
+        const eventPublisher = getDomainEventPublisher();
+        await eventPublisher.createAndPublish({
+          type: 'user.registered',
+          entityId: user.id,
+          entityType: 'user',
+          userId: user.id,
+          payload: {
+            userId: user.id,
+            walletAddress: address,
+            walletChainId: chainId,
+            registeredAt: new Date().toISOString(),
+          },
+          source: 'api',
+          traceId: requestId,
+        });
+      } catch (eventError) {
+        apiLog.methodError(apiLogger, 'POST /api/v1/auth/verify', eventError, {
+          requestId,
+          context: 'Failed to emit user.registered event',
+        });
+      }
     }
 
     // 6. Create session

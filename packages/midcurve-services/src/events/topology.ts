@@ -65,6 +65,12 @@ export const ROUTING_PATTERNS = {
   /** All position events */
   ALL_POSITION_EVENTS: 'positions.#',
 
+  // User events: users.{action}.{userId}
+  /** All user registered events */
+  USER_REGISTERED: 'users.registered.#',
+  /** All user events */
+  ALL_USER_EVENTS: 'users.#',
+
   // Order events (keeping existing format for now)
   /** All order events: order.# */
   ALL_ORDER_EVENTS: 'order.#',
@@ -100,6 +106,29 @@ const POSITION_EVENT_TO_ACTION: Record<string, string> = {
   'position.fees.collected': 'fees-collected',
   'position.state.refreshed': 'state-refreshed',
 };
+
+/**
+ * Map from user event type to routing key action
+ */
+const USER_EVENT_TO_ACTION: Record<string, string> = {
+  'user.registered': 'registered',
+};
+
+/**
+ * Build a routing key for user events
+ *
+ * @param eventType - Full event type (e.g., 'user.registered')
+ * @param userId - User ID
+ * @returns Routing key (e.g., 'users.registered.clxyz123abc')
+ * @throws Error if event type is unknown
+ */
+export function buildUserRoutingKey(eventType: string, userId: string): string {
+  const action = USER_EVENT_TO_ACTION[eventType];
+  if (!action) {
+    throw new Error(`Unknown user event type: ${eventType}`);
+  }
+  return `users.${action}.${userId}`;
+}
 
 /**
  * Parse a positionHash to extract coordinates

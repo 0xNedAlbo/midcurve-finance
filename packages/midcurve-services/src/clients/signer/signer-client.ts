@@ -14,6 +14,8 @@ import type { ServiceLogger } from '../../logging/index.js';
 import type {
   SignerConfig,
   SignerClientDependencies,
+  SignerCreateAutomationWalletRequest,
+  SignerCreateAutomationWalletResponse,
   SignerDeployStrategyRequest,
   SignerDeployStrategyResponse,
   SignerErrorResponse,
@@ -146,6 +148,92 @@ export class SignerClient {
       // Network or other fetch errors
       this.logger.error({
         strategyId: request.strategyId,
+        error: error instanceof Error ? error.message : String(error),
+        msg: 'Failed to communicate with signer service',
+      });
+
+      throw new SignerClientError(
+        'Failed to communicate with signer service',
+        'NETWORK_ERROR',
+        503,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  /**
+   * Create an automation wallet for a user via the signer service.
+   *
+   * @param request - Wallet creation request
+   * @returns Created wallet data, or null if the user already has one (409)
+   * @throws SignerClientError on unexpected failures
+   */
+  async createAutomationWallet(
+    request: SignerCreateAutomationWalletRequest
+  ): Promise<SignerCreateAutomationWalletResponse['wallet'] | null> {
+    const url = `${this.config.baseUrl}/api/wallets/automation`;
+
+    this.logger.info({
+      userId: request.userId,
+      msg: 'Creating automation wallet via signer service',
+    });
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (response.status === 409) {
+        this.logger.info({
+          userId: request.userId,
+          msg: 'User already has an automation wallet',
+        });
+        return null;
+      }
+
+      const data = (await response.json()) as
+        | SignerCreateAutomationWalletResponse
+        | SignerErrorResponse;
+
+      if (!response.ok || !data.success) {
+        const errorData = data as SignerErrorResponse;
+        this.logger.error({
+          userId: request.userId,
+          statusCode: response.status,
+          errorCode: errorData.error?.code,
+          errorMessage: errorData.error?.message,
+          msg: 'Failed to create automation wallet',
+        });
+
+        throw new SignerClientError(
+          errorData.error?.message || 'Wallet creation failed',
+          errorData.error?.code || 'UNKNOWN_ERROR',
+          response.status,
+          errorData.error?.details
+        );
+      }
+
+      const successData = data as SignerCreateAutomationWalletResponse;
+
+      this.logger.info({
+        userId: request.userId,
+        walletAddress: successData.wallet.walletAddress,
+        msg: 'Automation wallet created successfully',
+      });
+
+      return successData.wallet;
+    } catch (error) {
+      if (error instanceof SignerClientError) {
+        throw error;
+      }
+
+      this.logger.error({
+        userId: request.userId,
         error: error instanceof Error ? error.message : String(error),
         msg: 'Failed to communicate with signer service',
       });

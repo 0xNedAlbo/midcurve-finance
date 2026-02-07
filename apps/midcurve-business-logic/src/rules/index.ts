@@ -47,5 +47,8 @@ export { RuleRegistry } from './registry';
 export { EnrichCoingeckoTokensRule } from './enrich-coingecko-tokens';
 export { RefreshCoingeckoTokensRule } from './refresh-coingecko-tokens';
 
+// User lifecycle rules
+export { CreateAutomationWalletOnUserRegisteredRule } from './create-automation-wallet-on-user-registered';
+
 // UniswapV3 protocol-specific rules
 export * from './uniswapv3';

@@ -82,6 +82,7 @@ export type {
   DomainEventType,
   PositionEventType,
   OrderEventType,
+  UserEventType,
   DomainEntityType,
   DomainEventSource,
   // Event envelope
@@ -103,6 +104,8 @@ export type {
   OrderExecutedPayload,
   OrderCancelledPayload,
   OrderFailedPayload,
+  // User payloads
+  UserRegisteredPayload,
   // Typed events
   PositionClosedEvent,
   PositionLiquidityIncreasedEvent,
@@ -111,6 +114,7 @@ export type {
   OrderCancelledEvent,
   OrderTriggeredEvent,
   OrderExecutedEvent,
+  UserRegisteredEvent,
   // Outbox
   OutboxStatus,
   DomainEventOutboxRecord,
@@ -134,6 +138,8 @@ export {
   // Functions - Order routing keys
   buildOrderRoutingKey,
   getEventSuffix,
+  // Functions - User routing keys
+  buildUserRoutingKey,
   // Functions - Legacy (deprecated)
   buildRoutingKey,
   // Functions - Topology setup

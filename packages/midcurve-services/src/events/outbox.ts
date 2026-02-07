@@ -16,6 +16,7 @@ import {
   DOMAIN_EVENTS_EXCHANGE,
   buildPositionRoutingKey,
   buildOrderRoutingKey,
+  buildUserRoutingKey,
   getEventSuffix,
 } from './topology.js';
 
@@ -243,6 +244,9 @@ export class OutboxPublisher {
         );
       }
       routingKey = buildPositionRoutingKey(outboxRecord.eventType, payload.positionHash);
+    } else if (outboxRecord.entityType === 'user') {
+      // User events: use userId from entityId
+      routingKey = buildUserRoutingKey(outboxRecord.eventType, outboxRecord.entityId);
     } else {
       // Order events: use legacy format
       const eventSuffix = getEventSuffix(outboxRecord.eventType);
