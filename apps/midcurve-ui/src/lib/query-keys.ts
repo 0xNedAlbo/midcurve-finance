@@ -212,7 +212,7 @@ export const queryKeys = {
       // List all shared contracts
       lists: () => [...queryKeys.automation.sharedContracts.all, 'list'] as const,
 
-      // By chain (deprecated - use byPosition)
+      // By chain (used when nftId is not available, e.g., before minting)
       byChain: (chainId: number) =>
         [...queryKeys.automation.sharedContracts.all, 'chain', chainId] as const,
 

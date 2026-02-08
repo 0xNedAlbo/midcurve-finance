@@ -1,37 +1,9 @@
 /**
  * Automation Contract Configuration
  *
- * Contains contract addresses for UniswapV3PositionCloser and related automation contracts.
+ * Constants for close order registration: trigger modes, swap directions, and slippage defaults.
+ * Contract addresses are fetched dynamically from the API via useSharedContract hook.
  */
-
-import type { Address } from 'viem';
-
-/**
- * UniswapV3PositionCloser contract addresses by chain ID
- * These are Diamond proxy contracts that handle SL/TP order registration and execution
- */
-export const POSITION_CLOSER_ADDRESSES: Record<number, Address> = {
-  1: '0x66deed7C4669680BEF6484E269689490aA385d9a',      // Ethereum Mainnet
-  42161: '0x543e6637352c196727CBe28B4E130a105e604a0B',  // Arbitrum One
-};
-
-/**
- * Get the PositionCloser contract address for a given chain
- * @param chainId - The chain ID
- * @returns The contract address or null if not deployed on this chain
- */
-export function getPositionCloserAddress(chainId: number): Address | null {
-  return POSITION_CLOSER_ADDRESSES[chainId] ?? null;
-}
-
-/**
- * Check if automation (SL/TP orders) is supported on a given chain
- * @param chainId - The chain ID
- * @returns True if automation is supported
- */
-export function isAutomationSupported(chainId: number): boolean {
-  return chainId in POSITION_CLOSER_ADDRESSES;
-}
 
 /**
  * Trigger modes for close orders

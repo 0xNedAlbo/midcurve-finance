@@ -29,7 +29,8 @@ import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useRegisterCloseOrder } from '@/hooks/automation/useRegisterCloseOrder';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
-import { getPositionCloserAddress, TriggerMode, SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
+import { TriggerMode, SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
+import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { getChainSlugByChainId } from '@/config/chains';
 import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
@@ -107,9 +108,12 @@ export function TransactionStep() {
   // Pool discovery hook for price refresh
   const discoverPool = useDiscoverPool();
 
+  // Look up automation contract dynamically from DB (chain-only endpoint, no nftId needed)
+  const { data: sharedContract } = useChainSharedContract(chainId);
+  const positionCloserAddress = (sharedContract?.contractAddress ?? null) as Address | null;
+
   // Determine if automation is enabled
   const hasAutomation = state.automationEnabled && (state.stopLossEnabled || state.takeProfitEnabled);
-  const positionCloserAddress = chainId ? getPositionCloserAddress(chainId) : null;
 
   // Determine base/quote token addresses and amounts
   // Use adjusted amounts if available (from PriceAdjustmentStep), otherwise fall back to allocated amounts
@@ -765,7 +769,7 @@ export function TransactionStep() {
   // Register SL/TP orders phase
   useEffect(() => {
     if (currentPhase !== 'automation') return;
-    if (!mintedTokenId || !walletAddress || !autowalletAddress || !chainId) return;
+    if (!mintedTokenId || !walletAddress || !autowalletAddress || !chainId || !positionCloserAddress) return;
 
     const poolAddress = state.discoveredPool?.typedConfig.address as Address | undefined;
     if (!poolAddress) return;
@@ -784,6 +788,7 @@ export function TransactionStep() {
         slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
         swapSlippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
         chainId,
+        contractAddress: positionCloserAddress,
       });
     }
 
@@ -801,10 +806,11 @@ export function TransactionStep() {
         slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
         swapSlippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
         chainId,
+        contractAddress: positionCloserAddress,
       });
     }
   }, [
-    currentPhase, mintedTokenId, walletAddress, autowalletAddress, chainId,
+    currentPhase, mintedTokenId, walletAddress, autowalletAddress, chainId, positionCloserAddress,
     state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick,
     swapDirection, registerSL, registerTP, attemptedTxs,
   ]);

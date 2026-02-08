@@ -11,6 +11,8 @@ export {
   type SharedContractsMap,
   type GetPositionSharedContractsResponseData,
   type GetPositionSharedContractsResponse,
+  type GetChainSharedContractsResponseData,
+  type GetChainSharedContractsResponse,
   // Deprecated (JSON-config-based)
   SHARED_CONTRACT_PROTOCOLS,
   type SharedContractProtocol,

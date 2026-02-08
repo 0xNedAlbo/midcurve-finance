@@ -365,6 +365,7 @@ function wizardReducer(
         ...state,
         stopLossEnabled: action.enabled,
         stopLossTick: action.tick,
+        automationEnabled: action.enabled || state.takeProfitEnabled,
       };
 
     case 'SET_TAKE_PROFIT':
@@ -372,6 +373,7 @@ function wizardReducer(
         ...state,
         takeProfitEnabled: action.enabled,
         takeProfitTick: action.tick,
+        automationEnabled: state.stopLossEnabled || action.enabled,
       };
 
     case 'SET_NEEDS_SWAP':

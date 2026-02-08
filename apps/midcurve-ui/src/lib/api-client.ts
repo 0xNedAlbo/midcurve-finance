@@ -185,6 +185,7 @@ import type {
   NotifyOrderCancelledResponse,
   // Shared Contracts
   GetPositionSharedContractsResponseData,
+  GetChainSharedContractsResponseData,
   // Wallet
   GetAutowalletResponse,
   CreateAutowalletResponse,
@@ -390,6 +391,16 @@ export const automationApi = {
   getPositionSharedContracts(chainId: number, nftId: string) {
     return apiClient.get<GetPositionSharedContractsResponseData>(
       `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/shared-contracts`
+    );
+  },
+
+  /**
+   * Get shared contracts for a chain (no nftId needed).
+   * Use this when you only have a chainId (e.g., before minting a position).
+   */
+  getChainSharedContracts(chainId: number) {
+    return apiClient.get<GetChainSharedContractsResponseData>(
+      `/api/v1/automation/shared-contracts/${chainId}`
     );
   },
 

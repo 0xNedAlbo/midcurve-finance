@@ -75,6 +75,25 @@ export interface GetPositionSharedContractsResponseData {
 export type GetPositionSharedContractsResponse =
   ApiResponse<GetPositionSharedContractsResponseData>;
 
+/**
+ * GET /api/v1/automation/shared-contracts/[chainId] - Response Data
+ *
+ * Returns shared contracts available for a chain.
+ * Use this when you only have a chainId and no nftId (e.g., before minting a position).
+ */
+export interface GetChainSharedContractsResponseData {
+  /**
+   * Map of contract name to contract info
+   */
+  contracts: SharedContractsMap;
+}
+
+/**
+ * GET /api/v1/automation/shared-contracts/[chainId] - Response
+ */
+export type GetChainSharedContractsResponse =
+  ApiResponse<GetChainSharedContractsResponseData>;
+
 // =============================================================================
 // DEPRECATED TYPES (JSON-config-based, to be removed)
 // =============================================================================

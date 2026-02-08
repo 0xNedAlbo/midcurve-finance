@@ -16,7 +16,6 @@ import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import type { Address, Hash } from 'viem';
 import { POSITION_CLOSER_ABI } from '@/abis/UniswapV3PositionCloser';
 import {
-  getPositionCloserAddress,
   type TriggerModeValue,
   type SwapDirectionValue,
   DEFAULT_CLOSE_ORDER_SLIPPAGE,
@@ -48,6 +47,8 @@ export interface RegisterCloseOrderParams {
   swapSlippageBps?: number;
   /** Chain ID for the transaction */
   chainId: number;
+  /** Contract address for the PositionCloser (from shared contracts lookup) */
+  contractAddress: Address;
 }
 
 /**
@@ -136,10 +137,8 @@ export function useRegisterCloseOrder(): UseRegisterCloseOrderResult {
         swapDirection,
         swapSlippageBps = DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
         chainId,
+        contractAddress: positionCloserAddress,
       } = params;
-
-      // Get contract address for this chain
-      const positionCloserAddress = getPositionCloserAddress(chainId);
 
       if (!positionCloserAddress) {
         setError(new Error(`Automation not supported on chain ${chainId}`));
