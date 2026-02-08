@@ -12,6 +12,7 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
 import { IncreaseDepositPage } from './pages/IncreaseDepositPage';
+import { WithdrawPage } from './pages/WithdrawPage';
 
 // Automation
 import { AutowalletPage } from './components/automation';
@@ -49,6 +50,10 @@ export function App() {
                 <Route
                   path="/positions/increase/:protocol/:chain/:nftId"
                   element={<IncreaseDepositPage />}
+                />
+                <Route
+                  path="/positions/withdraw/:protocol/:chain/:nftId"
+                  element={<WithdrawPage />}
                 />
               </Routes>
             </BrowserRouter>

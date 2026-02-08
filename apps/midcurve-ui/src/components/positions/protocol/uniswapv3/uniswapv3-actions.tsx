@@ -14,7 +14,6 @@ import { useAccount } from "wagmi";
 import { useNavigate } from "react-router-dom";
 import type { Address } from "viem";
 import type { ListPositionData } from "@midcurve/api-shared";
-import { WithdrawPositionModal } from "@/components/positions/withdraw-position-modal";
 import { getChainSlugByChainId } from "@/config/chains";
 import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
@@ -34,7 +33,6 @@ interface UniswapV3ActionsProps {
 export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const { address: walletAddress, isConnected } = useAccount();
   const navigate = useNavigate();
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showHedgeModal, setShowHedgeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unClaimedFees) > 0n;
@@ -131,7 +129,12 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         </button>
 
         <button
-          onClick={() => setShowWithdrawModal(true)}
+          onClick={() => {
+            const chainSlug = getChainSlugByChainId(positionConfig.chainId);
+            if (chainSlug) {
+              navigate(`/positions/withdraw/uniswapv3/${chainSlug}/${positionConfig.nftId}`);
+            }
+          }}
           className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer ${
             position.isActive
               ? "text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
@@ -224,17 +227,6 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           disabledReason={automationDisabledReason}
         />
       </div>
-
-      {/* Withdraw Modal */}
-      <WithdrawPositionModal
-        isOpen={showWithdrawModal}
-        onClose={() => setShowWithdrawModal(false)}
-        position={position}
-        onWithdrawSuccess={() => {
-          // Don't auto-close - user will click Finish button
-          // Position data will be refreshed on next view
-        }}
-      />
 
       {/* Collect Fees Modal */}
       <CollectFeesModal
