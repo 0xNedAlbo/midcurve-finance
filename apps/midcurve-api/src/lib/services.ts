@@ -32,6 +32,8 @@ import {
   FavoritePoolService,
   UniswapV3SubgraphClient,
   EvmTransactionStatusService,
+  UniswapV3LedgerService,
+  UniswapV3AprService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -293,6 +295,22 @@ export function getFavoritePoolService(): FavoritePoolService {
     _favoritePoolService = new FavoritePoolService();
   }
   return _favoritePoolService;
+}
+
+/**
+ * Create a UniswapV3LedgerService instance for a specific position.
+ * Not a singleton — each position requires its own scoped instance.
+ */
+export function getUniswapV3PositionLedgerService(positionId: string): UniswapV3LedgerService {
+  return new UniswapV3LedgerService({ positionId });
+}
+
+/**
+ * Create a UniswapV3AprService instance for a specific position.
+ * Not a singleton — each position requires its own scoped instance.
+ */
+export function getUniswapV3AprService(positionId: string): UniswapV3AprService {
+  return new UniswapV3AprService({ positionId });
 }
 
 /**

@@ -35,7 +35,7 @@ import {
 import type { AprPeriodsResponse, AprPeriodData, AprSummaryData } from '@midcurve/api-shared';
 import { serializeBigInt } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getUniswapV3PositionService, getPositionAprService } from '@/lib/services';
+import { getUniswapV3PositionService, getUniswapV3AprService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -165,30 +165,11 @@ export async function GET(
         positionHash,
       });
 
-      // 3. Fetch full position to get required parameters for APR calculation
-      const position = await getUniswapV3PositionService().findById(dbPosition.id);
-      if (!position) {
-        const errorResponse = createErrorResponse(
-          ApiErrorCode.POSITION_NOT_FOUND,
-          'Position not found',
-          `Position ${dbPosition.id} not found`
-        );
-        apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
-        return NextResponse.json(errorResponse, {
-          status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND],
-        });
-      }
+      // 3. Fetch APR periods (ordered descending: newest first)
+      const aprPeriods = await getUniswapV3AprService(dbPosition.id).fetchAprPeriods();
 
-      // 4. Fetch APR periods (ordered descending: newest first)
-      const aprPeriods = await getPositionAprService().getAprPeriods(dbPosition.id);
-
-      // 5. Calculate APR summary
-      const aprSummary = await getPositionAprService().calculateAprSummary(
-        dbPosition.id,
-        position.currentCostBasis,
-        position.unClaimedFees,
-        position.positionOpenedAt
-      );
+      // 4. Calculate APR summary (fetches position, metrics, and periods internally)
+      const aprSummary = await getUniswapV3PositionService().fetchAprSummary(dbPosition.id);
 
       apiLog.businessOperation(apiLogger, requestId, 'apr-fetched', 'position', dbPosition.id, {
         chainId,

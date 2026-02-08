@@ -161,7 +161,7 @@ export async function GET(
       });
 
       // 3. Fetch ledger events (ordered descending: newest first)
-      const ledgerEvents = await getUniswapV3PositionLedgerService().findAllItems(dbPosition.id);
+      const ledgerEvents = await getUniswapV3PositionLedgerService(dbPosition.id).findAll();
 
       apiLog.businessOperation(apiLogger, requestId, 'ledger-fetched', 'position', dbPosition.id, {
         chainId,
