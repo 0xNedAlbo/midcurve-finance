@@ -11,6 +11,7 @@ import { PositionDetailPage } from './pages/PositionDetailPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
+import { IncreaseDepositPage } from './pages/IncreaseDepositPage';
 
 // Automation
 import { AutowalletPage } from './components/automation';
@@ -44,6 +45,10 @@ export function App() {
                 <Route
                   path="/positions/create"
                   element={<CreatePositionPage />}
+                />
+                <Route
+                  path="/positions/increase/:protocol/:chain/:nftId"
+                  element={<IncreaseDepositPage />}
                 />
               </Routes>
             </BrowserRouter>
