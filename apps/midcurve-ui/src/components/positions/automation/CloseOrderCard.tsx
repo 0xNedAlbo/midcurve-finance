@@ -150,8 +150,9 @@ export function CloseOrderCard({
   const triggerMode = config.triggerMode ?? 'LOWER';
   const canCancel = canCancelCloseOrder(order.status);
 
-  // Format expiration
-  const expiresAt = config.validUntil ? new Date(config.validUntil) : null;
+  // Format expiration — epoch (0) means "no expiry" per smart contract convention
+  const parsedExpiry = config.validUntil ? new Date(config.validUntil) : null;
+  const expiresAt = parsedExpiry && parsedExpiry.getTime() > 0 ? parsedExpiry : null;
   const isExpiringSoon = expiresAt && expiresAt.getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000; // 7 days
 
   return (

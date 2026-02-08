@@ -19,7 +19,9 @@ export function CloseOrderSuccessStep({ order, quoteTokenSymbol: _quoteTokenSymb
     validUntil?: string;
   };
 
-  const expiresAt = config.validUntil ? new Date(config.validUntil) : null;
+  // Epoch (0) means "no expiry" per smart contract convention
+  const parsedExpiry = config.validUntil ? new Date(config.validUntil) : null;
+  const expiresAt = parsedExpiry && parsedExpiry.getTime() > 0 ? parsedExpiry : null;
 
   return (
     <div className="py-8 text-center">
