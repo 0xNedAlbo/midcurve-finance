@@ -159,33 +159,8 @@ export function ConfigureStep() {
     return (currentLiquidity * BigInt(percentScaled)) / 10000n;
   }, [positionState?.liquidity, state.withdrawPercent]);
 
-  // Calculate token amounts to receive
-  const withdrawAmounts = useMemo(() => {
-    const sqrtPriceX96 = BigInt(currentSqrtPriceX96 || '0');
-    if (liquidityToRemove === 0n || sqrtPriceX96 === 0n) {
-      return { baseAmount: 0n, quoteAmount: 0n };
-    }
-    try {
-      const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
-        liquidityToRemove, sqrtPriceX96, tickLower, tickUpper
-      );
-      const isQuoteToken0 = position?.isToken0Quote;
-      return {
-        baseAmount: isQuoteToken0 ? token1Amount : token0Amount,
-        quoteAmount: isQuoteToken0 ? token0Amount : token1Amount,
-      };
-    } catch {
-      return { baseAmount: 0n, quoteAmount: 0n };
-    }
-  }, [liquidityToRemove, currentSqrtPriceX96, tickLower, tickUpper, position?.isToken0Quote]);
-
   // Percentage handler
   const handlePercentChange = useCallback((percent: number) => {
-    setWithdrawPercent(percent);
-  }, [setWithdrawPercent]);
-
-  // Quick preset handlers
-  const handlePreset = useCallback((percent: number) => {
     setWithdrawPercent(percent);
   }, [setWithdrawPercent]);
 
@@ -229,6 +204,40 @@ export function ConfigureStep() {
       return 0;
     }
   }, [state.discoveredPool, baseToken, quoteToken, isToken0Base]);
+
+  // Current price as bigint for display (uses refreshed price when available)
+  const currentPriceBigint = useMemo(() => {
+    if (!state.discoveredPool || !baseToken || !quoteToken) return null;
+    try {
+      const sqrtPriceX96 = BigInt(currentSqrtPriceX96 || '0');
+      if (sqrtPriceX96 === 0n) return null;
+
+      const Q96 = 2n ** 96n;
+      const Q192 = Q96 * Q96;
+      const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+      const token0Decimals = state.discoveredPool.token0.decimals;
+      const token1Decimals = state.discoveredPool.token1.decimals;
+      const quoteDecimals = quoteToken.decimals;
+
+      if (isToken0Base) {
+        const decimalDiff = token0Decimals - token1Decimals;
+        if (decimalDiff >= 0) {
+          return (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / Q192;
+        } else {
+          return (rawPriceNum * 10n ** BigInt(quoteDecimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
+        }
+      } else {
+        const decimalDiff = token1Decimals - token0Decimals;
+        if (decimalDiff >= 0) {
+          return (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / rawPriceNum;
+        } else {
+          return (Q192 * 10n ** BigInt(quoteDecimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
+        }
+      }
+    } catch {
+      return null;
+    }
+  }, [state.discoveredPool, currentSqrtPriceX96, baseToken, quoteToken, isToken0Base]);
 
   // Slider bounds for PnL curve
   const [sliderBounds, setSliderBounds] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
@@ -466,24 +475,7 @@ export function ConfigureStep() {
                      [&::-moz-range-thumb]:bg-blue-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
         />
 
-        {/* Quick presets */}
-        <div className="flex gap-2">
-          {[25, 50, 75, 100].map((pct) => (
-            <button
-              key={pct}
-              onClick={() => handlePreset(pct)}
-              className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                Math.abs(state.withdrawPercent - pct) < 0.1
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-white'
-              }`}
-            >
-              {pct}%
-            </button>
-          ))}
-        </div>
-
-        {/* Maximum display */}
+        {/* Position value display */}
         <div className="text-xs text-slate-400">
           Position Value:{' '}
           {formatCompactValue(currentPositionValue, quoteToken?.decimals ?? 18)}{' '}
@@ -491,34 +483,29 @@ export function ConfigureStep() {
         </div>
       </div>
 
-      {/* Preview Section */}
-      <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg p-4">
-        <div className="flex items-center justify-between text-sm mb-2">
-          <span className="text-white font-medium">You will receive:</span>
+      {/* Pool Price */}
+      {quoteToken && currentPriceBigint !== null && (
+        <div className="flex items-center justify-between px-3 py-2 bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg">
+          <span className="text-xs text-slate-400">
+            Pool Price:{' '}
+            <span className="text-white font-medium">
+              {formatCompactValue(currentPriceBigint, quoteToken.decimals)} {quoteToken.symbol}
+            </span>
+          </span>
           <button
             onClick={handleRefreshPool}
             disabled={isRefreshing}
-            className="p-1 hover:bg-slate-700 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`p-1 rounded transition-colors cursor-pointer ${
+              isRefreshing
+                ? 'text-slate-600 cursor-not-allowed'
+                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+            }`}
             title="Refresh pool price"
           >
-            <RefreshCw className={`w-4 h-4 text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-slate-400">{baseToken?.symbol ?? 'Base'}</span>
-            <span className="text-white font-medium">
-              {formatCompactValue(withdrawAmounts.baseAmount, baseToken?.decimals ?? 18)}
-            </span>
-          </div>
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-slate-400">{quoteToken?.symbol ?? 'Quote'}</span>
-            <span className="text-white font-medium">
-              {formatCompactValue(withdrawAmounts.quoteAmount, quoteToken?.decimals ?? 18)}
-            </span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Wallet/Network/Owner Checks */}
       {!isConnected && (
