@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Copy, ExternalLink } from "lucide-react";
+import { formatDateTime } from "@midcurve/shared";
 import { formatProtocolName } from "@/lib/format-helpers";
 import { getDashboardUrl } from "@/lib/dashboard-referrer";
 
@@ -241,7 +242,7 @@ export function PositionDetailHeader({
             {updatedAt && (
               <div className="text-right text-sm text-slate-400">
                 <div>Last Updated</div>
-                <div>{new Date(updatedAt).toLocaleString()}</div>
+                <div>{formatDateTime(updatedAt)}</div>
               </div>
             )}
 

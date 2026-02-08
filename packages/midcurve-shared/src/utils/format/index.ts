@@ -7,3 +7,4 @@
 
 export * from './fraction-format.js';
 export * from './format-helpers.js';
+export * from './date-format.js';

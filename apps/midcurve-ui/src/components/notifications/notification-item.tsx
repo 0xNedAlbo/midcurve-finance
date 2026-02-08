@@ -13,7 +13,7 @@ import {
   ArrowUpRight,
   Trash2,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatRelativeTime } from '@midcurve/shared';
 
 interface NotificationItemProps {
   notification: NotificationData;
@@ -48,11 +48,7 @@ function getNotificationIcon(eventType: string) {
  * Format timestamp to relative time
  */
 function formatTime(timestamp: string): string {
-  try {
-    return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
-  } catch {
-    return timestamp;
-  }
+  return formatRelativeTime(timestamp);
 }
 
 export function NotificationItem({

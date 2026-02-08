@@ -2,6 +2,7 @@
 
 import { formatCompactValue } from "@/lib/fraction-format";
 import type { AprPeriodData } from "@midcurve/api-shared";
+import { formatDateTime } from "@midcurve/shared";
 
 interface AprPeriodsTableProps {
   periods: AprPeriodData[];
@@ -66,8 +67,7 @@ export function AprPeriodsTable({
                   >
                     <td className="py-3 px-2">
                       <div className="text-white">
-                        {endDate.toLocaleDateString()}{" "}
-                        {endDate.toLocaleTimeString()}
+                        {formatDateTime(endDate)}
                       </div>
                     </td>
                     <td className="py-3 px-2 text-right text-slate-300">
@@ -107,8 +107,7 @@ export function AprPeriodsTable({
                   <tr className="border-t border-slate-700/50">
                     <td className="py-3 px-2">
                       <div className="text-slate-400 italic">
-                        {openedDate.toLocaleDateString()}{" "}
-                        {openedDate.toLocaleTimeString()}
+                        {formatDateTime(openedDate)}
                       </div>
                     </td>
                     <td className="py-3 px-2 text-right text-slate-400 italic">
