@@ -26,12 +26,8 @@ import {
   positionStateToJSON,
   positionStateFromJSON,
 } from './uniswapv3-position-state.js';
-import {
-  calculatePositionValueAtPrice,
-  determinePhase,
-} from '../../../utils/uniswapv3/position.js';
-import { getTokenAmountsFromLiquidity } from '../../../utils/uniswapv3/liquidity.js';
-import { priceToTick } from '../../../utils/uniswapv3/price.js';
+import { calculatePositionValue, getTokenAmountsFromLiquidity_X96 } from '../../../utils/uniswapv3/liquidity.js';
+import { priceToSqrtRatioX96 } from '../../../utils/uniswapv3/price.js';
 import type { PositionPhase } from '../../../utils/uniswapv3/types.js';
 
 // ============================================================================
@@ -263,50 +259,58 @@ export class UniswapV3Position extends BasePosition {
   simulatePnLAtPrice(price: bigint): UniswapV3PnLSimulationResult {
     const baseToken = this.getBaseToken();
     const quoteToken = this.getQuoteToken();
+    const baseIsToken0 = !this.isToken0Quote;
 
-    // Calculate position value at target price
-    const positionValue = calculatePositionValueAtPrice(
-      this.liquidity,
-      this.tickLower,
-      this.tickUpper,
-      price,
+    // Convert price → sqrtPriceX96 DIRECTLY (continuous, no tick snapping)
+    // This avoids the stair-step artifacts caused by nearestUsableTick() quantization
+    const sqrtPriceJSBI = priceToSqrtRatioX96(
       baseToken.address,
       quoteToken.address,
       baseToken.decimals,
-      this.pool.tickSpacing
+      price
     );
+    const sqrtPriceX96 = BigInt(sqrtPriceJSBI.toString());
 
-    // Calculate PnL
-    const pnlValue = positionValue - this.currentCostBasis;
-    const pnlPercent = this.currentCostBasis > 0n
-      ? Number((pnlValue * 10000n) / this.currentCostBasis) / 100
-      : 0;
-
-    // Calculate tick at target price for token amounts and phase
-    const targetTick = priceToTick(
-      price,
-      this.pool.tickSpacing,
-      baseToken.address,
-      quoteToken.address,
-      baseToken.decimals
-    );
-
-    // Get token amounts at this price
-    const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(targetTick).toString());
-    const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
+    // Calculate position value using continuous sqrtPrice
+    const positionValue = calculatePositionValue(
       this.liquidity,
       sqrtPriceX96,
       this.tickLower,
-      this.tickUpper
+      this.tickUpper,
+      baseIsToken0
+    );
+
+    // Calculate PnL with higher precision (0.0001% resolution instead of 0.01%)
+    const pnlValue = positionValue - this.currentCostBasis;
+    const pnlPercent = this.currentCostBasis > 0n
+      ? Number((pnlValue * 1000000n) / this.currentCostBasis) / 10000
+      : 0;
+
+    // Get tick-boundary sqrtPrices for token amounts and phase detection
+    const sqrtPriceLowerX96 = BigInt(TickMath.getSqrtRatioAtTick(this.tickLower).toString());
+    const sqrtPriceUpperX96 = BigInt(TickMath.getSqrtRatioAtTick(this.tickUpper).toString());
+
+    // Get token amounts using continuous sqrtPrice
+    const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity_X96(
+      this.liquidity,
+      sqrtPriceX96,
+      sqrtPriceLowerX96,
+      sqrtPriceUpperX96
     );
 
     // Map to base/quote based on token order
-    const baseIsToken0 = !this.isToken0Quote;
     const baseTokenAmount = baseIsToken0 ? token0Amount : token1Amount;
     const quoteTokenAmount = baseIsToken0 ? token1Amount : token0Amount;
 
-    // Determine phase
-    const phase = determinePhase(targetTick, this.tickLower, this.tickUpper);
+    // Determine phase by comparing sqrtPrices directly (no tick conversion for hypothetical price)
+    let phase: PositionPhase;
+    if (sqrtPriceX96 < sqrtPriceLowerX96) {
+      phase = 'below';
+    } else if (sqrtPriceX96 >= sqrtPriceUpperX96) {
+      phase = 'above';
+    } else {
+      phase = 'in-range';
+    }
 
     return {
       positionValue,

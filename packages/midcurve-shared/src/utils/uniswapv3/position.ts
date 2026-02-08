@@ -1,4 +1,4 @@
-import { priceToTick } from "./price.js";
+import { priceToSqrtRatioX96 } from "./price.js";
 import { calculatePositionValue } from "./liquidity.js";
 import { TickMath } from "@uniswap/v3-sdk";
 import type { PnLPoint, PositionPhase } from "./types.js";
@@ -44,8 +44,9 @@ export function calculatePnL(
     pnlPercent: number;
 } {
     const pnl = currentValue - costBasis;
+    // Use higher precision: 0.0001% resolution instead of 0.01%
     const pnlPercent =
-        costBasis > 0n ? Number((pnl * 10000n) / costBasis) / 100 : 0;
+        costBasis > 0n ? Number((pnl * 1000000n) / costBasis) / 10000 : 0;
 
     return { pnl, pnlPercent };
 }
@@ -72,7 +73,7 @@ export function generatePnLCurve(
     baseTokenAddress: string,
     quoteTokenAddress: string,
     baseTokenDecimals: number,
-    tickSpacing: number,
+    _tickSpacing: number,
     priceRange: { min: bigint; max: bigint },
     numPoints: number = 150
 ): PnLPoint[] {
@@ -82,18 +83,22 @@ export function generatePnLCurve(
     // Determine if base is token0
     const baseIsToken0 = BigInt(baseTokenAddress) < BigInt(quoteTokenAddress);
 
+    // Pre-compute tick boundary sqrtPrices for phase detection
+    const sqrtPriceLowerX96 = BigInt(TickMath.getSqrtRatioAtTick(tickLower).toString());
+    const sqrtPriceUpperX96 = BigInt(TickMath.getSqrtRatioAtTick(tickUpper).toString());
+
     for (let i = 0; i <= numPoints; i++) {
         const price = priceRange.min + BigInt(i) * priceStep;
-        const tick = priceToTick(
-            price,
-            tickSpacing,
+
+        // Convert price → sqrtPriceX96 DIRECTLY (continuous, no tick snapping)
+        const sqrtPriceJSBI = priceToSqrtRatioX96(
             baseTokenAddress,
             quoteTokenAddress,
-            baseTokenDecimals
+            baseTokenDecimals,
+            price
         );
+        const sqrtPriceX96 = BigInt(sqrtPriceJSBI.toString());
 
-        // Convert tick to sqrtPriceX96 for hypothetical curve point
-        const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(tick).toString());
         const positionValue = calculatePositionValue(
             liquidity,
             sqrtPriceX96,
@@ -103,7 +108,16 @@ export function generatePnLCurve(
         );
 
         const { pnl, pnlPercent } = calculatePnL(positionValue, costBasis);
-        const phase = determinePhase(tick, tickLower, tickUpper);
+
+        // Determine phase by comparing sqrtPrices directly
+        let phase: PositionPhase;
+        if (sqrtPriceX96 < sqrtPriceLowerX96) {
+            phase = "below";
+        } else if (sqrtPriceX96 >= sqrtPriceUpperX96) {
+            phase = "above";
+        } else {
+            phase = "in-range";
+        }
 
         points.push({
             price,
@@ -138,20 +152,19 @@ export function calculatePositionValueAtPrice(
     baseTokenAddress: string,
     quoteTokenAddress: string,
     baseTokenDecimals: number,
-    tickSpacing: number
+    _tickSpacing: number
 ): bigint {
-    const targetTick = priceToTick(
-        targetPrice,
-        tickSpacing,
-        baseTokenAddress,
-        quoteTokenAddress,
-        baseTokenDecimals
-    );
-
     const baseIsToken0 = BigInt(baseTokenAddress) < BigInt(quoteTokenAddress);
 
-    // Convert tick to sqrtPriceX96 for hypothetical price point
-    const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(targetTick).toString());
+    // Convert price → sqrtPriceX96 DIRECTLY (continuous, no tick snapping)
+    const sqrtPriceJSBI = priceToSqrtRatioX96(
+        baseTokenAddress,
+        quoteTokenAddress,
+        baseTokenDecimals,
+        targetPrice
+    );
+    const sqrtPriceX96 = BigInt(sqrtPriceJSBI.toString());
+
     return calculatePositionValue(
         liquidity,
         sqrtPriceX96,
