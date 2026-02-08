@@ -363,8 +363,6 @@ export interface UserRegisteredPayload {
   userId: string;
   /** Primary wallet address used to register (EIP-55 checksummed) */
   walletAddress: string;
-  /** Chain ID of the wallet used to register */
-  walletChainId: number;
   /** ISO 8601 timestamp of registration */
   registeredAt: string;
 }

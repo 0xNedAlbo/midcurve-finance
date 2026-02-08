@@ -58,18 +58,15 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
       });
     }
 
-    const { address, chainId, name } = validationResult.data;
+    const { address, name } = validationResult.data;
 
     // Normalize address to EIP-55 checksum format
     const normalizedAddress = getAddress(address);
 
-    // Check if wallet address already exists
+    // Check if wallet address already exists (chain-agnostic)
     const existingWallet = await prisma.authWalletAddress.findUnique({
       where: {
-        address_chainId: {
-          address: normalizedAddress,
-          chainId,
-        },
+        address: normalizedAddress,
       },
       include: {
         user: true,
@@ -109,7 +106,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
         data: {
           userId: user.id,
           address: normalizedAddress,
-          chainId,
           isPrimary: true, // First wallet is always primary
         },
       });
@@ -119,7 +115,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
 
     apiLog.businessOperation(apiLogger, requestId, 'created', 'user', result.user.id, {
       address: normalizedAddress.slice(0, 10) + '...',
-      chainId,
     });
 
     // Format response
@@ -135,7 +130,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
       walletAddress: {
         id: result.walletAddress.id,
         address: result.walletAddress.address,
-        chainId: result.walletAddress.chainId,
         isPrimary: result.walletAddress.isPrimary,
         createdAt: result.walletAddress.createdAt.toISOString(),
         updatedAt: result.walletAddress.updatedAt.toISOString(),

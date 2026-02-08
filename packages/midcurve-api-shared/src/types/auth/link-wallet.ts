@@ -22,7 +22,6 @@ export interface LinkWalletRequest {
 export interface LinkWalletData {
   id: string;
   address: string;
-  chainId: number;
   isPrimary: boolean;
   createdAt: string;
 }

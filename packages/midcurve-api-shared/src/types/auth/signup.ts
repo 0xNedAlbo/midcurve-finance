@@ -10,7 +10,6 @@ import { z } from 'zod';
 // Request schema
 export const SignupRequestSchema = z.object({
   address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address'),
-  chainId: z.number().int().positive(),
   name: z.string().optional(),
 });
 
@@ -29,7 +28,6 @@ export interface SignupResponse {
   walletAddress: {
     id: string;
     address: string; // EIP-55 checksummed
-    chainId: number;
     isPrimary: boolean;
     createdAt: string;
     updatedAt: string;

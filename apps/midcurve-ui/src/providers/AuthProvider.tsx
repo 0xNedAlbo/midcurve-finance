@@ -15,10 +15,10 @@ type User = SessionUser;
 interface AuthContextValue {
   user: User | null;
   status: 'loading' | 'authenticated' | 'unauthenticated';
-  signIn: (address: string, message: string, signature: string, chainId: number) => Promise<void>;
-  signUp: (address: string, message: string, signature: string, chainId: number) => Promise<void>;
+  signIn: (address: string, message: string, signature: string) => Promise<void>;
+  signUp: (address: string, message: string, signature: string) => Promise<void>;
   signOut: () => Promise<void>;
-  linkWallet: (address: string, message: string, signature: string, chainId: number) => Promise<void>;
+  linkWallet: (message: string, signature: string) => Promise<void>;
   refreshSession: () => Promise<void>;
 }
 
@@ -53,14 +53,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     refreshSession();
   }, [refreshSession]);
 
-  const signIn = async (address: string, message: string, signature: string, chainId: number) => {
+  const signIn = async (address: string, message: string, signature: string) => {
     try {
       setStatus('loading');
       const response = await apiClient.post<SessionResponse>('/api/v1/auth/verify', {
         address,
         message,
         signature,
-        chainId,
       });
 
       if (response.data && response.data.user) {
@@ -75,14 +74,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const signUp = async (address: string, message: string, signature: string, chainId: number) => {
+  const signUp = async (address: string, message: string, signature: string) => {
     try {
       setStatus('loading');
       const response = await apiClient.post<SessionResponse>('/api/v1/auth/signup', {
         address,
         message,
         signature,
-        chainId,
       });
 
       if (response.data && response.data.user) {
@@ -106,13 +104,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const linkWallet = async (address: string, message: string, signature: string, chainId: number) => {
+  const linkWallet = async (message: string, signature: string) => {
     try {
       await apiClient.post('/api/v1/auth/link-wallet', {
-        address,
         message,
         signature,
-        chainId,
       });
       // Refresh session to get updated wallet list
       await refreshSession();

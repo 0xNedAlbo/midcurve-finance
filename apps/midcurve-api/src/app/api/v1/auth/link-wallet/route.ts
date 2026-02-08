@@ -101,22 +101,19 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       // 6. Normalize wallet address
       const address = normalizeAddress(siweMessage.address);
-      const chainId = siweMessage.chainId;
 
       // 7. Link wallet to user (will throw if already registered)
       try {
-        const wallet = await getAuthUserService().linkWallet(user.id, address, chainId);
+        const wallet = await getAuthUserService().linkWallet(user.id, address);
 
         apiLog.businessOperation(apiLogger, requestId, 'linked', 'wallet', wallet.id, {
           userId: user.id,
           address: address.slice(0, 10) + '...',
-          chainId,
         });
 
         const response = createSuccessResponse({
           id: wallet.id,
           address: wallet.address,
-          chainId: wallet.chainId,
           isPrimary: wallet.isPrimary,
           createdAt: wallet.createdAt.toISOString(),
         });
@@ -136,7 +133,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           const errorResponse = createErrorResponse(
             ApiErrorCode.WALLET_ALREADY_REGISTERED,
             'This wallet is already registered to a user account',
-            { address, chainId }
+            { address }
           );
 
           apiLog.requestEnd(apiLogger, requestId, 409, Date.now() - startTime);

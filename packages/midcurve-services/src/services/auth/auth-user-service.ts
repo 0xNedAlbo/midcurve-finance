@@ -2,7 +2,8 @@
  * AuthUserService
  *
  * Manages users and wallet addresses for authentication.
- * Handles user CRUD operations and wallet management across multiple EVM chains.
+ * Handles user CRUD operations and wallet management.
+ * Chain-agnostic: the same EVM address is recognized as the same user regardless of chain.
  */
 
 import type { PrismaClient, User, AuthWalletAddress } from '@midcurve/database';
@@ -43,21 +44,17 @@ export class AuthUserService {
   }
 
   /**
-   * Find user by wallet address and chain ID
+   * Find user by wallet address (chain-agnostic)
    *
    * @param address - Ethereum address (any case)
-   * @param chainId - EVM chain ID
    * @returns User if wallet is registered, null otherwise
    */
-  async findUserByWallet(address: string, chainId: number): Promise<User | null> {
+  async findUserByWallet(address: string): Promise<User | null> {
     const normalizedAddress = validateAndNormalizeAddress(address);
 
     const wallet = await this.prisma.authWalletAddress.findUnique({
       where: {
-        address_chainId: {
-          address: normalizedAddress,
-          chainId,
-        },
+        address: normalizedAddress,
       },
       include: { user: true },
     });
@@ -72,10 +69,10 @@ export class AuthUserService {
    * @returns Created user
    */
   async createUser(data: CreateUserInput): Promise<User> {
-    const { walletAddress, walletChainId, ...userData } = data;
+    const { walletAddress, ...userData } = data;
 
     // If wallet provided, create user + wallet in transaction
-    if (walletAddress && walletChainId) {
+    if (walletAddress) {
       const normalizedAddress = validateAndNormalizeAddress(walletAddress);
 
       return this.prisma.user.create({
@@ -84,7 +81,6 @@ export class AuthUserService {
           walletAddresses: {
             create: {
               address: normalizedAddress,
-              chainId: walletChainId,
               isPrimary: true,
             },
           },
@@ -120,21 +116,17 @@ export class AuthUserService {
   // ===========================================================================
 
   /**
-   * Find wallet by address and chain ID
+   * Find wallet by address (chain-agnostic)
    *
    * @param address - Ethereum address (any case)
-   * @param chainId - EVM chain ID
    * @returns Wallet with user relation, or null if not found
    */
-  async findWalletByAddress(address: string, chainId: number): Promise<AuthWalletAddress | null> {
+  async findWalletByAddress(address: string): Promise<AuthWalletAddress | null> {
     const normalizedAddress = validateAndNormalizeAddress(address);
 
     return this.prisma.authWalletAddress.findUnique({
       where: {
-        address_chainId: {
-          address: normalizedAddress,
-          chainId,
-        },
+        address: normalizedAddress,
       },
       include: { user: true },
     });
@@ -145,14 +137,12 @@ export class AuthUserService {
    *
    * @param userId - User ID
    * @param address - Ethereum address (any case)
-   * @param chainId - EVM chain ID
    * @param isPrimary - Whether to set as primary wallet
    * @returns Created wallet
    */
   async createWallet(
     userId: string,
     address: string,
-    chainId: number,
     isPrimary: boolean = false
   ): Promise<AuthWalletAddress> {
     const normalizedAddress = validateAndNormalizeAddress(address);
@@ -169,7 +159,6 @@ export class AuthUserService {
       data: {
         userId,
         address: normalizedAddress,
-        chainId,
         isPrimary,
       },
     });
@@ -180,21 +169,20 @@ export class AuthUserService {
    *
    * @param userId - User ID
    * @param address - Ethereum address (any case)
-   * @param chainId - EVM chain ID
    * @returns Created wallet
    * @throws Error if wallet already registered to any user
    */
-  async linkWallet(userId: string, address: string, chainId: number): Promise<AuthWalletAddress> {
+  async linkWallet(userId: string, address: string): Promise<AuthWalletAddress> {
     const normalizedAddress = validateAndNormalizeAddress(address);
 
     // Check wallet not already registered
-    const existing = await this.findWalletByAddress(normalizedAddress, chainId);
+    const existing = await this.findWalletByAddress(normalizedAddress);
     if (existing) {
       throw new Error('Wallet already registered to a user');
     }
 
     // Create wallet (not primary)
-    return this.createWallet(userId, normalizedAddress, chainId, false);
+    return this.createWallet(userId, normalizedAddress, false);
   }
 
   /**
@@ -251,11 +239,10 @@ export class AuthUserService {
    * Check if wallet address is available for registration
    *
    * @param address - Ethereum address (any case)
-   * @param chainId - EVM chain ID
    * @returns true if available, false if already registered
    */
-  async isWalletAvailable(address: string, chainId: number): Promise<boolean> {
-    const wallet = await this.findWalletByAddress(address, chainId);
+  async isWalletAvailable(address: string): Promise<boolean> {
+    const wallet = await this.findWalletByAddress(address);
     return wallet === null;
   }
 }

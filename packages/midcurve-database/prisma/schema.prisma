@@ -42,12 +42,11 @@ model Session {
   @@map("sessions")
 }
 
-// AuthWalletAddress - User wallet addresses across multiple EVM chains
+// AuthWalletAddress - User wallet addresses (chain-agnostic, same key = same user across all EVM chains)
 model AuthWalletAddress {
   id        String   @id @default(cuid())
   userId    String
   address   String // Normalized (EIP-55 checksum)
-  chainId   Int // 1 (Ethereum), 42161 (Arbitrum), 8453 (Base), 56 (BSC), 137 (Polygon), 10 (Optimism)
   isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -55,10 +54,9 @@ model AuthWalletAddress {
   // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Constraints
-  @@unique([address, chainId])
+  // Constraints — address alone is unique (same key controls all EVM chains)
+  @@unique([address])
   @@index([userId])
-  @@index([address])
   @@map("auth_wallet_addresses")
 }
 

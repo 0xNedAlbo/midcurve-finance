@@ -2,13 +2,14 @@
  * Auth Wallet Address Type
  *
  * Represents a blockchain wallet address associated with a user account.
- * Supports multiple wallets per user across different EVM chains.
+ * Supports multiple wallets per user. Chain-agnostic: the same private key
+ * controls an address across all EVM chains, so address alone is the identity.
  */
 
 /**
  * Wallet address associated with a user
  *
- * A user can have multiple wallet addresses across different chains.
+ * A user can have multiple wallet addresses.
  * One wallet can be marked as primary for display purposes.
  */
 export interface AuthWalletAddress {
@@ -27,17 +28,6 @@ export interface AuthWalletAddress {
    * Normalized before storage
    */
   address: string;
-
-  /**
-   * EVM chain ID
-   * - 1: Ethereum
-   * - 42161: Arbitrum
-   * - 8453: Base
-   * - 56: BSC
-   * - 137: Polygon
-   * - 10: Optimism
-   */
-  chainId: number;
 
   /**
    * Whether this is the user's primary wallet

@@ -20,7 +20,6 @@ export interface CreateUserInput {
   email?: string;
   image?: string;
   walletAddress?: string; // Optional: create user with initial wallet
-  walletChainId?: number; // Required if walletAddress provided
 }
 
 /**

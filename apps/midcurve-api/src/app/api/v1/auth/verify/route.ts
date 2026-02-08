@@ -134,18 +134,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 4. Consume nonce (single use)
     await getAuthNonceService().consumeNonce(siweMessage.nonce);
 
-    // 5. Normalize address and find/create user
+    // 5. Normalize address and find/create user (chain-agnostic)
     const address = normalizeAddress(siweMessage.address);
-    const chainId = siweMessage.chainId;
 
-    let user = await getAuthUserService().findUserByWallet(address, chainId);
+    let user = await getAuthUserService().findUserByWallet(address);
 
     if (!user) {
       // Create new user with wallet
       user = await getAuthUserService().createUser({
         name: `User ${address.slice(0, 6)}...${address.slice(-4)}`,
         walletAddress: address,
-        walletChainId: chainId,
       });
 
       apiLog.businessOperation(apiLogger, requestId, 'created', 'user', user.id, { address });
@@ -161,7 +159,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           payload: {
             userId: user.id,
             walletAddress: address,
-            walletChainId: chainId,
             registeredAt: new Date().toISOString(),
           },
           source: 'api',
@@ -197,7 +194,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         id: w.id,
         userId: w.userId,
         address: w.address,
-        chainId: w.chainId,
         isPrimary: w.isPrimary,
         createdAt: w.createdAt,
         updatedAt: w.updatedAt,
