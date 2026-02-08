@@ -73,7 +73,6 @@ function runForge(args: string[]): Promise<string> {
       cwd: process.cwd(),
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,
     });
 
     proc.stdin?.end();
@@ -129,7 +128,7 @@ async function main(): Promise<void> {
   }
 
   // Extra flags passed after -- (e.g., --broadcast --verify)
-  const extraArgs = process.argv.slice(2);
+  const extraArgs = process.argv.slice(2).filter((arg) => arg !== '--');
 
   console.log('=== Deploy PositionCloser Diamond ===');
   console.log('  Chain:            ', chain, `(${chainId})`);
