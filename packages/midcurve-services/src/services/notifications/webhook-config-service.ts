@@ -5,7 +5,7 @@
  * URL configuration, event filtering, and secret management.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma, UserWebhookConfig } from '@midcurve/database';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -45,7 +45,7 @@ export class WebhookConfigService {
    * @param dependencies - Service dependencies
    */
   constructor(dependencies: WebhookConfigServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('WebhookConfigService');
   }
 

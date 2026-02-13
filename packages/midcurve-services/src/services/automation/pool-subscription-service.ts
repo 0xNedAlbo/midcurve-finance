@@ -5,7 +5,7 @@
  * Tracks which pools have active orders and need price monitoring.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import {
   type PoolPriceSubscriptionData,
@@ -47,7 +47,7 @@ export class PoolSubscriptionService {
    * @param dependencies - Service dependencies
    */
   constructor(dependencies: PoolSubscriptionServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('PoolSubscriptionService');
   }
 

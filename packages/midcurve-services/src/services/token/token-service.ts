@@ -13,7 +13,7 @@
  * for type-safe config access via .typedConfig and convenience accessors.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { TokenInterface, TokenType } from '@midcurve/shared';
 import { TokenFactory } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
@@ -73,7 +73,7 @@ export abstract class TokenService {
    * @param dependencies.prisma - Prisma client instance (creates default if not provided)
    */
   constructor(dependencies: TokenServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger(this.constructor.name);
   }
 

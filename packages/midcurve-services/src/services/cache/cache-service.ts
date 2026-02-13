@@ -18,7 +18,7 @@
  * - Rate limit coordination across workers
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -49,7 +49,7 @@ export class CacheService {
    * @param dependencies.prisma - Prisma client instance (creates default if not provided)
    */
   constructor(dependencies: CacheServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('CacheService');
   }
 

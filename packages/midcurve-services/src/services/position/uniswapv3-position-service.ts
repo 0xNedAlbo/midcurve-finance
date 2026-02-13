@@ -5,7 +5,7 @@
  * Handles serialization/deserialization of Uniswap V3 position config and state.
  */
 
-import { PrismaClient } from "@midcurve/database";
+import { prisma as prismaClient, PrismaClient } from "@midcurve/database";
 import type {
     UniswapV3PositionConfigData,
     UniswapV3PositionState,
@@ -294,7 +294,7 @@ export class UniswapV3PositionService {
      */
     constructor(dependencies: UniswapV3PositionServiceDependencies = {}) {
         // Initialize base class properties
-        this._prisma = dependencies.prisma ?? new PrismaClient();
+        this._prisma = dependencies.prisma ?? prismaClient;
         this.logger = createServiceLogger(this.constructor.name);
         this.eventPublisher =
             dependencies.eventPublisher ?? getDomainEventPublisher();

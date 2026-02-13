@@ -9,7 +9,7 @@
  * - Performance tracking over time
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
   UniswapV3PoolPrice,
   poolPriceConfigToJSON,
@@ -98,7 +98,7 @@ export class UniswapV3PoolPriceService {
    * @param dependencies.poolService - Pool service instance (creates default if not provided)
    */
   constructor(dependencies: UniswapV3PoolPriceServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
     this._poolService =
       dependencies.poolService ?? new UniswapV3PoolService({ prisma: this._prisma });

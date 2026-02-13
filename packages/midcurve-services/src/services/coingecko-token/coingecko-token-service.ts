@@ -16,7 +16,7 @@
  * - Token search (find tokens by CoinGecko ID)
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
   CoingeckoToken,
   CoingeckoTokenConfig,
@@ -69,7 +69,7 @@ export class CoingeckoTokenService {
   private readonly logger: ServiceLogger;
 
   constructor(dependencies: CoingeckoTokenServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.coinGeckoClient =
       dependencies.coinGeckoClient ?? CoinGeckoClient.getInstance();
     this.logger = createServiceLogger('CoingeckoTokenService');

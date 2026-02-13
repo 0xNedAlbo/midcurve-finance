@@ -5,7 +5,7 @@
  * Used by the RangeMonitor worker to detect when notifications should be sent.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { PositionRangeStatus } from '@midcurve/database';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -71,7 +71,7 @@ export class PositionRangeTrackerService {
    * @param dependencies - Service dependencies
    */
   constructor(dependencies: PositionRangeTrackerServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('PositionRangeTrackerService');
   }
 

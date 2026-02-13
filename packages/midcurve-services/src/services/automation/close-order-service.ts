@@ -5,7 +5,7 @@
  * Close orders represent registered triggers for automated position closing.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import {
   CloseOrderFactory,
@@ -56,7 +56,7 @@ export class CloseOrderService {
    * @param dependencies - Service dependencies
    */
   constructor(dependencies: CloseOrderServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('CloseOrderService');
   }
 

@@ -5,7 +5,7 @@
  * Handles user preferences, default configurations, and fallback logic.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { QuoteTokenResult, QuoteTokenResultProtocol } from '@midcurve/shared';
 import type { QuoteTokenInput } from '../types/quote-token/quote-token-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
@@ -30,7 +30,7 @@ export abstract class QuoteTokenService {
   protected abstract readonly protocol: QuoteTokenResultProtocol;
 
   constructor(dependencies: QuoteTokenServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger(this.constructor.name);
     this.logger.info('QuoteTokenService initialized');
   }

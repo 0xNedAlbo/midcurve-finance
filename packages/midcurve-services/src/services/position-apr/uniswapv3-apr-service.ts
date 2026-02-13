@@ -9,7 +9,7 @@
  * - External callers: to query APR periods for display/analysis
  */
 
-import { PrismaClient } from "@midcurve/database";
+import { prisma as prismaClient, PrismaClient } from "@midcurve/database";
 import type { AprSummary } from "@midcurve/shared";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import type { AprPeriodData } from "../types/position-apr/index.js";
@@ -70,7 +70,7 @@ export class UniswapV3AprService {
         dependencies: UniswapV3AprServiceDependencies = {},
     ) {
         this.positionId = config.positionId;
-        this.prisma = dependencies.prisma ?? new PrismaClient();
+        this.prisma = dependencies.prisma ?? prismaClient;
     }
 
     // ============================================================================

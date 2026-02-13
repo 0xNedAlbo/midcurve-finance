@@ -5,7 +5,7 @@
  * Simple service for user identification and management.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { User } from '@midcurve/database';
 import type { CreateUserInput, UpdateUserInput } from '../types/user/index.js';
 
@@ -24,7 +24,7 @@ export class UserService {
    * @param dependencies.prisma - Prisma client instance (optional, defaults to new PrismaClient)
    */
   constructor(dependencies: { prisma?: PrismaClient } = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
   }
 
   /**

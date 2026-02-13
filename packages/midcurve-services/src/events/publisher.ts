@@ -7,7 +7,7 @@
  */
 
 import { createId } from '@paralleldrive/cuid2';
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import type { Channel } from 'amqplib';
 import { createServiceLogger, log } from '../logging/index.js';
@@ -124,7 +124,7 @@ export class DomainEventPublisher {
   private readonly logger: ServiceLogger;
 
   constructor(deps: DomainEventPublisherDependencies = {}) {
-    this.prisma = deps.prisma ?? new PrismaClient();
+    this.prisma = deps.prisma ?? prismaClient;
     this.channel = deps.channel ?? null;
     this.logger = createServiceLogger('DomainEventPublisher');
   }

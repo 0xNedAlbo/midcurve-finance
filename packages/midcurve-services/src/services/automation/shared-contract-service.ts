@@ -6,7 +6,7 @@
  * (e.g., UniswapV3PositionCloser deployed on multiple EVM chains).
  */
 
-import { PrismaClient, Prisma } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient, Prisma } from '@midcurve/database';
 import type { SharedContract } from '@midcurve/database';
 import {
   SharedContractTypeEnum,
@@ -62,7 +62,7 @@ export class SharedContractService {
    * @param dependencies - Service dependencies
    */
   constructor(dependencies: SharedContractServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('SharedContractService');
   }
 

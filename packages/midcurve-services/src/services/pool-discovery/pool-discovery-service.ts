@@ -5,7 +5,7 @@
  * Handles discovery of pools for token pairs and enrichment with indexer metrics.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { PoolInterface, Protocol, PoolDiscoveryResult } from '@midcurve/shared';
 import type { PoolDiscoveryInput } from '../types/pool-discovery/pool-discovery-input.js';
 import { createServiceLogger } from '../../logging/index.js';
@@ -70,7 +70,7 @@ export abstract class PoolDiscoveryService {
    * @param dependencies - Optional dependencies object
    */
   constructor(dependencies: PoolDiscoveryServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger(this.constructor.name);
     this.logger.info('PoolDiscoveryService initialized');
   }

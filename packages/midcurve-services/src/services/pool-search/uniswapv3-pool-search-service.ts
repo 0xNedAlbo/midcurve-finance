@@ -24,7 +24,7 @@
  * ```
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import { isAddress, getAddress } from 'viem';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -71,7 +71,7 @@ export class UniswapV3PoolSearchService {
   private readonly logger: ServiceLogger;
 
   constructor(dependencies: UniswapV3PoolSearchServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.subgraphClient = dependencies.subgraphClient ?? UniswapV3SubgraphClient.getInstance();
     this.coingeckoTokenService = dependencies.coingeckoTokenService ?? new CoingeckoTokenService({ prisma: this.prisma });
     this.evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();

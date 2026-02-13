@@ -5,7 +5,7 @@
  * Handles creation, listing, marking as read, and deletion of notifications.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma, UserNotification } from '@midcurve/database';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -62,7 +62,7 @@ export class NotificationService {
    * @param dependencies - Service dependencies
    */
   constructor(dependencies: NotificationServiceDependencies = {}) {
-    this.prisma = dependencies.prisma ?? new PrismaClient();
+    this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('NotificationService');
   }
 

@@ -5,7 +5,7 @@
  * Handles event creation, retrieval, and deduplication with reorg-safe hashing.
  */
 
-import { PrismaClient } from "@midcurve/database";
+import { prisma as prismaClient, PrismaClient } from "@midcurve/database";
 import {
     UniswapV3PositionLedgerEvent,
     ledgerEventConfigToJSON,
@@ -437,7 +437,7 @@ export class UniswapV3LedgerService {
         dependencies: UniswapV3LedgerServiceDependencies = {},
     ) {
         this.positionId = config.positionId;
-        this._prisma = dependencies.prisma ?? new PrismaClient();
+        this._prisma = dependencies.prisma ?? prismaClient;
         this.logger = createServiceLogger("UniswapV3LedgerService");
         this._aprService =
             dependencies.aprService ??

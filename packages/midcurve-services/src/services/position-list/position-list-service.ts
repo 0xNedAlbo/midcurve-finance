@@ -13,7 +13,7 @@
  * services (e.g., UniswapV3PositionService) via detail endpoints.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type {
   PositionListFilters,
   PositionListRow,
@@ -73,7 +73,7 @@ export class PositionListService {
   private readonly logger: ServiceLogger;
 
   constructor(dependencies: PositionListServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('PositionListService');
   }
 

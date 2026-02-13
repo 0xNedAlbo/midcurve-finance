@@ -6,7 +6,7 @@
  * copied to the permanent DomainEvent table for audit trail.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import type { Channel } from 'amqplib';
 import { createServiceLogger, log } from '../logging/index.js';
@@ -81,7 +81,7 @@ export class OutboxPublisher {
   private cleanupTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: OutboxPublisherDependencies) {
-    this.prisma = deps.prisma ?? new PrismaClient();
+    this.prisma = deps.prisma ?? prismaClient;
     this.channel = deps.channel;
     this.config = { ...OUTBOX_CONFIG, ...deps.config };
     this.logger = createServiceLogger('OutboxPublisher');

@@ -11,7 +11,7 @@
  * - isFavorite: Check if a pool is in user's favorites
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -114,7 +114,7 @@ export class FavoritePoolService {
    * @param dependencies.subgraphClient - UniswapV3SubgraphClient instance (uses singleton if not provided)
    */
   constructor(dependencies: FavoritePoolServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('FavoritePoolService');
     this._poolService =
       dependencies.poolService ??

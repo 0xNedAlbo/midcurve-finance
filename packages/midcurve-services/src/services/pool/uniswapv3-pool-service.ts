@@ -7,7 +7,7 @@
  * Returns UniswapV3Pool class instances for type-safe config/state access.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
   UniswapV3Pool,
   UniswapV3PoolConfig,
@@ -253,7 +253,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
    * @param dependencies.erc20TokenService - ERC-20 token service (creates default if not provided)
    */
   constructor(dependencies: UniswapV3PoolServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? new PrismaClient();
+    this._prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('UniswapV3PoolService');
     this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
     this._erc20TokenService =

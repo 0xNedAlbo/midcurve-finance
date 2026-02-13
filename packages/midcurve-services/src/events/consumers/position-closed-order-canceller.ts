@@ -6,7 +6,7 @@
  * the ledger sync process.
  */
 
-import { PrismaClient } from '@midcurve/database';
+import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import { DomainEventConsumer } from '../consumer.js';
 import { DOMAIN_QUEUES, ROUTING_PATTERNS } from '../topology.js';
 import type { DomainEvent, PositionClosedPayload } from '../types.js';
@@ -48,7 +48,7 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
 
   constructor(deps: PositionClosedOrderCancellerDependencies = {}) {
     super();
-    this.prisma = deps.prisma ?? new PrismaClient();
+    this.prisma = deps.prisma ?? prismaClient;
     this.closeOrderService = new CloseOrderService({ prisma: this.prisma });
     this.poolSubscriptionService = new PoolSubscriptionService({ prisma: this.prisma });
   }
