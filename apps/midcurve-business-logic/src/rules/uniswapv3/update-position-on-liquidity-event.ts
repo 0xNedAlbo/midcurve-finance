@@ -110,7 +110,7 @@ export class UpdatePositionOnLiquidityEventRule extends BusinessRule {
       EXCHANGE_POSITION_LIQUIDITY,
       ROUTING_PATTERN
     );
-    await this.channel.prefetch(10);
+    await this.channel.prefetch(1);
 
     // Start consuming
     const result = await this.channel.consume(
