@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Plus, Minus, DollarSign } from "lucide-react";
+import { Plus, Minus, DollarSign, Flame } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useNavigate } from "react-router-dom";
 import type { Address } from "viem";
@@ -24,6 +24,7 @@ import { CreateHedgedPositionModal } from "@/components/positions/hedge/CreateHe
 import { useSharedContract, useAutowallet } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
+import { useBurnPosition } from "@/hooks/positions/uniswapv3/useBurnPosition";
 
 interface UniswapV3ActionsProps {
   position: UniswapV3PositionData;
@@ -36,6 +37,11 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showHedgeModal, setShowHedgeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unClaimedFees) > 0n;
+
+  // Position lifecycle state
+  const positionState = position.state as { isClosed?: boolean; isBurned?: boolean; ownerAddress: string };
+  const isClosed = positionState.isClosed ?? false;
+  const isBurned = positionState.isBurned ?? false;
 
   // Extract owner address from position state
   const ownerAddress = position.state.ownerAddress;
@@ -67,14 +73,14 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const hasAutowallet = !!autowalletData?.address;
 
   // Calculate automation disabled state and reason
-  const automationDisabled = !position.isActive || !isChainSupported || !hasAutowallet;
+  const automationDisabled = !position.isActive || isClosed || !isChainSupported || !hasAutowallet;
 
   const automationDisabledReason = useMemo(() => {
-    if (!position.isActive) return 'Position is closed';
+    if (!position.isActive || isClosed) return 'Position is closed';
     if (!isChainSupported) return 'Automation not supported on this chain';
     if (!hasAutowallet) return 'No automation wallet configured';
     return undefined;
-  }, [position.isActive, isChainSupported, hasAutowallet]);
+  }, [position.isActive, isClosed, isChainSupported, hasAutowallet]);
 
   // Build token config for price display
   const tokenConfig: TokenConfig = useMemo(
@@ -102,6 +108,13 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     areAddressesEqual(walletAddress, ownerAddress)
   );
 
+  // Burn position hook (for closed-not-burned positions)
+  const burnPosition = useBurnPosition(
+    isClosed && !isBurned
+      ? { tokenId: BigInt(positionConfig.nftId), chainId: positionConfig.chainId }
+      : null
+  );
+
   // Don't show action buttons if user doesn't own the position
   if (!isOwner) {
     return null;
@@ -110,6 +123,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   return (
     <>
       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
+        {/* Increase Deposit / Reopen Position */}
         <button
           onClick={() => {
             const chainSlug = getChainSlugByChainId(positionConfig.chainId);
@@ -117,47 +131,70 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
               navigate(`/positions/increase/uniswapv3/${chainSlug}/${positionConfig.nftId}`);
             }
           }}
-          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer ${
-            position.isActive
-              ? "text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
-              : "text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
-          }`}
-          disabled={!position.isActive}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
         >
           <Plus className="w-3 h-3" />
-          Increase Deposit
+          {isClosed && !isBurned ? 'Reopen Position' : 'Increase Deposit'}
         </button>
 
-        <button
-          onClick={() => {
-            const chainSlug = getChainSlugByChainId(positionConfig.chainId);
-            if (chainSlug) {
-              navigate(`/positions/withdraw/uniswapv3/${chainSlug}/${positionConfig.nftId}`);
-            }
-          }}
-          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer ${
-            position.isActive
-              ? "text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
-              : "text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
-          }`}
-          disabled={!position.isActive}
-        >
-          <Minus className="w-3 h-3" />
-          Withdraw
-        </button>
+        {/* Withdraw — hidden for closed positions */}
+        {!isClosed && (
+          <button
+            onClick={() => {
+              const chainSlug = getChainSlugByChainId(positionConfig.chainId);
+              if (chainSlug) {
+                navigate(`/positions/withdraw/uniswapv3/${chainSlug}/${positionConfig.nftId}`);
+              }
+            }}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
+          >
+            <Minus className="w-3 h-3" />
+            Withdraw
+          </button>
+        )}
 
-        <button
-          onClick={() => setShowCollectFeesModal(true)}
-          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
-            hasUnclaimedFees
-              ? "text-amber-300 bg-amber-900/20 hover:bg-amber-800/30 border-amber-600/50 cursor-pointer"
-              : "text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
-          }`}
-          disabled={!hasUnclaimedFees}
-        >
-          <DollarSign className="w-3 h-3" />
-          Collect Fees
-        </button>
+        {/* Collect Fees — hidden for closed positions */}
+        {!isClosed && (
+          <button
+            onClick={() => setShowCollectFeesModal(true)}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
+              hasUnclaimedFees
+                ? "text-amber-300 bg-amber-900/20 hover:bg-amber-800/30 border-amber-600/50 cursor-pointer"
+                : "text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
+            }`}
+            disabled={!hasUnclaimedFees}
+          >
+            <DollarSign className="w-3 h-3" />
+            Collect Fees
+          </button>
+        )}
+
+        {/* Burn NFT — shown only for closed, not-burned positions */}
+        {isClosed && !isBurned && (
+          <button
+            onClick={() => {
+              if (burnPosition.isBurning || burnPosition.isWaitingForBurn) return;
+              if (burnPosition.burnSuccess) return;
+              const confirmed = window.confirm(
+                'Permanently burn this position NFT? The position cannot be reopened later.'
+              );
+              if (confirmed) burnPosition.burn();
+            }}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer ${
+              burnPosition.burnSuccess
+                ? "text-green-300 bg-green-900/20 border-green-600/50"
+                : "text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50"
+            }`}
+            disabled={burnPosition.isBurning || burnPosition.isWaitingForBurn}
+          >
+            <Flame className="w-3 h-3" />
+            {burnPosition.isBurning || burnPosition.isWaitingForBurn
+              ? 'Burning...'
+              : burnPosition.burnSuccess
+                ? 'Burned!'
+                : 'Burn NFT'}
+          </button>
+        )}
 
         {/* Automation Buttons - always visible, disabled when unavailable */}
         {/* Divider between position actions and automation */}

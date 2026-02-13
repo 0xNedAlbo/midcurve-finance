@@ -31,6 +31,8 @@ export interface UniswapV3PositionStateResponse {
   tokensOwed1: string;
   unclaimedFees0: string;
   unclaimedFees1: string;
+  isClosed: boolean;
+  isBurned: boolean;
 }
 
 /**

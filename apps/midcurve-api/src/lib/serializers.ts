@@ -173,6 +173,8 @@ export function serializeUniswapV3PositionState(state: UniswapV3PositionState) {
     tokensOwed1: state.tokensOwed1.toString(),
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
+    isClosed: state.isClosed,
+    isBurned: state.isBurned,
   };
 }
 
