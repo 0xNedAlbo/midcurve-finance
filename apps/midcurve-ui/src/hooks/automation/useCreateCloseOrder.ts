@@ -259,7 +259,13 @@ export function useCreateCloseOrder(
           });
         }
 
-        // Invalidate caches
+        // Invalidate caches — position detail includes activeCloseOrders
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
+        });
         queryClient.invalidateQueries({
           queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
         });

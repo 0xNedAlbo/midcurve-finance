@@ -16,16 +16,16 @@ import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Shield, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Address } from 'viem';
-import type { ListPositionData } from '@midcurve/api-shared';
+import type { ListPositionData, SerializedCloseOrder } from '@midcurve/api-shared';
 import { VaultConfigStep } from './steps/VaultConfigStep';
 import { TriggerConfigStep } from './steps/TriggerConfigStep';
 import { DeployStep } from './steps/DeployStep';
-import { useCloseOrders } from '@/hooks/automation/useCloseOrders';
 
 interface CreateHedgedPositionModalProps {
   isOpen: boolean;
   onClose: () => void;
   position: ListPositionData;
+  activeCloseOrders: SerializedCloseOrder[];
 }
 
 type WizardStep = 0 | 1 | 2;
@@ -40,6 +40,7 @@ export function CreateHedgedPositionModal({
   isOpen,
   onClose,
   position,
+  activeCloseOrders,
 }: CreateHedgedPositionModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -68,11 +69,7 @@ export function CreateHedgedPositionModal({
     ? position.pool.token0
     : position.pool.token1;
 
-  // Fetch existing close orders for defaults
-  const { data: closeOrders } = useCloseOrders({
-    chainId: position.config.chainId,
-    nftId: position.config.nftId.toString(),
-  });
+  const closeOrders = activeCloseOrders;
 
   // Find existing SL/TP orders for defaults
   const defaultTriggers = useMemo(() => {

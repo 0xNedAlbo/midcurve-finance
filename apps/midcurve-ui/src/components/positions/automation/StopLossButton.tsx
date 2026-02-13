@@ -14,8 +14,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, X as XIcon, ArrowRight, Loader2 } from 'lucide-react';
 import type { Address } from 'viem';
-import type { ListPositionData, TriggerMode } from '@midcurve/api-shared';
-import { useCloseOrders } from '@/hooks/automation';
+import type { ListPositionData, TriggerMode, SerializedCloseOrder } from '@midcurve/api-shared';
 import { CloseOrderModal } from './CloseOrderModal';
 import { CancelOrderConfirmModal } from './CancelOrderConfirmModal';
 import {
@@ -108,6 +107,11 @@ interface StopLossButtonProps {
    * Reason why the button is disabled (shown as tooltip)
    */
   disabledReason?: string;
+
+  /**
+   * Close orders from position detail response.
+   */
+  activeCloseOrders: SerializedCloseOrder[];
 }
 
 export function StopLossButton({
@@ -125,6 +129,7 @@ export function StopLossButton({
   isToken0Quote,
   disabled = false,
   disabledReason,
+  activeCloseOrders,
 }: StopLossButtonProps) {
   // Extract position data for PnL simulation
   const positionState = position.state as { liquidity: string };
@@ -146,13 +151,7 @@ export function StopLossButton({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
 
-  // Fetch close orders for this position with polling enabled
-  // Polling speeds up automatically when an order is executing
-  const { data: orders = [] } = useCloseOrders({
-    chainId,
-    nftId: nftId.toString(),
-    polling: true,
-  });
+  const orders = activeCloseOrders;
 
   // Build token config for utilities
   const tokenConfig: TokenConfig = useMemo(

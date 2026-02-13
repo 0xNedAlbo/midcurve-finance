@@ -187,6 +187,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           isToken0Quote={position.isToken0Quote}
           disabled={automationDisabled}
           disabledReason={automationDisabledReason}
+          activeCloseOrders={position.activeCloseOrders}
         />
 
         {/* Current Price Display - between SL and TP buttons */}
@@ -216,6 +217,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           isToken0Quote={position.isToken0Quote}
           disabled={automationDisabled}
           disabledReason={automationDisabledReason}
+          activeCloseOrders={position.activeCloseOrders}
         />
 
         {/* Divider between automation and hedge */}
@@ -244,6 +246,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         isOpen={showHedgeModal}
         onClose={() => setShowHedgeModal(false)}
         position={position}
+        activeCloseOrders={position.activeCloseOrders}
       />
     </>
   );
