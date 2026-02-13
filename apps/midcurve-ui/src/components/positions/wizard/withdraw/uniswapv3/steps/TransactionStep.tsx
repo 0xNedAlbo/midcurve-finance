@@ -79,14 +79,16 @@ export function TransactionStep() {
       chainId: poolChainId,
       recipient: walletAddress as Address,
       slippageBps: 100,
+      burnAfterCollect: state.burnAfterWithdraw && state.withdrawPercent >= 100,
     };
-  }, [config, walletAddress, liquidityToRemove, amount0Min, amount1Min, poolChainId, isWrongNetwork, isWrongAccount]);
+  }, [config, walletAddress, liquidityToRemove, amount0Min, amount1Min, poolChainId, isWrongNetwork, isWrongAccount, state.burnAfterWithdraw, state.withdrawPercent]);
 
   const decreaseLiquidity = useDecreaseLiquidity(decreaseParams);
 
   // Transaction prompt
+  const isBurning = state.burnAfterWithdraw && state.withdrawPercent >= 100;
   const withdrawPrompt = useEvmTransactionPrompt({
-    label: 'Withdraw Liquidity',
+    label: isBurning ? 'Withdraw Liquidity & Burn NFT' : 'Withdraw Liquidity',
     buttonLabel: 'Execute',
     retryButtonLabel: 'Retry',
     chainId: poolChainId,
@@ -101,14 +103,16 @@ export function TransactionStep() {
     onReset: () => decreaseLiquidity.reset(),
   });
 
-  // Handle finish
+  // Handle finish — navigate to dashboard if NFT was burned (position no longer exists)
   const handleFinish = useCallback(() => {
-    if (config && chainSlug) {
+    if (isBurning) {
+      navigate('/dashboard');
+    } else if (config && chainSlug) {
       navigate(`/positions/uniswapv3/${chainSlug}/${config.nftId}`);
     } else {
       navigate('/dashboard');
     }
-  }, [navigate, config, chainSlug]);
+  }, [navigate, config, chainSlug, isBurning]);
 
   // ===== Render =====
 

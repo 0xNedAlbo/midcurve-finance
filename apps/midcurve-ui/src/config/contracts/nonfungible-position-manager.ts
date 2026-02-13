@@ -137,6 +137,14 @@ export const NONFUNGIBLE_POSITION_MANAGER_ABI = [
     stateMutability: 'payable',
     type: 'function',
   },
+  // burn() - Burn empty NFT (requires liquidity=0, tokensOwed0=0, tokensOwed1=0)
+  {
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    name: 'burn',
+    outputs: [],
+    stateMutability: 'payable',
+    type: 'function',
+  },
   // multicall() - Execute multiple operations in one transaction
   {
     inputs: [{ name: 'data', type: 'bytes[]' }],

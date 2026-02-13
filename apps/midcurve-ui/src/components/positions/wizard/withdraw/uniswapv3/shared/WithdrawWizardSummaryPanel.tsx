@@ -358,6 +358,12 @@ export function WithdrawWizardSummaryPanel({
                   {formatCompactValue(withdrawInfo.remainingQuoteValue, quoteDecimals)} {quoteSymbol}
                 </span>
               </div>
+              {state.burnAfterWithdraw && state.withdrawPercent >= 100 && (
+                <div className="flex justify-between items-center text-sm pt-1.5 border-t border-slate-600/50">
+                  <span className="text-slate-400">Burn NFT</span>
+                  <span className="text-slate-300 font-medium">Yes</span>
+                </div>
+              )}
             </div>
           </div>
         )}

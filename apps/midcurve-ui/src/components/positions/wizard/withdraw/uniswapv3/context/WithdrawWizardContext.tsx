@@ -37,6 +37,7 @@ export interface WithdrawWizardState {
 
   // Withdrawal configuration
   withdrawPercent: number; // 0-100 slider value
+  burnAfterWithdraw: boolean; // true = burn NFT after full withdrawal
   refreshedSqrtPriceX96: string | null; // refreshed pool price (null = use pool state)
 
   // Transactions
@@ -62,6 +63,7 @@ type WizardAction =
   | { type: 'SET_DISCOVERED_POOL'; pool: UniswapV3Pool }
   | { type: 'SET_ACTIVE_CLOSE_ORDERS'; orders: SerializedCloseOrder[] }
   | { type: 'SET_WITHDRAW_PERCENT'; percent: number }
+  | { type: 'SET_BURN_AFTER_WITHDRAW'; burn: boolean }
   | { type: 'SET_REFRESHED_SQRT_PRICE'; sqrtPriceX96: string | null }
   | { type: 'ADD_TRANSACTION'; tx: TransactionRecord }
   | { type: 'UPDATE_TRANSACTION'; hash: string; status: TransactionRecord['status'] }
@@ -87,6 +89,7 @@ const initialState: WithdrawWizardState = {
   discoveredPool: null,
   activeCloseOrders: [],
   withdrawPercent: 0,
+  burnAfterWithdraw: true,
   refreshedSqrtPriceX96: null,
   transactions: [],
   stepValidation: {},
@@ -143,8 +146,13 @@ function wizardReducer(
     case 'SET_ACTIVE_CLOSE_ORDERS':
       return { ...state, activeCloseOrders: action.orders };
 
-    case 'SET_WITHDRAW_PERCENT':
-      return { ...state, withdrawPercent: action.percent };
+    case 'SET_WITHDRAW_PERCENT': {
+      const burnAfterWithdraw = action.percent >= 100;
+      return { ...state, withdrawPercent: action.percent, burnAfterWithdraw };
+    }
+
+    case 'SET_BURN_AFTER_WITHDRAW':
+      return { ...state, burnAfterWithdraw: action.burn };
 
     case 'SET_REFRESHED_SQRT_PRICE':
       return { ...state, refreshedSqrtPriceX96: action.sqrtPriceX96 };
@@ -209,6 +217,7 @@ interface WithdrawWizardContextValue {
 
   // Withdrawal input
   setWithdrawPercent: (percent: number) => void;
+  setBurnAfterWithdraw: (burn: boolean) => void;
   setRefreshedSqrtPrice: (sqrtPriceX96: string | null) => void;
 
   // Transactions
@@ -291,6 +300,10 @@ export function WithdrawWizardProvider({ children }: { children: ReactNode }) {
     (percent: number) => dispatch({ type: 'SET_WITHDRAW_PERCENT', percent }),
     []
   );
+  const setBurnAfterWithdraw = useCallback(
+    (burn: boolean) => dispatch({ type: 'SET_BURN_AFTER_WITHDRAW', burn }),
+    []
+  );
   const setRefreshedSqrtPrice = useCallback(
     (sqrtPriceX96: string | null) =>
       dispatch({ type: 'SET_REFRESHED_SQRT_PRICE', sqrtPriceX96 }),
@@ -354,6 +367,7 @@ export function WithdrawWizardProvider({ children }: { children: ReactNode }) {
     setDiscoveredPool,
     setActiveCloseOrders,
     setWithdrawPercent,
+    setBurnAfterWithdraw,
     setRefreshedSqrtPrice,
     addTransaction,
     updateTransaction,

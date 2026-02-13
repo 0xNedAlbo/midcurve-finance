@@ -14,6 +14,7 @@ export interface DecreaseLiquidityParams {
   chainId: number;
   recipient: Address;
   slippageBps?: number; // Slippage in basis points (default: 100 = 1%)
+  burnAfterCollect?: boolean; // Burn the NFT after collecting (requires 100% withdrawal)
 }
 
 export interface UseDecreaseLiquidityResult {
@@ -129,12 +130,24 @@ export function useDecreaseLiquidity(params: DecreaseLiquidityParams | null): Us
         args: [collectParams],
       });
 
-      // Execute multicall with both operations
+      // Build multicall data: decrease + collect + optional burn
+      const multicallData: `0x${string}`[] = [decreaseCalldata, collectCalldata];
+
+      if (params.burnAfterCollect) {
+        const burnCalldata = encodeFunctionData({
+          abi: NONFUNGIBLE_POSITION_MANAGER_ABI,
+          functionName: 'burn',
+          args: [params.tokenId],
+        });
+        multicallData.push(burnCalldata);
+      }
+
+      // Execute multicall
       writeContract({
         address: managerAddress,
         abi: NONFUNGIBLE_POSITION_MANAGER_ABI,
         functionName: 'multicall',
-        args: [[decreaseCalldata, collectCalldata]],
+        args: [multicallData],
         chainId: params.chainId,
       });
     } catch (error) {

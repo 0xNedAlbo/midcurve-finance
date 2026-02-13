@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useMemo, useState } from 'react';
-import { PlusCircle, MinusCircle, TrendingDown, RefreshCw } from 'lucide-react';
+import { PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import {
   formatCompactValue,
@@ -29,6 +29,7 @@ export function ConfigureStep() {
   const {
     state,
     setWithdrawPercent,
+    setBurnAfterWithdraw,
     setRefreshedSqrtPrice,
     setStepValid,
     setInteractiveZoom,
@@ -204,40 +205,6 @@ export function ConfigureStep() {
       return 0;
     }
   }, [state.discoveredPool, baseToken, quoteToken, isToken0Base]);
-
-  // Current price as bigint for display (uses refreshed price when available)
-  const currentPriceBigint = useMemo(() => {
-    if (!state.discoveredPool || !baseToken || !quoteToken) return null;
-    try {
-      const sqrtPriceX96 = BigInt(currentSqrtPriceX96 || '0');
-      if (sqrtPriceX96 === 0n) return null;
-
-      const Q96 = 2n ** 96n;
-      const Q192 = Q96 * Q96;
-      const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
-      const token0Decimals = state.discoveredPool.token0.decimals;
-      const token1Decimals = state.discoveredPool.token1.decimals;
-      const quoteDecimals = quoteToken.decimals;
-
-      if (isToken0Base) {
-        const decimalDiff = token0Decimals - token1Decimals;
-        if (decimalDiff >= 0) {
-          return (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / Q192;
-        } else {
-          return (rawPriceNum * 10n ** BigInt(quoteDecimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
-        }
-      } else {
-        const decimalDiff = token1Decimals - token0Decimals;
-        if (decimalDiff >= 0) {
-          return (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / rawPriceNum;
-        } else {
-          return (Q192 * 10n ** BigInt(quoteDecimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
-        }
-      }
-    } catch {
-      return null;
-    }
-  }, [state.discoveredPool, currentSqrtPriceX96, baseToken, quoteToken, isToken0Base]);
 
   // Slider bounds for PnL curve
   const [sliderBounds, setSliderBounds] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
@@ -483,28 +450,22 @@ export function ConfigureStep() {
         </div>
       </div>
 
-      {/* Pool Price */}
-      {quoteToken && currentPriceBigint !== null && (
-        <div className="flex items-center justify-between px-3 py-2 bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg">
-          <span className="text-xs text-slate-400">
-            Pool Price:{' '}
-            <span className="text-white font-medium">
-              {formatCompactValue(currentPriceBigint, quoteToken.decimals)} {quoteToken.symbol}
-            </span>
-          </span>
-          <button
-            onClick={handleRefreshPool}
-            disabled={isRefreshing}
-            className={`p-1 rounded transition-colors cursor-pointer ${
-              isRefreshing
-                ? 'text-slate-600 cursor-not-allowed'
-                : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-            }`}
-            title="Refresh pool price"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
+      {/* Burn NFT checkbox — only visible at 100% withdrawal */}
+      {state.withdrawPercent >= 100 && (
+        <label className="flex items-start gap-3 p-3 bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg cursor-pointer">
+          <input
+            type="checkbox"
+            checked={state.burnAfterWithdraw}
+            onChange={(e) => setBurnAfterWithdraw(e.target.checked)}
+            className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+          />
+          <div>
+            <span className="text-sm text-white font-medium">Burn Position NFT</span>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Permanently destroy the NFT after withdrawing all liquidity. The position cannot be reopened later.
+            </p>
+          </div>
+        </label>
       )}
 
       {/* Wallet/Network/Owner Checks */}
@@ -543,7 +504,9 @@ export function ConfigureStep() {
             <TrendingDown className="w-8 h-8 mx-auto text-slate-600" />
             <p className="text-sm font-medium text-slate-400">Full Withdrawal</p>
             <p className="text-xs text-slate-500">
-              No remaining position after full withdrawal
+              {state.burnAfterWithdraw
+                ? 'Position will be fully withdrawn and the NFT will be burned'
+                : 'No remaining position after full withdrawal'}
             </p>
           </div>
         </div>
