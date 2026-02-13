@@ -6,6 +6,7 @@
  */
 
 import type { UniswapV3PositionResponse } from './typed-response.js';
+import type { SerializedCloseOrder } from '../../automation/close-orders.js';
 import { z } from 'zod';
 
 /**
@@ -23,10 +24,13 @@ export interface GetUniswapV3PositionParams {
  *
  * Returns the complete position data with all bigint fields converted to strings for JSON serialization.
  * The position state is refreshed from on-chain data before being returned.
+ * Includes active close orders (status: active | triggering) for the position.
  *
  * PnL curve data is available separately via GET /api/v1/positions/:positionId/pnl-curve.
  */
-export type GetUniswapV3PositionResponse = UniswapV3PositionResponse;
+export interface GetUniswapV3PositionResponse extends UniswapV3PositionResponse {
+  activeCloseOrders: SerializedCloseOrder[];
+}
 
 // =============================================================================
 // Zod Schemas

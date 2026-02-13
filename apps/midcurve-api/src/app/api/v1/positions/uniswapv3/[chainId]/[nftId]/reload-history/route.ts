@@ -40,7 +40,7 @@ import {
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
 import { LedgerPathParamsSchema } from '@midcurve/api-shared';
-import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
+import type { UniswapV3PositionResponse } from '@midcurve/api-shared';
 import { serializeUniswapV3Position } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUniswapV3PositionService } from '@/lib/services';
@@ -179,7 +179,7 @@ export async function POST(
       });
 
       // 6. Serialize bigints to strings for JSON
-      const serializedPosition = serializeUniswapV3Position(position) as GetUniswapV3PositionResponse;
+      const serializedPosition = serializeUniswapV3Position(position) as UniswapV3PositionResponse;
 
       const response = createSuccessResponse(serializedPosition);
 

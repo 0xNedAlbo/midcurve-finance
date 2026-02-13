@@ -13,7 +13,6 @@ import type {
   UniswapV3PoolStateResponse,
   Erc20TokenConfigResponse,
 } from './response-types.js';
-import type { SerializedCloseOrder } from '../../automation/close-orders.js';
 
 /**
  * Erc20Token as it appears in API responses.
@@ -97,9 +96,6 @@ export interface UniswapV3PositionResponse {
   // Protocol-specific (STRONGLY TYPED)
   config: UniswapV3PositionConfigResponse;
   state: UniswapV3PositionStateResponse;
-
-  // Active close orders (status: active | triggering)
-  activeCloseOrders: SerializedCloseOrder[];
 
   // Timestamps
   createdAt: string;

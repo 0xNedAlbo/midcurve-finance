@@ -29,12 +29,13 @@ import {
   CreateUniswapV3PositionParamsSchema,
   CreateUniswapV3PositionRequestSchema,
 } from '@midcurve/api-shared';
-import { serializeUniswapV3Position } from '@/lib/serializers';
+import { serializeUniswapV3Position, serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3PoolService,
+  getCloseOrderService,
 } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
@@ -135,7 +136,7 @@ export async function GET(
 
       // 3. Execute lookup and refresh within a transaction for consistency
       // This ensures all state updates succeed or fail atomically
-      const position = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         // 3a. Fast indexed lookup by positionHash
         const dbPosition = await getUniswapV3PositionService().findByPositionHash(
           user.id,
@@ -162,11 +163,18 @@ export async function GET(
           tx
         );
 
-        return refreshedPosition;
+        // 3c. Fetch active close orders for this position
+        const activeCloseOrders = await getCloseOrderService().findByPositionId(
+          dbPosition.id,
+          { status: ['active', 'triggering'] },
+          tx
+        );
+
+        return { position: refreshedPosition, activeCloseOrders };
       });
 
       // Handle position not found (outside transaction)
-      if (!position) {
+      if (!result) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.POSITION_NOT_FOUND,
           'Position not found',
@@ -180,6 +188,8 @@ export async function GET(
         });
       }
 
+      const { position, activeCloseOrders } = result;
+
       apiLog.businessOperation(apiLogger, requestId, 'refreshed', 'position', position.id, {
         chainId,
         nftId,
@@ -189,7 +199,10 @@ export async function GET(
       });
 
       // 4. Serialize bigints to strings for JSON
-      const serializedPosition = serializeUniswapV3Position(position) as GetUniswapV3PositionResponse;
+      const serializedPosition: GetUniswapV3PositionResponse = {
+        ...serializeUniswapV3Position(position),
+        activeCloseOrders: activeCloseOrders.map(serializeCloseOrder),
+      };
 
       const response = createSuccessResponse(serializedPosition);
 
