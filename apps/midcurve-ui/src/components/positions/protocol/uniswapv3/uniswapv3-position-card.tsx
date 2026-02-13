@@ -28,6 +28,7 @@ import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
 import { useRefreshPosition } from "@/hooks/positions/useRefreshPosition";
 import { useUniswapV3Position } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
+import { useUniswapV3LiveMetrics } from "@/hooks/positions/uniswapv3/useUniswapV3LiveMetrics";
 import { getChainSlugByChainId } from "@/config/chains";
 
 interface UniswapV3PositionCardProps {
@@ -75,7 +76,7 @@ interface UniswapV3PositionCardLoadedProps {
 }
 
 function UniswapV3PositionCardLoaded({
-  position,
+  position: rawPosition,
   chainId,
   nftId,
   showDeleteModal,
@@ -83,6 +84,9 @@ function UniswapV3PositionCardLoaded({
   showReloadHistoryModal,
   setShowReloadHistoryModal,
 }: UniswapV3PositionCardLoadedProps) {
+  // Patch live pool price into position data (5s polling)
+  const position = useUniswapV3LiveMetrics(rawPosition);
+
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
   const refreshMutation = useRefreshPosition();
