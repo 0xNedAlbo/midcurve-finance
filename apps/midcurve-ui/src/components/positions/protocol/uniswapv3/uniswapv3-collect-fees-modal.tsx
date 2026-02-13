@@ -1,64 +1,38 @@
+/**
+ * UniswapV3CollectFeesModal - Protocol-specific modal for collecting fees
+ *
+ * Uniswap V3 specific modal that wraps UniswapV3CollectFeesForm.
+ * Uses React Portal for proper z-index stacking.
+ */
+
 'use client';
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import type { ListPositionData } from '@midcurve/api-shared';
-import { UniswapV3CollectFeesForm } from './protocol/uniswapv3/uniswapv3-collect-fees-form';
+import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
+import { UniswapV3CollectFeesForm } from './uniswapv3-collect-fees-form';
 
-interface CollectFeesModalProps {
+interface UniswapV3CollectFeesModalProps {
   isOpen: boolean;
   onClose: () => void;
-  position: ListPositionData;
+  position: UniswapV3PositionData;
   onCollectSuccess?: () => void;
 }
 
-/**
- * Collect Fees Modal - Protocol-Agnostic Shell
- *
- * Displays a modal for collecting accumulated fees from a position.
- * Routes to protocol-specific collect fees forms based on position.protocol.
- *
- * Supported protocols:
- * - uniswapv3: Uniswap V3 collect fees form
- * - Future: orca, raydium, etc.
- */
-export function CollectFeesModal({
+export function UniswapV3CollectFeesModal({
   isOpen,
   onClose,
   position,
   onCollectSuccess,
-}: CollectFeesModalProps) {
+}: UniswapV3CollectFeesModalProps) {
   const [mounted, setMounted] = useState(false);
 
-  // Ensure component is mounted on client side for portal
   useEffect(() => {
     setMounted(true);
   }, []);
 
   if (!isOpen || !mounted) return null;
-
-  // Render protocol-specific form
-  const renderCollectFeesForm = () => {
-    switch (position.protocol) {
-      case 'uniswapv3':
-        return (
-          <UniswapV3CollectFeesForm
-            position={position}
-            onClose={onClose}
-            onCollectSuccess={onCollectSuccess}
-          />
-        );
-      default:
-        return (
-          <div className="text-center py-12">
-            <p className="text-slate-400">
-              Collect fees not supported for protocol: {position.protocol}
-            </p>
-          </div>
-        );
-    }
-  };
 
   const modalContent = (
     <>
@@ -90,7 +64,11 @@ export function CollectFeesModal({
 
           {/* Content */}
           <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-            {renderCollectFeesForm()}
+            <UniswapV3CollectFeesForm
+              position={position}
+              onClose={onClose}
+              onCollectSuccess={onCollectSuccess}
+            />
           </div>
         </div>
       </div>

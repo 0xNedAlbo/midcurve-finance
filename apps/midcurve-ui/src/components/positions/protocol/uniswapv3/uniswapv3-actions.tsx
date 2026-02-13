@@ -15,7 +15,7 @@ import { useNavigate } from "react-router-dom";
 import type { Address } from "viem";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { getChainSlugByChainId } from "@/config/chains";
-import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
+import { UniswapV3CollectFeesModal } from "./uniswapv3-collect-fees-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
 import { HedgeButton } from "@/components/positions/automation/HedgeButton";
@@ -229,7 +229,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
       </div>
 
       {/* Collect Fees Modal */}
-      <CollectFeesModal
+      <UniswapV3CollectFeesModal
         isOpen={showCollectFeesModal}
         onClose={() => setShowCollectFeesModal(false)}
         position={position}
