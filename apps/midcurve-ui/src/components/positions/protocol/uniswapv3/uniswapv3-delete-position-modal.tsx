@@ -1,19 +1,8 @@
 /**
- * DeletePositionModal - Protocol-agnostic confirmation modal for deleting positions
+ * UniswapV3DeletePositionModal - Confirmation modal for deleting a Uniswap V3 position
  *
- * Features:
- * - React Portal for proper z-index stacking
- * - Warning UI with AlertTriangle icon
- * - Protocol-specific position info display via slot component
- * - Loading state with spinner during deletion
- * - Error display for API failures
- * - Backdrop click to close
- * - All buttons disabled during deletion
- *
- * Protocol-Agnostic Design:
- * - Generic modal shell works for all protocols
- * - Protocol-specific details rendered via PositionInfoDisplay component
- * - Delete endpoint determined via getDeleteEndpoint helper
+ * Protocol-specific modal that takes flat props (no full position object needed).
+ * Uses React Portal for proper z-index stacking.
  */
 
 "use client";
@@ -21,57 +10,57 @@
 import { X, AlertTriangle, Loader2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
-import type { ListPositionData } from "@midcurve/api-shared";
 import { useDeletePosition } from "@/hooks/positions/useDeletePosition";
-import { getDeleteEndpoint } from "@/lib/position-helpers";
-import { PositionInfoDisplay } from "./position-info-display";
+import { InfoRow } from "../../info-row";
+import { formatChainName } from "@/lib/position-helpers";
 
-interface DeletePositionModalProps {
+interface UniswapV3DeletePositionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  position: ListPositionData;
   onDeleteSuccess?: () => void;
+  positionHash: string;
+  chainId: number;
+  nftId: number;
+  token0Symbol: string;
+  token1Symbol: string;
+  feeBps: number;
 }
 
-export function DeletePositionModal({
+export function UniswapV3DeletePositionModal({
   isOpen,
   onClose,
-  position,
   onDeleteSuccess,
-}: DeletePositionModalProps) {
+  positionHash,
+  chainId,
+  nftId,
+  token0Symbol,
+  token1Symbol,
+  feeBps,
+}: UniswapV3DeletePositionModalProps) {
   const [mounted, setMounted] = useState(false);
 
-  // Ensure component is mounted on client side for portal
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Delete mutation
-  const deletePosition = useDeletePosition();
+  const deletePosition = useDeletePosition(positionHash);
 
-  // Handle delete confirmation
   const handleDelete = async () => {
     try {
-      const endpoint = getDeleteEndpoint(position);
-
-      // Use mutateAsync instead of mutate to properly await the result
       await deletePosition.mutateAsync({
-        endpoint,
-        positionId: position.id,
+        endpoint: `/api/v1/positions/uniswapv3/${chainId}/${nftId}`,
       });
 
-      // Call parent callback to handle any additional logic
       onDeleteSuccess?.();
-
-      // Close modal after successful deletion
       onClose();
     } catch (error) {
-      // Error is already displayed in the modal UI via deletePosition.isError
-      console.error('Failed to delete position:', error);
+      console.error("Failed to delete position:", error);
     }
   };
 
   if (!isOpen || !mounted) return null;
+
+  const feePercentage = (feeBps / 10000).toFixed(2);
 
   const modalContent = (
     <>
@@ -105,15 +94,27 @@ export function DeletePositionModal({
 
           {/* Content */}
           <div className="p-6 space-y-4">
-            {/* Warning message */}
             <p className="text-slate-300 text-sm leading-relaxed">
               Are you sure you want to delete this position? This action cannot
               be undone and will permanently remove the position from your
               portfolio.
             </p>
 
-            {/* Protocol-specific position details */}
-            <PositionInfoDisplay position={position} />
+            {/* Position info */}
+            <div className="bg-slate-700/30 rounded-lg p-4 space-y-2">
+              <InfoRow label="NFT ID" value={`#${nftId}`} />
+              <InfoRow
+                label="Chain"
+                value={formatChainName(chainId)}
+                valueClassName="text-sm text-white"
+              />
+              <InfoRow
+                label="Token Pair"
+                value={`${token0Symbol}/${token1Symbol}`}
+                valueClassName="text-sm text-white"
+              />
+              <InfoRow label="Fee Tier" value={`${feePercentage}%`} />
+            </div>
 
             {/* Error display */}
             {deletePosition.isError && (

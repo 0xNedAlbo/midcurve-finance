@@ -1,18 +1,18 @@
 /**
  * useDeletePosition - React Query hook for deleting positions
  *
- * Protocol-agnostic delete mutation that accepts a protocol-specific endpoint.
- * Handles cache invalidation automatically on success.
+ * Uses a per-position mutation key so `useIsMutating` works natively
+ * for tracking in-flight deletions without manual cache scanning.
  *
  * Usage:
  * ```typescript
- * const deletePosition = useDeletePosition({
- *   onSuccess: () => console.log('Position deleted'),
- *   onError: (error) => console.error(error),
- * });
+ * const deletePosition = useDeletePosition(position.positionHash);
+ * deletePosition.mutate({ endpoint });
  *
- * const endpoint = getDeleteEndpoint(position);
- * deletePosition.mutate({ endpoint, positionId: position.id });
+ * // In another component — check if this position is being deleted:
+ * const isDeleting = useIsMutating({
+ *   mutationKey: deletePositionMutationKey(position.positionHash),
+ * }) > 0;
  * ```
  */
 
@@ -26,13 +26,21 @@ import { apiClient, ApiError } from '@/lib/api-client';
 
 interface DeletePositionParams {
   endpoint: string; // Protocol-specific DELETE endpoint
-  positionId: string; // For logging and tracking
 }
 
 /**
+ * Builds the mutation key for a specific position's delete operation.
+ */
+export const deletePositionMutationKey = (positionHash: string) =>
+  ['positions', 'delete', positionHash] as const;
+
+/**
  * Hook to delete a position
+ *
+ * @param positionHash - Unique position identifier (e.g. "uniswapv3/1/12345")
  */
 export function useDeletePosition(
+  positionHash: string,
   options?: Omit<
     UseMutationOptions<void, ApiError, DeletePositionParams>,
     'mutationKey' | 'mutationFn'
@@ -41,7 +49,7 @@ export function useDeletePosition(
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationKey: ['positions', 'delete'] as const,
+    mutationKey: deletePositionMutationKey(positionHash),
 
     mutationFn: async ({ endpoint }: DeletePositionParams) => {
       await apiClient.delete(endpoint);
@@ -60,31 +68,5 @@ export function useDeletePosition(
     },
 
     ...options,
-  });
-}
-
-/**
- * Hook to get loading state for a specific position deletion
- *
- * Useful for showing loading states on specific position cards.
- *
- * @param positionId - Position ID to check
- * @returns true if position is currently being deleted
- */
-export function useIsDeletingPosition(positionId: string): boolean {
-  const queryClient = useQueryClient();
-  const mutationCache = queryClient.getMutationCache();
-
-  // Check if there's an active delete mutation for this position
-  const deleteMutations = mutationCache.findAll({
-    mutationKey: ['positions', 'delete'],
-    status: 'pending',
-  });
-
-  return deleteMutations.some((mutation) => {
-    const variables = mutation.state.variables as
-      | DeletePositionParams
-      | undefined;
-    return variables?.positionId === positionId;
   });
 }

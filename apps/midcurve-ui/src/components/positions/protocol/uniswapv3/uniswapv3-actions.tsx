@@ -13,7 +13,7 @@ import { Plus, Minus, DollarSign } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useNavigate } from "react-router-dom";
 import type { Address } from "viem";
-import type { ListPositionData } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { getChainSlugByChainId } from "@/config/chains";
 import { CollectFeesModal } from "@/components/positions/collect-fees-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
@@ -26,7 +26,7 @@ import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
 
 interface UniswapV3ActionsProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
   isInRange: boolean; // Future: May be used for range-specific actions
 }
 

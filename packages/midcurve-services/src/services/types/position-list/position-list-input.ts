@@ -5,8 +5,6 @@
  * Used by PositionListService for cross-protocol position queries.
  */
 
-import type { PositionInterface } from '@midcurve/shared';
-
 /**
  * Filters for listing positions
  *
@@ -65,11 +63,12 @@ export interface PositionListFilters {
    * Field to sort results by:
    * - 'createdAt': When position was added to database
    * - 'positionOpenedAt': When position was opened on-chain
+   * - 'currentValue': Current position value in quote token
    * - 'totalApr': Total APR (fees + rewards)
    *
    * @default 'createdAt'
    */
-  sortBy?: 'createdAt' | 'positionOpenedAt' | 'totalApr';
+  sortBy?: 'createdAt' | 'positionOpenedAt' | 'currentValue' | 'totalApr';
 
   /**
    * Sort direction
@@ -80,40 +79,70 @@ export interface PositionListFilters {
 }
 
 /**
+ * Raw position row returned from Prisma select (common fields only).
+ *
+ * No pool/token joins — just the position table columns needed for
+ * sorting, filtering, and protocol dispatch.
+ *
+ * bigint fields are stored as strings in Prisma (Decimal columns).
+ * Date fields are native Date objects.
+ */
+export interface PositionListRow {
+  id: string;
+  positionHash: string;
+  protocol: string;
+  positionType: string;
+
+  // Financial (stored as string in Prisma Decimal columns)
+  currentValue: string;
+  currentCostBasis: string;
+  realizedPnl: string;
+  unrealizedPnl: string;
+  realizedCashflow: string;
+  unrealizedCashflow: string;
+  collectedFees: string;
+  unClaimedFees: string;
+  lastFeesCollectedAt: Date | null;
+  totalApr: number | null;
+
+  // Price range (stored as string in Prisma Decimal columns)
+  priceRangeLower: string;
+  priceRangeUpper: string;
+
+  // Lifecycle
+  positionOpenedAt: Date;
+  positionClosedAt: Date | null;
+  isActive: boolean;
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
  * Result object for position list queries
  *
- * Contains positions array plus metadata for pagination.
+ * Contains position rows plus metadata for pagination.
  */
 export interface PositionListResult {
   /**
-   * Array of positions matching the filter criteria
-   *
-   * Positions are returned as PositionInterface.
-   * For fully-typed positions with protocol-specific accessors, use protocol-specific services.
+   * Array of position rows matching the filter criteria.
+   * These are flat rows with common fields only — no hydrated position instances.
    */
-  positions: PositionInterface[];
+  positions: PositionListRow[];
 
   /**
    * Total count of positions matching the filter (ignoring pagination)
-   *
-   * Use this to calculate total pages:
-   * ```typescript
-   * const totalPages = Math.ceil(total / limit);
-   * ```
    */
   total: number;
 
   /**
    * Actual limit used (after validation)
-   *
-   * May differ from requested limit if validation clamped it to [1, 100].
    */
   limit: number;
 
   /**
    * Actual offset used (after validation)
-   *
-   * May differ from requested offset if validation clamped it to >= 0.
    */
   offset: number;
 }

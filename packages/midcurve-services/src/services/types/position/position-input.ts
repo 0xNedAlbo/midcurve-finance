@@ -40,8 +40,9 @@ export interface UniswapV3PositionDiscoverInput {
    * - Will be validated and normalized to EIP-55 checksum format
    * - Must match either token0 or token1 in the pool
    * - Service will use this address to determine isToken0Quote
+   * - If omitted, service falls back to QuoteTokenService preferences
    */
-  quoteTokenAddress: string;
+  quoteTokenAddress?: string;
 }
 
 // =============================================================================

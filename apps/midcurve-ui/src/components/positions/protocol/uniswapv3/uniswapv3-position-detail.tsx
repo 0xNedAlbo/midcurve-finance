@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { PositionDetailHeader } from "../../position-detail-header";
 import { PositionDetailTabs } from "../../position-detail-tabs";
 import { UniswapV3OverviewTab } from "./uniswapv3-overview-tab";
@@ -11,7 +11,7 @@ import { getChainMetadataByChainId } from "@/config/chains";
 import { getNonfungiblePositionManagerAddress } from "@/config/contracts/nonfungible-position-manager";
 
 interface UniswapV3PositionDetailProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
   onRefresh?: () => void;
   isRefreshing?: boolean;
 }

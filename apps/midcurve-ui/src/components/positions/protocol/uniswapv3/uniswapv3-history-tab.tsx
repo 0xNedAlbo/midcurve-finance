@@ -1,12 +1,12 @@
 "use client";
 
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { PnLBreakdown } from "@/components/positions/pnl-breakdown";
 import { LedgerEventTable } from "@/components/positions/ledger/ledger-event-table";
 import { useUniswapV3Ledger } from "@/hooks/positions/uniswapv3/useUniswapV3Ledger";
 
 interface UniswapV3HistoryTabProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3HistoryTab({ position }: UniswapV3HistoryTabProps) {

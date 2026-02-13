@@ -2,7 +2,8 @@
  * usePositionsList - Platform-agnostic position list hook
  *
  * Fetches paginated list of positions across all protocols.
- * Supports filtering by protocol, status, and sorting options.
+ * Returns common fields for sorting/filtering and positionHash for protocol dispatch.
+ * Does NOT return protocol-specific data — each card fetches its own detail.
  */
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
@@ -40,18 +41,10 @@ export function usePositionsList(
         searchParams.set('offset', params.offset.toString());
       }
 
-      // Include PnL curve data by default for mini curve visualization
-      // Can be overridden by explicitly passing includePnLCurve: false
-      const includePnLCurve = params?.includePnLCurve ?? true;
-      searchParams.set('includePnLCurve', includePnLCurve.toString());
-
       const url = `/api/v1/positions/list${
         searchParams.toString() ? `?${searchParams}` : ''
       }`;
 
-      // ListPositionsResponse is a PaginatedResponse which has its own structure:
-      // { success, data: T[], pagination, meta }
-      // We need to fetch the raw response, not use apiClient which unwraps .data
       const API_BASE_URL = import.meta.env.VITE_API_URL || '';
       const response = await fetch(`${API_BASE_URL}${url}`, {
         credentials: 'include',
@@ -64,7 +57,7 @@ export function usePositionsList(
 
       return response.json() as Promise<ListPositionsResponse>;
     },
-    staleTime: 30_000, // 30 seconds (positions change frequently)
+    staleTime: 30_000,
     ...options,
   });
 }

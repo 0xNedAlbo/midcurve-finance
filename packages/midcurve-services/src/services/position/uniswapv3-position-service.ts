@@ -689,16 +689,21 @@ export class UniswapV3PositionService {
             );
 
             // Determine quote token (isToken0Quote)
-            const normalizedQuote = normalizeAddress(quoteTokenAddress);
             let isToken0Quote: boolean;
-            if (normalizedQuote === pool.token0.typedConfig.address) {
-                isToken0Quote = true;
-            } else if (normalizedQuote === pool.token1.typedConfig.address) {
-                isToken0Quote = false;
+            if (quoteTokenAddress) {
+                const normalizedQuote = normalizeAddress(quoteTokenAddress);
+                if (normalizedQuote === pool.token0.typedConfig.address) {
+                    isToken0Quote = true;
+                } else if (normalizedQuote === pool.token1.typedConfig.address) {
+                    isToken0Quote = false;
+                } else {
+                    throw new Error(
+                        `Quote token ${quoteTokenAddress} is not in pool. Pool tokens: ${pool.token0.typedConfig.address}, ${pool.token1.typedConfig.address}`,
+                    );
+                }
             } else {
-                throw new Error(
-                    `Quote token ${quoteTokenAddress} is not in pool. Pool tokens: ${pool.token0.typedConfig.address}, ${pool.token1.typedConfig.address}`,
-                );
+                // Default: token0 is quote token when quoteTokenAddress not specified
+                isToken0Quote = true;
             }
 
             // f) Create position with default values

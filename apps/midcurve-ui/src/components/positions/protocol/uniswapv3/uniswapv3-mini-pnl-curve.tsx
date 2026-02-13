@@ -16,12 +16,12 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ListPositionData } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { tickToPrice } from "@midcurve/shared";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
   width?: number;
   height?: number;
   /**

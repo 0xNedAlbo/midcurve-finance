@@ -19,3 +19,6 @@ export * from './format/index.js';
 
 // Position helpers
 export * from './position-helpers.js';
+
+// Position hash parsing
+export * from './position-hash.js';

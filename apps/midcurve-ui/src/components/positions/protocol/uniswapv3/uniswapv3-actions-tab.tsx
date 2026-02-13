@@ -1,10 +1,10 @@
 "use client";
 
 import { Activity } from "lucide-react";
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 
 interface UniswapV3ActionsTabProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3ActionsTab({}: UniswapV3ActionsTabProps) {

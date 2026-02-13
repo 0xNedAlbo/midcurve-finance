@@ -17,13 +17,13 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { UniswapV3RangeStatusLine } from "./uniswapv3-range-status-line";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
 import { UniswapV3PositionSimulator } from "./uniswapv3-position-simulator";
 
 interface UniswapV3OverviewTabProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {

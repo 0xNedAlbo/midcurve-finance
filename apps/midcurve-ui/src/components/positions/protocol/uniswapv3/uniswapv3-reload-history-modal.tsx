@@ -1,19 +1,8 @@
 /**
- * ReloadHistoryModal - Protocol-agnostic confirmation modal for reloading position history
+ * UniswapV3ReloadHistoryModal - Confirmation modal for reloading a Uniswap V3 position's history
  *
- * Features:
- * - React Portal for proper z-index stacking
- * - Warning UI with RefreshCw icon
- * - Protocol-specific position info display via slot component
- * - Loading state with spinner during reload (30-60 seconds)
- * - Error display for API failures
- * - Backdrop click to close (disabled during reload)
- * - All buttons disabled during reload operation
- *
- * Protocol-Agnostic Design:
- * - Generic modal shell works for all protocols
- * - Protocol-specific details rendered via PositionInfoDisplay component
- * - Reload endpoint determined via getReloadHistoryEndpoint helper
+ * Protocol-specific modal that takes flat props (no full position object needed).
+ * Uses React Portal for proper z-index stacking.
  */
 
 "use client";
@@ -21,57 +10,57 @@
 import { X, RefreshCw, Loader2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
-import type { ListPositionData } from "@midcurve/api-shared";
 import { useReloadPositionHistory } from "@/hooks/positions/useReloadPositionHistory";
-import { getReloadHistoryEndpoint } from "@/lib/position-helpers";
-import { PositionInfoDisplay } from "./position-info-display";
+import { InfoRow } from "../../info-row";
+import { formatChainName } from "@/lib/position-helpers";
 
-interface ReloadHistoryModalProps {
+interface UniswapV3ReloadHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  position: ListPositionData;
   onReloadSuccess?: () => void;
+  positionHash: string;
+  chainId: number;
+  nftId: number;
+  token0Symbol: string;
+  token1Symbol: string;
+  feeBps: number;
 }
 
-export function ReloadHistoryModal({
+export function UniswapV3ReloadHistoryModal({
   isOpen,
   onClose,
-  position,
   onReloadSuccess,
-}: ReloadHistoryModalProps) {
+  positionHash,
+  chainId,
+  nftId,
+  token0Symbol,
+  token1Symbol,
+  feeBps,
+}: UniswapV3ReloadHistoryModalProps) {
   const [mounted, setMounted] = useState(false);
 
-  // Ensure component is mounted on client side for portal
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Reload history mutation
-  const reloadHistory = useReloadPositionHistory();
+  const reloadHistory = useReloadPositionHistory(positionHash);
 
-  // Handle reload confirmation
   const handleReload = async () => {
     try {
-      const endpoint = getReloadHistoryEndpoint(position);
-
-      // Use mutateAsync instead of mutate to properly await the result
       await reloadHistory.mutateAsync({
-        endpoint,
-        positionId: position.id,
+        endpoint: `/api/v1/positions/uniswapv3/${chainId}/${nftId}/reload-history`,
       });
 
-      // Call parent callback to handle any additional logic
       onReloadSuccess?.();
-
-      // Close modal after successful reload
       onClose();
     } catch (error) {
-      // Error is already displayed in the modal UI via reloadHistory.isError
-      console.error('Failed to reload position history:', error);
+      console.error("Failed to reload position history:", error);
     }
   };
 
   if (!isOpen || !mounted) return null;
+
+  const feePercentage = (feeBps / 10000).toFixed(2);
 
   const modalContent = (
     <>
@@ -108,16 +97,31 @@ export function ReloadHistoryModal({
             {/* Warning message */}
             <div className="space-y-2">
               <p className="text-slate-300 text-sm leading-relaxed">
-                This will completely rebuild the position&apos;s event history from the blockchain.
+                This will completely rebuild the position&apos;s event history
+                from the blockchain.
               </p>
               <p className="text-slate-400 text-xs leading-relaxed">
-                All ledger events, APR periods, and cached data will be refetched.
-                This process may take 30-60 seconds depending on the position&apos;s age.
+                All ledger events, APR periods, and cached data will be
+                refetched. This process may take 30-60 seconds depending on the
+                position&apos;s age.
               </p>
             </div>
 
-            {/* Protocol-specific position details */}
-            <PositionInfoDisplay position={position} />
+            {/* Position info */}
+            <div className="bg-slate-700/30 rounded-lg p-4 space-y-2">
+              <InfoRow label="NFT ID" value={`#${nftId}`} />
+              <InfoRow
+                label="Chain"
+                value={formatChainName(chainId)}
+                valueClassName="text-sm text-white"
+              />
+              <InfoRow
+                label="Token Pair"
+                value={`${token0Symbol}/${token1Symbol}`}
+                valueClassName="text-sm text-white"
+              />
+              <InfoRow label="Fee Tier" value={`${feePercentage}%`} />
+            </div>
 
             {/* Loading state with additional info */}
             {reloadHistory.isPending && (
@@ -135,7 +139,8 @@ export function ReloadHistoryModal({
             {/* Error display */}
             {reloadHistory.isError && (
               <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
-                {reloadHistory.error?.message || "Failed to reload position history"}
+                {reloadHistory.error?.message ||
+                  "Failed to reload position history"}
               </div>
             )}
 

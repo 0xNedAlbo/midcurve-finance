@@ -11,7 +11,7 @@ import { useState, useMemo } from "react";
 
 import { formatCompactValue } from "@/lib/fraction-format";
 import { SlidersHorizontal } from "lucide-react";
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import {
   getTokenAmountsFromLiquidity,
   calculatePositionValue,
@@ -22,7 +22,7 @@ import { TickMath } from "@uniswap/v3-sdk";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
 
 interface UniswapV3PositionSimulatorProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 interface SimulatedState {
@@ -172,27 +172,8 @@ export function UniswapV3PositionSimulator({
     const unrealizedPnL = positionValue - currentCostBasis;
     const pnlExcludingFees = realizedPnL + unrealizedPnL + collectedFees;
 
-    // Find adjusted PnL from curve data (accounts for SL/TP orders)
-    let adjustedPnlExcludingFees = pnlExcludingFees;
-    if (position.pnlCurve?.curve && position.pnlCurve.curve.length > 0) {
-      // Find the closest point in the curve to the simulated price
-      let closestPoint = position.pnlCurve.curve[0];
-      let minDiff = Math.abs(Number(BigInt(closestPoint.price) - poolPrice));
-
-      for (const point of position.pnlCurve.curve) {
-        const diff = Math.abs(Number(BigInt(point.price) - poolPrice));
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestPoint = point;
-        }
-      }
-
-      // Use adjusted PnL from curve (this accounts for SL/TP flattening)
-      // The curve's adjustedPnl is unrealized PnL with order effects
-      // We need to add realized PnL and collected fees to match our formula
-      const adjustedUnrealizedPnL = BigInt(closestPoint.adjustedPnl);
-      adjustedPnlExcludingFees = realizedPnL + adjustedUnrealizedPnL + collectedFees;
-    }
+    // Adjusted PnL equals raw PnL (order effects not available in detail endpoint)
+    const adjustedPnlExcludingFees = pnlExcludingFees;
 
     return {
       baseTokenAmount,

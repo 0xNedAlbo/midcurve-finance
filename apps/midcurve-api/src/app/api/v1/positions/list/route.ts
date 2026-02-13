@@ -3,6 +3,10 @@
  *
  * GET /api/v1/positions/list
  *
+ * Returns common position fields for sorting/filtering and positionHash for
+ * protocol dispatch. No protocol-specific data, no pool/token objects,
+ * no PnL curves. Each card fetches its own detail data.
+ *
  * Authentication: Required (session only)
  */
 
@@ -15,12 +19,11 @@ import {
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
 import { ListPositionsQuerySchema } from '@midcurve/api-shared';
-import type { UniswapV3Position } from '@midcurve/shared';
-import { serializeUniswapV3Position } from '@/lib/serializers';
+import type { ListPositionsResponse, PositionListItem } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import type { ListPositionsResponse, ListPositionData, PnLCurveResponseData, PnLCurvePointData, PnLCurveOrderData } from '@midcurve/api-shared';
-import { getPositionListService, getPnLCurveService } from '@/lib/services';
+import { getPositionListService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
+import type { PositionListRow } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,59 +33,47 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 /**
+ * Serialize a PositionListRow (from service) to a PositionListItem (for API response).
+ * Converts Date fields to ISO strings. Bigint fields are already strings from Prisma.
+ */
+function serializeListRow(row: PositionListRow): PositionListItem {
+  return {
+    positionHash: row.positionHash,
+    protocol: row.protocol,
+    positionType: row.positionType,
+    currentValue: row.currentValue,
+    currentCostBasis: row.currentCostBasis,
+    realizedPnl: row.realizedPnl,
+    unrealizedPnl: row.unrealizedPnl,
+    realizedCashflow: row.realizedCashflow,
+    unrealizedCashflow: row.unrealizedCashflow,
+    collectedFees: row.collectedFees,
+    unClaimedFees: row.unClaimedFees,
+    lastFeesCollectedAt: row.lastFeesCollectedAt?.toISOString() ?? null,
+    totalApr: row.totalApr,
+    priceRangeLower: row.priceRangeLower,
+    priceRangeUpper: row.priceRangeUpper,
+    positionOpenedAt: row.positionOpenedAt.toISOString(),
+    positionClosedAt: row.positionClosedAt?.toISOString() ?? null,
+    isActive: row.isActive,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
  * GET /api/v1/positions/list
  *
  * List user's positions across all protocols with pagination, filtering, and sorting.
- *
- * Features:
- * - Cross-protocol support (Uniswap V3, Orca, Raydium, etc.)
- * - Filter by protocol(s)
- * - Filter by position status (active/closed/all)
- * - Sorting by multiple fields
- * - Offset-based pagination
+ * Returns common fields + positionHash for protocol dispatch.
  *
  * Query parameters:
  * - protocols (optional): Comma-separated protocol list (e.g., 'uniswapv3,orca')
  * - status (optional): Filter by status ('active', 'closed', 'all') - default: 'all'
- * - sortBy (optional): Sort field ('createdAt', 'positionOpenedAt', 'currentValue', 'unrealizedPnl') - default: 'createdAt'
+ * - sortBy (optional): Sort field ('createdAt', 'positionOpenedAt', 'currentValue', 'totalApr') - default: 'createdAt'
  * - sortDirection (optional): Sort direction ('asc', 'desc') - default: 'desc'
  * - limit (optional): Results per page (1-100, default: 20)
  * - offset (optional): Pagination offset (>=0, default: 0)
- *
- * Returns: Paginated list of positions with full pool and token details
- *
- * Example response:
- * {
- *   "success": true,
- *   "data": [
- *     {
- *       "id": "uuid",
- *       "protocol": "uniswapv3",
- *       "currentValue": "1500000000",
- *       "pool": {
- *         "token0": { "symbol": "USDC", ... },
- *         "token1": { "symbol": "WETH", ... },
- *         ...
- *       },
- *       ...
- *     }
- *   ],
- *   "pagination": {
- *     "total": 150,
- *     "limit": 20,
- *     "offset": 0,
- *     "hasMore": true
- *   },
- *   "meta": {
- *     "timestamp": "2025-01-15T...",
- *     "filters": {
- *       "protocols": ["uniswapv3"],
- *       "status": "active",
- *       "sortBy": "createdAt",
- *       "sortDirection": "desc"
- *     }
- *   }
- * }
  */
 export async function GET(request: NextRequest): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
@@ -98,7 +89,6 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection: searchParams.get('sortDirection') ?? undefined,
         limit: searchParams.get('limit') ?? undefined,
         offset: searchParams.get('offset') ?? undefined,
-        includePnLCurve: searchParams.get('includePnLCurve') ?? undefined,
       };
 
       const validation = ListPositionsQuerySchema.safeParse(queryParams);
@@ -119,7 +109,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { protocols, status, sortBy, sortDirection, limit, offset, includePnLCurve } =
+      const { protocols, status, sortBy, sortDirection, limit, offset } =
         validation.data;
 
       apiLog.businessOperation(apiLogger, requestId, 'list', 'positions', user.id, {
@@ -129,10 +119,9 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection,
         limit,
         offset,
-        includePnLCurve,
       });
 
-      // 2. Query positions from service (now includes aprPeriods in DB query)
+      // 2. Query positions from service (flat rows, no joins)
       const result = await getPositionListService().list(user.id, {
         protocols,
         status,
@@ -142,74 +131,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         offset,
       });
 
-      // 3. Serialize positions for JSON response
-      // No need to fetch aprPeriods - totalApr is already calculated and stored in Position
-      // This reduces payload size by 80-95% for APR data
-
-      const serializedPositions: ListPositionData[] = [];
-
-      for (const position of result.positions) {
-        // Currently only Uniswap V3 is supported
-        // Cast to UniswapV3Position for proper serialization
-        const serializedPosition = serializeUniswapV3Position(position as UniswapV3Position);
-
-        const positionData = serializedPosition as unknown as ListPositionData;
-
-        // Generate PnL curve if requested
-        if (includePnLCurve) {
-          try {
-            const curveData = await getPnLCurveService().generate({
-              positionId: position.id,
-              numPoints: 100, // Compact curve for mini display
-              includeOrders: true,
-            });
-
-            // Serialize curve data for JSON response
-            const serializedCurve: PnLCurveResponseData = {
-              positionId: curveData.positionId,
-              tickLower: curveData.tickLower,
-              tickUpper: curveData.tickUpper,
-              liquidity: curveData.liquidity.toString(),
-              costBasis: curveData.costBasis.toString(),
-              baseToken: curveData.baseToken,
-              quoteToken: curveData.quoteToken,
-              currentPrice: curveData.currentPrice.toString(),
-              currentTick: curveData.currentTick,
-              lowerPrice: curveData.lowerPrice.toString(),
-              upperPrice: curveData.upperPrice.toString(),
-              orders: curveData.orders.map((order): PnLCurveOrderData => ({
-                type: order.type,
-                triggerPrice: order.triggerPrice.toString(),
-                triggerTick: order.triggerTick,
-                status: order.status,
-                valueAtTrigger: order.valueAtTrigger.toString(),
-              })),
-              curve: curveData.curve.map((point): PnLCurvePointData => ({
-                price: point.price.toString(),
-                positionValue: point.positionValue.toString(),
-                adjustedValue: point.adjustedValue.toString(),
-                pnl: point.pnl.toString(),
-                adjustedPnl: point.adjustedPnl.toString(),
-                pnlPercent: point.pnlPercent,
-                adjustedPnlPercent: point.adjustedPnlPercent,
-                phase: point.phase,
-                orderTriggered: point.orderTriggered,
-              })),
-            };
-
-            positionData.pnlCurve = serializedCurve;
-          } catch (curveError) {
-            // Log error but don't fail the entire request
-            apiLogger.warn(
-              { requestId, positionId: position.id, error: curveError },
-              'Failed to generate PnL curve for position'
-            );
-            // Leave pnlCurve undefined for this position
-          }
-        }
-
-        serializedPositions.push(positionData);
-      }
+      // 3. Serialize rows (Date → ISO string conversion)
+      const serializedPositions: PositionListItem[] = result.positions.map(serializeListRow);
 
       // 4. Create paginated response
       const response: ListPositionsResponse = {
@@ -238,7 +161,6 @@ export async function GET(request: NextRequest): Promise<Response> {
           limit: result.limit,
           offset: result.offset,
           hasMore: result.offset + result.limit < result.total,
-          includePnLCurve,
         },
         'Positions retrieved successfully'
       );

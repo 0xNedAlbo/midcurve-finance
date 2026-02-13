@@ -4,7 +4,7 @@
  * Protocol-specific component that shows EVM chain name and pool fee tier.
  */
 
-import type { ListPositionData } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 
 const CHAIN_NAMES: Record<number, string> = {
   1: "Ethereum",
@@ -17,7 +17,7 @@ const CHAIN_NAMES: Record<number, string> = {
 };
 
 interface UniswapV3ChainBadgeProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3ChainBadge({ position }: UniswapV3ChainBadgeProps) {

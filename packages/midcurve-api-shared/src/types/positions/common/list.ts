@@ -3,12 +3,12 @@
  *
  * Types for listing user's positions across all protocols with pagination,
  * filtering, and sorting.
+ *
+ * The list endpoint returns protocol-agnostic common fields for sorting/filtering.
+ * Protocol-specific display data is fetched by individual cards via detail endpoints.
  */
 
 import type { PaginatedResponse } from '../../common/index.js';
-import type { UniswapV3PositionResponse } from '../uniswapv3/typed-response.js';
-import type { AprPeriodData } from './apr.js';
-import type { PnLCurveResponseData } from './pnl-curve.js';
 import { z } from 'zod';
 import { PaginationParamsSchema } from '../../common/pagination.js';
 
@@ -23,12 +23,69 @@ export type PositionStatus = 'active' | 'closed' | 'all';
 export type PositionSortBy =
   | 'createdAt'
   | 'positionOpenedAt'
+  | 'currentValue'
   | 'totalApr';
 
 /**
  * Sort direction options
  */
 export type SortDirection = 'asc' | 'desc';
+
+// =============================================================================
+// List Item Type
+// =============================================================================
+
+/**
+ * Common position fields returned by the list endpoint.
+ *
+ * These fields are protocol-agnostic and used for:
+ * - Sorting (by value, APR, age, etc.)
+ * - Filtering (by status, chain via positionHash, etc.)
+ * - Protocol dispatch (parse positionHash to determine card type)
+ *
+ * NOT for display purposes — each card fetches its own detail data.
+ *
+ * All bigint fields are serialized as strings for JSON compatibility.
+ * All Date fields are serialized as ISO 8601 strings.
+ */
+export interface PositionListItem {
+  // Identity
+  /** Position hash: "{protocol}/{...protocol-specific-fields}" e.g. "uniswapv3/1/12345" */
+  positionHash: string;
+  /** Protocol identifier e.g. "uniswapv3" */
+  protocol: string;
+  /** Position type e.g. "CL_TICKS" */
+  positionType: string;
+
+  // Financial (bigint as string) — for sorting/filtering by value
+  currentValue: string;
+  currentCostBasis: string;
+  realizedPnl: string;
+  unrealizedPnl: string;
+  realizedCashflow: string;
+  unrealizedCashflow: string;
+  collectedFees: string;
+  unClaimedFees: string;
+  lastFeesCollectedAt: string | null;
+  totalApr: number | null;
+
+  // Price range (bigint as string)
+  priceRangeLower: string;
+  priceRangeUpper: string;
+
+  // Lifecycle — for sorting/filtering by age, status
+  positionOpenedAt: string;
+  positionClosedAt: string | null;
+  isActive: boolean;
+
+  // Timestamps
+  createdAt: string;
+  updatedAt: string;
+}
+
+// =============================================================================
+// Request / Response Types
+// =============================================================================
 
 /**
  * GET /api/v1/positions/list - Query parameters
@@ -76,47 +133,12 @@ export interface ListPositionsParams {
    * @default 0
    */
   offset?: number;
-
-  /**
-   * Include PnL curve data in response
-   * When true, generates PnL curve with order effects for each position
-   * @default false (opt-in since curve generation is expensive)
-   */
-  includePnLCurve?: boolean;
 }
-
-/**
- * Position data for API response
- *
- * Currently only supports UniswapV3. When additional protocols are added,
- * this should become a discriminated union:
- * type ListPositionData = UniswapV3PositionResponse | OrcaPositionResponse;
- *
- * All fields are JSON-safe:
- * - bigint fields converted to strings
- * - Date fields converted to ISO 8601 strings
- * - Fully nested pool and token objects with typed config/state
- */
-export type ListPositionData = UniswapV3PositionResponse & {
-  /**
-   * APR periods for the position (sorted descending by startTimestamp)
-   * Used for accurate APR calculation in UI components
-   * Optional - may be undefined for positions without historical data
-   */
-  aprPeriods?: AprPeriodData[];
-
-  /**
-   * PnL curve data with order effects (SL/TP)
-   * Included when `includePnLCurve=true` in request
-   * Contains curve points with adjusted values considering automation orders
-   */
-  pnlCurve?: PnLCurveResponseData;
-};
 
 /**
  * GET /api/v1/positions/list - Response
  */
-export type ListPositionsResponse = PaginatedResponse<ListPositionData> & {
+export type ListPositionsResponse = PaginatedResponse<PositionListItem> & {
   meta: {
     timestamp: string;
     filters: {
@@ -143,6 +165,7 @@ export const PositionStatusSchema = z.enum(['active', 'closed', 'all']);
 export const PositionSortBySchema = z.enum([
   'createdAt',
   'positionOpenedAt',
+  'currentValue',
   'totalApr',
 ]);
 
@@ -176,7 +199,7 @@ export const ListPositionsQuerySchema = PaginationParamsSchema.extend({
     .default('createdAt')
     .transform(
       (val) =>
-        val as 'createdAt' | 'positionOpenedAt' | 'currentValue' | 'unrealizedPnl'
+        val as 'createdAt' | 'positionOpenedAt' | 'currentValue' | 'totalApr'
     )
     .pipe(PositionSortBySchema),
 
@@ -186,15 +209,27 @@ export const ListPositionsQuerySchema = PaginationParamsSchema.extend({
     .default('desc')
     .transform((val) => val as 'asc' | 'desc')
     .pipe(SortDirectionSchema),
-
-  includePnLCurve: z
-    .string()
-    .optional()
-    .default('false')
-    .transform((val) => val === 'true'),
 });
 
 /**
  * Inferred type from schema
  */
 export type ListPositionsQuery = z.infer<typeof ListPositionsQuerySchema>;
+
+// =============================================================================
+// Deprecated Types (to be removed after UI migration to protocol-specific cards)
+// =============================================================================
+
+import type { UniswapV3PositionResponse } from '../uniswapv3/typed-response.js';
+import type { AprPeriodData } from './apr.js';
+import type { PnLCurveResponseData } from './pnl-curve.js';
+
+/**
+ * @deprecated Use `PositionListItem` for list data and `UniswapV3PositionResponse`
+ * for card display data. This type will be removed once all UI components
+ * migrate to protocol-specific detail endpoints.
+ */
+export type ListPositionData = UniswapV3PositionResponse & {
+  aprPeriods?: AprPeriodData[];
+  pnlCurve?: PnLCurveResponseData;
+};

@@ -1,21 +1,11 @@
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { RotateCcw, ArrowDownAZ, ArrowUpAZ } from "lucide-react";
-import { PositionCard } from "./position-card";
+import { parsePositionHash } from "@midcurve/shared";
+import { UniswapV3PositionCard } from "./protocol/uniswapv3/uniswapv3-position-card";
 import { EmptyStateActions } from "./empty-state-actions";
 import { usePositionsList } from "@/hooks/positions/usePositionsList";
 import type { ListPositionsParams } from "@midcurve/api-shared";
-
-// Chain ID to name mapping for client-side filtering
-const CHAIN_ID_TO_NAME: Record<number, string> = {
-  1: "ethereum",
-  42161: "arbitrum",
-  8453: "base",
-};
-
-function getChainName(chainId: number): string {
-  return CHAIN_ID_TO_NAME[chainId] || "unknown";
-}
 
 interface PositionListProps {
   className?: string;
@@ -23,8 +13,8 @@ interface PositionListProps {
 
 // Valid filter values for validation
 const VALID_STATUS_VALUES = ["all", "active", "closed"] as const;
-const VALID_CHAIN_VALUES = ["all", "ethereum", "arbitrum", "base"] as const;
-const VALID_SORT_VALUES = ["positionOpenedAt", "totalApr"] as const;
+const VALID_PROTOCOL_VALUES = ["all", "uniswapv3"] as const;
+const VALID_SORT_VALUES = ["positionOpenedAt", "totalApr", "currentValue"] as const;
 
 export function PositionList({ className }: PositionListProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -35,10 +25,10 @@ export function PositionList({ className }: PositionListProps) {
     ? statusParam
     : "active") as "all" | "active" | "closed";
 
-  const chainParam = searchParams.get("chain");
-  const filterChain = (VALID_CHAIN_VALUES.includes(chainParam as any)
-    ? chainParam
-    : "all");
+  const protocolParam = searchParams.get("protocol");
+  const filterProtocol = (VALID_PROTOCOL_VALUES.includes(protocolParam as any)
+    ? protocolParam
+    : "all") as typeof VALID_PROTOCOL_VALUES[number];
 
   const sortParam = searchParams.get("sortBy");
   const sortBy = (VALID_SORT_VALUES.includes(sortParam as any)
@@ -58,53 +48,32 @@ export function PositionList({ className }: PositionListProps) {
   const queryParams = useMemo<ListPositionsParams>(
     () => ({
       status: filterStatus,
+      protocols: filterProtocol === "all" ? undefined : [filterProtocol],
       sortBy,
       sortDirection,
       limit,
       offset,
     }),
-    [filterStatus, sortBy, sortDirection, offset]
+    [filterStatus, filterProtocol, sortBy, sortDirection, offset]
   );
 
-  // Fetch positions from API
+  // Fetch positions from API (returns common fields + positionHash)
   const { data, isLoading, error, refetch } = usePositionsList(queryParams);
 
-  // Client-side chain filtering (API doesn't support chain filter)
-  const filteredPositions = useMemo(() => {
+  // Parse and validate position hashes
+  const positions = useMemo(() => {
     if (!data?.data) return [];
-
-    // First, filter out any undefined/null positions (defensive)
-    const invalidPositions = data.data.filter((position) => position == null || position.id == null);
-    if (invalidPositions.length > 0) {
-      console.warn(`[PositionList] Found ${invalidPositions.length} invalid positions in API response:`);
-      invalidPositions.forEach((pos, idx) => {
-        console.warn(`  Invalid position ${idx}:`, pos);
-        if (pos) {
-          console.warn(`    - has id: ${pos.id != null}`);
-          console.warn(`    - has config: ${pos.config != null}`);
-          console.warn(`    - has pool: ${pos.pool != null}`);
-        }
-      });
-      console.warn('[PositionList] Total positions count:', data.data.length);
-      console.warn('[PositionList] Full API data.data array:', data.data);
-    }
-
-    const validPositions = data.data.filter((position) => position != null && position.id != null);
-
-    if (filterChain === "all") {
-      return validPositions;
-    }
-
-    return validPositions.filter((position) => {
-      // Extract chainId from position config (protocol-specific)
-      if (position.protocol === "uniswapv3") {
-        const config = position.config as { chainId: number };
-        const chainName = getChainName(config.chainId);
-        return chainName === filterChain;
+    return data.data.filter((item) => {
+      if (!item?.positionHash) return false;
+      try {
+        parsePositionHash(item.positionHash);
+        return true;
+      } catch {
+        console.warn(`[PositionList] Skipping invalid positionHash: "${item.positionHash}"`);
+        return false;
       }
-      return false;
     });
-  }, [data, filterChain]);
+  }, [data]);
 
   // Pagination info
   const pagination = data?.pagination;
@@ -114,63 +83,59 @@ export function PositionList({ className }: PositionListProps) {
   // Update URL with new filter parameters
   const updateUrl = (updates: {
     status?: string;
-    chain?: string;
+    protocol?: string;
     sortBy?: string;
     sortDirection?: "asc" | "desc";
     offset?: number;
   }) => {
     const params = new URLSearchParams(searchParams.toString());
 
-    // Apply updates
     if (updates.status !== undefined) {
       params.set("status", updates.status);
-      params.set("offset", "0"); // Reset pagination on filter change
+      params.set("offset", "0");
     }
-    if (updates.chain !== undefined) {
-      params.set("chain", updates.chain);
-      // No offset reset for client-side filter
+    if (updates.protocol !== undefined) {
+      params.set("protocol", updates.protocol);
+      params.set("offset", "0");
     }
     if (updates.sortBy !== undefined) {
       params.set("sortBy", updates.sortBy);
-      params.set("offset", "0"); // Reset pagination on filter change
+      params.set("offset", "0");
     }
     if (updates.sortDirection !== undefined) {
       params.set("sortDirection", updates.sortDirection);
-      params.set("offset", "0"); // Reset pagination on sort direction change
+      params.set("offset", "0");
     }
     if (updates.offset !== undefined) {
       params.set("offset", String(updates.offset));
     }
 
-    // Update URL params (React Router handles this without page reload)
+    // Clean up stale chain param if present from old URLs
+    params.delete("chain");
+
     setSearchParams(params);
   };
 
-  // Handle filter changes
   const handleFilterChange = (filter: {
     status?: string;
-    chain?: string;
+    protocol?: string;
     sortBy?: string;
   }) => {
     updateUrl(filter);
   };
 
-  // Toggle sort direction
   const toggleSortDirection = () => {
     const newDirection = sortDirection === "desc" ? "asc" : "desc";
     updateUrl({ sortDirection: newDirection });
   };
 
-  // Load more handler
   const handleLoadMore = () => {
     if (!isLoading && hasMore) {
       updateUrl({ offset: offset + limit });
     }
   };
 
-  // Placeholder discovery handler
   const handleDiscoverNewPositions = () => {
-    console.log("Position discovery - functionality not implemented yet");
     refetch();
   };
 
@@ -183,7 +148,7 @@ export function PositionList({ className }: PositionListProps) {
           value={filterStatus}
           onChange={(e) =>
             handleFilterChange({
-              status: e.target.value as "active" | "closed" | "archived",
+              status: e.target.value as "active" | "closed" | "all",
             })
           }
           className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
@@ -193,16 +158,14 @@ export function PositionList({ className }: PositionListProps) {
           <option value="closed">Closed</option>
         </select>
 
-        {/* Chain Filter */}
+        {/* Protocol Filter */}
         <select
-          value={filterChain ?? undefined}
-          onChange={(e) => handleFilterChange({ chain: e.target.value })}
+          value={filterProtocol}
+          onChange={(e) => handleFilterChange({ protocol: e.target.value })}
           className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
         >
-          <option value="all">All Chains</option>
-          <option value="ethereum">Ethereum</option>
-          <option value="arbitrum">Arbitrum</option>
-          <option value="base">Base</option>
+          <option value="all">All Protocols</option>
+          <option value="uniswapv3">Uniswap V3</option>
         </select>
 
         {/* Sort By and Direction */}
@@ -214,9 +177,9 @@ export function PositionList({ className }: PositionListProps) {
           >
             <option value="positionOpenedAt">Sort by: Position Age</option>
             <option value="totalApr">Sort by: APR</option>
+            <option value="currentValue">Sort by: Position Value</option>
           </select>
 
-          {/* Sort Direction Toggle */}
           <button
             onClick={toggleSortDirection}
             className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 transition-colors cursor-pointer"
@@ -230,7 +193,7 @@ export function PositionList({ className }: PositionListProps) {
           </button>
         </div>
 
-        {/* Refresh Button - Only visible when "active" filter is selected */}
+        {/* Refresh Button */}
         {filterStatus === "active" && (
           <button
             onClick={handleDiscoverNewPositions}
@@ -262,34 +225,44 @@ export function PositionList({ className }: PositionListProps) {
       )}
 
       {/* Loading State (Initial) */}
-      {!error && isLoading && filteredPositions.length === 0 && (
+      {!error && isLoading && positions.length === 0 && (
         <div className="text-center py-8">
           <p className="text-slate-400">Loading positions...</p>
         </div>
       )}
 
       {/* Empty State */}
-      {!error && !isLoading && filteredPositions.length === 0 && (
+      {!error && !isLoading && positions.length === 0 && (
         <EmptyStateActions
-          onImportSuccess={async (position) => {
-            console.log("Position imported:", position);
-            // Refetch positions to show the newly imported position
+          onImportSuccess={async () => {
             await refetch();
           }}
         />
       )}
 
       {/* Positions Grid */}
-      {!error && filteredPositions.length > 0 && (
+      {!error && positions.length > 0 && (
         <>
           <div className="grid grid-cols-1 gap-4">
-            {filteredPositions.map((position, index) => (
-              <PositionCard
-                key={position.id}
-                initialData={position}
-                listIndex={index}
-              />
-            ))}
+            {positions.map((item) => {
+              try {
+                const parsed = parsePositionHash(item.positionHash);
+                switch (parsed.protocol) {
+                  case "uniswapv3":
+                    return (
+                      <UniswapV3PositionCard
+                        key={item.positionHash}
+                        chainId={parsed.chainId}
+                        nftId={parsed.nftId}
+                      />
+                    );
+                  default:
+                    return null;
+                }
+              } catch {
+                return null;
+              }
+            })}
           </div>
 
           {/* Load More Button */}
@@ -306,7 +279,7 @@ export function PositionList({ className }: PositionListProps) {
                     Loading more...
                   </>
                 ) : (
-                  `Load More (${total - filteredPositions.length} remaining)`
+                  `Load More (${total - positions.length} remaining)`
                 )}
               </button>
             </div>
@@ -314,7 +287,7 @@ export function PositionList({ className }: PositionListProps) {
 
           {/* Pagination Info */}
           <div className="text-center mt-4 text-sm text-slate-400">
-            Showing {filteredPositions.length} of {total} positions
+            Showing {positions.length} of {total} positions
           </div>
         </>
       )}

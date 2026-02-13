@@ -132,7 +132,6 @@ export {
   ROUTING_PATTERNS,
   DLQ_MESSAGE_TTL_MS,
   // Functions - Position routing keys
-  parsePositionHash,
   buildPositionRoutingKey,
   parsePositionRoutingKey,
   // Functions - Order routing keys

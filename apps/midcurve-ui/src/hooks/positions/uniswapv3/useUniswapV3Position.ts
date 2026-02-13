@@ -25,6 +25,14 @@ import { queryKeys } from '@/lib/query-keys';
 import { apiClientFn } from '@/lib/api-client';
 import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
 
+/**
+ * UI-specific type alias for Uniswap V3 position data.
+ *
+ * Use this instead of `GetUniswapV3PositionResponse` or `ListPositionData`
+ * when typing component props that receive position data.
+ */
+export type UniswapV3PositionData = GetUniswapV3PositionResponse;
+
 export function useUniswapV3Position(
   chainId: number,
   nftId: string,

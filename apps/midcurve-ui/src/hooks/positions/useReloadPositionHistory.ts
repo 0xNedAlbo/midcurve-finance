@@ -5,15 +5,18 @@
  * This is a destructive operation that deletes all existing ledger events,
  * APR periods, and sync state, then refetches everything from scratch.
  *
+ * Uses a per-position mutation key so `useIsMutating` works natively
+ * for tracking in-flight reloads without manual cache scanning.
+ *
  * Usage:
  * ```typescript
- * const reloadHistory = useReloadPositionHistory({
- *   onSuccess: (position) => console.log('History reloaded', position),
- *   onError: (error) => console.error(error),
- * });
+ * const reloadHistory = useReloadPositionHistory(position.positionHash);
+ * reloadHistory.mutate({ endpoint });
  *
- * const endpoint = `/api/v1/positions/uniswapv3/${chainId}/${nftId}/reload-history`;
- * reloadHistory.mutate({ endpoint, positionId: position.id });
+ * // In another component — check if this position is reloading:
+ * const isReloading = useIsMutating({
+ *   mutationKey: reloadPositionHistoryMutationKey(position.positionHash),
+ * }) > 0;
  * ```
  */
 
@@ -29,17 +32,25 @@ import type { BigIntToString } from '@midcurve/api-shared';
 
 interface ReloadPositionHistoryParams {
   endpoint: string; // Protocol-specific reload-history endpoint
-  positionId: string; // For tracking and cache updates
 }
 
 type SerializedPosition = BigIntToString<UniswapV3Position>;
 
 /**
+ * Builds the mutation key for a specific position's reload-history operation.
+ */
+export const reloadPositionHistoryMutationKey = (positionHash: string) =>
+  ['positions', 'reload-history', positionHash] as const;
+
+/**
  * Hook to reload a position's entire history from the blockchain
+ *
+ * @param positionHash - Unique position identifier (e.g. "uniswapv3/1/12345")
  *
  * Returns the refreshed position with all recalculated metrics.
  */
 export function useReloadPositionHistory(
+  positionHash: string,
   options?: Omit<
     UseMutationOptions<SerializedPosition, ApiError, ReloadPositionHistoryParams>,
     'mutationKey' | 'mutationFn'
@@ -48,7 +59,7 @@ export function useReloadPositionHistory(
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationKey: ['positions', 'reload-history'] as const,
+    mutationKey: reloadPositionHistoryMutationKey(positionHash),
 
     mutationFn: async ({ endpoint }: ReloadPositionHistoryParams) => {
       const result = await apiClient.post<SerializedPosition>(endpoint, {});
@@ -73,31 +84,5 @@ export function useReloadPositionHistory(
     },
 
     ...options,
-  });
-}
-
-/**
- * Hook to get loading state for a specific position history reload
- *
- * Useful for showing loading states on specific position cards.
- *
- * @param positionId - Position ID to check
- * @returns true if position history is currently being reloaded
- */
-export function useIsReloadingPositionHistory(positionId: string): boolean {
-  const queryClient = useQueryClient();
-  const mutationCache = queryClient.getMutationCache();
-
-  // Check if there's an active reload-history mutation for this position
-  const reloadMutations = mutationCache.findAll({
-    mutationKey: ['positions', 'reload-history'],
-    status: 'pending',
-  });
-
-  return reloadMutations.some((mutation) => {
-    const variables = mutation.state.variables as
-      | ReloadPositionHistoryParams
-      | undefined;
-    return variables?.positionId === positionId;
   });
 }

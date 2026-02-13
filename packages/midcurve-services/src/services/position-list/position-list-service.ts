@@ -2,27 +2,53 @@
  * Position List Service
  *
  * Lightweight service for listing positions across all protocols.
- * Returns positions with config/state as unknown (no protocol-specific parsing).
+ * Returns flat position rows with common fields only (no pool/token joins).
  *
  * Use this for:
- * - List views showing multiple positions
+ * - List views showing multiple positions (sorting, filtering, pagination)
  * - Cross-protocol position queries
- * - Performance-sensitive queries (no parsing overhead)
+ * - Protocol dispatch (positionHash → protocol-specific cards)
  *
- * For fully-typed positions with parsed config/state, use protocol-specific
- * services (e.g., UniswapV3PositionService).
+ * For fully-typed positions with protocol-specific data, use protocol-specific
+ * services (e.g., UniswapV3PositionService) via detail endpoints.
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { PositionInterface, PositionRow } from '@midcurve/shared';
-import type { Erc20TokenRow, UniswapV3PoolRow } from '@midcurve/shared';
-import { PositionFactory, PoolFactory, Erc20Token, UniswapV3Pool } from '@midcurve/shared';
 import type {
   PositionListFilters,
+  PositionListRow,
   PositionListResult,
 } from '../types/position-list/position-list-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
+
+/**
+ * Prisma select clause for common position fields.
+ * No joins — just position table columns needed for list sorting/filtering.
+ */
+const POSITION_LIST_SELECT = {
+  id: true,
+  positionHash: true,
+  protocol: true,
+  positionType: true,
+  currentValue: true,
+  currentCostBasis: true,
+  realizedPnl: true,
+  unrealizedPnl: true,
+  realizedCashflow: true,
+  unrealizedCashflow: true,
+  collectedFees: true,
+  unClaimedFees: true,
+  lastFeesCollectedAt: true,
+  totalApr: true,
+  priceRangeLower: true,
+  priceRangeUpper: true,
+  positionOpenedAt: true,
+  positionClosedAt: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 /**
  * Dependencies for PositionListService
@@ -40,53 +66,30 @@ export interface PositionListServiceDependencies {
  * Position List Service
  *
  * Provides lightweight position listing with filtering, sorting, and pagination.
+ * Returns flat rows with common fields — no protocol-specific hydration.
  */
 export class PositionListService {
   private readonly _prisma: PrismaClient;
   private readonly logger: ServiceLogger;
 
-  /**
-   * Creates a new PositionListService instance
-   *
-   * @param dependencies - Optional dependencies object
-   * @param dependencies.prisma - Prisma client instance (creates default if not provided)
-   */
   constructor(dependencies: PositionListServiceDependencies = {}) {
     this._prisma = dependencies.prisma ?? new PrismaClient();
     this.logger = createServiceLogger('PositionListService');
   }
 
-  /**
-   * Get the Prisma client instance
-   */
   protected get prisma(): PrismaClient {
     return this._prisma;
   }
 
   /**
-   * List positions for a user with filtering, sorting, and pagination
+   * List positions for a user with filtering, sorting, and pagination.
    *
-   * Returns PositionInterface instances using the factory pattern.
-   * For fully-typed positions with protocol-specific accessors, use protocol-specific
-   * services (e.g., UniswapV3PositionService).
+   * Returns flat position rows with common fields only.
+   * No pool/token joins, no protocol-specific hydration.
    *
    * @param userId - User ID who owns the positions
    * @param filters - Optional filtering, sorting, and pagination options
-   * @returns Result with positions array, total count, and pagination metadata
-   *
-   * @example
-   * ```typescript
-   * const service = new PositionListService({ prisma });
-   *
-   * // Get first page of active positions
-   * const result = await service.list(userId, {
-   *   status: 'active',
-   *   limit: 20,
-   *   offset: 0,
-   * });
-   *
-   * console.log(`Showing ${result.positions.length} of ${result.total} positions`);
-   * ```
+   * @returns Result with position rows, total count, and pagination metadata
    */
   async list(
     userId: string,
@@ -115,24 +118,20 @@ export class PositionListService {
       // Build where clause
       const where: any = {
         userId,
+        // Only include positions with a valid positionHash
+        positionHash: { not: null },
       };
 
-      // Add status filter
       if (status === 'active') {
         where.isActive = true;
       } else if (status === 'closed') {
         where.isActive = false;
       }
-      // For 'all', don't add isActive filter
 
-      // Add protocol filter
       if (protocols && protocols.length > 0) {
-        where.protocol = {
-          in: protocols,
-        };
+        where.protocol = { in: protocols };
       }
 
-      // Validate and clamp pagination parameters
       const validatedLimit = Math.min(Math.max(limit, 1), 100);
       const validatedOffset = Math.max(offset, 0);
 
@@ -144,18 +143,10 @@ export class PositionListService {
         sortDirection,
       });
 
-      // Execute queries in parallel
       const [results, total] = await Promise.all([
         this.prisma.position.findMany({
           where,
-          include: {
-            pool: {
-              include: {
-                token0: true,
-                token1: true,
-              },
-            },
-          },
+          select: POSITION_LIST_SELECT,
           orderBy: {
             [sortBy]: sortDirection,
           },
@@ -165,8 +156,11 @@ export class PositionListService {
         this.prisma.position.count({ where }),
       ]);
 
-      // Map database results to PositionInterface using factory
-      const positions = results.map((result) => this.mapToPosition(result as any));
+      // Cast positionHash from string | null to string (filtered by where clause)
+      const positions: PositionListRow[] = results.map((row) => ({
+        ...row,
+        positionHash: row.positionHash as string,
+      }));
 
       this.logger.info(
         {
@@ -199,103 +193,5 @@ export class PositionListService {
       });
       throw error;
     }
-  }
-
-  /**
-   * Map database result to PositionInterface using factory
-   *
-   * Creates token and pool instances, then uses PositionFactory
-   * to create the protocol-specific position class.
-   *
-   * @param dbResult - Raw database result from Prisma
-   * @returns PositionInterface instance
-   */
-  private mapToPosition(dbResult: {
-    id: string;
-    positionHash: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    protocol: string;
-    positionType: string;
-    userId: string;
-    currentValue: string;
-    currentCostBasis: string;
-    realizedPnl: string;
-    unrealizedPnl: string;
-    realizedCashflow: string;
-    unrealizedCashflow: string;
-    collectedFees: string;
-    unClaimedFees: string;
-    lastFeesCollectedAt: Date;
-    totalApr: number | null;
-    priceRangeLower: string;
-    priceRangeUpper: string;
-    poolId: string;
-    isToken0Quote: boolean;
-    positionOpenedAt: Date;
-    positionClosedAt: Date | null;
-    isActive: boolean;
-    config: Record<string, unknown>;
-    state: Record<string, unknown>;
-    pool: {
-      id: string;
-      protocol: string;
-      poolType: string;
-      feeBps: number;
-      config: Record<string, unknown>;
-      state: Record<string, unknown>;
-      createdAt: Date;
-      updatedAt: Date;
-      token0: Erc20TokenRow;
-      token1: Erc20TokenRow;
-    };
-  }): PositionInterface {
-    // Create token instances
-    const token0 = Erc20Token.fromDB(dbResult.pool.token0);
-    const token1 = Erc20Token.fromDB(dbResult.pool.token1);
-
-    // Create pool instance
-    const pool = PoolFactory.fromDB(
-      dbResult.pool as unknown as UniswapV3PoolRow,
-      token0,
-      token1
-    ) as UniswapV3Pool;
-
-    // Convert string bigint fields to native bigint
-    const positionRow: PositionRow = {
-      id: dbResult.id,
-      positionHash: dbResult.positionHash ?? '',
-      userId: dbResult.userId,
-      protocol: dbResult.protocol,
-      positionType: dbResult.positionType,
-      poolId: dbResult.poolId,
-      isToken0Quote: dbResult.isToken0Quote,
-      currentValue: BigInt(dbResult.currentValue),
-      currentCostBasis: BigInt(dbResult.currentCostBasis),
-      realizedPnl: BigInt(dbResult.realizedPnl),
-      unrealizedPnl: BigInt(dbResult.unrealizedPnl),
-      realizedCashflow: BigInt(dbResult.realizedCashflow),
-      unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
-      collectedFees: BigInt(dbResult.collectedFees),
-      unClaimedFees: BigInt(dbResult.unClaimedFees),
-      lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
-      totalApr: dbResult.totalApr,
-      priceRangeLower: BigInt(dbResult.priceRangeLower),
-      priceRangeUpper: BigInt(dbResult.priceRangeUpper),
-      positionOpenedAt: dbResult.positionOpenedAt,
-      positionClosedAt: dbResult.positionClosedAt,
-      isActive: dbResult.isActive,
-      config: dbResult.config,
-      state: dbResult.state,
-      createdAt: dbResult.createdAt,
-      updatedAt: dbResult.updatedAt,
-      pool: dbResult.pool as unknown as UniswapV3PoolRow & {
-        token0: Erc20TokenRow;
-        token1: Erc20TokenRow;
-      },
-    };
-
-    // Use factory to create protocol-specific position class
-    return PositionFactory.fromDB(positionRow, pool);
   }
 }

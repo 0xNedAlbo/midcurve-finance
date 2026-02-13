@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { Copy } from "lucide-react";
-import type { ListPositionData } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 
 // Chain ID to block explorer mapping
 const BLOCK_EXPLORERS: Record<number, { name: string; url: string }> = {
@@ -24,7 +24,7 @@ const BLOCK_EXPLORERS: Record<number, { name: string; url: string }> = {
 const NFTPM_ADDRESS = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
 
 interface UniswapV3IdentifierProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3Identifier({ position }: UniswapV3IdentifierProps) {

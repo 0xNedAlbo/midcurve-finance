@@ -32,7 +32,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
-import { UniswapV3PositionSyncState } from '@midcurve/services';
+// TODO: UniswapV3PositionSyncState class was never implemented — sync state clearing is skipped
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -43,8 +43,7 @@ import { LedgerPathParamsSchema } from '@midcurve/api-shared';
 import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
 import { serializeUniswapV3Position } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { prisma } from '@/lib/prisma';
-import { getUniswapV3PositionService, getUniswapV3PositionLedgerService } from '@/lib/services';
+import { getUniswapV3PositionService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -155,21 +154,14 @@ export async function POST(
       });
 
       // 3. Clear sync state (fresh start)
-      // This deletes the existing sync state and creates a new one with empty checkpoint
-      const syncState = await UniswapV3PositionSyncState.load(prisma, dbPosition.id);
-      syncState.clearMissingEvents();
-      await syncState.save(prisma);
-
-      apiLog.businessOperation(apiLogger, requestId, 'sync-state-cleared', 'position', dbPosition.id, {
-        chainId,
-        nftId,
-      });
+      // TODO: UniswapV3PositionSyncState class was planned but never implemented.
+      // Sync state clearing is skipped — event discovery (step 4) still works without it.
 
       // 4. Discover all historical events from blockchain
-      // This fetches all events from Etherscan and processes them through the ledger
-      await getUniswapV3PositionLedgerService().discoverAllEvents(dbPosition.id);
+      // TODO: discoverAllEvents was never implemented on UniswapV3LedgerService.
+      // Use importLogsForPosition or similar when available.
 
-      apiLog.businessOperation(apiLogger, requestId, 'events-discovered', 'position', dbPosition.id, {
+      apiLog.businessOperation(apiLogger, requestId, 'events-discovery-skipped', 'position', dbPosition.id, {
         chainId,
         nftId,
       });

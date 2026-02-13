@@ -6,7 +6,7 @@ import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { normalizeAddress } from '@midcurve/shared';
 import { formatCompactValue } from '@/lib/fraction-format';
-import type { ListPositionData } from '@midcurve/api-shared';
+import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useCollectFees } from '@/hooks/positions/uniswapv3/useCollectFees';
@@ -16,7 +16,7 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
 
 interface UniswapV3CollectFeesFormProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
   onClose: () => void;
   onCollectSuccess?: () => void;
 }

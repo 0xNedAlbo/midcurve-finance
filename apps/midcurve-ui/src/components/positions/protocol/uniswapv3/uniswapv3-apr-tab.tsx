@@ -1,12 +1,12 @@
 "use client";
 
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { AprBreakdown } from "@/components/positions/apr-breakdown";
 import { AprPeriodsTable } from "@/components/positions/apr-periods-table";
 import { useUniswapV3AprPeriods } from "@/hooks/positions/uniswapv3/useUniswapV3AprPeriods";
 
 interface UniswapV3AprTabProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3AprTab({ position }: UniswapV3AprTabProps) {

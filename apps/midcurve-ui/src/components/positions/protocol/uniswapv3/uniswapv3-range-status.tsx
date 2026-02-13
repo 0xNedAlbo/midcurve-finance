@@ -4,10 +4,10 @@
  * Protocol-specific component that calculates range status from ticks.
  */
 
-import type { ListPositionData } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 
 interface UniswapV3RangeStatusProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3RangeStatus({ position }: UniswapV3RangeStatusProps) {

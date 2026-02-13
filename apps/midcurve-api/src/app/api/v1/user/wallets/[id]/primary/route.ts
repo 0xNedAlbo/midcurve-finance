@@ -66,7 +66,6 @@ export async function PATCH(
         const response = createSuccessResponse({
           id: wallet.id,
           address: wallet.address,
-          chainId: wallet.chainId,
           isPrimary: wallet.isPrimary,
           createdAt: wallet.createdAt.toISOString(),
         });

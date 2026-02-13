@@ -1,6 +1,6 @@
 "use client";
 
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { tickToSqrtRatioX96 } from "@midcurve/shared";
 import { CopyableField } from "@/components/ui/copyable-field";
 import { DisplayField } from "@/components/ui/display-field";
@@ -8,7 +8,7 @@ import { getChainMetadataByChainId } from "@/config/chains";
 import { getNonfungiblePositionManagerAddress } from "@/config/contracts/nonfungible-position-manager";
 
 interface UniswapV3TechnicalTabProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 /**

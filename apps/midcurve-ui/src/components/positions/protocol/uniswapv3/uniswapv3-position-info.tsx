@@ -11,12 +11,12 @@
  * needs to be displayed.
  */
 
-import type { ListPositionData } from '@midcurve/api-shared';
+import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import { InfoRow } from '../../info-row';
 import { formatChainName } from '@/lib/position-helpers';
 
 interface UniswapV3PositionInfoProps {
-  position: ListPositionData;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3PositionInfo({ position }: UniswapV3PositionInfoProps) {

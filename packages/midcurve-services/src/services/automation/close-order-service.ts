@@ -15,6 +15,7 @@ import {
 } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
+import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import type {
   RegisterCloseOrderInput,
   UpdateCloseOrderInput,
@@ -226,14 +227,16 @@ export class CloseOrderService {
    */
   async findByPositionId(
     positionId: string,
-    options: FindCloseOrderOptions = {}
+    options: FindCloseOrderOptions = {},
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface[]> {
     log.methodEntry(this.logger, 'findByPositionId', { positionId, options });
 
     try {
+      const db = tx ?? this.prisma;
       const whereClause = this.buildWhereClause({ ...options, positionId });
 
-      const results = await this.prisma.automationCloseOrder.findMany({
+      const results = await db.automationCloseOrder.findMany({
         where: whereClause,
         orderBy: { createdAt: 'desc' },
       });

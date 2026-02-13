@@ -6,7 +6,6 @@
  */
 
 import type { UniswapV3PositionResponse } from './typed-response.js';
-import type { PnLCurveResponseData } from '../common/pnl-curve.js';
 import { z } from 'zod';
 
 /**
@@ -24,12 +23,10 @@ export interface GetUniswapV3PositionParams {
  *
  * Returns the complete position data with all bigint fields converted to strings for JSON serialization.
  * The position state is refreshed from on-chain data before being returned.
- * Includes PnL curve data with order effects (SL/TP) for visualization.
+ *
+ * PnL curve data is available separately via GET /api/v1/positions/:positionId/pnl-curve.
  */
-export type GetUniswapV3PositionResponse = UniswapV3PositionResponse & {
-  /** PnL curve data with order effects for visualization */
-  pnlCurve?: PnLCurveResponseData;
-};
+export type GetUniswapV3PositionResponse = UniswapV3PositionResponse;
 
 // =============================================================================
 // Zod Schemas

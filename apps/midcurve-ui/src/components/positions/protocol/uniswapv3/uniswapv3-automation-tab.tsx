@@ -11,11 +11,11 @@
 import { AlertCircle, Loader2 } from "lucide-react";
 import type { Address } from "viem";
 import { useSharedContract } from "@/hooks/automation";
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { PositionCloseOrdersPanel } from "../../automation";
 
 interface UniswapV3AutomationTabProps {
-  position: GetUniswapV3PositionResponse;
+  position: UniswapV3PositionData;
 }
 
 export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps) {
