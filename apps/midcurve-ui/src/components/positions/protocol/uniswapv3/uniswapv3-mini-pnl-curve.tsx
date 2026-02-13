@@ -9,7 +9,8 @@
  * - Current price marker (blue circle)
  * - Zero line (gray horizontal)
  *
- * Uses embedded pnlCurve data from position list API response.
+ * Generates PnL curve data locally using UniswapV3Position.forSimulation()
+ * and CloseOrderSimulationOverlay (same pattern as wizard components).
  */
 
 "use client";
@@ -17,7 +18,15 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
-import { tickToPrice } from "@midcurve/shared";
+import {
+  tickToPrice,
+  calculatePositionValue,
+  UniswapV3Pool,
+  UniswapV3Position,
+  CloseOrderSimulationOverlay,
+} from "@midcurve/shared";
+import type { PoolJSON } from "@midcurve/shared";
+import type { SerializedUniswapV3CloseOrderConfig } from "@midcurve/api-shared";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
@@ -40,6 +49,9 @@ interface CurvePoint {
   phase: "below" | "in-range" | "above";
 }
 
+/** Number of points to generate for the mini curve */
+const NUM_CURVE_POINTS = 60;
+
 export function UniswapV3MiniPnLCurve({
   position,
   width = 120,
@@ -50,33 +62,207 @@ export function UniswapV3MiniPnLCurve({
   const [hoveredPoint, setHoveredPoint] = useState<CurvePoint | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
 
-  // Extract and transform curve data from embedded API response
-  const curveData = useMemo(() => {
+  // Extract base/quote token info
+  const quoteToken = position.isToken0Quote
+    ? position.pool.token0
+    : position.pool.token1;
+  const baseToken = position.isToken0Quote
+    ? position.pool.token1
+    : position.pool.token0;
+  const baseTokenConfig = baseToken.config as { address: string };
+  const quoteTokenConfig = quoteToken.config as { address: string };
+  const isToken0Base = !position.isToken0Quote;
+
+  // Extract SL/TP prices from active close orders
+  const closeOrderPrices = useMemo(() => {
+    let stopLossPrice: bigint | null = null;
+    let takeProfitPrice: bigint | null = null;
+
+    if (!position.activeCloseOrders?.length) {
+      return { stopLossPrice, takeProfitPrice };
+    }
+
+    const token0Decimals = position.pool.token0.decimals;
+    const token1Decimals = position.pool.token1.decimals;
+
+    for (const order of position.activeCloseOrders) {
+      const orderConfig = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
+      if (!orderConfig.triggerMode) continue;
+
+      try {
+        if (orderConfig.triggerMode === 'LOWER' && orderConfig.sqrtPriceX96Lower) {
+          const sqrtPriceX96 = BigInt(orderConfig.sqrtPriceX96Lower);
+          const Q96 = 2n ** 96n;
+          const Q192 = Q96 * Q96;
+          const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+
+          if (isToken0Base) {
+            const decimalDiff = token0Decimals - token1Decimals;
+            if (decimalDiff >= 0) {
+              stopLossPrice = (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / Q192;
+            } else {
+              stopLossPrice = (rawPriceNum * 10n ** BigInt(quoteToken.decimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
+            }
+          } else {
+            const decimalDiff = token1Decimals - token0Decimals;
+            if (decimalDiff >= 0) {
+              stopLossPrice = (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / rawPriceNum;
+            } else {
+              stopLossPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
+            }
+          }
+        }
+
+        if (orderConfig.triggerMode === 'UPPER' && orderConfig.sqrtPriceX96Upper) {
+          const sqrtPriceX96 = BigInt(orderConfig.sqrtPriceX96Upper);
+          const Q96 = 2n ** 96n;
+          const Q192 = Q96 * Q96;
+          const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+
+          if (isToken0Base) {
+            const decimalDiff = token0Decimals - token1Decimals;
+            if (decimalDiff >= 0) {
+              takeProfitPrice = (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / Q192;
+            } else {
+              takeProfitPrice = (rawPriceNum * 10n ** BigInt(quoteToken.decimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
+            }
+          } else {
+            const decimalDiff = token1Decimals - token0Decimals;
+            if (decimalDiff >= 0) {
+              takeProfitPrice = (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / rawPriceNum;
+            } else {
+              takeProfitPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
+            }
+          }
+        }
+      } catch {
+        // Ignore conversion errors for individual orders
+      }
+    }
+
+    return { stopLossPrice, takeProfitPrice };
+  }, [position.activeCloseOrders, position.pool.token0.decimals, position.pool.token1.decimals, isToken0Base, quoteToken.decimals]);
+
+  // Create simulation position with SL/TP overlay
+  const simulationPosition = useMemo(() => {
+    const posConfig = position.config as { tickLower: number; tickUpper: number };
+    const posState = position.state as { liquidity: string };
+    const poolState = position.pool.state as { sqrtPriceX96: string };
+
+    const liquidity = BigInt(posState.liquidity);
+    if (liquidity <= 0n) return null;
+
     try {
-      // Check if pnlCurve data is available
-      if (!position.pnlCurve) {
+      const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
+      const sqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
+      const costBasis = calculatePositionValue(
+        liquidity, sqrtPriceX96,
+        posConfig.tickLower, posConfig.tickUpper, isToken0Base
+      );
+      if (costBasis === 0n) return null;
+
+      const basePosition = UniswapV3Position.forSimulation({
+        pool,
+        isToken0Quote: position.isToken0Quote,
+        tickLower: posConfig.tickLower,
+        tickUpper: posConfig.tickUpper,
+        liquidity,
+        costBasis,
+      });
+
+      return new CloseOrderSimulationOverlay({
+        underlyingPosition: basePosition,
+        stopLossPrice: closeOrderPrices.stopLossPrice,
+        takeProfitPrice: closeOrderPrices.takeProfitPrice,
+      });
+    } catch {
+      return null;
+    }
+  }, [position.pool, position.config, position.state, position.isToken0Quote, isToken0Base, closeOrderPrices]);
+
+  // Generate PnL curve data locally
+  const curveData = useMemo(() => {
+    if (!simulationPosition) return null;
+
+    try {
+      const posConfig = position.config as { tickLower: number; tickUpper: number };
+      const poolState = position.pool.state as { currentTick: number };
+      const quoteDecimals = quoteToken.decimals;
+      const quoteDecimalsDivisor = 10n ** BigInt(quoteDecimals);
+      const quoteDivisor = Number(quoteDecimalsDivisor);
+
+      // Calculate range boundary prices from ticks
+      const lowerPriceBigint = tickToPrice(
+        posConfig.tickLower,
+        baseTokenConfig.address,
+        quoteTokenConfig.address,
+        baseToken.decimals
+      );
+      const upperPriceBigint = tickToPrice(
+        posConfig.tickUpper,
+        baseTokenConfig.address,
+        quoteTokenConfig.address,
+        baseToken.decimals
+      );
+
+      const lowerPrice = Number(lowerPriceBigint) / quoteDivisor;
+      const upperPrice = Number(upperPriceBigint) / quoteDivisor;
+
+      // Calculate current price
+      const currentTick = overrideTick ?? poolState.currentTick;
+      const currentPriceBigint = tickToPrice(
+        currentTick,
+        baseTokenConfig.address,
+        quoteTokenConfig.address,
+        baseToken.decimals
+      );
+      const currentPriceNumber = Number(currentPriceBigint) / quoteDivisor;
+
+      // Determine visual range: extend 50% beyond tick range boundaries
+      const rangeSpan = upperPrice - lowerPrice;
+      const extension = rangeSpan * 0.5;
+      const visualMin = Math.max(lowerPrice - extension, lowerPrice * 0.1);
+      const visualMax = upperPrice + extension;
+
+      if (visualMin <= 0 || visualMax <= 0 || visualMin >= visualMax) {
         return null;
       }
 
-      const pnlCurve = position.pnlCurve;
+      // Generate evenly-spaced price points
+      const points: CurvePoint[] = [];
 
-      // Validate curve data
-      if (!pnlCurve.curve || pnlCurve.curve.length === 0) {
-        return null;
+      for (let i = 0; i <= NUM_CURVE_POINTS; i++) {
+        const priceDisplay = visualMin + (visualMax - visualMin) * (i / NUM_CURVE_POINTS);
+
+        // Convert display price to bigint (quote token units)
+        const priceBigint = BigInt(Math.floor(priceDisplay * quoteDivisor));
+        if (priceBigint <= 0n) continue;
+
+        const result = simulationPosition.simulatePnLAtPrice(priceBigint);
+
+        const positionValueDisplay = Number(result.positionValue) / quoteDivisor;
+        const pnlDisplay = Number(result.pnlValue) / quoteDivisor;
+
+        // Determine phase based on price relative to range
+        let phase: "below" | "in-range" | "above";
+        if (priceDisplay < lowerPrice) {
+          phase = "below";
+        } else if (priceDisplay > upperPrice) {
+          phase = "above";
+        } else {
+          phase = "in-range";
+        }
+
+        points.push({
+          price: priceDisplay,
+          positionValue: positionValueDisplay,
+          pnl: pnlDisplay,
+          pnlPercent: result.pnlPercent,
+          phase,
+        });
       }
 
-      // Get quote token decimals for number conversion
-      const quoteDecimals = pnlCurve.quoteToken.decimals;
-      const quoteDivisor = Math.pow(10, quoteDecimals);
-
-      // Transform curve points - use adjustedPnl (includes order effects)
-      const points: CurvePoint[] = pnlCurve.curve.map((point) => ({
-        price: Number(BigInt(point.price)) / quoteDivisor,
-        pnl: Number(BigInt(point.adjustedPnl)) / quoteDivisor,
-        positionValue: Number(BigInt(point.adjustedValue)) / quoteDivisor,
-        pnlPercent: point.adjustedPnlPercent,
-        phase: point.phase as "below" | "in-range" | "above",
-      }));
+      if (points.length === 0) return null;
 
       // Calculate ranges for scaling
       const allPrices = points.map((p) => p.price);
@@ -84,36 +270,7 @@ export function UniswapV3MiniPnLCurve({
       const priceRangeMin = Math.min(...allPrices);
       const priceRangeMax = Math.max(...allPrices);
 
-      // Calculate current price marker position
-      // Use overrideTick if provided, otherwise use currentTick from curve data
-      let currentPriceNumber: number;
-
-      if (overrideTick !== undefined) {
-        // Calculate price from override tick using tickToPrice
-        // Need base/quote token addresses for tick-to-price conversion
-        const baseTokenConfig = position.isToken0Quote
-          ? (position.pool.token1.config as { address: string })
-          : (position.pool.token0.config as { address: string });
-        const quoteTokenConfig = position.isToken0Quote
-          ? (position.pool.token0.config as { address: string })
-          : (position.pool.token1.config as { address: string });
-        const baseDecimals = position.isToken0Quote
-          ? Number(position.pool.token1.decimals)
-          : Number(position.pool.token0.decimals);
-
-        const overridePriceBigInt = tickToPrice(
-          overrideTick,
-          baseTokenConfig.address,
-          quoteTokenConfig.address,
-          baseDecimals
-        );
-        currentPriceNumber = Number(overridePriceBigInt) / quoteDivisor;
-      } else {
-        // Use current price from curve data
-        currentPriceNumber = Number(BigInt(pnlCurve.currentPrice)) / quoteDivisor;
-      }
-
-      // Find closest point in curve for marker placement
+      // Find closest point in curve for current price marker
       let currentPriceIndex: number;
       if (currentPriceNumber >= priceRangeMax) {
         currentPriceIndex = points.length - 1;
@@ -131,10 +288,6 @@ export function UniswapV3MiniPnLCurve({
         });
       }
 
-      // Get range prices for boundary lines
-      const lowerPrice = Number(BigInt(pnlCurve.lowerPrice)) / quoteDivisor;
-      const upperPrice = Number(BigInt(pnlCurve.upperPrice)) / quoteDivisor;
-
       return {
         points,
         priceRange: {
@@ -150,10 +303,10 @@ export function UniswapV3MiniPnLCurve({
         upperPrice,
       };
     } catch (error) {
-      console.error("Error processing PnL curve data:", error);
+      console.error("Error generating PnL curve data:", error);
       return null;
     }
-  }, [position, overrideTick]);
+  }, [simulationPosition, position.config, position.pool.state, overrideTick, quoteToken.decimals, baseTokenConfig.address, quoteTokenConfig.address, baseToken.decimals]);
 
   // Show N/A state when curve data is unavailable
   if (!curveData || !curveData.points || curveData.points.length === 0) {
@@ -202,11 +355,6 @@ export function UniswapV3MiniPnLCurve({
 
   // Generate unique IDs for clip paths (avoid conflicts with multiple positions)
   const uniqueId = `${position.protocol}-${position.id}`;
-
-  // Get quote token for tooltip
-  const quoteToken = position.isToken0Quote
-    ? position.pool.token0
-    : position.pool.token1;
 
   // Mouse event handlers for tooltip
   const handleMouseMove = (e: React.MouseEvent<SVGRectElement>) => {
