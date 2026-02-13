@@ -875,7 +875,7 @@ export class UniswapV3PositionService {
             // Each method reads fresh on-chain data and persists it to the database
 
             // 0. Get position to determine pool ID
-            const position = await this.findById(id);
+            const position = await this.findById(id, dbTx);
             if (!position) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -947,7 +947,7 @@ export class UniswapV3PositionService {
             await this.refreshMetrics(id, resolvedBlockNumber, dbTx);
 
             // 7. Check if position should be marked as closed
-            const refreshedPosition = await this.findById(id);
+            const refreshedPosition = await this.findById(id, dbTx);
             if (!refreshedPosition) {
                 const error = new Error(
                     `Position not found after refresh: ${id}`,
@@ -988,7 +988,7 @@ export class UniswapV3PositionService {
                 await this.updateClosedState(id, false, true, closedAt, dbTx);
 
                 // Re-fetch to get updated state
-                const closedPosition = await this.findById(id);
+                const closedPosition = await this.findById(id, dbTx);
                 if (!closedPosition) {
                     throw new Error(
                         `Position not found after close update: ${id}`,
@@ -1532,7 +1532,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position (DB read for config/metadata only)
-            const position = await this.findById(id);
+            const position = await this.findById(id, tx);
             if (!position) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -1732,7 +1732,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get position for opened date
-            const position = await this.findById(id);
+            const position = await this.findById(id, tx);
             if (!position) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -1865,7 +1865,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position with pool
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, tx);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2054,7 +2054,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, db);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2133,7 +2133,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, db);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2213,7 +2213,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, db);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2353,7 +2353,7 @@ export class UniswapV3PositionService {
         await this.refreshMetrics(id, "latest", tx);
 
         // Return the updated position
-        const burnedPosition = await this.findById(id);
+        const burnedPosition = await this.findById(id, tx);
         if (!burnedPosition) {
             throw new Error(
                 `Position not found after burned transition: ${id}`,
@@ -2384,7 +2384,7 @@ export class UniswapV3PositionService {
         const db = tx ?? this.prisma;
 
         // Get existing position
-        const existing = await this.findById(id);
+        const existing = await this.findById(id, db);
         if (!existing) {
             throw new Error(`Position not found: ${id}`);
         }
@@ -2442,7 +2442,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, db);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2565,7 +2565,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, tx);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2633,7 +2633,7 @@ export class UniswapV3PositionService {
 
         try {
             // 1. Get existing position
-            const existing = await this.findById(id);
+            const existing = await this.findById(id, tx);
             if (!existing) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2764,7 +2764,7 @@ export class UniswapV3PositionService {
             const metrics = await this.fetchMetrics(id, blockNumber, tx);
 
             // 2. Calculate totalApr (reuses metrics already fetched, only needs APR periods from DB)
-            const position = await this.findById(id);
+            const position = await this.findById(id, tx);
             if (!position) {
                 throw new Error(`Position not found: ${id}`);
             }
@@ -2994,15 +2994,19 @@ export class UniswapV3PositionService {
      * - Filter by protocol type (returns null if not uniswapv3)
      *
      * @param id - Position ID
+     * @param tx - Optional Prisma transaction client (required when reading
+     *             within an interactive transaction to see uncommitted writes)
      * @returns Position if found and is uniswapv3 protocol, null otherwise
      */
-    async findById(id: string): Promise<UniswapV3Position | null> {
+    async findById(id: string, tx?: PrismaTransactionClient): Promise<UniswapV3Position | null> {
         log.methodEntry(this.logger, "findById", { id });
+
+        const db = tx ?? this.prisma;
 
         try {
             log.dbOperation(this.logger, "findUnique", "Position", { id });
 
-            const result = await this.prisma.position.findUnique({
+            const result = await db.position.findUnique({
                 where: { id },
                 include: {
                     pool: {
