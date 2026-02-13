@@ -10,6 +10,7 @@
  */
 
 import { PrismaClient } from "@midcurve/database";
+import type { AprSummary } from "@midcurve/shared";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import type { AprPeriodData } from "../types/position-apr/index.js";
 
@@ -158,6 +159,98 @@ export class UniswapV3AprService {
         await db.positionAprPeriod.deleteMany({
             where: { positionId: this.positionId },
         });
+    }
+
+    /**
+     * Calculate APR summary from pre-fetched position metrics and APR periods.
+     *
+     * Combines realized APR (from completed periods) with unrealized APR
+     * (from current unclaimed fees) into a time-weighted total.
+     *
+     * @param params - Position metrics needed for calculation
+     * @param blockNumber - Block number limit for APR periods, or 'latest'
+     * @param tx - Optional transaction client
+     * @returns Complete APR summary with realized, unrealized, and total metrics
+     */
+    async calculateSummary(
+        params: {
+            positionOpenedAt: Date;
+            currentCostBasis: bigint;
+            unClaimedFees: bigint;
+        },
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<AprSummary> {
+        const aprPeriods = await this.fetchAprPeriods(blockNumber, tx);
+
+        // Realized metrics from completed APR periods
+        let realizedFees = 0n;
+        let realizedWeightedCostBasisSum = 0n;
+        let realizedTotalSeconds = 0;
+
+        for (const period of aprPeriods) {
+            realizedFees += period.collectedFeeValue;
+            realizedWeightedCostBasisSum +=
+                period.costBasis * BigInt(period.durationSeconds);
+            realizedTotalSeconds += period.durationSeconds;
+        }
+
+        const realizedTWCostBasis =
+            realizedTotalSeconds > 0
+                ? realizedWeightedCostBasisSum / BigInt(realizedTotalSeconds)
+                : 0n;
+        const realizedActiveDays = realizedTotalSeconds / 86400;
+        const realizedApr =
+            realizedTWCostBasis > 0n && realizedActiveDays > 0
+                ? (Number(realizedFees) / Number(realizedTWCostBasis)) *
+                  (365 / realizedActiveDays) *
+                  100
+                : 0;
+
+        // Unrealized metrics from current state
+        const unrealizedFees = params.unClaimedFees;
+        const unrealizedCostBasis = params.currentCostBasis;
+        const firstPeriod = aprPeriods[0];
+        const lastPeriodEnd = firstPeriod
+            ? firstPeriod.endTimestamp
+            : params.positionOpenedAt;
+        const unrealizedSeconds = Math.max(
+            0,
+            (Date.now() - lastPeriodEnd.getTime()) / 1000,
+        );
+        const unrealizedActiveDays = unrealizedSeconds / 86400;
+        const unrealizedApr =
+            unrealizedCostBasis > 0n && unrealizedActiveDays > 0
+                ? (Number(unrealizedFees) / Number(unrealizedCostBasis)) *
+                  (365 / unrealizedActiveDays) *
+                  100
+                : 0;
+
+        // Time-weighted total APR
+        const totalActiveDays = realizedActiveDays + unrealizedActiveDays;
+        const totalApr =
+            totalActiveDays > 0
+                ? (realizedApr * realizedActiveDays +
+                      unrealizedApr * unrealizedActiveDays) /
+                  totalActiveDays
+                : 0;
+
+        // Minimum threshold: 5 minutes = 300 seconds = 0.00347 days
+        const belowThreshold = totalActiveDays < 0.00347;
+
+        return {
+            realizedFees,
+            realizedTWCostBasis,
+            realizedActiveDays: Math.round(realizedActiveDays * 10) / 10,
+            realizedApr,
+            unrealizedFees,
+            unrealizedCostBasis,
+            unrealizedActiveDays: Math.round(unrealizedActiveDays * 10) / 10,
+            unrealizedApr,
+            totalApr,
+            totalActiveDays: Math.round(totalActiveDays * 10) / 10,
+            belowThreshold,
+        };
     }
 
     // ============================================================================

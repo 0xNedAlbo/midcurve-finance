@@ -1738,97 +1738,29 @@ export class UniswapV3PositionService {
             // 2. Fetch metrics for current cost basis and unclaimed fees
             const metrics = await this.fetchMetrics(id, blockNumber, tx);
 
-            // 3. Fetch APR periods
+            // 3. Delegate to AprService for calculation
             const aprService = new UniswapV3AprService(
                 { positionId: id },
                 { prisma: this._prisma },
             );
-            const aprPeriods = await aprService.fetchAprPeriods(blockNumber, tx);
-
-            // 4. Calculate realized metrics from APR periods
-            let realizedFees = 0n;
-            let realizedWeightedCostBasisSum = 0n;
-            let realizedTotalSeconds = 0;
-
-            for (const period of aprPeriods) {
-                realizedFees += period.collectedFeeValue;
-                realizedWeightedCostBasisSum +=
-                    period.costBasis * BigInt(period.durationSeconds);
-                realizedTotalSeconds += period.durationSeconds;
-            }
-
-            const realizedTWCostBasis =
-                realizedTotalSeconds > 0
-                    ? realizedWeightedCostBasisSum / BigInt(realizedTotalSeconds)
-                    : 0n;
-
-            const realizedActiveDays = realizedTotalSeconds / 86400;
-
-            // Calculate realized APR: (fees / costBasis) * (365 / days) * 100
-            const realizedApr =
-                realizedTWCostBasis > 0n && realizedActiveDays > 0
-                    ? (Number(realizedFees) / Number(realizedTWCostBasis)) *
-                      (365 / realizedActiveDays) *
-                      100
-                    : 0;
-
-            // 5. Calculate unrealized metrics
-            const unrealizedFees = metrics.unClaimedFees;
-            const unrealizedCostBasis = metrics.currentCostBasis;
-
-            // Days since last period end (or position start if no periods)
-            const firstPeriod = aprPeriods[0];
-            const lastPeriodEnd = firstPeriod
-                ? firstPeriod.endTimestamp
-                : position.positionOpenedAt;
-            const unrealizedSeconds = Math.max(
-                0,
-                (Date.now() - lastPeriodEnd.getTime()) / 1000,
+            const summary = await aprService.calculateSummary(
+                {
+                    positionOpenedAt: position.positionOpenedAt,
+                    currentCostBasis: metrics.currentCostBasis,
+                    unClaimedFees: metrics.unClaimedFees,
+                },
+                blockNumber,
+                tx,
             );
-            const unrealizedActiveDays = unrealizedSeconds / 86400;
-
-            // Calculate unrealized APR
-            const unrealizedApr =
-                unrealizedCostBasis > 0n && unrealizedActiveDays > 0
-                    ? (Number(unrealizedFees) / Number(unrealizedCostBasis)) *
-                      (365 / unrealizedActiveDays) *
-                      100
-                    : 0;
-
-            // 6. Calculate total (time-weighted average)
-            const totalActiveDays = realizedActiveDays + unrealizedActiveDays;
-            const totalApr =
-                totalActiveDays > 0
-                    ? (realizedApr * realizedActiveDays +
-                          unrealizedApr * unrealizedActiveDays) /
-                      totalActiveDays
-                    : 0;
-
-            // Minimum threshold: 5 minutes = 300 seconds = 0.00347 days
-            const belowThreshold = totalActiveDays < 0.00347;
-
-            const summary: AprSummary = {
-                realizedFees,
-                realizedTWCostBasis,
-                realizedActiveDays: Math.round(realizedActiveDays * 10) / 10,
-                realizedApr,
-                unrealizedFees,
-                unrealizedCostBasis,
-                unrealizedActiveDays: Math.round(unrealizedActiveDays * 10) / 10,
-                unrealizedApr,
-                totalApr,
-                totalActiveDays: Math.round(totalActiveDays * 10) / 10,
-                belowThreshold,
-            };
 
             this.logger.info(
                 {
                     id,
                     blockNumber,
-                    totalApr: totalApr.toFixed(2),
-                    realizedApr: realizedApr.toFixed(2),
-                    unrealizedApr: unrealizedApr.toFixed(2),
-                    totalActiveDays: totalActiveDays.toFixed(1),
+                    totalApr: summary.totalApr.toFixed(2),
+                    realizedApr: summary.realizedApr.toFixed(2),
+                    unrealizedApr: summary.unrealizedApr.toFixed(2),
+                    totalActiveDays: summary.totalActiveDays.toFixed(1),
                 },
                 "Position APR summary fetched",
             );
@@ -2810,8 +2742,9 @@ export class UniswapV3PositionService {
      * - priceRangeLower/Upper (from ticks)
      *
      * Also refreshes pool state to ensure accurate price data.
+     * Calculates and persists totalApr via UniswapV3AprService.calculateSummary().
      *
-     * Note: Does NOT update totalApr, isActive, or positionClosedAt.
+     * Note: Does NOT update isActive or positionClosedAt.
      *
      * @param id - Position database ID
      * @param blockNumber - Block number to fetch state at, or 'latest' for current block
@@ -2828,7 +2761,28 @@ export class UniswapV3PositionService {
             // 1. Fetch metrics at specified block (does not persist)
             const metrics = await this.fetchMetrics(id, blockNumber, tx);
 
-            // 2. Persist metrics to database
+            // 2. Calculate totalApr (reuses metrics already fetched, only needs APR periods from DB)
+            const position = await this.findById(id);
+            if (!position) {
+                throw new Error(`Position not found: ${id}`);
+            }
+
+            const aprService = new UniswapV3AprService(
+                { positionId: id },
+                { prisma: this._prisma },
+            );
+            const aprSummary = await aprService.calculateSummary(
+                {
+                    positionOpenedAt: position.positionOpenedAt,
+                    currentCostBasis: metrics.currentCostBasis,
+                    unClaimedFees: metrics.unClaimedFees,
+                },
+                blockNumber,
+                tx,
+            );
+            const persistedApr = aprSummary.belowThreshold ? null : aprSummary.totalApr;
+
+            // 3. Persist metrics to database
             const db = tx ?? this.prisma;
 
             log.dbOperation(this.logger, "update", "Position", {
@@ -2843,6 +2797,7 @@ export class UniswapV3PositionService {
                     "lastFeesCollectedAt",
                     "priceRangeLower",
                     "priceRangeUpper",
+                    "totalApr",
                 ],
             });
 
@@ -2860,6 +2815,7 @@ export class UniswapV3PositionService {
                     lastFeesCollectedAt: metrics.lastFeesCollectedAt,
                     priceRangeLower: metrics.priceRangeLower.toString(),
                     priceRangeUpper: metrics.priceRangeUpper.toString(),
+                    totalApr: persistedApr,
                 },
             });
 
@@ -2870,6 +2826,7 @@ export class UniswapV3PositionService {
                     currentCostBasis: metrics.currentCostBasis.toString(),
                     unrealizedPnl: metrics.unrealizedPnl.toString(),
                     unClaimedFees: metrics.unClaimedFees.toString(),
+                    totalApr: persistedApr?.toFixed(2) ?? null,
                 },
                 "Position metrics refreshed",
             );
