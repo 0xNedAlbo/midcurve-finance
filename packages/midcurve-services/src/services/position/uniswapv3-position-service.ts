@@ -820,7 +820,7 @@ export class UniswapV3PositionService {
      * - Uses last known fee growth values with tokensOwed set to 0
      * - Prevents "Invalid token ID" errors for burned NFTs
      * - Checks if position is fully closed (final COLLECT with all principal withdrawn)
-     * - If fully closed: Sets isActive=false and positionClosedAt to timestamp of final COLLECT event
+     * - If fully closed: Sets isClosed=true and positionClosedAt to timestamp of final COLLECT event
      *
      * For active positions (liquidity > 0):
      * - Fetches current fee data from NonfungiblePositionManager
@@ -851,7 +851,9 @@ export class UniswapV3PositionService {
      * - Pool state (sqrtPriceX96, currentTick, etc.)
      *
      * Note: Config fields (chainId, nftId, ticks, poolAddress) are immutable and not updated.
-     * Note: totalApr, isActive, and positionClosedAt are NOT updated by this method.
+     * Note: totalApr is NOT updated by this method (use refreshPositionApr).
+     * Note: isActive is only set to false when a burned NFT is detected.
+     * Note: isClosed and positionClosedAt are updated when close/reopen conditions are detected.
      *
      * @param id - Position ID
      * @param dbTx - Optional Prisma transaction client for atomic operations
@@ -2399,7 +2401,6 @@ export class UniswapV3PositionService {
             where: { id },
             data: {
                 state: this.serializeState(updatedState) as object,
-                isActive: true,
                 positionClosedAt: null,
             },
         });
@@ -2412,8 +2413,9 @@ export class UniswapV3PositionService {
      * and synchronizes the position-level isActive and positionClosedAt fields.
      *
      * State transitions:
-     * - When isBurned or isClosed becomes true: isActive=false, positionClosedAt is set
-     * - positionClosedAt is only set on transition (not if already closed)
+     * - When isBurned becomes true: isActive=false, positionClosedAt is set
+     * - When isClosed becomes true: positionClosedAt is set (isActive unchanged)
+     * - positionClosedAt is only set on transition to burned (not if already burned)
      *
      * @param id - Position database ID
      * @param isBurned - Whether the NFT has been burned
@@ -2455,7 +2457,7 @@ export class UniswapV3PositionService {
 
             // 3. Determine if this is a state transition to closed/burned
             const wasActive = existing.isActive;
-            const becomingInactive = (isBurned || isClosed) && wasActive;
+            const becomingInactive = isBurned && wasActive;
 
             // 4. Serialize state
             const stateDB = this.serializeState(updatedState);
@@ -2744,7 +2746,7 @@ export class UniswapV3PositionService {
      * Also refreshes pool state to ensure accurate price data.
      * Calculates and persists totalApr via UniswapV3AprService.calculateSummary().
      *
-     * Note: Does NOT update isActive or positionClosedAt.
+     * Note: Does NOT update isActive, isClosed, or positionClosedAt.
      *
      * @param id - Position database ID
      * @param blockNumber - Block number to fetch state at, or 'latest' for current block
