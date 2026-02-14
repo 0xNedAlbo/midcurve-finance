@@ -184,7 +184,7 @@ export function CloseOrderModal({
   currentSqrtPriceX96,
   currentPriceDisplay,
   isToken0Quote,
-  onSuccess,
+  onSuccess: _onSuccess,
   orderType,
   // Position data for PnL simulation
   liquidity,
@@ -246,7 +246,6 @@ export function CloseOrderModal({
     isSuccess,
     result,
     error: hookError,
-    apiError,
     reset: resetHook,
     isReady: isHookReady,
   } = useCreateCloseOrder(chainId, nftId.toString());
@@ -301,14 +300,11 @@ export function CloseOrderModal({
   // Track hook success/error state
   useEffect(() => {
     if (isSuccess && result) {
-      // Order was successfully registered
-      if (result.order) {
-        setCreatedOrder(result.order);
-        onSuccess?.(result.order);
-      }
+      // Order was successfully registered on-chain
+      // Backend event subscriber creates the DB record automatically
       setStep('success');
     }
-  }, [isSuccess, result, onSuccess]);
+  }, [isSuccess, result]);
 
   useEffect(() => {
     if (hookError) {
@@ -316,14 +312,6 @@ export function CloseOrderModal({
       setStep('review'); // Go back to review on error
     }
   }, [hookError]);
-
-  // Handle API notification error (tx succeeded but API failed)
-  useEffect(() => {
-    if (apiError) {
-      setLocalError(`Transaction succeeded but order monitoring failed: ${apiError.message}`);
-      setStep('review'); // Go back to review to show error
-    }
-  }, [apiError]);
 
   // Clear wallet-related errors when wallet connects
   useEffect(() => {

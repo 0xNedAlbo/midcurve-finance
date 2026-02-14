@@ -13,6 +13,7 @@ import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
 import { IncreaseDepositPage } from './pages/IncreaseDepositPage';
 import { WithdrawPage } from './pages/WithdrawPage';
+import { RiskTriggersPage } from './pages/RiskTriggersPage';
 
 // Automation
 import { AutowalletPage } from './components/automation';
@@ -54,6 +55,10 @@ export function App() {
                 <Route
                   path="/positions/withdraw/:protocol/:chain/:nftId"
                   element={<WithdrawPage />}
+                />
+                <Route
+                  path="/positions/triggers/:protocol/:chain/:nftId"
+                  element={<RiskTriggersPage />}
                 />
               </Routes>
             </BrowserRouter>

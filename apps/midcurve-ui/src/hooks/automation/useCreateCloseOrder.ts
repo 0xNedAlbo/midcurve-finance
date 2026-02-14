@@ -2,17 +2,16 @@
  * useCreateCloseOrder - Register a close order via user's wallet
  *
  * This hook uses Wagmi to have the user sign the registerOrder transaction
- * directly with their connected wallet. After confirmation, it notifies
- * the API to start monitoring the order.
+ * directly with their connected wallet. After confirmation, it invalidates
+ * caches so the UI picks up the order created by the backend event subscriber.
  *
  * Flow:
  * 1. Hook fetches ABI and contract address via useSharedContract
  * 2. User calls registerOrder()
  * 3. User signs registerOrder() tx in their wallet (Wagmi)
  * 4. Wait for tx confirmation
- * 5. Parse OrderRegistered event
- * 6. POST to /api/v1/automation/close-orders with all order details
- * 7. Return the created order
+ * 5. Parse OrderRegistered event (validation only)
+ * 6. Invalidate caches (backend event subscriber creates the DB record)
  *
  * V1.0 Interface (tick-based):
  * - Uses triggerTick (int24) instead of sqrtPriceX96 bounds
@@ -25,10 +24,9 @@ import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagm
 import { useQueryClient } from '@tanstack/react-query';
 import { decodeEventLog, type Address, type Hash, type TransactionReceipt } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
-import { automationApi } from '@/lib/api-client';
 import { useSharedContract } from './useSharedContract';
 import type { SerializedCloseOrder } from '@midcurve/api-shared';
-import { tickToSqrtRatioX96, type UniswapV3PositionCloserAbi } from '@midcurve/shared';
+import { type UniswapV3PositionCloserAbi } from '@midcurve/shared';
 
 /**
  * Order type for the contract (V1.0 interface)
@@ -77,8 +75,6 @@ export interface RegisterCloseOrderParams {
 export interface CreateCloseOrderResult {
   /** Transaction hash */
   txHash: Hash;
-  /** The created order (after API notification) */
-  order?: SerializedCloseOrder;
 }
 
 /**
@@ -91,14 +87,12 @@ export interface UseCreateCloseOrderResult {
   isRegistering: boolean;
   /** Whether waiting for transaction confirmation */
   isWaitingForConfirmation: boolean;
-  /** Whether the registration was successful (tx confirmed AND API notified) */
+  /** Whether the registration was successful (tx confirmed) */
   isSuccess: boolean;
-  /** The result data (txHash, order) */
+  /** The result data (txHash) */
   result: CreateCloseOrderResult | null;
   /** Any error that occurred (wallet tx error) */
   error: Error | null;
-  /** API notification error (tx succeeded but API failed) */
-  apiError: Error | null;
   /** Reset the hook state */
   reset: () => void;
   /** Whether the shared contract is ready (ABI loaded) */
@@ -155,7 +149,6 @@ export function useCreateCloseOrder(
   const { address: connectedAddress } = useAccount();
   const [result, setResult] = useState<CreateCloseOrderResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [apiError, setApiError] = useState<Error | null>(null);
   const [currentParams, setCurrentParams] = useState<RegisterCloseOrderParams | null>(null);
 
   // Fetch ABI and contract address from shared contract API
@@ -186,99 +179,39 @@ export function useCreateCloseOrder(
     hash: txHash,
   });
 
-  // Handle transaction success - parse event and notify API
+  // Handle transaction success - validate event and invalidate caches
+  // The backend event subscriber creates the DB record automatically.
   useEffect(() => {
-    if (!isTxSuccess || !receipt || !txHash || !currentParams || !abi || !contractAddress || !positionManager) return;
+    if (!isTxSuccess || !receipt || !txHash || !currentParams || !abi || !contractAddress) return;
 
-    const handleSuccess = async () => {
-      try {
-        // Verify OrderRegistered event was emitted
-        const eventFound = parseOrderRegisteredEvent(
-          receipt,
-          contractAddress as Address,
-          abi
-        );
+    // Verify OrderRegistered event was emitted
+    const eventFound = parseOrderRegisteredEvent(
+      receipt,
+      contractAddress as Address,
+      abi
+    );
 
-        if (!eventFound) {
-          throw new Error('Failed to find OrderRegistered event in transaction');
-        }
+    if (!eventFound) {
+      setError(new Error('Failed to find OrderRegistered event in transaction'));
+      return;
+    }
 
-        // Build validUntil as ISO string
-        const validUntilDate = new Date(Number(currentParams.validUntil) * 1000);
+    setResult({ txHash });
 
-        // Create close order via position-scoped API
-        // Map orderType to triggerMode for API
-        const triggerModeMap: Record<OrderType, 'LOWER' | 'UPPER'> = {
-          'STOP_LOSS': 'LOWER',
-          'TAKE_PROFIT': 'UPPER',
-        };
-        const triggerMode = triggerModeMap[currentParams.orderType];
-
-        // Convert triggerTick to sqrtPriceX96 for API
-        const triggerSqrtPriceX96 = tickToSqrtRatioX96(currentParams.triggerTick).toString();
-
-        // Compute closeOrderHash: {sl|tp}@{tick}
-        const hashPrefix = currentParams.orderType === 'STOP_LOSS' ? 'sl' : 'tp';
-        const closeOrderHash = `${hashPrefix}@${currentParams.triggerTick}`;
-
-        try {
-          const response = await automationApi.positionCloseOrders.create(
-            chainId,
-            nftId,
-            closeOrderHash,
-            {
-              poolAddress: currentParams.poolAddress,
-              operatorAddress: currentParams.operatorAddress,
-              positionManager,
-              triggerMode,
-              sqrtPriceX96: triggerSqrtPriceX96,
-              payoutAddress: currentParams.payoutAddress,
-              validUntil: validUntilDate.toISOString(),
-              slippageBps: currentParams.slippageBps,
-              registrationTxHash: txHash,
-              swapConfig: currentParams.swapConfig,
-            }
-          );
-
-          setResult({
-            txHash,
-            order: response.data,
-          });
-        } catch (err) {
-          // On-chain tx succeeded but API notification failed
-          // Surface this error to the user - they need to know the order
-          // may not be monitored properly
-          console.error('Failed to notify API of close order:', err);
-          const errorMessage = err instanceof Error
-            ? err.message
-            : 'Failed to register order with monitoring service';
-          setApiError(new Error(errorMessage));
-          // Still set result with txHash so user knows the tx succeeded
-          setResult({
-            txHash,
-          });
-        }
-
-        // Invalidate caches — position detail includes activeCloseOrders
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
-        });
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
-        });
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
-        });
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.automation.closeOrders.lists(),
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error('Unknown error'));
-      }
-    };
-
-    handleSuccess();
-  }, [isTxSuccess, receipt, txHash, currentParams, queryClient, abi, contractAddress, positionManager, chainId, nftId]);
+    // Invalidate caches — backend event subscriber will have created the order
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.automation.closeOrders.lists(),
+    });
+  }, [isTxSuccess, receipt, txHash, currentParams, queryClient, abi, contractAddress, chainId, nftId]);
 
   // Handle errors
   useEffect(() => {
@@ -294,7 +227,6 @@ export function useCreateCloseOrder(
     // Reset state
     setResult(null);
     setError(null);
-    setApiError(null);
     setCurrentParams(params);
 
     // Pre-flight check: verify shared contract is ready
@@ -371,7 +303,6 @@ export function useCreateCloseOrder(
     resetWrite();
     setResult(null);
     setError(null);
-    setApiError(null);
     setCurrentParams(null);
   }, [resetWrite]);
 
@@ -379,10 +310,9 @@ export function useCreateCloseOrder(
     registerOrder,
     isRegistering: isWritePending,
     isWaitingForConfirmation,
-    isSuccess: isTxSuccess && result !== null && apiError === null,
+    isSuccess: isTxSuccess && result !== null,
     result,
     error,
-    apiError,
     reset,
     isReady,
   };
