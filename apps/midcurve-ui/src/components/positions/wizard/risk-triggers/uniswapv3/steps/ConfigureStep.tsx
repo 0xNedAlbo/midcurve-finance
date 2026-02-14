@@ -349,9 +349,9 @@ export function ConfigureStep() {
     [setTakeProfitPrice, clearTakeProfit]
   );
 
-  // Switch to SL tab on curve interaction
-  const handleSlTpInteraction = useCallback(() => {
-    setConfigurationTab('sl');
+  // Switch to correct tab on curve interaction
+  const handleSlTpInteraction = useCallback((triggerType: 'sl' | 'tp') => {
+    setConfigurationTab(triggerType);
   }, [setConfigurationTab]);
 
   // Risk metrics computed by overlay (evaluates all critical price points)

@@ -274,6 +274,16 @@ export interface CreateFromOnChainEventInput {
   slippageBps: number;
 
   /**
+   * Swap direction from on-chain event
+   */
+  swapDirection: 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
+
+  /**
+   * Swap slippage in basis points
+   */
+  swapSlippageBps: number;
+
+  /**
    * Registration transaction hash
    */
   registrationTxHash: string;

@@ -109,6 +109,8 @@ export interface OrderRegisteredPayload {
   triggerTick: number;
   validUntil: string;
   slippageBps: number;
+  swapDirection: SwapDirectionString;
+  swapSlippageBps: number;
 }
 
 export interface OrderCancelledPayload {
@@ -143,6 +145,7 @@ export interface OrderSlippageUpdatedPayload {
 export interface OrderSwapIntentUpdatedPayload {
   oldDirection: SwapDirectionString;
   newDirection: SwapDirectionString;
+  swapSlippageBps: number;
 }
 
 // ============================================================
@@ -258,6 +261,8 @@ export function buildCloseOrderEvent(
           triggerTick: Number(args.triggerTick),
           validUntil: String(args.validUntil),
           slippageBps: Number(args.slippageBps),
+          swapDirection: swapDirectionToString(args.swapDirection as number),
+          swapSlippageBps: Number(args.swapSlippageBps),
         },
       };
 
@@ -327,6 +332,7 @@ export function buildCloseOrderEvent(
         payload: {
           oldDirection: swapDirectionToString(args.oldDirection as number),
           newDirection: swapDirectionToString(args.newDirection as number),
+          swapSlippageBps: Number(args.swapSlippageBps),
         },
       };
 

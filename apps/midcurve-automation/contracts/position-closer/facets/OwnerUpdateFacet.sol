@@ -50,7 +50,8 @@ contract OwnerUpdateFacet is Modifiers {
         uint256 indexed nftId,
         TriggerMode indexed triggerMode,
         SwapDirection oldDirection,
-        SwapDirection newDirection
+        SwapDirection newDirection,
+        uint16 swapSlippageBps
     );
 
     // ========================================
@@ -210,6 +211,6 @@ contract OwnerUpdateFacet is Modifiers {
         order.swapDirection = direction;
         order.swapSlippageBps = swapSlippageBps;
 
-        emit OrderSwapIntentUpdated(nftId, triggerMode, oldDirection, direction);
+        emit OrderSwapIntentUpdated(nftId, triggerMode, oldDirection, direction, swapSlippageBps);
     }
 }

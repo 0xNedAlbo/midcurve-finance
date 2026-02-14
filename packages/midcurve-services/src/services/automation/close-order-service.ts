@@ -1043,6 +1043,9 @@ export class CloseOrderService {
         operatorAddress: input.operator,
         validUntil: new Date(Number(input.validUntil) * 1000).toISOString(),
         slippageBps: input.slippageBps,
+        swapConfig: input.swapDirection === 'NONE'
+          ? { enabled: false, direction: 'NONE', slippageBps: 0 }
+          : { enabled: true, direction: input.swapDirection, slippageBps: input.swapSlippageBps },
       };
 
       // Build initial state matching createInitialState() format
@@ -1171,9 +1174,10 @@ export class CloseOrderService {
   async updateSwapConfig(
     id: string,
     direction: 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+    swapSlippageBps: number,
     tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
-    log.methodEntry(this.logger, 'updateSwapConfig', { id, direction });
+    log.methodEntry(this.logger, 'updateSwapConfig', { id, direction, swapSlippageBps });
 
     try {
       const db = tx ?? this.prisma;
@@ -1186,22 +1190,13 @@ export class CloseOrderService {
       }
 
       const config = existing.config as Record<string, unknown>;
-      const existingSwap = (config.swapConfig as Record<string, unknown>) || {};
 
       const updatedConfig = {
         ...config,
         swapConfig:
           direction === 'NONE'
-            ? {
-                enabled: false,
-                direction: 'NONE',
-                slippageBps: (existingSwap.slippageBps as number) || 0,
-              }
-            : {
-                ...existingSwap,
-                enabled: true,
-                direction,
-              },
+            ? { enabled: false, direction: 'NONE', slippageBps: 0 }
+            : { enabled: true, direction, slippageBps: swapSlippageBps },
       };
 
       const result = await db.automationCloseOrder.update({

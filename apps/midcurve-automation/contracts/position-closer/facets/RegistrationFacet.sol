@@ -22,7 +22,9 @@ contract RegistrationFacet is Modifiers {
         address payout,
         int24 triggerTick,
         uint256 validUntil,
-        uint16 slippageBps
+        uint16 slippageBps,
+        SwapDirection swapDirection,
+        uint16 swapSlippageBps
     );
 
     event OrderCancelled(
@@ -110,7 +112,9 @@ contract RegistrationFacet is Modifiers {
             params.payout,
             params.triggerTick,
             params.validUntil,
-            params.slippageBps
+            params.slippageBps,
+            params.swapDirection,
+            params.swapSlippageBps
         );
     }
 

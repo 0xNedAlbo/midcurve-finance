@@ -395,6 +395,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
             validUntil: new Date(Number(payload.validUntil) * 1000).toISOString(),
             slippageBps: payload.slippageBps,
             poolAddress: payload.pool,
+            swapConfig: payload.swapDirection === 'NONE'
+              ? { enabled: false, direction: 'NONE', slippageBps: 0 }
+              : { enabled: true, direction: payload.swapDirection, slippageBps: payload.swapSlippageBps },
           }, newCloseOrderHash, tx);
 
           this.logger.info(
@@ -460,6 +463,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         payout: payload.payout,
         validUntil: payload.validUntil,
         slippageBps: payload.slippageBps,
+        swapDirection: payload.swapDirection,
+        swapSlippageBps: payload.swapSlippageBps,
         registrationTxHash: transactionHash,
         blockNumber,
       }, tx);
@@ -783,6 +788,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       await this.closeOrderService.updateSwapConfig(
         order.id,
         event.payload.newDirection,
+        event.payload.swapSlippageBps,
         tx
       );
 

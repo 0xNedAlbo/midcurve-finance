@@ -1,8 +1,8 @@
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
-import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown, Trash2, Plus } from 'lucide-react';
+import { Wallet, Banknote, TrendingUp, Shield, Target, PlusCircle, MinusCircle, TrendingDown, Trash2, Plus, ArrowRightLeft, AlertTriangle } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
-import type { PnLScenario } from '@midcurve/shared';
+import type { PnLScenario, SwapConfig } from '@midcurve/shared';
 import {
   formatCompactValue,
   calculatePositionValue,
@@ -18,7 +18,9 @@ import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3'
 import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
 import {
   useCreatePositionWizard,
+  computeSwapDirection,
   type ConfigurationTab,
+  type SwapConfigState,
 } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
@@ -28,11 +30,26 @@ import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
 import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 
+// Chains supported for Paraswap swap integration
+const PARASWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const;
+const PARASWAP_SUPPORTED_CHAINS = import.meta.env.DEV
+  ? [...PARASWAP_PRODUCTION_CHAINS, 31337]
+  : PARASWAP_PRODUCTION_CHAINS;
+
+const SWAP_SLIPPAGE_OPTIONS = [
+  { value: 50, label: '0.5%' },
+  { value: 100, label: '1%' },
+  { value: 200, label: '2%' },
+  { value: 300, label: '3%' },
+  { value: 500, label: '5%' },
+];
+
 // Configuration section tabs
 const CONFIG_TABS: { id: ConfigurationTab; label: string; description: string; icon: typeof Banknote }[] = [
   { id: 'capital', label: 'Capital Allocation', description: 'Enter the token amounts for your position', icon: Banknote },
   { id: 'range', label: 'Position Range', description: 'Configure the price range for your position', icon: TrendingUp },
-  { id: 'sltp', label: 'SL/TP Setup', description: 'Set stop loss and take profit triggers', icon: Shield },
+  { id: 'sl', label: 'SL Setup', description: 'Configure stop loss trigger and post-close swap', icon: Shield },
+  { id: 'tp', label: 'TP Setup', description: 'Configure take profit trigger and post-close swap', icon: Target },
 ];
 
 export function PositionConfigStep() {
@@ -49,6 +66,12 @@ export function PositionConfigStep() {
     setInteractiveZoom,
     setStopLoss,
     setTakeProfit,
+    setSlSwapEnabled,
+    setSlSwapSlippage,
+    setSlSwapToQuote,
+    setTpSwapEnabled,
+    setTpSwapSlippage,
+    setTpSwapToQuote,
   } = useCreatePositionWizard();
 
   const { address: walletAddress, isConnected } = useAccount();
@@ -402,11 +425,30 @@ export function PositionConfigStep() {
         costBasis,
       });
 
+      // Build per-order swap configs for PnL curve shape
+      const isToken0Quote = !isToken0Base;
+      const slSwapConfig: SwapConfig | undefined = state.slSwapConfig.enabled
+        ? {
+            enabled: true,
+            direction: computeSwapDirection(state.slSwapConfig.swapToQuote, isToken0Quote),
+            slippageBps: state.slSwapConfig.slippageBps,
+          }
+        : undefined;
+      const tpSwapConfig: SwapConfig | undefined = state.tpSwapConfig.enabled
+        ? {
+            enabled: true,
+            direction: computeSwapDirection(state.tpSwapConfig.swapToQuote, isToken0Quote),
+            slippageBps: state.tpSwapConfig.slippageBps,
+          }
+        : undefined;
+
       // Always wrap in overlay (handles null SL/TP gracefully)
       return new CloseOrderSimulationOverlay({
         underlyingPosition: basePosition,
         takeProfitPrice,
         stopLossPrice,
+        stopLossSwapConfig: slSwapConfig,
+        takeProfitSwapConfig: tpSwapConfig,
       });
     } catch (error) {
       console.error("Error creating simulation position:", error);
@@ -421,6 +463,12 @@ export function PositionConfigStep() {
     costBasis,
     stopLossPrice,
     takeProfitPrice,
+    state.slSwapConfig.enabled,
+    state.slSwapConfig.swapToQuote,
+    state.slSwapConfig.slippageBps,
+    state.tpSwapConfig.enabled,
+    state.tpSwapConfig.swapToQuote,
+    state.tpSwapConfig.slippageBps,
   ]);
 
   // Handle base input change
@@ -473,9 +521,9 @@ export function PositionConfigStep() {
     setConfigurationTab('range');
   }, [setConfigurationTab]);
 
-  // Handle SL/TP interaction - switch to SL/TP Setup tab
-  const handleSlTpInteraction = useCallback(() => {
-    setConfigurationTab('sltp');
+  // Handle SL/TP interaction - switch to correct setup tab
+  const handleSlTpInteraction = useCallback((triggerType: 'sl' | 'tp') => {
+    setConfigurationTab(triggerType);
   }, [setConfigurationTab]);
 
   // Render Capital Allocation tab content
@@ -735,16 +783,118 @@ export function PositionConfigStep() {
     }
   }, [takeProfitPrice, simulationPosition]);
 
-  // Render SL/TP Setup tab content
-  const renderSltpTab = () => {
+  // Check if chain supports Paraswap swap integration
+  const chainId = state.selectedPool?.chainId ?? 0;
+  const isSwapSupported = (PARASWAP_SUPPORTED_CHAINS as readonly number[]).includes(chainId);
+
+  // Render inline swap config for a trigger
+  const renderSwapConfig = (
+    swapConfig: SwapConfigState,
+    setEnabled: (enabled: boolean) => void,
+    setSlippage: (slippageBps: number) => void,
+    toggleDirection: () => void,
+  ) => {
+    const baseSymbol = state.baseToken?.symbol || 'Base';
+    const quoteSymbol = state.quoteToken?.symbol || 'Quote';
+
+    if (!isSwapSupported) {
+      return (
+        <div className="mt-4 p-3 bg-slate-700/20 rounded-lg">
+          <p className="text-xs text-slate-500">
+            Post-close swap not available on this chain. Supported: Ethereum,
+            Arbitrum, Base, Optimism.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-4 pt-4 border-t border-slate-600/30 space-y-3">
+        <div className="text-[10px] text-slate-400 uppercase tracking-wide">
+          Post-Close Swap
+        </div>
+
+        {/* Toggle */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-slate-300">Enable Swap</span>
+          <button
+            type="button"
+            onClick={() => setEnabled(!swapConfig.enabled)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+              swapConfig.enabled ? 'bg-blue-600' : 'bg-slate-600'
+            }`}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                swapConfig.enabled ? 'translate-x-4.5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Swap details when enabled */}
+        {swapConfig.enabled && (
+          <div className="space-y-3">
+            {/* Direction display */}
+            <div className="flex items-center gap-2 text-sm">
+              <span className={swapConfig.swapToQuote ? 'text-slate-300' : 'text-blue-400 font-medium'}>
+                {swapConfig.swapToQuote ? baseSymbol : quoteSymbol}
+              </span>
+              <button
+                type="button"
+                onClick={toggleDirection}
+                className="p-1 rounded bg-slate-700/50 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 transition-colors cursor-pointer"
+                title={`Swap to ${swapConfig.swapToQuote ? baseSymbol : quoteSymbol}`}
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className={swapConfig.swapToQuote ? 'text-blue-400 font-medium' : 'text-slate-300'}>
+                {swapConfig.swapToQuote ? quoteSymbol : baseSymbol}
+              </span>
+            </div>
+
+            {/* Slippage */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-slate-400 mr-1">Slippage:</span>
+              {SWAP_SLIPPAGE_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSlippage(value)}
+                  className={`py-1 px-2 text-xs rounded border transition-colors cursor-pointer ${
+                    swapConfig.slippageBps === value
+                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                      : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* High slippage warning */}
+            {swapConfig.slippageBps > 300 && (
+              <div className="flex items-start gap-1.5 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded">
+                <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <p className="text-[11px] text-yellow-300">
+                  High slippage may result in unfavorable swap rates.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render SL Setup tab content
+  const renderSlTab = () => {
     const quoteSymbol = state.quoteToken?.symbol || 'Quote';
     const quoteDecimals = state.quoteToken?.decimals ?? 18;
     const hasSl = stopLossPrice !== null;
-    const hasTp = takeProfitPrice !== null;
 
     return (
-      <div className="grid grid-cols-2 gap-4">
-        {/* Stop Loss Column */}
+      <div>
         <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
           <div className="flex items-center justify-between">
             <div className="text-[10px] text-slate-400 uppercase tracking-wide">Stop Loss</div>
@@ -797,9 +947,22 @@ export function PositionConfigStep() {
               </div>
             </>
           )}
-        </div>
 
-        {/* Take Profit Column */}
+          {/* SL swap config (only when trigger is set) */}
+          {hasSl && renderSwapConfig(state.slSwapConfig, setSlSwapEnabled, setSlSwapSlippage, () => setSlSwapToQuote(!state.slSwapConfig.swapToQuote))}
+        </div>
+      </div>
+    );
+  };
+
+  // Render TP Setup tab content
+  const renderTpTab = () => {
+    const quoteSymbol = state.quoteToken?.symbol || 'Quote';
+    const quoteDecimals = state.quoteToken?.decimals ?? 18;
+    const hasTp = takeProfitPrice !== null;
+
+    return (
+      <div>
         <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
           <div className="flex items-center justify-between">
             <div className="text-[10px] text-slate-400 uppercase tracking-wide">Take Profit</div>
@@ -852,6 +1015,9 @@ export function PositionConfigStep() {
               </div>
             </>
           )}
+
+          {/* TP swap config (only when trigger is set) */}
+          {hasTp && renderSwapConfig(state.tpSwapConfig, setTpSwapEnabled, setTpSwapSlippage, () => setTpSwapToQuote(!state.tpSwapConfig.swapToQuote))}
         </div>
       </div>
     );
@@ -864,8 +1030,10 @@ export function PositionConfigStep() {
         return renderCapitalTab();
       case 'range':
         return renderRangeTab();
-      case 'sltp':
-        return renderSltpTab();
+      case 'sl':
+        return renderSlTab();
+      case 'tp':
+        return renderTpTab();
       default:
         return renderCapitalTab();
     }

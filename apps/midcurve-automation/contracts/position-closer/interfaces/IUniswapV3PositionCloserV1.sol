@@ -179,7 +179,9 @@ interface IUniswapV3PositionCloserV1 {
         address payout,
         int24 triggerTick,
         uint256 validUntil,
-        uint16 slippageBps
+        uint16 slippageBps,
+        SwapDirection swapDirection,
+        uint16 swapSlippageBps
     );
 
     /// @notice Emitted when an order is executed
@@ -245,7 +247,8 @@ interface IUniswapV3PositionCloserV1 {
         uint256 indexed nftId,
         TriggerMode indexed triggerMode,
         SwapDirection oldDirection,
-        SwapDirection newDirection
+        SwapDirection newDirection,
+        uint16 swapSlippageBps
     );
 
     /// @notice Emitted when fee is applied during execution

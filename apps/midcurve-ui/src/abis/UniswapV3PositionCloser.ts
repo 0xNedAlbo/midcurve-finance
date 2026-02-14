@@ -96,6 +96,8 @@ export const POSITION_CLOSER_ABI = [
       { name: 'triggerTick', type: 'int24', indexed: false },
       { name: 'validUntil', type: 'uint256', indexed: false },
       { name: 'slippageBps', type: 'uint16', indexed: false },
+      { name: 'swapDirection', type: 'uint8', indexed: false },
+      { name: 'swapSlippageBps', type: 'uint16', indexed: false },
     ],
   },
   {

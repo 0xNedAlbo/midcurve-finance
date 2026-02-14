@@ -62,6 +62,8 @@ export interface OrderRegisteredPayload {
   triggerTick: number;
   validUntil: string;
   slippageBps: number;
+  swapDirection: SwapDirectionString;
+  swapSlippageBps: number;
 }
 
 export interface OrderCancelledPayload {
@@ -96,6 +98,7 @@ export interface OrderSlippageUpdatedPayload {
 export interface OrderSwapIntentUpdatedPayload {
   oldDirection: SwapDirectionString;
   newDirection: SwapDirectionString;
+  swapSlippageBps: number;
 }
 
 // ============================================================

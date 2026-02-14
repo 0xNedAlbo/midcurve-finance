@@ -12,10 +12,21 @@ import type { WizardStep } from '@/components/layout/wizard';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { ZOOM_STORAGE_KEYS, ZOOM_DEFAULTS } from '@/lib/zoom-settings';
 import { useWizardUrlState, type HydrationPayload } from '../hooks/useWizardUrlState';
+export {
+  type SwapConfigState,
+  computeSwapDirection,
+} from '@/components/positions/wizard/risk-triggers/uniswapv3/context/RiskTriggersWizardContext';
+import type { SwapConfigState } from '@/components/positions/wizard/risk-triggers/uniswapv3/context/RiskTriggersWizardContext';
 
 // ----- Types -----
 
-export type ConfigurationTab = 'capital' | 'range' | 'sltp';
+export type ConfigurationTab = 'capital' | 'range' | 'sl' | 'tp';
+
+const DEFAULT_SWAP_CONFIG: SwapConfigState = {
+  enabled: true,
+  slippageBps: 100,
+  swapToQuote: true,
+};
 export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
 
 export interface TransactionRecord {
@@ -65,6 +76,10 @@ export interface CreatePositionWizardState {
   stopLossTick: number | null;
   takeProfitEnabled: boolean;
   takeProfitTick: number | null;
+
+  // Per-order post-close swap configuration
+  slSwapConfig: SwapConfigState;
+  tpSwapConfig: SwapConfigState;
 
   // Conditional step flags
   needsSwap: boolean;
@@ -119,6 +134,12 @@ type WizardAction =
   | { type: 'SET_AUTOMATION_ENABLED'; enabled: boolean }
   | { type: 'SET_STOP_LOSS'; enabled: boolean; tick: number | null }
   | { type: 'SET_TAKE_PROFIT'; enabled: boolean; tick: number | null }
+  | { type: 'SET_SL_SWAP_ENABLED'; enabled: boolean }
+  | { type: 'SET_SL_SWAP_SLIPPAGE'; slippageBps: number }
+  | { type: 'SET_SL_SWAP_TO_QUOTE'; swapToQuote: boolean }
+  | { type: 'SET_TP_SWAP_ENABLED'; enabled: boolean }
+  | { type: 'SET_TP_SWAP_SLIPPAGE'; slippageBps: number }
+  | { type: 'SET_TP_SWAP_TO_QUOTE'; swapToQuote: boolean }
   | { type: 'SET_NEEDS_SWAP'; needsSwap: boolean }
   | { type: 'SET_NEEDS_AUTOWALLET'; needsAutowallet: boolean }
   | { type: 'ADD_TRANSACTION'; tx: TransactionRecord }
@@ -164,6 +185,8 @@ const initialState: CreatePositionWizardState = {
   stopLossTick: null,
   takeProfitEnabled: false,
   takeProfitTick: null,
+  slSwapConfig: { ...DEFAULT_SWAP_CONFIG },
+  tpSwapConfig: { ...DEFAULT_SWAP_CONFIG },
   needsSwap: false,
   needsAutowallet: false,
   transactions: [],
@@ -221,6 +244,9 @@ function wizardReducer(
         stopLossEnabled: false,
         takeProfitEnabled: false,
         automationEnabled: false,
+        // Reset swap configs
+        slSwapConfig: { ...DEFAULT_SWAP_CONFIG },
+        tpSwapConfig: { ...DEFAULT_SWAP_CONFIG },
         // Reset capital allocation
         baseInputAmount: '',
         quoteInputAmount: '',
@@ -252,6 +278,9 @@ function wizardReducer(
         stopLossEnabled: false,
         takeProfitEnabled: false,
         automationEnabled: false,
+        // Reset swap configs
+        slSwapConfig: { ...DEFAULT_SWAP_CONFIG },
+        tpSwapConfig: { ...DEFAULT_SWAP_CONFIG },
         // Reset capital allocation
         baseInputAmount: '',
         quoteInputAmount: '',
@@ -375,6 +404,24 @@ function wizardReducer(
         takeProfitTick: action.tick,
         automationEnabled: state.stopLossEnabled || action.enabled,
       };
+
+    case 'SET_SL_SWAP_ENABLED':
+      return { ...state, slSwapConfig: { ...state.slSwapConfig, enabled: action.enabled } };
+
+    case 'SET_SL_SWAP_SLIPPAGE':
+      return { ...state, slSwapConfig: { ...state.slSwapConfig, slippageBps: action.slippageBps } };
+
+    case 'SET_SL_SWAP_TO_QUOTE':
+      return { ...state, slSwapConfig: { ...state.slSwapConfig, swapToQuote: action.swapToQuote } };
+
+    case 'SET_TP_SWAP_ENABLED':
+      return { ...state, tpSwapConfig: { ...state.tpSwapConfig, enabled: action.enabled } };
+
+    case 'SET_TP_SWAP_SLIPPAGE':
+      return { ...state, tpSwapConfig: { ...state.tpSwapConfig, slippageBps: action.slippageBps } };
+
+    case 'SET_TP_SWAP_TO_QUOTE':
+      return { ...state, tpSwapConfig: { ...state.tpSwapConfig, swapToQuote: action.swapToQuote } };
 
     case 'SET_NEEDS_SWAP':
       return { ...state, needsSwap: action.needsSwap };
@@ -563,6 +610,14 @@ interface CreatePositionWizardContextValue {
   setStopLoss: (enabled: boolean, tick: number | null) => void;
   setTakeProfit: (enabled: boolean, tick: number | null) => void;
 
+  // Per-order swap config
+  setSlSwapEnabled: (enabled: boolean) => void;
+  setSlSwapSlippage: (slippageBps: number) => void;
+  setSlSwapToQuote: (swapToQuote: boolean) => void;
+  setTpSwapEnabled: (enabled: boolean) => void;
+  setTpSwapSlippage: (slippageBps: number) => void;
+  setTpSwapToQuote: (swapToQuote: boolean) => void;
+
   // Conditional flags
   setNeedsSwap: (needsSwap: boolean) => void;
   setNeedsAutowallet: (needsAutowallet: boolean) => void;
@@ -721,6 +776,31 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     dispatch({ type: 'SET_TAKE_PROFIT', enabled, tick });
   }, []);
 
+  // Per-order swap config
+  const setSlSwapEnabled = useCallback((enabled: boolean) => {
+    dispatch({ type: 'SET_SL_SWAP_ENABLED', enabled });
+  }, []);
+
+  const setSlSwapSlippage = useCallback((slippageBps: number) => {
+    dispatch({ type: 'SET_SL_SWAP_SLIPPAGE', slippageBps });
+  }, []);
+
+  const setSlSwapToQuote = useCallback((swapToQuote: boolean) => {
+    dispatch({ type: 'SET_SL_SWAP_TO_QUOTE', swapToQuote });
+  }, []);
+
+  const setTpSwapEnabled = useCallback((enabled: boolean) => {
+    dispatch({ type: 'SET_TP_SWAP_ENABLED', enabled });
+  }, []);
+
+  const setTpSwapSlippage = useCallback((slippageBps: number) => {
+    dispatch({ type: 'SET_TP_SWAP_SLIPPAGE', slippageBps });
+  }, []);
+
+  const setTpSwapToQuote = useCallback((swapToQuote: boolean) => {
+    dispatch({ type: 'SET_TP_SWAP_TO_QUOTE', swapToQuote });
+  }, []);
+
   // Conditional flags
   const setNeedsSwap = useCallback((needsSwap: boolean) => {
     dispatch({ type: 'SET_NEEDS_SWAP', needsSwap });
@@ -835,6 +915,12 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setAutomationEnabled,
     setStopLoss,
     setTakeProfit,
+    setSlSwapEnabled,
+    setSlSwapSlippage,
+    setSlSwapToQuote,
+    setTpSwapEnabled,
+    setTpSwapSlippage,
+    setTpSwapToQuote,
     setNeedsSwap,
     setNeedsAutowallet,
     addTransaction,

@@ -70,7 +70,7 @@ export interface InteractivePnLCurveProps {
   // Enable SL/TP interaction mode (default: true if SL/TP callbacks provided)
   enableSLTPInteraction?: boolean;
   // Callback when user starts interacting with SL/TP lines
-  onSlTpInteraction?: () => void;
+  onSlTpInteraction?: (triggerType: 'sl' | 'tp') => void;
   /** PnL scenario to visualize. Defaults to 'combined'. */
   scenario?: PnLScenario;
   // Dimensions
@@ -643,7 +643,7 @@ function InteractivePnLCurveInner({
       e.stopPropagation();
 
       // Notify parent that SL/TP interaction started (e.g., to switch tabs)
-      onSlTpInteraction?.();
+      onSlTpInteraction?.(triggerType);
 
       slTpDragRef.current = {
         isDragging: true,
