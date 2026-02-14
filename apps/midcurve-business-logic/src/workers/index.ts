@@ -18,6 +18,7 @@ import {
   EnrichCoingeckoTokensRule,
   RefreshCoingeckoTokensRule,
   UpdatePositionOnLiquidityEventRule,
+  ProcessCloseOrderEventsRule,
   CreateAutomationWalletOnUserRegisteredRule,
   type BusinessRuleStatus,
 } from '../rules';
@@ -64,6 +65,9 @@ export class RuleManager {
 
     // Position liquidity event handler - imports ledger events and refreshes positions
     this.registry.register(new UpdatePositionOnLiquidityEventRule());
+
+    // Close order lifecycle event handler - syncs close orders with on-chain state
+    this.registry.register(new ProcessCloseOrderEventsRule());
 
     // User lifecycle rules
     // Auto-create automation wallet when new user registers

@@ -79,7 +79,7 @@ export class CloseOrderService {
    * @param input - Close order registration input (includes closeId and registrationTxHash)
    * @returns The created close order
    */
-  async register(input: RegisterCloseOrderInput): Promise<CloseOrderInterface> {
+  async register(input: RegisterCloseOrderInput, tx?: PrismaTransactionClient): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'register', {
       closeOrderType: input.closeOrderType,
       positionId: input.positionId,
@@ -88,6 +88,8 @@ export class CloseOrderService {
     });
 
     try {
+      const db = tx ?? this.prisma;
+
       // Create config and state based on order type
       const config = this.createConfig(input);
       const state = this.createInitialState(input);
@@ -102,7 +104,8 @@ export class CloseOrderService {
       // Check for duplicate (same position + hash)
       const existing = await this.findByPositionAndHash(
         input.positionId,
-        closeOrderHash
+        closeOrderHash,
+        tx
       );
       if (existing) {
         throw new Error(
@@ -110,7 +113,7 @@ export class CloseOrderService {
         );
       }
 
-      const result = await this.prisma.automationCloseOrder.create({
+      const result = await db.automationCloseOrder.create({
         data: {
           closeOrderType: input.closeOrderType,
           positionId: input.positionId,
@@ -149,11 +152,12 @@ export class CloseOrderService {
    * @param id - Order ID
    * @returns The order if found, null otherwise
    */
-  async findById(id: string): Promise<CloseOrderInterface | null> {
+  async findById(id: string, tx?: PrismaTransactionClient): Promise<CloseOrderInterface | null> {
     log.methodEntry(this.logger, 'findById', { id });
 
     try {
-      const result = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const result = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -182,7 +186,8 @@ export class CloseOrderService {
    */
   async findByPositionAndHash(
     positionId: string,
-    closeOrderHash: string
+    closeOrderHash: string,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface | null> {
     log.methodEntry(this.logger, 'findByPositionAndHash', {
       positionId,
@@ -190,7 +195,8 @@ export class CloseOrderService {
     });
 
     try {
-      const result = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const result = await db.automationCloseOrder.findUnique({
         where: {
           positionId_closeOrderHash: {
             positionId,
@@ -270,13 +276,15 @@ export class CloseOrderService {
    * @returns Array of active close orders for the pool
    */
   async findActiveOrdersForPool(
-    poolAddress: string
+    poolAddress: string,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface[]> {
     log.methodEntry(this.logger, 'findActiveOrdersForPool', { poolAddress });
 
     try {
+      const db = tx ?? this.prisma;
       // Get all active orders
-      const results = await this.prisma.automationCloseOrder.findMany({
+      const results = await db.automationCloseOrder.findMany({
         where: {
           status: 'active',
         },
@@ -308,11 +316,12 @@ export class CloseOrderService {
    *
    * @returns Array of pool addresses
    */
-  async getActivePoolAddresses(): Promise<string[]> {
+  async getActivePoolAddresses(tx?: PrismaTransactionClient): Promise<string[]> {
     log.methodEntry(this.logger, 'getActivePoolAddresses', {});
 
     try {
-      const results = await this.prisma.automationCloseOrder.findMany({
+      const db = tx ?? this.prisma;
+      const results = await db.automationCloseOrder.findMany({
         where: { status: 'active' },
         select: { config: true },
       });
@@ -347,13 +356,14 @@ export class CloseOrderService {
    *
    * @returns Array of pool info with chainId and poolAddress
    */
-  async getPoolsWithActiveOrders(): Promise<
+  async getPoolsWithActiveOrders(tx?: PrismaTransactionClient): Promise<
     Array<{ chainId: number; poolAddress: string; poolId: string }>
   > {
     log.methodEntry(this.logger, 'getPoolsWithActiveOrders', {});
 
     try {
-      const results = await this.prisma.automationCloseOrder.findMany({
+      const db = tx ?? this.prisma;
+      const results = await db.automationCloseOrder.findMany({
         where: { status: 'active' },
         select: {
           config: true,
@@ -412,8 +422,8 @@ export class CloseOrderService {
    * @param id - Order ID
    * @returns The updated order
    */
-  async markRegistering(id: string): Promise<CloseOrderInterface> {
-    return this.updateStatus(id, 'registering');
+  async markRegistering(id: string, tx?: PrismaTransactionClient): Promise<CloseOrderInterface> {
+    return this.updateStatus(id, 'registering', tx);
   }
 
   /**
@@ -425,12 +435,14 @@ export class CloseOrderService {
    */
   async markRegistered(
     id: string,
-    input: MarkOrderRegisteredInput
+    input: MarkOrderRegisteredInput,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'markRegistered', { id, input });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -453,7 +465,7 @@ export class CloseOrderService {
         registeredAt: new Date().toISOString(),
       };
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: {
           status: 'active',
@@ -493,13 +505,15 @@ export class CloseOrderService {
    */
   async markTriggered(
     id: string,
-    input: MarkOrderTriggeredInput
+    input: MarkOrderTriggeredInput,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'markTriggered', { id, input });
 
     try {
+      const db = tx ?? this.prisma;
       // First fetch to get existing state and validate order exists
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -525,7 +539,7 @@ export class CloseOrderService {
 
       // Atomic conditional update: only update if status is still 'active'
       // This prevents race conditions where status changed between findUnique and update
-      const updateResult = await this.prisma.automationCloseOrder.updateMany({
+      const updateResult = await db.automationCloseOrder.updateMany({
         where: {
           id,
           status: 'active', // Only update if still active
@@ -539,7 +553,7 @@ export class CloseOrderService {
       // If no rows were updated, status changed between check and update (race condition)
       if (updateResult.count === 0) {
         // Fetch current status for error message
-        const current = await this.prisma.automationCloseOrder.findUnique({
+        const current = await db.automationCloseOrder.findUnique({
           where: { id },
           select: { status: true },
         });
@@ -550,7 +564,7 @@ export class CloseOrderService {
       }
 
       // Fetch the updated record to return
-      const result = await this.prisma.automationCloseOrder.findUnique({
+      const result = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -581,12 +595,14 @@ export class CloseOrderService {
    */
   async markExecuted(
     id: string,
-    input: MarkOrderExecutedInput
+    input: MarkOrderExecutedInput,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'markExecuted', { id, input });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -605,7 +621,7 @@ export class CloseOrderService {
         amount1Out: input.amount1Out.toString(),
       };
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: {
           status: 'executed',
@@ -644,12 +660,14 @@ export class CloseOrderService {
    */
   async incrementExecutionAttempt(
     id: string,
-    error: string
+    error: string,
+    tx?: PrismaTransactionClient
   ): Promise<{ retryCount: number }> {
     log.methodEntry(this.logger, 'incrementExecutionAttempt', { id, error });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -667,7 +685,7 @@ export class CloseOrderService {
         lastExecutionAt: new Date().toISOString(),
       };
 
-      await this.prisma.automationCloseOrder.update({
+      await db.automationCloseOrder.update({
         where: { id },
         data: {
           state: updatedState as unknown as Prisma.InputJsonValue,
@@ -697,11 +715,12 @@ export class CloseOrderService {
    * @param error - Error message
    * @returns The updated order
    */
-  async markFailed(id: string, error: string): Promise<CloseOrderInterface> {
+  async markFailed(id: string, error: string, tx?: PrismaTransactionClient): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'markFailed', { id, error });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -718,7 +737,7 @@ export class CloseOrderService {
         retryCount,
       };
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: {
           status: 'failed',
@@ -743,11 +762,12 @@ export class CloseOrderService {
    * @param id - Order ID
    * @returns The updated order
    */
-  async cancel(id: string): Promise<CloseOrderInterface> {
+  async cancel(id: string, tx?: PrismaTransactionClient): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'cancel', { id });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -767,7 +787,7 @@ export class CloseOrderService {
         );
       }
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: { status: 'cancelled' },
       });
@@ -792,12 +812,14 @@ export class CloseOrderService {
    */
   async update(
     id: string,
-    input: UpdateCloseOrderInput
+    input: UpdateCloseOrderInput,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'update', { id, input });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -826,7 +848,7 @@ export class CloseOrderService {
         updatedConfig.slippageBps = input.slippageBps;
       }
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: {
           config: updatedConfig as unknown as Prisma.InputJsonValue,
@@ -852,11 +874,12 @@ export class CloseOrderService {
    *
    * @param id - Order ID
    */
-  async delete(id: string): Promise<void> {
+  async delete(id: string, tx?: PrismaTransactionClient): Promise<void> {
     log.methodEntry(this.logger, 'delete', { id });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -873,7 +896,7 @@ export class CloseOrderService {
         );
       }
 
-      await this.prisma.automationCloseOrder.delete({
+      await db.automationCloseOrder.delete({
         where: { id },
       });
 
@@ -901,7 +924,8 @@ export class CloseOrderService {
   async findByNftIdAndTriggerMode(
     nftId: string,
     triggerMode: TriggerMode,
-    chainId: number
+    chainId: number,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface | null> {
     log.methodEntry(this.logger, 'findByNftIdAndTriggerMode', {
       nftId,
@@ -910,7 +934,8 @@ export class CloseOrderService {
     });
 
     try {
-      const results = await this.prisma.automationCloseOrder.findMany({
+      const db = tx ?? this.prisma;
+      const results = await db.automationCloseOrder.findMany({
         where: {
           closeOrderType: 'uniswapv3',
           config: {
@@ -961,7 +986,8 @@ export class CloseOrderService {
    * registered on-chain.
    */
   async createFromOnChainEvent(
-    input: CreateFromOnChainEventInput
+    input: CreateFromOnChainEventInput,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'createFromOnChainEvent', {
       positionId: input.positionId,
@@ -971,6 +997,8 @@ export class CloseOrderService {
     });
 
     try {
+      const db = tx ?? this.prisma;
+
       // Convert triggerTick to sqrtPriceX96
       const sqrtPriceX96 = BigInt(
         tickToSqrtRatioX96(input.triggerTick).toString()
@@ -985,7 +1013,8 @@ export class CloseOrderService {
       // Idempotency: check if order already exists
       const existing = await this.findByPositionAndHash(
         input.positionId,
-        closeOrderHash
+        closeOrderHash,
+        tx
       );
       if (existing) {
         this.logger.info(
@@ -1031,7 +1060,7 @@ export class CloseOrderService {
         amount1Out: null,
       };
 
-      const result = await this.prisma.automationCloseOrder.create({
+      const result = await db.automationCloseOrder.create({
         data: {
           closeOrderType: 'uniswapv3',
           positionId: input.positionId,
@@ -1080,7 +1109,8 @@ export class CloseOrderService {
   async updateConfigField(
     id: string,
     updates: Record<string, unknown>,
-    newCloseOrderHash?: string
+    newCloseOrderHash?: string,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'updateConfigField', {
       id,
@@ -1089,7 +1119,8 @@ export class CloseOrderService {
     });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -1108,7 +1139,7 @@ export class CloseOrderService {
         data.closeOrderHash = newCloseOrderHash;
       }
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data,
       });
@@ -1139,12 +1170,14 @@ export class CloseOrderService {
    */
   async updateSwapConfig(
     id: string,
-    direction: 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0'
+    direction: 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'updateSwapConfig', { id, direction });
 
     try {
-      const existing = await this.prisma.automationCloseOrder.findUnique({
+      const db = tx ?? this.prisma;
+      const existing = await db.automationCloseOrder.findUnique({
         where: { id },
       });
 
@@ -1171,7 +1204,7 @@ export class CloseOrderService {
               },
       };
 
-      const result = await this.prisma.automationCloseOrder.update({
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: {
           config: updatedConfig as unknown as Prisma.InputJsonValue,
@@ -1205,12 +1238,14 @@ export class CloseOrderService {
    */
   private async updateStatus(
     id: string,
-    newStatus: CloseOrderStatus
+    newStatus: CloseOrderStatus,
+    tx?: PrismaTransactionClient
   ): Promise<CloseOrderInterface> {
     log.methodEntry(this.logger, 'updateStatus', { id, newStatus });
 
     try {
-      const result = await this.prisma.automationCloseOrder.update({
+      const db = tx ?? this.prisma;
+      const result = await db.automationCloseOrder.update({
         where: { id },
         data: { status: newStatus },
       });
