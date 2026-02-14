@@ -8,6 +8,7 @@
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma, AutomationLog } from '@midcurve/database';
+import type { PrismaTransactionClient } from '../../clients/index.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type {
@@ -130,7 +131,7 @@ export class AutomationLogService {
    * @param input - Log creation input
    * @returns The created log entry
    */
-  async log(input: CreateAutomationLogInput): Promise<AutomationLog> {
+  async log(input: CreateAutomationLogInput, tx?: PrismaTransactionClient): Promise<AutomationLog> {
     log.methodEntry(this.logger, 'log', {
       positionId: input.positionId,
       logType: input.logType,
@@ -138,7 +139,8 @@ export class AutomationLogService {
     });
 
     try {
-      const result = await this.prisma.automationLog.create({
+      const db = tx ?? this.prisma;
+      const result = await db.automationLog.create({
         data: {
           positionId: input.positionId,
           closeOrderId: input.closeOrderId,
@@ -175,7 +177,8 @@ export class AutomationLogService {
    */
   async listByPosition(
     positionId: string,
-    options: ListAutomationLogsOptions = {}
+    options: ListAutomationLogsOptions = {},
+    tx?: PrismaTransactionClient
   ): Promise<ListAutomationLogsResult> {
     const { level, limit = 50, cursor } = options;
 
@@ -187,6 +190,8 @@ export class AutomationLogService {
     });
 
     try {
+      const db = tx ?? this.prisma;
+
       // Build where clause
       const where: Prisma.AutomationLogWhereInput = {
         positionId,
@@ -202,7 +207,7 @@ export class AutomationLogService {
       }
 
       // Fetch limit + 1 to determine if there are more results
-      const logs = await this.prisma.automationLog.findMany({
+      const logs = await db.automationLog.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit + 1,
@@ -246,7 +251,8 @@ export class AutomationLogService {
    */
   async listByCloseOrder(
     closeOrderId: string,
-    options: ListAutomationLogsOptions = {}
+    options: ListAutomationLogsOptions = {},
+    tx?: PrismaTransactionClient
   ): Promise<ListAutomationLogsResult> {
     const { level, limit = 50, cursor } = options;
 
@@ -258,6 +264,8 @@ export class AutomationLogService {
     });
 
     try {
+      const db = tx ?? this.prisma;
+
       const where: Prisma.AutomationLogWhereInput = {
         closeOrderId,
       };
@@ -270,7 +278,7 @@ export class AutomationLogService {
         where.id = { lt: cursor };
       }
 
-      const logs = await this.prisma.automationLog.findMany({
+      const logs = await db.automationLog.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit + 1,
@@ -313,7 +321,8 @@ export class AutomationLogService {
   async logOrderCreated(
     positionId: string,
     closeOrderId: string,
-    context: OrderCreatedContext
+    context: OrderCreatedContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderCreatedMessage(context);
     await this.log({
@@ -323,7 +332,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_CREATED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -332,7 +341,8 @@ export class AutomationLogService {
   async logOrderRegistered(
     positionId: string,
     closeOrderId: string,
-    context: OrderRegisteredContext
+    context: OrderRegisteredContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderRegisteredMessage(context);
     await this.log({
@@ -342,7 +352,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_REGISTERED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -351,7 +361,8 @@ export class AutomationLogService {
   async logOrderTriggered(
     positionId: string,
     closeOrderId: string,
-    context: OrderTriggeredContext
+    context: OrderTriggeredContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderTriggeredMessage(context);
     await this.log({
@@ -361,7 +372,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_TRIGGERED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -370,7 +381,8 @@ export class AutomationLogService {
   async logOrderExecuting(
     positionId: string,
     closeOrderId: string,
-    context: OrderExecutingContext
+    context: OrderExecutingContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderExecutingMessage(context);
     await this.log({
@@ -380,7 +392,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_EXECUTING,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -389,7 +401,8 @@ export class AutomationLogService {
   async logOrderExecuted(
     positionId: string,
     closeOrderId: string,
-    context: OrderExecutedContext
+    context: OrderExecutedContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderExecutedMessage(context);
     await this.log({
@@ -399,7 +412,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_EXECUTED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -408,7 +421,8 @@ export class AutomationLogService {
   async logOrderFailed(
     positionId: string,
     closeOrderId: string,
-    context: OrderFailedContext
+    context: OrderFailedContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderFailedMessage(context);
     await this.log({
@@ -418,7 +432,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_FAILED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -427,7 +441,8 @@ export class AutomationLogService {
   async logOrderCancelled(
     positionId: string,
     closeOrderId: string,
-    context: OrderCancelledContext
+    context: OrderCancelledContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderCancelledMessage(context);
     await this.log({
@@ -437,7 +452,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_CANCELLED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -446,7 +461,8 @@ export class AutomationLogService {
   async logOrderExpired(
     positionId: string,
     closeOrderId: string,
-    context: OrderExpiredContext
+    context: OrderExpiredContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderExpiredMessage(context);
     await this.log({
@@ -456,7 +472,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_EXPIRED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -465,7 +481,8 @@ export class AutomationLogService {
   async logOrderModified(
     positionId: string,
     closeOrderId: string,
-    context: OrderModifiedContext
+    context: OrderModifiedContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderModifiedMessage(context);
     await this.log({
@@ -475,7 +492,7 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_MODIFIED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -484,7 +501,8 @@ export class AutomationLogService {
   async logRetryScheduled(
     positionId: string,
     closeOrderId: string,
-    context: RetryScheduledContext
+    context: RetryScheduledContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatRetryScheduledMessage(context);
     await this.log({
@@ -494,7 +512,7 @@ export class AutomationLogService {
       logType: AutomationLogType.RETRY_SCHEDULED,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -503,7 +521,8 @@ export class AutomationLogService {
   async logPreflightValidation(
     positionId: string,
     closeOrderId: string,
-    context: PreflightValidationContext
+    context: PreflightValidationContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatPreflightValidationMessage(context);
     await this.log({
@@ -513,7 +532,7 @@ export class AutomationLogService {
       logType: AutomationLogType.PREFLIGHT_VALIDATION,
       message,
       context,
-    });
+    }, tx);
   }
 
   /**
@@ -522,7 +541,8 @@ export class AutomationLogService {
   async logSimulationFailed(
     positionId: string,
     closeOrderId: string,
-    context: SimulationFailedContext
+    context: SimulationFailedContext,
+    tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatSimulationFailedMessage(context);
     await this.log({
@@ -532,7 +552,7 @@ export class AutomationLogService {
       logType: AutomationLogType.SIMULATION_FAILED,
       message,
       context,
-    });
+    }, tx);
   }
 
   // ============================================================================

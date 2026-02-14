@@ -23,7 +23,16 @@ import { prisma, type PrismaClient } from '@midcurve/database';
 import {
   CloseOrderService,
   PoolSubscriptionService,
+  AutomationLogService,
+  UniswapV3PositionService,
   deriveCloseOrderHash,
+  generateOrderTag,
+} from '@midcurve/services';
+import type {
+  OrderCreatedContext,
+  OrderRegisteredContext,
+  OrderCancelledContext,
+  OrderModifiedContext,
 } from '@midcurve/services';
 import {
   tickToSqrtRatioX96,
@@ -74,11 +83,15 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private consumerTag: string | null = null;
   private closeOrderService: CloseOrderService;
   private poolSubscriptionService: PoolSubscriptionService;
+  private automationLogService: AutomationLogService;
+  private positionService: UniswapV3PositionService;
 
   constructor() {
     super();
     this.closeOrderService = new CloseOrderService({ prisma });
     this.poolSubscriptionService = new PoolSubscriptionService({ prisma });
+    this.automationLogService = new AutomationLogService({ prisma });
+    this.positionService = new UniswapV3PositionService({ prisma });
   }
 
   // ===========================================================================
@@ -257,6 +270,44 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     return match ? { id: match.id, poolId: match.poolId } : null;
   }
 
+  /**
+   * Builds an orderTag for automation log messages.
+   * Uses UniswapV3PositionService to retrieve position/pool data needed for
+   * price formatting (token decimals and quote/base assignment).
+   *
+   * Returns null if position cannot be found (logs warning, caller should skip logging).
+   */
+  private async buildOrderTag(
+    order: CloseOrderInterface,
+    tx?: TxClient
+  ): Promise<string | null> {
+    const position = await this.positionService.findById(order.positionId, tx);
+    if (!position) {
+      this.logger.warn(
+        { positionId: order.positionId, orderId: order.id },
+        'Cannot build order tag: position not found'
+      );
+      return null;
+    }
+
+    const config = order.config as Record<string, unknown>;
+    const triggerMode = config.triggerMode as string;
+    const triggerSide: 'lower' | 'upper' =
+      triggerMode === 'LOWER' ? 'lower' : 'upper';
+    const sqrtPriceX96Str =
+      triggerMode === 'LOWER'
+        ? (config.sqrtPriceX96Lower as string)
+        : (config.sqrtPriceX96Upper as string);
+
+    return generateOrderTag({
+      triggerSide,
+      sqrtPriceX96: BigInt(sqrtPriceX96Str),
+      token0IsQuote: position.isToken0Quote,
+      token0Decimals: position.pool.token0.decimals,
+      token1Decimals: position.pool.token1.decimals,
+    });
+  }
+
   // ===========================================================================
   // Event Handlers
   // ===========================================================================
@@ -297,6 +348,21 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
             { orderId: existingOrder.id, status: existingOrder.status },
             'Existing order activated from on-chain registration'
           );
+
+          // Log ORDER_REGISTERED
+          const orderTag = await this.buildOrderTag(existingOrder, tx);
+          if (orderTag) {
+            await this.automationLogService.logOrderRegistered(
+              existingOrder.positionId,
+              existingOrder.id,
+              {
+                orderTag,
+                registrationTxHash: transactionHash,
+                chainId,
+              } satisfies OrderRegisteredContext,
+              tx
+            );
+          }
         } else if (existingOrder.status === 'active') {
           // Already active — idempotent skip
           this.logger.debug(
@@ -353,6 +419,21 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         'Close order created from on-chain registration'
       );
 
+      // Log ORDER_CREATED
+      const orderTag = await this.buildOrderTag(created, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderCreated(
+          created.positionId,
+          created.id,
+          {
+            orderTag,
+            slippageBps: payload.slippageBps,
+            chainId,
+          } satisfies OrderCreatedContext,
+          tx
+        );
+      }
+
       return position.poolId;
     });
 
@@ -382,6 +463,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         return null;
       }
 
+      // Build order tag before cancel (order still has config data)
+      const orderTag = await this.buildOrderTag(order, tx);
+
       await this.closeOrderService.cancel(order.id, tx);
 
       // Look up position poolId for post-tx subscription update
@@ -394,6 +478,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         { orderId: order.id },
         'Close order cancelled from on-chain event'
       );
+
+      // Log ORDER_CANCELLED
+      if (orderTag) {
+        await this.automationLogService.logOrderCancelled(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            reason: 'on-chain cancellation',
+            chainId: event.chainId,
+          } satisfies OrderCancelledContext,
+          tx
+        );
+      }
 
       return position?.poolId ?? null;
     });
@@ -422,6 +520,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         { orderId: order.id, newOperator: event.payload.newOperator },
         'Close order operator updated'
       );
+
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            changes: 'operator address',
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
     });
   }
 
@@ -443,6 +555,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         { orderId: order.id, newPayout: event.payload.newPayout },
         'Close order payout updated'
       );
+
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            changes: 'payout address',
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
     });
   }
 
@@ -458,6 +584,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
+
+      // Build order tag BEFORE update (captures old trigger price)
+      const oldOrderTag = await this.buildOrderTag(order, tx);
 
       const triggerMode = event.triggerMode as TriggerMode;
       const newTick = event.payload.newTick;
@@ -491,6 +620,19 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         },
         'Close order trigger tick updated'
       );
+
+      if (oldOrderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag: oldOrderTag,
+            changes: 'trigger tick',
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
     });
   }
 
@@ -516,6 +658,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         { orderId: order.id, newValidUntil },
         'Close order valid-until updated'
       );
+
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            changes: 'valid-until',
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
     });
   }
 
@@ -529,6 +685,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
+      const previousSlippageBps = (order.config as Record<string, unknown>)
+        .slippageBps as number | undefined;
+
       await this.closeOrderService.updateConfigField(order.id, {
         slippageBps: event.payload.newSlippageBps,
       }, undefined, tx);
@@ -537,6 +696,22 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         { orderId: order.id, newSlippageBps: event.payload.newSlippageBps },
         'Close order slippage updated'
       );
+
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            changes: 'slippage',
+            previousSlippageBps,
+            newSlippageBps: event.payload.newSlippageBps,
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
     });
   }
 
@@ -560,6 +735,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         { orderId: order.id, newDirection: event.payload.newDirection },
         'Close order swap intent updated'
       );
+
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            changes: 'swap intent',
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
     });
   }
 }
