@@ -2,7 +2,7 @@ import { useMemo, useCallback } from 'react';
 import { useAccount, useChainId } from 'wagmi';
 import type { Address } from 'viem';
 import { getTokenAmountsFromLiquidity } from '@midcurve/shared';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import { useWithdrawWizard } from '../context/WithdrawWizardContext';
 import { WithdrawWizardSummaryPanel } from '../shared/WithdrawWizardSummaryPanel';
@@ -16,6 +16,8 @@ import { getChainSlugByChainId } from '@/config/chains';
 export function TransactionStep() {
   const { state } = useWithdrawWizard();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
   const { address: walletAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
 
@@ -103,16 +105,10 @@ export function TransactionStep() {
     onReset: () => decreaseLiquidity.reset(),
   });
 
-  // Handle finish — navigate to dashboard if NFT was burned (position no longer exists)
+  // Handle finish — navigate back to origin page
   const handleFinish = useCallback(() => {
-    if (isBurning) {
-      navigate('/dashboard');
-    } else if (config && chainSlug) {
-      navigate(`/positions/uniswapv3/${chainSlug}/${config.nftId}`);
-    } else {
-      navigate('/dashboard');
-    }
-  }, [navigate, config, chainSlug, isBurning]);
+    navigate(returnTo);
+  }, [navigate, returnTo]);
 
   // ===== Render =====
 

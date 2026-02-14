@@ -1,22 +1,19 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ExternalLink, Check, TrendingDown, TrendingUp, Copy } from 'lucide-react';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 
 export function SummaryStep() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { state, reset } = useCreatePositionWizard();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   const token0 = state.selectedPool?.token0;
   const token1 = state.selectedPool?.token1;
 
   const handleViewPosition = () => {
-    // Navigate to position detail page
-    if (state.selectedPool && state.nftId) {
-      navigate(`/positions/uniswapv3/${state.selectedPool.chainName.toLowerCase()}/${state.nftId}`);
-    } else {
-      navigate('/dashboard');
-    }
+    navigate(returnTo);
   };
 
   const handleCreateAnother = () => {
@@ -140,7 +137,7 @@ export function SummaryStep() {
           onClick={handleViewPosition}
           className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
         >
-          View Position
+          Finish
         </button>
         <button
           onClick={handleCreateAnother}

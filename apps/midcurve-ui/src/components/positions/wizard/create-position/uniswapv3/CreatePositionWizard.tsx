@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FullPageWizardLayout } from '@/components/layout/wizard';
 import {
   CreatePositionWizardProvider,
@@ -54,10 +54,12 @@ interface StepContent {
 
 function StepRenderer({ content }: { content: StepContent }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { steps, state } = useCreatePositionWizard();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   const handleClose = () => {
-    navigate('/dashboard');
+    navigate(returnTo);
   };
 
   return (
@@ -78,13 +80,15 @@ function StepRenderer({ content }: { content: StepContent }) {
 // Loading component shown during URL hydration
 function HydrationLoading() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   return (
     <FullPageWizardLayout
       title="Create Uniswap V3 Position"
       steps={[]}
       currentStep={0}
-      onClose={() => navigate('/dashboard')}
+      onClose={() => navigate(returnTo)}
       interactiveContent={
         <div className="flex items-center justify-center h-full min-h-[400px]">
           <div className="text-center">
@@ -104,6 +108,8 @@ function HydrationLoading() {
 // Main content component that conditionally renders the current step
 function CreatePositionWizardContent() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
   const { steps, state, goBack, goToStep, isHydrating } = useCreatePositionWizard();
   const currentStepId = steps[state.currentStepIndex]?.id;
 
@@ -152,7 +158,7 @@ function CreatePositionWizardContent() {
           goBack();
         } else {
           // On first step with no history, exit wizard
-          navigate('/dashboard', { replace: true });
+          navigate(returnTo, { replace: true });
         }
       }
     };

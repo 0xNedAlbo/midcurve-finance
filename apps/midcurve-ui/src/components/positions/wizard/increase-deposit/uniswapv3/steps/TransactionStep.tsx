@@ -4,7 +4,7 @@ import type { Address } from 'viem';
 import { getAddress } from 'viem';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
 import { getTokenAmountsFromLiquidity } from '@midcurve/shared';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import { useIncreaseDepositWizard } from '../context/IncreaseDepositWizardContext';
 import { IncreaseWizardSummaryPanel } from '../shared/IncreaseWizardSummaryPanel';
@@ -21,6 +21,8 @@ import { PriceAdjustmentStep } from './PriceAdjustmentStep';
 export function TransactionStep() {
   const { state } = useIncreaseDepositWizard();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
   const { address: walletAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
 
@@ -161,12 +163,8 @@ export function TransactionStep() {
 
   // Handle finish
   const handleFinish = useCallback(() => {
-    if (config && chainSlug) {
-      navigate(`/positions/uniswapv3/${chainSlug}/${config.nftId}`);
-    } else {
-      navigate('/dashboard');
-    }
-  }, [navigate, config, chainSlug]);
+    navigate(returnTo);
+  }, [navigate, returnTo]);
 
   // ===== Render =====
 

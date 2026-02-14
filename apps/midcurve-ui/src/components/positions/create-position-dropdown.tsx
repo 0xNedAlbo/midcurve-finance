@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Plus, ChevronDown, Loader2 } from "lucide-react";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
 import {
@@ -19,6 +19,7 @@ export function CreatePositionDropdown() {
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   const navigate = useNavigate();
+  const location = useLocation();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Import position mutation
@@ -39,7 +40,7 @@ export function CreatePositionDropdown() {
   // Handle menu item clicks
   const handleCreateNew = () => {
     setIsDropdownOpen(false);
-    navigate('/positions/create');
+    navigate('/positions/create', { state: { returnTo: location.pathname } });
   };
 
   const handleToggleNftForm = () => {

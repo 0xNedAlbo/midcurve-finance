@@ -11,7 +11,7 @@
 import { useState, useMemo } from "react";
 import { Plus, Minus, DollarSign, Flame } from "lucide-react";
 import { useAccount } from "wagmi";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import type { Address } from "viem";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { getChainSlugByChainId } from "@/config/chains";
@@ -34,6 +34,7 @@ interface UniswapV3ActionsProps {
 export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const { address: walletAddress, isConnected } = useAccount();
   const navigate = useNavigate();
+  const location = useLocation();
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showBurnModal, setShowBurnModal] = useState(false);
   const [showHedgeModal, setShowHedgeModal] = useState(false);
@@ -124,7 +125,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           onClick={() => {
             const chainSlug = getChainSlugByChainId(positionConfig.chainId);
             if (chainSlug) {
-              navigate(`/positions/increase/uniswapv3/${chainSlug}/${positionConfig.nftId}`);
+              navigate(`/positions/increase/uniswapv3/${chainSlug}/${positionConfig.nftId}`, { state: { returnTo: location.pathname } });
             }
           }}
           className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
@@ -139,7 +140,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
             onClick={() => {
               const chainSlug = getChainSlugByChainId(positionConfig.chainId);
               if (chainSlug) {
-                navigate(`/positions/withdraw/uniswapv3/${chainSlug}/${positionConfig.nftId}`);
+                navigate(`/positions/withdraw/uniswapv3/${chainSlug}/${positionConfig.nftId}`, { state: { returnTo: location.pathname } });
               }
             }}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"

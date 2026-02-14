@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
 import { FullPageWizardLayout } from '@/components/layout/wizard';
 import {
@@ -42,10 +42,12 @@ function TransactionStepRenderer() {
 // Helper component to render the step content into the layout
 function StepRenderer({ content }: { content: StepContent }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { steps, state } = useIncreaseDepositWizard();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   const handleClose = () => {
-    navigate('/dashboard');
+    navigate(returnTo);
   };
 
   return (
@@ -66,13 +68,15 @@ function StepRenderer({ content }: { content: StepContent }) {
 // Loading component shown while position data is being fetched
 function LoadingState() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   return (
     <FullPageWizardLayout
       title="Increase Deposit"
       steps={[]}
       currentStep={0}
-      onClose={() => navigate('/dashboard')}
+      onClose={() => navigate(returnTo)}
       interactiveContent={
         <div className="flex items-center justify-center h-full min-h-[400px]">
           <div className="text-center">
@@ -92,22 +96,24 @@ function LoadingState() {
 // Error component
 function ErrorState({ message }: { message: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   return (
     <FullPageWizardLayout
       title="Increase Deposit"
       steps={[]}
       currentStep={0}
-      onClose={() => navigate('/dashboard')}
+      onClose={() => navigate(returnTo)}
       interactiveContent={
         <div className="flex items-center justify-center h-full min-h-[400px]">
           <div className="text-center">
             <p className="text-red-400 mb-4">{message}</p>
             <button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(returnTo)}
               className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors cursor-pointer"
             >
-              Back to Dashboard
+              Go Back
             </button>
           </div>
         </div>
@@ -223,6 +229,8 @@ function DataFetcher({ chainId, nftId }: { chainId: number; nftId: string }) {
 // Main content component that conditionally renders the current step
 function IncreaseDepositWizardContent() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
   const { steps, state, goBack, goToStep } = useIncreaseDepositWizard();
   const currentStepId = steps[state.currentStepIndex]?.id;
 
@@ -266,14 +274,14 @@ function IncreaseDepositWizardContent() {
           isPopstateRef.current = true;
           goBack();
         } else {
-          navigate('/dashboard', { replace: true });
+          navigate(returnTo, { replace: true });
         }
       }
     };
 
     window.addEventListener('popstate', handlePopstate);
     return () => window.removeEventListener('popstate', handlePopstate);
-  }, [state.currentStepIndex, goBack, goToStep, navigate]);
+  }, [state.currentStepIndex, goBack, goToStep, navigate, returnTo]);
 
   // Render only the current step component
   switch (currentStepId) {

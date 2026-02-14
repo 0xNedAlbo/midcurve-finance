@@ -2,7 +2,7 @@
 
 import { Wand2, FileText, ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
 import {
   getAllUniswapV3Chains,
@@ -30,6 +30,7 @@ export function EmptyStateActions({
 
   // Navigation for wizard
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Real import handler using API
   const handleImportNft = () => {
@@ -102,7 +103,7 @@ export function EmptyStateActions({
 
             {/* Action Button */}
             <button
-              onClick={() => navigate('/positions/create')}
+              onClick={() => navigate('/positions/create', { state: { returnTo: location.pathname } })}
               className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
             >
               Start Wizard
