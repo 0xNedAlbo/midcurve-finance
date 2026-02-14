@@ -12,6 +12,7 @@ export type {
   MarkOrderRegisteredInput,
   MarkOrderTriggeredInput,
   MarkOrderExecutedInput,
+  CreateFromOnChainEventInput,
   // Pool subscription inputs
   UpdatePoolSubscriptionInput,
   FindPoolSubscriptionOptions,

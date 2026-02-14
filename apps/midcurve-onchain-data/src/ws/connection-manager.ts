@@ -24,3 +24,11 @@ export {
   MAX_POSITIONS_PER_SUBSCRIPTION,
   type PositionInfo,
 } from './providers/uniswap-v3-nfpm';
+
+// Close order lifecycle subscriptions (UniswapV3PositionCloser events)
+export {
+  UniswapV3CloserSubscriptionBatch,
+  createCloserSubscriptionBatches,
+  MAX_CONTRACTS_PER_SUBSCRIPTION,
+  type CloserContractInfo,
+} from './providers/uniswap-v3-closer';

@@ -25,6 +25,7 @@ import { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 import { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 import { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
 import { UniswapV3PoolPriceSubscriber } from './uniswapv3-pool-price-subscriber';
+import { CloseOrderSubscriber } from './close-order-subscriber';
 
 const log = onchainDataLogger.child({ component: 'WorkerManager' });
 
@@ -38,6 +39,7 @@ export class WorkerManager {
   private erc20BalanceSubscriber: Erc20BalanceSubscriber;
   private evmTxStatusSubscriber: EvmTxStatusSubscriber;
   private uniswapV3PoolPriceSubscriber: UniswapV3PoolPriceSubscriber;
+  private closeOrderSubscriber: CloseOrderSubscriber;
   private positionEventHandler: PositionEventHandler;
   private isRunning = false;
 
@@ -48,6 +50,7 @@ export class WorkerManager {
     this.erc20BalanceSubscriber = new Erc20BalanceSubscriber();
     this.evmTxStatusSubscriber = new EvmTxStatusSubscriber();
     this.uniswapV3PoolPriceSubscriber = new UniswapV3PoolPriceSubscriber();
+    this.closeOrderSubscriber = new CloseOrderSubscriber();
     this.positionEventHandler = new PositionEventHandler();
 
     // Wire both subscribers to event handler
@@ -90,6 +93,7 @@ export class WorkerManager {
         this.erc20BalanceSubscriber.start(),
         this.evmTxStatusSubscriber.start(),
         this.uniswapV3PoolPriceSubscriber.start(),
+        this.closeOrderSubscriber.start(),
       ]);
 
       this.isRunning = true;
@@ -128,6 +132,7 @@ export class WorkerManager {
         this.erc20BalanceSubscriber.stop(),
         this.evmTxStatusSubscriber.stop(),
         this.uniswapV3PoolPriceSubscriber.stop(),
+        this.closeOrderSubscriber.stop(),
       ]);
 
       // Close RabbitMQ connection
@@ -156,6 +161,7 @@ export class WorkerManager {
     erc20BalanceSubscriber: ReturnType<Erc20BalanceSubscriber['getStatus']>;
     evmTxStatusSubscriber: ReturnType<EvmTxStatusSubscriber['getStatus']>;
     uniswapV3PoolPriceSubscriber: ReturnType<UniswapV3PoolPriceSubscriber['getStatus']>;
+    closeOrderSubscriber: ReturnType<CloseOrderSubscriber['getStatus']>;
     eventConsumer: {
       positionEvents: { isRunning: boolean };
     };
@@ -173,6 +179,7 @@ export class WorkerManager {
       erc20BalanceSubscriber: this.erc20BalanceSubscriber.getStatus(),
       evmTxStatusSubscriber: this.evmTxStatusSubscriber.getStatus(),
       uniswapV3PoolPriceSubscriber: this.uniswapV3PoolPriceSubscriber.getStatus(),
+      closeOrderSubscriber: this.closeOrderSubscriber.getStatus(),
       eventConsumer: {
         positionEvents: { isRunning: this.positionEventHandler.isRunning() },
       },
@@ -199,3 +206,4 @@ export { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 export { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 export { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
 export { UniswapV3PoolPriceSubscriber } from './uniswapv3-pool-price-subscriber';
+export { CloseOrderSubscriber } from './close-order-subscriber';

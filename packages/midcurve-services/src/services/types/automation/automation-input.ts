@@ -213,6 +213,77 @@ export interface MarkOrderExecutedInput {
   amount1Out: bigint;
 }
 
+/**
+ * Input for creating a close order from an on-chain registration event.
+ * Used when the order was registered directly on-chain (not via the UI/API flow).
+ */
+export interface CreateFromOnChainEventInput {
+  /**
+   * Position ID in the database
+   */
+  positionId: string;
+
+  /**
+   * Automation contract configuration
+   */
+  automationContractConfig: AutomationContractConfig;
+
+  /**
+   * NFT ID (token ID from NFPM) as string
+   */
+  nftId: string;
+
+  /**
+   * Pool address
+   */
+  poolAddress: string;
+
+  /**
+   * Trigger mode (LOWER or UPPER)
+   */
+  triggerMode: TriggerMode;
+
+  /**
+   * Trigger tick from the on-chain event
+   */
+  triggerTick: number;
+
+  /**
+   * Position owner address
+   */
+  owner: string;
+
+  /**
+   * Operator address (automation wallet)
+   */
+  operator: string;
+
+  /**
+   * Payout address (receives closed position tokens)
+   */
+  payout: string;
+
+  /**
+   * Valid until (unix timestamp as string from contract event)
+   */
+  validUntil: string;
+
+  /**
+   * Slippage tolerance in basis points
+   */
+  slippageBps: number;
+
+  /**
+   * Registration transaction hash
+   */
+  registrationTxHash: string;
+
+  /**
+   * Block number where the registration occurred
+   */
+  blockNumber: string;
+}
+
 // =============================================================================
 // POOL SUBSCRIPTION INPUT TYPES
 // =============================================================================

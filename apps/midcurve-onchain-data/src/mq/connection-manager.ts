@@ -9,7 +9,7 @@ import amqplib, { type ChannelModel, type Channel } from 'amqplib';
 import { setupDomainEventsTopology } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConfig, type RabbitMQConfig } from '../lib/config';
-import { setupOnchainDataTopology, EXCHANGE_POOL_PRICES, EXCHANGE_POSITION_LIQUIDITY } from './topology';
+import { setupOnchainDataTopology, EXCHANGE_POOL_PRICES, EXCHANGE_POSITION_LIQUIDITY, EXCHANGE_CLOSE_ORDER_EVENTS } from './topology';
 
 const log = onchainDataLogger.child({ component: 'RabbitMQConnection' });
 
@@ -232,6 +232,23 @@ class RabbitMQConnectionManager {
 
     if (published) {
       priceLog.mqEvent(log, 'published', { exchange: EXCHANGE_POSITION_LIQUIDITY, routingKey });
+    }
+
+    return published;
+  }
+
+  /**
+   * Publish a message to the close-order-events exchange
+   */
+  async publishCloseOrderEvent(routingKey: string, content: Buffer): Promise<boolean> {
+    const channel = await this.getChannel();
+    const published = channel.publish(EXCHANGE_CLOSE_ORDER_EVENTS, routingKey, content, {
+      persistent: true,
+      contentType: 'application/json',
+    });
+
+    if (published) {
+      priceLog.mqEvent(log, 'published', { exchange: EXCHANGE_CLOSE_ORDER_EVENTS, routingKey });
     }
 
     return published;

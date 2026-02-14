@@ -28,6 +28,9 @@ export const EXCHANGE_POOL_PRICES = 'pool-prices';
 /** Exchange name for position liquidity events (IncreaseLiquidity, DecreaseLiquidity, Collect) */
 export const EXCHANGE_POSITION_LIQUIDITY = 'position-liquidity-events';
 
+/** Exchange name for close order lifecycle events (registration, cancellation, config updates) */
+export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
+
 /**
  * Build a routing key for UniswapV3 swap events.
  * Format: uniswapv3.{chainId}.{poolAddress}
@@ -42,6 +45,14 @@ export function buildUniswapV3RoutingKey(chainId: number, poolAddress: string): 
  */
 export function buildPositionLiquidityRoutingKey(chainId: number, nftId: string): string {
   return `uniswapv3.${chainId}.${nftId}`;
+}
+
+/**
+ * Build a routing key for close order lifecycle events.
+ * Format: closer.{chainId}.{nftId}.{triggerMode}
+ */
+export function buildCloseOrderRoutingKey(chainId: number, nftId: string, triggerMode: string): string {
+  return `closer.${chainId}.${nftId}.${triggerMode}`;
 }
 
 // ============================================================
@@ -76,6 +87,13 @@ export async function setupOnchainDataTopology(channel: Channel): Promise<void> 
   });
   log.info({ exchange: EXCHANGE_POSITION_LIQUIDITY, type: 'topic', msg: 'Exchange declared' });
 
+  // Create close-order-events topic exchange
+  await channel.assertExchange(EXCHANGE_CLOSE_ORDER_EVENTS, 'topic', {
+    durable: true,
+    autoDelete: false,
+  });
+  log.info({ exchange: EXCHANGE_CLOSE_ORDER_EVENTS, type: 'topic', msg: 'Exchange declared' });
+
   log.info({ msg: 'Onchain data topology setup complete' });
 }
 
@@ -91,6 +109,7 @@ export async function verifyOnchainDataTopology(channel: Channel): Promise<boole
   try {
     await channel.checkExchange(EXCHANGE_POOL_PRICES);
     await channel.checkExchange(EXCHANGE_POSITION_LIQUIDITY);
+    await channel.checkExchange(EXCHANGE_CLOSE_ORDER_EVENTS);
     return true;
   } catch {
     return false;

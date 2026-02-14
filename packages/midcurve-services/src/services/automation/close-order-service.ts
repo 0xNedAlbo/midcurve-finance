@@ -9,9 +9,11 @@ import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import {
   CloseOrderFactory,
+  tickToSqrtRatioX96,
   type CloseOrderInterface,
   type CloseOrderType,
   type CloseOrderStatus,
+  type TriggerMode,
 } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -23,8 +25,12 @@ import type {
   MarkOrderRegisteredInput,
   MarkOrderTriggeredInput,
   MarkOrderExecutedInput,
+  CreateFromOnChainEventInput,
 } from '../types/automation/index.js';
-import { deriveCloseOrderHashFromConfig } from '../../utils/automation/close-order-hash.js';
+import {
+  deriveCloseOrderHash,
+  deriveCloseOrderHashFromConfig,
+} from '../../utils/automation/close-order-hash.js';
 
 /**
  * Dependencies for CloseOrderService
@@ -875,6 +881,317 @@ export class CloseOrderService {
       log.methodExit(this.logger, 'delete', { id });
     } catch (error) {
       log.methodError(this.logger, 'delete', error as Error, { id });
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // ON-CHAIN EVENT OPERATIONS
+  // ============================================================================
+
+  /**
+   * Finds a close order by on-chain identifiers (nftId, triggerMode, chainId).
+   *
+   * On-chain, a close order is uniquely identified by (nftId, triggerMode).
+   * chainId is needed to disambiguate across chains.
+   *
+   * Uses Prisma JSON path filter on config.nftId, then in-memory filter
+   * for triggerMode and chainId (Prisma can't filter multiple JSON paths).
+   */
+  async findByNftIdAndTriggerMode(
+    nftId: string,
+    triggerMode: TriggerMode,
+    chainId: number
+  ): Promise<CloseOrderInterface | null> {
+    log.methodEntry(this.logger, 'findByNftIdAndTriggerMode', {
+      nftId,
+      triggerMode,
+      chainId,
+    });
+
+    try {
+      const results = await this.prisma.automationCloseOrder.findMany({
+        where: {
+          closeOrderType: 'uniswapv3',
+          config: {
+            path: ['nftId'],
+            equals: nftId,
+          },
+        },
+      });
+
+      // Filter in memory for triggerMode and chainId
+      const match = results.find((r) => {
+        const config = r.config as Record<string, unknown>;
+        const contractConfig = r.automationContractConfig as Record<
+          string,
+          unknown
+        >;
+        return (
+          config.triggerMode === triggerMode &&
+          contractConfig.chainId === chainId
+        );
+      });
+
+      const order = match ? this.mapToOrder(match) : null;
+
+      log.methodExit(this.logger, 'findByNftIdAndTriggerMode', {
+        found: !!order,
+      });
+      return order;
+    } catch (error) {
+      log.methodError(
+        this.logger,
+        'findByNftIdAndTriggerMode',
+        error as Error,
+        { nftId, triggerMode, chainId }
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Creates a close order from an on-chain registration event.
+   *
+   * Used when an OrderRegistered event is observed on-chain for a position
+   * tracked by our platform, but no corresponding DB record exists (i.e.,
+   * the order was registered directly on-chain, not through the UI/API flow).
+   *
+   * The order is created directly in 'active' status since it is already
+   * registered on-chain.
+   */
+  async createFromOnChainEvent(
+    input: CreateFromOnChainEventInput
+  ): Promise<CloseOrderInterface> {
+    log.methodEntry(this.logger, 'createFromOnChainEvent', {
+      positionId: input.positionId,
+      nftId: input.nftId,
+      triggerMode: input.triggerMode,
+      chainId: input.automationContractConfig.chainId,
+    });
+
+    try {
+      // Convert triggerTick to sqrtPriceX96
+      const sqrtPriceX96 = BigInt(
+        tickToSqrtRatioX96(input.triggerTick).toString()
+      );
+
+      // Derive close order hash
+      const closeOrderHash = deriveCloseOrderHash(
+        input.triggerMode,
+        sqrtPriceX96
+      );
+
+      // Idempotency: check if order already exists
+      const existing = await this.findByPositionAndHash(
+        input.positionId,
+        closeOrderHash
+      );
+      if (existing) {
+        this.logger.info(
+          { id: existing.id, closeOrderHash },
+          'Order already exists for on-chain event, returning existing'
+        );
+        log.methodExit(this.logger, 'createFromOnChainEvent', {
+          id: existing.id,
+          deduplicated: true,
+        });
+        return existing;
+      }
+
+      // Build config matching createConfig() format
+      const sqrtPriceX96Str = sqrtPriceX96.toString();
+      const config: Record<string, unknown> = {
+        closeId: 0, // Legacy field, not available from on-chain event
+        nftId: input.nftId,
+        poolAddress: input.poolAddress,
+        triggerMode: input.triggerMode,
+        sqrtPriceX96Lower:
+          input.triggerMode === 'LOWER' ? sqrtPriceX96Str : '0',
+        sqrtPriceX96Upper:
+          input.triggerMode === 'UPPER' ? sqrtPriceX96Str : '0',
+        payoutAddress: input.payout,
+        operatorAddress: input.operator,
+        validUntil: new Date(Number(input.validUntil) * 1000).toISOString(),
+        slippageBps: input.slippageBps,
+      };
+
+      // Build initial state matching createInitialState() format
+      const state: Record<string, unknown> = {
+        registrationTxHash: input.registrationTxHash,
+        registeredAt: new Date().toISOString(),
+        triggeredAt: null,
+        triggerSqrtPriceX96: null,
+        executionTxHash: null,
+        executedAt: null,
+        executionFeeBps: null,
+        executionError: null,
+        retryCount: 0,
+        amount0Out: null,
+        amount1Out: null,
+      };
+
+      const result = await this.prisma.automationCloseOrder.create({
+        data: {
+          closeOrderType: 'uniswapv3',
+          positionId: input.positionId,
+          closeOrderHash,
+          status: 'active',
+          automationContractConfig:
+            input.automationContractConfig as unknown as Prisma.InputJsonValue,
+          config: config as unknown as Prisma.InputJsonValue,
+          state: state as unknown as Prisma.InputJsonValue,
+        },
+      });
+
+      const order = this.mapToOrder(result);
+
+      this.logger.info(
+        {
+          id: order.id,
+          positionId: input.positionId,
+          nftId: input.nftId,
+          triggerMode: input.triggerMode,
+          closeOrderHash,
+        },
+        'Close order created from on-chain event'
+      );
+
+      log.methodExit(this.logger, 'createFromOnChainEvent', { id: order.id });
+      return order;
+    } catch (error) {
+      log.methodError(
+        this.logger,
+        'createFromOnChainEvent',
+        error as Error,
+        { input }
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Updates config fields on a close order from on-chain events.
+   *
+   * Merges the provided updates into the existing config JSON.
+   * If newCloseOrderHash is provided (e.g., when trigger tick changes),
+   * the closeOrderHash column is also updated.
+   */
+  async updateConfigField(
+    id: string,
+    updates: Record<string, unknown>,
+    newCloseOrderHash?: string
+  ): Promise<CloseOrderInterface> {
+    log.methodEntry(this.logger, 'updateConfigField', {
+      id,
+      updateKeys: Object.keys(updates),
+      newCloseOrderHash,
+    });
+
+    try {
+      const existing = await this.prisma.automationCloseOrder.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      const config = existing.config as Record<string, unknown>;
+      const updatedConfig = { ...config, ...updates };
+
+      const data: Prisma.AutomationCloseOrderUpdateInput = {
+        config: updatedConfig as unknown as Prisma.InputJsonValue,
+      };
+
+      if (newCloseOrderHash !== undefined) {
+        data.closeOrderHash = newCloseOrderHash;
+      }
+
+      const result = await this.prisma.automationCloseOrder.update({
+        where: { id },
+        data,
+      });
+
+      const order = this.mapToOrder(result);
+
+      this.logger.info(
+        { id, updatedFields: Object.keys(updates), newCloseOrderHash },
+        'Close order config updated from on-chain event'
+      );
+
+      log.methodExit(this.logger, 'updateConfigField', { id });
+      return order;
+    } catch (error) {
+      log.methodError(this.logger, 'updateConfigField', error as Error, {
+        id,
+        updates,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Updates the swap config on a close order from an on-chain swap intent update event.
+   *
+   * If direction is 'NONE', disables the swap config.
+   * Otherwise, enables swap config with the new direction.
+   */
+  async updateSwapConfig(
+    id: string,
+    direction: 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0'
+  ): Promise<CloseOrderInterface> {
+    log.methodEntry(this.logger, 'updateSwapConfig', { id, direction });
+
+    try {
+      const existing = await this.prisma.automationCloseOrder.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      const config = existing.config as Record<string, unknown>;
+      const existingSwap = (config.swapConfig as Record<string, unknown>) || {};
+
+      const updatedConfig = {
+        ...config,
+        swapConfig:
+          direction === 'NONE'
+            ? {
+                enabled: false,
+                direction: 'NONE',
+                slippageBps: (existingSwap.slippageBps as number) || 0,
+              }
+            : {
+                ...existingSwap,
+                enabled: true,
+                direction,
+              },
+      };
+
+      const result = await this.prisma.automationCloseOrder.update({
+        where: { id },
+        data: {
+          config: updatedConfig as unknown as Prisma.InputJsonValue,
+        },
+      });
+
+      const order = this.mapToOrder(result);
+
+      this.logger.info(
+        { id, direction },
+        'Close order swap config updated from on-chain event'
+      );
+
+      log.methodExit(this.logger, 'updateSwapConfig', { id });
+      return order;
+    } catch (error) {
+      log.methodError(this.logger, 'updateSwapConfig', error as Error, {
+        id,
+        direction,
+      });
       throw error;
     }
   }

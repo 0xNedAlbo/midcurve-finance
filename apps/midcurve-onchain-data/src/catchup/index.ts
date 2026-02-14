@@ -18,3 +18,14 @@ export {
   type CatchUpResult,
   type SinglePositionCatchUpResult,
 } from './position-liquidity-catchup';
+
+export {
+  getCloseOrderLastProcessedBlock,
+  setCloseOrderLastProcessedBlock,
+  updateCloseOrderBlockIfHigher,
+  executeCloseOrderCatchUpNonFinalized,
+  executeCloseOrderCatchUpFinalized,
+  executeCloseOrderCatchUpNonFinalizedForChains,
+  executeCloseOrderCatchUpFinalizedForChains,
+} from './close-order-catchup';
+export type { CatchUpResult as CloseOrderCatchUpResult } from './close-order-catchup';
