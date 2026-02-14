@@ -50,8 +50,10 @@ export {
 // Simulation overlay
 export {
   CloseOrderSimulationOverlay,
+  INFINITE_RUNUP,
   type CloseOrderTriggerState,
   type CloseOrderSimulationOverlayParams,
+  type PostTriggerExposure,
 } from './close-order-simulation/index.js';
 
 // Import for use in type alias

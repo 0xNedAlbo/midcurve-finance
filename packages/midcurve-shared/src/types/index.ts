@@ -101,10 +101,12 @@ export {
   positionStateToJSON,
   positionStateFromJSON,
   CloseOrderSimulationOverlay,
+  INFINITE_RUNUP,
 } from './position/index.js';
 export type {
   CloseOrderTriggerState,
   CloseOrderSimulationOverlayParams,
+  PostTriggerExposure,
   UniswapV3SimulationParams,
   PnLSimulationResult,
 } from './position/index.js';

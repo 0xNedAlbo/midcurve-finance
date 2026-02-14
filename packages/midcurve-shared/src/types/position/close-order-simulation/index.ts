@@ -7,6 +7,8 @@
 
 export {
   CloseOrderSimulationOverlay,
+  INFINITE_RUNUP,
   type CloseOrderTriggerState,
   type CloseOrderSimulationOverlayParams,
+  type PostTriggerExposure,
 } from './close-order-simulation-overlay.js';

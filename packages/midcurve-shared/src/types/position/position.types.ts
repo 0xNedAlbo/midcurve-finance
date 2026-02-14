@@ -40,6 +40,10 @@ export interface PnLSimulationResult {
   pnlValue: bigint;
   /** PnL as percentage of cost basis */
   pnlPercent: number;
+  /** Amount of base token held at this price (optional, provided by protocol-specific implementations) */
+  baseTokenAmount?: bigint;
+  /** Amount of quote token held at this price (optional, provided by protocol-specific implementations) */
+  quoteTokenAmount?: bigint;
 }
 
 // ============================================================================
