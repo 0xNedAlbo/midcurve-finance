@@ -209,8 +209,6 @@ export function PositionDetailPage() {
       <div className="max-w-[1600px] mx-auto px-2 md:px-4 lg:px-6 py-8">
         <PositionDetailLayout
           position={position}
-          onRefresh={refetch}
-          isRefreshing={isFetching}
         />
       </div>
     </div>

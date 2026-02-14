@@ -1,5 +1,8 @@
 import { useSearchParams } from "react-router-dom";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
+import { useUniswapV3LiveMetrics } from "@/hooks/positions/uniswapv3/useUniswapV3LiveMetrics";
+import { useUniswapV3AutoRefresh } from "@/hooks/positions/uniswapv3/useUniswapV3AutoRefresh";
+import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
 import { PositionDetailHeader } from "../../position-detail-header";
 import { PositionDetailTabs } from "../../position-detail-tabs";
 import { UniswapV3OverviewTab } from "./uniswapv3-overview-tab";
@@ -12,13 +15,11 @@ import { getNonfungiblePositionManagerAddress } from "@/config/contracts/nonfung
 
 interface UniswapV3PositionDetailProps {
   position: UniswapV3PositionData;
-  onRefresh?: () => void;
-  isRefreshing?: boolean;
 }
 
 export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "automation" | "technical";
 
-export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: UniswapV3PositionDetailProps) {
+export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3PositionDetailProps) {
   const [searchParams] = useSearchParams();
 
   // Get tab from URL query params, default to 'overview'
@@ -26,7 +27,25 @@ export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: U
   const activeTab = (searchParams.get("tab") || "overview") as TabType;
 
   // Extract chain ID and NFT ID for header
-  const config = position.config as { chainId: number; nftId: number; tickLower: number; tickUpper: number };
+  const config = rawPosition.config as { chainId: number; nftId: number; tickLower: number; tickUpper: number };
+
+  // Patch live pool price into position data (5s polling)
+  const position = useUniswapV3LiveMetrics(rawPosition);
+
+  // On-chain refresh on mount + every 60s (fire-and-forget, DB polling picks up changes)
+  const { isRefreshing: isAutoRefreshing } = useUniswapV3AutoRefresh(config.chainId, String(config.nftId));
+
+  // Manual refresh via POST endpoint (on-chain sync, not just DB refetch)
+  const refreshMutation = useUniswapV3RefreshPosition();
+  const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
+
+  const handleRefresh = async () => {
+    refreshMutation.mutate({
+      chainId: config.chainId,
+      nftId: String(config.nftId),
+    });
+  };
+
   const poolState = position.pool.state as { currentTick: number };
   const positionState = position.state as { liquidity: string };
   const chainMetadata = getChainMetadataByChainId(config.chainId);
@@ -38,13 +57,6 @@ export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: U
 
   // Get NFPM address for explorer link
   const nftManagerAddress = getNonfungiblePositionManagerAddress(config.chainId);
-
-  // Wrap onRefresh to ensure it returns Promise<void>
-  const handleRefresh = async () => {
-    if (onRefresh) {
-      await onRefresh();
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -62,7 +74,7 @@ export function UniswapV3PositionDetail({ position, onRefresh, isRefreshing }: U
         }}
         protocol={position.protocol}
         onRefresh={handleRefresh}
-        isRefreshing={isRefreshing || false}
+        isRefreshing={isRefreshing}
         feeTierDisplay={<span>{(position.pool.feeBps / 10000).toFixed(2)}%</span>}
         identifierDisplay={<span>#{config.nftId}</span>}
         explorerUrl={nftManagerAddress ? `${chainMetadata?.explorer}/token/${nftManagerAddress}?a=${config.nftId}` : undefined}

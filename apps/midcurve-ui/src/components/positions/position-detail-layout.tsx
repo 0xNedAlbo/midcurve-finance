@@ -6,19 +6,15 @@ import { AlertCircle } from "lucide-react";
 
 interface PositionDetailLayoutProps {
   position: GetUniswapV3PositionResponse; // Expand union type when adding more protocols
-  onRefresh?: () => void;
-  isRefreshing?: boolean;
 }
 
-export function PositionDetailLayout({ position, onRefresh, isRefreshing }: PositionDetailLayoutProps) {
+export function PositionDetailLayout({ position }: PositionDetailLayoutProps) {
   // Protocol-agnostic dispatcher
   switch (position.protocol) {
     case "uniswapv3":
       return (
         <UniswapV3PositionDetail
           position={position}
-          onRefresh={onRefresh}
-          isRefreshing={isRefreshing}
         />
       );
 
