@@ -9,16 +9,11 @@
  * - Cancel button (if cancellable)
  */
 
-import { X, AlertTriangle, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
 import { pricePerToken0InToken1, pricePerToken1InToken0 } from '@midcurve/shared';
-import { CloseOrderStatusBadge, canCancelCloseOrder } from './CloseOrderStatusBadge';
+import { CloseOrderStatusBadge } from './CloseOrderStatusBadge';
 import { formatCompactValue } from '@/lib/fraction-format';
-
-/**
- * Type of wallet issue preventing cancel action
- */
-export type WalletIssue = 'not-connected' | 'wrong-network' | 'wrong-account';
 
 interface CloseOrderCardProps {
   /**
@@ -55,22 +50,6 @@ interface CloseOrderCardProps {
    * Quote token address for price conversion
    */
   quoteTokenAddress: string;
-
-  /**
-   * Callback when cancel is clicked
-   */
-  onCancel?: (orderId: string) => void;
-
-  /**
-   * Whether cancel is in progress
-   */
-  isCancelling?: boolean;
-
-  /**
-   * Wallet issue preventing cancel action
-   * When set, shows a hint instead of the cancel button
-   */
-  walletIssue?: WalletIssue;
 }
 
 /**
@@ -135,9 +114,6 @@ export function CloseOrderCard({
   baseTokenDecimals,
   baseTokenAddress,
   quoteTokenAddress,
-  onCancel,
-  isCancelling = false,
-  walletIssue,
 }: CloseOrderCardProps) {
   const config = order.config as {
     triggerMode?: TriggerMode;
@@ -148,7 +124,6 @@ export function CloseOrderCard({
   };
 
   const triggerMode = config.triggerMode ?? 'LOWER';
-  const canCancel = canCancelCloseOrder(order.status);
 
   // Format expiration — epoch (0) means "no expiry" per smart contract convention
   const parsedExpiry = config.validUntil ? new Date(config.validUntil) : null;
@@ -199,26 +174,6 @@ export function CloseOrderCard({
         )}
       </div>
 
-      {/* Actions */}
-      {canCancel && (
-        walletIssue ? (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500">
-            <Wallet className="w-3 h-3" />
-            {walletIssue === 'not-connected' && 'Connect wallet to cancel'}
-            {walletIssue === 'wrong-network' && 'Switch to correct network to cancel'}
-            {walletIssue === 'wrong-account' && 'Connect position owner wallet to cancel'}
-          </div>
-        ) : onCancel && (
-          <button
-            onClick={() => onCancel(order.id)}
-            disabled={isCancelling}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <X className="w-3 h-3" />
-            {isCancelling ? 'Cancelling...' : 'Cancel Order'}
-          </button>
-        )
-      )}
     </div>
   );
 }

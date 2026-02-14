@@ -8,9 +8,12 @@
  * - Order history
  */
 
+import { useCallback } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
 import type { Address } from "viem";
 import { useSharedContract } from "@/hooks/automation";
+import { getChainSlugByChainId } from "@/config/chains";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { PositionCloseOrdersPanel } from "../../automation";
 
@@ -19,6 +22,9 @@ interface UniswapV3AutomationTabProps {
 }
 
 export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   // Get quote token info for formatting
   const quoteToken = position.isToken0Quote
     ? position.pool.token0
@@ -43,6 +49,16 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
     isLoading: isContractLoading,
     error: contractError,
   } = useSharedContract(poolConfig.chainId, positionConfig.nftId.toString());
+
+  // Navigate to Risk Triggers wizard
+  const handleEditOrders = useCallback(() => {
+    const chainSlug = getChainSlugByChainId(poolConfig.chainId);
+    if (chainSlug) {
+      navigate(`/positions/triggers/uniswapv3/${chainSlug}/${positionConfig.nftId}`, {
+        state: { returnTo: `${location.pathname}?tab=automation` },
+      });
+    }
+  }, [navigate, location.pathname, poolConfig.chainId, positionConfig.nftId]);
 
   const contractAddress = contractData?.contractAddress as Address | undefined;
   const isChainSupported = contractData?.isSupported ?? false;
@@ -84,7 +100,6 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         chainId={poolConfig.chainId}
         nftId={positionConfig.nftId.toString()}
         contractAddress={contractAddress}
-        positionOwner={positionState.ownerAddress as Address}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
         baseTokenSymbol={baseToken.symbol}
@@ -92,6 +107,7 @@ export function UniswapV3AutomationTab({ position }: UniswapV3AutomationTabProps
         baseTokenAddress={baseTokenConfig.address}
         quoteTokenAddress={quoteTokenConfig.address}
         isPositionClosed={isPositionClosed}
+        onEditOrders={handleEditOrders}
       />
     </div>
   );

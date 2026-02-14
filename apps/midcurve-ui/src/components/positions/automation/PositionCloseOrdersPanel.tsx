@@ -6,13 +6,10 @@
  * - Loading and error states
  */
 
-import { useState } from 'react';
-import { AlertCircle, Loader2, Shield } from 'lucide-react';
+import { AlertCircle, Loader2, Settings2, Shield } from 'lucide-react';
 import type { Address } from 'viem';
-import { useAccount } from 'wagmi';
-import type { SerializedUniswapV3CloseOrderConfig, TriggerMode } from '@midcurve/api-shared';
-import { useCloseOrders, useCancelCloseOrder, type OrderType } from '@/hooks/automation';
-import { CloseOrderCard, type WalletIssue } from './CloseOrderCard';
+import { useCloseOrders } from '@/hooks/automation';
+import { CloseOrderCard } from './CloseOrderCard';
 import { isCloseOrderTerminal } from './CloseOrderStatusBadge';
 import { AutomationLogList } from './AutomationLogList';
 
@@ -37,11 +34,6 @@ interface PositionCloseOrdersPanelProps {
    * Optional - when undefined, shows empty state but allows creating orders
    */
   contractAddress?: Address;
-
-  /**
-   * Position owner address - used to check if connected wallet can cancel orders
-   */
-  positionOwner?: Address;
 
   /**
    * Quote token symbol
@@ -77,6 +69,11 @@ interface PositionCloseOrdersPanelProps {
    * Whether the position is closed (liquidity = 0)
    */
   isPositionClosed?: boolean;
+
+  /**
+   * Callback to navigate to the Risk Triggers wizard for editing SL/TP orders
+   */
+  onEditOrders?: () => void;
 }
 
 export function PositionCloseOrdersPanel({
@@ -84,7 +81,6 @@ export function PositionCloseOrdersPanel({
   chainId,
   nftId,
   contractAddress,
-  positionOwner,
   quoteTokenSymbol,
   quoteTokenDecimals,
   baseTokenSymbol,
@@ -92,52 +88,16 @@ export function PositionCloseOrdersPanel({
   baseTokenAddress,
   quoteTokenAddress,
   isPositionClosed = false,
+  onEditOrders,
 }: PositionCloseOrdersPanelProps) {
-  // Track which order is being cancelled
-  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
-
-  // Wallet connection state
-  const { address: connectedAddress, isConnected, chainId: connectedChainId } = useAccount();
-
-  // Check wallet connection issues for cancel functionality
-  const isWrongNetwork = isConnected && connectedChainId !== chainId;
-  const isWrongAccount = !!(
-    isConnected &&
-    connectedAddress &&
-    positionOwner &&
-    connectedAddress.toLowerCase() !== positionOwner.toLowerCase()
-  );
-
-  // Determine wallet issue for UI feedback
-  const walletIssue: WalletIssue | undefined = !isConnected
-    ? 'not-connected'
-    : isWrongNetwork
-      ? 'wrong-network'
-      : isWrongAccount
-        ? 'wrong-account'
-        : undefined;
-
-  // Can cancel orders only if wallet is properly connected
-  const canCancelOrders = isConnected && !isWrongNetwork && !isWrongAccount;
-
   // Whether contract exists - determines if we can fetch orders
   const hasContract = !!contractAddress;
 
   // Fetch close orders for this position (only if contract exists)
-  const { data: orders, isLoading, error, refetch } = useCloseOrders(
+  const { data: orders, isLoading, error } = useCloseOrders(
     { chainId, nftId, polling: true },
     { enabled: !!positionId && hasContract }
   );
-
-  // Cancel hook - fetches ABI internally
-  const {
-    cancelOrder,
-    isCancelling,
-    isWaitingForConfirmation,
-    isSuccess: isCancelSuccess,
-    error: cancelError,
-    reset: resetCancel,
-  } = useCancelCloseOrder(chainId, nftId);
 
   // Filter to show active orders first, then terminal ones
   const activeOrders = orders?.filter((o) => !isCloseOrderTerminal(o.status)) ?? [];
@@ -146,69 +106,24 @@ export function PositionCloseOrdersPanel({
   // Has any active (non-terminal) orders
   const hasActiveOrders = activeOrders.length > 0;
 
-  // Handle cancel success
-  if (isCancelSuccess && cancellingOrderId) {
-    setCancellingOrderId(null);
-    resetCancel();
-    refetch();
-  }
-
-  const handleCancel = (orderId: string) => {
-    // Can't cancel without contract address
-    if (!contractAddress) return;
-
-    // Find the order to get the triggerMode
-    const order = orders?.find((o) => o.id === orderId);
-    if (!order) return;
-
-    const config = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
-    const triggerMode = config.triggerMode ?? 'LOWER';
-
-    // Map triggerMode to orderType (V1.0 tick-based interface)
-    // When isToken0Quote=true, the order type is inverted because tick direction is opposite to user price direction
-    const isToken0Quote = BigInt(quoteTokenAddress) < BigInt(baseTokenAddress);
-    const orderTypeFromTriggerMode: Record<TriggerMode, OrderType> = isToken0Quote
-      ? {
-          'LOWER': 'TAKE_PROFIT',  // Lower user price → tick rises → TAKE_PROFIT
-          'UPPER': 'STOP_LOSS',    // Upper user price → tick falls → STOP_LOSS
-        }
-      : {
-          'LOWER': 'STOP_LOSS',    // Lower user price → tick falls → STOP_LOSS
-          'UPPER': 'TAKE_PROFIT',  // Upper user price → tick rises → TAKE_PROFIT
-        };
-    const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
-
-    setCancellingOrderId(orderId);
-    cancelOrder({ orderType });
-  };
-
-  // Check if a specific order is being cancelled
-  const isOrderCancelling = (orderId: string) =>
-    orderId === cancellingOrderId && (isCancelling || isWaitingForConfirmation);
-
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center gap-2 mb-4">
-        <Shield className="w-5 h-5 text-blue-400" />
-        <h3 className="text-lg font-semibold text-slate-200">Automation</h3>
-      </div>
-
-      {/* Error: Cancel failed */}
-      {cancelError && (
-        <div className="flex items-start gap-2 p-3 mb-4 bg-red-900/30 border border-red-700/50 rounded-lg text-red-400 text-sm">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <span>Failed to cancel order: {cancelError.message}</span>
-            <button
-              onClick={resetCancel}
-              className="ml-2 text-red-300 hover:text-red-200 underline cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Shield className="w-5 h-5 text-blue-400" />
+          <h3 className="text-lg font-semibold text-slate-200">Automation</h3>
         </div>
-      )}
+        {onEditOrders && !isPositionClosed && (
+          <button
+            onClick={onEditOrders}
+            className="flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+          >
+            <Settings2 className="w-4 h-4" />
+            Edit SL/TP Orders
+          </button>
+        )}
+      </div>
 
       {/* Content */}
       {isPositionClosed && !hasActiveOrders && terminalOrders.length === 0 ? (
@@ -259,9 +174,6 @@ export function PositionCloseOrdersPanel({
                   baseTokenDecimals={baseTokenDecimals}
                   baseTokenAddress={baseTokenAddress}
                   quoteTokenAddress={quoteTokenAddress}
-                  onCancel={canCancelOrders ? handleCancel : undefined}
-                  isCancelling={isOrderCancelling(order.id)}
-                  walletIssue={walletIssue}
                 />
               ))}
             </div>
