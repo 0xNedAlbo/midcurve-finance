@@ -2,32 +2,26 @@
  * useCancelCloseOrder - Cancel a close order via user's wallet
  *
  * This hook uses Wagmi to have the user sign the cancelOrder transaction
- * directly with their connected wallet. After confirmation, it updates
- * the order status in the database.
+ * directly with their connected wallet. After confirmation, it invalidates
+ * caches so the UI picks up the cancellation made by the backend event subscriber.
  *
  * Flow:
  * 1. User calls cancelOrder()
  * 2. User signs cancelOrder() tx in their wallet (Wagmi)
- * 3. Wait for tx confirmation (with 60s timeout)
- * 4. On success/failure/timeout: Cancel via DELETE /api/v1/automation/close-orders/[id]
- * 5. Invalidate cache and return success
+ * 3. Wait for tx confirmation
+ * 4. Invalidate caches (backend event subscriber updates the DB record)
  *
  * V1.0 Interface (tick-based):
  * - Uses cancelOrder(nftId, orderType) instead of cancelClose(closeId)
  * - Orders identified by (nftId, orderType) - one SL and one TP per position
  */
 
-/** Timeout for waiting on transaction confirmation (60 seconds) */
-const TX_TIMEOUT_MS = 60_000;
-
 import { useState, useEffect, useCallback } from 'react';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Address, Hash } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
-import { automationApi } from '@/lib/api-client';
 import { useSharedContract } from './useSharedContract';
-import type { SerializedCloseOrder } from '@midcurve/api-shared';
 import type { OrderType } from './useCreateCloseOrder';
 
 /**
@@ -37,25 +31,14 @@ import type { OrderType } from './useCreateCloseOrder';
 export interface CancelCloseOrderParams {
   /** Order type: STOP_LOSS or TAKE_PROFIT */
   orderType: OrderType;
-  /** Close order semantic hash for API (e.g., "sl@-12345", "tp@201120") */
-  closeOrderHash: string;
-  /**
-   * Position ID for cache invalidation
-   * @deprecated Derived from chainId/nftId for position-scoped endpoints
-   */
-  positionId?: string;
 }
 
 /**
  * Result from cancelling a close order
  */
 export interface CancelCloseOrderResult {
-  /** Transaction hash (may be undefined if force-cancelled before tx was submitted) */
-  txHash?: Hash;
-  /** Updated order from API */
-  order?: SerializedCloseOrder;
-  /** True if cancelled in DB without on-chain confirmation (due to timeout or tx failure) */
-  forceCancelled?: boolean;
+  /** Transaction hash */
+  txHash: Hash;
 }
 
 /**
@@ -70,14 +53,10 @@ export interface UseCancelCloseOrderResult {
   isWaitingForConfirmation: boolean;
   /** Whether the cancellation was successful */
   isSuccess: boolean;
-  /** The result data (txHash, order) */
+  /** The result data (txHash) */
   result: CancelCloseOrderResult | null;
   /** Any error that occurred */
   error: Error | null;
-  /** Whether the transaction timed out */
-  isTimedOut: boolean;
-  /** Whether the order was force-cancelled in DB (due to timeout or tx failure) */
-  forceCancelled: boolean;
   /** Reset the hook state */
   reset: () => void;
   /** Whether the shared contract is ready (ABI loaded) */
@@ -97,9 +76,6 @@ export function useCancelCloseOrder(
   const queryClient = useQueryClient();
   const [result, setResult] = useState<CancelCloseOrderResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [currentParams, setCurrentParams] = useState<CancelCloseOrderParams | null>(null);
-  const [isTimedOut, setIsTimedOut] = useState(false);
-  const [forceCancelled, setForceCancelled] = useState(false);
 
   // Fetch ABI and contract address from shared contract API
   const {
@@ -128,121 +104,39 @@ export function useCancelCloseOrder(
     hash: txHash,
   });
 
-  // Force cancel the order in the database (DELETE endpoint)
-  const forceCancel = useCallback(async (params: CancelCloseOrderParams) => {
-    try {
-      // Use position-scoped endpoint
-      const response = await automationApi.positionCloseOrders.cancel(
-        chainId,
-        nftId,
-        params.closeOrderHash
-      );
-      setForceCancelled(true);
-      setResult({
-        txHash,
-        order: response.data,
-        forceCancelled: true,
-      });
+  // Handle transaction success — invalidate caches so UI picks up
+  // the cancellation made by the backend event subscriber.
+  useEffect(() => {
+    if (!isTxSuccess || !txHash || result) return;
 
-      // Invalidate position-scoped caches — position detail includes activeCloseOrders
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
-      });
-      // Also invalidate legacy caches for backward compatibility
-      if (params.positionId) {
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.automation.closeOrders.byPosition(params.positionId),
-        });
-      }
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.lists(),
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to force cancel order'));
+    setResult({ txHash });
+
+    // Invalidate caches — backend event subscriber will have cancelled the order
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.automation.closeOrders.lists(),
+    });
+  }, [isTxSuccess, txHash, result, queryClient, chainId, nftId]);
+
+  // Handle errors
+  useEffect(() => {
+    if (writeError) {
+      setError(writeError);
+    } else if (receiptError) {
+      setError(receiptError);
     }
-  }, [txHash, queryClient, chainId, nftId]);
-
-  // Handle transaction success - update order status in database
-  useEffect(() => {
-    if (!isTxSuccess || !txHash || !currentParams || forceCancelled) return;
-
-    const handleSuccess = async () => {
-      try {
-        // Cancel the order in the database via position-scoped DELETE endpoint
-        const response = await automationApi.positionCloseOrders.cancel(
-          chainId,
-          nftId,
-          currentParams.closeOrderHash
-        );
-
-        setResult({
-          txHash,
-          order: response.data,
-        });
-
-        // Invalidate position-scoped caches — position detail includes activeCloseOrders
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
-        });
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
-        });
-        // Also invalidate legacy caches for backward compatibility
-        if (currentParams.positionId) {
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
-          });
-        }
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.automation.closeOrders.lists(),
-        });
-      } catch (err) {
-        // Even if DB update fails, the on-chain tx succeeded
-        console.error('Failed to update order status in database:', err);
-        setResult({
-          txHash,
-        });
-      }
-    };
-
-    handleSuccess();
-  }, [isTxSuccess, txHash, currentParams, queryClient, forceCancelled, chainId, nftId]);
-
-  // Timeout mechanism - force cancel if tx takes too long
-  useEffect(() => {
-    // Only start timeout after tx is submitted (we have txHash) and still waiting
-    if (!txHash || isTxSuccess || forceCancelled || !currentParams) return;
-
-    const timeout = setTimeout(() => {
-      console.warn('Transaction timeout reached, force cancelling order in database');
-      setIsTimedOut(true);
-      forceCancel(currentParams);
-    }, TX_TIMEOUT_MS);
-
-    return () => clearTimeout(timeout);
-  }, [txHash, isTxSuccess, forceCancelled, currentParams, forceCancel]);
-
-  // Handle errors - force cancel on tx failure
-  useEffect(() => {
-    const err = writeError || receiptError;
-    if (err && currentParams && !forceCancelled) {
-      console.error('Transaction failed, force cancelling order in database:', err);
-      setError(err);
-      forceCancel(currentParams);
-    }
-  }, [writeError, receiptError, currentParams, forceCancelled, forceCancel]);
+  }, [writeError, receiptError]);
 
   // Cancel function - calls cancelOrder on shared contract (V1.0 interface)
   const cancelOrder = useCallback((params: CancelCloseOrderParams) => {
     // Reset state
     setResult(null);
     setError(null);
-    setIsTimedOut(false);
-    setForceCancelled(false);
-    setCurrentParams(params);
 
     // Pre-flight check: verify shared contract is ready
     if (!isReady || !abi || !contractAddress) {
@@ -273,20 +167,15 @@ export function useCancelCloseOrder(
     resetWrite();
     setResult(null);
     setError(null);
-    setCurrentParams(null);
-    setIsTimedOut(false);
-    setForceCancelled(false);
   }, [resetWrite]);
 
   return {
     cancelOrder,
     isCancelling: isWritePending,
     isWaitingForConfirmation,
-    isSuccess: (isTxSuccess || forceCancelled) && result !== null,
+    isSuccess: isTxSuccess && result !== null,
     result,
     error,
-    isTimedOut,
-    forceCancelled,
     reset,
     isReady,
   };

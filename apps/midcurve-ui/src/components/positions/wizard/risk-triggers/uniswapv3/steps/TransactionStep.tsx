@@ -33,7 +33,6 @@ import type {
 import { useUpdateCloseOrder } from '@/hooks/automation/useUpdateCloseOrder';
 import type { UpdateCloseOrderParams } from '@/hooks/automation/useUpdateCloseOrder';
 import { useCancelCloseOrder } from '@/hooks/automation/useCancelCloseOrder';
-import type { CancelCloseOrderParams } from '@/hooks/automation/useCancelCloseOrder';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { getChainSlugByChainId } from '@/config/chains';
@@ -381,23 +380,10 @@ export function TransactionStep() {
           break;
         }
         case 'cancel': {
-          const initialTrigger =
-            op.orderType === 'STOP_LOSS'
-              ? state.initialStopLoss
-              : state.initialTakeProfit;
-          if (!initialTrigger.closeOrderHash) {
-            updateOp(op.id, {
-              status: 'error',
-              error: 'Missing close order hash',
-            });
-            setCurrentOpIndex(-1);
-            return;
-          }
           cancelOrder.reset();
           cancelOrder.cancelOrder({
             orderType: op.orderType!,
-            closeOrderHash: initialTrigger.closeOrderHash,
-          } as CancelCloseOrderParams);
+          });
           break;
         }
         case 'update_tick': {

@@ -564,8 +564,8 @@ export function ConfigureStep() {
             </>
           )}
 
-          {/* SL swap config */}
-          {renderSwapConfig(state.slSwapConfig, setSlSwapEnabled, setSlSwapSlippage)}
+          {/* SL swap config (only when trigger is set) */}
+          {hasSl && renderSwapConfig(state.slSwapConfig, setSlSwapEnabled, setSlSwapSlippage)}
         </div>
       </div>
     );
@@ -652,8 +652,8 @@ export function ConfigureStep() {
             </>
           )}
 
-          {/* TP swap config */}
-          {renderSwapConfig(state.tpSwapConfig, setTpSwapEnabled, setTpSwapSlippage)}
+          {/* TP swap config (only when trigger is set) */}
+          {hasTp && renderSwapConfig(state.tpSwapConfig, setTpSwapEnabled, setTpSwapSlippage)}
         </div>
       </div>
     );

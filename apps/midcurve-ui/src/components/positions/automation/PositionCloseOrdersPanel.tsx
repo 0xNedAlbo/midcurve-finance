@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { AlertCircle, AlertTriangle, Loader2, Shield } from 'lucide-react';
+import { AlertCircle, Loader2, Shield } from 'lucide-react';
 import type { Address } from 'viem';
 import { useAccount } from 'wagmi';
 import type { SerializedUniswapV3CloseOrderConfig, TriggerMode } from '@midcurve/api-shared';
@@ -136,8 +136,6 @@ export function PositionCloseOrdersPanel({
     isWaitingForConfirmation,
     isSuccess: isCancelSuccess,
     error: cancelError,
-    isTimedOut,
-    forceCancelled,
     reset: resetCancel,
   } = useCancelCloseOrder(chainId, nftId);
 
@@ -148,13 +146,10 @@ export function PositionCloseOrdersPanel({
   // Has any active (non-terminal) orders
   const hasActiveOrders = activeOrders.length > 0;
 
-  // Handle cancel success (including force-cancelled)
+  // Handle cancel success
   if (isCancelSuccess && cancellingOrderId) {
     setCancellingOrderId(null);
-    // Don't reset if force-cancelled - we want to show the warning
-    if (!forceCancelled) {
-      resetCancel();
-    }
+    resetCancel();
     refetch();
   }
 
@@ -162,17 +157,12 @@ export function PositionCloseOrdersPanel({
     // Can't cancel without contract address
     if (!contractAddress) return;
 
-    // Find the order to get the closeOrderHash and triggerMode
+    // Find the order to get the triggerMode
     const order = orders?.find((o) => o.id === orderId);
     if (!order) return;
 
     const config = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
     const triggerMode = config.triggerMode ?? 'LOWER';
-
-    if (!order.closeOrderHash) {
-      console.error('Order missing closeOrderHash');
-      return;
-    }
 
     // Map triggerMode to orderType (V1.0 tick-based interface)
     // When isToken0Quote=true, the order type is inverted because tick direction is opposite to user price direction
@@ -189,16 +179,12 @@ export function PositionCloseOrdersPanel({
     const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
 
     setCancellingOrderId(orderId);
-    cancelOrder({
-      orderType,
-      closeOrderHash: order.closeOrderHash,
-      positionId,
-    });
+    cancelOrder({ orderType });
   };
 
-  // Check if a specific order is being cancelled (not if already force-cancelled)
+  // Check if a specific order is being cancelled
   const isOrderCancelling = (orderId: string) =>
-    orderId === cancellingOrderId && (isCancelling || isWaitingForConfirmation) && !forceCancelled;
+    orderId === cancellingOrderId && (isCancelling || isWaitingForConfirmation);
 
   return (
     <div className="bg-slate-900/50 border border-slate-700/50 rounded-xl p-4 md:p-6">
@@ -208,28 +194,8 @@ export function PositionCloseOrdersPanel({
         <h3 className="text-lg font-semibold text-slate-200">Automation</h3>
       </div>
 
-      {/* Warning: Order was force-cancelled due to timeout/failure */}
-      {forceCancelled && (
-        <div className="flex items-start gap-2 p-3 mb-4 bg-amber-900/30 border border-amber-700/50 rounded-lg text-amber-400 text-sm">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <span>
-              Order cancelled in system.{' '}
-              {isTimedOut ? 'The transaction timed out - ' : 'The transaction failed - '}
-              if the order is still active on-chain, it will be ignored by automation.
-            </span>
-            <button
-              onClick={resetCancel}
-              className="ml-2 text-amber-300 hover:text-amber-200 underline cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Error: Cancel failed completely */}
-      {cancelError && !forceCancelled && (
+      {/* Error: Cancel failed */}
+      {cancelError && (
         <div className="flex items-start gap-2 p-3 mb-4 bg-red-900/30 border border-red-700/50 rounded-lg text-red-400 text-sm">
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <div className="flex-1">

@@ -193,11 +193,7 @@ export function CancelOrderConfirmModal({
         };
     const orderType: OrderType = orderTypeFromTriggerMode[triggerMode];
 
-    cancelOrder({
-      orderType,
-      closeOrderHash: order.closeOrderHash,
-      positionId: order.positionId,
-    });
+    cancelOrder({ orderType });
   };
 
   // Don't allow close during processing (but allow when success)
