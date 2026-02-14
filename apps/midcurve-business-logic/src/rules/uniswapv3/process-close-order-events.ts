@@ -315,10 +315,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   /**
    * Handles OrderRegistered events.
    *
-   * Three scenarios:
+   * Four scenarios:
    * 1. Order already exists in pending/registering → activate it
    * 2. Order already exists in active → idempotent skip
-   * 3. No order exists → create from on-chain event (if position is tracked)
+   * 3. Order exists in terminal state (cancelled/executed/expired/failed) → reactivate with fresh config
+   * 4. No order exists → create from on-chain event (if position is tracked)
    */
   private async handleRegistered(event: OrderRegisteredEvent): Promise<void> {
     const { chainId, nftId, triggerMode, contractAddress, transactionHash, blockNumber, payload } =
@@ -369,10 +370,64 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
             { orderId: existingOrder.id },
             'Order already active, skipping registered event'
           );
+        } else if (TERMINAL_STATUSES.includes(existingOrder.status)) {
+          // Order was previously cancelled/executed/expired/failed but re-registered on-chain.
+          // The contract allows re-registration over non-active orders.
+          // Reactivate with fresh config from the event.
+          await this.closeOrderService.markRegistered(existingOrder.id, {
+            closeId: 0,
+            registrationTxHash: transactionHash,
+          }, tx);
+
+          // Update config to match new registration parameters
+          const newSqrtPriceX96 = BigInt(
+            tickToSqrtRatioX96(payload.triggerTick).toString()
+          );
+          const tm = triggerMode as TriggerMode;
+          const newCloseOrderHash = deriveCloseOrderHash(tm, newSqrtPriceX96);
+
+          await this.closeOrderService.updateConfigField(existingOrder.id, {
+            triggerMode: tm,
+            sqrtPriceX96Lower: tm === 'LOWER' ? newSqrtPriceX96.toString() : '0',
+            sqrtPriceX96Upper: tm === 'UPPER' ? newSqrtPriceX96.toString() : '0',
+            payoutAddress: payload.payout,
+            operatorAddress: payload.operator,
+            validUntil: new Date(Number(payload.validUntil) * 1000).toISOString(),
+            slippageBps: payload.slippageBps,
+            poolAddress: payload.pool,
+          }, newCloseOrderHash, tx);
+
+          this.logger.info(
+            { orderId: existingOrder.id, previousStatus: existingOrder.status },
+            'Terminal order reactivated from on-chain re-registration'
+          );
+
+          // Log ORDER_REGISTERED — use fresh data since existingOrder config is stale
+          const position = await this.positionService.findById(existingOrder.positionId, tx);
+          if (position) {
+            const triggerSide: 'lower' | 'upper' = tm === 'LOWER' ? 'lower' : 'upper';
+            const orderTag = generateOrderTag({
+              triggerSide,
+              sqrtPriceX96: newSqrtPriceX96,
+              token0IsQuote: position.isToken0Quote,
+              token0Decimals: position.pool.token0.decimals,
+              token1Decimals: position.pool.token1.decimals,
+            });
+            await this.automationLogService.logOrderRegistered(
+              existingOrder.positionId,
+              existingOrder.id,
+              {
+                orderTag,
+                registrationTxHash: transactionHash,
+                chainId,
+              } satisfies OrderRegisteredContext,
+              tx
+            );
+          }
         } else {
           this.logger.warn(
             { orderId: existingOrder.id, status: existingOrder.status },
-            'Registered event for order in unexpected state'
+            'Registered event for order in truly unexpected state'
           );
         }
         return null;
