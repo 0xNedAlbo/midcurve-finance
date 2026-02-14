@@ -27,6 +27,7 @@ export interface TriggerState {
 export interface SwapConfigState {
   enabled: boolean;
   slippageBps: number;
+  swapToQuote: boolean; // true = swap to quote token, false = swap to base token
 }
 
 export type ConfigurationTab = 'sl' | 'tp';
@@ -84,6 +85,8 @@ type WizardAction =
   | { type: 'SET_SL_SWAP_SLIPPAGE'; slippageBps: number }
   | { type: 'SET_TP_SWAP_ENABLED'; enabled: boolean }
   | { type: 'SET_TP_SWAP_SLIPPAGE'; slippageBps: number }
+  | { type: 'SET_SL_SWAP_TO_QUOTE'; swapToQuote: boolean }
+  | { type: 'SET_TP_SWAP_TO_QUOTE'; swapToQuote: boolean }
   | { type: 'SET_CONFIGURATION_TAB'; tab: ConfigurationTab }
   | { type: 'SET_STEP_VALID'; stepId: string; valid: boolean }
   | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
@@ -109,6 +112,7 @@ const EMPTY_TRIGGER: TriggerState = {
 const DEFAULT_SWAP_CONFIG: SwapConfigState = {
   enabled: true,
   slippageBps: 100,
+  swapToQuote: true,
 };
 
 const initialState: RiskTriggersWizardState = {
@@ -264,6 +268,18 @@ function wizardReducer(
         tpSwapConfig: { ...state.tpSwapConfig, slippageBps: action.slippageBps },
       };
 
+    case 'SET_SL_SWAP_TO_QUOTE':
+      return {
+        ...state,
+        slSwapConfig: { ...state.slSwapConfig, swapToQuote: action.swapToQuote },
+      };
+
+    case 'SET_TP_SWAP_TO_QUOTE':
+      return {
+        ...state,
+        tpSwapConfig: { ...state.tpSwapConfig, swapToQuote: action.swapToQuote },
+      };
+
     case 'SET_CONFIGURATION_TAB':
       return { ...state, configurationTab: action.tab };
 
@@ -323,6 +339,7 @@ export function convertOrdersToTriggerState(
   baseTokenAddress: string,
   quoteTokenAddress: string,
   baseTokenDecimals: number,
+  isToken0Quote: boolean,
 ): {
   sl: TriggerState;
   tp: TriggerState;
@@ -390,9 +407,15 @@ export function convertOrdersToTriggerState(
     const config = order.config as Record<string, unknown>;
     const swapConfig = config.swapConfig as Record<string, unknown> | undefined;
     if (swapConfig && swapConfig.enabled) {
-      return { enabled: true, slippageBps: (swapConfig.slippageBps as number) || 100 };
+      const direction = swapConfig.direction as string | undefined;
+      const toQuoteDirection = computeSwapToQuoteDirection(isToken0Quote);
+      return {
+        enabled: true,
+        slippageBps: (swapConfig.slippageBps as number) || 100,
+        swapToQuote: direction === toQuoteDirection,
+      };
     }
-    return { enabled: false, slippageBps: 100 };
+    return { enabled: false, slippageBps: 100, swapToQuote: true };
   };
 
   return { sl, tp, slSwap: extractSwapConfig(slOrder), tpSwap: extractSwapConfig(tpOrder) };
@@ -405,6 +428,18 @@ export function computeSwapToQuoteDirection(
   isToken0Quote: boolean
 ): 'TOKEN0_TO_1' | 'TOKEN1_TO_0' {
   return isToken0Quote ? 'TOKEN1_TO_0' : 'TOKEN0_TO_1';
+}
+
+/**
+ * Compute the actual SwapDirection based on user's semantic choice and pool token ordering.
+ */
+export function computeSwapDirection(
+  swapToQuote: boolean,
+  isToken0Quote: boolean
+): 'TOKEN0_TO_1' | 'TOKEN1_TO_0' {
+  return swapToQuote
+    ? computeSwapToQuoteDirection(isToken0Quote)
+    : computeSwapToQuoteDirection(!isToken0Quote);
 }
 
 // ----- Context -----
@@ -431,6 +466,7 @@ interface RiskTriggersWizardContextValue {
     baseTokenAddress: string,
     quoteTokenAddress: string,
     baseTokenDecimals: number,
+    isToken0Quote: boolean,
   ) => void;
 
   // Trigger editing
@@ -442,8 +478,10 @@ interface RiskTriggersWizardContextValue {
   // Swap config (per-order)
   setSlSwapEnabled: (enabled: boolean) => void;
   setSlSwapSlippage: (slippageBps: number) => void;
+  setSlSwapToQuote: (swapToQuote: boolean) => void;
   setTpSwapEnabled: (enabled: boolean) => void;
   setTpSwapSlippage: (slippageBps: number) => void;
+  setTpSwapToQuote: (swapToQuote: boolean) => void;
 
   // UI
   setConfigurationTab: (tab: ConfigurationTab) => void;
@@ -527,12 +565,14 @@ export function RiskTriggersWizardProvider({
       baseTokenAddress: string,
       quoteTokenAddress: string,
       baseTokenDecimals: number,
+      isToken0Quote: boolean,
     ) => {
       const { sl, tp, slSwap, tpSwap } = convertOrdersToTriggerState(
         orders,
         baseTokenAddress,
         quoteTokenAddress,
         baseTokenDecimals,
+        isToken0Quote,
       );
       dispatch({ type: 'INITIALIZE_FROM_ORDERS', sl, tp, slSwap, tpSwap });
     },
@@ -576,6 +616,16 @@ export function RiskTriggersWizardProvider({
   const setTpSwapSlippage = useCallback(
     (slippageBps: number) =>
       dispatch({ type: 'SET_TP_SWAP_SLIPPAGE', slippageBps }),
+    []
+  );
+  const setSlSwapToQuote = useCallback(
+    (swapToQuote: boolean) =>
+      dispatch({ type: 'SET_SL_SWAP_TO_QUOTE', swapToQuote }),
+    []
+  );
+  const setTpSwapToQuote = useCallback(
+    (swapToQuote: boolean) =>
+      dispatch({ type: 'SET_TP_SWAP_TO_QUOTE', swapToQuote }),
     []
   );
 
@@ -673,14 +723,16 @@ export function RiskTriggersWizardProvider({
   const slSwapChanged = useMemo(
     () =>
       state.initialSlSwapConfig.enabled !== state.slSwapConfig.enabled ||
-      state.initialSlSwapConfig.slippageBps !== state.slSwapConfig.slippageBps,
+      state.initialSlSwapConfig.slippageBps !== state.slSwapConfig.slippageBps ||
+      state.initialSlSwapConfig.swapToQuote !== state.slSwapConfig.swapToQuote,
     [state.initialSlSwapConfig, state.slSwapConfig]
   );
 
   const tpSwapChanged = useMemo(
     () =>
       state.initialTpSwapConfig.enabled !== state.tpSwapConfig.enabled ||
-      state.initialTpSwapConfig.slippageBps !== state.tpSwapConfig.slippageBps,
+      state.initialTpSwapConfig.slippageBps !== state.tpSwapConfig.slippageBps ||
+      state.initialTpSwapConfig.swapToQuote !== state.tpSwapConfig.swapToQuote,
     [state.initialTpSwapConfig, state.tpSwapConfig]
   );
 
@@ -714,8 +766,10 @@ export function RiskTriggersWizardProvider({
     clearTakeProfit,
     setSlSwapEnabled,
     setSlSwapSlippage,
+    setSlSwapToQuote,
     setTpSwapEnabled,
     setTpSwapSlippage,
+    setTpSwapToQuote,
     setConfigurationTab,
     setStepValid,
     isStepValid,

@@ -10,18 +10,22 @@ import {
   TrendingDown,
   AlertTriangle,
 } from 'lucide-react';
+import type { PnLScenario, SwapConfig } from '@midcurve/shared';
 import {
   formatCompactValue,
   calculatePositionValue,
-  tickToPrice,
   compareAddresses,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
+  INFINITE_RUNUP,
 } from '@midcurve/shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
+import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
 import {
   useRiskTriggersWizard,
+  computeSwapDirection,
   type ConfigurationTab,
+  type SwapConfigState,
 } from '../context/RiskTriggersWizardContext';
 
 // Configuration section tabs
@@ -74,8 +78,10 @@ export function ConfigureStep() {
     clearTakeProfit,
     setSlSwapEnabled,
     setSlSwapSlippage,
+    setSlSwapToQuote,
     setTpSwapEnabled,
     setTpSwapSlippage,
+    setTpSwapToQuote,
     setInteractiveZoom,
     setSummaryZoom,
     goNext,
@@ -83,6 +89,18 @@ export function ConfigureStep() {
     slOperation,
     tpOperation,
   } = useRiskTriggersWizard();
+
+  const [scenario, setScenario] = useState<PnLScenario>('combined');
+
+  // Auto-reset scenario when SL/TP is cleared
+  useEffect(() => {
+    if (scenario === 'sl_triggered' && !state.stopLoss.enabled) {
+      setScenario('combined');
+    }
+    if (scenario === 'tp_triggered' && !state.takeProfit.enabled) {
+      setScenario('combined');
+    }
+  }, [state.stopLoss.enabled, state.takeProfit.enabled, scenario]);
 
   const position = state.position;
   const pool = state.discoveredPool;
@@ -240,10 +258,29 @@ export function ConfigureStep() {
           ? BigInt(position.currentCostBasis)
           : costBasis,
       });
+      // Build SwapConfig objects from wizard state
+      const isToken0Quote = !isToken0Base;
+      const slSwapConfig: SwapConfig | undefined = state.slSwapConfig.enabled
+        ? {
+            enabled: true,
+            direction: computeSwapDirection(state.slSwapConfig.swapToQuote, isToken0Quote),
+            slippageBps: state.slSwapConfig.slippageBps,
+          }
+        : undefined;
+      const tpSwapConfig: SwapConfig | undefined = state.tpSwapConfig.enabled
+        ? {
+            enabled: true,
+            direction: computeSwapDirection(state.tpSwapConfig.swapToQuote, isToken0Quote),
+            slippageBps: state.tpSwapConfig.slippageBps,
+          }
+        : undefined;
+
       return new CloseOrderSimulationOverlay({
         underlyingPosition: basePosition,
         takeProfitPrice: state.takeProfit.priceBigint,
         stopLossPrice: state.stopLoss.priceBigint,
+        stopLossSwapConfig: slSwapConfig,
+        takeProfitSwapConfig: tpSwapConfig,
       });
     } catch {
       return null;
@@ -256,6 +293,12 @@ export function ConfigureStep() {
     position,
     state.stopLoss.priceBigint,
     state.takeProfit.priceBigint,
+    state.slSwapConfig.enabled,
+    state.slSwapConfig.slippageBps,
+    state.slSwapConfig.swapToQuote,
+    state.tpSwapConfig.enabled,
+    state.tpSwapConfig.slippageBps,
+    state.tpSwapConfig.swapToQuote,
   ]);
 
   // Convert price to bigint (quote token units)
@@ -311,52 +354,31 @@ export function ConfigureStep() {
     setConfigurationTab('sl');
   }, [setConfigurationTab]);
 
-  // Calculate max drawdown (loss at SL price)
-  const slDrawdown = useMemo(() => {
-    if (!state.stopLoss.priceBigint || !simulationPosition) return null;
+  // Risk metrics computed by overlay (evaluates all critical price points)
+  const maxDrawdown = useMemo(() => {
+    if (!simulationPosition) return null;
     try {
-      const result = simulationPosition.simulatePnLAtPrice(
-        state.stopLoss.priceBigint
-      );
-      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
-    } catch {
-      return null;
-    }
-  }, [state.stopLoss.priceBigint, simulationPosition]);
+      return simulationPosition.maxDrawdown();
+    } catch { return null; }
+  }, [simulationPosition]);
 
-  // Calculate max runup (profit at TP price)
-  const tpRunup = useMemo(() => {
-    if (!state.takeProfit.priceBigint || !simulationPosition) return null;
+  const maxRunup = useMemo(() => {
+    if (!simulationPosition) return null;
     try {
-      const result = simulationPosition.simulatePnLAtPrice(
-        state.takeProfit.priceBigint
-      );
-      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
-    } catch {
-      return null;
-    }
-  }, [state.takeProfit.priceBigint, simulationPosition]);
+      return simulationPosition.maxRunup();
+    } catch { return null; }
+  }, [simulationPosition]);
 
-  // Calculate PnL at upper range boundary (for max runup when no TP)
-  const upperBoundaryRunup = useMemo(() => {
-    if (!positionConfig || !tokenInfo || !pool || !simulationPosition)
-      return null;
-    try {
-      const baseDecimals = isToken0Base
-        ? pool.token0.decimals
-        : pool.token1.decimals;
-      const upperPriceBigInt = tickToPrice(
-        positionConfig.tickUpper,
-        tokenInfo.baseToken.address,
-        tokenInfo.quoteToken.address,
-        baseDecimals
-      );
-      const result = simulationPosition.simulatePnLAtPrice(upperPriceBigInt);
-      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
-    } catch {
-      return null;
-    }
-  }, [positionConfig, tokenInfo, pool, simulationPosition, isToken0Base]);
+  // Drawdown/runup as percentage of cost basis
+  const maxDrawdownPercent = useMemo(() => {
+    if (maxDrawdown === null || costBasis === 0n) return null;
+    return Number((maxDrawdown * 1000000n) / costBasis) / 10000;
+  }, [maxDrawdown, costBasis]);
+
+  const maxRunupPercent = useMemo(() => {
+    if (maxRunup === null || maxRunup === INFINITE_RUNUP || costBasis === 0n) return null;
+    return Number((maxRunup * 1000000n) / costBasis) / 10000;
+  }, [maxRunup, costBasis]);
 
   // Zoom handlers
   const handleInteractiveZoomIn = useCallback(() => {
@@ -394,9 +416,10 @@ export function ConfigureStep() {
   // Swap config section (reused for both SL and TP tabs)
   // ============================================================
   const renderSwapConfig = (
-    swapConfig: { enabled: boolean; slippageBps: number },
+    swapConfig: SwapConfigState,
     setEnabled: (enabled: boolean) => void,
     setSlippage: (slippageBps: number) => void,
+    toggleDirection: () => void,
   ) => {
     if (!tokenInfo) return null;
     const baseSymbol = tokenInfo.baseToken.symbol;
@@ -442,15 +465,20 @@ export function ConfigureStep() {
           <div className="space-y-3">
             {/* Direction display */}
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-slate-300">{baseSymbol}</span>
+              <span className={swapConfig.swapToQuote ? 'text-slate-300' : 'text-blue-400 font-medium'}>
+                {swapConfig.swapToQuote ? baseSymbol : quoteSymbol}
+              </span>
               <button
-                disabled
-                className="p-1 rounded bg-slate-700/50 text-slate-500 cursor-not-allowed"
-                title="Swap direction change coming soon"
+                type="button"
+                onClick={toggleDirection}
+                className="p-1 rounded bg-slate-700/50 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 transition-colors cursor-pointer"
+                title={`Swap to ${swapConfig.swapToQuote ? baseSymbol : quoteSymbol}`}
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
               </button>
-              <span className="text-slate-300">{quoteSymbol}</span>
+              <span className={swapConfig.swapToQuote ? 'text-blue-400 font-medium' : 'text-slate-300'}>
+                {swapConfig.swapToQuote ? quoteSymbol : baseSymbol}
+              </span>
             </div>
 
             {/* Slippage */}
@@ -534,17 +562,18 @@ export function ConfigureStep() {
                   Max Drawdown
                 </div>
                 <div className="text-sm font-medium text-red-400">
-                  {slDrawdown ? (
+                  {maxDrawdown !== null ? (
                     <>
-                      {formatCompactValue(
-                        slDrawdown.pnlValue,
+                      -{formatCompactValue(
+                        maxDrawdown,
                         quoteDecimals
                       )}{' '}
                       {quoteSymbol}
-                      <span className="text-xs text-slate-500 ml-1">
-                        ({slDrawdown.pnlPercent >= 0 ? '+' : ''}
-                        {slDrawdown.pnlPercent.toFixed(1)}%)
-                      </span>
+                      {maxDrawdownPercent !== null && (
+                        <span className="text-xs text-slate-500 ml-1">
+                          (-{maxDrawdownPercent.toFixed(1)}%)
+                        </span>
+                      )}
                     </>
                   ) : (
                     <span className="text-slate-500">--</span>
@@ -565,7 +594,7 @@ export function ConfigureStep() {
           )}
 
           {/* SL swap config (only when trigger is set) */}
-          {hasSl && renderSwapConfig(state.slSwapConfig, setSlSwapEnabled, setSlSwapSlippage)}
+          {hasSl && renderSwapConfig(state.slSwapConfig, setSlSwapEnabled, setSlSwapSlippage, () => setSlSwapToQuote(!state.slSwapConfig.swapToQuote))}
         </div>
       </div>
     );
@@ -621,19 +650,23 @@ export function ConfigureStep() {
                   Max Runup
                 </div>
                 <div className="text-sm font-medium text-green-400">
-                  {tpRunup ? (
-                    <>
-                      {tpRunup.pnlValue >= 0n ? '+' : ''}
-                      {formatCompactValue(
-                        tpRunup.pnlValue,
-                        quoteDecimals
-                      )}{' '}
-                      {quoteSymbol}
-                      <span className="text-xs text-slate-500 ml-1">
-                        ({tpRunup.pnlPercent >= 0 ? '+' : ''}
-                        {tpRunup.pnlPercent.toFixed(1)}%)
-                      </span>
-                    </>
+                  {maxRunup !== null ? (
+                    maxRunup === INFINITE_RUNUP ? (
+                      <>&#8734;</>
+                    ) : (
+                      <>
+                        +{formatCompactValue(
+                          maxRunup,
+                          quoteDecimals
+                        )}{' '}
+                        {quoteSymbol}
+                        {maxRunupPercent !== null && (
+                          <span className="text-xs text-slate-500 ml-1">
+                            (+{maxRunupPercent.toFixed(1)}%)
+                          </span>
+                        )}
+                      </>
+                    )
                   ) : (
                     <span className="text-slate-500">--</span>
                   )}
@@ -653,7 +686,7 @@ export function ConfigureStep() {
           )}
 
           {/* TP swap config (only when trigger is set) */}
-          {hasTp && renderSwapConfig(state.tpSwapConfig, setTpSwapEnabled, setTpSwapSlippage)}
+          {hasTp && renderSwapConfig(state.tpSwapConfig, setTpSwapEnabled, setTpSwapSlippage, () => setTpSwapToQuote(!state.tpSwapConfig.swapToQuote))}
         </div>
       </div>
     );
@@ -781,6 +814,12 @@ export function ConfigureStep() {
 
     return (
       <div className="h-full flex flex-col min-h-0">
+        <PnLScenarioTabs
+          scenario={scenario}
+          onScenarioChange={setScenario}
+          hasStopLoss={state.stopLoss.enabled}
+          hasTakeProfit={state.takeProfit.enabled}
+        />
         <InteractivePnLCurve
           poolData={{
             token0Address: pool.token0.config.address as string,
@@ -798,8 +837,9 @@ export function ConfigureStep() {
           onSliderBoundsChange={handleSliderBoundsChange}
           onStopLossPriceChange={handleStopLossPriceChange}
           onTakeProfitPriceChange={handleTakeProfitPriceChange}
-          enableSLTPInteraction={true}
+          enableSLTPInteraction={scenario === 'combined'}
           onSlTpInteraction={handleSlTpInteraction}
+          scenario={scenario}
           className="flex-1 min-h-0"
         />
         <p className="text-xs text-slate-400 mt-2 text-center shrink-0">
@@ -817,6 +857,7 @@ export function ConfigureStep() {
     if (!tokenInfo) return null;
     const quoteDecimals = tokenInfo.quoteToken.decimals;
     const quoteSymbol = tokenInfo.quoteToken.symbol;
+    const baseSymbol = tokenInfo.baseToken.symbol;
 
     return (
       <div className="h-full flex flex-col">
@@ -893,14 +934,15 @@ export function ConfigureStep() {
             <div className="space-y-1.5">
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">Max Drawdown</span>
-                {slDrawdown ? (
+                {maxDrawdown !== null ? (
                   <span className="text-red-400 font-medium">
-                    {formatCompactValue(slDrawdown.pnlValue, quoteDecimals)}{' '}
+                    -{formatCompactValue(maxDrawdown, quoteDecimals)}{' '}
                     {quoteSymbol}
-                    <span className="text-xs text-slate-500 ml-1">
-                      ({slDrawdown.pnlPercent >= 0 ? '+' : ''}
-                      {slDrawdown.pnlPercent.toFixed(1)}%)
-                    </span>
+                    {maxDrawdownPercent !== null && (
+                      <span className="text-xs text-slate-500 ml-1">
+                        (-{maxDrawdownPercent.toFixed(1)}%)
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <span className="text-red-400 font-medium">-100%</span>
@@ -908,26 +950,20 @@ export function ConfigureStep() {
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">Max Runup</span>
-                {tpRunup ? (
-                  <span className="text-green-400 font-medium">
-                    {tpRunup.pnlValue >= 0n ? '+' : ''}
-                    {formatCompactValue(tpRunup.pnlValue, quoteDecimals)}{' '}
-                    {quoteSymbol}
-                    <span className="text-xs text-slate-500 ml-1">
-                      ({tpRunup.pnlPercent >= 0 ? '+' : ''}
-                      {tpRunup.pnlPercent.toFixed(1)}%)
+                {maxRunup !== null ? (
+                  maxRunup === INFINITE_RUNUP ? (
+                    <span className="text-green-400 font-medium">&#8734;</span>
+                  ) : (
+                    <span className="text-green-400 font-medium">
+                      +{formatCompactValue(maxRunup, quoteDecimals)}{' '}
+                      {quoteSymbol}
+                      {maxRunupPercent !== null && (
+                        <span className="text-xs text-slate-500 ml-1">
+                          (+{maxRunupPercent.toFixed(1)}%)
+                        </span>
+                      )}
                     </span>
-                  </span>
-                ) : upperBoundaryRunup ? (
-                  <span className="text-green-400 font-medium">
-                    {upperBoundaryRunup.pnlValue >= 0n ? '+' : ''}
-                    {formatCompactValue(upperBoundaryRunup.pnlValue, quoteDecimals)}{' '}
-                    {quoteSymbol}
-                    <span className="text-xs text-slate-500 ml-1">
-                      ({upperBoundaryRunup.pnlPercent >= 0 ? '+' : ''}
-                      {upperBoundaryRunup.pnlPercent.toFixed(1)}%)
-                    </span>
-                  </span>
+                  )
                 ) : (
                   <span className="text-slate-500">--</span>
                 )}
@@ -950,7 +986,7 @@ export function ConfigureStep() {
                     }
                   >
                     {state.slSwapConfig.enabled
-                      ? `to ${quoteSymbol} (${(state.slSwapConfig.slippageBps / 100).toFixed(1)}%)`
+                      ? `${state.slSwapConfig.swapToQuote ? baseSymbol : quoteSymbol} \u2192 ${state.slSwapConfig.swapToQuote ? quoteSymbol : baseSymbol} (${(state.slSwapConfig.slippageBps / 100).toFixed(1)}%)`
                       : 'Disabled'}
                   </span>
                 </div>
@@ -964,7 +1000,7 @@ export function ConfigureStep() {
                     }
                   >
                     {state.tpSwapConfig.enabled
-                      ? `to ${quoteSymbol} (${(state.tpSwapConfig.slippageBps / 100).toFixed(1)}%)`
+                      ? `${state.tpSwapConfig.swapToQuote ? baseSymbol : quoteSymbol} \u2192 ${state.tpSwapConfig.swapToQuote ? quoteSymbol : baseSymbol} (${(state.tpSwapConfig.slippageBps / 100).toFixed(1)}%)`
                       : 'Disabled'}
                   </span>
                 </div>

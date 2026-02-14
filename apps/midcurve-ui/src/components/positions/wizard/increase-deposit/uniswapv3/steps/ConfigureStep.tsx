@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react';
 import { Wallet, PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
+import type { PnLScenario } from '@midcurve/shared';
 import {
   formatCompactValue,
   calculatePositionValue,
@@ -12,6 +13,7 @@ import {
 } from '@midcurve/shared';
 import type { PoolSearchTokenInfo, SerializedUniswapV3CloseOrderConfig } from '@midcurve/api-shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
+import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
 import { useIncreaseDepositWizard } from '../context/IncreaseDepositWizardContext';
 import { IncreaseWizardSummaryPanel } from '../shared/IncreaseWizardSummaryPanel';
 import { useCapitalCalculations } from '@/components/positions/wizard/create-position/uniswapv3/hooks/useCapitalCalculations';
@@ -33,6 +35,7 @@ export function ConfigureStep() {
   } = useIncreaseDepositWizard();
 
   const { address: walletAddress, isConnected } = useAccount();
+  const [scenario, setScenario] = useState<PnLScenario>('combined');
 
   // Extract position data
   const position = state.position;
@@ -274,6 +277,16 @@ export function ConfigureStep() {
     return { stopLossPrice, takeProfitPrice };
   }, [state.activeCloseOrders, state.discoveredPool, baseToken, quoteToken, isToken0Base]);
 
+  // Auto-reset scenario when SL/TP is not available
+  useEffect(() => {
+    if (scenario === 'sl_triggered' && !closeOrderPrices.stopLossPrice) {
+      setScenario('combined');
+    }
+    if (scenario === 'tp_triggered' && !closeOrderPrices.takeProfitPrice) {
+      setScenario('combined');
+    }
+  }, [closeOrderPrices.stopLossPrice, closeOrderPrices.takeProfitPrice, scenario]);
+
   // Create simulation position for PnL curve
   // Shows COMBINED position (existing + additional liquidity)
   const simulationPosition = useMemo(() => {
@@ -458,6 +471,12 @@ export function ConfigureStep() {
       const discoveredPool = state.discoveredPool!;
       return (
         <div className="h-full flex flex-col min-h-0">
+          <PnLScenarioTabs
+            scenario={scenario}
+            onScenarioChange={setScenario}
+            hasStopLoss={closeOrderPrices.stopLossPrice !== null}
+            hasTakeProfit={closeOrderPrices.takeProfitPrice !== null}
+          />
           <InteractivePnLCurve
             poolData={{
               token0Address: discoveredPool.token0.config.address as string,
@@ -481,6 +500,7 @@ export function ConfigureStep() {
             position={simulationPosition}
             sliderBounds={sliderBounds}
             onSliderBoundsChange={handleSliderBoundsChange}
+            scenario={scenario}
             // No tick/SL/TP change callbacks = range and triggers are non-draggable
             className="flex-1 min-h-0"
           />

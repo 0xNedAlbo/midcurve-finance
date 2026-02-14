@@ -226,6 +226,7 @@ function DataFetcher({
         baseAddress,
         quoteAddress,
         baseToken.decimals,
+        pos.isToken0Quote,
       );
     }
   }, [closeOrdersQuery.data, positionQuery.data, initializeFromOrders]);

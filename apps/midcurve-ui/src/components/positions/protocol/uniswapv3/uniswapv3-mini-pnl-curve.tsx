@@ -26,7 +26,7 @@ import {
   CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
 import type { PoolJSON } from "@midcurve/shared";
-import type { SerializedUniswapV3CloseOrderConfig } from "@midcurve/api-shared";
+import type { SerializedUniswapV3CloseOrderConfig, SwapConfig } from "@midcurve/api-shared";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
@@ -73,13 +73,15 @@ export function UniswapV3MiniPnLCurve({
   const quoteTokenConfig = quoteToken.config as { address: string };
   const isToken0Base = !position.isToken0Quote;
 
-  // Extract SL/TP prices from active close orders
-  const closeOrderPrices = useMemo(() => {
+  // Extract SL/TP prices and swap configs from active close orders
+  const closeOrderData = useMemo(() => {
     let stopLossPrice: bigint | null = null;
     let takeProfitPrice: bigint | null = null;
+    let slSwapConfig: SwapConfig | null = null;
+    let tpSwapConfig: SwapConfig | null = null;
 
     if (!position.activeCloseOrders?.length) {
-      return { stopLossPrice, takeProfitPrice };
+      return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
     }
 
     const token0Decimals = position.pool.token0.decimals;
@@ -111,6 +113,10 @@ export function UniswapV3MiniPnLCurve({
               stopLossPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
             }
           }
+
+          if (orderConfig.swapConfig?.enabled) {
+            slSwapConfig = orderConfig.swapConfig;
+          }
         }
 
         if (orderConfig.triggerMode === 'UPPER' && orderConfig.sqrtPriceX96Upper) {
@@ -134,13 +140,17 @@ export function UniswapV3MiniPnLCurve({
               takeProfitPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
             }
           }
+
+          if (orderConfig.swapConfig?.enabled) {
+            tpSwapConfig = orderConfig.swapConfig;
+          }
         }
       } catch {
         // Ignore conversion errors for individual orders
       }
     }
 
-    return { stopLossPrice, takeProfitPrice };
+    return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
   }, [position.activeCloseOrders, position.pool.token0.decimals, position.pool.token1.decimals, isToken0Base, quoteToken.decimals]);
 
   // Create simulation position with SL/TP overlay
@@ -172,13 +182,15 @@ export function UniswapV3MiniPnLCurve({
 
       return new CloseOrderSimulationOverlay({
         underlyingPosition: basePosition,
-        stopLossPrice: closeOrderPrices.stopLossPrice,
-        takeProfitPrice: closeOrderPrices.takeProfitPrice,
+        stopLossPrice: closeOrderData.stopLossPrice,
+        takeProfitPrice: closeOrderData.takeProfitPrice,
+        stopLossSwapConfig: closeOrderData.slSwapConfig,
+        takeProfitSwapConfig: closeOrderData.tpSwapConfig,
       });
     } catch {
       return null;
     }
-  }, [position.pool, position.config, position.state, position.isToken0Quote, isToken0Base, closeOrderPrices]);
+  }, [position.pool, position.config, position.state, position.isToken0Quote, isToken0Base, closeOrderData]);
 
   // Generate PnL curve data locally
   const curveData = useMemo(() => {

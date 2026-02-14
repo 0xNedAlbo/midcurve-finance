@@ -8,6 +8,7 @@ import { GridRows, GridColumns } from "@visx/grid";
 import { ParentSize } from "@visx/responsive";
 import { LinePath, Area } from "@visx/shape";
 import { curveMonotoneX } from "@visx/curve";
+import type { PnLScenario } from "@midcurve/shared";
 import {
   tickToPrice,
   compareAddresses,
@@ -70,6 +71,8 @@ export interface InteractivePnLCurveProps {
   enableSLTPInteraction?: boolean;
   // Callback when user starts interacting with SL/TP lines
   onSlTpInteraction?: () => void;
+  /** PnL scenario to visualize. Defaults to 'combined'. */
+  scenario?: PnLScenario;
   // Dimensions
   height?: number;
   className?: string;
@@ -105,6 +108,7 @@ function InteractivePnLCurveInner({
   onStopLossPriceChange,
   onTakeProfitPriceChange,
   onSlTpInteraction,
+  scenario,
 }: InteractivePnLCurveProps & { width: number }) {
   // Extract position properties (null-safe)
   const positionConfig = position?.config as { tickLower?: number; tickUpper?: number } | undefined;
@@ -226,8 +230,10 @@ function InteractivePnLCurveInner({
         // Skip invalid prices
         if (priceBigint <= 0n) continue;
 
-        // Use position's simulation method (handles SL/TP flattening automatically)
-        const result = position.simulatePnLAtPrice(priceBigint);
+        // Use scenario-aware simulation when a non-combined scenario is selected
+        const result = scenario && scenario !== 'combined'
+          ? position.simulateScenario(priceBigint, scenario)
+          : position.simulatePnLAtPrice(priceBigint);
 
         // Convert bigint values to display numbers
         const positionValueDisplay = Number(result.positionValue) / Number(quoteDecimalsDivisor);
@@ -254,6 +260,7 @@ function InteractivePnLCurveInner({
     upperPrice,
     sliderBounds,
     quoteToken.decimals,
+    scenario,
   ]);
 
   // Find the PnL percentage at the current price by interpolating from curve data
@@ -772,8 +779,11 @@ function InteractivePnLCurveInner({
   const hasPosition = liquidity > 0n && curveData.length > 0;
 
   // Calculate display prices for SL/TP lines
-  const slDisplayPrice = stopLossPrice !== null ? bigintPriceToDisplay(stopLossPrice) : null;
-  const tpDisplayPrice = takeProfitPrice !== null ? bigintPriceToDisplay(takeProfitPrice) : null;
+  // In triggered scenarios, only show the relevant trigger line as a reference marker
+  const showSL = scenario !== 'tp_triggered';
+  const showTP = scenario !== 'sl_triggered';
+  const slDisplayPrice = stopLossPrice !== null && showSL ? bigintPriceToDisplay(stopLossPrice) : null;
+  const tpDisplayPrice = takeProfitPrice !== null && showTP ? bigintPriceToDisplay(takeProfitPrice) : null;
 
   return (
     <svg ref={svgRef} width={width} height={height}>

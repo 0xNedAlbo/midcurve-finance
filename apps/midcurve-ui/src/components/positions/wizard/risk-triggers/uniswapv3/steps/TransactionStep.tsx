@@ -19,7 +19,7 @@ import {
 } from '@midcurve/shared';
 import {
   useRiskTriggersWizard,
-  computeSwapToQuoteDirection,
+  computeSwapDirection,
 } from '../context/RiskTriggersWizardContext';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
@@ -428,7 +428,7 @@ export function TransactionStep() {
               ? state.slSwapConfig
               : state.tpSwapConfig;
           const direction = swapCfg.enabled
-            ? computeSwapToQuoteDirection(tokenInfo.isToken0Quote)
+            ? computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)
             : ('NONE' as const);
           updateOrder.reset();
           updateOrder.updateOrder({
@@ -468,8 +468,8 @@ export function TransactionStep() {
           const swapConfig: SwapConfig | undefined = orderSwapCfg.enabled
             ? {
                 enabled: true,
-                direction: computeSwapToQuoteDirection(
-                  tokenInfo.isToken0Quote
+                direction: computeSwapDirection(
+                  orderSwapCfg.swapToQuote, tokenInfo.isToken0Quote
                 ),
                 slippageBps: orderSwapCfg.slippageBps,
               }

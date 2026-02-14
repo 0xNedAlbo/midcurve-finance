@@ -104,7 +104,7 @@ export {
   INFINITE_RUNUP,
 } from './position/index.js';
 export type {
-  CloseOrderTriggerState,
+  PnLScenario,
   CloseOrderSimulationOverlayParams,
   PostTriggerExposure,
   UniswapV3SimulationParams,

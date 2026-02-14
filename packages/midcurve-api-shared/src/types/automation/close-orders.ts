@@ -119,6 +119,7 @@ export interface SerializedUniswapV3CloseOrderConfig {
   operatorAddress: string;
   validUntil: string; // ISO date string
   slippageBps: number;
+  swapConfig?: SwapConfig; // post-close swap configuration (optional)
 }
 
 /**

@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { Wallet, Banknote, TrendingUp, Shield, PlusCircle, MinusCircle, TrendingDown, Trash2, Plus } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
+import type { PnLScenario } from '@midcurve/shared';
 import {
   formatCompactValue,
   calculatePositionValue,
@@ -14,6 +15,7 @@ import {
   CloseOrderSimulationOverlay,
 } from '@midcurve/shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
+import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
 import {
   useCreatePositionWizard,
   type ConfigurationTab,
@@ -144,6 +146,9 @@ export function PositionConfigStep() {
   // Track whether user has manually adjusted the bounds
   const [userAdjustedBounds, setUserAdjustedBounds] = useState(false);
 
+  // PnL scenario tab state
+  const [scenario, setScenario] = useState<PnLScenario>('combined');
+
   // SL/TP state for close order simulation
   const [stopLossPrice, setStopLossPrice] = useState<bigint | null>(null);
   const [takeProfitPrice, setTakeProfitPrice] = useState<bigint | null>(null);
@@ -218,6 +223,12 @@ export function PositionConfigStep() {
     setUserAdjustedBounds(false);
     setSlTpInitialized(false); // Allow re-initialization after flip
   }, [state.quoteToken?.address]);
+
+  // Auto-reset scenario when SL/TP is cleared
+  useEffect(() => {
+    if (stopLossPrice === null && scenario === 'sl_triggered') setScenario('combined');
+    if (takeProfitPrice === null && scenario === 'tp_triggered') setScenario('combined');
+  }, [stopLossPrice, takeProfitPrice, scenario]);
 
   // Sync local SL/TP prices to context as ticks (for URL persistence)
   // Skip sync until we've initialized from context to avoid overwriting URL values
@@ -932,6 +943,12 @@ export function PositionConfigStep() {
       const pool = state.discoveredPool!;
       return (
         <div className="h-full flex flex-col min-h-0">
+          <PnLScenarioTabs
+            scenario={scenario}
+            onScenarioChange={setScenario}
+            hasStopLoss={stopLossPrice !== null}
+            hasTakeProfit={takeProfitPrice !== null}
+          />
           <InteractivePnLCurve
             poolData={{
               token0Address: pool.token0.config.address as string,
@@ -953,6 +970,7 @@ export function PositionConfigStep() {
               decimals: state.quoteToken!.decimals,
             }}
             position={simulationPosition}
+            scenario={scenario}
             sliderBounds={sliderBounds}
             onSliderBoundsChange={handleSliderBoundsChange}
             onTickLowerChange={handleTickLowerChange}
@@ -961,6 +979,7 @@ export function PositionConfigStep() {
             onStopLossPriceChange={setStopLossPrice}
             onTakeProfitPriceChange={setTakeProfitPrice}
             onSlTpInteraction={handleSlTpInteraction}
+            enableSLTPInteraction={scenario === 'combined'}
             className="flex-1 min-h-0"
           />
           <p className="text-xs text-slate-400 mt-2 text-center shrink-0">
