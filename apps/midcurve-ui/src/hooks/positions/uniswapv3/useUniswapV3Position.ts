@@ -1,8 +1,9 @@
 /**
  * useUniswapV3Position - Fetch single Uniswap V3 position by chainId + nftId
  *
- * Platform-specific query hook for fetching detailed position data.
- * Returns fresh on-chain state merged with database records.
+ * Polls the DB-only GET endpoint every 3 seconds to pick up background
+ * state changes (liquidity events, deposits, withdrawals, closures).
+ * On-chain refresh is handled separately by useUniswapV3AutoRefresh (60s).
  *
  * Supports `initialData` option to show placeholder data (from list query)
  * immediately while fresh data loads in the background.
@@ -10,14 +11,6 @@
  * @param chainId - Chain ID where position exists
  * @param nftId - NFT ID of the position
  * @param options - React Query options, including initialData for placeholder
- *
- * @example
- * ```tsx
- * // With initial data from list query (no loading skeleton)
- * const { data: position } = useUniswapV3Position(1, '12345', {
- *   initialData: listPositionData,
- * });
- * ```
  */
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
@@ -45,8 +38,8 @@ export function useUniswapV3Position(
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}`
       );
     },
-    staleTime: 60_000, // 1 minute (position details change less frequently)
-    refetchInterval: 60_000, // Auto-refresh every 60 seconds
+    staleTime: 2_000, // 2 seconds
+    refetchInterval: 3_000, // Poll DB every 3 seconds for background changes
     ...options,
   });
 }

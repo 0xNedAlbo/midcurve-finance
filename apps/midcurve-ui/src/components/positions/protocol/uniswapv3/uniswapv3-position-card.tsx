@@ -3,8 +3,10 @@
  *
  * This component is responsible for its own data lifecycle:
  * 1. Shows skeleton layout matching final dimensions
- * 2. Fetches detail data via useUniswapV3Position hook (60s auto-refresh)
- * 3. Renders header, metrics, PnL curve, and action buttons
+ * 2. Fetches detail data via useUniswapV3Position hook (3s DB polling)
+ * 3. Triggers on-chain refresh via useUniswapV3AutoRefresh (60s)
+ * 4. Patches live pool price via useUniswapV3LiveMetrics (5s)
+ * 5. Renders header, metrics, PnL curve, and action buttons
  *
  * Props are just chainId + nftId — all other data is fetched internally.
  */
@@ -27,6 +29,7 @@ import { useIsMutating } from "@tanstack/react-query";
 import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
 import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
+import { useUniswapV3AutoRefresh } from "@/hooks/positions/uniswapv3/useUniswapV3AutoRefresh";
 import { useUniswapV3Position } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { useUniswapV3LiveMetrics } from "@/hooks/positions/uniswapv3/useUniswapV3LiveMetrics";
 import { getChainSlugByChainId } from "@/config/chains";
@@ -87,9 +90,13 @@ function UniswapV3PositionCardLoaded({
   // Patch live pool price into position data (5s polling)
   const position = useUniswapV3LiveMetrics(rawPosition);
 
+  // On-chain refresh on mount + every 60s (fire-and-forget, DB polling picks up changes)
+  const { isRefreshing: isAutoRefreshing } = useUniswapV3AutoRefresh(chainId, String(nftId));
+
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
   const refreshMutation = useUniswapV3RefreshPosition();
+  const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
 
   // Extract token roles
   const quoteToken = position.isToken0Quote
@@ -173,13 +180,13 @@ function UniswapV3PositionCardLoaded({
           </Link>
           <button
             onClick={handleRefresh}
-            disabled={refreshMutation.isPending}
+            disabled={isRefreshing}
             className="p-1.5 md:p-2 hover:bg-slate-700/50 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             title="Refresh"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 md:w-4 md:h-4 text-slate-400 ${
-                refreshMutation.isPending ? "animate-spin" : ""
+                isRefreshing ? "animate-spin" : ""
               }`}
             />
           </button>

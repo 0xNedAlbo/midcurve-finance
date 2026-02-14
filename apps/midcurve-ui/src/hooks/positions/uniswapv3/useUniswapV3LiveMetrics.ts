@@ -6,9 +6,9 @@
  * unClaimedFees) client-side. Returns a fully populated position structure
  * so all child components automatically reflect the live price.
  *
- * The 60-second full position refresh (useUniswapV3Position) still runs
- * independently to pick up on-chain changes like fee accumulation and
- * liquidity changes.
+ * Works alongside:
+ * - useUniswapV3AutoRefresh (60s) — on-chain sync for fees, APR, liquidity
+ * - useUniswapV3Position (3s) — DB polling for background state changes
  */
 
 import { useMemo } from "react";
