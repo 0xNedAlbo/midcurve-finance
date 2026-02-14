@@ -26,7 +26,7 @@ import { UniswapV3ReloadHistoryModal } from "./uniswapv3-reload-history-modal";
 import { useIsMutating } from "@tanstack/react-query";
 import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
-import { useRefreshPosition } from "@/hooks/positions/useRefreshPosition";
+import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
 import { useUniswapV3Position } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { useUniswapV3LiveMetrics } from "@/hooks/positions/uniswapv3/useUniswapV3LiveMetrics";
 import { getChainSlugByChainId } from "@/config/chains";
@@ -89,7 +89,7 @@ function UniswapV3PositionCardLoaded({
 
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
-  const refreshMutation = useRefreshPosition();
+  const refreshMutation = useUniswapV3RefreshPosition();
 
   // Extract token roles
   const quoteToken = position.isToken0Quote
@@ -115,7 +115,6 @@ function UniswapV3PositionCardLoaded({
 
   const handleRefresh = () => {
     refreshMutation.mutate({
-      protocol: "uniswapv3",
       chainId,
       nftId: String(nftId),
     });

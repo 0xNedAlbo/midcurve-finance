@@ -60,39 +60,20 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * GET /api/v1/positions/uniswapv3/:chainId/:nftId
  *
  * Fetch a specific Uniswap V3 position owned by the authenticated user
- * and refresh its state from on-chain data.
+ * from the database. Does NOT refresh on-chain data — use
+ * POST /api/v1/positions/uniswapv3/:chainId/:nftId/refresh for that.
  *
  * Features:
  * - Looks up position by user ID + chain ID + NFT ID
- * - Refreshes position state from blockchain (current liquidity, fees, PnL)
  * - Returns complete position data with nested pool and token details
  * - Ensures users can only access their own positions
+ * - Uses a database transaction for consistent reads
  *
  * Path parameters:
  * - chainId: EVM chain ID (e.g., 1 = Ethereum, 42161 = Arbitrum, etc.)
  * - nftId: Uniswap V3 NFT token ID
  *
- * Returns: Full position object with current on-chain state
- *
- * Example response:
- * {
- *   "success": true,
- *   "data": {
- *     "id": "uuid",
- *     "protocol": "uniswapv3",
- *     "currentValue": "1500000000",  // bigint as string
- *     "unrealizedPnl": "50000000",
- *     "pool": {
- *       "id": "uuid",
- *       "token0": { "symbol": "USDC", ... },
- *       "token1": { "symbol": "WETH", ... },
- *       ...
- *     },
- *     "config": { "chainId": 1, "nftId": "123456", ... },
- *     "state": { "liquidity": "...", "tokensOwed0": "...", ... },
- *     ...
- *   }
- * }
+ * Returns: Full position object with last-known state from database
  */
 export async function GET(
   request: NextRequest,
@@ -134,43 +115,33 @@ export async function GET(
         userId: user.id,
       });
 
-      // 3. Execute lookup and refresh within a transaction for consistency
-      // This ensures all state updates succeed or fail atomically
+      // 3. Execute lookup within a transaction for consistent reads
       const result = await prisma.$transaction(async (tx) => {
         // 3a. Fast indexed lookup by positionHash
-        const dbPosition = await getUniswapV3PositionService().findByPositionHash(
+        const position = await getUniswapV3PositionService().findByPositionHash(
           user.id,
           positionHash,
           tx
         );
 
-        // Verify position exists
-        if (!dbPosition) {
+        if (!position) {
           return null;
         }
 
-        apiLog.businessOperation(apiLogger, requestId, 'fetch', 'position', dbPosition.id, {
+        apiLog.businessOperation(apiLogger, requestId, 'fetch', 'position', position.id, {
           chainId,
           nftId,
           positionHash,
         });
 
-        // 3b. Refresh position from on-chain data
-        // This fetches current liquidity, fees, PnL, and updates the database
-        const refreshedPosition = await getUniswapV3PositionService().refresh(
-          dbPosition.id,
-          'latest',
-          tx
-        );
-
-        // 3c. Fetch active close orders for this position
+        // 3b. Fetch active close orders for this position
         const activeCloseOrders = await getCloseOrderService().findByPositionId(
-          dbPosition.id,
+          position.id,
           { status: ['active', 'triggering'] },
           tx
         );
 
-        return { position: refreshedPosition, activeCloseOrders };
+        return { position, activeCloseOrders };
       });
 
       // Handle position not found (outside transaction)
@@ -190,12 +161,10 @@ export async function GET(
 
       const { position, activeCloseOrders } = result;
 
-      apiLog.businessOperation(apiLogger, requestId, 'refreshed', 'position', position.id, {
+      apiLog.businessOperation(apiLogger, requestId, 'fetched', 'position', position.id, {
         chainId,
         nftId,
         pool: `${position.pool.token0.symbol}/${position.pool.token1.symbol}`,
-        currentValue: position.currentValue.toString(),
-        unrealizedPnl: position.unrealizedPnl.toString(),
       });
 
       // 4. Serialize bigints to strings for JSON
@@ -219,42 +188,7 @@ export async function GET(
 
       // Map service errors to API error codes
       if (error instanceof Error) {
-        const errorMessage = error.message.toLowerCase();
-
-        // Chain not supported
-        if (
-          error.message.includes('not configured') ||
-          error.message.includes('not supported')
-        ) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.CHAIN_NOT_SUPPORTED,
-            'Chain not supported',
-            error.message
-          );
-          apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.CHAIN_NOT_SUPPORTED],
-          });
-        }
-
-        // Position/Pool unavailable on chain (chain reset, contract deleted, burned NFT)
-        // This must be checked BEFORE "not found" to avoid returning 404 for chain state issues
-        if (
-          errorMessage.includes('has been burned') ||
-          errorMessage.includes('token addresses are zero') ||
-          errorMessage.includes('zero sqrtpricex96') ||
-          errorMessage.includes('all state fields are zero')
-        ) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.SERVICE_UNAVAILABLE,
-            'Position data unavailable on chain',
-            error.message
-          );
-          apiLog.requestEnd(apiLogger, requestId, 503, Date.now() - startTime);
-          return NextResponse.json(errorResponse, { status: 503 });
-        }
-
-        // Position not found in database (different from unavailable on chain)
+        // Position not found
         if (
           error.message.includes('not found') ||
           error.message.includes('does not exist')
@@ -267,23 +201,6 @@ export async function GET(
           apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
           return NextResponse.json(errorResponse, {
             status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND],
-          });
-        }
-
-        // On-chain read failures (RPC errors, contract errors)
-        if (
-          error.message.includes('Failed to read') ||
-          error.message.includes('contract') ||
-          error.message.includes('RPC')
-        ) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.BAD_REQUEST,
-            'Failed to refresh position data from blockchain',
-            error.message
-          );
-          apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_REQUEST],
           });
         }
       }
