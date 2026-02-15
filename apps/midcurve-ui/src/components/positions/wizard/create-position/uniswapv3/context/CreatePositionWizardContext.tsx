@@ -31,7 +31,7 @@ export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
 
 export interface TransactionRecord {
   hash: string;
-  type: 'approval' | 'mint' | 'autowallet' | 'register-sl' | 'register-tp';
+  type: 'approval' | 'mint' | 'autowallet' | 'register-sl' | 'register-tp' | 'register-orders';
   label: string;
   status: 'pending' | 'confirming' | 'confirmed' | 'failed';
 }

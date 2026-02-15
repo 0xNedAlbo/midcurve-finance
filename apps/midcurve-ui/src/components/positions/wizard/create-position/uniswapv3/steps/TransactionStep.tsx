@@ -26,10 +26,10 @@ import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfung
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
 import { useCreatePositionAPI, extractLiquidityFromReceipt } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
-import { useRegisterCloseOrder } from '@/hooks/automation/useRegisterCloseOrder';
+import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
-import { TriggerMode, SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
+import { SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { getChainSlugByChainId } from '@/config/chains';
@@ -58,8 +58,7 @@ const TX_IDS = {
   REFRESH_POOL: 'refresh-pool',
   MINT_POSITION: 'mint-position',
   APPROVE_NFT: 'approve-nft',
-  REGISTER_SL: 'register-sl',
-  REGISTER_TP: 'register-tp',
+  REGISTER_ORDERS: 'register-orders',
 } as const;
 
 export function TransactionStep() {
@@ -273,9 +272,12 @@ export function TransactionStep() {
   // NFT operator approval hook (for automation contract)
   const nftApproval = useOperatorApproval(chainId, positionCloserAddress ?? undefined);
 
-  // Close order registration hooks
-  const registerSL = useRegisterCloseOrder();
-  const registerTP = useRegisterCloseOrder();
+  // Multicall hook for registering SL/TP orders in a single transaction
+  const multicallOrders = useMulticallPositionCloser(
+    chainId ?? 0,
+    mintedTokenId?.toString() ?? '',
+    { abi: sharedContract?.abi, contractAddress: positionCloserAddress }
+  );
 
   // Determine per-order swap directions from user-configured swap configs
   const isToken0Quote = useMemo(() => {
@@ -499,34 +501,25 @@ export function TransactionStep() {
       });
     }
 
-    // Register Stop Loss
-    if (state.stopLossEnabled) {
-      const slErrorFiltered = isUserRejection(registerSL.error) ? null : registerSL.error;
+    // Register SL/TP orders (batched into single multicall tx)
+    if (state.stopLossEnabled || state.takeProfitEnabled) {
+      const mcError = isUserRejection(multicallOrders.error) ? null : multicallOrders.error;
+      const orderLabels: string[] = [];
+      if (state.stopLossEnabled) orderLabels.push('Stop Loss');
+      if (state.takeProfitEnabled) orderLabels.push('Take Profit');
       txs.push({
-        id: TX_IDS.REGISTER_SL,
-        label: 'Register Stop Loss',
-        status: getRegisterStatus(registerSL, currentPhase),
-        txHash: registerSL.txHash,
-        error: slErrorFiltered?.message,
-      });
-    }
-
-    // Register Take Profit
-    if (state.takeProfitEnabled) {
-      const tpErrorFiltered = isUserRejection(registerTP.error) ? null : registerTP.error;
-      txs.push({
-        id: TX_IDS.REGISTER_TP,
-        label: 'Register Take Profit',
-        status: getRegisterStatus(registerTP, currentPhase),
-        txHash: registerTP.txHash,
-        error: tpErrorFiltered?.message,
+        id: TX_IDS.REGISTER_ORDERS,
+        label: `Register ${orderLabels.join(' & ')}`,
+        status: getMulticallOrdersStatus(multicallOrders, currentPhase),
+        txHash: multicallOrders.txHash,
+        error: mcError?.message,
       });
     }
 
     return txs;
   }, [
     priceAdjustment.status, priceAdjustment.error,
-    mint, nftApproval, registerSL, registerTP,
+    mint, nftApproval, multicallOrders,
     currentPhase, hasAutomation, state.stopLossEnabled, state.takeProfitEnabled,
     isUserRejection,
   ]);
@@ -564,13 +557,12 @@ export function TransactionStep() {
     return 'pending';
   }
 
-  function getRegisterStatus(reg: typeof registerSL, phase: typeof currentPhase): TxStatus {
-    // Filter user rejection errors
-    const regErrorFiltered = isUserRejection(reg.error) ? null : reg.error;
-    if (regErrorFiltered) return 'error';
-    if (reg.isSuccess) return 'success';
-    if (reg.isWaitingForConfirmation) return 'confirming';
-    if (reg.isRegistering) return 'waiting';
+  function getMulticallOrdersStatus(mc: typeof multicallOrders, phase: typeof currentPhase): TxStatus {
+    const mcError = isUserRejection(mc.error) ? null : mc.error;
+    if (mcError) return 'error';
+    if (mc.isSuccess) return 'success';
+    if (mc.isWaitingForConfirmation) return 'confirming';
+    if (mc.isSubmitting) return 'waiting';
     if (phase === 'automation') return 'pending';
     return 'pending';
   }
@@ -756,97 +748,93 @@ export function TransactionStep() {
     }
   }, [currentPhase, nftApproval.isApprovalSuccess, nftApproval.isApproved, nftApproval.error]);
 
-  // Register SL/TP orders phase
+  // Register SL/TP orders phase (single multicall transaction)
   useEffect(() => {
     if (currentPhase !== 'automation') return;
-    if (!mintedTokenId || !walletAddress || !autowalletAddress || !chainId || !positionCloserAddress) return;
+    if (!mintedTokenId || !walletAddress || !autowalletAddress || !chainId) return;
+    if (multicallOrders.isSubmitting || multicallOrders.isWaitingForConfirmation || multicallOrders.isSuccess || multicallOrders.error) return;
+    if (attemptedTxs.has(TX_IDS.REGISTER_ORDERS)) return;
+    if (!multicallOrders.isReady) return;
 
     const poolAddress = state.discoveredPool?.typedConfig.address as Address | undefined;
     if (!poolAddress) return;
 
-    // Register Stop Loss
-    if (state.stopLossEnabled && state.stopLossTick !== null && !registerSL.isRegistering && !registerSL.isWaitingForConfirmation && !registerSL.isSuccess && !registerSL.error && !attemptedTxs.has(TX_IDS.REGISTER_SL)) {
-      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_SL));
-      registerSL.register({
-        nftId: mintedTokenId,
-        poolAddress,
-        triggerMode: TriggerMode.LOWER,
-        triggerTick: state.stopLossTick,
-        payoutAddress: walletAddress,
-        operatorAddress: autowalletAddress,
-        swapDirection: slSwapDirection,
-        slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
-        swapSlippageBps: state.slSwapConfig.slippageBps,
-        chainId,
-        contractAddress: positionCloserAddress,
+    const calls: PositionCloserCall[] = [];
+
+    // Build SL registerOrder call
+    if (state.stopLossEnabled && state.stopLossTick !== null) {
+      calls.push({
+        functionName: 'registerOrder',
+        args: [{
+          nftId: mintedTokenId,
+          pool: poolAddress,
+          triggerMode: 0, // LOWER (Stop Loss)
+          triggerTick: state.stopLossTick,
+          payout: walletAddress,
+          operator: autowalletAddress,
+          validUntil: 0n,
+          slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
+          swapDirection: slSwapDirection,
+          swapSlippageBps: state.slSwapConfig.enabled ? state.slSwapConfig.slippageBps : DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
+        }],
       });
     }
 
-    // Register Take Profit
-    if (state.takeProfitEnabled && state.takeProfitTick !== null && !registerTP.isRegistering && !registerTP.isWaitingForConfirmation && !registerTP.isSuccess && !registerTP.error && !attemptedTxs.has(TX_IDS.REGISTER_TP)) {
-      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_TP));
-      registerTP.register({
-        nftId: mintedTokenId,
-        poolAddress,
-        triggerMode: TriggerMode.UPPER,
-        triggerTick: state.takeProfitTick,
-        payoutAddress: walletAddress,
-        operatorAddress: autowalletAddress,
-        swapDirection: tpSwapDirection,
-        slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
-        swapSlippageBps: state.tpSwapConfig.slippageBps,
-        chainId,
-        contractAddress: positionCloserAddress,
+    // Build TP registerOrder call
+    if (state.takeProfitEnabled && state.takeProfitTick !== null) {
+      calls.push({
+        functionName: 'registerOrder',
+        args: [{
+          nftId: mintedTokenId,
+          pool: poolAddress,
+          triggerMode: 1, // UPPER (Take Profit)
+          triggerTick: state.takeProfitTick,
+          payout: walletAddress,
+          operator: autowalletAddress,
+          validUntil: 0n,
+          slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
+          swapDirection: tpSwapDirection,
+          swapSlippageBps: state.tpSwapConfig.enabled ? state.tpSwapConfig.slippageBps : DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
+        }],
       });
+    }
+
+    if (calls.length > 0) {
+      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_ORDERS));
+      multicallOrders.execute(calls);
     }
   }, [
-    currentPhase, mintedTokenId, walletAddress, autowalletAddress, chainId, positionCloserAddress,
+    currentPhase, mintedTokenId, walletAddress, autowalletAddress, chainId,
+    multicallOrders, attemptedTxs,
     state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick,
-    state.slSwapConfig, state.tpSwapConfig, slSwapDirection, tpSwapDirection, registerSL, registerTP, attemptedTxs,
+    state.slSwapConfig, state.tpSwapConfig, slSwapDirection, tpSwapDirection,
   ]);
 
-  // Track SL/TP registration completion
+  // Track SL/TP multicall completion
   useEffect(() => {
     if (currentPhase !== 'automation') return;
 
     // Check for errors (filter user rejections - silently ignored)
-    const slErrorFiltered = isUserRejection(registerSL.error) ? null : registerSL.error;
-    const tpErrorFiltered = isUserRejection(registerTP.error) ? null : registerTP.error;
-    if (slErrorFiltered) {
-      setActiveError({ txId: TX_IDS.REGISTER_SL, message: slErrorFiltered.message });
-      return;
-    }
-    if (tpErrorFiltered) {
-      setActiveError({ txId: TX_IDS.REGISTER_TP, message: tpErrorFiltered.message });
+    const mcError = isUserRejection(multicallOrders.error) ? null : multicallOrders.error;
+    if (mcError) {
+      setActiveError({ txId: TX_IDS.REGISTER_ORDERS, message: mcError.message });
       return;
     }
 
-    // Check if all registrations are complete
-    const slDone = !state.stopLossEnabled || registerSL.isSuccess;
-    const tpDone = !state.takeProfitEnabled || registerTP.isSuccess;
-
-    if (slDone && tpDone) {
-      // Record transactions
-      if (registerSL.isSuccess && registerSL.txHash) {
+    if (multicallOrders.isSuccess) {
+      // Record transaction
+      if (multicallOrders.txHash) {
         addTransaction({
-          hash: registerSL.txHash,
-          type: 'register-sl',
-          label: 'Register Stop Loss',
-          status: 'confirmed',
-        });
-      }
-      if (registerTP.isSuccess && registerTP.txHash) {
-        addTransaction({
-          hash: registerTP.txHash,
-          type: 'register-tp',
-          label: 'Register Take Profit',
+          hash: multicallOrders.txHash,
+          type: 'register-orders',
+          label: 'Register SL/TP Orders',
           status: 'confirmed',
         });
       }
 
       setCurrentPhase('done');
     }
-  }, [currentPhase, state.stopLossEnabled, state.takeProfitEnabled, registerSL, registerTP, addTransaction]);
+  }, [currentPhase, multicallOrders.isSuccess, multicallOrders.error, multicallOrders.txHash, addTransaction]);
 
   // Update step validation
   useEffect(() => {
@@ -1023,8 +1011,8 @@ export function TransactionStep() {
         // NFT approval is ready when we're in nft-approval phase (mint is done)
         return currentPhase === 'nft-approval';
       }
-      if (tx.id === TX_IDS.REGISTER_SL || tx.id === TX_IDS.REGISTER_TP) {
-        // SL/TP registration is ready when we're in automation phase (NFT approval is done)
+      if (tx.id === TX_IDS.REGISTER_ORDERS) {
+        // Order registration is ready when we're in automation phase (NFT approval is done)
         return currentPhase === 'automation';
       }
       return false;
@@ -1046,10 +1034,8 @@ export function TransactionStep() {
       } else if (tx.id === TX_IDS.APPROVE_NFT) {
         nftApproval.reset();
         nftApproval.approve();
-      } else if (tx.id === TX_IDS.REGISTER_SL) {
-        registerSL.reset();
-      } else if (tx.id === TX_IDS.REGISTER_TP) {
-        registerTP.reset();
+      } else if (tx.id === TX_IDS.REGISTER_ORDERS) {
+        multicallOrders.reset();
       }
     };
 

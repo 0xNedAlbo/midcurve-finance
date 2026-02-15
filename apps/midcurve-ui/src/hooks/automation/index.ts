@@ -57,6 +57,14 @@ export {
   type ListAutomationLogsResponseData,
 } from './useAutomationLogs';
 
+// Multicall (batch multiple PositionCloser calls in one tx)
+export {
+  useMulticallPositionCloser,
+  type PositionCloserCall,
+  type UseMulticallPositionCloserOptions,
+  type UseMulticallPositionCloserResult,
+} from './useMulticallPositionCloser';
+
 // Shared Contracts
 export { useSharedContract } from './useSharedContract';
 

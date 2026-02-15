@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount, useChainId } from 'wagmi';
 import {
@@ -8,10 +8,12 @@ import {
   AlertCircle,
   ExternalLink,
   Copy,
+  ChevronDown,
+  ChevronRight,
   PlusCircle,
   MinusCircle,
 } from 'lucide-react';
-import type { Address, Hash } from 'viem';
+import type { Address } from 'viem';
 import {
   formatCompactValue,
   priceToTick,
@@ -24,15 +26,7 @@ import {
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
-import { useCreateCloseOrder } from '@/hooks/automation/useCreateCloseOrder';
-import type {
-  RegisterCloseOrderParams,
-  OrderType,
-  SwapConfig,
-} from '@/hooks/automation/useCreateCloseOrder';
-import { useUpdateCloseOrder } from '@/hooks/automation/useUpdateCloseOrder';
-import type { UpdateCloseOrderParams } from '@/hooks/automation/useUpdateCloseOrder';
-import { useCancelCloseOrder } from '@/hooks/automation/useCancelCloseOrder';
+import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { getChainSlugByChainId } from '@/config/chains';
@@ -43,16 +37,10 @@ const ZOOM_MIN = 0.75;
 const ZOOM_MAX = 1.25;
 const ZOOM_STEP = 0.125;
 
-// ----- Transaction Operation Types -----
-
-interface TxOperation {
+// ----- Sub-operation descriptor (for display inside multicall row) -----
+interface SubOperation {
   id: string;
   label: string;
-  type: 'approval' | 'cancel' | 'update_tick' | 'update_swap' | 'create';
-  orderType?: OrderType;
-  status: 'pending' | 'signing' | 'confirming' | 'success' | 'error';
-  txHash?: Hash;
-  error?: string;
 }
 
 export function TransactionStep() {
@@ -90,12 +78,6 @@ export function TransactionStep() {
     return (position.config as { nftId: number }).nftId.toString();
   }, [position]);
 
-  const positionOwner = useMemo(() => {
-    if (!position) return '' as Address;
-    return (position.state as { ownerAddress: string })
-      .ownerAddress as Address;
-  }, [position]);
-
   const poolAddress = useMemo(() => {
     if (!position) return '' as Address;
     return (position.config as { poolAddress: string })
@@ -129,9 +111,7 @@ export function TransactionStep() {
   const { data: autowalletData } = useAutowallet();
 
   const operatorApproval = useOperatorApproval(chainId, contractAddress);
-  const createOrder = useCreateCloseOrder(chainId, nftId);
-  const updateOrder = useUpdateCloseOrder(chainId, nftId);
-  const cancelOrder = useCancelCloseOrder(chainId, nftId);
+  const multicall = useMulticallPositionCloser(chainId, nftId);
 
   // ----- Compute trigger ticks -----
   const currentSlTick = useMemo(() => {
@@ -178,76 +158,134 @@ export function TransactionStep() {
     }
   }, [state.takeProfit, state.discoveredPool, tokenInfo]);
 
-  // ----- Build operation queue -----
-  const operations = useMemo((): TxOperation[] => {
-    const ops: TxOperation[] = [];
+  // ----- Determine if NFPM approval is needed -----
+  const needsApproval = useMemo(() => {
+    const needsCreate = slOperation === 'CREATE' || tpOperation === 'CREATE';
+    return needsCreate && !operatorApproval.isApproved;
+  }, [slOperation, tpOperation, operatorApproval.isApproved]);
+
+  // ----- Build sub-operation labels (for display) -----
+  const subOperations = useMemo((): SubOperation[] => {
+    const ops: SubOperation[] = [];
     const quoteDecimals = tokenInfo?.quoteDecimals ?? 18;
     const quoteSymbol = tokenInfo?.quoteSymbol ?? '';
 
-    // Determine if we need operator approval
-    const needsCreate = slOperation === 'CREATE' || tpOperation === 'CREATE';
-    if (needsCreate && !operatorApproval.isApproved) {
-      ops.push({
-        id: 'approval',
-        label: 'Approve automation contract',
-        type: 'approval',
-        status: 'pending',
-      });
-    }
-
     // Cancels first
     if (slOperation === 'CANCEL') {
-      ops.push({
-        id: 'cancel_sl',
-        label: 'Cancel Stop Loss',
-        type: 'cancel',
-        orderType: 'STOP_LOSS',
-        status: 'pending',
-      });
+      ops.push({ id: 'cancel_sl', label: 'Cancel Stop Loss' });
     }
     if (tpOperation === 'CANCEL') {
-      ops.push({
-        id: 'cancel_tp',
-        label: 'Cancel Take Profit',
-        type: 'cancel',
-        orderType: 'TAKE_PROFIT',
-        status: 'pending',
-      });
+      ops.push({ id: 'cancel_tp', label: 'Cancel Take Profit' });
     }
 
-    // Updates next
+    // Updates
     if (slOperation === 'UPDATE') {
-      ops.push({
-        id: 'update_sl_tick',
-        label: 'Update Stop Loss trigger price',
-        type: 'update_tick',
-        orderType: 'STOP_LOSS',
-        status: 'pending',
-      });
+      ops.push({ id: 'update_sl_tick', label: 'Update Stop Loss trigger price' });
     }
     if (tpOperation === 'UPDATE') {
-      ops.push({
-        id: 'update_tp_tick',
-        label: 'Update Take Profit trigger price',
-        type: 'update_tick',
-        orderType: 'TAKE_PROFIT',
-        status: 'pending',
-      });
+      ops.push({ id: 'update_tp_tick', label: 'Update Take Profit trigger price' });
     }
 
-    // Swap updates (per-order)
+    // Swap updates
     if (
       slSwapChanged &&
       state.stopLoss.enabled &&
       slOperation !== 'CREATE' &&
       slOperation !== 'CANCEL'
     ) {
-      ops.push({
-        id: 'update_sl_swap',
-        label: 'Update Stop Loss swap config',
-        type: 'update_swap',
-        orderType: 'STOP_LOSS',
-        status: 'pending',
+      ops.push({ id: 'update_sl_swap', label: 'Update Stop Loss swap config' });
+    }
+    if (
+      tpSwapChanged &&
+      state.takeProfit.enabled &&
+      tpOperation !== 'CREATE' &&
+      tpOperation !== 'CANCEL'
+    ) {
+      ops.push({ id: 'update_tp_swap', label: 'Update Take Profit swap config' });
+    }
+
+    // Creates
+    if (slOperation === 'CREATE') {
+      const priceLabel = state.stopLoss.priceBigint
+        ? ` at ${formatCompactValue(state.stopLoss.priceBigint, quoteDecimals)} ${quoteSymbol}`
+        : '';
+      ops.push({ id: 'create_sl', label: `Register Stop Loss${priceLabel}` });
+    }
+    if (tpOperation === 'CREATE') {
+      const priceLabel = state.takeProfit.priceBigint
+        ? ` at ${formatCompactValue(state.takeProfit.priceBigint, quoteDecimals)} ${quoteSymbol}`
+        : '';
+      ops.push({ id: 'create_tp', label: `Register Take Profit${priceLabel}` });
+    }
+
+    return ops;
+  }, [
+    slOperation, tpOperation, slSwapChanged, tpSwapChanged,
+    state.stopLoss.enabled, state.stopLoss.priceBigint,
+    state.takeProfit.enabled, state.takeProfit.priceBigint,
+    tokenInfo,
+  ]);
+
+  // ----- Build multicall calldata from sub-operations -----
+  const buildMulticallCalls = useCallback((): PositionCloserCall[] | null => {
+    if (!tokenInfo) return null;
+
+    const nftIdBigInt = BigInt(nftId);
+    const autowalletAddress = autowalletData?.address as Address | undefined;
+    const calls: PositionCloserCall[] = [];
+
+    // Map OrderType to TriggerMode contract value
+    const triggerModeMap = { STOP_LOSS: 0, TAKE_PROFIT: 1 } as const;
+    const swapDirectionMap = { NONE: 0, TOKEN0_TO_1: 1, TOKEN1_TO_0: 2 } as const;
+
+    // Cancels
+    if (slOperation === 'CANCEL') {
+      calls.push({
+        functionName: 'cancelOrder',
+        args: [nftIdBigInt, triggerModeMap.STOP_LOSS],
+      });
+    }
+    if (tpOperation === 'CANCEL') {
+      calls.push({
+        functionName: 'cancelOrder',
+        args: [nftIdBigInt, triggerModeMap.TAKE_PROFIT],
+      });
+    }
+
+    // Tick updates
+    if (slOperation === 'UPDATE' && currentSlTick !== null) {
+      calls.push({
+        functionName: 'setTriggerTick',
+        args: [nftIdBigInt, triggerModeMap.STOP_LOSS, currentSlTick],
+      });
+    }
+    if (tpOperation === 'UPDATE' && currentTpTick !== null) {
+      calls.push({
+        functionName: 'setTriggerTick',
+        args: [nftIdBigInt, triggerModeMap.TAKE_PROFIT, currentTpTick],
+      });
+    }
+
+    // Swap intent updates
+    if (
+      slSwapChanged &&
+      state.stopLoss.enabled &&
+      slOperation !== 'CREATE' &&
+      slOperation !== 'CANCEL'
+    ) {
+      const swapCfg = state.slSwapConfig;
+      const direction = swapCfg.enabled
+        ? computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)
+        : ('NONE' as const);
+      const dirValue = swapDirectionMap[direction];
+      calls.push({
+        functionName: 'setSwapIntent',
+        args: [
+          nftIdBigInt,
+          triggerModeMap.STOP_LOSS,
+          dirValue,
+          swapCfg.enabled ? swapCfg.slippageBps : 0,
+        ],
       });
     }
     if (
@@ -256,384 +294,154 @@ export function TransactionStep() {
       tpOperation !== 'CREATE' &&
       tpOperation !== 'CANCEL'
     ) {
-      ops.push({
-        id: 'update_tp_swap',
-        label: 'Update Take Profit swap config',
-        type: 'update_swap',
-        orderType: 'TAKE_PROFIT',
-        status: 'pending',
+      const swapCfg = state.tpSwapConfig;
+      const direction = swapCfg.enabled
+        ? computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)
+        : ('NONE' as const);
+      const dirValue = swapDirectionMap[direction];
+      calls.push({
+        functionName: 'setSwapIntent',
+        args: [
+          nftIdBigInt,
+          triggerModeMap.TAKE_PROFIT,
+          dirValue,
+          swapCfg.enabled ? swapCfg.slippageBps : 0,
+        ],
       });
     }
 
-    // Creates last
-    if (slOperation === 'CREATE') {
-      const priceLabel = state.stopLoss.priceBigint
-        ? ` at ${formatCompactValue(state.stopLoss.priceBigint, quoteDecimals)} ${quoteSymbol}`
-        : '';
-      ops.push({
-        id: 'create_sl',
-        label: `Register Stop Loss${priceLabel}`,
-        type: 'create',
-        orderType: 'STOP_LOSS',
-        status: 'pending',
+    // Creates
+    if (slOperation === 'CREATE' && currentSlTick !== null && autowalletAddress) {
+      const swapCfg = state.slSwapConfig;
+      const swapDirection = swapCfg.enabled
+        ? swapDirectionMap[computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)]
+        : 0;
+      const validUntil = BigInt(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60);
+
+      calls.push({
+        functionName: 'registerOrder',
+        args: [
+          {
+            nftId: nftIdBigInt,
+            pool: poolAddress,
+            triggerMode: triggerModeMap.STOP_LOSS,
+            triggerTick: currentSlTick,
+            payout: connectedAddress as Address,
+            operator: autowalletAddress,
+            validUntil,
+            slippageBps: 100,
+            swapDirection,
+            swapSlippageBps: swapCfg.enabled ? swapCfg.slippageBps : 0,
+          },
+        ],
       });
     }
-    if (tpOperation === 'CREATE') {
-      const priceLabel = state.takeProfit.priceBigint
-        ? ` at ${formatCompactValue(state.takeProfit.priceBigint, quoteDecimals)} ${quoteSymbol}`
-        : '';
-      ops.push({
-        id: 'create_tp',
-        label: `Register Take Profit${priceLabel}`,
-        type: 'create',
-        orderType: 'TAKE_PROFIT',
-        status: 'pending',
+    if (tpOperation === 'CREATE' && currentTpTick !== null && autowalletAddress) {
+      const swapCfg = state.tpSwapConfig;
+      const swapDirection = swapCfg.enabled
+        ? swapDirectionMap[computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)]
+        : 0;
+      const validUntil = BigInt(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60);
+
+      calls.push({
+        functionName: 'registerOrder',
+        args: [
+          {
+            nftId: nftIdBigInt,
+            pool: poolAddress,
+            triggerMode: triggerModeMap.TAKE_PROFIT,
+            triggerTick: currentTpTick,
+            payout: connectedAddress as Address,
+            operator: autowalletAddress,
+            validUntil,
+            slippageBps: 100,
+            swapDirection,
+            swapSlippageBps: swapCfg.enabled ? swapCfg.slippageBps : 0,
+          },
+        ],
       });
     }
 
-    return ops;
+    return calls.length > 0 ? calls : null;
   }, [
-    slOperation,
-    tpOperation,
-    slSwapChanged,
-    tpSwapChanged,
-    operatorApproval.isApproved,
-    state.stopLoss.enabled,
-    state.stopLoss.priceBigint,
-    state.takeProfit.enabled,
-    state.takeProfit.priceBigint,
-    tokenInfo,
+    nftId, tokenInfo, autowalletData, slOperation, tpOperation,
+    slSwapChanged, tpSwapChanged, currentSlTick, currentTpTick,
+    state.stopLoss, state.takeProfit, state.slSwapConfig, state.tpSwapConfig,
+    poolAddress, connectedAddress,
   ]);
 
   // ----- Execution state -----
-  const [txOps, setTxOps] = useState<TxOperation[]>([]);
-  const txOpsRef = useRef<TxOperation[]>(txOps);
-  txOpsRef.current = txOps;
-  const [currentOpIndex, setCurrentOpIndex] = useState(-1);
-  const [isDone, setIsDone] = useState(false);
+  // Phase: idle → approval → multicall → done
+  const [phase, setPhase] = useState<'idle' | 'approval' | 'multicall' | 'done'>('idle');
+  const [approvalDone, setApprovalDone] = useState(false);
+  const [subOpsExpanded, setSubOpsExpanded] = useState(true);
 
-  // Initialize txOps from operations once approval check completes
+  // Helper to check if error is user rejection
+  const isUserRejection = (error: Error | null | undefined): boolean => {
+    if (!error) return false;
+    const message = error.message?.toLowerCase() || '';
+    return message.includes('user rejected') || message.includes('user denied');
+  };
+
+  // Watch approval completion
   useEffect(() => {
-    if (operations.length > 0 && txOps.length === 0 && !operatorApproval.isChecking) {
-      setTxOps([...operations]);
+    if (phase !== 'approval') return;
+
+    if (operatorApproval.isApprovalSuccess || operatorApproval.isApproved) {
+      setApprovalDone(true);
+      setPhase('multicall');
     }
-  }, [operations, txOps.length, operatorApproval.isChecking]);
+  }, [phase, operatorApproval.isApprovalSuccess, operatorApproval.isApproved]);
 
-  // Computed: index of the first non-success operation (for Execute button placement)
-  const nextPendingIndex = useMemo(() => {
-    const idx = txOps.findIndex((op) => op.status !== 'success');
-    return idx === -1 ? txOps.length : idx;
-  }, [txOps]);
-
-  // ----- Helpers to update tx op status -----
-  const updateOp = useCallback(
-    (id: string, updates: Partial<TxOperation>) => {
-      setTxOps((prev) =>
-        prev.map((op) => (op.id === id ? { ...op, ...updates } : op))
-      );
-    },
-    []
-  );
-
-  // ----- Execute a specific operation -----
-  const handleExecuteOp = useCallback(
-    (index: number) => {
-      if (currentOpIndex !== -1) return; // Already executing something
-
-      const op = txOps[index];
-      if (!op || !tokenInfo || !contractAddress) return;
-
-      const autowalletAddress = autowalletData?.address as
-        | Address
-        | undefined;
-
-      // If retrying, reset the appropriate hook
-      if (op.status === 'error') {
-        switch (op.type) {
-          case 'approval':
-            operatorApproval.reset();
-            break;
-          case 'cancel':
-            cancelOrder.reset();
-            break;
-          case 'update_tick':
-          case 'update_swap':
-            updateOrder.reset();
-            break;
-          case 'create':
-            createOrder.reset();
-            break;
-        }
-      }
-
-      setCurrentOpIndex(index);
-      updateOp(op.id, {
-        status: 'signing',
-        error: undefined,
-        txHash: undefined,
-      });
-
-      // Execute the operation
-      switch (op.type) {
-        case 'approval': {
-          operatorApproval.approve();
-          break;
-        }
-        case 'cancel': {
-          cancelOrder.reset();
-          cancelOrder.cancelOrder({
-            orderType: op.orderType!,
-          });
-          break;
-        }
-        case 'update_tick': {
-          const tick =
-            op.orderType === 'STOP_LOSS' ? currentSlTick : currentTpTick;
-          const initialTrigger =
-            op.orderType === 'STOP_LOSS'
-              ? state.initialStopLoss
-              : state.initialTakeProfit;
-          if (tick === null || !initialTrigger.closeOrderHash) {
-            updateOp(op.id, {
-              status: 'error',
-              error: 'Missing tick or hash',
-            });
-            setCurrentOpIndex(-1);
-            return;
-          }
-          updateOrder.reset();
-          updateOrder.updateOrder({
-            updateType: 'triggerTick',
-            orderType: op.orderType!,
-            closeOrderHash: initialTrigger.closeOrderHash,
-            triggerTick: tick,
-          } as UpdateCloseOrderParams);
-          break;
-        }
-        case 'update_swap': {
-          const initialTrigger =
-            op.orderType === 'STOP_LOSS'
-              ? state.initialStopLoss
-              : state.initialTakeProfit;
-          if (!initialTrigger.closeOrderHash) {
-            updateOp(op.id, {
-              status: 'error',
-              error: 'Missing close order hash',
-            });
-            setCurrentOpIndex(-1);
-            return;
-          }
-          const swapCfg =
-            op.orderType === 'STOP_LOSS'
-              ? state.slSwapConfig
-              : state.tpSwapConfig;
-          const direction = swapCfg.enabled
-            ? computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)
-            : ('NONE' as const);
-          updateOrder.reset();
-          updateOrder.updateOrder({
-            updateType: 'swapIntent',
-            orderType: op.orderType!,
-            closeOrderHash: initialTrigger.closeOrderHash,
-            direction,
-            swapSlippageBps: swapCfg.enabled
-              ? swapCfg.slippageBps
-              : 0,
-          } as UpdateCloseOrderParams);
-          break;
-        }
-        case 'create': {
-          const tick =
-            op.orderType === 'STOP_LOSS' ? currentSlTick : currentTpTick;
-          if (tick === null) {
-            updateOp(op.id, {
-              status: 'error',
-              error: 'Missing trigger tick',
-            });
-            setCurrentOpIndex(-1);
-            return;
-          }
-          if (!autowalletAddress) {
-            updateOp(op.id, {
-              status: 'error',
-              error: 'Autowallet not available',
-            });
-            setCurrentOpIndex(-1);
-            return;
-          }
-          const orderSwapCfg =
-            op.orderType === 'STOP_LOSS'
-              ? state.slSwapConfig
-              : state.tpSwapConfig;
-          const swapConfig: SwapConfig | undefined = orderSwapCfg.enabled
-            ? {
-                enabled: true,
-                direction: computeSwapDirection(
-                  orderSwapCfg.swapToQuote, tokenInfo.isToken0Quote
-                ),
-                slippageBps: orderSwapCfg.slippageBps,
-              }
-            : undefined;
-
-          // 30 days from now
-          const validUntil = BigInt(
-            Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60
-          );
-
-          createOrder.reset();
-          createOrder.registerOrder({
-            poolAddress: poolAddress,
-            orderType: op.orderType!,
-            triggerTick: tick,
-            payoutAddress: connectedAddress as Address,
-            operatorAddress: autowalletAddress,
-            validUntil,
-            slippageBps: 100,
-            positionId: position?.id ?? '',
-            positionOwner,
-            swapConfig,
-          } as RegisterCloseOrderParams);
-          break;
-        }
-      }
-    },
-    [
-      currentOpIndex,
-      txOps,
-      tokenInfo,
-      contractAddress,
-      autowalletData,
-      state,
-      operatorApproval,
-      cancelOrder,
-      updateOrder,
-      createOrder,
-      currentSlTick,
-      currentTpTick,
-      poolAddress,
-      connectedAddress,
-      positionOwner,
-      position,
-      updateOp,
-    ]
-  );
-
-  // ----- Watch hook states and update operation status -----
-
-  // Approval
+  // Watch multicall completion
   useEffect(() => {
-    if (currentOpIndex < 0) return;
-    const op = txOpsRef.current[currentOpIndex];
-    if (!op || op.type !== 'approval') return;
+    if (phase !== 'multicall') return;
 
-    if (operatorApproval.isApprovalSuccess) {
-      updateOp(op.id, { status: 'success', txHash: operatorApproval.txHash });
-      setCurrentOpIndex(-1);
-    } else if (operatorApproval.isWaitingForConfirmation && op.status !== 'confirming') {
-      updateOp(op.id, { status: 'confirming' });
-    } else if (operatorApproval.error && op.status !== 'error') {
-      updateOp(op.id, {
-        status: 'error',
-        error: operatorApproval.error.message,
-      });
-      setCurrentOpIndex(-1);
+    if (multicall.isSuccess) {
+      setPhase('done');
     }
-  }, [
-    currentOpIndex,
-    operatorApproval.isApprovalSuccess,
-    operatorApproval.isWaitingForConfirmation,
-    operatorApproval.error,
-    operatorApproval.txHash,
-    updateOp,
-  ]);
+  }, [phase, multicall.isSuccess]);
 
-  // Cancel
+  // Skip approval phase if not needed and initialize to correct phase
   useEffect(() => {
-    if (currentOpIndex < 0) return;
-    const op = txOpsRef.current[currentOpIndex];
-    if (!op || op.type !== 'cancel') return;
+    if (phase !== 'idle') return;
+    if (operatorApproval.isChecking) return;
 
-    if (cancelOrder.isSuccess) {
-      updateOp(op.id, {
-        status: 'success',
-        txHash: cancelOrder.result?.txHash,
-      });
-      setCurrentOpIndex(-1);
-    } else if (cancelOrder.isWaitingForConfirmation && op.status !== 'confirming') {
-      updateOp(op.id, { status: 'confirming' });
-    } else if (cancelOrder.error && op.status !== 'error') {
-      updateOp(op.id, { status: 'error', error: cancelOrder.error.message });
-      setCurrentOpIndex(-1);
+    // If no approval needed and no sub-operations, nothing to do
+    if (!needsApproval && subOperations.length === 0) return;
+  }, [phase, operatorApproval.isChecking, needsApproval, subOperations.length]);
+
+  const isDone = phase === 'done';
+
+  // ----- Handlers -----
+  const handleExecuteApproval = useCallback(() => {
+    if (operatorApproval.error) {
+      operatorApproval.reset();
     }
-  }, [
-    currentOpIndex,
-    cancelOrder.isSuccess,
-    cancelOrder.isWaitingForConfirmation,
-    cancelOrder.error,
-    cancelOrder.result,
-    updateOp,
-  ]);
+    setPhase('approval');
+    operatorApproval.approve();
+  }, [operatorApproval]);
 
-  // Update
-  useEffect(() => {
-    if (currentOpIndex < 0) return;
-    const op = txOpsRef.current[currentOpIndex];
-    if (!op || (op.type !== 'update_tick' && op.type !== 'update_swap')) return;
-
-    if (updateOrder.isSuccess) {
-      updateOp(op.id, {
-        status: 'success',
-        txHash: updateOrder.result?.txHash,
-      });
-      setCurrentOpIndex(-1);
-    } else if (updateOrder.isWaitingForConfirmation && op.status !== 'confirming') {
-      updateOp(op.id, { status: 'confirming' });
-    } else if (updateOrder.error && op.status !== 'error') {
-      updateOp(op.id, { status: 'error', error: updateOrder.error.message });
-      setCurrentOpIndex(-1);
+  const handleExecuteMulticall = useCallback(() => {
+    if (multicall.error) {
+      multicall.reset();
     }
-  }, [
-    currentOpIndex,
-    updateOrder.isSuccess,
-    updateOrder.isWaitingForConfirmation,
-    updateOrder.error,
-    updateOrder.result,
-    updateOp,
-  ]);
 
-  // Create
-  useEffect(() => {
-    if (currentOpIndex < 0) return;
-    const op = txOpsRef.current[currentOpIndex];
-    if (!op || op.type !== 'create') return;
-
-    if (createOrder.isSuccess) {
-      updateOp(op.id, {
-        status: 'success',
-        txHash: createOrder.result?.txHash,
-      });
-      setCurrentOpIndex(-1);
-    } else if (createOrder.isWaitingForConfirmation && op.status !== 'confirming') {
-      updateOp(op.id, { status: 'confirming' });
-    } else if (createOrder.error && op.status !== 'error') {
-      updateOp(op.id, { status: 'error', error: createOrder.error.message });
-      setCurrentOpIndex(-1);
+    const calls = buildMulticallCalls();
+    if (!calls) {
+      return;
     }
-  }, [
-    currentOpIndex,
-    createOrder.isSuccess,
-    createOrder.isWaitingForConfirmation,
-    createOrder.error,
-    createOrder.result,
-    updateOp,
-  ]);
 
-  // Check if all operations completed
-  useEffect(() => {
-    if (txOps.length > 0 && txOps.every((op) => op.status === 'success')) {
-      setIsDone(true);
-    }
-  }, [txOps]);
+    setPhase('multicall');
+    multicall.execute(calls);
+  }, [multicall, buildMulticallCalls]);
+
+  const handleRetryMulticall = useCallback(() => {
+    multicall.reset();
+    const calls = buildMulticallCalls();
+    if (!calls) return;
+    multicall.execute(calls);
+  }, [multicall, buildMulticallCalls]);
 
   // Handle finish
   const handleFinish = useCallback(() => {
@@ -641,21 +449,20 @@ export function TransactionStep() {
   }, [navigate, returnTo]);
 
   // ============================================================
-  // Render: Operation row (matches EvmTransactionPrompt visual style)
+  // Render: Approval row
   // ============================================================
-  const renderOperationRow = (op: TxOperation, index: number) => {
-    const isActive = op.status === 'signing' || op.status === 'confirming';
-    const isError = op.status === 'error';
-    const isSuccess = op.status === 'success';
-    const isIdle = op.status === 'pending';
-    const showButton =
-      index === nextPendingIndex &&
-      currentOpIndex === -1 &&
-      (isIdle || isError);
+  const renderApprovalRow = () => {
+    if (!needsApproval && !approvalDone) return null;
+
+    const isActive = operatorApproval.isApproving || operatorApproval.isWaitingForConfirmation;
+    const approvalError = isUserRejection(operatorApproval.error) ? null : operatorApproval.error;
+    const isError = !!approvalError;
+    const isSuccess = approvalDone || operatorApproval.isApprovalSuccess || operatorApproval.isApproved;
+    const isPending = !isActive && !isError && !isSuccess;
+    const showButton = isPending || isError;
 
     return (
       <div
-        key={op.id}
         className={`py-3 px-4 rounded-lg transition-colors ${
           isError
             ? 'bg-red-500/10 border border-red-500/30'
@@ -668,47 +475,32 @@ export function TransactionStep() {
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {/* Status Icon */}
-            {isIdle && <Circle className="w-5 h-5 text-slate-500" />}
-            {op.status === 'signing' && (
-              <Circle className="w-5 h-5 text-blue-400" />
-            )}
-            {op.status === 'confirming' && (
-              <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
-            )}
+            {isPending && <Circle className="w-5 h-5 text-slate-500" />}
+            {operatorApproval.isApproving && <Circle className="w-5 h-5 text-blue-400" />}
+            {operatorApproval.isWaitingForConfirmation && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
             {isSuccess && <Check className="w-5 h-5 text-green-400" />}
             {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
 
-            {/* Label */}
-            <span
-              className={
-                isSuccess
-                  ? 'text-slate-400'
-                  : isError
-                    ? 'text-red-300'
-                    : 'text-white'
-              }
-            >
-              {op.label}
+            <span className={isSuccess ? 'text-slate-400' : isError ? 'text-red-300' : 'text-white'}>
+              Approve automation contract
             </span>
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-2">
-            {op.txHash && (
+            {operatorApproval.txHash && (
               <a
-                href={buildTxUrl(chainId, op.txHash)}
+                href={buildTxUrl(chainId, operatorApproval.txHash)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
               >
-                {truncateTxHash(op.txHash)}
+                {truncateTxHash(operatorApproval.txHash)}
                 <ExternalLink className="w-3 h-3" />
               </a>
             )}
             {showButton && (
               <button
-                onClick={() => handleExecuteOp(index)}
+                onClick={handleExecuteApproval}
                 className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
               >
                 {isError ? 'Retry' : 'Execute'}
@@ -717,19 +509,144 @@ export function TransactionStep() {
           </div>
         </div>
 
-        {/* Error message */}
-        {isError && op.error && (
+        {isError && approvalError && (
           <div className="mt-2 pl-8 flex gap-2">
             <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
-              {op.error}
+              {approvalError.message}
             </div>
             <button
-              onClick={() => navigator.clipboard.writeText(op.error!)}
+              onClick={() => navigator.clipboard.writeText(approvalError.message)}
               className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
               title="Copy error to clipboard"
             >
               <Copy className="w-4 h-4" />
             </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================
+  // Render: Multicall row with sub-items
+  // ============================================================
+  const renderMulticallRow = () => {
+    if (subOperations.length === 0) return null;
+
+    const isActive = multicall.isSubmitting || multicall.isWaitingForConfirmation;
+    const multicallError = isUserRejection(multicall.error) ? null : multicall.error;
+    const isError = !!multicallError;
+    const isSuccess = multicall.isSuccess;
+    const isPending = !isActive && !isError && !isSuccess;
+
+    // Show Execute button when: approval is done (or not needed) AND multicall not yet executing
+    const approvalComplete = !needsApproval || approvalDone || operatorApproval.isApproved;
+    const showButton = approvalComplete && (isPending || isError);
+
+    const label = subOperations.length === 1
+      ? subOperations[0].label
+      : `Apply ${subOperations.length} Order Changes`;
+
+    return (
+      <div
+        className={`rounded-lg transition-colors ${
+          isError
+            ? 'bg-red-500/10 border border-red-500/30'
+            : isSuccess
+              ? 'bg-green-500/10 border border-green-500/20'
+              : isActive
+                ? 'bg-blue-500/10 border border-blue-500/20'
+                : 'bg-slate-700/30 border border-slate-600/20'
+        }`}
+      >
+        {/* Main row */}
+        <div className="py-3 px-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {/* Status Icon */}
+              {isPending && <Circle className="w-5 h-5 text-slate-500" />}
+              {multicall.isSubmitting && <Circle className="w-5 h-5 text-blue-400" />}
+              {multicall.isWaitingForConfirmation && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+              {isSuccess && <Check className="w-5 h-5 text-green-400" />}
+              {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
+
+              {/* Expand/collapse toggle (only for multiple sub-ops) */}
+              {subOperations.length > 1 && (
+                <button
+                  onClick={() => setSubOpsExpanded(!subOpsExpanded)}
+                  className="p-0.5 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  {subOpsExpanded
+                    ? <ChevronDown className="w-4 h-4" />
+                    : <ChevronRight className="w-4 h-4" />}
+                </button>
+              )}
+
+              {/* Label */}
+              <span className={isSuccess ? 'text-slate-400' : isError ? 'text-red-300' : 'text-white'}>
+                {label}
+              </span>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              {multicall.txHash && (
+                <a
+                  href={buildTxUrl(chainId, multicall.txHash)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                >
+                  {truncateTxHash(multicall.txHash)}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              {showButton && (
+                <button
+                  onClick={isError ? handleRetryMulticall : handleExecuteMulticall}
+                  className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
+                >
+                  {isError ? 'Retry' : 'Execute'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Error message */}
+          {isError && multicallError && (
+            <div className="mt-2 pl-8 flex gap-2">
+              <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
+                {multicallError.message}
+              </div>
+              <button
+                onClick={() => navigator.clipboard.writeText(multicallError.message)}
+                className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
+                title="Copy error to clipboard"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Sub-items (only shown when multiple operations and expanded) */}
+        {subOperations.length > 1 && subOpsExpanded && (
+          <div className="px-4 pb-3 space-y-1.5">
+            {subOperations.map((sub) => (
+              <div
+                key={sub.id}
+                className="flex items-center gap-2.5 pl-8 py-1"
+              >
+                {isSuccess
+                  ? <Check className="w-3.5 h-3.5 text-green-400/70" />
+                  : isActive
+                    ? <Loader2 className="w-3.5 h-3.5 text-blue-400/70 animate-spin" />
+                    : <Circle className="w-3.5 h-3.5 text-slate-600" />}
+                <span className={`text-sm ${isSuccess ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {sub.label}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -768,13 +685,17 @@ export function TransactionStep() {
       );
     }
 
+    // Count total transactions user will sign
+    const txCount = (needsApproval ? 1 : 0) + (subOperations.length > 0 ? 1 : 0);
+
     return (
       <div className="space-y-6">
         <h3 className="text-lg font-semibold text-white">
-          Execute Transactions
+          Execute Transaction{txCount !== 1 ? 's' : ''}
         </h3>
         <div className="space-y-3">
-          {txOps.map((op, index) => renderOperationRow(op, index))}
+          {renderApprovalRow()}
+          {renderMulticallRow()}
         </div>
       </div>
     );
@@ -791,6 +712,9 @@ export function TransactionStep() {
   const renderSummary = () => {
     const quoteDecimals = tokenInfo?.quoteDecimals ?? 18;
     const quoteSymbol = tokenInfo?.quoteSymbol ?? '';
+
+    // Count actual wallet signatures needed
+    const txCount = (needsApproval ? 1 : 0) + (subOperations.length > 0 ? 1 : 0);
 
     return (
       <div className="h-full flex flex-col">
@@ -838,9 +762,10 @@ export function TransactionStep() {
           <div className="p-3 bg-slate-700/30 rounded-lg">
             <p className="text-xs text-slate-400 mb-1">Transactions</p>
             <p className="text-lg font-semibold text-white">
-              {txOps.length}{' '}
+              {txCount}{' '}
               <span className="text-sm font-normal text-slate-400">
-                {txOps.length === 1 ? 'transaction' : 'transactions'}
+                {txCount === 1 ? 'transaction' : 'transactions'}
+                {subOperations.length > 1 && ` (${subOperations.length} operations batched)`}
               </span>
             </p>
           </div>
@@ -913,7 +838,7 @@ export function TransactionStep() {
           </div>
         </div>
 
-        {/* Navigation buttons (matching IncreaseDeposit pattern) */}
+        {/* Navigation buttons */}
         <div className="flex gap-3 mt-6 pt-4 border-t border-slate-700/50">
           <button
             onClick={goBack}
