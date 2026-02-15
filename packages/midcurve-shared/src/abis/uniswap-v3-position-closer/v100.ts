@@ -225,10 +225,38 @@ export const UniswapV3PositionCloserV100Abi = [
   },
   {
     type: 'function',
+    name: 'multicall',
+    inputs: [
+      {
+        name: 'data',
+        type: 'bytes[]',
+        internalType: 'bytes[]',
+      },
+    ],
+    outputs: [
+      {
+        name: 'results',
+        type: 'bytes[]',
+        internalType: 'bytes[]',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'version',
     inputs: [],
     outputs: [{ name: '', type: 'string', internalType: 'string' }],
     stateMutability: 'pure',
+  },
+  // Errors
+  {
+    type: 'error',
+    name: 'MulticallFailed',
+    inputs: [
+      { name: 'index', type: 'uint256', internalType: 'uint256' },
+      { name: 'returnData', type: 'bytes', internalType: 'bytes' },
+    ],
   },
   // Events
   {

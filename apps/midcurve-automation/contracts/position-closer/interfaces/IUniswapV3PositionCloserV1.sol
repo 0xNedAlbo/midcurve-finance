@@ -127,6 +127,18 @@ interface IUniswapV3PositionCloserV1 {
     ) external;
 
     // ========================================
+    // MULTICALL
+    // ========================================
+
+    /// @notice Execute multiple calls in a single transaction
+    /// @dev Sub-calls that use nonReentrant (registerOrder, cancelOrder, executeOrder)
+    ///      will revert if invoked via multicall. Intended for batching owner updates
+    ///      and view calls.
+    /// @param data Array of ABI-encoded function calls
+    /// @return results Array of ABI-encoded return values
+    function multicall(bytes[] calldata data) external returns (bytes[] memory results);
+
+    // ========================================
     // VIEWS
     // ========================================
 

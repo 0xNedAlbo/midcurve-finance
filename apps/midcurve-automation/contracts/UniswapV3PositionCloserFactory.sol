@@ -33,6 +33,7 @@ contract UniswapV3PositionCloserFactory {
     address public immutable ownerUpdateFacet;
     address public immutable viewFacet;
     address public immutable versionFacet;
+    address public immutable multicallFacet;
 
     // ============ Registry ============
 
@@ -56,11 +57,11 @@ contract UniswapV3PositionCloserFactory {
     /// @param augustusRegistry_ The Paraswap AugustusRegistry
     /// @param facets_ Array of facet addresses in order:
     ///        [diamondCut, diamondLoupe, ownership, registration, execution,
-    ///         ownerUpdate, view, version]
+    ///         ownerUpdate, view, version, multicall]
     constructor(
         address positionManager_,
         address augustusRegistry_,
-        address[8] memory facets_
+        address[9] memory facets_
     ) {
         if (positionManager_ == address(0)) revert ZeroAddress();
         if (augustusRegistry_ == address(0)) revert ZeroAddress();
@@ -76,9 +77,10 @@ contract UniswapV3PositionCloserFactory {
         ownerUpdateFacet = facets_[5];
         viewFacet = facets_[6];
         versionFacet = facets_[7];
+        multicallFacet = facets_[8];
 
         // Validate all facet addresses
-        for (uint256 i = 0; i < 8; i++) {
+        for (uint256 i = 0; i < 9; i++) {
             if (facets_[i] == address(0)) revert ZeroAddress();
         }
     }
@@ -134,7 +136,7 @@ contract UniswapV3PositionCloserFactory {
 
     /// @dev Build the array of facet cuts for diamond construction
     function _buildFacetCuts() internal view returns (IDiamondCut.FacetCut[] memory cuts) {
-        cuts = new IDiamondCut.FacetCut[](8);
+        cuts = new IDiamondCut.FacetCut[](9);
 
         // DiamondCutFacet
         cuts[0] = IDiamondCut.FacetCut({
@@ -190,6 +192,13 @@ contract UniswapV3PositionCloserFactory {
             facetAddress: versionFacet,
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: _getVersionSelectors()
+        });
+
+        // MulticallFacet
+        cuts[8] = IDiamondCut.FacetCut({
+            facetAddress: multicallFacet,
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: _getMulticallSelectors()
         });
     }
 
@@ -254,5 +263,10 @@ contract UniswapV3PositionCloserFactory {
         selectors = new bytes4[](2);
         selectors[0] = bytes4(keccak256("interfaceVersion()"));
         selectors[1] = bytes4(keccak256("version()"));
+    }
+
+    function _getMulticallSelectors() internal pure returns (bytes4[] memory selectors) {
+        selectors = new bytes4[](1);
+        selectors[0] = bytes4(keccak256("multicall(bytes[])"));
     }
 }
