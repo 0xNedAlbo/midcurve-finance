@@ -23,6 +23,7 @@ import {
   type ConfigurationTab,
   type SwapConfigState,
 } from '../context/CreatePositionWizardContext';
+import { SlippageSettingsModal } from '@/components/positions/wizard/shared/SlippageSettingsModal';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { PositionRangeSection } from '../shared/PositionRangeSection';
@@ -54,9 +55,13 @@ export function PositionConfigStep() {
     setStopLoss,
     setTakeProfit,
     setSlSwapEnabled,
+    setSlSwapSlippage,
     setSlSwapToQuote,
+    setSlExitSlippage,
     setTpSwapEnabled,
+    setTpSwapSlippage,
     setTpSwapToQuote,
+    setTpExitSlippage,
   } = useCreatePositionWizard();
 
   const { address: walletAddress, isConnected } = useAccount();
@@ -769,11 +774,15 @@ export function PositionConfigStep() {
     }
   }, [simulationPosition, costBasis]);
 
+  // Advanced settings modal state
+  const [advancedModalTrigger, setAdvancedModalTrigger] = useState<'sl' | 'tp' | null>(null);
+
   // Render "Exit to" dropdown for a trigger
   const renderExitToDropdown = (
     swapConfig: SwapConfigState,
     setEnabled: (enabled: boolean) => void,
     setSwapToQuote: (swapToQuote: boolean) => void,
+    trigger: 'sl' | 'tp',
   ) => {
     const baseSymbol = state.baseToken?.symbol || 'Base';
     const quoteSymbol = state.quoteToken?.symbol || 'Quote';
@@ -808,6 +817,7 @@ export function PositionConfigStep() {
         </select>
         <button
           type="button"
+          onClick={() => setAdvancedModalTrigger(trigger)}
           className="ml-auto text-sm text-blue-400 underline decoration-dashed cursor-pointer hover:text-blue-300"
         >
           Advanced Settings
@@ -850,7 +860,7 @@ export function PositionConfigStep() {
               Add Stop Loss
             </button>
           )}
-          {hasSl && renderExitToDropdown(state.slSwapConfig, setSlSwapEnabled, setSlSwapToQuote)}
+          {hasSl && renderExitToDropdown(state.slSwapConfig, setSlSwapEnabled, setSlSwapToQuote, 'sl')}
         </div>
 
         {/* Take Profit column */}
@@ -878,8 +888,20 @@ export function PositionConfigStep() {
               Add Take Profit
             </button>
           )}
-          {hasTp && renderExitToDropdown(state.tpSwapConfig, setTpSwapEnabled, setTpSwapToQuote)}
+          {hasTp && renderExitToDropdown(state.tpSwapConfig, setTpSwapEnabled, setTpSwapToQuote, 'tp')}
         </div>
+
+        {/* Advanced Settings Modal */}
+        <SlippageSettingsModal
+          isOpen={advancedModalTrigger !== null}
+          onClose={() => setAdvancedModalTrigger(null)}
+          triggerLabel={advancedModalTrigger === 'sl' ? 'Stop Loss' : 'Take Profit'}
+          exitSlippageBps={advancedModalTrigger === 'sl' ? state.slSwapConfig.exitSlippageBps : state.tpSwapConfig.exitSlippageBps}
+          swapSlippageBps={advancedModalTrigger === 'sl' ? state.slSwapConfig.slippageBps : state.tpSwapConfig.slippageBps}
+          swapEnabled={advancedModalTrigger === 'sl' ? state.slSwapConfig.enabled : state.tpSwapConfig.enabled}
+          onExitSlippageChange={advancedModalTrigger === 'sl' ? setSlExitSlippage : setTpExitSlippage}
+          onSwapSlippageChange={advancedModalTrigger === 'sl' ? setSlSwapSlippage : setTpSwapSlippage}
+        />
       </div>
     );
   };

@@ -28,6 +28,7 @@ export interface SwapConfigState {
   enabled: boolean;
   slippageBps: number;
   swapToQuote: boolean; // true = swap to quote token, false = swap to base token
+  exitSlippageBps: number; // slippage tolerance for decreaseLiquidity (basis points)
 }
 
 export interface RiskTriggersWizardState {
@@ -84,6 +85,8 @@ type WizardAction =
   | { type: 'SET_TP_SWAP_SLIPPAGE'; slippageBps: number }
   | { type: 'SET_SL_SWAP_TO_QUOTE'; swapToQuote: boolean }
   | { type: 'SET_TP_SWAP_TO_QUOTE'; swapToQuote: boolean }
+  | { type: 'SET_SL_EXIT_SLIPPAGE'; exitSlippageBps: number }
+  | { type: 'SET_TP_EXIT_SLIPPAGE'; exitSlippageBps: number }
   | { type: 'SET_STEP_VALID'; stepId: string; valid: boolean }
   | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
   | { type: 'SET_SUMMARY_ZOOM'; zoom: number }
@@ -107,8 +110,9 @@ const EMPTY_TRIGGER: TriggerState = {
 
 const DEFAULT_SWAP_CONFIG: SwapConfigState = {
   enabled: true,
-  slippageBps: 100,
+  slippageBps: 300,
   swapToQuote: true,
+  exitSlippageBps: 50,
 };
 
 const initialState: RiskTriggersWizardState = {
@@ -275,6 +279,18 @@ function wizardReducer(
         tpSwapConfig: { ...state.tpSwapConfig, swapToQuote: action.swapToQuote },
       };
 
+    case 'SET_SL_EXIT_SLIPPAGE':
+      return {
+        ...state,
+        slSwapConfig: { ...state.slSwapConfig, exitSlippageBps: action.exitSlippageBps },
+      };
+
+    case 'SET_TP_EXIT_SLIPPAGE':
+      return {
+        ...state,
+        tpSwapConfig: { ...state.tpSwapConfig, exitSlippageBps: action.exitSlippageBps },
+      };
+
     case 'SET_STEP_VALID':
       return {
         ...state,
@@ -398,16 +414,18 @@ export function convertOrdersToTriggerState(
     if (!order) return { ...DEFAULT_SWAP_CONFIG };
     const config = order.config as Record<string, unknown>;
     const swapConfig = config.swapConfig as Record<string, unknown> | undefined;
+    const exitSlippageBps = typeof config.slippageBps === 'number' ? config.slippageBps : DEFAULT_SWAP_CONFIG.exitSlippageBps;
     if (swapConfig && swapConfig.enabled) {
       const direction = swapConfig.direction as string | undefined;
       const toQuoteDirection = computeSwapToQuoteDirection(isToken0Quote);
       return {
         enabled: true,
-        slippageBps: (swapConfig.slippageBps as number) || 100,
+        slippageBps: (swapConfig.slippageBps as number) || DEFAULT_SWAP_CONFIG.slippageBps,
         swapToQuote: direction === toQuoteDirection,
+        exitSlippageBps,
       };
     }
-    return { enabled: false, slippageBps: 100, swapToQuote: true };
+    return { enabled: false, slippageBps: DEFAULT_SWAP_CONFIG.slippageBps, swapToQuote: true, exitSlippageBps };
   };
 
   return { sl, tp, slSwap: extractSwapConfig(slOrder), tpSwap: extractSwapConfig(tpOrder) };
@@ -471,9 +489,11 @@ interface RiskTriggersWizardContextValue {
   setSlSwapEnabled: (enabled: boolean) => void;
   setSlSwapSlippage: (slippageBps: number) => void;
   setSlSwapToQuote: (swapToQuote: boolean) => void;
+  setSlExitSlippage: (exitSlippageBps: number) => void;
   setTpSwapEnabled: (enabled: boolean) => void;
   setTpSwapSlippage: (slippageBps: number) => void;
   setTpSwapToQuote: (swapToQuote: boolean) => void;
+  setTpExitSlippage: (exitSlippageBps: number) => void;
 
   // UI
   setStepValid: (stepId: string, valid: boolean) => void;
@@ -619,6 +639,16 @@ export function RiskTriggersWizardProvider({
       dispatch({ type: 'SET_TP_SWAP_TO_QUOTE', swapToQuote }),
     []
   );
+  const setSlExitSlippage = useCallback(
+    (exitSlippageBps: number) =>
+      dispatch({ type: 'SET_SL_EXIT_SLIPPAGE', exitSlippageBps }),
+    []
+  );
+  const setTpExitSlippage = useCallback(
+    (exitSlippageBps: number) =>
+      dispatch({ type: 'SET_TP_EXIT_SLIPPAGE', exitSlippageBps }),
+    []
+  );
 
   // UI
   const setStepValid = useCallback(
@@ -710,7 +740,8 @@ export function RiskTriggersWizardProvider({
     () =>
       state.initialSlSwapConfig.enabled !== state.slSwapConfig.enabled ||
       state.initialSlSwapConfig.slippageBps !== state.slSwapConfig.slippageBps ||
-      state.initialSlSwapConfig.swapToQuote !== state.slSwapConfig.swapToQuote,
+      state.initialSlSwapConfig.swapToQuote !== state.slSwapConfig.swapToQuote ||
+      state.initialSlSwapConfig.exitSlippageBps !== state.slSwapConfig.exitSlippageBps,
     [state.initialSlSwapConfig, state.slSwapConfig]
   );
 
@@ -718,7 +749,8 @@ export function RiskTriggersWizardProvider({
     () =>
       state.initialTpSwapConfig.enabled !== state.tpSwapConfig.enabled ||
       state.initialTpSwapConfig.slippageBps !== state.tpSwapConfig.slippageBps ||
-      state.initialTpSwapConfig.swapToQuote !== state.tpSwapConfig.swapToQuote,
+      state.initialTpSwapConfig.swapToQuote !== state.tpSwapConfig.swapToQuote ||
+      state.initialTpSwapConfig.exitSlippageBps !== state.tpSwapConfig.exitSlippageBps,
     [state.initialTpSwapConfig, state.tpSwapConfig]
   );
 
@@ -753,9 +785,11 @@ export function RiskTriggersWizardProvider({
     setSlSwapEnabled,
     setSlSwapSlippage,
     setSlSwapToQuote,
+    setSlExitSlippage,
     setTpSwapEnabled,
     setTpSwapSlippage,
     setTpSwapToQuote,
+    setTpExitSlippage,
     setStepValid,
     isStepValid,
     setInteractiveZoom,

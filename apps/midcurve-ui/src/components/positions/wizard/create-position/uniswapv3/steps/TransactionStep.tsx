@@ -29,7 +29,7 @@ import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
-import { SwapDirection, DEFAULT_CLOSE_ORDER_SLIPPAGE } from '@/config/automation-contracts';
+import { SwapDirection } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { getChainSlugByChainId } from '@/config/chains';
@@ -773,9 +773,9 @@ export function TransactionStep() {
           payout: walletAddress,
           operator: autowalletAddress,
           validUntil: 0n,
-          slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
+          slippageBps: state.slSwapConfig.exitSlippageBps,
           swapDirection: slSwapDirection,
-          swapSlippageBps: state.slSwapConfig.enabled ? state.slSwapConfig.slippageBps : DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
+          swapSlippageBps: state.slSwapConfig.enabled ? state.slSwapConfig.slippageBps : 0,
         }],
       });
     }
@@ -792,9 +792,9 @@ export function TransactionStep() {
           payout: walletAddress,
           operator: autowalletAddress,
           validUntil: 0n,
-          slippageBps: DEFAULT_CLOSE_ORDER_SLIPPAGE.liquidityBps,
+          slippageBps: state.tpSwapConfig.exitSlippageBps,
           swapDirection: tpSwapDirection,
-          swapSlippageBps: state.tpSwapConfig.enabled ? state.tpSwapConfig.slippageBps : DEFAULT_CLOSE_ORDER_SLIPPAGE.swapBps,
+          swapSlippageBps: state.tpSwapConfig.enabled ? state.tpSwapConfig.slippageBps : 0,
         }],
       });
     }

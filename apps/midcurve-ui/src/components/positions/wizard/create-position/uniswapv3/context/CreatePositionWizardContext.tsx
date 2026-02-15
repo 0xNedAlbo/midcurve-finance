@@ -24,8 +24,9 @@ export type ConfigurationTab = 'capital' | 'range' | 'sltp';
 
 const DEFAULT_SWAP_CONFIG: SwapConfigState = {
   enabled: true,
-  slippageBps: 100,
+  slippageBps: 300,
   swapToQuote: true,
+  exitSlippageBps: 50,
 };
 export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
 
@@ -140,6 +141,8 @@ type WizardAction =
   | { type: 'SET_TP_SWAP_ENABLED'; enabled: boolean }
   | { type: 'SET_TP_SWAP_SLIPPAGE'; slippageBps: number }
   | { type: 'SET_TP_SWAP_TO_QUOTE'; swapToQuote: boolean }
+  | { type: 'SET_SL_EXIT_SLIPPAGE'; exitSlippageBps: number }
+  | { type: 'SET_TP_EXIT_SLIPPAGE'; exitSlippageBps: number }
   | { type: 'SET_NEEDS_SWAP'; needsSwap: boolean }
   | { type: 'SET_NEEDS_AUTOWALLET'; needsAutowallet: boolean }
   | { type: 'ADD_TRANSACTION'; tx: TransactionRecord }
@@ -423,6 +426,12 @@ function wizardReducer(
     case 'SET_TP_SWAP_TO_QUOTE':
       return { ...state, tpSwapConfig: { ...state.tpSwapConfig, swapToQuote: action.swapToQuote } };
 
+    case 'SET_SL_EXIT_SLIPPAGE':
+      return { ...state, slSwapConfig: { ...state.slSwapConfig, exitSlippageBps: action.exitSlippageBps } };
+
+    case 'SET_TP_EXIT_SLIPPAGE':
+      return { ...state, tpSwapConfig: { ...state.tpSwapConfig, exitSlippageBps: action.exitSlippageBps } };
+
     case 'SET_NEEDS_SWAP':
       return { ...state, needsSwap: action.needsSwap };
 
@@ -614,9 +623,11 @@ interface CreatePositionWizardContextValue {
   setSlSwapEnabled: (enabled: boolean) => void;
   setSlSwapSlippage: (slippageBps: number) => void;
   setSlSwapToQuote: (swapToQuote: boolean) => void;
+  setSlExitSlippage: (exitSlippageBps: number) => void;
   setTpSwapEnabled: (enabled: boolean) => void;
   setTpSwapSlippage: (slippageBps: number) => void;
   setTpSwapToQuote: (swapToQuote: boolean) => void;
+  setTpExitSlippage: (exitSlippageBps: number) => void;
 
   // Conditional flags
   setNeedsSwap: (needsSwap: boolean) => void;
@@ -801,6 +812,14 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     dispatch({ type: 'SET_TP_SWAP_TO_QUOTE', swapToQuote });
   }, []);
 
+  const setSlExitSlippage = useCallback((exitSlippageBps: number) => {
+    dispatch({ type: 'SET_SL_EXIT_SLIPPAGE', exitSlippageBps });
+  }, []);
+
+  const setTpExitSlippage = useCallback((exitSlippageBps: number) => {
+    dispatch({ type: 'SET_TP_EXIT_SLIPPAGE', exitSlippageBps });
+  }, []);
+
   // Conditional flags
   const setNeedsSwap = useCallback((needsSwap: boolean) => {
     dispatch({ type: 'SET_NEEDS_SWAP', needsSwap });
@@ -918,9 +937,11 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setSlSwapEnabled,
     setSlSwapSlippage,
     setSlSwapToQuote,
+    setSlExitSlippage,
     setTpSwapEnabled,
     setTpSwapSlippage,
     setTpSwapToQuote,
+    setTpExitSlippage,
     setNeedsSwap,
     setNeedsAutowallet,
     addTransaction,
