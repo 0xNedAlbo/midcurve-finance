@@ -1042,17 +1042,6 @@ function InteractivePnLCurveInner({
         {/* Range boundary interactive elements - ON TOP of tooltip overlay */}
         {hasPosition && (
           <>
-            {/* Lower boundary - interactive hit area */}
-            <rect
-              x={xScale(lowerPrice) - 10}
-              y={0}
-              width={20}
-              height={chartHeight}
-              fill="transparent"
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleRangeBoundaryMouseDown('lower', e)}
-            />
             {/* Lower boundary - triangle handle */}
             <polygon
               points={`${xScale(lowerPrice)},2 ${xScale(lowerPrice)},14 ${xScale(lowerPrice) + 10},8`}
@@ -1076,17 +1065,6 @@ function InteractivePnLCurveInner({
               {formatCompactValue(lowerPriceBigint, quoteToken.decimals)}
             </text>
 
-            {/* Upper boundary - interactive hit area */}
-            <rect
-              x={xScale(upperPrice) - 10}
-              y={0}
-              width={20}
-              height={chartHeight}
-              fill="transparent"
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleRangeBoundaryMouseDown('upper', e)}
-            />
             {/* Upper boundary - triangle handle */}
             <polygon
               points={`${xScale(upperPrice)},2 ${xScale(upperPrice)},14 ${xScale(upperPrice) - 10},8`}
@@ -1127,17 +1105,6 @@ function InteractivePnLCurveInner({
                 strokeDasharray="6,4"
               />
             </g>
-            {/* SL - interactive hit area */}
-            <rect
-              x={xScale(slDisplayPrice) - 10}
-              y={0}
-              width={20}
-              height={chartHeight}
-              fill="transparent"
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleSlTpLineMouseDown('sl', e)}
-            />
             {/* SL label and handle at bottom */}
             <g>
               {/* SL triangle handle - base on line, pointing left */}
@@ -1182,17 +1149,6 @@ function InteractivePnLCurveInner({
                 strokeDasharray="6,4"
               />
             </g>
-            {/* TP - interactive hit area */}
-            <rect
-              x={xScale(tpDisplayPrice) - 10}
-              y={0}
-              width={20}
-              height={chartHeight}
-              fill="transparent"
-              pointerEvents="all"
-              style={{ cursor: 'ew-resize' }}
-              onMouseDown={(e) => handleSlTpLineMouseDown('tp', e)}
-            />
             {/* TP label and handle at bottom */}
             <g>
               {/* TP triangle handle - base on line, pointing right */}
