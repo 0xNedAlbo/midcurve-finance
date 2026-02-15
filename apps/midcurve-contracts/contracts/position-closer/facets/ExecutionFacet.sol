@@ -6,16 +6,16 @@ import {IUniswapV3PositionCloserV1} from "../interfaces/IUniswapV3PositionCloser
 import {IMidcurveSwapRouter} from "../../swap-router/interfaces/IMidcurveSwapRouter.sol";
 import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePositionManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
-import {IERC20Minimal} from "../interfaces/IERC20Minimal.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {TickMath} from "../libraries/TickMath.sol";
 import {LiquidityAmounts} from "../libraries/LiquidityAmounts.sol";
-import {SafeERC20} from "../libraries/SafeERC20.sol";
 
 /// @title ExecutionFacet
 /// @notice Facet for executing close orders when trigger conditions are met
 /// @dev Handles position closing, fee application, and optional post-close swaps via MidcurveSwapRouter
 contract ExecutionFacet is Modifiers {
-    using SafeERC20 for address;
+    using SafeERC20 for IERC20;
 
     // ========================================
     // CONSTANTS
@@ -154,8 +154,8 @@ contract ExecutionFacet is Modifiers {
         }
 
         // 12) Payout remainder to configured address
-        if (payout0 > 0) ctx.token0.safeTransfer(order.payout, payout0);
-        if (payout1 > 0) ctx.token1.safeTransfer(order.payout, payout1);
+        if (payout0 > 0) IERC20(ctx.token0).safeTransfer(order.payout, payout0);
+        if (payout1 > 0) IERC20(ctx.token1).safeTransfer(order.payout, payout1);
 
         emit OrderExecuted(
             nftId,
@@ -293,8 +293,8 @@ contract ExecutionFacet is Modifiers {
             uint256 fee0 = (ctx.amount0Out * uint256(feeBps)) / 10_000;
             uint256 fee1 = (ctx.amount1Out * uint256(feeBps)) / 10_000;
 
-            if (fee0 > 0) ctx.token0.safeTransfer(feeRecipient, fee0);
-            if (fee1 > 0) ctx.token1.safeTransfer(feeRecipient, fee1);
+            if (fee0 > 0) IERC20(ctx.token0).safeTransfer(feeRecipient, fee0);
+            if (fee1 > 0) IERC20(ctx.token1).safeTransfer(feeRecipient, fee1);
 
             emit FeeApplied(nftId, triggerMode, feeRecipient, feeBps, fee0, fee1);
 
@@ -337,10 +337,10 @@ contract ExecutionFacet is Modifiers {
         }
 
         // Approve SwapRouter to pull tokenIn
-        tokenIn.safeApprove(s.swapRouter, amountIn);
+        IERC20(tokenIn).forceApprove(s.swapRouter, amountIn);
 
         // Record output balance before swap
-        uint256 balanceBefore = IERC20Minimal(tokenOut).balanceOf(address(this));
+        uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
 
         // Execute swap via MidcurveSwapRouter
         IMidcurveSwapRouter(s.swapRouter).sell(
@@ -354,10 +354,10 @@ contract ExecutionFacet is Modifiers {
         );
 
         // Reset approval (security best practice)
-        tokenIn.safeApprove(s.swapRouter, 0);
+        IERC20(tokenIn).forceApprove(s.swapRouter, 0);
 
         // Verify output via balance diff
-        uint256 balanceAfter = IERC20Minimal(tokenOut).balanceOf(address(this));
+        uint256 balanceAfter = IERC20(tokenOut).balanceOf(address(this));
         uint256 amountOut = balanceAfter - balanceBefore;
 
         if (amountOut == 0) {

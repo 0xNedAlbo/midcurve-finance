@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IERC20 } from "../../interfaces/IERC20.sol";
-import { SafeERC20 } from "../../libraries/SafeERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IVenueAdapter } from "../interfaces/IVenueAdapter.sol";
 import { IV3SwapRouter } from "../interfaces/IV3SwapRouter.sol";
 
@@ -53,7 +53,7 @@ contract UniswapV3Adapter is IVenueAdapter {
         uint24 fee = abi.decode(venueData, (uint24));
 
         // Approve SwapRouter to spend tokenIn (handles USDT-style tokens)
-        IERC20(tokenIn).safeApprove(address(swapRouter), amountIn);
+        IERC20(tokenIn).forceApprove(address(swapRouter), amountIn);
 
         // Execute exact input swap — output goes to msg.sender (the router)
         amountOut = swapRouter.exactInputSingle(
@@ -69,7 +69,7 @@ contract UniswapV3Adapter is IVenueAdapter {
         );
 
         // Reset approval for safety
-        IERC20(tokenIn).safeApprove(address(swapRouter), 0);
+        IERC20(tokenIn).forceApprove(address(swapRouter), 0);
     }
 
     /// @inheritdoc IVenueAdapter
@@ -83,7 +83,7 @@ contract UniswapV3Adapter is IVenueAdapter {
         uint24 fee = abi.decode(venueData, (uint24));
 
         // Approve SwapRouter to spend up to amountInMaximum
-        IERC20(tokenIn).safeApprove(address(swapRouter), amountInMaximum);
+        IERC20(tokenIn).forceApprove(address(swapRouter), amountInMaximum);
 
         // Execute exact output swap — output goes to msg.sender (the router)
         amountIn = swapRouter.exactOutputSingle(
@@ -99,7 +99,7 @@ contract UniswapV3Adapter is IVenueAdapter {
         );
 
         // Reset approval for safety
-        IERC20(tokenIn).safeApprove(address(swapRouter), 0);
+        IERC20(tokenIn).forceApprove(address(swapRouter), 0);
 
         // Refund unused tokenIn back to the router
         uint256 remaining = IERC20(tokenIn).balanceOf(address(this));
