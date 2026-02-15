@@ -30,8 +30,6 @@ export interface SwapConfigState {
   swapToQuote: boolean; // true = swap to quote token, false = swap to base token
 }
 
-export type ConfigurationTab = 'sl' | 'tp';
-
 export interface RiskTriggersWizardState {
   currentStepIndex: number;
 
@@ -54,7 +52,6 @@ export interface RiskTriggersWizardState {
   tpSwapConfig: SwapConfigState;
 
   // UI
-  configurationTab: ConfigurationTab;
   stepValidation: Record<string, boolean>;
   interactiveZoom: number;
   summaryZoom: number;
@@ -87,7 +84,6 @@ type WizardAction =
   | { type: 'SET_TP_SWAP_SLIPPAGE'; slippageBps: number }
   | { type: 'SET_SL_SWAP_TO_QUOTE'; swapToQuote: boolean }
   | { type: 'SET_TP_SWAP_TO_QUOTE'; swapToQuote: boolean }
-  | { type: 'SET_CONFIGURATION_TAB'; tab: ConfigurationTab }
   | { type: 'SET_STEP_VALID'; stepId: string; valid: boolean }
   | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
   | { type: 'SET_SUMMARY_ZOOM'; zoom: number }
@@ -129,7 +125,6 @@ const initialState: RiskTriggersWizardState = {
   takeProfit: { ...EMPTY_TRIGGER },
   slSwapConfig: { ...DEFAULT_SWAP_CONFIG },
   tpSwapConfig: { ...DEFAULT_SWAP_CONFIG },
-  configurationTab: 'sl',
   stepValidation: {},
   interactiveZoom: 1.0,
   summaryZoom: 1.0,
@@ -279,9 +274,6 @@ function wizardReducer(
         ...state,
         tpSwapConfig: { ...state.tpSwapConfig, swapToQuote: action.swapToQuote },
       };
-
-    case 'SET_CONFIGURATION_TAB':
-      return { ...state, configurationTab: action.tab };
 
     case 'SET_STEP_VALID':
       return {
@@ -484,7 +476,6 @@ interface RiskTriggersWizardContextValue {
   setTpSwapToQuote: (swapToQuote: boolean) => void;
 
   // UI
-  setConfigurationTab: (tab: ConfigurationTab) => void;
   setStepValid: (stepId: string, valid: boolean) => void;
   isStepValid: (stepId: string) => boolean;
   setInteractiveZoom: (zoom: number) => void;
@@ -630,11 +621,6 @@ export function RiskTriggersWizardProvider({
   );
 
   // UI
-  const setConfigurationTab = useCallback(
-    (tab: ConfigurationTab) =>
-      dispatch({ type: 'SET_CONFIGURATION_TAB', tab }),
-    []
-  );
   const setStepValid = useCallback(
     (stepId: string, valid: boolean) =>
       dispatch({ type: 'SET_STEP_VALID', stepId, valid }),
@@ -770,7 +756,6 @@ export function RiskTriggersWizardProvider({
     setTpSwapEnabled,
     setTpSwapSlippage,
     setTpSwapToQuote,
-    setConfigurationTab,
     setStepValid,
     isStepValid,
     setInteractiveZoom,

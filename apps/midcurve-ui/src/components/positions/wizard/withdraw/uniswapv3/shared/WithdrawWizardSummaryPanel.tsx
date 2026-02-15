@@ -10,6 +10,7 @@ import {
 import { useWithdrawWizard } from '../context/WithdrawWizardContext';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { RiskTriggersSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/RiskTriggersSection';
+import { PostCloseSwapSection, type SwapConfigDisplay } from '@/components/positions/wizard/create-position/uniswapv3/shared/PostCloseSwapSection';
 import { SelectedPoolSummary } from '@/components/positions/wizard/create-position/uniswapv3/shared/SelectedPoolSummary';
 
 // Zoom constants
@@ -236,6 +237,39 @@ export function WithdrawWizardSummaryPanel({
   const isCurrentStepValid = isStepValid(currentStep.id);
   const isNextDisabled = nextDisabled || !isCurrentStepValid;
 
+  // Extract swap configs from active close orders (read-only display)
+  const swapConfigs = useMemo(() => {
+    let slSwapConfig: SwapConfigDisplay | null = null;
+    let tpSwapConfig: SwapConfigDisplay | null = null;
+
+    if (!state.activeCloseOrders.length || !position) return { slSwapConfig, tpSwapConfig };
+
+    const isToken0Quote = position.isToken0Quote;
+
+    for (const order of state.activeCloseOrders) {
+      const orderConfig = order.config as Record<string, unknown>;
+      const triggerMode = orderConfig.triggerMode as string | undefined;
+      const swapConfig = orderConfig.swapConfig as Record<string, unknown> | undefined;
+
+      if (!triggerMode) continue;
+
+      const display: SwapConfigDisplay = swapConfig?.enabled
+        ? {
+            enabled: true,
+            slippageBps: (swapConfig.slippageBps as number) || 100,
+            swapToQuote: isToken0Quote
+              ? (swapConfig.direction as string) === 'TOKEN1_TO_0'
+              : (swapConfig.direction as string) === 'TOKEN0_TO_1',
+          }
+        : { enabled: false, slippageBps: 100, swapToQuote: true };
+
+      if (triggerMode === 'LOWER') slSwapConfig = display;
+      if (triggerMode === 'UPPER') tpSwapConfig = display;
+    }
+
+    return { slSwapConfig, tpSwapConfig };
+  }, [state.activeCloseOrders, position]);
+
   const quoteDecimals = quoteToken?.decimals ?? 18;
   const quoteSymbol = quoteToken?.symbol ?? '';
 
@@ -412,6 +446,16 @@ export function WithdrawWizardSummaryPanel({
           slDrawdown={slDrawdown}
           tpRunup={tpRunup}
           quoteTokenDecimals={quoteDecimals}
+        />
+
+        {/* Post-Close Swap (from existing close orders, read-only) */}
+        <PostCloseSwapSection
+          slSwapConfig={swapConfigs.slSwapConfig}
+          tpSwapConfig={swapConfigs.tpSwapConfig}
+          baseSymbol={baseToken?.symbol ?? ''}
+          quoteSymbol={quoteSymbol}
+          hasStopLoss={stopLossPrice != null}
+          hasTakeProfit={takeProfitPrice != null}
         />
 
         {/* Custom content from step */}

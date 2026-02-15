@@ -1,14 +1,10 @@
 import { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   Shield,
-  Target,
-  ArrowRightLeft,
   Trash2,
-  Plus,
   PlusCircle,
   MinusCircle,
   TrendingDown,
-  AlertTriangle,
 } from 'lucide-react';
 import type { PnLScenario, SwapConfig } from '@midcurve/shared';
 import {
@@ -21,47 +17,13 @@ import {
 } from '@midcurve/shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
+import { RiskTriggersSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/RiskTriggersSection';
+import { PostCloseSwapSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/PostCloseSwapSection';
 import {
   useRiskTriggersWizard,
   computeSwapDirection,
-  type ConfigurationTab,
   type SwapConfigState,
 } from '../context/RiskTriggersWizardContext';
-
-// Configuration section tabs
-const CONFIG_TABS: {
-  id: ConfigurationTab;
-  label: string;
-  description: string;
-  icon: typeof Shield;
-}[] = [
-  {
-    id: 'sl',
-    label: 'SL Setup',
-    description: 'Configure stop loss trigger and swap',
-    icon: Shield,
-  },
-  {
-    id: 'tp',
-    label: 'TP Setup',
-    description: 'Configure take profit trigger and swap',
-    icon: Target,
-  },
-];
-
-// Chains supported for Paraswap swap integration
-const PARASWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const;
-const PARASWAP_SUPPORTED_CHAINS = import.meta.env.DEV
-  ? [...PARASWAP_PRODUCTION_CHAINS, 31337]
-  : PARASWAP_PRODUCTION_CHAINS;
-
-const SWAP_SLIPPAGE_OPTIONS = [
-  { value: 50, label: '0.5%' },
-  { value: 100, label: '1%' },
-  { value: 200, label: '2%' },
-  { value: 300, label: '3%' },
-  { value: 500, label: '5%' },
-];
 
 // Zoom constants
 const ZOOM_MIN = 0.75;
@@ -71,16 +33,13 @@ const ZOOM_STEP = 0.125;
 export function ConfigureStep() {
   const {
     state,
-    setConfigurationTab,
     setStopLossPrice,
     clearStopLoss,
     setTakeProfitPrice,
     clearTakeProfit,
     setSlSwapEnabled,
-    setSlSwapSlippage,
     setSlSwapToQuote,
     setTpSwapEnabled,
-    setTpSwapSlippage,
     setTpSwapToQuote,
     setInteractiveZoom,
     setSummaryZoom,
@@ -349,36 +308,29 @@ export function ConfigureStep() {
     [setTakeProfitPrice, clearTakeProfit]
   );
 
-  // Switch to correct tab on curve interaction
-  const handleSlTpInteraction = useCallback((triggerType: 'sl' | 'tp') => {
-    setConfigurationTab(triggerType);
-  }, [setConfigurationTab]);
-
-  // Risk metrics computed by overlay (evaluates all critical price points)
-  const maxDrawdown = useMemo(() => {
+  // Risk metrics computed by overlay
+  const slDrawdown = useMemo(() => {
     if (!simulationPosition) return null;
     try {
-      return simulationPosition.maxDrawdown();
+      const drawdown = simulationPosition.maxDrawdown();
+      const pnlPercent = costBasis !== 0n
+        ? Number((drawdown * 1000000n) / costBasis) / 10000
+        : null;
+      return { pnlValue: -drawdown, pnlPercent: pnlPercent != null ? -pnlPercent : undefined };
     } catch { return null; }
-  }, [simulationPosition]);
+  }, [simulationPosition, costBasis]);
 
-  const maxRunup = useMemo(() => {
+  const tpRunup = useMemo(() => {
     if (!simulationPosition) return null;
     try {
-      return simulationPosition.maxRunup();
+      const runup = simulationPosition.maxRunup();
+      if (runup === INFINITE_RUNUP) return { pnlValue: INFINITE_RUNUP, pnlPercent: undefined };
+      const pnlPercent = costBasis !== 0n
+        ? Number((runup * 1000000n) / costBasis) / 10000
+        : null;
+      return { pnlValue: runup, pnlPercent: pnlPercent ?? undefined };
     } catch { return null; }
-  }, [simulationPosition]);
-
-  // Drawdown/runup as percentage of cost basis
-  const maxDrawdownPercent = useMemo(() => {
-    if (maxDrawdown === null || costBasis === 0n) return null;
-    return Number((maxDrawdown * 1000000n) / costBasis) / 10000;
-  }, [maxDrawdown, costBasis]);
-
-  const maxRunupPercent = useMemo(() => {
-    if (maxRunup === null || maxRunup === INFINITE_RUNUP || costBasis === 0n) return null;
-    return Number((maxRunup * 1000000n) / costBasis) / 10000;
-  }, [maxRunup, costBasis]);
+  }, [simulationPosition, costBasis]);
 
   // Zoom handlers
   const handleInteractiveZoomIn = useCallback(() => {
@@ -401,138 +353,74 @@ export function ConfigureStep() {
     setSummaryZoom(Math.max(state.summaryZoom - ZOOM_STEP, ZOOM_MIN));
   }, [state.summaryZoom, setSummaryZoom]);
 
-  // Get chain ID
-  const chainId = useMemo(() => {
-    if (!position) return 0;
-    return (position.config as { chainId: number }).chainId;
-  }, [position]);
-
-  // Check if chain supports Paraswap
-  const isSwapSupported = (
-    PARASWAP_SUPPORTED_CHAINS as readonly number[]
-  ).includes(chainId);
-
   // ============================================================
-  // Swap config section (reused for both SL and TP tabs)
+  // "Exit to" dropdown (matches Create Position pattern)
   // ============================================================
-  const renderSwapConfig = (
+  const renderExitToDropdown = (
     swapConfig: SwapConfigState,
     setEnabled: (enabled: boolean) => void,
-    setSlippage: (slippageBps: number) => void,
-    toggleDirection: () => void,
+    setSwapToQuote: (swapToQuote: boolean) => void,
   ) => {
-    if (!tokenInfo) return null;
-    const baseSymbol = tokenInfo.baseToken.symbol;
-    const quoteSymbol = tokenInfo.quoteToken.symbol;
+    const baseSymbol = tokenInfo?.baseToken.symbol || 'Base';
+    const quoteSymbol = tokenInfo?.quoteToken.symbol || 'Quote';
 
-    if (!isSwapSupported) {
-      return (
-        <div className="mt-4 p-3 bg-slate-700/20 rounded-lg">
-          <p className="text-xs text-slate-500">
-            Post-close swap not available on this chain. Supported: Ethereum,
-            Arbitrum, Base, Optimism.
-          </p>
-        </div>
-      );
-    }
+    const currentValue = !swapConfig.enabled
+      ? 'both'
+      : swapConfig.swapToQuote
+        ? 'quote'
+        : 'base';
+
+    const handleChange = (value: string) => {
+      if (value === 'both') {
+        setEnabled(false);
+      } else {
+        setEnabled(true);
+        setSwapToQuote(value === 'quote');
+      }
+    };
 
     return (
-      <div className="mt-4 pt-4 border-t border-slate-600/30 space-y-3">
-        <div className="text-[10px] text-slate-400 uppercase tracking-wide">
-          Post-Close Swap
-        </div>
-
-        {/* Toggle */}
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-300">Enable Swap</span>
-          <button
-            type="button"
-            onClick={() => setEnabled(!swapConfig.enabled)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
-              swapConfig.enabled ? 'bg-blue-600' : 'bg-slate-600'
-            }`}
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                swapConfig.enabled ? 'translate-x-4.5' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Swap details when enabled */}
-        {swapConfig.enabled && (
-          <div className="space-y-3">
-            {/* Direction display */}
-            <div className="flex items-center gap-2 text-sm">
-              <span className={swapConfig.swapToQuote ? 'text-slate-300' : 'text-blue-400 font-medium'}>
-                {swapConfig.swapToQuote ? baseSymbol : quoteSymbol}
-              </span>
-              <button
-                type="button"
-                onClick={toggleDirection}
-                className="p-1 rounded bg-slate-700/50 text-slate-400 hover:text-blue-400 hover:bg-slate-600/50 transition-colors cursor-pointer"
-                title={`Swap to ${swapConfig.swapToQuote ? baseSymbol : quoteSymbol}`}
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-              </button>
-              <span className={swapConfig.swapToQuote ? 'text-blue-400 font-medium' : 'text-slate-300'}>
-                {swapConfig.swapToQuote ? quoteSymbol : baseSymbol}
-              </span>
-            </div>
-
-            {/* Slippage */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-slate-400 mr-1">Slippage:</span>
-              {SWAP_SLIPPAGE_OPTIONS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setSlippage(value)}
-                  className={`py-1 px-2 text-xs rounded border transition-colors cursor-pointer ${
-                    swapConfig.slippageBps === value
-                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                      : 'border-slate-600 text-slate-400 hover:border-slate-500'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* High slippage warning */}
-            {swapConfig.slippageBps > 300 && (
-              <div className="flex items-start gap-1.5 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded">
-                <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 mt-0.5 flex-shrink-0" />
-                <p className="text-[11px] text-yellow-300">
-                  High slippage may result in unfavorable swap rates.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+      <div className="mt-3 flex items-center gap-2">
+        <span className="text-sm text-slate-400">Exit to</span>
+        <select
+          value={currentValue}
+          onChange={(e) => handleChange(e.target.value)}
+          className="bg-slate-700/50 border border-slate-600 rounded px-2 py-1 text-sm text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+        >
+          <option value="quote">{quoteSymbol}</option>
+          <option value="base">{baseSymbol}</option>
+          <option value="both">{baseSymbol} + {quoteSymbol}</option>
+        </select>
+        <button
+          type="button"
+          className="ml-auto text-sm text-blue-400 underline decoration-dashed cursor-pointer hover:text-blue-300"
+        >
+          Advanced Settings
+        </button>
       </div>
     );
   };
 
   // ============================================================
-  // SL Setup Tab
+  // Unified SL/TP Setup (two columns)
   // ============================================================
-  const renderSlTab = () => {
+  const renderSltpSection = () => {
     if (!tokenInfo) return null;
     const quoteSymbol = tokenInfo.quoteToken.symbol;
     const quoteDecimals = tokenInfo.quoteToken.decimals;
     const hasSl = state.stopLoss.enabled;
+    const hasTp = state.takeProfit.enabled;
 
     return (
-      <div>
-        {/* Trigger card */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Stop Loss column */}
         <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
-          <div className="flex items-center justify-between">
-            <div className="text-[10px] text-slate-400 uppercase tracking-wide">
-              Stop Loss
-            </div>
-            {hasSl ? (
+          <div className="text-[10px] text-slate-400 uppercase tracking-wide">Stop Loss</div>
+          {hasSl && state.stopLoss.priceBigint ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-red-400">
+                {formatCompactValue(state.stopLoss.priceBigint, quoteDecimals)} {quoteSymbol}
+              </span>
               <button
                 onClick={clearStopLoss}
                 className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
@@ -540,84 +428,27 @@ export function ConfigureStep() {
               >
                 <Trash2 className="w-3 h-3" />
               </button>
-            ) : (
-              <button
-                onClick={handleAddStopLoss}
-                disabled={currentPrice <= 0}
-                className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Add stop loss at -10%"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-          {hasSl && state.stopLoss.priceBigint ? (
-            <>
-              <div className="text-sm font-medium text-red-400">
-                {formatCompactValue(state.stopLoss.priceBigint, quoteDecimals)}{' '}
-                {quoteSymbol}
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">
-                  Max Drawdown
-                </div>
-                <div className="text-sm font-medium text-red-400">
-                  {maxDrawdown !== null ? (
-                    <>
-                      -{formatCompactValue(
-                        maxDrawdown,
-                        quoteDecimals
-                      )}{' '}
-                      {quoteSymbol}
-                      {maxDrawdownPercent !== null && (
-                        <span className="text-xs text-slate-500 ml-1">
-                          (-{maxDrawdownPercent.toFixed(1)}%)
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-slate-500">--</span>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-sm font-medium text-slate-500">Not set</div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">
-                  Max Drawdown
-                </div>
-                <div className="text-sm font-medium text-slate-500">--</div>
-              </div>
-            </>
-          )}
-
-          {/* SL swap config (only when trigger is set) */}
-          {hasSl && renderSwapConfig(state.slSwapConfig, setSlSwapEnabled, setSlSwapSlippage, () => setSlSwapToQuote(!state.slSwapConfig.swapToQuote))}
-        </div>
-      </div>
-    );
-  };
-
-  // ============================================================
-  // TP Setup Tab
-  // ============================================================
-  const renderTpTab = () => {
-    if (!tokenInfo) return null;
-    const quoteSymbol = tokenInfo.quoteToken.symbol;
-    const quoteDecimals = tokenInfo.quoteToken.decimals;
-    const hasTp = state.takeProfit.enabled;
-
-    return (
-      <div>
-        {/* Trigger card */}
-        <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
-          <div className="flex items-center justify-between">
-            <div className="text-[10px] text-slate-400 uppercase tracking-wide">
-              Take Profit
             </div>
-            {hasTp ? (
+          ) : (
+            <button
+              onClick={handleAddStopLoss}
+              disabled={currentPrice <= 0}
+              className="text-sm text-blue-400 underline decoration-dashed cursor-pointer hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Add Stop Loss
+            </button>
+          )}
+          {hasSl && renderExitToDropdown(state.slSwapConfig, setSlSwapEnabled, setSlSwapToQuote)}
+        </div>
+
+        {/* Take Profit column */}
+        <div className="bg-slate-700/30 rounded-lg p-3 border border-slate-600/50">
+          <div className="text-[10px] text-slate-400 uppercase tracking-wide">Take Profit</div>
+          {hasTp && state.takeProfit.priceBigint ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-green-400">
+                {formatCompactValue(state.takeProfit.priceBigint, quoteDecimals)} {quoteSymbol}
+              </span>
               <button
                 onClick={clearTakeProfit}
                 className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
@@ -625,113 +456,32 @@ export function ConfigureStep() {
               >
                 <Trash2 className="w-3 h-3" />
               </button>
-            ) : (
-              <button
-                onClick={handleAddTakeProfit}
-                disabled={currentPrice <= 0}
-                className="p-0.5 text-orange-400 hover:text-orange-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Add take profit at +10%"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-          {hasTp && state.takeProfit.priceBigint ? (
-            <>
-              <div className="text-sm font-medium text-green-400">
-                {formatCompactValue(
-                  state.takeProfit.priceBigint,
-                  quoteDecimals
-                )}{' '}
-                {quoteSymbol}
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">
-                  Max Runup
-                </div>
-                <div className="text-sm font-medium text-green-400">
-                  {maxRunup !== null ? (
-                    maxRunup === INFINITE_RUNUP ? (
-                      <>&#8734;</>
-                    ) : (
-                      <>
-                        +{formatCompactValue(
-                          maxRunup,
-                          quoteDecimals
-                        )}{' '}
-                        {quoteSymbol}
-                        {maxRunupPercent !== null && (
-                          <span className="text-xs text-slate-500 ml-1">
-                            (+{maxRunupPercent.toFixed(1)}%)
-                          </span>
-                        )}
-                      </>
-                    )
-                  ) : (
-                    <span className="text-slate-500">--</span>
-                  )}
-                </div>
-              </div>
-            </>
+            </div>
           ) : (
-            <>
-              <div className="text-sm font-medium text-slate-500">Not set</div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">
-                  Max Runup
-                </div>
-                <div className="text-sm font-medium text-slate-500">--</div>
-              </div>
-            </>
+            <button
+              onClick={handleAddTakeProfit}
+              disabled={currentPrice <= 0}
+              className="text-sm text-blue-400 underline decoration-dashed cursor-pointer hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Add Take Profit
+            </button>
           )}
-
-          {/* TP swap config (only when trigger is set) */}
-          {hasTp && renderSwapConfig(state.tpSwapConfig, setTpSwapEnabled, setTpSwapSlippage, () => setTpSwapToQuote(!state.tpSwapConfig.swapToQuote))}
+          {hasTp && renderExitToDropdown(state.tpSwapConfig, setTpSwapEnabled, setTpSwapToQuote)}
         </div>
       </div>
     );
   };
 
   // ============================================================
-  // Tab content
-  // ============================================================
-  const renderTabContent = () => {
-    switch (state.configurationTab) {
-      case 'sl':
-        return renderSlTab();
-      case 'tp':
-        return renderTpTab();
-      default:
-        return renderSlTab();
-    }
-  };
-
-  // ============================================================
-  // Interactive panel (left side - tabs + content)
+  // Interactive panel (left side - SL/TP config)
   // ============================================================
   const renderInteractive = () => (
     <div className="space-y-4">
-      {/* Header with tabs and zoom controls */}
+      {/* Header with title and zoom controls */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          {CONFIG_TABS.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setConfigurationTab(tab.id)}
-                className={`flex items-center gap-1.5 pb-2 text-sm font-medium transition-colors cursor-pointer border-b-2 ${
-                  state.configurationTab === tab.id
-                    ? 'text-blue-400 border-blue-400'
-                    : 'text-slate-400 border-transparent hover:text-slate-200'
-                }`}
-                title={tab.description}
-              >
-                <Icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-1.5 pb-2 text-sm font-medium text-blue-400 border-b-2 border-blue-400">
+          <Shield className="w-4 h-4" />
+          SL/TP Setup
         </div>
 
         {/* Zoom controls */}
@@ -763,8 +513,8 @@ export function ConfigureStep() {
         </div>
       </div>
 
-      {/* Tab content */}
-      <div className="pt-2">{renderTabContent()}</div>
+      {/* SL/TP two-column config */}
+      <div className="pt-2">{renderSltpSection()}</div>
     </div>
   );
 
@@ -838,7 +588,6 @@ export function ConfigureStep() {
           onStopLossPriceChange={handleStopLossPriceChange}
           onTakeProfitPriceChange={handleTakeProfitPriceChange}
           enableSLTPInteraction={scenario === 'combined'}
-          onSlTpInteraction={handleSlTpInteraction}
           scenario={scenario}
           className="flex-1 min-h-0"
         />
@@ -851,13 +600,13 @@ export function ConfigureStep() {
   };
 
   // ============================================================
-  // Summary panel (right side)
+  // Summary panel (right side) — uses shared components
   // ============================================================
   const renderSummary = () => {
     if (!tokenInfo) return null;
     const quoteDecimals = tokenInfo.quoteToken.decimals;
-    const quoteSymbol = tokenInfo.quoteToken.symbol;
     const baseSymbol = tokenInfo.baseToken.symbol;
+    const quoteSymbol = tokenInfo.quoteToken.symbol;
 
     return (
       <div className="h-full flex flex-col">
@@ -893,120 +642,25 @@ export function ConfigureStep() {
         </div>
 
         <div className="flex-1 space-y-4 overflow-auto">
-          {/* Trigger Prices */}
-          <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-            <p className="text-xs text-slate-400">Trigger Prices</p>
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Stop Loss</span>
-                {state.stopLoss.enabled && state.stopLoss.priceBigint ? (
-                  <span className="text-red-400 font-medium">
-                    {formatCompactValue(
-                      state.stopLoss.priceBigint,
-                      quoteDecimals
-                    )}{' '}
-                    {quoteSymbol}
-                  </span>
-                ) : (
-                  <span className="text-slate-500">Not set</span>
-                )}
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Take Profit</span>
-                {state.takeProfit.enabled && state.takeProfit.priceBigint ? (
-                  <span className="text-green-400 font-medium">
-                    {formatCompactValue(
-                      state.takeProfit.priceBigint,
-                      quoteDecimals
-                    )}{' '}
-                    {quoteSymbol}
-                  </span>
-                ) : (
-                  <span className="text-slate-500">Not set</span>
-                )}
-              </div>
-            </div>
-          </div>
+          {/* Risk Profile (shared component) */}
+          <RiskTriggersSection
+            stopLossPrice={state.stopLoss.enabled ? state.stopLoss.priceBigint : null}
+            takeProfitPrice={state.takeProfit.enabled ? state.takeProfit.priceBigint : null}
+            slDrawdown={slDrawdown}
+            tpRunup={tpRunup}
+            quoteTokenDecimals={quoteDecimals}
+            quoteSymbol={quoteSymbol}
+          />
 
-          {/* Risk Profile */}
-          <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-            <p className="text-xs text-slate-400">Risk Profile</p>
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Max Drawdown</span>
-                {maxDrawdown !== null ? (
-                  <span className="text-red-400 font-medium">
-                    -{formatCompactValue(maxDrawdown, quoteDecimals)}{' '}
-                    {quoteSymbol}
-                    {maxDrawdownPercent !== null && (
-                      <span className="text-xs text-slate-500 ml-1">
-                        (-{maxDrawdownPercent.toFixed(1)}%)
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-red-400 font-medium">-100%</span>
-                )}
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Max Runup</span>
-                {maxRunup !== null ? (
-                  maxRunup === INFINITE_RUNUP ? (
-                    <span className="text-green-400 font-medium">&#8734;</span>
-                  ) : (
-                    <span className="text-green-400 font-medium">
-                      +{formatCompactValue(maxRunup, quoteDecimals)}{' '}
-                      {quoteSymbol}
-                      {maxRunupPercent !== null && (
-                        <span className="text-xs text-slate-500 ml-1">
-                          (+{maxRunupPercent.toFixed(1)}%)
-                        </span>
-                      )}
-                    </span>
-                  )
-                ) : (
-                  <span className="text-slate-500">--</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Post-Close Swap (per-order) */}
-          {isSwapSupported && (
-            <div className="p-3 bg-slate-700/30 rounded-lg space-y-2.5">
-              <p className="text-xs text-slate-400">Post-Close Swap</p>
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">SL</span>
-                  <span
-                    className={
-                      state.slSwapConfig.enabled
-                        ? 'text-blue-400 font-medium'
-                        : 'text-slate-500'
-                    }
-                  >
-                    {state.slSwapConfig.enabled
-                      ? `${state.slSwapConfig.swapToQuote ? baseSymbol : quoteSymbol} \u2192 ${state.slSwapConfig.swapToQuote ? quoteSymbol : baseSymbol} (${(state.slSwapConfig.slippageBps / 100).toFixed(1)}%)`
-                      : 'Disabled'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">TP</span>
-                  <span
-                    className={
-                      state.tpSwapConfig.enabled
-                        ? 'text-blue-400 font-medium'
-                        : 'text-slate-500'
-                    }
-                  >
-                    {state.tpSwapConfig.enabled
-                      ? `${state.tpSwapConfig.swapToQuote ? baseSymbol : quoteSymbol} \u2192 ${state.tpSwapConfig.swapToQuote ? quoteSymbol : baseSymbol} (${(state.tpSwapConfig.slippageBps / 100).toFixed(1)}%)`
-                      : 'Disabled'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Post-Close Swap (shared component) */}
+          <PostCloseSwapSection
+            slSwapConfig={state.slSwapConfig}
+            tpSwapConfig={state.tpSwapConfig}
+            baseSymbol={baseSymbol}
+            quoteSymbol={quoteSymbol}
+            hasStopLoss={state.stopLoss.enabled}
+            hasTakeProfit={state.takeProfit.enabled}
+          />
         </div>
 
         {/* Continue button */}

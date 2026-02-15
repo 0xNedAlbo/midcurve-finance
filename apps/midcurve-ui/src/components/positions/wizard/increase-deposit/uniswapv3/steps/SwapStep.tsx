@@ -2,6 +2,7 @@ import { useEffect, useMemo, useCallback } from 'react';
 import { Check, Loader2, ArrowRight, Coins, PlusCircle, MinusCircle } from 'lucide-react';
 import { useAccount, useChainId } from 'wagmi';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
+import type { SwapConfig } from '@midcurve/shared';
 import {
   formatCompactValue,
   compareAddresses,
@@ -240,13 +241,15 @@ export function SwapStep() {
     ) === 0;
   }, [state.discoveredPool, baseToken]);
 
-  // Close order prices
+  // Close order prices and swap configs
   const closeOrderPrices = useMemo(() => {
     let stopLossPrice: bigint | null = null;
     let takeProfitPrice: bigint | null = null;
+    let slSwapConfig: SwapConfig | undefined;
+    let tpSwapConfig: SwapConfig | undefined;
 
     if (!state.activeCloseOrders.length || !state.discoveredPool || !baseToken || !quoteToken) {
-      return { stopLossPrice, takeProfitPrice };
+      return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
     }
 
     for (const order of state.activeCloseOrders) {
@@ -296,9 +299,21 @@ export function SwapStep() {
           }
         }
       } catch { /* ignore */ }
+
+      // Extract swap config from order
+      const swapCfg = orderConfig.swapConfig as { enabled?: boolean; direction?: string; slippageBps?: number } | undefined;
+      if (swapCfg?.enabled) {
+        const cfg: SwapConfig = {
+          enabled: true,
+          direction: swapCfg.direction as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+          slippageBps: swapCfg.slippageBps || 100,
+        };
+        if (orderConfig.triggerMode === 'LOWER') slSwapConfig = cfg;
+        if (orderConfig.triggerMode === 'UPPER') tpSwapConfig = cfg;
+      }
     }
 
-    return { stopLossPrice, takeProfitPrice };
+    return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
   }, [state.activeCloseOrders, state.discoveredPool, baseToken, quoteToken, isToken0Base]);
 
   // Simulation position for PnL curve
@@ -327,6 +342,8 @@ export function SwapStep() {
         underlyingPosition: basePosition,
         stopLossPrice: closeOrderPrices.stopLossPrice,
         takeProfitPrice: closeOrderPrices.takeProfitPrice,
+        stopLossSwapConfig: closeOrderPrices.slSwapConfig,
+        takeProfitSwapConfig: closeOrderPrices.tpSwapConfig,
       });
     } catch {
       return null;

@@ -27,6 +27,7 @@ import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { PositionRangeSection } from '../shared/PositionRangeSection';
 import { RiskTriggersSection } from '../shared/RiskTriggersSection';
+import { PostCloseSwapSection } from '../shared/PostCloseSwapSection';
 import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
 import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
@@ -1114,6 +1115,16 @@ export function PositionConfigStep() {
         tpRunup={tpRunup}
         quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
         quoteSymbol={state.quoteToken?.symbol || 'Quote'}
+      />
+
+      {/* Post-Close Swap */}
+      <PostCloseSwapSection
+        slSwapConfig={state.slSwapConfig}
+        tpSwapConfig={state.tpSwapConfig}
+        baseSymbol={state.baseToken?.symbol || 'Base'}
+        quoteSymbol={state.quoteToken?.symbol || 'Quote'}
+        hasStopLoss={stopLossPrice !== null}
+        hasTakeProfit={takeProfitPrice !== null}
       />
     </WizardSummaryPanel>
   );

@@ -2,7 +2,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react';
 import { Wallet, PlusCircle, MinusCircle, TrendingDown } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { useAccount } from 'wagmi';
-import type { PnLScenario } from '@midcurve/shared';
+import type { PnLScenario, SwapConfig } from '@midcurve/shared';
 import {
   formatCompactValue,
   calculatePositionValue,
@@ -191,13 +191,15 @@ export function ConfigureStep() {
     }
   }, [state.discoveredPool, position, calculations.liquidity, tickLower, tickUpper, isToken0Base]);
 
-  // Extract SL/TP prices from active close orders
+  // Extract SL/TP prices and swap configs from active close orders
   const closeOrderPrices = useMemo(() => {
     let stopLossPrice: bigint | null = null;
     let takeProfitPrice: bigint | null = null;
+    let slSwapConfig: SwapConfig | undefined;
+    let tpSwapConfig: SwapConfig | undefined;
 
     if (!state.activeCloseOrders.length || !state.discoveredPool || !baseToken || !quoteToken) {
-      return { stopLossPrice, takeProfitPrice };
+      return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
     }
 
     for (const order of state.activeCloseOrders) {
@@ -272,9 +274,21 @@ export function ConfigureStep() {
       } catch {
         // Ignore conversion errors for individual orders
       }
+
+      // Extract swap config from order
+      const swapCfg = orderConfig.swapConfig as { enabled?: boolean; direction?: string; slippageBps?: number } | undefined;
+      if (swapCfg?.enabled) {
+        const cfg: SwapConfig = {
+          enabled: true,
+          direction: swapCfg.direction as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+          slippageBps: swapCfg.slippageBps || 100,
+        };
+        if (orderConfig.triggerMode === 'LOWER') slSwapConfig = cfg;
+        if (orderConfig.triggerMode === 'UPPER') tpSwapConfig = cfg;
+      }
     }
 
-    return { stopLossPrice, takeProfitPrice };
+    return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
   }, [state.activeCloseOrders, state.discoveredPool, baseToken, quoteToken, isToken0Base]);
 
   // Auto-reset scenario when SL/TP is not available
@@ -311,6 +325,8 @@ export function ConfigureStep() {
         underlyingPosition: basePosition,
         stopLossPrice: closeOrderPrices.stopLossPrice,
         takeProfitPrice: closeOrderPrices.takeProfitPrice,
+        stopLossSwapConfig: closeOrderPrices.slSwapConfig,
+        takeProfitSwapConfig: closeOrderPrices.tpSwapConfig,
       });
     } catch {
       return null;
