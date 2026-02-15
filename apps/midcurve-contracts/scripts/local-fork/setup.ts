@@ -62,8 +62,6 @@ const FOUNDRY_SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
 interface SetupState {
   mockUsdAddress?: string;
-  mockAugustusAddress?: string;
-  mockAugustusRegistryAddress?: string;
   positionCloserAddress?: string;
   positionCloserVersion?: { major: number; minor: number };
   sharedContractId?: string;
@@ -174,8 +172,6 @@ function updateEnvFile(envPath: string, key: string, value: string): void {
  */
 function updateLocalChainConfig(
   mockUsdAddress: string,
-  _mockAugustusAddress?: string,
-  mockAugustusRegistryAddress?: string,
   positionCloserAddress?: string,
   poolAddress?: string,
   swapRouterAddress?: string
@@ -190,9 +186,6 @@ function updateLocalChainConfig(
   for (const envPath of backendEnvPaths) {
     try {
       updateEnvFile(envPath, 'MOCK_USD_ADDRESS', mockUsdAddress);
-      if (mockAugustusRegistryAddress) {
-        updateEnvFile(envPath, 'MOCK_AUGUSTUS_ADDRESS', mockAugustusRegistryAddress);
-      }
       if (positionCloserAddress) {
         updateEnvFile(envPath, 'UNISWAPV3_POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
       }
@@ -207,22 +200,11 @@ function updateLocalChainConfig(
       console.warn(`Warning: Could not update ${envPath}:`, error);
     }
   }
-
-  // UI .env file (needs VITE_ prefix for Vite build-time variables)
-  const uiEnvPath = resolve(process.cwd(), '../midcurve-ui/.env');
-  try {
-    if (mockAugustusRegistryAddress) {
-      updateEnvFile(uiEnvPath, 'VITE_MOCK_AUGUSTUS_REGISTRY_ADDRESS', mockAugustusRegistryAddress);
-    }
-    console.log(`Updated: ${uiEnvPath}`);
-  } catch (error) {
-    console.warn(`Warning: Could not update ${uiEnvPath}:`, error);
-  }
 }
 
 async function step1Deploy(state: SetupState): Promise<void> {
   console.log('\n' + '='.repeat(60));
-  console.log('Step 1: Deploy MockUSD, MockAugustus, and PositionCloser');
+  console.log('Step 1: Deploy MockUSD, PositionCloser, and MidcurveSwapRouter');
   console.log('='.repeat(60) + '\n');
 
   const output = await runCommand('forge', [
@@ -239,8 +221,6 @@ async function step1Deploy(state: SetupState): Promise<void> {
   // Extract addresses from output
   // Looking for patterns like "MockUSD deployed at: 0x..."
   state.mockUsdAddress = extractAddress(output, /MockUSD deployed at:\s*(0x[a-fA-F0-9]{40})/);
-  state.mockAugustusAddress = extractAddress(output, /MockAugustus deployed at:\s*(0x[a-fA-F0-9]{40})/);
-  state.mockAugustusRegistryAddress = extractAddress(output, /MockAugustusRegistry deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.positionCloserAddress = extractAddress(output, /PositionCloser deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.swapRouterAddress = extractAddress(output, /MidcurveSwapRouter deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.uniswapV3AdapterAddress = extractAddress(output, /UniswapV3Adapter deployed at:\s*(0x[a-fA-F0-9]{40})/);
@@ -248,17 +228,9 @@ async function step1Deploy(state: SetupState): Promise<void> {
   if (!state.mockUsdAddress) {
     throw new Error('Failed to extract MockUSD address from deploy output');
   }
-  if (!state.mockAugustusAddress) {
-    throw new Error('Failed to extract MockAugustus address from deploy output');
-  }
-  if (!state.mockAugustusRegistryAddress) {
-    throw new Error('Failed to extract MockAugustusRegistry address from deploy output');
-  }
 
   console.log('\n--- Extracted Addresses ---');
   console.log('MockUSD:', state.mockUsdAddress);
-  console.log('MockAugustus:', state.mockAugustusAddress);
-  console.log('MockAugustusRegistry:', state.mockAugustusRegistryAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
   console.log('MidcurveSwapRouter:', state.swapRouterAddress || '(not found)');
   console.log('UniswapV3Adapter:', state.uniswapV3AdapterAddress || '(not found)');
@@ -331,32 +303,6 @@ async function step2CreatePool(state: SetupState): Promise<void> {
 
   console.log('\n--- Extracted Address ---');
   console.log('Pool:', state.poolAddress);
-}
-
-async function step2bConfigureMockAugustus(state: SetupState): Promise<void> {
-  console.log('\n' + '='.repeat(60));
-  console.log('Step 2b: Configure MockAugustus with Pool');
-  console.log('='.repeat(60) + '\n');
-
-  if (!state.mockAugustusAddress || !state.poolAddress) {
-    throw new Error('MockAugustus or Pool address not set');
-  }
-
-  // Call MockAugustus.setPool(poolAddress) using cast
-  // Note: Function signature must be quoted to prevent shell from interpreting parentheses
-  await runCommand('cast', [
-    'send',
-    state.mockAugustusAddress,
-    '"setPool(address)"',
-    state.poolAddress,
-    '--rpc-url',
-    'http://localhost:8545',
-    '--unlocked',
-    '--from',
-    FOUNDRY_SENDER,
-  ]);
-
-  console.log(`Configured MockAugustus with pool: ${state.poolAddress}`);
 }
 
 async function step3AddLiquidity(state: SetupState): Promise<void> {
@@ -495,10 +441,9 @@ async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('');
   console.log('This script will:');
-  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, PositionCloser (Diamond), and MidcurveSwapRouter');
+  console.log('1. Deploy MockUSD, PositionCloser (Diamond), and MidcurveSwapRouter');
   console.log('1b. Read Diamond interface version');
   console.log('2. Create a WETH/MockUSD Uniswap V3 pool');
-  console.log('2b. Configure MockAugustus with pool address');
   console.log('3. Add initial liquidity to the pool');
   console.log('4. Fund test account #0 with 100 WETH + 1,000,000 MockUSD');
   console.log('5. Store SharedContract deployment info in database (PositionCloser + SwapRouter)');
@@ -513,14 +458,11 @@ async function main(): Promise<void> {
     await step1Deploy(state);
     await step1bReadDiamondVersion(state);
     await step2CreatePool(state);
-    await step2bConfigureMockAugustus(state);
 
     // Update .env files with all deployed addresses (after pool is created)
     console.log('\n--- Updating Configuration ---');
     updateLocalChainConfig(
       state.mockUsdAddress!,
-      state.mockAugustusAddress,
-      state.mockAugustusRegistryAddress,
       state.positionCloserAddress,
       state.poolAddress,
       state.swapRouterAddress
@@ -536,8 +478,6 @@ async function main(): Promise<void> {
     console.log('');
     console.log('Deployed Addresses:');
     console.log('  MockUSD:', state.mockUsdAddress);
-    console.log('  MockAugustus:', state.mockAugustusAddress);
-    console.log('  MockAugustusRegistry:', state.mockAugustusRegistryAddress);
     console.log('  PositionCloser (Diamond):', state.positionCloserAddress || '(not deployed)');
     if (state.positionCloserVersion) {
       console.log(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
@@ -562,8 +502,6 @@ async function main(): Promise<void> {
     console.log('');
     console.log('Environment Variables for Manual Commands:');
     console.log(`  export MOCK_USD_ADDRESS="${state.mockUsdAddress}"`);
-    console.log(`  export MOCK_AUGUSTUS_ADDRESS="${state.mockAugustusAddress}"`);
-    console.log(`  export MOCK_AUGUSTUS_REGISTRY_ADDRESS="${state.mockAugustusRegistryAddress}"`);
     console.log(`  export MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
     console.log(`  export SWAP_ROUTER_ADDRESS="${state.swapRouterAddress}"`);
@@ -588,8 +526,6 @@ async function main(): Promise<void> {
     console.error('');
     console.error('Current state:');
     console.error('  MockUSD:', state.mockUsdAddress || '(not deployed)');
-    console.error('  MockAugustus:', state.mockAugustusAddress || '(not deployed)');
-    console.error('  MockAugustusRegistry:', state.mockAugustusRegistryAddress || '(not deployed)');
     console.error('  PositionCloser:', state.positionCloserAddress || '(not deployed)');
     if (state.positionCloserVersion) {
       console.error(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
