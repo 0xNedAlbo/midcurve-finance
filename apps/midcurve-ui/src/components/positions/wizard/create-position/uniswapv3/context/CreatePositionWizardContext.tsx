@@ -20,7 +20,7 @@ import type { SwapConfigState } from '@/components/positions/wizard/risk-trigger
 
 // ----- Types -----
 
-export type ConfigurationTab = 'capital' | 'range' | 'sl' | 'tp';
+export type ConfigurationTab = 'capital' | 'range' | 'sltp';
 
 const DEFAULT_SWAP_CONFIG: SwapConfigState = {
   enabled: true,

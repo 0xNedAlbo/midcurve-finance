@@ -76,7 +76,7 @@ export function parseWizardUrlParams(searchParams: URLSearchParams): WizardUrlPa
   const currentStepIndex = stepStr ? Math.max(0, Math.min(5, parseInt(stepStr, 10))) : 0;
 
   const tabStr = searchParams.get('tab');
-  const validTabs: ConfigurationTab[] = ['capital', 'range', 'sl', 'tp'];
+  const validTabs: ConfigurationTab[] = ['capital', 'range', 'sltp'];
   const configurationTab = validTabs.includes(tabStr as ConfigurationTab)
     ? (tabStr as ConfigurationTab)
     : 'capital';
