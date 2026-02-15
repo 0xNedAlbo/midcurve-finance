@@ -332,9 +332,8 @@ contract UpgradeFacets is Script {
     }
 
     function getExecutionSelectors() internal pure returns (bytes4[] memory) {
-        bytes4[] memory selectors = new bytes4[](2);
+        bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = ExecutionFacet.executeOrder.selector;
-        selectors[1] = ExecutionFacet.uniswapV3SwapCallback.selector;
         return selectors;
     }
 
@@ -356,7 +355,7 @@ contract UpgradeFacets is Script {
         selectors[2] = ViewFacet.canExecuteOrder.selector;
         selectors[3] = ViewFacet.getCurrentTick.selector;
         selectors[4] = ViewFacet.positionManager.selector;
-        selectors[5] = ViewFacet.augustusRegistry.selector;
+        selectors[5] = ViewFacet.swapRouter.selector;
         selectors[6] = ViewFacet.maxFeeBps.selector;
         return selectors;
     }

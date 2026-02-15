@@ -42,13 +42,22 @@ export interface SignTransactionResult {
 }
 
 /**
- * Swap params for executeOrder with post-close swap via Paraswap
+ * A single hop in the swap route through MidcurveSwapRouter
+ */
+export interface HopParams {
+  venueId: string;      // bytes32 hex
+  tokenIn: Address;
+  tokenOut: Address;
+  venueData: Hex;
+}
+
+/**
+ * Swap params for executeOrder with post-close swap via MidcurveSwapRouter
  */
 export interface SwapParams {
-  augustus: Address;
-  swapCalldata: Hex;
-  deadline: number;
   minAmountOut: string; // Minimum output amount (slippage protection)
+  deadline: number;
+  hops: HopParams[];
 }
 
 /**
@@ -70,7 +79,7 @@ export interface SignExecuteOrderInput {
   gasPrice: bigint;
   // Nonce is required - caller fetches from chain (signer is stateless)
   nonce: number;
-  // Optional swap params for post-close swap via Paraswap or direct pool swap (augustus == address(0))
+  // Optional swap params for post-close swap via MidcurveSwapRouter
   swapParams?: SwapParams;
 }
 
@@ -120,10 +129,18 @@ const POSITION_CLOSER_ABI = [
         name: 'swapParams',
         type: 'tuple',
         components: [
-          { name: 'augustus', type: 'address' },
-          { name: 'swapCalldata', type: 'bytes' },
-          { name: 'deadline', type: 'uint256' },
           { name: 'minAmountOut', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+          {
+            name: 'hops',
+            type: 'tuple[]',
+            components: [
+              { name: 'venueId', type: 'bytes32' },
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'venueData', type: 'bytes' },
+            ],
+          },
         ],
       },
     ],
@@ -134,10 +151,9 @@ const POSITION_CLOSER_ABI = [
 
 // Empty swap params (no swap)
 const EMPTY_SWAP_PARAMS = {
-  augustus: '0x0000000000000000000000000000000000000000' as Address,
-  swapCalldata: '0x' as Hex,
-  deadline: 0n,
   minAmountOut: 0n,
+  deadline: 0n,
+  hops: [],
 } as const;
 
 // =============================================================================
@@ -170,10 +186,14 @@ class AutomationSigningServiceImpl {
     // 2. Build swap params tuple (use empty params if no swap)
     const swapParamsTuple = swapParams
       ? {
-          augustus: swapParams.augustus,
-          swapCalldata: swapParams.swapCalldata,
-          deadline: BigInt(swapParams.deadline),
           minAmountOut: BigInt(swapParams.minAmountOut),
+          deadline: BigInt(swapParams.deadline),
+          hops: swapParams.hops.map((hop) => ({
+            venueId: hop.venueId as `0x${string}`,
+            tokenIn: hop.tokenIn,
+            tokenOut: hop.tokenOut,
+            venueData: hop.venueData,
+          })),
         }
       : EMPTY_SWAP_PARAMS;
 

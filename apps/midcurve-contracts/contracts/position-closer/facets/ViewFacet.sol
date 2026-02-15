@@ -102,11 +102,11 @@ contract ViewFacet is Modifiers {
         return s.positionManager;
     }
 
-    /// @notice Get the Augustus registry address
-    /// @return The Paraswap AugustusRegistry address
-    function augustusRegistry() external view returns (address) {
+    /// @notice Get the MidcurveSwapRouter address
+    /// @return The MidcurveSwapRouter address
+    function swapRouter() external view returns (address) {
         AppStorage storage s = LibAppStorage.appStorage();
-        return s.augustusRegistry;
+        return s.swapRouter;
     }
 
     /// @notice Get the maximum fee in basis points

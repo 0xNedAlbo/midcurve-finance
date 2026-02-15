@@ -32,17 +32,22 @@ export interface SignedTransaction {
 }
 
 /**
- * Swap parameters for executeOrder with post-close swap
- *
- * When augustus is the zero address (0x0000...0000), the contract executes a direct
- * pool swap (fallback mode) instead of routing through Paraswap. In this mode,
- * swapCalldata and deadline are ignored, and minAmountOut provides slippage protection.
+ * A single hop in the swap route through MidcurveSwapRouter
+ */
+export interface HopInput {
+  venueId: string;      // bytes32 hex (e.g. keccak256("UniswapV3"))
+  tokenIn: string;      // Token in address
+  tokenOut: string;     // Token out address
+  venueData: string;    // Hex-encoded venue-specific data (e.g. abi.encode(uint24 fee))
+}
+
+/**
+ * Swap parameters for executeOrder with post-close swap via MidcurveSwapRouter
  */
 export interface SwapParamsInput {
-  augustus: string;       // Augustus swapper address, or 0x0 for direct pool swap
-  swapCalldata: string;   // Hex-encoded calldata (ignored when augustus == 0x0)
-  deadline: number;       // Unix timestamp or 0 for no deadline
   minAmountOut: string;   // Minimum output amount (slippage protection)
+  deadline: number;       // Unix timestamp or 0 for no deadline
+  hops: HopInput[];       // Swap route hops through MidcurveSwapRouter
 }
 
 export interface ExecuteOrderParams {
@@ -78,10 +83,18 @@ const POSITION_CLOSER_ABI = [
         name: 'swapParams',
         type: 'tuple',
         components: [
-          { name: 'augustus', type: 'address' },
-          { name: 'swapCalldata', type: 'bytes' },
-          { name: 'deadline', type: 'uint256' },
           { name: 'minAmountOut', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+          {
+            name: 'hops',
+            type: 'tuple[]',
+            components: [
+              { name: 'venueId', type: 'bytes32' },
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'venueData', type: 'bytes' },
+            ],
+          },
         ],
       },
     ],
@@ -92,10 +105,9 @@ const POSITION_CLOSER_ABI = [
 
 // Empty swap params (no swap)
 const EMPTY_SWAP_PARAMS = {
-  augustus: '0x0000000000000000000000000000000000000000' as Address,
-  swapCalldata: '0x' as `0x${string}`,
-  deadline: 0n,
   minAmountOut: 0n,
+  deadline: 0n,
+  hops: [],
 } as const;
 
 // =============================================================================
@@ -190,10 +202,14 @@ class SignerClient {
     // Build swap params tuple (use empty params if no swap)
     const swapParamsTuple = swapParams
       ? {
-          augustus: swapParams.augustus as Address,
-          swapCalldata: swapParams.swapCalldata as `0x${string}`,
-          deadline: BigInt(swapParams.deadline),
           minAmountOut: BigInt(swapParams.minAmountOut),
+          deadline: BigInt(swapParams.deadline),
+          hops: swapParams.hops.map((hop) => ({
+            venueId: hop.venueId as `0x${string}`,
+            tokenIn: hop.tokenIn as Address,
+            tokenOut: hop.tokenOut as Address,
+            venueData: hop.venueData as `0x${string}`,
+          })),
         }
       : EMPTY_SWAP_PARAMS;
 

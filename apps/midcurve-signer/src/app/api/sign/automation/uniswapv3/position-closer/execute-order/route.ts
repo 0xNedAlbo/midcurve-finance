@@ -29,10 +29,14 @@
  *     gasPrice: string (bigint as string),
  *     nonce: number (required, caller fetches from chain),
  *     swapParams?: {
- *       augustus: string (swap contract address, or 0x0 for direct pool swap),
- *       swapCalldata: string (hex-encoded calldata),
+ *       minAmountOut: string (minimum output amount for slippage protection),
  *       deadline: number (unix timestamp or 0),
- *       minAmountOut: string (minimum output amount for slippage protection)
+ *       hops: Array<{
+ *         venueId: string (bytes32 hex),
+ *         tokenIn: string (address),
+ *         tokenOut: string (address),
+ *         venueData: string (hex-encoded venue data)
+ *       }>
  *     }
  *   }
  *
@@ -65,13 +69,22 @@ import type { Address } from 'viem';
 const logger = signerLogger.child({ endpoint: 'sign-automation-execute-order' });
 
 /**
- * Swap params schema for executeOrder with post-close swap
+ * Hop schema for MidcurveSwapRouter route
+ */
+const HopSchema = z.object({
+  venueId: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid venueId (must be bytes32)'),
+  tokenIn: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid tokenIn address'),
+  tokenOut: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid tokenOut address'),
+  venueData: z.string().regex(/^0x[a-fA-F0-9]*$/, 'Invalid venueData'),
+});
+
+/**
+ * Swap params schema for executeOrder with post-close swap via MidcurveSwapRouter
  */
 const SwapParamsSchema = z.object({
-  augustus: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid augustus address'),
-  swapCalldata: z.string().regex(/^0x[a-fA-F0-9]*$/, 'Invalid swap calldata'),
-  deadline: z.number().int().nonnegative('deadline must be non-negative'),
   minAmountOut: z.string().regex(/^\d+$/, 'minAmountOut must be numeric string'),
+  deadline: z.number().int().nonnegative('deadline must be non-negative'),
+  hops: z.array(HopSchema).min(1, 'At least one hop is required'),
 });
 
 /**
@@ -93,7 +106,7 @@ const SignExecuteOrderSchema = z.object({
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
   // Nonce is required - caller fetches from chain (signer is stateless)
   nonce: z.number().int().nonnegative('nonce is required'),
-  // Optional swap params for post-close swap via Paraswap or direct pool swap
+  // Optional swap params for post-close swap via MidcurveSwapRouter
   swapParams: SwapParamsSchema.optional(),
 });
 
@@ -169,10 +182,14 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       nonce,
       swapParams: swapParams
         ? {
-            augustus: swapParams.augustus as Address,
-            swapCalldata: swapParams.swapCalldata as `0x${string}`,
-            deadline: swapParams.deadline,
             minAmountOut: swapParams.minAmountOut,
+            deadline: swapParams.deadline,
+            hops: swapParams.hops.map((hop) => ({
+              venueId: hop.venueId,
+              tokenIn: hop.tokenIn as Address,
+              tokenOut: hop.tokenOut as Address,
+              venueData: hop.venueData as `0x${string}`,
+            })),
           }
         : undefined,
     });

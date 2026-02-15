@@ -19,12 +19,12 @@ contract DiamondInit {
 
     /// @notice Initialize the diamond with chain constants and configuration
     /// @param positionManager_ The Uniswap V3 NonfungiblePositionManager address
-    /// @param augustusRegistry_ The Paraswap AugustusRegistry address for swap validation
+    /// @param swapRouter_ The MidcurveSwapRouter address for post-close token swaps
     /// @param interfaceVersion_ The interface version (e.g., 100 = v1.0, 101 = v1.1)
     /// @param maxFeeBps_ Maximum operator fee in basis points (e.g., 100 = 1%)
     function init(
         address positionManager_,
-        address augustusRegistry_,
+        address swapRouter_,
         uint32 interfaceVersion_,
         uint16 maxFeeBps_
     ) external {
@@ -35,11 +35,11 @@ contract DiamondInit {
 
         // Validate addresses
         if (positionManager_ == address(0)) revert ZeroAddress();
-        if (augustusRegistry_ == address(0)) revert ZeroAddress();
+        if (swapRouter_ == address(0)) revert ZeroAddress();
 
         // Set chain constants
         s.positionManager = positionManager_;
-        s.augustusRegistry = augustusRegistry_;
+        s.swapRouter = swapRouter_;
 
         // Set protocol configuration
         s.interfaceVersion = interfaceVersion_;

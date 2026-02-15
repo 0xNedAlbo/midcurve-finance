@@ -151,6 +151,9 @@ interface IMidcurveSwapRouter {
     /// @notice Check if a token is whitelisted as a SwapToken
     function isSwapToken(address token) external view returns (bool);
 
+    /// @notice Get all whitelisted swap tokens
+    function getSwapTokens() external view returns (address[] memory);
+
     /// @notice Get the current manager address
     function manager() external view returns (address);
 }

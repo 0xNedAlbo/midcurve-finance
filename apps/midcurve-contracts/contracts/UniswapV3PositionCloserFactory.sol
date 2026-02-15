@@ -20,8 +20,8 @@ contract UniswapV3PositionCloserFactory {
     /// @notice The Uniswap V3 NonfungiblePositionManager address
     address public immutable positionManager;
 
-    /// @notice The Paraswap AugustusRegistry address for swap validation
-    address public immutable augustusRegistry;
+    /// @notice The MidcurveSwapRouter address for post-close token swaps
+    address public immutable swapRouter;
 
     // ============ Shared Facets (Deploy Once Per Chain) ============
 
@@ -54,20 +54,20 @@ contract UniswapV3PositionCloserFactory {
 
     /// @notice Deploy factory with all shared facet addresses
     /// @param positionManager_ The Uniswap V3 NonfungiblePositionManager
-    /// @param augustusRegistry_ The Paraswap AugustusRegistry
+    /// @param swapRouter_ The MidcurveSwapRouter address
     /// @param facets_ Array of facet addresses in order:
     ///        [diamondCut, diamondLoupe, ownership, registration, execution,
     ///         ownerUpdate, view, version, multicall]
     constructor(
         address positionManager_,
-        address augustusRegistry_,
+        address swapRouter_,
         address[9] memory facets_
     ) {
         if (positionManager_ == address(0)) revert ZeroAddress();
-        if (augustusRegistry_ == address(0)) revert ZeroAddress();
+        if (swapRouter_ == address(0)) revert ZeroAddress();
 
         positionManager = positionManager_;
-        augustusRegistry = augustusRegistry_;
+        swapRouter = swapRouter_;
 
         diamondCutFacet = facets_[0];
         diamondLoupeFacet = facets_[1];
@@ -121,7 +121,7 @@ contract UniswapV3PositionCloserFactory {
 
         // Set chain constants
         s.positionManager = positionManager;
-        s.augustusRegistry = augustusRegistry;
+        s.swapRouter = swapRouter;
 
         // Set protocol config
         s.maxFeeBps = 100;          // 1% max operator fee
@@ -231,9 +231,8 @@ contract UniswapV3PositionCloserFactory {
     }
 
     function _getExecutionSelectors() internal pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](2);
-        selectors[0] = bytes4(keccak256("executeOrder(uint256,uint8,address,uint16,(address,bytes,uint256,uint256))"));
-        selectors[1] = bytes4(keccak256("uniswapV3SwapCallback(int256,int256,bytes)"));
+        selectors = new bytes4[](1);
+        selectors[0] = bytes4(keccak256("executeOrder(uint256,uint8,address,uint16,(uint256,uint256,(bytes32,address,address,bytes)[]))"));
     }
 
     function _getOwnerUpdateSelectors() internal pure returns (bytes4[] memory selectors) {
@@ -247,16 +246,14 @@ contract UniswapV3PositionCloserFactory {
     }
 
     function _getViewSelectors() internal pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](8);
+        selectors = new bytes4[](7);
         selectors[0] = bytes4(keccak256("getOrder(uint256,uint8)"));
         selectors[1] = bytes4(keccak256("hasOrder(uint256,uint8)"));
         selectors[2] = bytes4(keccak256("canExecuteOrder(uint256,uint8)"));
         selectors[3] = bytes4(keccak256("getCurrentTick(address)"));
         selectors[4] = bytes4(keccak256("positionManager()"));
-        selectors[5] = bytes4(keccak256("augustusRegistry()"));
+        selectors[5] = bytes4(keccak256("swapRouter()"));
         selectors[6] = bytes4(keccak256("maxFeeBps()"));
-        // Note: slot 7 unused, but array size matches expected count
-        selectors[7] = bytes4(0); // Placeholder
     }
 
     function _getVersionSelectors() internal pure returns (bytes4[] memory selectors) {

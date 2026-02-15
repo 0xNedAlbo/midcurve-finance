@@ -6,7 +6,8 @@
  */
 
 import type { AutomationContractConfig } from '@midcurve/shared';
-import { formatCurrency, getTokenAmountsFromLiquidity, UniswapV3Position } from '@midcurve/shared';
+import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
+import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
 import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
 import {
   broadcastTransaction,
@@ -14,13 +15,14 @@ import {
   getRevertReason,
   validatePositionForClose,
   simulateExecuteOrder,
-  calculatePoolSwapMinAmountOut,
   checkContractTokenBalances,
   getOnChainNonce,
   getOnChainOrder,
   readPoolPrice,
+  readSwapRouterAddress,
   type SupportedChainId,
   type PreflightValidation,
+  type SimulationSwapParams,
 } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -32,8 +34,7 @@ import {
   type OrderTriggerMessage,
   type ExecutionResultNotificationMessage,
 } from '../mq/messages';
-import { getSignerClient } from '../clients/signer-client';
-import { getSwapClient, type ParaswapSwapParams, PARASWAP_SUPPORTED_CHAINS } from '../clients/paraswap-client';
+import { getSignerClient, type SwapParamsInput } from '../clients/signer-client';
 
 const log = automationLogger.child({ component: 'OrderExecutor' });
 
@@ -315,10 +316,6 @@ export class OrderExecutor {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    // Read current retry count to determine if pool swap fallback is available
-    const currentRetryCount = ((order.state as Record<string, unknown>).retryCount as number) || 0;
-    const isLastAttempt = currentRetryCount >= MAX_EXECUTION_ATTEMPTS - 1;
-
     // Derive triggerMode from triggerSide for contract calls (0=LOWER, 1=UPPER)
     const triggerMode = triggerSide === 'upper' ? 1 : 0;
 
@@ -503,194 +500,114 @@ export class OrderExecutor {
     }
 
     // =========================================================================
-    // SWAP PARAMS: Build Paraswap swap params BEFORE simulation if swap is enabled
+    // SWAP PARAMS: Compute optimal swap path via SwapRouterService
     // Uses on-chain swap configuration (swapDirection, swapSlippageBps) since
     // the contract decides whether to swap based on on-chain state.
+    //
+    // SwapRouterService discovers multi-hop paths, ranks them by estimated
+    // output using local math, and applies CoinGecko fair-value slippage floor.
     // =========================================================================
-    let swapParams: ParaswapSwapParams | undefined;
+    let swapParams: SwapParamsInput | undefined;
 
     if (swapEnabled) {
-      const swapClient = getSwapClient(chainId);
+      log.info({
+        orderId,
+        positionId,
+        swapDirection,
+        swapSlippageBps,
+        msg: 'Computing swap params via SwapRouterService',
+      });
 
-      // Check if chain supports swaps
-      if (!swapClient.isChainSupported(chainId)) {
-        log.warn({
-          orderId,
-          positionId,
-          chainId,
-          msg: 'Swap enabled on-chain but chain not supported by swap client - execution will fail',
-        });
-        throw new Error(`Swap enabled on-chain but swap client does not support chain ${chainId}`);
-      } else {
-        log.info({
-          orderId,
-          positionId,
-          swapDirection,
-          swapSlippageBps,
-          msg: 'Building Paraswap swap params from on-chain config',
-        });
+      // Read swapRouter address from PositionCloser ViewFacet
+      const swapRouterAddress = await readSwapRouterAddress(
+        chainId as SupportedChainId,
+        contractAddress as `0x${string}`
+      );
 
-        // Get pool tokens directly (no base/quote indirection needed with TOKEN0_TO_1 / TOKEN1_TO_0)
-        const token0Address = position.pool.token0.config.address;
-        const token1Address = position.pool.token1.config.address;
-        const token0Decimals = position.pool.token0.decimals;
-        const token1Decimals = position.pool.token1.decimals;
+      // Fetch FRESH pool price for accurate position analysis
+      const { sqrtPriceX96: freshPoolPrice } = await readPoolPrice(
+        chainId as SupportedChainId,
+        poolAddress as `0x${string}`
+      );
 
-        // Determine src/dest based on explicit swap direction
-        const srcToken = swapDirection === 'TOKEN0_TO_1' ? token0Address : token1Address;
-        const destToken = swapDirection === 'TOKEN0_TO_1' ? token1Address : token0Address;
-        const srcDecimals = swapDirection === 'TOKEN0_TO_1' ? token0Decimals : token1Decimals;
-        const destDecimals = swapDirection === 'TOKEN0_TO_1' ? token1Decimals : token0Decimals;
-
-        // Calculate expected swap amount from preflight position data
-        // This uses the same Uniswap V3 math the contract uses to determine actual amounts
-        let swapAmount: bigint;
-        let freshPoolPrice: bigint; // Hoisted for access in pool swap fallback
-
-        if (nftId && preflight?.positionData) {
-          // Fetch FRESH pool price at execution time for accurate amount calculation
-          // The trigger price (_currentPrice) can be stale by seconds/minutes due to queue latency
-          ({ sqrtPriceX96: freshPoolPrice } = await readPoolPrice(
-            chainId as SupportedChainId,
-            poolAddress as `0x${string}`
-          ));
-
-          log.info({
-            orderId,
-            positionId,
-            triggerPrice: _currentPrice,
-            freshPrice: freshPoolPrice.toString(),
-            priceDelta: (freshPoolPrice - BigInt(_currentPrice)).toString(),
-            msg: 'Using fresh pool price for swap calculation (trigger price may be stale)',
-          });
-
-          // Calculate expected token amounts from liquidity using FRESH price
-          const expectedAmounts = getTokenAmountsFromLiquidity(
-            preflight.positionData.liquidity,
-            freshPoolPrice,
-            preflight.positionData.tickLower,
-            preflight.positionData.tickUpper
-          );
-
-          // Add tokensOwed (uncollected fees) to expected amounts
-          const totalAmount0 = expectedAmounts.token0Amount + preflight.positionData.tokensOwed0;
-          const totalAmount1 = expectedAmounts.token1Amount + preflight.positionData.tokensOwed1;
-
-          // Determine swap source amount based on explicit direction
-          // TOKEN0_TO_1: swap token0 → source is totalAmount0
-          // TOKEN1_TO_0: swap token1 → source is totalAmount1
-          const rawSwapAmount = swapDirection === 'TOKEN0_TO_1' ? totalAmount0 : totalAmount1;
-
-          // Apply 0.5% safety margin to swap amount to account for price movement
-          // between off-chain calculation and on-chain execution. This prevents
-          // "transfer amount exceeds balance" errors when the price moves slightly
-          // against us during the transaction confirmation window.
-          const SWAP_SAFETY_MARGIN_BPS = 50n; // 0.5%
-          swapAmount = (rawSwapAmount * (10000n - SWAP_SAFETY_MARGIN_BPS)) / 10000n;
-
-          log.info({
-            orderId,
-            positionId,
-            liquidity: preflight.positionData.liquidity.toString(),
-            totalAmount0: totalAmount0.toString(),
-            totalAmount1: totalAmount1.toString(),
-            swapDirection,
-            rawSwapAmount: rawSwapAmount.toString(),
-            safeSwapAmount: swapAmount.toString(),
-            safetyMarginBps: Number(SWAP_SAFETY_MARGIN_BPS),
-            msg: 'Calculated swap amount with 0.5% safety margin',
-          });
-        } else {
-          // Hard error - cannot proceed without position data for swap amount calculation
-          throw new Error(
-            `Cannot calculate swap amount: preflight position data unavailable for order ${orderId}`
-          );
-        }
-
-        // Get swap params from swap client (Paraswap or MockParaswap for local chain)
-        try {
-          swapParams = await swapClient.getSwapParams({
-            chainId: chainId as (typeof PARASWAP_SUPPORTED_CHAINS)[number],
-            srcToken: srcToken as `0x${string}`,
-            srcDecimals,
-            destToken: destToken as `0x${string}`,
-            destDecimals,
-            amount: swapAmount.toString(),
-            userAddress: contractAddress as `0x${string}`,
-            slippageBps: swapSlippageBps, // Use on-chain slippage
-          });
-
-          log.info({
-            orderId,
-            positionId,
-            augustusAddress: swapParams.augustusAddress,
-            srcToken: swapParams.srcToken,
-            destToken: swapParams.destToken,
-            msg: 'Swap params obtained',
-          });
-        } catch (swapErr) {
-          if (!isLastAttempt) {
-            // Not final attempt — throw and let retry mechanism handle it
-            log.warn({
-              orderId,
-              positionId,
-              error: (swapErr as Error).message,
-              retryCount: currentRetryCount,
-              msg: 'Paraswap failed, will retry',
-            });
-            throw new Error(
-              `Paraswap failed (attempt ${currentRetryCount + 1}/${MAX_EXECUTION_ATTEMPTS}): ${(swapErr as Error).message}`
-            );
-          }
-
-          // Final attempt — fall back to direct pool swap
-          log.warn({
-            orderId,
-            positionId,
-            error: (swapErr as Error).message,
-            retryCount: currentRetryCount,
-            msg: 'Paraswap failed on final attempt, falling back to direct pool swap',
-          });
-
-          const minAmountOut = calculatePoolSwapMinAmountOut(
-            swapAmount,
-            freshPoolPrice,
-            swapDirection as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
-            token0Decimals,
-            token1Decimals,
-            swapSlippageBps
-          );
-
-          swapParams = {
-            augustusAddress: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-            spenderAddress: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-            swapCalldata: '0x' as `0x${string}`,
-            srcToken: srcToken as `0x${string}`,
-            destToken: destToken as `0x${string}`,
-            srcAmount: swapAmount.toString(),
-            destAmount: minAmountOut.toString(),
-            minDestAmount: minAmountOut.toString(),
-            swapAllBalanceOffset: 0,
-          };
-
-          log.info({
-            orderId,
-            positionId,
-            minAmountOut: minAmountOut.toString(),
-            swapDirection,
-            msg: 'Pool swap fallback params built',
-          });
-        }
+      // Build pre-fetched position data from preflight validation
+      if (!preflight?.positionData) {
+        throw new Error(
+          `Cannot calculate swap amount: preflight position data unavailable for order ${orderId}`
+        );
       }
+
+      const swapRouterService = new SwapRouterService();
+      const swapResult: PostCloseSwapResult = await swapRouterService.computePostCloseSwapParams({
+        chainId,
+        nftId,
+        swapRouterAddress,
+        swapDirection: swapDirection as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
+        maxDeviationBps: swapSlippageBps,
+        positionData: {
+          token0: preflight.positionData.token0 as `0x${string}`,
+          token1: preflight.positionData.token1 as `0x${string}`,
+          fee: preflight.positionData.fee,
+          tickLower: preflight.positionData.tickLower,
+          tickUpper: preflight.positionData.tickUpper,
+          liquidity: preflight.positionData.liquidity,
+          tokensOwed0: preflight.positionData.tokensOwed0,
+          tokensOwed1: preflight.positionData.tokensOwed1,
+        },
+        currentSqrtPriceX96: freshPoolPrice,
+      });
+
+      if (swapResult.kind === 'do_not_execute') {
+        throw new Error(
+          `SwapRouterService: swap not executable — ${swapResult.reason}`
+        );
+      }
+
+      // Convert SwapInstruction to SwapParamsInput for signer client
+      swapParams = {
+        minAmountOut: swapResult.minAmountOut.toString(),
+        deadline: Number(swapResult.deadline),
+        hops: swapResult.hops.map((hop) => ({
+          venueId: hop.venueId,
+          tokenIn: hop.tokenIn,
+          tokenOut: hop.tokenOut,
+          venueData: hop.venueData,
+        })),
+      };
+
+      log.info({
+        orderId,
+        positionId,
+        tokenIn: swapResult.tokenIn,
+        tokenOut: swapResult.tokenOut,
+        estimatedAmountIn: swapResult.estimatedAmountIn.toString(),
+        minAmountOut: swapResult.minAmountOut.toString(),
+        hopsCount: swapResult.hops.length,
+        diagnostics: {
+          pathsEnumerated: swapResult.diagnostics.pathsEnumerated,
+          pathsQuoted: swapResult.diagnostics.pathsQuoted,
+          bestEstimatedAmountOut: swapResult.diagnostics.bestEstimatedAmountOut.toString(),
+          fairValuePrice: swapResult.diagnostics.fairValuePrice,
+          absoluteFloorAmountOut: swapResult.diagnostics.absoluteFloorAmountOut.toString(),
+          poolsDiscovered: swapResult.diagnostics.poolsDiscovered,
+          backbonePoolsCacheHit: swapResult.diagnostics.backbonePoolsCacheHit,
+          swapTokensCacheHit: swapResult.diagnostics.swapTokensCacheHit,
+        },
+        msg: 'SwapRouterService computed optimal swap params',
+      });
     }
 
     // Build simulation swap params
-    const simulationSwapParams = swapParams
+    const simulationSwapParams: SimulationSwapParams | undefined = swapParams
       ? {
-          augustus: swapParams.augustusAddress as `0x${string}`,
-          swapCalldata: swapParams.swapCalldata as `0x${string}`,
-          deadline: 0n,
-          minAmountOut: BigInt(swapParams.minDestAmount),
+          minAmountOut: BigInt(swapParams.minAmountOut),
+          deadline: BigInt(swapParams.deadline),
+          hops: swapParams.hops.map((hop) => ({
+            venueId: hop.venueId as `0x${string}`,
+            tokenIn: hop.tokenIn as `0x${string}`,
+            tokenOut: hop.tokenOut as `0x${string}`,
+            venueData: hop.venueData as `0x${string}`,
+          })),
         }
       : undefined;
 
@@ -822,14 +739,7 @@ export class OrderExecutor {
       feeBps: feeConfig.bps,
       operatorAddress,
       nonce,
-      swapParams: swapParams
-        ? {
-            augustus: swapParams.augustusAddress,
-            swapCalldata: swapParams.swapCalldata,
-            deadline: 0, // No deadline by default
-            minAmountOut: swapParams.minDestAmount,
-          }
-        : undefined,
+      swapParams,
     });
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {

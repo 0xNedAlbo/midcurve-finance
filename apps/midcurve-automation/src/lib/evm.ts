@@ -125,6 +125,28 @@ export async function readPoolPrice(
 }
 
 /**
+ * Read pool fee tier from a Uniswap V3 pool
+ *
+ * @param chainId - Chain ID
+ * @param poolAddress - Uniswap V3 pool address
+ * @returns Fee tier (e.g. 500, 3000, 10000)
+ */
+export async function readPoolFee(
+  chainId: SupportedChainId,
+  poolAddress: `0x${string}`
+): Promise<number> {
+  const client = getPublicClient(chainId);
+
+  const fee = await client.readContract({
+    address: poolAddress,
+    abi: UNISWAP_V3_POOL_FEE_ABI,
+    functionName: 'fee',
+  });
+
+  return fee;
+}
+
+/**
  * Read current block number for a chain
  */
 export async function readBlockNumber(chainId: SupportedChainId): Promise<bigint> {
@@ -632,10 +654,19 @@ const POSITION_CLOSER_ABI = [
         name: 'swapParams',
         type: 'tuple',
         components: [
-          { internalType: 'address', name: 'augustus', type: 'address' },
-          { internalType: 'bytes', name: 'swapCalldata', type: 'bytes' },
-          { internalType: 'uint256', name: 'deadline', type: 'uint256' },
           { internalType: 'uint256', name: 'minAmountOut', type: 'uint256' },
+          { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+          {
+            internalType: 'struct IMidcurveSwapRouter.Hop[]',
+            name: 'hops',
+            type: 'tuple[]',
+            components: [
+              { internalType: 'bytes32', name: 'venueId', type: 'bytes32' },
+              { internalType: 'address', name: 'tokenIn', type: 'address' },
+              { internalType: 'address', name: 'tokenOut', type: 'address' },
+              { internalType: 'bytes', name: 'venueData', type: 'bytes' },
+            ],
+          },
         ],
       },
     ],
@@ -676,23 +707,44 @@ const POSITION_CLOSER_ABI = [
 ] as const;
 
 /**
+ * UniswapV3 Pool ABI for fee reading
+ */
+const UNISWAP_V3_POOL_FEE_ABI = [
+  {
+    inputs: [],
+    name: 'fee',
+    outputs: [{ internalType: 'uint24', name: '', type: 'uint24' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+/**
  * Empty swap params for no-swap execution
  */
-const EMPTY_SWAP_PARAMS = {
-  augustus: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-  swapCalldata: '0x' as `0x${string}`,
-  deadline: 0n,
+const EMPTY_SWAP_PARAMS: SimulationSwapParams = {
   minAmountOut: 0n,
-} as const;
+  deadline: 0n,
+  hops: [],
+};
+
+/**
+ * Hop type for simulation swap params
+ */
+export interface SimulationHop {
+  venueId: `0x${string}`;
+  tokenIn: `0x${string}`;
+  tokenOut: `0x${string}`;
+  venueData: `0x${string}`;
+}
 
 /**
  * Swap params type for simulation
  */
 export interface SimulationSwapParams {
-  augustus: `0x${string}`;
-  swapCalldata: `0x${string}`;
-  deadline: bigint;
   minAmountOut: bigint;
+  deadline: bigint;
+  hops: SimulationHop[];
 }
 
 /**
@@ -729,7 +781,7 @@ export async function simulateExecuteOrder(
       address: contractAddress,
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeOrder',
-      args: [nftId, triggerMode, feeRecipient, feeBps, swapParamsTuple],
+      args: [nftId, triggerMode, feeRecipient, feeBps, swapParamsTuple] as any,
       account: operatorAddress,
     });
 
@@ -881,4 +933,30 @@ export async function getOnChainOrder(
     swapDirection: Number(result.swapDirection),
     swapSlippageBps: Number(result.swapSlippageBps),
   };
+}
+
+/**
+ * Read the MidcurveSwapRouter address from the PositionCloser's ViewFacet.
+ */
+const VIEW_FACET_SWAP_ROUTER_ABI = [
+  {
+    type: 'function',
+    name: 'swapRouter',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const;
+
+export async function readSwapRouterAddress(
+  chainId: SupportedChainId,
+  contractAddress: `0x${string}`
+): Promise<`0x${string}`> {
+  const client = getPublicClient(chainId);
+
+  return client.readContract({
+    address: contractAddress,
+    abi: VIEW_FACET_SWAP_ROUTER_ABI,
+    functionName: 'swapRouter',
+  });
 }

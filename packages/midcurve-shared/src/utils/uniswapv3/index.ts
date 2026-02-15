@@ -15,6 +15,7 @@ export * from './liquidity.js';
 export * from './position.js';
 export * from './utils.js';
 export * from './fees.js';
+export * from './swap.js';
 
 // Commonly used functions (convenience re-exports)
 export {
@@ -68,3 +69,9 @@ export type {
   UnclaimedFeeAmountsInput,
   UnclaimedFeeAmountsResult,
 } from './fees.js';
+
+export {
+  // Swap estimation
+  computeExpectedSwapOutput,
+  computeMultiHopSwapOutput,
+} from './swap.js';

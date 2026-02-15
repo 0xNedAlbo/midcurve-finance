@@ -43,12 +43,12 @@ contract DeployPositionCloserDiamond is Script {
     // ========================================
 
     /// @notice Deploy the PositionCloser Diamond
-    /// @param augustusRegistry The Paraswap AugustusRegistry address
+    /// @param swapRouter The MidcurveSwapRouter address
     /// @param owner The diamond owner address
     /// @return diamond The deployed diamond address
-    function run(address augustusRegistry, address owner) public returns (address diamond) {
+    function run(address swapRouter, address owner) public returns (address diamond) {
         console.log("=== Deploying PositionCloser Diamond ===");
-        console.log("Augustus Registry:", augustusRegistry);
+        console.log("SwapRouter:", swapRouter);
         console.log("Owner:", owner);
         console.log("Interface Version:", INTERFACE_VERSION);
         console.log("");
@@ -164,7 +164,7 @@ contract DeployPositionCloserDiamond is Script {
         bytes memory initCalldata = abi.encodeWithSelector(
             DiamondInit.init.selector,
             NFPM,
-            augustusRegistry,
+            swapRouter,
             INTERFACE_VERSION,
             MAX_FEE_BPS
         );
@@ -236,9 +236,8 @@ contract DeployPositionCloserDiamond is Script {
     }
 
     function getExecutionSelectors() internal pure returns (bytes4[] memory) {
-        bytes4[] memory selectors = new bytes4[](2);
+        bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = ExecutionFacet.executeOrder.selector;
-        selectors[1] = ExecutionFacet.uniswapV3SwapCallback.selector;
         return selectors;
     }
 
@@ -260,7 +259,7 @@ contract DeployPositionCloserDiamond is Script {
         selectors[2] = ViewFacet.canExecuteOrder.selector;
         selectors[3] = ViewFacet.getCurrentTick.selector;
         selectors[4] = ViewFacet.positionManager.selector;
-        selectors[5] = ViewFacet.augustusRegistry.selector;
+        selectors[5] = ViewFacet.swapRouter.selector;
         selectors[6] = ViewFacet.maxFeeBps.selector;
         return selectors;
     }

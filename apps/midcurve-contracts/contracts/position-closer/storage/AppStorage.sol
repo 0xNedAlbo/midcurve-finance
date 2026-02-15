@@ -23,7 +23,7 @@ enum OrderStatus {
     CANCELLED    // 3 - Order was cancelled by owner
 }
 
-/// @notice Swap direction for post-close token conversion via Paraswap
+/// @notice Swap direction for post-close token conversion
 /// @dev Uses Uniswap's native token ordering (token0/token1), role-agnostic
 enum SwapDirection {
     NONE,         // 0 - No swap, user receives both tokens as-is
@@ -70,8 +70,8 @@ struct AppStorage {
     /// @notice The Uniswap V3 NonfungiblePositionManager address
     address positionManager;
 
-    /// @notice The Paraswap AugustusRegistry address for swap validation
-    address augustusRegistry;
+    /// @notice The MidcurveSwapRouter address for post-close token swaps
+    address swapRouter;
 
     // ========================================
     // PROTOCOL CONFIGURATION
@@ -105,12 +105,6 @@ struct AppStorage {
     /// @notice Whether the contract has been initialized
     bool initialized;
 
-    // ========================================
-    // TRANSIENT STATE (for swap callbacks)
-    // ========================================
-
-    /// @notice Expected pool for swap callback validation
-    address expectedSwapPool;
 }
 
 // =============================================================================
@@ -197,8 +191,6 @@ abstract contract Modifiers {
     error NftNotApproved(address owner, uint256 nftId);
     error FeeBpsTooHigh(uint16 feeBps, uint16 maxFeeBps);
     error TransferFailed();
-    error InvalidAugustus(address augustus);
-    error SwapDeadlineExpired(uint256 deadline, uint256 current);
     error SwapFailed();
     error SwapOutputZero();
     error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);

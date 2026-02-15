@@ -25,17 +25,14 @@ import {DiamondInit} from "../contracts/position-closer/init/DiamondInit.sol";
 /// @dev Usage:
 ///   forge script script/DeployPositionCloser.s.sol --rpc-url local --broadcast --unlocked --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 ///
-/// Environment variables (optional):
-///   AUGUSTUS_REGISTRY - Override the AugustusRegistry address (default: uses existing MockAugustusRegistry)
+/// Environment variables (required):
+///   SWAP_ROUTER - The MidcurveSwapRouter address
 contract DeployPositionCloser is Script {
     // Mainnet NFPM address (available in fork)
     address constant NFPM = 0xC36442b4a4522E871399CD717aBDD847Ab11FE88;
 
     // Foundry test account #0 (pre-funded in Anvil)
     address constant FOUNDRY_SENDER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-
-    // Default MockAugustusRegistry from local:setup
-    address constant DEFAULT_AUGUSTUS_REGISTRY = 0x9A676e781A523b5d0C0e43731313A708CB607508;
 
     // Interface version: 100 = v1.0
     uint32 constant INTERFACE_VERSION = 100;
@@ -44,15 +41,11 @@ contract DeployPositionCloser is Script {
     uint16 constant MAX_FEE_BPS = 100;
 
     function run() public {
-        // Allow override of AugustusRegistry via env var
-        address augustusRegistry = DEFAULT_AUGUSTUS_REGISTRY;
-        try vm.envAddress("AUGUSTUS_REGISTRY") returns (address envRegistry) {
-            augustusRegistry = envRegistry;
-        } catch {}
+        address swapRouter = vm.envAddress("SWAP_ROUTER");
 
         console.log("=== Deploying PositionCloser Diamond ===");
         console.log("NFPM:", NFPM);
-        console.log("AugustusRegistry:", augustusRegistry);
+        console.log("SwapRouter:", swapRouter);
         console.log("Owner:", FOUNDRY_SENDER);
         console.log("");
 
@@ -129,7 +122,7 @@ contract DeployPositionCloser is Script {
         bytes memory initCalldata = abi.encodeWithSelector(
             DiamondInit.init.selector,
             NFPM,
-            augustusRegistry,
+            swapRouter,
             INTERFACE_VERSION,
             MAX_FEE_BPS
         );
@@ -196,9 +189,8 @@ contract DeployPositionCloser is Script {
     }
 
     function getExecutionSelectors() internal pure returns (bytes4[] memory) {
-        bytes4[] memory selectors = new bytes4[](2);
+        bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = ExecutionFacet.executeOrder.selector;
-        selectors[1] = ExecutionFacet.uniswapV3SwapCallback.selector;
         return selectors;
     }
 
@@ -220,7 +212,7 @@ contract DeployPositionCloser is Script {
         selectors[2] = ViewFacet.canExecuteOrder.selector;
         selectors[3] = ViewFacet.getCurrentTick.selector;
         selectors[4] = ViewFacet.positionManager.selector;
-        selectors[5] = ViewFacet.augustusRegistry.selector;
+        selectors[5] = ViewFacet.swapRouter.selector;
         selectors[6] = ViewFacet.maxFeeBps.selector;
         return selectors;
     }

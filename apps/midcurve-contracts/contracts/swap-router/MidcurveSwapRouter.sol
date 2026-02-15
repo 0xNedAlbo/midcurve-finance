@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import { IERC20 } from "../interfaces/IERC20.sol";
 import { SafeERC20 } from "../libraries/SafeERC20.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { IMidcurveSwapRouter } from "./interfaces/IMidcurveSwapRouter.sol";
 import { IVenueAdapter } from "./interfaces/IVenueAdapter.sol";
 
@@ -14,6 +15,7 @@ import { IVenueAdapter } from "./interfaces/IVenueAdapter.sol";
 ///      is violated, the entire transaction reverts.
 contract MidcurveSwapRouter is IMidcurveSwapRouter {
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     // ============================================================================
     // State
@@ -27,7 +29,7 @@ contract MidcurveSwapRouter is IMidcurveSwapRouter {
     mapping(bytes32 => address) public venueAdapters;
 
     /// @notice Whitelisted intermediary tokens for path validation
-    mapping(address => bool) public isSwapToken;
+    EnumerableSet.AddressSet private _swapTokens;
 
     /// @dev Reentrancy lock (1 = unlocked, 2 = locked)
     uint256 private _reentrancyLock;
@@ -187,17 +189,15 @@ contract MidcurveSwapRouter is IMidcurveSwapRouter {
     /// @inheritdoc IMidcurveSwapRouter
     function addSwapToken(address token) external onlyManager {
         if (token == address(0)) revert ZeroAddress();
-        if (isSwapToken[token]) revert SwapTokenAlreadyWhitelisted(token);
+        if (!_swapTokens.add(token)) revert SwapTokenAlreadyWhitelisted(token);
 
-        isSwapToken[token] = true;
         emit SwapTokenAdded(token);
     }
 
     /// @inheritdoc IMidcurveSwapRouter
     function removeSwapToken(address token) external onlyManager {
-        if (!isSwapToken[token]) revert SwapTokenNotWhitelisted(token);
+        if (!_swapTokens.remove(token)) revert SwapTokenNotWhitelisted(token);
 
-        isSwapToken[token] = false;
         emit SwapTokenRemoved(token);
     }
 
@@ -231,6 +231,16 @@ contract MidcurveSwapRouter is IMidcurveSwapRouter {
     /// @inheritdoc IMidcurveSwapRouter
     function getAdapter(bytes32 venueId) external view returns (address) {
         return venueAdapters[venueId];
+    }
+
+    /// @inheritdoc IMidcurveSwapRouter
+    function isSwapToken(address token) external view returns (bool) {
+        return _swapTokens.contains(token);
+    }
+
+    /// @inheritdoc IMidcurveSwapRouter
+    function getSwapTokens() external view returns (address[] memory) {
+        return _swapTokens.values();
     }
 
     // ============================================================================
@@ -280,6 +290,6 @@ contract MidcurveSwapRouter is IMidcurveSwapRouter {
 
     /// @dev Check if a token is allowed in a hop: must be one of the overall endpoints or a whitelisted SwapToken
     function _isAllowedToken(address token, address overallTokenIn, address overallTokenOut) internal view returns (bool) {
-        return token == overallTokenIn || token == overallTokenOut || isSwapToken[token];
+        return token == overallTokenIn || token == overallTokenOut || _swapTokens.contains(token);
     }
 }

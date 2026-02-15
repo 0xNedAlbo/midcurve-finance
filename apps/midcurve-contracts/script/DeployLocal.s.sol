@@ -3,8 +3,6 @@ pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {MockUSD} from "../contracts/MockUSD.sol";
-import {MockAugustus} from "../contracts/mocks/MockAugustus.sol";
-import {MockAugustusRegistry} from "../contracts/mocks/MockAugustusRegistry.sol";
 
 // Diamond core
 import {Diamond} from "../contracts/position-closer/diamond/Diamond.sol";
@@ -35,8 +33,7 @@ import {UniswapV3Adapter} from "../contracts/swap-router/adapters/UniswapV3Adapt
  *   pnpm local:deploy (or via pnpm local:setup)
  *
  * This uses the Foundry default account #0 which is pre-funded with ETH.
- * The MockAugustus contract is used instead of real Paraswap since Paraswap API
- * cannot price custom tokens like mockUSD.
+ * Swaps are routed through the MidcurveSwapRouter with UniswapV3Adapter.
  */
 contract DeployLocalScript is Script {
     // Mainnet NFPM address (available in fork)
@@ -75,17 +72,32 @@ contract DeployLocalScript is Script {
         MockUSD mockUSD = new MockUSD();
         console.log("MockUSD deployed at:", address(mockUSD));
 
-        // Deploy MockAugustus (for local swap execution)
-        MockAugustus mockAugustus = new MockAugustus();
-        console.log("MockAugustus deployed at:", address(mockAugustus));
+        // ========================================
+        // 2. Deploy MidcurveSwapRouter (before Diamond, since Diamond init needs router address)
+        // ========================================
+        console.log("");
+        console.log("--- Deploying MidcurveSwapRouter ---");
 
-        // Deploy MockAugustusRegistry and register MockAugustus
-        MockAugustusRegistry mockRegistry = new MockAugustusRegistry();
-        mockRegistry.setValidAugustus(address(mockAugustus), true);
-        console.log("MockAugustusRegistry deployed at:", address(mockRegistry));
+        // Deploy UniswapV3Adapter with mainnet SwapRouter02
+        UniswapV3Adapter uniAdapter = new UniswapV3Adapter(UNISWAP_SWAP_ROUTER);
+        console.log("UniswapV3Adapter deployed at:", address(uniAdapter));
+
+        // Deploy MidcurveSwapRouter with FOUNDRY_SENDER as manager
+        MidcurveSwapRouter midcurveSwapRouter = new MidcurveSwapRouter(FOUNDRY_SENDER);
+        console.log("MidcurveSwapRouter deployed at:", address(midcurveSwapRouter));
+
+        // Register UniswapV3 adapter
+        midcurveSwapRouter.registerAdapter(uniAdapter.VENUE_ID(), address(uniAdapter));
+
+        // Add default SwapTokens (WETH + USDC available in mainnet fork)
+        // Note: MockUSD is intentionally NOT added as a SwapToken — it serves as an
+        // endpoint token in test swaps (e.g., MockUSD → WETH → USDC) so we can
+        // exercise multi-hop path validation.
+        midcurveSwapRouter.addSwapToken(WETH);
+        midcurveSwapRouter.addSwapToken(USDC);
 
         // ========================================
-        // 2. Deploy PositionCloser Diamond
+        // 3. Deploy PositionCloser Diamond
         // ========================================
         console.log("");
         console.log("--- Deploying PositionCloser Diamond ---");
@@ -161,11 +173,11 @@ contract DeployLocalScript is Script {
             functionSelectors: getMulticallSelectors()
         });
 
-        // Build init calldata
+        // Build init calldata (pass MidcurveSwapRouter as swap router)
         bytes memory initCalldata = abi.encodeWithSelector(
             DiamondInit.init.selector,
             NFPM,
-            address(mockRegistry),
+            address(midcurveSwapRouter),
             INTERFACE_VERSION,
             MAX_FEE_BPS
         );
@@ -180,30 +192,6 @@ contract DeployLocalScript is Script {
         Diamond positionCloserDiamond = new Diamond(facetCuts, args);
         console.log("PositionCloser deployed at:", address(positionCloserDiamond));
 
-        // ========================================
-        // 3. Deploy MidcurveSwapRouter
-        // ========================================
-        console.log("");
-        console.log("--- Deploying MidcurveSwapRouter ---");
-
-        // Deploy UniswapV3Adapter with mainnet SwapRouter02
-        UniswapV3Adapter uniAdapter = new UniswapV3Adapter(UNISWAP_SWAP_ROUTER);
-        console.log("UniswapV3Adapter deployed at:", address(uniAdapter));
-
-        // Deploy MidcurveSwapRouter with FOUNDRY_SENDER as manager
-        MidcurveSwapRouter midcurveSwapRouter = new MidcurveSwapRouter(FOUNDRY_SENDER);
-        console.log("MidcurveSwapRouter deployed at:", address(midcurveSwapRouter));
-
-        // Register UniswapV3 adapter
-        midcurveSwapRouter.registerAdapter(uniAdapter.VENUE_ID(), address(uniAdapter));
-
-        // Add default SwapTokens (WETH + USDC available in mainnet fork)
-        // Note: MockUSD is intentionally NOT added as a SwapToken — it serves as an
-        // endpoint token in test swaps (e.g., MockUSD → WETH → USDC) so we can
-        // exercise multi-hop path validation.
-        midcurveSwapRouter.addSwapToken(WETH);
-        midcurveSwapRouter.addSwapToken(USDC);
-
         vm.stopBroadcast();
 
         console.log("");
@@ -212,12 +200,10 @@ contract DeployLocalScript is Script {
         console.log("========================================");
         console.log("");
         console.log("MockUSD:", address(mockUSD));
-        console.log("MockAugustus:", address(mockAugustus));
-        console.log("MockAugustusRegistry:", address(mockRegistry));
-        console.log("PositionCloser:", address(positionCloserDiamond));
-        console.log("Interface Version:", INTERFACE_VERSION);
         console.log("MidcurveSwapRouter:", address(midcurveSwapRouter));
         console.log("UniswapV3Adapter:", address(uniAdapter));
+        console.log("PositionCloser:", address(positionCloserDiamond));
+        console.log("Interface Version:", INTERFACE_VERSION);
         console.log("");
         console.log("========================================");
     }
@@ -264,9 +250,8 @@ contract DeployLocalScript is Script {
     }
 
     function getExecutionSelectors() internal pure returns (bytes4[] memory) {
-        bytes4[] memory selectors = new bytes4[](2);
+        bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = ExecutionFacet.executeOrder.selector;
-        selectors[1] = ExecutionFacet.uniswapV3SwapCallback.selector;
         return selectors;
     }
 
@@ -288,7 +273,7 @@ contract DeployLocalScript is Script {
         selectors[2] = ViewFacet.canExecuteOrder.selector;
         selectors[3] = ViewFacet.getCurrentTick.selector;
         selectors[4] = ViewFacet.positionManager.selector;
-        selectors[5] = ViewFacet.augustusRegistry.selector;
+        selectors[5] = ViewFacet.swapRouter.selector;
         selectors[6] = ViewFacet.maxFeeBps.selector;
         return selectors;
     }

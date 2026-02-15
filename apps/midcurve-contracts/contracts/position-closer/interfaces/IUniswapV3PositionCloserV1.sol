@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {TriggerMode, SwapDirection, CloseOrder} from "../storage/AppStorage.sol";
+import {IMidcurveSwapRouter} from "../../swap-router/interfaces/IMidcurveSwapRouter.sol";
 
 /// @title IUniswapV3PositionCloserV1
 /// @notice Versioned interface for UniswapV3 Position Closer Diamond (V1)
@@ -54,15 +55,13 @@ interface IUniswapV3PositionCloserV1 {
     // EXECUTION
     // ========================================
 
-    /// @notice Parameters for swap execution
-    /// @dev When augustus == address(0), the contract executes a direct pool swap (fallback mode)
-    ///      instead of routing through Paraswap. In this mode, swapCalldata and deadline are ignored,
-    ///      and minAmountOut provides slippage protection against the pool price.
+    /// @notice Parameters for swap execution via MidcurveSwapRouter
+    /// @dev The swap route (hops) is determined off-chain and passed in by the operator.
+    ///      An empty hops array means no swap (used when swapDirection is NONE).
     struct SwapParams {
-        address augustus;           // AugustusSwapper address (verified against registry), or address(0) for direct pool swap
-        bytes swapCalldata;         // Fresh calldata from Paraswap API (ignored when augustus == address(0))
-        uint256 deadline;           // Swap deadline (0 = no deadline, ignored when augustus == address(0))
-        uint256 minAmountOut;       // Minimum output amount (slippage protection, used in both modes)
+        uint256 minAmountOut;               // Minimum output amount (slippage protection)
+        uint256 deadline;                   // Swap deadline (0 = no deadline)
+        IMidcurveSwapRouter.Hop[] hops;     // Swap route through MidcurveSwapRouter
     }
 
     /// @notice Execute a close order when trigger condition is met
@@ -169,9 +168,9 @@ interface IUniswapV3PositionCloserV1 {
     /// @return The NonfungiblePositionManager address
     function positionManager() external view returns (address);
 
-    /// @notice Get the Augustus registry address
-    /// @return The Paraswap AugustusRegistry address
-    function augustusRegistry() external view returns (address);
+    /// @notice Get the MidcurveSwapRouter address
+    /// @return The MidcurveSwapRouter address
+    function swapRouter() external view returns (address);
 
     /// @notice Get the maximum fee in basis points
     /// @return The max fee bps (e.g., 100 = 1%)
@@ -273,18 +272,8 @@ interface IUniswapV3PositionCloserV1 {
         uint256 feeAmount1
     );
 
-    /// @notice Emitted when post-close swap is executed via Paraswap
+    /// @notice Emitted when post-close swap is executed via MidcurveSwapRouter
     event SwapExecuted(
-        uint256 indexed nftId,
-        TriggerMode indexed triggerMode,
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOut
-    );
-
-    /// @notice Emitted when post-close swap is executed via direct pool swap (fallback)
-    event PoolSwapExecuted(
         uint256 indexed nftId,
         TriggerMode indexed triggerMode,
         address tokenIn,
