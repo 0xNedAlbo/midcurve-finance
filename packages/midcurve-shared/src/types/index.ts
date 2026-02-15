@@ -319,6 +319,7 @@ export {
   buildSharedContractHash,
   parseSharedContractHash,
   buildUniswapV3PositionCloserHash,
+  buildMidcurveSwapRouterHash,
   parseInterfaceVersion,
   buildInterfaceVersion,
 } from './shared-contract/index.js';

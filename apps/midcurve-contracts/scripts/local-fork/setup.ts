@@ -70,6 +70,10 @@ interface SetupState {
   sharedContractHash?: string;
   poolAddress?: string;
   positionTokenId?: string;
+  swapRouterAddress?: string;
+  uniswapV3AdapterAddress?: string;
+  swapRouterContractId?: string;
+  swapRouterContractHash?: string;
 }
 
 async function runCommand(
@@ -173,7 +177,8 @@ function updateLocalChainConfig(
   _mockAugustusAddress?: string,
   mockAugustusRegistryAddress?: string,
   positionCloserAddress?: string,
-  poolAddress?: string
+  poolAddress?: string,
+  swapRouterAddress?: string
 ): void {
   // Backend .env files (contracts, automation, and API)
   const backendEnvPaths = [
@@ -193,6 +198,9 @@ function updateLocalChainConfig(
       }
       if (poolAddress) {
         updateEnvFile(envPath, 'MOCK_USD_WETH_POOL_ADDRESS', poolAddress);
+      }
+      if (swapRouterAddress) {
+        updateEnvFile(envPath, 'MIDCURVE_SWAP_ROUTER_ADDRESS_LOCAL', swapRouterAddress);
       }
       console.log(`Updated: ${envPath}`);
     } catch (error) {
@@ -234,6 +242,8 @@ async function step1Deploy(state: SetupState): Promise<void> {
   state.mockAugustusAddress = extractAddress(output, /MockAugustus deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.mockAugustusRegistryAddress = extractAddress(output, /MockAugustusRegistry deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.positionCloserAddress = extractAddress(output, /PositionCloser deployed at:\s*(0x[a-fA-F0-9]{40})/);
+  state.swapRouterAddress = extractAddress(output, /MidcurveSwapRouter deployed at:\s*(0x[a-fA-F0-9]{40})/);
+  state.uniswapV3AdapterAddress = extractAddress(output, /UniswapV3Adapter deployed at:\s*(0x[a-fA-F0-9]{40})/);
 
   if (!state.mockUsdAddress) {
     throw new Error('Failed to extract MockUSD address from deploy output');
@@ -250,6 +260,8 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('MockAugustus:', state.mockAugustusAddress);
   console.log('MockAugustusRegistry:', state.mockAugustusRegistryAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
+  console.log('MidcurveSwapRouter:', state.swapRouterAddress || '(not found)');
+  console.log('UniswapV3Adapter:', state.uniswapV3AdapterAddress || '(not found)');
 }
 
 async function step1bReadDiamondVersion(state: SetupState): Promise<void> {
@@ -437,14 +449,43 @@ async function step5StoreSharedContract(state: SetupState): Promise<void> {
     state.sharedContractId = result.id;
     state.sharedContractHash = result.sharedContractHash;
 
-    console.log('SharedContract upserted:');
+    console.log('SharedContract upserted (PositionCloser):');
     console.log('  ID:', result.id);
     console.log('  Hash:', result.sharedContractHash);
     console.log('  Address:', result.config.address);
     console.log(`  Version: v${result.interfaceVersionMajor}.${result.interfaceVersionMinor}`);
   } catch (error) {
-    console.error('Failed to store SharedContract:', error);
+    console.error('Failed to store PositionCloser SharedContract:', error);
     throw error;
+  }
+
+  // Store SwapRouter in database
+  if (state.swapRouterAddress) {
+    try {
+      const swapRouterResult = await sharedContractService.upsert({
+        sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
+        sharedContractName: SharedContractNameEnum.MIDCURVE_SWAP_ROUTER,
+        interfaceVersionMajor: 1,
+        interfaceVersionMinor: 0,
+        chainId: LOCAL_CHAIN_ID,
+        address: state.swapRouterAddress,
+        isActive: true,
+      });
+
+      state.swapRouterContractId = swapRouterResult.id;
+      state.swapRouterContractHash = swapRouterResult.sharedContractHash;
+
+      console.log('SharedContract upserted (SwapRouter):');
+      console.log('  ID:', swapRouterResult.id);
+      console.log('  Hash:', swapRouterResult.sharedContractHash);
+      console.log('  Address:', swapRouterResult.config.address);
+      console.log(`  Version: v${swapRouterResult.interfaceVersionMajor}.${swapRouterResult.interfaceVersionMinor}`);
+    } catch (error) {
+      console.error('Failed to store SwapRouter SharedContract:', error);
+      throw error;
+    }
+  } else {
+    console.log('SwapRouter not deployed - skipping database storage');
   }
 }
 
@@ -454,13 +495,13 @@ async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('');
   console.log('This script will:');
-  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, and PositionCloser (Diamond)');
+  console.log('1. Deploy MockUSD, MockAugustus, MockAugustusRegistry, PositionCloser (Diamond), and MidcurveSwapRouter');
   console.log('1b. Read Diamond interface version');
   console.log('2. Create a WETH/MockUSD Uniswap V3 pool');
   console.log('2b. Configure MockAugustus with pool address');
   console.log('3. Add initial liquidity to the pool');
   console.log('4. Fund test account #0 with 100 WETH + 1,000,000 MockUSD');
-  console.log('5. Store SharedContract deployment info in database');
+  console.log('5. Store SharedContract deployment info in database (PositionCloser + SwapRouter)');
   console.log('');
   console.log('Prerequisites:');
   console.log('- Anvil running on port 8545 (pnpm local:anvil)');
@@ -481,7 +522,8 @@ async function main(): Promise<void> {
       state.mockAugustusAddress,
       state.mockAugustusRegistryAddress,
       state.positionCloserAddress,
-      state.poolAddress
+      state.poolAddress,
+      state.swapRouterAddress
     );
 
     await step3AddLiquidity(state);
@@ -500,14 +542,22 @@ async function main(): Promise<void> {
     if (state.positionCloserVersion) {
       console.log(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
     }
+    console.log('  MidcurveSwapRouter:', state.swapRouterAddress || '(not deployed)');
+    console.log('  UniswapV3Adapter:', state.uniswapV3AdapterAddress || '(not deployed)');
     console.log('  Pool:', state.poolAddress);
     console.log('');
     if (state.sharedContractId) {
-      console.log('SharedContract Database Record:');
-      console.log('  ID:', state.sharedContractId);
-      console.log('  Hash:', state.sharedContractHash);
-      console.log('');
+      console.log('SharedContract Database Records:');
+      console.log('  PositionCloser:');
+      console.log('    ID:', state.sharedContractId);
+      console.log('    Hash:', state.sharedContractHash);
     }
+    if (state.swapRouterContractId) {
+      console.log('  SwapRouter:');
+      console.log('    ID:', state.swapRouterContractId);
+      console.log('    Hash:', state.swapRouterContractHash);
+    }
+    console.log('');
     console.log('Position NFT Token ID:', state.positionTokenId || '(not minted)');
     console.log('');
     console.log('Environment Variables for Manual Commands:');
@@ -516,6 +566,7 @@ async function main(): Promise<void> {
     console.log(`  export MOCK_AUGUSTUS_REGISTRY_ADDRESS="${state.mockAugustusRegistryAddress}"`);
     console.log(`  export MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
+    console.log(`  export SWAP_ROUTER_ADDRESS="${state.swapRouterAddress}"`);
     console.log('');
     console.log('Next Steps:');
     console.log('1. Check pool price:');
@@ -543,8 +594,10 @@ async function main(): Promise<void> {
     if (state.positionCloserVersion) {
       console.error(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
     }
+    console.error('  MidcurveSwapRouter:', state.swapRouterAddress || '(not deployed)');
     console.error('  Pool:', state.poolAddress || '(not created)');
-    console.error('  SharedContract:', state.sharedContractId || '(not stored)');
+    console.error('  SharedContract (PositionCloser):', state.sharedContractId || '(not stored)');
+    console.error('  SharedContract (SwapRouter):', state.swapRouterContractId || '(not stored)');
     console.error('');
     console.error('Make sure Anvil is running: pnpm local:anvil');
     process.exit(1);

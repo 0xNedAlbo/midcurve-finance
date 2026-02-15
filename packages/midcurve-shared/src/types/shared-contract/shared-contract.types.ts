@@ -19,6 +19,7 @@ export type SharedContractType =
  */
 export const SharedContractName = {
   UNISWAP_V3_POSITION_CLOSER: 'UniswapV3PositionCloser',
+  MIDCURVE_SWAP_ROUTER: 'MidcurveSwapRouter',
 } as const;
 
 export type SharedContractName =

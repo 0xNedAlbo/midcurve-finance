@@ -24,6 +24,10 @@ import {MulticallFacet} from "../contracts/position-closer/facets/MulticallFacet
 // Init
 import {DiamondInit} from "../contracts/position-closer/init/DiamondInit.sol";
 
+// SwapRouter
+import {MidcurveSwapRouter} from "../contracts/swap-router/MidcurveSwapRouter.sol";
+import {UniswapV3Adapter} from "../contracts/swap-router/adapters/UniswapV3Adapter.sol";
+
 /**
  * @title DeployLocalScript
  * @notice Deploys mock infrastructure and PositionCloser Diamond for local Anvil fork testing
@@ -46,6 +50,13 @@ contract DeployLocalScript is Script {
 
     // Max operator fee: 1% (100 basis points)
     uint16 constant MAX_FEE_BPS = 100;
+
+    // Mainnet Uniswap V3 SwapRouter02 (available in fork)
+    address constant UNISWAP_SWAP_ROUTER = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
+
+    // Mainnet WETH and USDC (available in fork)
+    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
 
     function run() public {
         console.log("=== Local Fork Deployment (Automation) ===");
@@ -169,6 +180,30 @@ contract DeployLocalScript is Script {
         Diamond positionCloserDiamond = new Diamond(facetCuts, args);
         console.log("PositionCloser deployed at:", address(positionCloserDiamond));
 
+        // ========================================
+        // 3. Deploy MidcurveSwapRouter
+        // ========================================
+        console.log("");
+        console.log("--- Deploying MidcurveSwapRouter ---");
+
+        // Deploy UniswapV3Adapter with mainnet SwapRouter02
+        UniswapV3Adapter uniAdapter = new UniswapV3Adapter(UNISWAP_SWAP_ROUTER);
+        console.log("UniswapV3Adapter deployed at:", address(uniAdapter));
+
+        // Deploy MidcurveSwapRouter with FOUNDRY_SENDER as manager
+        MidcurveSwapRouter midcurveSwapRouter = new MidcurveSwapRouter(FOUNDRY_SENDER);
+        console.log("MidcurveSwapRouter deployed at:", address(midcurveSwapRouter));
+
+        // Register UniswapV3 adapter
+        midcurveSwapRouter.registerAdapter(uniAdapter.VENUE_ID(), address(uniAdapter));
+
+        // Add default SwapTokens (WETH + USDC available in mainnet fork)
+        // Note: MockUSD is intentionally NOT added as a SwapToken — it serves as an
+        // endpoint token in test swaps (e.g., MockUSD → WETH → USDC) so we can
+        // exercise multi-hop path validation.
+        midcurveSwapRouter.addSwapToken(WETH);
+        midcurveSwapRouter.addSwapToken(USDC);
+
         vm.stopBroadcast();
 
         console.log("");
@@ -181,6 +216,8 @@ contract DeployLocalScript is Script {
         console.log("MockAugustusRegistry:", address(mockRegistry));
         console.log("PositionCloser:", address(positionCloserDiamond));
         console.log("Interface Version:", INTERFACE_VERSION);
+        console.log("MidcurveSwapRouter:", address(midcurveSwapRouter));
+        console.log("UniswapV3Adapter:", address(uniAdapter));
         console.log("");
         console.log("========================================");
     }

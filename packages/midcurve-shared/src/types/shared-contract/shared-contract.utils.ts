@@ -102,6 +102,24 @@ export function buildUniswapV3PositionCloserHash(
 }
 
 /**
+ * Build hash for MidcurveSwapRouter on EVM
+ * Convenience function for swap router lookups
+ */
+export function buildMidcurveSwapRouterHash(
+  major: number,
+  minor: number,
+  chainId: number
+): string {
+  return buildSharedContractHash(
+    SharedContractType.EVM_SMART_CONTRACT,
+    SharedContractName.MIDCURVE_SWAP_ROUTER,
+    major,
+    minor,
+    chainId
+  );
+}
+
+/**
  * Parse interface version from uint32 format used by smart contracts
  *
  * The on-chain version format is: major * 100 + minor
