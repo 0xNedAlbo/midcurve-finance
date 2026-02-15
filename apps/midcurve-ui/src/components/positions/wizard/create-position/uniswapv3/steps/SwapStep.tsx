@@ -15,10 +15,11 @@
 
 'use client';
 
-import { useEffect, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { Check, Loader2, ArrowRight, Coins, PlusCircle, MinusCircle } from 'lucide-react';
 import { useAccount, useChainId } from 'wagmi';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
+import type { SwapConfig, PnLScenario } from '@midcurve/shared';
 import {
   formatCompactValue,
   compareAddresses,
@@ -27,7 +28,7 @@ import {
   tickToPrice,
 } from '@midcurve/shared';
 
-import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
+import { useCreatePositionWizard, computeSwapDirection } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { PositionRangeSection } from '../shared/PositionRangeSection';
@@ -37,6 +38,7 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { getChainSlugByChainId } from '@/config/chains';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
+import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
 
 /**
  * Small token logo with fallback
@@ -157,6 +159,7 @@ export function SwapStep() {
   const { state, setStepValid, goNext, setNeedsSwap, setInteractiveZoom, saveOriginalAmounts } = useCreatePositionWizard();
   const { address: walletAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
+  const [scenario, setScenario] = useState<PnLScenario>('combined');
 
   // Zoom handlers using context state
   const handleZoomIn = useCallback(() => {
@@ -326,16 +329,35 @@ export function SwapStep() {
         costBasis,
       });
 
-      // Wrap in overlay with SL/TP prices for chart display
+      // Build per-order swap configs for PnL curve shape
+      const isToken0Quote = !isToken0Base;
+      const slSwapConfig: SwapConfig | undefined = state.slSwapConfig.enabled
+        ? {
+            enabled: true,
+            direction: computeSwapDirection(state.slSwapConfig.swapToQuote, isToken0Quote),
+            slippageBps: state.slSwapConfig.slippageBps,
+          }
+        : undefined;
+      const tpSwapConfig: SwapConfig | undefined = state.tpSwapConfig.enabled
+        ? {
+            enabled: true,
+            direction: computeSwapDirection(state.tpSwapConfig.swapToQuote, isToken0Quote),
+            slippageBps: state.tpSwapConfig.slippageBps,
+          }
+        : undefined;
+
+      // Wrap in overlay with SL/TP prices and swap configs for chart display
       return new CloseOrderSimulationOverlay({
         underlyingPosition: basePosition,
         takeProfitPrice: slTpPrices.takeProfitPrice,
         stopLossPrice: slTpPrices.stopLossPrice,
+        stopLossSwapConfig: slSwapConfig,
+        takeProfitSwapConfig: tpSwapConfig,
       });
     } catch {
       return null;
     }
-  }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base, slTpPrices]);
+  }, [state.discoveredPool, state.liquidity, state.tickLower, state.tickUpper, state.defaultTickLower, state.defaultTickUpper, state.totalQuoteValue, isToken0Base, slTpPrices, state.slSwapConfig.enabled, state.slSwapConfig.swapToQuote, state.slSwapConfig.slippageBps, state.tpSwapConfig.enabled, state.tpSwapConfig.swapToQuote, state.tpSwapConfig.slippageBps]);
 
   // Calculate max drawdown (loss at SL price)
   const slDrawdown = useMemo(() => {
@@ -616,6 +638,12 @@ export function SwapStep() {
       const pool = state.discoveredPool!;
       return (
         <div className="h-full flex flex-col min-h-0">
+          <PnLScenarioTabs
+            scenario={scenario}
+            onScenarioChange={setScenario}
+            hasStopLoss={slTpPrices.stopLossPrice !== null}
+            hasTakeProfit={slTpPrices.takeProfitPrice !== null}
+          />
           <InteractivePnLCurve
             poolData={{
               token0Address: pool.token0.config.address as string,
@@ -637,6 +665,7 @@ export function SwapStep() {
               decimals: state.quoteToken!.decimals,
             }}
             position={simulationPosition}
+            scenario={scenario}
             sliderBounds={sliderBounds}
             // No interaction callbacks = non-interactive display
             className="flex-1 min-h-0"
