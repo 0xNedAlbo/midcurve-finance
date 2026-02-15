@@ -27,7 +27,7 @@ import {
   positionStateFromJSON,
 } from './uniswapv3-position-state.js';
 import { calculatePositionValue, getTokenAmountsFromLiquidity_X96 } from '../../../utils/uniswapv3/liquidity.js';
-import { priceToSqrtRatioX96 } from '../../../utils/uniswapv3/price.js';
+import { priceToSqrtRatioX96, tickToPrice } from '../../../utils/uniswapv3/price.js';
 import type { PositionPhase } from '../../../utils/uniswapv3/types.js';
 
 // ============================================================================
@@ -413,6 +413,12 @@ export class UniswapV3Position extends BasePosition {
   static forSimulation(params: UniswapV3SimulationParams): UniswapV3Position {
     const now = new Date();
 
+    // Compute actual price range from ticks (needed by CloseOrderSimulationOverlay.maxRunup/maxDrawdown)
+    const baseToken = params.isToken0Quote ? params.pool.token1 : params.pool.token0;
+    const quoteToken = params.isToken0Quote ? params.pool.token0 : params.pool.token1;
+    const priceRangeLower = tickToPrice(params.tickLower, baseToken.address, quoteToken.address, baseToken.decimals);
+    const priceRangeUpper = tickToPrice(params.tickUpper, baseToken.address, quoteToken.address, baseToken.decimals);
+
     return new UniswapV3Position({
       // Identity (placeholder values for simulation)
       id: 'simulation',
@@ -438,9 +444,9 @@ export class UniswapV3Position extends BasePosition {
       lastFeesCollectedAt: now,
       totalApr: null,
 
-      // Price range (placeholder - actual calculation uses ticks)
-      priceRangeLower: 0n,
-      priceRangeUpper: 0n,
+      // Price range (computed from ticks)
+      priceRangeLower,
+      priceRangeUpper,
 
       // Lifecycle
       positionOpenedAt: now,

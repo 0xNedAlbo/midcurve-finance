@@ -13,6 +13,7 @@ import {
   getTickSpacing,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
+  INFINITE_RUNUP,
 } from '@midcurve/shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
@@ -755,33 +756,34 @@ export function PositionConfigStep() {
     setTakeProfitPrice(null);
   }, []);
 
-  // Calculate max drawdown (loss at SL price)
+  // Max drawdown across the full combined PnL curve (accounts for triggers + swap configs)
   const slDrawdown = useMemo(() => {
-    if (!stopLossPrice || !simulationPosition) return null;
+    if (!simulationPosition) return null;
     try {
-      const result = simulationPosition.simulatePnLAtPrice(stopLossPrice);
-      return {
-        pnlValue: result.pnlValue,
-        pnlPercent: result.pnlPercent,
-      };
+      const drawdown = simulationPosition.maxDrawdown();
+      const pnlPercent = costBasis !== 0n
+        ? Number((drawdown * 1000000n) / costBasis) / 10000
+        : null;
+      return { pnlValue: -drawdown, pnlPercent: pnlPercent != null ? -pnlPercent : undefined };
     } catch {
       return null;
     }
-  }, [stopLossPrice, simulationPosition]);
+  }, [simulationPosition, costBasis]);
 
-  // Calculate max runup (profit at TP price)
+  // Max runup across the full combined PnL curve (accounts for triggers + swap configs)
   const tpRunup = useMemo(() => {
-    if (!takeProfitPrice || !simulationPosition) return null;
+    if (!simulationPosition) return null;
     try {
-      const result = simulationPosition.simulatePnLAtPrice(takeProfitPrice);
-      return {
-        pnlValue: result.pnlValue,
-        pnlPercent: result.pnlPercent,
-      };
+      const runup = simulationPosition.maxRunup();
+      if (runup === INFINITE_RUNUP) return { pnlValue: INFINITE_RUNUP, pnlPercent: undefined };
+      const pnlPercent = costBasis !== 0n
+        ? Number((runup * 1000000n) / costBasis) / 10000
+        : null;
+      return { pnlValue: runup, pnlPercent: pnlPercent ?? undefined };
     } catch {
       return null;
     }
-  }, [takeProfitPrice, simulationPosition]);
+  }, [simulationPosition, costBasis]);
 
   // Check if chain supports Paraswap swap integration
   const chainId = state.selectedPool?.chainId ?? 0;
@@ -918,34 +920,11 @@ export function PositionConfigStep() {
             )}
           </div>
           {hasSl ? (
-            <>
-              <div className="text-sm font-medium text-red-400">
-                {formatCompactValue(stopLossPrice, quoteDecimals)} {quoteSymbol}
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">Max Drawdown</div>
-                <div className="text-sm font-medium text-red-400">
-                  {slDrawdown ? (
-                    <>
-                      {formatCompactValue(slDrawdown.pnlValue, quoteDecimals)} {quoteSymbol}
-                      <span className="text-xs text-slate-500 ml-1">
-                        ({slDrawdown.pnlPercent >= 0 ? '+' : ''}{slDrawdown.pnlPercent.toFixed(1)}%)
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-slate-500">--</span>
-                  )}
-                </div>
-              </div>
-            </>
+            <div className="text-sm font-medium text-red-400">
+              {formatCompactValue(stopLossPrice, quoteDecimals)} {quoteSymbol}
+            </div>
           ) : (
-            <>
-              <div className="text-sm font-medium text-slate-500">Not set</div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">Max Drawdown</div>
-                <div className="text-sm font-medium text-slate-500">--</div>
-              </div>
-            </>
+            <div className="text-sm font-medium text-slate-500">Not set</div>
           )}
 
           {/* SL swap config (only when trigger is set) */}
@@ -986,34 +965,11 @@ export function PositionConfigStep() {
             )}
           </div>
           {hasTp ? (
-            <>
-              <div className="text-sm font-medium text-green-400">
-                {formatCompactValue(takeProfitPrice, quoteDecimals)} {quoteSymbol}
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">Max Runup</div>
-                <div className="text-sm font-medium text-green-400">
-                  {tpRunup ? (
-                    <>
-                      {tpRunup.pnlValue >= 0n ? '+' : ''}{formatCompactValue(tpRunup.pnlValue, quoteDecimals)} {quoteSymbol}
-                      <span className="text-xs text-slate-500 ml-1">
-                        ({tpRunup.pnlPercent >= 0 ? '+' : ''}{tpRunup.pnlPercent.toFixed(1)}%)
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-slate-500">--</span>
-                  )}
-                </div>
-              </div>
-            </>
+            <div className="text-sm font-medium text-green-400">
+              {formatCompactValue(takeProfitPrice, quoteDecimals)} {quoteSymbol}
+            </div>
           ) : (
-            <>
-              <div className="text-sm font-medium text-slate-500">Not set</div>
-              <div className="mt-2 pt-2 border-t border-slate-600/50">
-                <div className="text-[10px] text-slate-400 mb-0.5">Max Runup</div>
-                <div className="text-sm font-medium text-slate-500">--</div>
-              </div>
-            </>
+            <div className="text-sm font-medium text-slate-500">Not set</div>
           )}
 
           {/* TP swap config (only when trigger is set) */}
@@ -1255,6 +1211,7 @@ export function PositionConfigStep() {
         slDrawdown={slDrawdown}
         tpRunup={tpRunup}
         quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
+        quoteSymbol={state.quoteToken?.symbol || 'Quote'}
       />
     </WizardSummaryPanel>
   );
