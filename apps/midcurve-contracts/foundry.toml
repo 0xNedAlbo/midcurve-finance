@@ -1,7 +1,7 @@
 [profile.default]
 src = "contracts"
 out = "out"
-libs = ["../../lib"]
+libs = ["lib"]
 solc = "0.8.28"
 evm_version = "paris"
 optimizer = true
@@ -10,7 +10,7 @@ via_ir = true
 
 # Remappings for dependencies
 remappings = [
-    "forge-std/=../../lib/forge-std/src/"
+    "forge-std/=lib/forge-std/src/"
 ]
 
 [profile.default.fmt]

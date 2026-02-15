@@ -2,9 +2,6 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
-import {MockUSD} from "../contracts/MockUSD.sol";
-import {MockAugustus} from "../contracts/mocks/MockAugustus.sol";
-import {MockAugustusRegistry} from "../contracts/mocks/MockAugustusRegistry.sol";
 
 // Diamond core
 import {Diamond} from "../contracts/position-closer/diamond/Diamond.sol";
@@ -19,26 +16,21 @@ import {RegistrationFacet} from "../contracts/position-closer/facets/Registratio
 import {ExecutionFacet} from "../contracts/position-closer/facets/ExecutionFacet.sol";
 import {OwnerUpdateFacet} from "../contracts/position-closer/facets/OwnerUpdateFacet.sol";
 import {ViewFacet} from "../contracts/position-closer/facets/ViewFacet.sol";
+import {MulticallFacet} from "../contracts/position-closer/facets/MulticallFacet.sol";
 
 // Init
 import {DiamondInit} from "../contracts/position-closer/init/DiamondInit.sol";
 
-/**
- * @title DeployLocalScript
- * @notice Deploys mock infrastructure and PositionCloser Diamond for local Anvil fork testing
- * @dev Usage:
- *   pnpm local:deploy (or via pnpm local:setup)
- *
- * This uses the Foundry default account #0 which is pre-funded with ETH.
- * The MockAugustus contract is used instead of real Paraswap since Paraswap API
- * cannot price custom tokens like mockUSD.
- */
-contract DeployLocalScript is Script {
+/// @title DeployPositionCloserDiamond
+/// @notice Deploys the UniswapV3PositionCloser as an EIP-2535 Diamond
+/// @dev This script deploys all facets and the diamond proxy with initialization
+contract DeployPositionCloserDiamond is Script {
+    // ========================================
+    // CONSTANTS
+    // ========================================
+
     // Mainnet NFPM address (available in fork)
     address constant NFPM = 0xC36442b4a4522E871399CD717aBDD847Ab11FE88;
-
-    // Foundry test account #0 (pre-funded in Anvil)
-    address constant FOUNDRY_SENDER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
 
     // Interface version: 100 = v1.0
     uint32 constant INTERFACE_VERSION = 100;
@@ -46,135 +38,160 @@ contract DeployLocalScript is Script {
     // Max operator fee: 1% (100 basis points)
     uint16 constant MAX_FEE_BPS = 100;
 
-    function run() public {
-        console.log("=== Local Fork Deployment (Automation) ===");
-        console.log("Chain ID:", block.chainid);
-        console.log("NFPM (forked):", NFPM);
+    // ========================================
+    // DEPLOYMENT
+    // ========================================
+
+    /// @notice Deploy the PositionCloser Diamond
+    /// @param augustusRegistry The Paraswap AugustusRegistry address
+    /// @param owner The diamond owner address
+    /// @return diamond The deployed diamond address
+    function run(address augustusRegistry, address owner) public returns (address diamond) {
+        console.log("=== Deploying PositionCloser Diamond ===");
+        console.log("Augustus Registry:", augustusRegistry);
+        console.log("Owner:", owner);
+        console.log("Interface Version:", INTERFACE_VERSION);
         console.log("");
 
         vm.startBroadcast();
 
-        // ========================================
-        // 1. Deploy Mock Infrastructure
-        // ========================================
-        console.log("--- Deploying Mock Infrastructure ---");
+        // 1. Deploy all facets
+        console.log("--- Deploying Facets ---");
 
-        // Deploy MockUSD token
-        MockUSD mockUSD = new MockUSD();
-        console.log("MockUSD deployed at:", address(mockUSD));
-
-        // Deploy MockAugustus (for local swap execution)
-        MockAugustus mockAugustus = new MockAugustus();
-        console.log("MockAugustus deployed at:", address(mockAugustus));
-
-        // Deploy MockAugustusRegistry and register MockAugustus
-        MockAugustusRegistry mockRegistry = new MockAugustusRegistry();
-        mockRegistry.setValidAugustus(address(mockAugustus), true);
-        console.log("MockAugustusRegistry deployed at:", address(mockRegistry));
-
-        // ========================================
-        // 2. Deploy PositionCloser Diamond
-        // ========================================
-        console.log("");
-        console.log("--- Deploying PositionCloser Diamond ---");
-
-        // Deploy all facets
         DiamondCutFacet diamondCutFacet = new DiamondCutFacet();
+        console.log("DiamondCutFacet:", address(diamondCutFacet));
+
         DiamondLoupeFacet diamondLoupeFacet = new DiamondLoupeFacet();
+        console.log("DiamondLoupeFacet:", address(diamondLoupeFacet));
+
         OwnershipFacet ownershipFacet = new OwnershipFacet();
+        console.log("OwnershipFacet:", address(ownershipFacet));
+
         VersionFacet versionFacet = new VersionFacet();
+        console.log("VersionFacet:", address(versionFacet));
+
         RegistrationFacet registrationFacet = new RegistrationFacet();
+        console.log("RegistrationFacet:", address(registrationFacet));
+
         ExecutionFacet executionFacet = new ExecutionFacet();
+        console.log("ExecutionFacet:", address(executionFacet));
+
         OwnerUpdateFacet ownerUpdateFacet = new OwnerUpdateFacet();
+        console.log("OwnerUpdateFacet:", address(ownerUpdateFacet));
+
         ViewFacet viewFacet = new ViewFacet();
+        console.log("ViewFacet:", address(viewFacet));
 
-        // Deploy init contract
+        MulticallFacet multicallFacet = new MulticallFacet();
+        console.log("MulticallFacet:", address(multicallFacet));
+
+        // 2. Deploy init contract
+        console.log("");
+        console.log("--- Deploying DiamondInit ---");
         DiamondInit diamondInit = new DiamondInit();
+        console.log("DiamondInit:", address(diamondInit));
 
-        // Build FacetCut array
-        IDiamondCut.FacetCut[] memory facetCuts = new IDiamondCut.FacetCut[](8);
+        // 3. Build FacetCut array
+        console.log("");
+        console.log("--- Building FacetCuts ---");
 
+        IDiamondCut.FacetCut[] memory facetCuts = new IDiamondCut.FacetCut[](9);
+
+        // DiamondCutFacet
         facetCuts[0] = IDiamondCut.FacetCut({
             facetAddress: address(diamondCutFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getDiamondCutSelectors()
         });
 
+        // DiamondLoupeFacet
         facetCuts[1] = IDiamondCut.FacetCut({
             facetAddress: address(diamondLoupeFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getDiamondLoupeSelectors()
         });
 
+        // OwnershipFacet
         facetCuts[2] = IDiamondCut.FacetCut({
             facetAddress: address(ownershipFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getOwnershipSelectors()
         });
 
+        // VersionFacet
         facetCuts[3] = IDiamondCut.FacetCut({
             facetAddress: address(versionFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getVersionSelectors()
         });
 
+        // RegistrationFacet
         facetCuts[4] = IDiamondCut.FacetCut({
             facetAddress: address(registrationFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getRegistrationSelectors()
         });
 
+        // ExecutionFacet
         facetCuts[5] = IDiamondCut.FacetCut({
             facetAddress: address(executionFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getExecutionSelectors()
         });
 
+        // OwnerUpdateFacet
         facetCuts[6] = IDiamondCut.FacetCut({
             facetAddress: address(ownerUpdateFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getOwnerUpdateSelectors()
         });
 
+        // ViewFacet
         facetCuts[7] = IDiamondCut.FacetCut({
             facetAddress: address(viewFacet),
             action: IDiamondCut.FacetCutAction.Add,
             functionSelectors: getViewSelectors()
         });
 
-        // Build init calldata
+        // MulticallFacet
+        facetCuts[8] = IDiamondCut.FacetCut({
+            facetAddress: address(multicallFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getMulticallSelectors()
+        });
+
+        // 4. Build init calldata
         bytes memory initCalldata = abi.encodeWithSelector(
             DiamondInit.init.selector,
             NFPM,
-            address(mockRegistry),
+            augustusRegistry,
             INTERFACE_VERSION,
             MAX_FEE_BPS
         );
 
-        // Deploy Diamond
+        // 5. Deploy Diamond
+        console.log("");
+        console.log("--- Deploying Diamond ---");
+
         Diamond.DiamondArgs memory args = Diamond.DiamondArgs({
-            owner: FOUNDRY_SENDER,
+            owner: owner,
             init: address(diamondInit),
             initCalldata: initCalldata
         });
 
-        Diamond positionCloserDiamond = new Diamond(facetCuts, args);
-        console.log("PositionCloser deployed at:", address(positionCloserDiamond));
+        Diamond diamondContract = new Diamond(facetCuts, args);
+        diamond = address(diamondContract);
+
+        console.log("Diamond deployed at:", diamond);
 
         vm.stopBroadcast();
 
         console.log("");
-        console.log("========================================");
-        console.log("=== Deployment Summary ===");
-        console.log("========================================");
-        console.log("");
-        console.log("MockUSD:", address(mockUSD));
-        console.log("MockAugustus:", address(mockAugustus));
-        console.log("MockAugustusRegistry:", address(mockRegistry));
-        console.log("PositionCloser:", address(positionCloserDiamond));
+        console.log("=== Deployment Complete ===");
+        console.log("PositionCloser Diamond:", diamond);
         console.log("Interface Version:", INTERFACE_VERSION);
-        console.log("");
-        console.log("========================================");
+
+        return diamond;
     }
 
     // ========================================
@@ -245,6 +262,12 @@ contract DeployLocalScript is Script {
         selectors[4] = ViewFacet.positionManager.selector;
         selectors[5] = ViewFacet.augustusRegistry.selector;
         selectors[6] = ViewFacet.maxFeeBps.selector;
+        return selectors;
+    }
+
+    function getMulticallSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = MulticallFacet.multicall.selector;
         return selectors;
     }
 }

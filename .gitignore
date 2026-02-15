@@ -66,9 +66,8 @@ temp/
 
 # Foundry
 /lib/
-apps/midcurve-automation/lib/
-apps/midcurve-automation/cache/
-apps/midcurve-automation/broadcast/
+apps/midcurve-contracts/cache/
+apps/midcurve-contracts/broadcast/
 apps/midcurve-evm/contracts/lib/
 apps/midcurve-evm/contracts/cache/
 apps/midcurve-evm/contracts/broadcast/

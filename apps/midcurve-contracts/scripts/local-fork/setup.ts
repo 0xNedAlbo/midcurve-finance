@@ -175,9 +175,10 @@ function updateLocalChainConfig(
   positionCloserAddress?: string,
   poolAddress?: string
 ): void {
-  // Backend .env files (automation and API)
+  // Backend .env files (contracts, automation, and API)
   const backendEnvPaths = [
-    resolve(process.cwd(), '.env'), // automation
+    resolve(process.cwd(), '.env'), // contracts
+    resolve(process.cwd(), '../midcurve-automation/.env'), // automation
     resolve(process.cwd(), '../midcurve-api/.env'), // api
   ];
 

@@ -13,3 +13,6 @@
 [submodule "apps/midcurve-hedges/lib/forge-std"]
 	path = apps/midcurve-hedges/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "apps/midcurve-contracts/lib/forge-std"]
+	path = apps/midcurve-contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std

@@ -45,7 +45,24 @@ function loadEnv(): void {
 
 loadEnv();
 import { localhost } from 'viem/chains';
-import { UNISWAP_V3_POOL_ABI } from '../../src/lib/evm';
+
+const UNISWAP_V3_POOL_ABI = [
+  {
+    inputs: [],
+    name: 'slot0',
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: 'observationIndex', type: 'uint16' },
+      { name: 'observationCardinality', type: 'uint16' },
+      { name: 'observationCardinalityNext', type: 'uint16' },
+      { name: 'feeProtocol', type: 'uint8' },
+      { name: 'unlocked', type: 'bool' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
 
 const LOCAL_RPC = 'http://localhost:8545';
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
