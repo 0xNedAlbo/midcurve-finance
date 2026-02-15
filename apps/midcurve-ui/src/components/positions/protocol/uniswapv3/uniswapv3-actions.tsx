@@ -19,9 +19,7 @@ import { UniswapV3CollectFeesModal } from "./uniswapv3-collect-fees-modal";
 import { UniswapV3BurnNftModal } from "./uniswapv3-burn-nft-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
-import { HedgeButton } from "@/components/positions/automation/HedgeButton";
 import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
-import { CreateHedgedPositionModal } from "@/components/positions/hedge/CreateHedgedPositionModal";
 import { useSharedContract, useAutowallet } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
@@ -37,7 +35,6 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const location = useLocation();
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showBurnModal, setShowBurnModal] = useState(false);
-  const [showHedgeModal, setShowHedgeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unClaimedFees) > 0n;
 
   // Position lifecycle state
@@ -238,14 +235,6 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           activeCloseOrders={position.activeCloseOrders}
         />
 
-        {/* Divider between automation and hedge */}
-        <div className="w-px h-6 bg-slate-600/50 mx-1" />
-
-        <HedgeButton
-          onClick={() => setShowHedgeModal(true)}
-          disabled={automationDisabled}
-          disabledReason={automationDisabledReason}
-        />
       </div>
 
       {/* Collect Fees Modal */}
@@ -266,13 +255,6 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         position={position}
       />
 
-      {/* Create Hedged Position Modal */}
-      <CreateHedgedPositionModal
-        isOpen={showHedgeModal}
-        onClose={() => setShowHedgeModal(false)}
-        position={position}
-        activeCloseOrders={position.activeCloseOrders}
-      />
     </>
   );
 }

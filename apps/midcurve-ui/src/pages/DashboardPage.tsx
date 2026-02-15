@@ -1,30 +1,14 @@
 import { useAuth } from '../providers/AuthProvider';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { UserDropdown } from '../components/auth/user-dropdown';
 import { NotificationBell } from '../components/notifications/notification-bell';
 import { CreatePositionDropdown } from '../components/positions/create-position-dropdown';
 import { PositionList } from '../components/positions/position-list';
-import { DashboardTabs, type DashboardTab } from '../components/common/dashboard-tabs';
-import { HedgedPositionList } from '../components/positions/hedge/hedged-position-list';
 
 export function DashboardPage() {
   const { user, status } = useAuth();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  // Read tab from URL, default to 'positions'
-  const tabParam = searchParams.get('tab');
-  const activeTab: DashboardTab =
-    tabParam === 'hedgedPositions' ? 'hedgedPositions' : 'positions';
-
-  const handleTabChange = (tab: DashboardTab) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('tab', tab);
-    // Reset offset when switching tabs
-    params.set('offset', '0');
-    setSearchParams(params);
-  };
 
   // Handle authentication redirect
   useEffect(() => {
@@ -68,29 +52,19 @@ export function DashboardPage() {
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold text-white mb-2">
-                {activeTab === 'positions'
-                  ? 'Your Positions'
-                  : 'Your Hedged Positions'}
+                Your Positions
               </h2>
               <p className="text-slate-300">
-                {activeTab === 'positions'
-                  ? 'Manage and analyze your Uniswap V3 liquidity positions'
-                  : 'Positions protected with SIL/TIP triggers'}
+                Manage and analyze your Uniswap V3 liquidity positions
               </p>
             </div>
 
-            {/* Action Buttons - show different buttons based on tab */}
             <div className="flex items-center gap-3">
-              {activeTab === 'positions' && <CreatePositionDropdown />}
+              <CreatePositionDropdown />
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <DashboardTabs activeTab={activeTab} onTabChange={handleTabChange} />
-
-          {/* Content based on active tab */}
-          {activeTab === 'positions' && <PositionList />}
-          {activeTab === 'hedgedPositions' && <HedgedPositionList />}
+          <PositionList />
         </div>
       </div>
     </div>
