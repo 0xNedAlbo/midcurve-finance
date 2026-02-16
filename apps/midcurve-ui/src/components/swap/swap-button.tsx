@@ -15,6 +15,7 @@ interface SwapButtonProps {
   hasQuote: boolean;
   isExpired: boolean;
   isDoNotExecute?: boolean;
+  isWrongNetwork?: boolean;
   insufficientBalance: boolean;
   isLoadingBalance: boolean;
   needsApproval: boolean;
@@ -37,6 +38,7 @@ export function SwapButton({
   hasQuote,
   isExpired,
   isDoNotExecute = false,
+  isWrongNetwork = false,
   insufficientBalance,
   isLoadingBalance,
   needsApproval,
@@ -59,6 +61,16 @@ export function SwapButton({
         disabled: true,
         onClick: () => {},
         className: 'bg-green-500 text-white',
+      };
+    }
+
+    // Wrong network
+    if (isWrongNetwork) {
+      return {
+        text: 'Wrong Network',
+        disabled: true,
+        onClick: () => {},
+        className: 'bg-slate-700 text-slate-400',
       };
     }
 

@@ -6,11 +6,12 @@
  * multiple times with the same inputs.
  *
  * Usage:
- *   CONTRACT_ADDRESS=0x543e... CHAIN_ID=42161 pnpm db:upsert-contract
+ *   CONTRACT_ADDRESS=0x543e... CHAIN_ID=42161 CONTRACT_NAME=UniswapV3PositionCloser pnpm db:upsert-contract
  *
  * Environment variables:
  *   CONTRACT_ADDRESS  - The deployed contract address (required)
  *   CHAIN_ID          - Target chain ID, e.g. 42161 (required)
+ *   CONTRACT_NAME     - Contract name: UniswapV3PositionCloser | MidcurveSwapRouter (required)
  *   VERSION_MAJOR     - Interface version major (default: 1)
  *   VERSION_MINOR     - Interface version minor (default: 0)
  *   DATABASE_URL      - PostgreSQL connection string (from .env)
@@ -21,6 +22,7 @@ import { resolve } from 'path';
 import {
   SharedContractTypeEnum,
   SharedContractNameEnum,
+  type SharedContractName,
 } from '@midcurve/shared';
 import { SharedContractService } from '@midcurve/services';
 
@@ -60,20 +62,37 @@ async function main(): Promise<void> {
 
   const contractAddress = process.env.CONTRACT_ADDRESS;
   const chainIdStr = process.env.CHAIN_ID;
+  const contractNameStr = process.env.CONTRACT_NAME;
   const versionMajor = parseInt(process.env.VERSION_MAJOR || '1', 10);
   const versionMinor = parseInt(process.env.VERSION_MINOR || '0', 10);
 
+  const validContractNames = Object.values(SharedContractNameEnum) as string[];
+
   if (!contractAddress) {
     console.error('Error: CONTRACT_ADDRESS environment variable is required');
-    console.error('Usage: CONTRACT_ADDRESS=0x... CHAIN_ID=42161 pnpm db:upsert-contract');
+    console.error('Usage: CONTRACT_ADDRESS=0x... CHAIN_ID=42161 CONTRACT_NAME=UniswapV3PositionCloser pnpm db:upsert-contract');
     process.exit(1);
   }
 
   if (!chainIdStr) {
     console.error('Error: CHAIN_ID environment variable is required');
-    console.error('Usage: CONTRACT_ADDRESS=0x... CHAIN_ID=42161 pnpm db:upsert-contract');
+    console.error('Usage: CONTRACT_ADDRESS=0x... CHAIN_ID=42161 CONTRACT_NAME=UniswapV3PositionCloser pnpm db:upsert-contract');
     process.exit(1);
   }
+
+  if (!contractNameStr) {
+    console.error('Error: CONTRACT_NAME environment variable is required');
+    console.error(`Valid values: ${validContractNames.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (!validContractNames.includes(contractNameStr)) {
+    console.error(`Error: CONTRACT_NAME "${contractNameStr}" is not valid`);
+    console.error(`Valid values: ${validContractNames.join(', ')}`);
+    process.exit(1);
+  }
+
+  const contractName = contractNameStr as SharedContractName;
 
   const chainId = parseInt(chainIdStr, 10);
   if (isNaN(chainId)) {
@@ -82,6 +101,7 @@ async function main(): Promise<void> {
   }
 
   console.log('=== Upsert SharedContract ===');
+  console.log('  Name:    ', contractName);
   console.log('  Contract:', contractAddress);
   console.log('  Chain ID:', chainId);
   console.log(`  Version:  v${versionMajor}.${versionMinor}`);
@@ -91,7 +111,7 @@ async function main(): Promise<void> {
 
   const result = await sharedContractService.upsert({
     sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
-    sharedContractName: SharedContractNameEnum.UNISWAP_V3_POSITION_CLOSER,
+    sharedContractName: contractName,
     interfaceVersionMajor: versionMajor,
     interfaceVersionMinor: versionMinor,
     chainId,

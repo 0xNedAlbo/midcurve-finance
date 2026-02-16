@@ -32,6 +32,7 @@ function formatBalance(balance: bigint, decimals: number): string {
 import { useRouterSwapQuote, useSwapApproval, useRouterExecuteSwap } from '@/hooks/swap';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 import { getChainSlugByChainId } from '@/config/chains';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { SourceTokenSelector } from './source-token-selector';
 import { TokenAmountInput } from './token-amount-input';
 import { RouterQuoteDisplay } from './router-quote-display';
@@ -81,7 +82,8 @@ export function FreeFormSwapWidget({
   onClose,
   onSwapSuccess,
 }: FreeFormSwapWidgetProps) {
-  const { address: userAddress } = useAccount();
+  const { address: userAddress, chain: walletChain } = useAccount();
+  const isWrongNetwork = walletChain !== undefined && walletChain.id !== chainId;
 
   // State
   const [sourceToken, setSourceToken] = useState<SwapToken | null>(null);
@@ -297,12 +299,18 @@ export function FreeFormSwapWidget({
         </div>
       )}
 
+      {/* Switch Network Prompt */}
+      {chainSlug && (
+        <EvmSwitchNetworkPrompt chain={chainSlug} isWrongNetwork={isWrongNetwork} />
+      )}
+
       {/* Swap Button */}
       <SwapButton
         hasSourceToken={!!sourceToken && !!destToken}
         hasQuote={!!quote}
         isExpired={false}
         isDoNotExecute={isDoNotExecute}
+        isWrongNetwork={isWrongNetwork}
         insufficientBalance={insufficientBalance}
         isLoadingBalance={isLoadingSourceBalance || (sourceTokenBalance === undefined && !!sourceToken && !!userAddress)}
         needsApproval={needsApproval}
