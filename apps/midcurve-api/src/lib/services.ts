@@ -34,6 +34,7 @@ import {
   EvmTransactionStatusService,
   UniswapV3LedgerService,
   UniswapV3AprService,
+  SwapRouterService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -60,6 +61,7 @@ let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _webhookDeliveryService: WebhookDeliveryService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
+let _swapRouterService: SwapRouterService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -311,6 +313,16 @@ export function getUniswapV3PositionLedgerService(positionId: string): UniswapV3
  */
 export function getUniswapV3AprService(positionId: string): UniswapV3AprService {
   return new UniswapV3AprService({ positionId });
+}
+
+/**
+ * Get singleton instance of SwapRouterService
+ */
+export function getSwapRouterService(): SwapRouterService {
+  if (!_swapRouterService) {
+    _swapRouterService = new SwapRouterService();
+  }
+  return _swapRouterService;
 }
 
 /**

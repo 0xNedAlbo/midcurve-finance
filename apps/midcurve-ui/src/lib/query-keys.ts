@@ -152,12 +152,12 @@ export const queryKeys = {
   },
 
   // ============================================
-  // SWAP (ParaSwap integration)
+  // SWAP (ParaSwap + MidcurveSwapRouter)
   // ============================================
   swap: {
     all: ['swap'] as const,
 
-    // Quotes
+    // ParaSwap quotes (used by SwapWidget)
     quotes: {
       all: ['swap', 'quotes'] as const,
       quote: (params: {
@@ -168,6 +168,21 @@ export const queryKeys = {
         userAddress: string;
       }) => [...queryKeys.swap.quotes.all, params] as const,
     },
+
+    // MidcurveSwapRouter quotes (used by SwapDialog)
+    routerQuotes: {
+      all: ['swap', 'router-quotes'] as const,
+      quote: (params: {
+        chainId: number;
+        tokenIn: string;
+        tokenOut: string;
+        amountIn: string;
+        maxDeviationBps: number;
+      }) => [...queryKeys.swap.routerQuotes.all, params] as const,
+    },
+
+    // MidcurveSwapRouter supported chains
+    routerSupportedChains: ['swap', 'router-supported-chains'] as const,
   },
 
   // ============================================

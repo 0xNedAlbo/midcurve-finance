@@ -58,8 +58,51 @@ export interface PositionDataInput {
 }
 
 // ============================================================================
+// Freeform Swap Input (UI Swap Dialog)
+// ============================================================================
+
+/**
+ * Input for computing a freeform swap quote (no position context).
+ * Used by the UI Swap Dialog where the user provides tokenIn/tokenOut/amount directly.
+ */
+export interface FreeformSwapInput {
+  /** EVM chain ID */
+  chainId: number;
+
+  /** MidcurveSwapRouter contract address on this chain */
+  swapRouterAddress: Address;
+
+  /** Token to sell */
+  tokenIn: Address;
+
+  /** Decimals of tokenIn */
+  tokenInDecimals: number;
+
+  /** Token to receive */
+  tokenOut: Address;
+
+  /** Decimals of tokenOut */
+  tokenOutDecimals: number;
+
+  /** Exact amount of tokenIn to sell (in raw units) */
+  amountIn: bigint;
+
+  /** Max deviation from fair market value in basis points (e.g. 100 = 1%) */
+  maxDeviationBps: number;
+
+  /** Maximum number of hops in the swap path (default: 3) */
+  maxHops?: number;
+}
+
+// ============================================================================
 // Output Types (Discriminated Union)
 // ============================================================================
+
+/**
+ * Result of computing a freeform swap quote.
+ * Same discriminated union as PostCloseSwapResult.
+ */
+export type FreeformSwapResult = SwapInstruction | DoNotExecute;
 
 /**
  * Result of computing post-close swap parameters.
@@ -106,6 +149,9 @@ export interface DoNotExecute {
 
   /** Human-readable reason for not executing */
   reason: string;
+
+  /** Best swap path hops (when a path was found but conditions are unfavorable) */
+  hops?: SwapHop[];
 
   /** Diagnostic information for logging */
   diagnostics: SwapDiagnostics;

@@ -14,6 +14,7 @@ interface SwapButtonProps {
   hasSourceToken: boolean;
   hasQuote: boolean;
   isExpired: boolean;
+  isDoNotExecute?: boolean;
   insufficientBalance: boolean;
   isLoadingBalance: boolean;
   needsApproval: boolean;
@@ -35,6 +36,7 @@ export function SwapButton({
   hasSourceToken,
   hasQuote,
   isExpired,
+  isDoNotExecute = false,
   insufficientBalance,
   isLoadingBalance,
   needsApproval,
@@ -74,6 +76,16 @@ export function SwapButton({
     if (!hasQuote) {
       return {
         text: 'Fetching quote...',
+        disabled: true,
+        onClick: () => {},
+        className: 'bg-slate-700 text-slate-400',
+      };
+    }
+
+    // Do not execute (unfavorable conditions)
+    if (isDoNotExecute) {
+      return {
+        text: 'Swap conditions unfavorable',
         disabled: true,
         onClick: () => {},
         className: 'bg-slate-700 text-slate-400',

@@ -148,10 +148,17 @@ export interface CoinGeckoClientDependencies {
 
   /**
    * Request scheduler for rate limiting
-   * If not provided, a new RequestScheduler with 2200ms spacing will be created
-   * @default new RequestScheduler({ minSpacingMs: 2200, name: 'CoinGeckoScheduler' })
+   * If not provided, a new RequestScheduler will be created with spacing
+   * based on the API tier (250ms for Pro, 2200ms for free).
    */
   requestScheduler?: RequestScheduler;
+
+  /**
+   * CoinGecko API key for Pro API access.
+   * If not provided, reads from COINGECKO_API_KEY env var.
+   * When set, uses pro-api.coingecko.com with higher rate limits.
+   */
+  apiKey?: string;
 }
 
 /**
@@ -164,7 +171,8 @@ export interface CoinGeckoClientDependencies {
 export class CoinGeckoClient {
   private static instance: CoinGeckoClient | null = null;
 
-  private readonly baseUrl = 'https://api.coingecko.com/api/v3';
+  private readonly baseUrl: string;
+  private readonly apiKey: string | undefined;
   private readonly cacheService: CacheService;
   private readonly requestScheduler: RequestScheduler;
   private readonly cacheTimeout = 3600; // 1 hour in seconds
@@ -187,12 +195,28 @@ export class CoinGeckoClient {
   constructor(dependencies: CoinGeckoClientDependencies = {}) {
     this.logger = createServiceLogger('CoinGeckoClient');
     this.cacheService = dependencies.cacheService ?? CacheService.getInstance();
+
+    // Determine API tier from key
+    this.apiKey = dependencies.apiKey ?? process.env.COINGECKO_API_KEY ?? undefined;
+    // Empty string means no key configured
+    if (this.apiKey === '') this.apiKey = undefined;
+
+    this.baseUrl = this.apiKey
+      ? 'https://pro-api.coingecko.com/api/v3'
+      : 'https://api.coingecko.com/api/v3';
+
     this.requestScheduler =
       dependencies.requestScheduler ??
       new RequestScheduler({
-        minSpacingMs: 2200, // ~27 requests per minute for CoinGecko
+        // Basic plan: 250 rpm → 250ms spacing. Free: ~27 rpm → 2200ms spacing.
+        minSpacingMs: this.apiKey ? 250 : 2200,
         name: 'CoinGeckoScheduler',
       });
+
+    this.logger.info(
+      { apiTier: this.apiKey ? 'pro' : 'free', baseUrl: this.baseUrl },
+      'CoinGeckoClient initialized'
+    );
   }
 
   /**
@@ -233,7 +257,11 @@ export class CoinGeckoClient {
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          const response = await fetch(url);
+          const fetchOptions: RequestInit = {};
+          if (this.apiKey) {
+            fetchOptions.headers = { 'x-cg-pro-api-key': this.apiKey };
+          }
+          const response = await fetch(url, fetchOptions);
 
           // Success - return response
           if (response.ok) {

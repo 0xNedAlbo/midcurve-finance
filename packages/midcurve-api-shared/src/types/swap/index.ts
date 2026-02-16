@@ -1,11 +1,11 @@
 /**
  * Swap API Types
  *
- * Types for ParaSwap-based token swapping functionality.
- * Includes token lists, quotes, and transaction building.
+ * Types for token swapping functionality.
+ * Includes ParaSwap (legacy, used by SwapWidget) and MidcurveSwapRouter (SwapDialog).
  */
 
-// Token list types
+// Token list types (shared)
 export {
   PARASWAP_SUPPORTED_CHAIN_IDS,
   type ParaswapSupportedChainId,
@@ -19,7 +19,7 @@ export {
   type GetSwapTokensResponse,
 } from './tokens.js';
 
-// Quote types
+// ParaSwap quote types (used by SwapWidget)
 export {
   type SwapSide,
   type GetSwapQuoteQuery,
@@ -29,10 +29,28 @@ export {
   type GetSwapQuoteResponse,
 } from './quote.js';
 
-// Transaction types
+// ParaSwap transaction types (used by SwapWidget)
 export {
   type BuildSwapTransactionRequest,
   BuildSwapTransactionRequestSchema,
   type SwapTransactionData,
   type BuildSwapTransactionResponse,
 } from './transaction.js';
+
+// MidcurveSwapRouter quote types (used by SwapDialog)
+export {
+  type RouterSwapHop,
+  type EncodedSwapHop,
+  type RouterQuoteDiagnostics,
+  type RouterSwapQuoteData,
+  type GetRouterSwapQuoteResponse,
+  type GetRouterSwapQuoteQuery,
+  GetRouterSwapQuoteQuerySchema,
+} from './router-quote.js';
+
+// MidcurveSwapRouter supported chains types
+export {
+  type RouterSupportedChainInfo,
+  type RouterSupportedChainsData,
+  type GetRouterSupportedChainsResponse,
+} from './router-supported-chains.js';

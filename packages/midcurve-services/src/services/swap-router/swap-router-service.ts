@@ -44,6 +44,8 @@ import {
 import type {
   PostCloseSwapInput,
   PostCloseSwapResult,
+  FreeformSwapInput,
+  FreeformSwapResult,
   SwapInstruction,
   DoNotExecute,
   SwapHop,
@@ -268,6 +270,187 @@ export class SwapRouterService {
         {
           chainId: input.chainId,
           nftId: input.nftId.toString(),
+        }
+      );
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // Freeform Swap Quote (UI Swap Dialog)
+  // ==========================================================================
+
+  /**
+   * Compute a freeform swap quote for the UI Swap Dialog.
+   * Skips Phase 1 (position analysis) and directly accepts tokenIn/tokenOut/amount.
+   * Reuses phases 2-7 from the post-close swap algorithm.
+   *
+   * @param input - Freeform swap input parameters
+   * @returns SwapInstruction to execute, or DoNotExecute if conditions are unfavorable
+   */
+  async computeFreeformSwapQuote(
+    input: FreeformSwapInput
+  ): Promise<FreeformSwapResult> {
+    log.methodEntry(this.logger, 'computeFreeformSwapQuote', {
+      chainId: input.chainId,
+      tokenIn: input.tokenIn,
+      tokenOut: input.tokenOut,
+      amountIn: input.amountIn.toString(),
+      maxDeviationBps: input.maxDeviationBps,
+    });
+
+    const maxHops = input.maxHops ?? 3;
+    const client = this.evmConfig.getPublicClient(input.chainId);
+
+    try {
+      // Look up CoinGecko IDs for both tokens (for fair value floor)
+      const [tokenInData, tokenOutData] = await Promise.all([
+        this.erc20TokenService.findByAddressAndChain(
+          input.tokenIn,
+          input.chainId
+        ),
+        this.erc20TokenService.findByAddressAndChain(
+          input.tokenOut,
+          input.chainId
+        ),
+      ]);
+
+      let tokenInCoinGeckoId: string | null =
+        tokenInData?.coingeckoId ?? null;
+      let tokenOutCoinGeckoId: string | null =
+        tokenOutData?.coingeckoId ?? null;
+
+      if (!tokenInCoinGeckoId) {
+        tokenInCoinGeckoId = await this.coinGeckoClient.findCoinByAddress(
+          input.chainId,
+          input.tokenIn
+        );
+      }
+      if (!tokenOutCoinGeckoId) {
+        tokenOutCoinGeckoId = await this.coinGeckoClient.findCoinByAddress(
+          input.chainId,
+          input.tokenOut
+        );
+      }
+
+      // ── Phase 2: Pool Discovery ─────────────────────────────────────
+      const { pools, swapTokens, backbonePoolsCacheHit, swapTokensCacheHit } =
+        await this._discoverPools(
+          client,
+          input.chainId,
+          input.swapRouterAddress,
+          input.tokenIn,
+          input.tokenOut
+        );
+
+      // ── Phase 3: Path Enumeration ───────────────────────────────────
+      const candidatePaths = this._enumeratePaths(
+        input.tokenIn,
+        input.tokenOut,
+        pools,
+        maxHops
+      );
+
+      // ── Phase 4: Local Math Quoting ─────────────────────────────────
+      const rankedPaths = this._quotePaths(candidatePaths, input.amountIn);
+
+      // ── Phase 5: Fair Value & Slippage Floor ────────────────────────
+      const fairValue = await this._computeFairValueFloor(
+        tokenInCoinGeckoId,
+        tokenOutCoinGeckoId,
+        input.amountIn,
+        input.tokenInDecimals,
+        input.tokenOutDecimals,
+        input.maxDeviationBps
+      );
+
+      // ── Phase 6: Execution Decision ─────────────────────────────────
+      const diagnostics: SwapDiagnostics = {
+        pathsEnumerated: candidatePaths.length,
+        pathsQuoted: rankedPaths.length,
+        bestEstimatedAmountOut:
+          rankedPaths.length > 0 ? rankedPaths[0]!.estimatedOut : 0n,
+        fairValuePrice: fairValue.fairPrice,
+        absoluteFloorAmountOut: fairValue.absoluteFloor,
+        tokenInUsdPrice: fairValue.tokenInUsdPrice,
+        tokenOutUsdPrice: fairValue.tokenOutUsdPrice,
+        intermediaryTokens: swapTokens,
+        poolsDiscovered: pools.length,
+        backbonePoolsCacheHit,
+        swapTokensCacheHit,
+      };
+
+      if (rankedPaths.length === 0) {
+        const result: DoNotExecute = {
+          kind: 'do_not_execute',
+          reason: 'No valid swap paths found',
+          diagnostics,
+        };
+        log.methodExit(this.logger, 'computeFreeformSwapQuote', {
+          result: 'do_not_execute',
+          reason: result.reason,
+        });
+        return result;
+      }
+
+      const bestPath = rankedPaths[0]!;
+
+      // ── Phase 7: Build Swap Hops ──────────────────────────────────
+      const hops = this._buildSwapHops(bestPath.path);
+
+      if (
+        fairValue.absoluteFloor > 0n &&
+        bestPath.estimatedOut < fairValue.absoluteFloor
+      ) {
+        const result: DoNotExecute = {
+          kind: 'do_not_execute',
+          reason: `Best estimated output (${bestPath.estimatedOut}) is below fair value floor (${fairValue.absoluteFloor})`,
+          hops,
+          diagnostics,
+        };
+        log.methodExit(this.logger, 'computeFreeformSwapQuote', {
+          result: 'do_not_execute',
+          reason: result.reason,
+          hopsCount: hops.length,
+        });
+        return result;
+      }
+
+      const minAmountOut =
+        fairValue.absoluteFloor > 0n ? fairValue.absoluteFloor : 0n;
+
+      const block = await client.getBlock();
+      const deadline = block.timestamp + DEADLINE_OFFSET_SECONDS;
+
+      const result: SwapInstruction = {
+        kind: 'execute',
+        tokenIn: input.tokenIn,
+        tokenOut: input.tokenOut,
+        estimatedAmountIn: input.amountIn,
+        minAmountOut,
+        hops,
+        deadline,
+        diagnostics,
+      };
+
+      log.methodExit(this.logger, 'computeFreeformSwapQuote', {
+        result: 'execute',
+        hopsCount: hops.length,
+        amountIn: input.amountIn.toString(),
+        minAmountOut: minAmountOut.toString(),
+        bestEstimatedOut: bestPath.estimatedOut.toString(),
+      });
+
+      return result;
+    } catch (error) {
+      log.methodError(
+        this.logger,
+        'computeFreeformSwapQuote',
+        error as Error,
+        {
+          chainId: input.chainId,
+          tokenIn: input.tokenIn,
+          tokenOut: input.tokenOut,
         }
       );
       throw error;
@@ -712,6 +895,10 @@ export class SwapRouterService {
 
     const paths: CandidatePath[] = [];
     const visitedPools = new Set<string>();
+    // Track visited tokens to prevent wasteful round-trips (e.g. A→B→A→C)
+    // Going through the same token twice via different pools always loses fees.
+    const visitedTokens = new Set<string>();
+    visitedTokens.add(tokenIn.toLowerCase());
 
     const dfs = (
       currentToken: Address,
@@ -734,7 +921,12 @@ export class SwapRouterService {
         const poolKey = pool.address.toLowerCase();
         if (visitedPools.has(poolKey)) continue;
 
+        const otherTokenKey = otherToken.toLowerCase();
+        // Allow reaching tokenOut but prevent revisiting intermediate tokens
+        if (otherTokenKey !== tokenOut.toLowerCase() && visitedTokens.has(otherTokenKey)) continue;
+
         visitedPools.add(poolKey);
+        visitedTokens.add(otherTokenKey);
         currentHops.push({
           poolAddress: pool.address,
           tokenIn: currentToken,
@@ -748,6 +940,7 @@ export class SwapRouterService {
 
         currentHops.pop();
         visitedPools.delete(poolKey);
+        visitedTokens.delete(otherTokenKey);
       }
     };
 

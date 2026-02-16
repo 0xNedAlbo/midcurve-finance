@@ -167,10 +167,13 @@ export async function apiClientFn<TResponse>(
 // =============================================================================
 
 import type {
-  // Swap
+  // Swap (ParaSwap)
   SwapQuoteData,
   BuildSwapTransactionRequest,
   SwapTransactionData,
+  // Swap (MidcurveSwapRouter)
+  RouterSwapQuoteData,
+  RouterSupportedChainsData,
   // Close Orders
   ListCloseOrdersRequest,
   ListCloseOrdersResponse,
@@ -567,7 +570,7 @@ export interface SwapQuoteParams {
 }
 
 /**
- * Swap API client for ParaSwap-based token swapping
+ * Swap API client for ParaSwap-based token swapping (used by SwapWidget)
  */
 export const swapApi = {
   /**
@@ -583,6 +586,44 @@ export const swapApi = {
    */
   buildTransaction(params: BuildSwapTransactionRequest) {
     return apiClient.post<SwapTransactionData>('/api/v1/swap/transaction', params);
+  },
+};
+
+// =============================================================================
+// SWAP ROUTER API (MidcurveSwapRouter — used by SwapDialog)
+// =============================================================================
+
+/**
+ * Router quote request parameters
+ */
+export interface RouterSwapQuoteParams {
+  chainId: number;
+  tokenIn: string;
+  tokenInDecimals: number;
+  tokenOut: string;
+  tokenOutDecimals: number;
+  amountIn: string;
+  maxDeviationBps: number;
+  maxHops?: number;
+}
+
+/**
+ * Swap Router API client for MidcurveSwapRouter-based swapping
+ */
+export const swapRouterApi = {
+  /**
+   * Get chains that have MidcurveSwapRouter deployed
+   */
+  getSupportedChains() {
+    return apiClient.get<RouterSupportedChainsData>('/api/v1/swap/router-supported-chains');
+  },
+
+  /**
+   * Get a swap quote from MidcurveSwapRouter
+   */
+  getQuote(params: RouterSwapQuoteParams) {
+    const qs = buildQueryString(params);
+    return apiClient.get<RouterSwapQuoteData>(`/api/v1/swap/router-quote${qs}`);
   },
 };
 

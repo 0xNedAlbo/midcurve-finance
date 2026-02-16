@@ -4,6 +4,8 @@ export type { SwapRouterServiceDependencies } from './swap-router-service.js';
 export type {
   PostCloseSwapInput,
   PostCloseSwapResult,
+  FreeformSwapInput,
+  FreeformSwapResult,
   SwapInstruction,
   DoNotExecute,
   SwapHop,

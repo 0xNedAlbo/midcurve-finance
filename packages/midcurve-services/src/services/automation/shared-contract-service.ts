@@ -245,6 +245,55 @@ export class SharedContractService {
     }
   }
 
+  /**
+   * Find all chains that have a given contract deployed (latest version per chain).
+   *
+   * @param contractName - The contract name (e.g., 'MidcurveSwapRouter')
+   * @returns Array of { chainId, address } for each chain with the contract
+   */
+  async findChainsByContractName(
+    contractName: SharedContractName
+  ): Promise<{ chainId: number; address: string }[]> {
+    log.methodEntry(this.logger, 'findChainsByContractName', { contractName });
+
+    try {
+      const contracts = await this.prisma.sharedContract.findMany({
+        where: {
+          sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
+          sharedContractName: contractName,
+          isActive: true,
+        },
+        orderBy: [
+          { interfaceVersionMajor: 'desc' },
+          { interfaceVersionMinor: 'desc' },
+        ],
+      });
+
+      // Deduplicate by chainId (take latest version, which comes first due to ordering)
+      const seen = new Set<number>();
+      const result: { chainId: number; address: string }[] = [];
+
+      for (const contract of contracts) {
+        const config = EvmSmartContractConfig.fromRecord(contract.config);
+        if (!seen.has(config.chainId)) {
+          seen.add(config.chainId);
+          result.push({ chainId: config.chainId, address: config.address });
+        }
+      }
+
+      log.methodExit(this.logger, 'findChainsByContractName', {
+        contractName,
+        chainCount: result.length,
+      });
+      return result;
+    } catch (error) {
+      log.methodError(this.logger, 'findChainsByContractName', error as Error, {
+        contractName,
+      });
+      throw error;
+    }
+  }
+
   // ============================================================================
   // WRITE OPERATIONS
   // ============================================================================
