@@ -238,17 +238,27 @@ export function TransactionStep() {
     const triggerModeMap = { STOP_LOSS: 0, TAKE_PROFIT: 1 } as const;
     const swapDirectionMap = { NONE: 0, TOKEN0_TO_1: 1, TOKEN1_TO_0: 2 } as const;
 
+    // When isToken0Quote, tick direction is inverse to user price direction:
+    //   SL (user price falls) → tick RISES → contract needs UPPER (>=)
+    //   TP (user price rises) → tick FALLS → contract needs LOWER (<=)
+    const slContractMode = tokenInfo.isToken0Quote
+      ? triggerModeMap.TAKE_PROFIT   // UPPER — tick rises when price falls
+      : triggerModeMap.STOP_LOSS;    // LOWER — tick falls when price falls
+    const tpContractMode = tokenInfo.isToken0Quote
+      ? triggerModeMap.STOP_LOSS     // LOWER — tick falls when price rises
+      : triggerModeMap.TAKE_PROFIT;  // UPPER — tick rises when price rises
+
     // Cancels
     if (slOperation === 'CANCEL') {
       calls.push({
         functionName: 'cancelOrder',
-        args: [nftIdBigInt, triggerModeMap.STOP_LOSS],
+        args: [nftIdBigInt, slContractMode],
       });
     }
     if (tpOperation === 'CANCEL') {
       calls.push({
         functionName: 'cancelOrder',
-        args: [nftIdBigInt, triggerModeMap.TAKE_PROFIT],
+        args: [nftIdBigInt, tpContractMode],
       });
     }
 
@@ -256,13 +266,13 @@ export function TransactionStep() {
     if (slOperation === 'UPDATE' && currentSlTick !== null) {
       calls.push({
         functionName: 'setTriggerTick',
-        args: [nftIdBigInt, triggerModeMap.STOP_LOSS, currentSlTick],
+        args: [nftIdBigInt, slContractMode, currentSlTick],
       });
     }
     if (tpOperation === 'UPDATE' && currentTpTick !== null) {
       calls.push({
         functionName: 'setTriggerTick',
-        args: [nftIdBigInt, triggerModeMap.TAKE_PROFIT, currentTpTick],
+        args: [nftIdBigInt, tpContractMode, currentTpTick],
       });
     }
 
@@ -282,7 +292,7 @@ export function TransactionStep() {
         functionName: 'setSwapIntent',
         args: [
           nftIdBigInt,
-          triggerModeMap.STOP_LOSS,
+          slContractMode,
           dirValue,
           swapCfg.enabled ? swapCfg.slippageBps : 0,
         ],
@@ -303,7 +313,7 @@ export function TransactionStep() {
         functionName: 'setSwapIntent',
         args: [
           nftIdBigInt,
-          triggerModeMap.TAKE_PROFIT,
+          tpContractMode,
           dirValue,
           swapCfg.enabled ? swapCfg.slippageBps : 0,
         ],
@@ -324,7 +334,7 @@ export function TransactionStep() {
           {
             nftId: nftIdBigInt,
             pool: poolAddress,
-            triggerMode: triggerModeMap.STOP_LOSS,
+            triggerMode: slContractMode,
             triggerTick: currentSlTick,
             payout: connectedAddress as Address,
             operator: autowalletAddress,
@@ -349,7 +359,7 @@ export function TransactionStep() {
           {
             nftId: nftIdBigInt,
             pool: poolAddress,
-            triggerMode: triggerModeMap.TAKE_PROFIT,
+            triggerMode: tpContractMode,
             triggerTick: currentTpTick,
             payout: connectedAddress as Address,
             operator: autowalletAddress,

@@ -1028,6 +1028,19 @@ export class CloseOrderService {
         return existing;
       }
 
+      // Determine semantic sqrtPriceX96 field based on position's isToken0Quote.
+      // When isToken0Quote, tick direction is inverse to user price direction:
+      //   On-chain UPPER → semantically LOWER (stop loss)
+      //   On-chain LOWER → semantically UPPER (take profit)
+      const position = await db.position.findUnique({
+        where: { id: input.positionId },
+        select: { isToken0Quote: true },
+      });
+      const isToken0Quote = position?.isToken0Quote ?? false;
+      const isSemanticallyLower = isToken0Quote
+        ? input.triggerMode === 'UPPER'
+        : input.triggerMode === 'LOWER';
+
       // Build config matching createConfig() format
       const sqrtPriceX96Str = sqrtPriceX96.toString();
       const config: Record<string, unknown> = {
@@ -1036,9 +1049,9 @@ export class CloseOrderService {
         poolAddress: input.poolAddress,
         triggerMode: input.triggerMode,
         sqrtPriceX96Lower:
-          input.triggerMode === 'LOWER' ? sqrtPriceX96Str : '0',
+          isSemanticallyLower ? sqrtPriceX96Str : '0',
         sqrtPriceX96Upper:
-          input.triggerMode === 'UPPER' ? sqrtPriceX96Str : '0',
+          isSemanticallyLower ? '0' : sqrtPriceX96Str,
         payoutAddress: input.payout,
         operatorAddress: input.operator,
         validUntil: new Date(Number(input.validUntil) * 1000).toISOString(),

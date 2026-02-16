@@ -292,12 +292,15 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
     const config = order.config as Record<string, unknown>;
     const triggerMode = config.triggerMode as string;
-    const triggerSide: 'lower' | 'upper' =
-      triggerMode === 'LOWER' ? 'lower' : 'upper';
-    const sqrtPriceX96Str =
-      triggerMode === 'LOWER'
-        ? (config.sqrtPriceX96Lower as string)
-        : (config.sqrtPriceX96Upper as string);
+    // Derive semantic triggerSide from on-chain triggerMode + isToken0Quote
+    // When isToken0Quote, on-chain UPPER = semantic lower (SL), on-chain LOWER = semantic upper (TP)
+    const triggerSide: 'lower' | 'upper' = position.isToken0Quote
+      ? (triggerMode === 'UPPER' ? 'lower' : 'upper')
+      : (triggerMode === 'LOWER' ? 'lower' : 'upper');
+    // Read sqrtPriceX96 from the semantic field (Lower = SL, Upper = TP)
+    const sqrtPriceX96Str = triggerSide === 'lower'
+      ? (config.sqrtPriceX96Lower as string)
+      : (config.sqrtPriceX96Upper as string);
 
     return generateOrderTag({
       triggerSide,
@@ -386,10 +389,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           const tm = triggerMode as TriggerMode;
           const newCloseOrderHash = deriveCloseOrderHash(tm, newSqrtPriceX96);
 
+          // Determine semantic sqrtPriceX96 field based on isToken0Quote.
+          // When isToken0Quote, tick direction is inverse to user price direction:
+          //   On-chain UPPER → semantically LOWER (stop loss)
+          //   On-chain LOWER → semantically UPPER (take profit)
+          const reactivatePosition = await this.positionService.findById(existingOrder.positionId, tx);
+          const reactivateIsToken0Quote = reactivatePosition?.isToken0Quote ?? false;
+          const reactivateIsSemanticallyLower = reactivateIsToken0Quote
+            ? tm === 'UPPER'
+            : tm === 'LOWER';
+
           await this.closeOrderService.updateConfigField(existingOrder.id, {
             triggerMode: tm,
-            sqrtPriceX96Lower: tm === 'LOWER' ? newSqrtPriceX96.toString() : '0',
-            sqrtPriceX96Upper: tm === 'UPPER' ? newSqrtPriceX96.toString() : '0',
+            sqrtPriceX96Lower: reactivateIsSemanticallyLower ? newSqrtPriceX96.toString() : '0',
+            sqrtPriceX96Upper: reactivateIsSemanticallyLower ? '0' : newSqrtPriceX96.toString(),
             payoutAddress: payload.payout,
             operatorAddress: payload.operator,
             validUntil: new Date(Number(payload.validUntil) * 1000).toISOString(),
@@ -406,9 +419,10 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           );
 
           // Log ORDER_REGISTERED — use fresh data since existingOrder config is stale
-          const position = await this.positionService.findById(existingOrder.positionId, tx);
+          const position = reactivatePosition;
           if (position) {
-            const triggerSide: 'lower' | 'upper' = tm === 'LOWER' ? 'lower' : 'upper';
+            // Derive semantic triggerSide from on-chain triggerMode + isToken0Quote
+            const triggerSide: 'lower' | 'upper' = reactivateIsSemanticallyLower ? 'lower' : 'upper';
             const orderTag = generateOrderTag({
               triggerSide,
               sqrtPriceX96: newSqrtPriceX96,
@@ -658,11 +672,18 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         newSqrtPriceX96
       );
 
-      // Update the appropriate threshold based on trigger mode
-      const updates: Record<string, unknown> =
-        triggerMode === 'LOWER'
-          ? { sqrtPriceX96Lower: newSqrtPriceX96.toString() }
-          : { sqrtPriceX96Upper: newSqrtPriceX96.toString() };
+      // Determine semantic sqrtPriceX96 field based on isToken0Quote.
+      // When isToken0Quote, on-chain UPPER → semantic LOWER (SL), on-chain LOWER → semantic UPPER (TP).
+      const tickUpdatePosition = await this.positionService.findById(order.positionId, tx);
+      const tickUpdateIsToken0Quote = tickUpdatePosition?.isToken0Quote ?? false;
+      const tickUpdateIsSemanticallyLower = tickUpdateIsToken0Quote
+        ? triggerMode === 'UPPER'
+        : triggerMode === 'LOWER';
+
+      // Update the appropriate threshold based on semantic meaning
+      const updates: Record<string, unknown> = tickUpdateIsSemanticallyLower
+        ? { sqrtPriceX96Lower: newSqrtPriceX96.toString() }
+        : { sqrtPriceX96Upper: newSqrtPriceX96.toString() };
 
       await this.closeOrderService.updateConfigField(
         order.id,

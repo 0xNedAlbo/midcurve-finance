@@ -356,10 +356,17 @@ export function convertOrdersToTriggerState(
 } {
   const activeStatuses = ['active', 'pending', 'registering'];
 
+  // config.triggerMode stores the on-chain value. When isToken0Quote, tick direction
+  // is inverse to user price direction, so the on-chain triggerMode is flipped:
+  //   isToken0Quote: SL = on-chain UPPER, TP = on-chain LOWER
+  //  !isToken0Quote: SL = on-chain LOWER, TP = on-chain UPPER
+  const slConfigTriggerMode = isToken0Quote ? 'UPPER' : 'LOWER';
+  const tpConfigTriggerMode = isToken0Quote ? 'LOWER' : 'UPPER';
+
   const slOrder = orders.find((o) => {
     const config = o.config as Record<string, unknown>;
     return (
-      config.triggerMode === 'LOWER' &&
+      config.triggerMode === slConfigTriggerMode &&
       activeStatuses.includes(o.status)
     );
   });
@@ -367,7 +374,7 @@ export function convertOrdersToTriggerState(
   const tpOrder = orders.find((o) => {
     const config = o.config as Record<string, unknown>;
     return (
-      config.triggerMode === 'UPPER' &&
+      config.triggerMode === tpConfigTriggerMode &&
       activeStatuses.includes(o.status)
     );
   });

@@ -316,8 +316,10 @@ export class OrderExecutor {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    // Derive triggerMode from triggerSide for contract calls (0=LOWER, 1=UPPER)
-    const triggerMode = triggerSide === 'upper' ? 1 : 0;
+    // Read on-chain triggerMode from DB config (not derived from triggerSide).
+    // config.triggerMode stores the on-chain value which accounts for isToken0Quote inversion.
+    const orderTriggerMode = (order.config as Record<string, unknown>).triggerMode as string;
+    const triggerMode = orderTriggerMode === 'UPPER' ? 1 : 0;
 
     // Get contract address from automationContractConfig (immutable at registration)
     const contractConfig = order.automationContractConfig as AutomationContractConfig;

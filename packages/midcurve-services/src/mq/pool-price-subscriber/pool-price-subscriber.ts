@@ -441,16 +441,19 @@ export class PoolPriceSubscriber {
       // Invoke user's handler
       await this.messageHandler(message, this);
 
-      // Acknowledge message
-      this.channel.ack(msg);
+      // Acknowledge message (guard against shutdown race)
+      if (this.channel) {
+        this.channel.ack(msg);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       this.logger.error({ error: errorMessage }, 'Error processing message');
 
       // Reject message without requeue (avoid infinite loop)
-      // In production, you might want a dead letter queue
-      this.channel.nack(msg, false, false);
+      if (this.channel) {
+        this.channel.nack(msg, false, false);
+      }
     }
   }
 }
