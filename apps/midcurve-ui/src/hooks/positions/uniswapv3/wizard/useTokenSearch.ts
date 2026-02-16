@@ -96,7 +96,7 @@ export function useTokenSearch({
       try {
         const chainId = getChainId(chain);
         const params = new URLSearchParams({
-          chainId: chainId.toString(),
+          chainIds: chainId.toString(),
           query: searchQuery,
         });
 
@@ -113,14 +113,23 @@ export function useTokenSearch({
         const tokens = response.data || [];
 
         // Map to TokenSearchResult format
-        const mappedTokens: TokenSearchResult[] = tokens.map((token: any) => ({
-          address: token.address || '',
-          symbol: token.symbol,
-          name: token.name,
-          decimals: 18, // Default - will be resolved when token is created
-          logoUrl: token.logoUrl || undefined,
-          marketCap: token.marketCap || undefined,
-        }));
+        // API returns TokenSymbolResult with addresses[] array grouped by symbol
+        const chainId_ = getChainId(chain);
+        const mappedTokens: TokenSearchResult[] = tokens
+          .map((token: any) => {
+            const chainAddress = token.addresses?.find(
+              (a: any) => a.chainId === chainId_
+            );
+            return {
+              address: chainAddress?.address || '',
+              symbol: token.symbol,
+              name: token.name,
+              decimals: 18, // Default - will be resolved when token is created
+              logoUrl: token.logoUrl || undefined,
+              marketCap: token.marketCap || undefined,
+            };
+          })
+          .filter((t: TokenSearchResult) => t.address !== '');
 
         // Sort by market cap (descending) - highest market cap first
         // Results from CoinGecko are already sorted by mcap, but DB results may not be
