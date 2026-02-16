@@ -95,18 +95,31 @@ export function useTokenSearch({
 
       try {
         const chainId = getChainId(chain);
-        const params = new URLSearchParams({
-          chainIds: chainId.toString(),
-          query: searchQuery,
-        });
 
-        if (type) {
-          params.append('type', type);
+        // Detect if query is an Ethereum address and route to the appropriate endpoint
+        const isAddressQuery = /^0x[0-9a-fA-F]{40}$/.test(searchQuery);
+
+        let response;
+        if (isAddressQuery) {
+          const params = new URLSearchParams({
+            address: searchQuery,
+            chainIds: chainId.toString(),
+          });
+          response = await apiClient.get<any[]>(
+            `/api/v1/tokens/erc20/search-by-address?${params.toString()}`
+          );
+        } else {
+          const params = new URLSearchParams({
+            chainIds: chainId.toString(),
+            query: searchQuery,
+          });
+          if (type) {
+            params.append('type', type);
+          }
+          response = await apiClient.get<any[]>(
+            `/api/v1/tokens/erc20/search?${params.toString()}`
+          );
         }
-
-        const response = await apiClient.get<any[]>(
-          `/api/v1/tokens/erc20/search?${params.toString()}`
-        );
 
         // API returns { data: TokenSearchCandidate[] }
         // TokenSearchCandidate has: coingeckoId, symbol, name, address, chainId, logoUrl, marketCap

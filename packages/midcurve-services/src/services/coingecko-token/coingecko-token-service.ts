@@ -27,6 +27,7 @@ import { CoinGeckoClient } from '../../clients/coingecko/index.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { isAddress, getAddress } from 'viem';
+import { getForkSourceChainId } from '../../config/evm.js';
 
 // Supported chain IDs (same as CoinGeckoClient)
 const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 56, 137, 10] as const;
@@ -425,17 +426,73 @@ export class CoingeckoTokenService {
 
     const chainsToSearch = chainIds ?? [...SUPPORTED_CHAIN_IDS];
 
-    // Parallel search across all chains using existing findByChainAndAddress
+    // Parallel search across all chains using existing findByChainAndAddress.
+    // For local chains (e.g. 31337), look up the fork source chain (e.g. 1)
+    // since coingecko_tokens only stores production chainIds.
     const results = await Promise.all(
-      chainsToSearch.map((chainId) =>
-        this.findByChainAndAddress(chainId, normalizedAddress)
-      )
+      chainsToSearch.map(async (chainId) => {
+        const lookupId = getForkSourceChainId(chainId);
+        const token = await this.findByChainAndAddress(lookupId, normalizedAddress);
+        if (token && lookupId !== chainId) {
+          // Remap the result's chainId back to the requested local chainId
+          return new CoingeckoToken({
+            ...token,
+            config: new CoingeckoTokenConfig({
+              chainId,
+              tokenAddress: token.tokenAddress,
+            }),
+            enrichedAt: token.enrichedAt,
+            imageUrl: token.imageUrl,
+            marketCapUsd: token.marketCapUsd,
+          });
+        }
+        return token;
+      })
     );
 
     // Filter out nulls (chains where address wasn't found)
     const foundTokens = results.filter(
       (t): t is CoingeckoToken => t !== null
     );
+
+    // For local chains, also search the tokens table for local-only tokens
+    const localChainIds = chainsToSearch.filter(
+      (id) => getForkSourceChainId(id) !== id
+    );
+    if (localChainIds.length > 0) {
+      const foundChainIds = new Set(foundTokens.map((t) => t.chainId));
+      for (const localChainId of localChainIds) {
+        if (foundChainIds.has(localChainId)) continue; // already found via coingecko
+        const dbToken = await this.prisma.token.findFirst({
+          where: {
+            tokenType: 'erc20',
+            AND: [
+              { config: { path: ['chainId'], equals: localChainId } },
+              { config: { path: ['address'], equals: normalizedAddress } },
+            ],
+          },
+        });
+        if (dbToken) {
+          const cfg = dbToken.config as { address: string; chainId: number };
+          foundTokens.push(
+            new CoingeckoToken({
+              id: dbToken.id,
+              coingeckoId: dbToken.coingeckoId || '',
+              name: dbToken.name,
+              symbol: dbToken.symbol,
+              config: new CoingeckoTokenConfig({
+                chainId: cfg.chainId,
+                tokenAddress: cfg.address,
+              }),
+              createdAt: dbToken.createdAt,
+              updatedAt: dbToken.updatedAt,
+              imageUrl: dbToken.logoUrl,
+              marketCapUsd: dbToken.marketCap,
+            })
+          );
+        }
+      }
+    }
 
     this.logger.info(
       {
@@ -642,6 +699,18 @@ export class CoingeckoTokenService {
       return [];
     }
 
+    // Map local chains (e.g. 31337) to their fork source (e.g. 1) for DB lookup.
+    // The coingecko_tokens table only has production chainIds, but local forks
+    // share the same token addresses as their source chain.
+    const lookupToRequested = new Map<number, number[]>();
+    for (const chainId of chainIds) {
+      const lookupId = getForkSourceChainId(chainId);
+      const existing = lookupToRequested.get(lookupId) || [];
+      existing.push(chainId);
+      lookupToRequested.set(lookupId, existing);
+    }
+    const effectiveChainIds = [...lookupToRequested.keys()];
+
     // Raw SQL query that groups by symbol and aggregates addresses
     // Uses MAX for name, coingeckoId, imageUrl, marketCapUsd (picks one per symbol)
     // Uses JSON_AGG to collect all addresses per symbol
@@ -669,22 +738,76 @@ export class CoingeckoTokenService {
           )
         ) as addresses
       FROM coingecko_tokens
-      WHERE (config->>'chainId')::int = ANY(${chainIds})
+      WHERE (config->>'chainId')::int = ANY(${effectiveChainIds})
         AND symbol ILIKE ${'%' + query + '%'}
       GROUP BY symbol
       ORDER BY MAX("marketCapUsd") DESC NULLS LAST
       LIMIT ${limit}
     `;
 
-    // Map to TokenSymbolResult format
-    const tokenSymbols: TokenSymbolResult[] = results.map((row) => ({
-      symbol: row.symbol,
-      name: row.name,
-      coingeckoId: row.coingeckoId,
-      logoUrl: row.logoUrl ?? undefined,
-      marketCap: row.marketCap ?? undefined,
-      addresses: row.addresses,
-    }));
+    // Post-process: remap DB chainIds back to the requested chainIds.
+    // e.g. if user asked for chainId 31337 and we queried chainId 1,
+    // expand the chainId 1 addresses to include chainId 31337.
+    const tokenSymbols: TokenSymbolResult[] = results.map((row) => {
+      const expandedAddresses: Array<{ chainId: number; address: string }> = [];
+      for (const addr of row.addresses) {
+        const requestedIds = lookupToRequested.get(addr.chainId);
+        if (requestedIds) {
+          for (const requestedId of requestedIds) {
+            expandedAddresses.push({ chainId: requestedId, address: addr.address });
+          }
+        }
+      }
+      return {
+        symbol: row.symbol,
+        name: row.name,
+        coingeckoId: row.coingeckoId,
+        logoUrl: row.logoUrl ?? undefined,
+        marketCap: row.marketCap ?? undefined,
+        addresses: expandedAddresses,
+      };
+    });
+
+    // For local chains, also search the tokens table for local-only tokens
+    // (e.g. mockUSD deployed only on the local fork, not in CoinGecko data).
+    const localChainIds = chainIds.filter(
+      (id) => getForkSourceChainId(id) !== id
+    );
+    if (localChainIds.length > 0) {
+      const dbTokens = await this.prisma.token.findMany({
+        where: {
+          tokenType: 'erc20',
+          symbol: { contains: query, mode: 'insensitive' },
+          OR: localChainIds.map((cid) => ({
+            config: { path: ['chainId'], equals: cid },
+          })),
+        },
+        orderBy: [
+          { marketCap: { sort: 'desc', nulls: 'last' } },
+          { symbol: 'asc' },
+        ],
+        take: limit,
+      });
+
+      // Merge — only add symbols not already present from coingecko search
+      const existingSymbols = new Set(
+        tokenSymbols.map((t) => t.symbol.toUpperCase())
+      );
+      for (const token of dbTokens) {
+        const upperSymbol = token.symbol.toUpperCase();
+        if (existingSymbols.has(upperSymbol)) continue;
+        const cfg = token.config as { address: string; chainId: number };
+        tokenSymbols.push({
+          symbol: token.symbol,
+          name: token.name,
+          coingeckoId: token.coingeckoId || '',
+          logoUrl: token.logoUrl || undefined,
+          marketCap: token.marketCap || undefined,
+          addresses: [{ chainId: cfg.chainId, address: cfg.address }],
+        });
+        existingSymbols.add(upperSymbol);
+      }
+    }
 
     log.methodExit(this.logger, 'searchByTextAndChains', {
       count: tokenSymbols.length,

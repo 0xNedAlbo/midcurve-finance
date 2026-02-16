@@ -112,6 +112,26 @@ export function isLocalChain(chainId: number): boolean {
 }
 
 /**
+ * Get the fork source chain ID for a local development chain.
+ *
+ * Local Anvil chain (31337) is a fork of Ethereum mainnet (1),
+ * so data lookups (e.g. CoinGecko token search) should use mainnet.
+ * Only active in development mode — in production, returns the chainId as-is.
+ *
+ * @param chainId - Chain ID to resolve
+ * @returns The fork source chain ID, or the original chainId if not a local/fork chain
+ */
+export function getForkSourceChainId(chainId: number): number {
+  if (
+    chainId === SupportedChainId.LOCAL &&
+    process.env['NODE_ENV'] !== 'production'
+  ) {
+    return SupportedChainId.ETHEREUM;
+  }
+  return chainId;
+}
+
+/**
  * Sentinel value used to mark missing RPC URLs
  * getChainConfig() will validate and throw comprehensive error when encountered
  */

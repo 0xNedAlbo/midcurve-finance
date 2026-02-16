@@ -204,18 +204,23 @@ export function UniswapV3MiniPnLCurve({
       const quoteDivisor = Number(quoteDecimalsDivisor);
 
       // Calculate range boundary prices from ticks
-      const lowerPriceBigint = tickToPrice(
+      const priceAtTickLower = tickToPrice(
         posConfig.tickLower,
         baseTokenConfig.address,
         quoteTokenConfig.address,
         baseToken.decimals
       );
-      const upperPriceBigint = tickToPrice(
+      const priceAtTickUpper = tickToPrice(
         posConfig.tickUpper,
         baseTokenConfig.address,
         quoteTokenConfig.address,
         baseToken.decimals
       );
+
+      // When isToken0Quote (base = token1), tick-to-price mapping inverts:
+      // tickLower maps to higher price, tickUpper to lower price. Swap accordingly.
+      const lowerPriceBigint = position.isToken0Quote ? priceAtTickUpper : priceAtTickLower;
+      const upperPriceBigint = position.isToken0Quote ? priceAtTickLower : priceAtTickUpper;
 
       const lowerPrice = Number(lowerPriceBigint) / quoteDivisor;
       const upperPrice = Number(upperPriceBigint) / quoteDivisor;
