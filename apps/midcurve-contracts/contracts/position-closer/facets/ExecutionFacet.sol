@@ -112,7 +112,7 @@ contract ExecutionFacet is Modifiers {
         if (feeBps > s.maxFeeBps) revert FeeBpsTooHigh(feeBps, s.maxFeeBps);
 
         // 5) Check trigger condition (tick-based)
-        (, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(order.pool).slot0();
+        (uint160 sqrtPriceX96, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(order.pool).slot0();
         if (!_triggerConditionMet(currentTick, order.triggerTick, triggerMode)) {
             revert TriggerConditionNotMet(currentTick, order.triggerTick, triggerMode);
         }
@@ -128,7 +128,7 @@ contract ExecutionFacet is Modifiers {
         );
 
         // 8) Withdraw liquidity and collect tokens
-        CloseContext memory ctx = _withdrawAndCollect(s, nftId, order.slippageBps);
+        CloseContext memory ctx = _withdrawAndCollect(s, nftId, order.slippageBps, sqrtPriceX96);
 
         // 9) Mark executed before external transfers (reentrancy hygiene)
         order.status = OrderStatus.EXECUTED;
@@ -217,7 +217,8 @@ contract ExecutionFacet is Modifiers {
     function _withdrawAndCollect(
         AppStorage storage s,
         uint256 nftId,
-        uint16 slippageBps
+        uint16 slippageBps,
+        uint160 currentSqrtPriceX96
     ) internal returns (CloseContext memory ctx) {
         INonfungiblePositionManagerMinimal nftManager = INonfungiblePositionManagerMinimal(s.positionManager);
 
@@ -241,17 +242,11 @@ contract ExecutionFacet is Modifiers {
         ctx.token1 = token1;
         ctx.liquidity = liquidity;
 
-        // Get current price for expected amount calculation
-        // Note: We need to get this from the pool, not from positions
-        // For simplicity, we'll use the tick range to calculate expected amounts
         uint160 sqrtPriceAX96 = TickMath.getSqrtRatioAtTick(tickLower);
         uint160 sqrtPriceBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
 
-        // Use midpoint as approximation for current price (safe since we're decreasing all liquidity)
-        uint160 currentSqrtPrice = uint160((uint256(sqrtPriceAX96) + uint256(sqrtPriceBX96)) / 2);
-
         (uint256 amount0Expected, uint256 amount1Expected) =
-            LiquidityAmounts.getAmountsForLiquidity(currentSqrtPrice, sqrtPriceAX96, sqrtPriceBX96, liquidity);
+            LiquidityAmounts.getAmountsForLiquidity(currentSqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, liquidity);
 
         uint256 amount0Min = (amount0Expected * (10_000 - uint256(slippageBps))) / 10_000;
         uint256 amount1Min = (amount1Expected * (10_000 - uint256(slippageBps))) / 10_000;
