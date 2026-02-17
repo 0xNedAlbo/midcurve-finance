@@ -35,39 +35,10 @@ export {
   SWAP_DIRECTIONS,
   type SwapDirection,
   type SwapConfig,
-  type SerializedAutomationContractConfig,
   type SerializedCloseOrder,
-  type SerializedUniswapV3CloseOrderConfig,
-  type SerializedUniswapV3CloseOrderState,
-  // Close Order Hash validation
   CloseOrderHashSchema,
-  // Register (user signs on-chain, then calls this endpoint)
-  type RegisterCloseOrderRequest,
-  RegisterCloseOrderRequestSchema,
-  type RegisterCloseOrderInput,
-  type RegisterCloseOrderResponse,
-  // List
-  type ListCloseOrdersRequest,
-  ListCloseOrdersQuerySchema,
-  type ListCloseOrdersInput,
   type ListCloseOrdersResponse,
-  // Get
   type GetCloseOrderResponse,
-  // Update
-  type UpdateCloseOrderRequest,
-  UpdateCloseOrderRequestSchema,
-  type UpdateCloseOrderInput,
-  type UpdateCloseOrderResponse,
-  // Cancel
-  type CancelCloseOrderResponse,
-  // Status
-  type CloseOrderRegistrationStatus,
-  type GetCloseOrderStatusResponse,
-  // Notify Order Cancelled (user signed on-chain)
-  type NotifyOrderCancelledRequest,
-  NotifyOrderCancelledRequestSchema,
-  type NotifyOrderCancelledInput,
-  type NotifyOrderCancelledResponse,
 } from './close-orders.js';
 
 // Wallet

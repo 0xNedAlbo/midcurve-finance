@@ -20,13 +20,14 @@ import { createPortal } from "react-dom";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import {
   tickToPrice,
+  tickToSqrtRatioX96,
   calculatePositionValue,
   UniswapV3Pool,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
 import type { PoolJSON } from "@midcurve/shared";
-import type { SerializedUniswapV3CloseOrderConfig, SwapConfig } from "@midcurve/api-shared";
+import type { SwapConfig } from "@midcurve/api-shared";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
@@ -88,16 +89,23 @@ export function UniswapV3MiniPnLCurve({
     const token1Decimals = position.pool.token1.decimals;
 
     for (const order of position.activeCloseOrders) {
-      const orderConfig = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
-      if (!orderConfig.triggerMode) continue;
+      if (!order.triggerMode || order.triggerTick == null) continue;
 
       try {
-        if (orderConfig.triggerMode === 'LOWER' && orderConfig.sqrtPriceX96Lower) {
-          const sqrtPriceX96 = BigInt(orderConfig.sqrtPriceX96Lower);
-          const Q96 = 2n ** 96n;
-          const Q192 = Q96 * Q96;
-          const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+        const sqrtPriceX96 = BigInt(tickToSqrtRatioX96(order.triggerTick).toString());
+        const Q96 = 2n ** 96n;
+        const Q192 = Q96 * Q96;
+        const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
 
+        // Build swap config from explicit fields
+        const hasSwap = order.swapDirection !== null;
+        const swapCfg: SwapConfig | null = hasSwap ? {
+          enabled: true,
+          direction: order.swapDirection!,
+          slippageBps: order.swapSlippageBps ?? 100,
+        } : null;
+
+        if (order.triggerMode === 'LOWER') {
           if (isToken0Base) {
             const decimalDiff = token0Decimals - token1Decimals;
             if (decimalDiff >= 0) {
@@ -113,18 +121,10 @@ export function UniswapV3MiniPnLCurve({
               stopLossPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
             }
           }
-
-          if (orderConfig.swapConfig?.enabled) {
-            slSwapConfig = orderConfig.swapConfig;
-          }
+          if (swapCfg) slSwapConfig = swapCfg;
         }
 
-        if (orderConfig.triggerMode === 'UPPER' && orderConfig.sqrtPriceX96Upper) {
-          const sqrtPriceX96 = BigInt(orderConfig.sqrtPriceX96Upper);
-          const Q96 = 2n ** 96n;
-          const Q192 = Q96 * Q96;
-          const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
-
+        if (order.triggerMode === 'UPPER') {
           if (isToken0Base) {
             const decimalDiff = token0Decimals - token1Decimals;
             if (decimalDiff >= 0) {
@@ -140,10 +140,7 @@ export function UniswapV3MiniPnLCurve({
               takeProfitPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
             }
           }
-
-          if (orderConfig.swapConfig?.enabled) {
-            tpSwapConfig = orderConfig.swapConfig;
-          }
+          if (swapCfg) tpSwapConfig = swapCfg;
         }
       } catch {
         // Ignore conversion errors for individual orders

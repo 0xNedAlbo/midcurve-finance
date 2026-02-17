@@ -176,11 +176,7 @@ import type {
   RouterSupportedChainsData,
   // Close Orders
   ListCloseOrdersResponse,
-  RegisterCloseOrderResponse,
   GetCloseOrderResponse,
-  UpdateCloseOrderRequest,
-  UpdateCloseOrderResponse,
-  CancelCloseOrderResponse,
   // Shared Contracts
   GetPositionSharedContractsResponseData,
   GetChainSharedContractsResponseData,
@@ -245,40 +241,6 @@ export const automationApi = {
     },
 
     /**
-     * Create a new close order at the specified closeOrderHash
-     * @param chainId - Chain ID
-     * @param nftId - Uniswap V3 NFT token ID
-     * @param closeOrderHash - Semantic identifier (e.g., "sl@-12345", "tp@201120")
-     * @param data - Order creation data
-     */
-    create(
-      chainId: number,
-      nftId: string,
-      closeOrderHash: string,
-      data: {
-        poolAddress: string;
-        operatorAddress: string;
-        positionManager: string;
-        triggerMode: 'LOWER' | 'UPPER';
-        sqrtPriceX96: string;
-        payoutAddress: string;
-        validUntil: string;
-        slippageBps: number;
-        registrationTxHash: string;
-        swapConfig?: {
-          enabled: boolean;
-          direction: 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
-          slippageBps: number;
-        };
-      }
-    ) {
-      return apiClient.put<RegisterCloseOrderResponse['data']>(
-        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`,
-        data
-      );
-    },
-
-    /**
      * Get a single close order by semantic hash
      * @param chainId - Chain ID
      * @param nftId - Uniswap V3 NFT token ID
@@ -286,32 +248,6 @@ export const automationApi = {
      */
     get(chainId: number, nftId: string, closeOrderHash: string) {
       return apiClient.get<GetCloseOrderResponse['data']>(
-        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`
-      );
-    },
-
-    /**
-     * Update a close order by semantic hash
-     * @param chainId - Chain ID
-     * @param nftId - Uniswap V3 NFT token ID
-     * @param closeOrderHash - Semantic identifier
-     * @param data - Update data (sqrtPriceX96Lower, sqrtPriceX96Upper, slippageBps)
-     */
-    update(chainId: number, nftId: string, closeOrderHash: string, data: UpdateCloseOrderRequest) {
-      return apiClient.patch<UpdateCloseOrderResponse['data']>(
-        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`,
-        data
-      );
-    },
-
-    /**
-     * Cancel a close order by semantic hash
-     * @param chainId - Chain ID
-     * @param nftId - Uniswap V3 NFT token ID
-     * @param closeOrderHash - Semantic identifier
-     */
-    cancel(chainId: number, nftId: string, closeOrderHash: string) {
-      return apiClient.delete<CancelCloseOrderResponse['data']>(
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`
       );
     },

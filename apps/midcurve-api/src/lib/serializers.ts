@@ -322,15 +322,8 @@ export function serializeOnChainCloseOrder(
     // Additional explicit fields
     validUntil: order.validUntil?.toISOString() ?? null,
     payoutAddress: order.payoutAddress,
-
-    // Legacy fields — populated from explicit columns for backward compat
-    automationContractConfig: {
-      chainId: order.chainId,
-      contractAddress: order.contractAddress,
-      positionManager: '', // No longer tracked per-order
-    },
-    config: {},
-    state: {},
+    contractAddress: order.contractAddress,
+    operatorAddress: order.operatorAddress,
 
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),

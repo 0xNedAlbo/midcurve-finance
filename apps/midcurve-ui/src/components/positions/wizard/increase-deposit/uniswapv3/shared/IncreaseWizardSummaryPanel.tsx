@@ -191,24 +191,21 @@ export function IncreaseWizardSummaryPanel({
     const isToken0Quote = position.isToken0Quote;
 
     for (const order of state.activeCloseOrders) {
-      const orderConfig = order.config as Record<string, unknown>;
-      const triggerMode = orderConfig.triggerMode as string | undefined;
-      const swapConfig = orderConfig.swapConfig as Record<string, unknown> | undefined;
+      if (!order.triggerMode) continue;
 
-      if (!triggerMode) continue;
-
-      const display: SwapConfigDisplay = swapConfig?.enabled
+      const hasSwap = order.swapDirection !== null;
+      const display: SwapConfigDisplay = hasSwap
         ? {
             enabled: true,
-            slippageBps: (swapConfig.slippageBps as number) || 100,
+            slippageBps: order.swapSlippageBps ?? 100,
             swapToQuote: isToken0Quote
-              ? (swapConfig.direction as string) === 'TOKEN1_TO_0'
-              : (swapConfig.direction as string) === 'TOKEN0_TO_1',
+              ? order.swapDirection === 'TOKEN1_TO_0'
+              : order.swapDirection === 'TOKEN0_TO_1',
           }
         : { enabled: false, slippageBps: 100, swapToQuote: true };
 
-      if (triggerMode === 'LOWER') slSwapConfig = display;
-      if (triggerMode === 'UPPER') tpSwapConfig = display;
+      if (order.triggerMode === 'LOWER') slSwapConfig = display;
+      if (order.triggerMode === 'UPPER') tpSwapConfig = display;
     }
 
     return { slSwapConfig, tpSwapConfig };

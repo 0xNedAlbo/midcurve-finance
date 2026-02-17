@@ -6,12 +6,13 @@ import {
   formatCompactValue,
   calculatePositionValue,
   tickToPrice,
+  tickToSqrtRatioX96,
   compareAddresses,
   getTokenAmountsFromLiquidity,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
 } from '@midcurve/shared';
-import type { PoolSearchTokenInfo, SerializedUniswapV3CloseOrderConfig } from '@midcurve/api-shared';
+import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
 import { useWithdrawWizard } from '../context/WithdrawWizardContext';
@@ -236,75 +237,51 @@ export function ConfigureStep() {
     }
 
     for (const order of state.activeCloseOrders) {
-      const orderConfig = order.config as unknown as SerializedUniswapV3CloseOrderConfig;
-      if (!orderConfig.triggerMode) continue;
+      if (!order.triggerMode || order.triggerTick == null) continue;
 
       try {
-        if (orderConfig.triggerMode === 'LOWER' && orderConfig.sqrtPriceX96Lower) {
-          const sqrtPriceX96 = BigInt(orderConfig.sqrtPriceX96Lower);
-          const Q96 = 2n ** 96n;
-          const Q192 = Q96 * Q96;
-          const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
-          const quoteDecimals = quoteToken.decimals;
-          const token0Decimals = state.discoveredPool.token0.decimals;
-          const token1Decimals = state.discoveredPool.token1.decimals;
+        const sqrtPriceX96 = BigInt(tickToSqrtRatioX96(order.triggerTick).toString());
+        const Q96 = 2n ** 96n;
+        const Q192 = Q96 * Q96;
+        const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
+        const quoteDecimals = quoteToken.decimals;
+        const token0Decimals = state.discoveredPool.token0.decimals;
+        const token1Decimals = state.discoveredPool.token1.decimals;
 
+        const computePrice = (): bigint => {
           if (isToken0Base) {
             const decimalDiff = token0Decimals - token1Decimals;
             if (decimalDiff >= 0) {
-              stopLossPrice = (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / Q192;
+              return (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / Q192;
             } else {
-              stopLossPrice = (rawPriceNum * 10n ** BigInt(quoteDecimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
+              return (rawPriceNum * 10n ** BigInt(quoteDecimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
             }
           } else {
             const decimalDiff = token1Decimals - token0Decimals;
             if (decimalDiff >= 0) {
-              stopLossPrice = (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / rawPriceNum;
+              return (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / rawPriceNum;
             } else {
-              stopLossPrice = (Q192 * 10n ** BigInt(quoteDecimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
+              return (Q192 * 10n ** BigInt(quoteDecimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
             }
           }
-        }
+        };
 
-        if (orderConfig.triggerMode === 'UPPER' && orderConfig.sqrtPriceX96Upper) {
-          const sqrtPriceX96 = BigInt(orderConfig.sqrtPriceX96Upper);
-          const Q96 = 2n ** 96n;
-          const Q192 = Q96 * Q96;
-          const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
-          const quoteDecimals = quoteToken.decimals;
-          const token0Decimals = state.discoveredPool.token0.decimals;
-          const token1Decimals = state.discoveredPool.token1.decimals;
-
-          if (isToken0Base) {
-            const decimalDiff = token0Decimals - token1Decimals;
-            if (decimalDiff >= 0) {
-              takeProfitPrice = (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / Q192;
-            } else {
-              takeProfitPrice = (rawPriceNum * 10n ** BigInt(quoteDecimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
-            }
-          } else {
-            const decimalDiff = token1Decimals - token0Decimals;
-            if (decimalDiff >= 0) {
-              takeProfitPrice = (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteDecimals)) / rawPriceNum;
-            } else {
-              takeProfitPrice = (Q192 * 10n ** BigInt(quoteDecimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
-            }
-          }
-        }
+        const price = computePrice();
+        if (order.triggerMode === 'LOWER') stopLossPrice = price;
+        if (order.triggerMode === 'UPPER') takeProfitPrice = price;
       } catch {
         // Ignore conversion errors for individual orders
       }
 
-      // Extract swap config from order
-      const swapCfg = orderConfig.swapConfig as { enabled?: boolean; direction?: string; slippageBps?: number } | undefined;
-      if (swapCfg?.enabled) {
+      // Extract swap config from explicit fields
+      if (order.swapDirection !== null) {
         const cfg: SwapConfig = {
           enabled: true,
-          direction: swapCfg.direction as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
-          slippageBps: swapCfg.slippageBps || 100,
+          direction: order.swapDirection!,
+          slippageBps: order.swapSlippageBps ?? 100,
         };
-        if (orderConfig.triggerMode === 'LOWER') slSwapConfig = cfg;
-        if (orderConfig.triggerMode === 'UPPER') tpSwapConfig = cfg;
+        if (order.triggerMode === 'LOWER') slSwapConfig = cfg;
+        if (order.triggerMode === 'UPPER') tpSwapConfig = cfg;
       }
     }
 

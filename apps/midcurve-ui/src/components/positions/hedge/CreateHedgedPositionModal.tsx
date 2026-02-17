@@ -16,6 +16,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Shield, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Address } from 'viem';
+import { tickToSqrtRatioX96 } from '@midcurve/shared';
 import type { ListPositionData, SerializedCloseOrder } from '@midcurve/api-shared';
 import { VaultConfigStep } from './steps/VaultConfigStep';
 import { TriggerConfigStep } from './steps/TriggerConfigStep';
@@ -78,18 +79,16 @@ export function CreateHedgedPositionModal({
     }
 
     const slOrder = closeOrders.find((order) => {
-      const config = order.config as { triggerMode?: string; sqrtPriceX96Lower?: string };
-      return config.triggerMode === 'LOWER' && order.status === 'active';
+      return order.triggerMode === 'LOWER' && order.status === 'active';
     });
 
     const tpOrder = closeOrders.find((order) => {
-      const config = order.config as { triggerMode?: string; sqrtPriceX96Upper?: string };
-      return config.triggerMode === 'UPPER' && order.status === 'active';
+      return order.triggerMode === 'UPPER' && order.status === 'active';
     });
 
     return {
-      sil: slOrder ? (slOrder.config as { sqrtPriceX96Lower?: string }).sqrtPriceX96Lower : undefined,
-      tip: tpOrder ? (tpOrder.config as { sqrtPriceX96Upper?: string }).sqrtPriceX96Upper : undefined,
+      sil: slOrder?.triggerTick != null ? tickToSqrtRatioX96(slOrder.triggerTick).toString() : undefined,
+      tip: tpOrder?.triggerTick != null ? tickToSqrtRatioX96(tpOrder.triggerTick).toString() : undefined,
     };
   }, [closeOrders]);
 

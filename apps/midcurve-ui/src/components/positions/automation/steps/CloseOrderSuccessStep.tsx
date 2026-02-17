@@ -14,13 +14,8 @@ interface CloseOrderSuccessStepProps {
 }
 
 export function CloseOrderSuccessStep({ order, quoteTokenSymbol: _quoteTokenSymbol }: CloseOrderSuccessStepProps) {
-  const config = order.config as {
-    triggerMode?: string;
-    validUntil?: string;
-  };
-
   // Epoch (0) means "no expiry" per smart contract convention
-  const parsedExpiry = config.validUntil ? new Date(config.validUntil) : null;
+  const parsedExpiry = order.validUntil ? new Date(order.validUntil) : null;
   const expiresAt = parsedExpiry && parsedExpiry.getTime() > 0 ? parsedExpiry : null;
 
   return (

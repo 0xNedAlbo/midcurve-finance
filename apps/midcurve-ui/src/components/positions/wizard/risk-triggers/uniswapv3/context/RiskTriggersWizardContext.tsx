@@ -364,17 +364,15 @@ export function convertOrdersToTriggerState(
   const tpConfigTriggerMode = isToken0Quote ? 'LOWER' : 'UPPER';
 
   const slOrder = orders.find((o) => {
-    const config = o.config as Record<string, unknown>;
     return (
-      config.triggerMode === slConfigTriggerMode &&
+      o.triggerMode === slConfigTriggerMode &&
       activeStatuses.includes(o.status)
     );
   });
 
   const tpOrder = orders.find((o) => {
-    const config = o.config as Record<string, unknown>;
     return (
-      config.triggerMode === tpConfigTriggerMode &&
+      o.triggerMode === tpConfigTriggerMode &&
       activeStatuses.includes(o.status)
     );
   });
@@ -419,16 +417,13 @@ export function convertOrdersToTriggerState(
   // Extract swap config per order
   const extractSwapConfig = (order: SerializedCloseOrder | undefined): SwapConfigState => {
     if (!order) return { ...DEFAULT_SWAP_CONFIG };
-    const config = order.config as Record<string, unknown>;
-    const swapConfig = config.swapConfig as Record<string, unknown> | undefined;
-    const exitSlippageBps = typeof config.slippageBps === 'number' ? config.slippageBps : DEFAULT_SWAP_CONFIG.exitSlippageBps;
-    if (swapConfig && swapConfig.enabled) {
-      const direction = swapConfig.direction as string | undefined;
+    const exitSlippageBps = order.slippageBps ?? DEFAULT_SWAP_CONFIG.exitSlippageBps;
+    if (order.swapDirection !== null) {
       const toQuoteDirection = computeSwapToQuoteDirection(isToken0Quote);
       return {
         enabled: true,
-        slippageBps: (swapConfig.slippageBps as number) || DEFAULT_SWAP_CONFIG.slippageBps,
-        swapToQuote: direction === toQuoteDirection,
+        slippageBps: order.swapSlippageBps ?? DEFAULT_SWAP_CONFIG.slippageBps,
+        swapToQuote: order.swapDirection === toQuoteDirection,
         exitSlippageBps,
       };
     }
