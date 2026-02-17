@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { useMemo } from 'react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { normalizeAddress } from '@midcurve/shared';
@@ -11,7 +10,7 @@ import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useCollectFees } from '@/hooks/positions/uniswapv3/useCollectFees';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
-import { TransactionStep } from '@/components/positions/TransactionStep';
+import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
 
@@ -28,8 +27,7 @@ interface UniswapV3CollectFeesFormProps {
  * Features:
  * - Fee preview with token amounts + quote value
  * - Network validation
- * - On-chain collect transaction
- * - Automatic event seeding via PATCH endpoint
+ * - On-chain collect transaction via EvmTransactionPrompt
  * - Success/error handling
  */
 export function UniswapV3CollectFeesForm({
@@ -91,18 +89,43 @@ export function UniswapV3CollectFeesForm({
   // Collect fees hook (MUST be called before any returns)
   const collectFees = useCollectFees(collectParams);
 
-  // Reset state when form opens (MUST be called before any returns)
-  useEffect(() => {
-    collectFees.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+  // Validate chain configuration (needed before canCollect)
+  const isWrongNetwork = !!(
+    isConnected &&
+    chainConfig &&
+    connectedChainId !== chainConfig.chainId
+  );
 
-  // Handle successful collection - call success callback
-  useEffect(() => {
-    if (collectFees.isSuccess) {
-      onCollectSuccess?.();
-    }
-  }, [collectFees.isSuccess, onCollectSuccess]);
+  const isWrongAccount = !!(
+    isConnected &&
+    walletAddress &&
+    state.ownerAddress &&
+    walletAddress.toLowerCase() !== state.ownerAddress.toLowerCase()
+  );
+
+  const canCollect =
+    isConnected &&
+    !isWrongNetwork &&
+    !isWrongAccount &&
+    unclaimedFees > 0n;
+
+  // Transaction prompt (MUST be called before any returns)
+  const collectFeesTx = useEvmTransactionPrompt({
+    label: 'Collect Fees',
+    buttonLabel: 'Collect',
+    chainId: config.chainId,
+    enabled: canCollect,
+    txHash: collectFees.receipt?.transactionHash,
+    isSubmitting: collectFees.isCollecting,
+    isWaitingForConfirmation: collectFees.isWaitingForConfirmation,
+    isSuccess: collectFees.isSuccess,
+    error: collectFees.error,
+    onExecute: () => collectFees.collect(),
+    onReset: () => collectFees.reset(),
+    onStatusChange: (status) => {
+      if (status === 'success') onCollectSuccess?.();
+    },
+  });
 
   // Validate chain configuration
   if (!chain || !chainConfig) {
@@ -119,35 +142,9 @@ export function UniswapV3CollectFeesForm({
     );
   }
 
-  // Check if wallet is connected to the wrong network
-  const isWrongNetwork = !!(
-    isConnected &&
-    connectedChainId !== chainConfig.chainId
-  );
-
-  // Check if connected wallet is the position owner
-  const isWrongAccount = !!(
-    isConnected &&
-    walletAddress &&
-    state.ownerAddress &&
-    walletAddress.toLowerCase() !== state.ownerAddress.toLowerCase()
-  );
-
   // Token info for display
   const baseToken = position.isToken0Quote ? position.pool.token1 : position.pool.token0;
   const quoteToken = position.isToken0Quote ? position.pool.token0 : position.pool.token1;
-
-  // Handle collect execution
-  const handleCollect = () => {
-    collectFees.collect();
-  };
-
-  // Validation
-  const canCollect =
-    isConnected &&
-    !isWrongNetwork &&
-    !isWrongAccount &&
-    unclaimedFees > 0n;
 
   return (
     <div className="space-y-3">
@@ -224,53 +221,11 @@ export function UniswapV3CollectFeesForm({
         <EvmSwitchNetworkPrompt chain={chain} isWrongNetwork={isWrongNetwork} />
       )}
 
-      {/* Transaction Steps */}
-      {isConnected && !isWrongAccount && (
-        <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-white mb-4">Transaction</h3>
-          <div className="space-y-3">
-
-            {/* Collect Fees Transaction */}
-            <TransactionStep
-              title="Collect Fees"
-              description="Transfer all accumulated fees to your wallet"
-              isLoading={
-                collectFees.isCollecting || collectFees.isWaitingForConfirmation
-              }
-              isComplete={collectFees.isSuccess}
-              isDisabled={
-                !canCollect ||
-                collectFees.isCollecting ||
-                collectFees.isWaitingForConfirmation ||
-                collectFees.isSuccess
-              }
-              onExecute={handleCollect}
-              showExecute={!collectFees.isSuccess}
-              transactionHash={collectFees.receipt?.transactionHash}
-              chain={chain}
-            />
-
-          </div>
-
-          {/* Error Display */}
-          {collectFees.error && (
-            <div className="mt-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-              <div className="flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                <div>
-                  <h5 className="text-red-400 font-medium">Transaction Error</h5>
-                  <p className="text-red-200/80 text-sm mt-1">
-                    {collectFees.error.message}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Collect Fees Transaction */}
+      {isConnected && !isWrongAccount && collectFeesTx.element}
 
       {/* Finish Button - Small green button at bottom right, only shown after collection completes */}
-      {collectFees.isSuccess && (
+      {collectFeesTx.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}
