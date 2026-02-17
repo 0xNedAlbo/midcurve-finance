@@ -7,10 +7,11 @@
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
+import { OnChainOrderStatus } from '@midcurve/shared';
 import { DomainEventConsumer } from '../consumer.js';
 import { DOMAIN_QUEUES, ROUTING_PATTERNS } from '../topology.js';
 import type { DomainEvent, PositionClosedPayload } from '../types.js';
-import { CloseOrderService } from '../../services/automation/close-order-service.js';
+import { OnChainCloseOrderService } from '../../services/automation/on-chain-close-order-service.js';
 import { PoolSubscriptionService } from '../../services/automation/pool-subscription-service.js';
 
 // ============================================================
@@ -32,7 +33,7 @@ export interface PositionClosedOrderCancellerDependencies {
  * with an event-driven approach.
  *
  * **Idempotency**: This handler is idempotent because:
- * 1. Cancelling an already-cancelled order is a no-op (CloseOrderService handles this)
+ * 1. Cancelling an already-cancelled order is a no-op
  * 2. Multiple cancellation attempts for the same order don't cause issues
  *
  * **Error Handling**: If cancellation fails for one order, we continue
@@ -43,13 +44,13 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
   readonly queueName = DOMAIN_QUEUES.POSITION_CLOSED_ORDER_CANCELLER;
 
   private readonly prisma: PrismaClient;
-  private readonly closeOrderService: CloseOrderService;
+  private readonly orderService: OnChainCloseOrderService;
   private readonly poolSubscriptionService: PoolSubscriptionService;
 
   constructor(deps: PositionClosedOrderCancellerDependencies = {}) {
     super();
     this.prisma = deps.prisma ?? prismaClient;
-    this.closeOrderService = new CloseOrderService({ prisma: this.prisma });
+    this.orderService = new OnChainCloseOrderService({ prisma: this.prisma });
     this.poolSubscriptionService = new PoolSubscriptionService({ prisma: this.prisma });
   }
 
@@ -68,9 +69,10 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
       'Processing position.closed event'
     );
 
-    // Find active orders for this position (non-terminal statuses)
-    const activeOrders = await this.closeOrderService.findByPositionId(positionId, {
-      status: ['pending', 'active', 'registering', 'triggering'],
+    // Find active orders for this position (ACTIVE on-chain + not idle monitoring)
+    const activeOrders = await this.orderService.findByPositionId(positionId, {
+      onChainStatus: OnChainOrderStatus.ACTIVE,
+      monitoringState: ['monitoring', 'triggered', 'suspended'],
     });
 
     if (activeOrders.length === 0) {
@@ -96,7 +98,7 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
     // Cancel each order and decrement pool subscription counts
     for (const order of activeOrders) {
       try {
-        await this.closeOrderService.cancel(order.id);
+        await this.orderService.markOnChainCancelled(order.id);
 
         // Decrement pool subscription order count
         if (position?.poolId) {

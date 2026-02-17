@@ -163,11 +163,11 @@ export interface PositionDataForCurve {
   };
   config: unknown;
   state: unknown;
-  automationOrders: {
+  onChainCloseOrders: {
     id: string;
-    closeOrderType: string;
-    status: string;
-    config: unknown;
-    state: unknown;
+    triggerMode: number;
+    triggerTick: number | null;
+    onChainStatus: number;
+    monitoringState: string;
   }[];
 }

@@ -268,6 +268,17 @@ export {
   CloseOrderFactory,
 } from './automation/index.js';
 
+// On-Chain Close Order types (contract enum mirrors)
+export {
+  OnChainOrderStatus,
+  ContractTriggerMode,
+  ContractSwapDirection,
+} from './automation/index.js';
+export type { MonitoringState } from './automation/index.js';
+
+// Close Order Execution types
+export type { CloseOrderExecutionStatus } from './automation/index.js';
+
 // UniswapV3 Automation types
 export type {
   TriggerMode,

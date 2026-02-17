@@ -3,15 +3,24 @@
  *
  * Re-exports all automation service classes and types.
  * These services handle position automation features:
- * - Close orders (price-triggered position closing)
+ * - On-chain close orders (price-triggered position closing)
+ * - Close order executions (individual execution attempt tracking)
  * - Shared contracts (versioned contract registry)
  * - Pool subscriptions (price monitoring)
  * - Automation logs (user-facing event logs)
+ * - Hedge vaults (automated LP management)
  */
 
-// Main services
-export { CloseOrderService } from './close-order-service.js';
-export type { CloseOrderServiceDependencies } from './close-order-service.js';
+// On-chain close order service (replaces old CloseOrderService)
+export { OnChainCloseOrderService } from './on-chain-close-order-service.js';
+export type {
+  OnChainCloseOrderServiceDependencies,
+  OnChainCloseOrderWithPosition,
+} from './on-chain-close-order-service.js';
+
+// Close order execution service
+export { CloseOrderExecutionService } from './close-order-execution-service.js';
+export type { CloseOrderExecutionServiceDependencies } from './close-order-execution-service.js';
 
 export { SharedContractService } from './shared-contract-service.js';
 export type {

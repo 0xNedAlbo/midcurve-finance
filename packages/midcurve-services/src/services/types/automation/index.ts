@@ -4,24 +4,30 @@
  * Barrel export for automation-related service types.
  */
 
+// Close order inputs (new: OnChainCloseOrder + CloseOrderExecution)
 export type {
-  // Close order inputs
-  RegisterCloseOrderInput,
-  UpdateCloseOrderInput,
-  FindCloseOrderOptions,
-  MarkOrderRegisteredInput,
-  MarkOrderTriggeredInput,
-  MarkOrderExecutedInput,
-  CreateFromOnChainEventInput,
-  // Pool subscription inputs
+  CreateOnChainCloseOrderInput,
+  UpsertFromOnChainEventInput,
+  SyncFromChainInput,
+  FindOnChainCloseOrderOptions,
+  CreateCloseOrderExecutionInput,
+  MarkCloseOrderExecutionCompletedInput,
+  MarkCloseOrderExecutionFailedInput,
+} from './close-order-input.js';
+
+// Pool subscription inputs
+export type {
   UpdatePoolSubscriptionInput,
   FindPoolSubscriptionOptions,
-  // Automation log types - base contexts
+} from './automation-input.js';
+
+// Automation log types - base contexts
+export type {
   AutomationPlatform,
   BaseLogContext,
   EvmLogContext,
   SolanaLogContext,
-  // Automation log types - order contexts (extend OrderLogContext)
+  // Order contexts (extend OrderLogContext)
   OrderLogContext,
   OrderCreatedContext,
   OrderRegisteredContext,
@@ -35,19 +41,18 @@ export type {
   OrderModifiedContext,
   PreflightValidationContext,
   SimulationFailedContext,
-  // Automation log types - union and inputs
+  // Union and inputs
   AutomationLogContext,
   CreateAutomationLogInput,
   ListAutomationLogsOptions,
 } from './automation-input.js';
 
+// Hedge vault types
 export type {
-  // Hedge vault types
   HedgeVaultState,
   HedgeVaultMonitoringStatus,
   HedgeVaultExecutionStatus,
   HedgeVaultTriggerType,
-  // Hedge vault inputs
   RegisterHedgeVaultInput,
   UpdateHedgeVaultStateInput,
   RecordHedgeVaultExecutionInput,

@@ -22,15 +22,15 @@ import {
   UniswapV3PositionConfig,
   positionStateFromJSON,
   stateFromJSON as poolStateFromJSON,
+  ContractTriggerMode,
+  OnChainOrderStatus,
   type UniswapV3PositionState,
   type UniswapV3PositionConfigJSON,
   type UniswapV3PositionStateJSON,
   type UniswapV3PoolStateJSON,
   type Erc20TokenConfig,
-  type TriggerMode,
 } from '@midcurve/shared';
 import { TickMath } from '@uniswap/v3-sdk';
-import JSBI from 'jsbi';
 import type {
   PnLCurveData,
   PnLCurvePoint,
@@ -129,7 +129,7 @@ export class PnLCurveService {
 
       // 7. Process orders
       const orders = this.processOrders(
-        position.automationOrders,
+        position.onChainCloseOrders,
         baseToken,
         quoteToken,
         positionConfig,
@@ -218,9 +218,9 @@ export class PnLCurveService {
             token1: true,
           },
         },
-        automationOrders: {
+        onChainCloseOrders: {
           where: {
-            status: { in: ['active', 'pending', 'registering'] },
+            onChainStatus: OnChainOrderStatus.ACTIVE,
           },
         },
       },
@@ -256,12 +256,12 @@ export class PnLCurveService {
       },
       config: position.config,
       state: position.state,
-      automationOrders: position.automationOrders.map((order) => ({
+      onChainCloseOrders: position.onChainCloseOrders.map((order) => ({
         id: order.id,
-        closeOrderType: order.closeOrderType,
-        status: order.status,
-        config: order.config,
-        state: order.state,
+        triggerMode: order.triggerMode,
+        triggerTick: order.triggerTick,
+        onChainStatus: order.onChainStatus,
+        monitoringState: order.monitoringState,
       })),
     };
   }
@@ -351,144 +351,71 @@ export class PnLCurveService {
   }
 
   /**
-   * Validate sqrtPriceX96 is within valid Uniswap V3 range
-   * MIN_SQRT_RATIO = 4295128739
-   * MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342
-   */
-  private isValidSqrtPriceX96(sqrtPriceX96: bigint): boolean {
-    const MIN_SQRT_RATIO = 4295128739n;
-    const MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342n;
-    return sqrtPriceX96 >= MIN_SQRT_RATIO && sqrtPriceX96 <= MAX_SQRT_RATIO;
-  }
-
-  /**
-   * Process automation orders into curve-friendly format
+   * Process on-chain close orders into curve-friendly format.
+   *
+   * With the new explicit-column model, triggerTick is stored directly
+   * (no more parsing sqrtPriceX96 from JSON blobs).
    */
   private processOrders(
-    orders: { id: string; closeOrderType: string; status: string; config: unknown; state: unknown }[],
+    orders: { id: string; triggerMode: number; triggerTick: number | null; onChainStatus: number; monitoringState: string }[],
     baseToken: { symbol: string; decimals: number; config: Erc20TokenConfig },
     quoteToken: { symbol: string; decimals: number; config: Erc20TokenConfig },
     positionConfig: UniswapV3PositionConfig,
     positionState: UniswapV3PositionState
   ): PnLCurveOrder[] {
     const result: PnLCurveOrder[] = [];
+    const baseIsToken0 = BigInt(baseToken.config.address) < BigInt(quoteToken.config.address);
 
     for (const order of orders) {
-      if (order.closeOrderType !== 'uniswapv3') {
+      if (order.triggerTick === null) {
+        this.logger.debug({ orderId: order.id }, 'Skipping order: no triggerTick set');
         continue;
       }
 
-      const config = order.config as {
-        triggerMode: TriggerMode;
-        sqrtPriceX96Lower: string;
-        sqrtPriceX96Upper: string;
-      };
+      const triggerTick = order.triggerTick;
 
-      const status = this.mapOrderStatus(order.status);
-      const baseIsToken0 = BigInt(baseToken.config.address) < BigInt(quoteToken.config.address);
+      const triggerPrice = tickToPrice(
+        triggerTick,
+        baseToken.config.address,
+        quoteToken.config.address,
+        baseToken.decimals
+      );
 
-      // Process LOWER trigger (stop-loss)
-      if (config.triggerMode === 'LOWER') {
-        const sqrtPriceX96Lower = BigInt(config.sqrtPriceX96Lower || '0');
+      // Convert tick → sqrtPriceX96 for position value calculation
+      const sqrtRatioJSBI = TickMath.getSqrtRatioAtTick(triggerTick);
+      const sqrtPriceX96 = BigInt(sqrtRatioJSBI.toString());
 
-        // Only process if sqrtPriceX96 is valid (not a sentinel value)
-        if (this.isValidSqrtPriceX96(sqrtPriceX96Lower)) {
-          // Convert BigInt to JSBI for Uniswap SDK compatibility
-          const sqrtRatioJSBI = JSBI.BigInt(sqrtPriceX96Lower.toString());
-          const triggerTick = TickMath.getTickAtSqrtRatio(sqrtRatioJSBI);
+      const valueAtTrigger = calculatePositionValue(
+        positionState.liquidity,
+        sqrtPriceX96,
+        positionConfig.tickLower,
+        positionConfig.tickUpper,
+        baseIsToken0
+      );
 
-          const triggerPrice = tickToPrice(
-            triggerTick,
-            baseToken.config.address,
-            quoteToken.config.address,
-            baseToken.decimals
-          );
+      const type: OrderType = order.triggerMode === ContractTriggerMode.LOWER
+        ? 'stop-loss'
+        : 'take-profit';
 
-          const valueAtTrigger = calculatePositionValue(
-            positionState.liquidity,
-            sqrtPriceX96Lower,
-            positionConfig.tickLower,
-            positionConfig.tickUpper,
-            baseIsToken0
-          );
+      const status = this.mapOnChainStatus(order.onChainStatus);
 
-          result.push({
-            type: 'stop-loss',
-            triggerPrice,
-            triggerTick,
-            status,
-            valueAtTrigger,
-          });
-        } else {
-          this.logger.debug(
-            { orderId: order.id, sqrtPriceX96Lower: sqrtPriceX96Lower.toString() },
-            'Skipping LOWER trigger: invalid sqrtPriceX96 (sentinel value)'
-          );
-        }
-      }
-
-      // Process UPPER trigger (take-profit)
-      if (config.triggerMode === 'UPPER') {
-        const sqrtPriceX96Upper = BigInt(config.sqrtPriceX96Upper || '0');
-
-        // Only process if sqrtPriceX96 is valid (not a sentinel value)
-        if (this.isValidSqrtPriceX96(sqrtPriceX96Upper)) {
-          // Convert BigInt to JSBI for Uniswap SDK compatibility
-          const sqrtRatioJSBI = JSBI.BigInt(sqrtPriceX96Upper.toString());
-          const triggerTick = TickMath.getTickAtSqrtRatio(sqrtRatioJSBI);
-
-          const triggerPrice = tickToPrice(
-            triggerTick,
-            baseToken.config.address,
-            quoteToken.config.address,
-            baseToken.decimals
-          );
-
-          const valueAtTrigger = calculatePositionValue(
-            positionState.liquidity,
-            sqrtPriceX96Upper,
-            positionConfig.tickLower,
-            positionConfig.tickUpper,
-            baseIsToken0
-          );
-
-          result.push({
-            type: 'take-profit',
-            triggerPrice,
-            triggerTick,
-            status,
-            valueAtTrigger,
-          });
-        } else {
-          this.logger.debug(
-            { orderId: order.id, sqrtPriceX96Upper: sqrtPriceX96Upper.toString() },
-            'Skipping UPPER trigger: invalid sqrtPriceX96 (sentinel value)'
-          );
-          // NOTE: No continue!
-        }
-      }
+      result.push({ type, triggerPrice, triggerTick, status, valueAtTrigger });
     }
 
     return result;
   }
 
   /**
-   * Map database order status to curve-friendly status
+   * Map on-chain order status to curve-friendly display status
    */
-  private mapOrderStatus(status: string): OrderStatus {
-    switch (status) {
-      case 'active':
+  private mapOnChainStatus(onChainStatus: number): OrderStatus {
+    switch (onChainStatus) {
+      case OnChainOrderStatus.ACTIVE:
         return 'active';
-      case 'pending':
-      case 'registering':
-        return 'pending';
-      case 'executed':
-      case 'triggering':
+      case OnChainOrderStatus.EXECUTED:
         return 'executed';
-      case 'cancelled':
+      case OnChainOrderStatus.CANCELLED:
         return 'cancelled';
-      case 'expired':
-        return 'expired';
       default:
         return 'pending';
     }
