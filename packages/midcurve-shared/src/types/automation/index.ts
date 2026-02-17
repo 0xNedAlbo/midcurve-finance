@@ -76,6 +76,23 @@ export {
 } from './factory.js';
 
 // ============================================================================
+// On-Chain Close Order Types (contract enum mirrors)
+// ============================================================================
+
+export {
+  OnChainOrderStatus,
+  ContractTriggerMode,
+  ContractSwapDirection,
+  type MonitoringState,
+} from './on-chain-close-order.types.js';
+
+// ============================================================================
+// Close Order Execution Types
+// ============================================================================
+
+export type { CloseOrderExecutionStatus } from './close-order-execution.types.js';
+
+// ============================================================================
 // UniswapV3 Types
 // ============================================================================
 
