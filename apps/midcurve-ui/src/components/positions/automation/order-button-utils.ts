@@ -34,6 +34,18 @@ interface CloseOrderConfig {
 }
 
 /**
+ * Get the trigger sqrtPriceX96 from a close order config.
+ * Each order has exactly one trigger price in either sqrtPriceX96Lower or
+ * sqrtPriceX96Upper (the other is "0"). Which field is used depends on the
+ * on-chain triggerMode and isToken0Quote, so we return whichever is non-zero.
+ */
+function getTriggerSqrtPriceX96(config: CloseOrderConfig): string | undefined {
+  if (config.sqrtPriceX96Upper && config.sqrtPriceX96Upper !== '0') return config.sqrtPriceX96Upper;
+  if (config.sqrtPriceX96Lower && config.sqrtPriceX96Lower !== '0') return config.sqrtPriceX96Lower;
+  return undefined;
+}
+
+/**
  * Format sqrtPriceX96 to human-readable price using proper token ordering.
  *
  * This is the same logic as CloseOrderCard.tsx formatTriggerPrice.
@@ -88,9 +100,6 @@ function sqrtPriceX96ToNumber(
 /**
  * Find the close order with trigger price closest to current price.
  *
- * For LOWER (stop-loss): Uses sqrtPriceX96Lower
- * For UPPER (take-profit): Uses sqrtPriceX96Upper
- *
  * @param orders - Array of close orders to filter
  * @param currentPriceDisplay - Current price as display string (for parsing)
  * @param triggerMode - 'LOWER' for stop-loss, 'UPPER' for take-profit
@@ -126,8 +135,7 @@ export function findClosestOrder(
 
   for (const order of relevantOrders) {
     const config = order.config as CloseOrderConfig;
-    const sqrtPriceX96 =
-      triggerMode === 'LOWER' ? config.sqrtPriceX96Lower : config.sqrtPriceX96Upper;
+    const sqrtPriceX96 = getTriggerSqrtPriceX96(config);
 
     if (!sqrtPriceX96) continue;
 
@@ -174,9 +182,8 @@ export function getOrderButtonLabel(
   const config = order.config as CloseOrderConfig;
   const prefix = orderType === 'stopLoss' ? 'SL' : 'TP';
 
-  // Get the relevant sqrtPriceX96 based on order type
-  const sqrtPriceX96 =
-    orderType === 'stopLoss' ? config.sqrtPriceX96Lower : config.sqrtPriceX96Upper;
+  // Get the trigger sqrtPriceX96 (whichever field is non-zero)
+  const sqrtPriceX96 = getTriggerSqrtPriceX96(config);
 
   const priceDisplay = formatTriggerPrice(sqrtPriceX96, tokenConfig);
 
@@ -219,8 +226,7 @@ export function isOrderExecuting(order: SerializedCloseOrder): boolean {
  */
 export function getOrderTriggerPrice(
   order: SerializedCloseOrder,
-  orderType: 'stopLoss' | 'takeProfit'
 ): string | undefined {
   const config = order.config as CloseOrderConfig;
-  return orderType === 'stopLoss' ? config.sqrtPriceX96Lower : config.sqrtPriceX96Upper;
+  return getTriggerSqrtPriceX96(config);
 }

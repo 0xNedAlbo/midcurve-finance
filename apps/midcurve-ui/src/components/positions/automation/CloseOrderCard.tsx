@@ -141,13 +141,14 @@ export function CloseOrderCard({
         <CloseOrderStatusBadge status={order.status} size="sm" />
       </div>
 
-      {/* Trigger Prices */}
+      {/* Trigger Prices — read whichever sqrtPriceX96 field is non-zero
+           (the field used depends on on-chain triggerMode and isToken0Quote) */}
       <div className="space-y-2 mb-3">
         {triggerMode === 'LOWER' && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Lower trigger:</span>
             <span className="text-red-400 font-mono">
-              {formatTriggerPrice(config.sqrtPriceX96Lower, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
+              {formatTriggerPrice(config.sqrtPriceX96Lower !== '0' ? config.sqrtPriceX96Lower : config.sqrtPriceX96Upper, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
             </span>
           </div>
         )}
@@ -155,7 +156,7 @@ export function CloseOrderCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Upper trigger:</span>
             <span className="text-green-400 font-mono">
-              {formatTriggerPrice(config.sqrtPriceX96Upper, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
+              {formatTriggerPrice(config.sqrtPriceX96Upper !== '0' ? config.sqrtPriceX96Upper : config.sqrtPriceX96Lower, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
             </span>
           </div>
         )}
