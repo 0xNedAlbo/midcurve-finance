@@ -54,7 +54,7 @@ interface UseCloseOrdersParams {
  * Check if any order is currently executing (triggering status)
  */
 function hasExecutingOrder(orders: SerializedCloseOrder[] | undefined): boolean {
-  return orders?.some((order) => order.status === 'triggering') ?? false;
+  return orders?.some((order) => order.monitoringState === 'triggered') ?? false;
 }
 
 /**

@@ -235,7 +235,8 @@ export interface PreflightValidationContext extends OrderLogContext {
  */
 export interface SimulationFailedContext extends OrderLogContext {
   error: string;
-  closeId: number;
+  nftId: string;
+  triggerMode: number;
   contractAddress: string;
   feeRecipient: string;
   feeBps: number;

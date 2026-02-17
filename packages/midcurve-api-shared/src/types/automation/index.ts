@@ -28,6 +28,8 @@ export {
   type CloseOrderType,
   CLOSE_ORDER_STATUSES,
   type CloseOrderStatus,
+  MONITORING_STATES,
+  type MonitoringState,
   TRIGGER_MODES,
   type TriggerMode,
   SWAP_DIRECTIONS,

@@ -75,6 +75,12 @@ export interface SerializedAutomationContractConfig {
 }
 
 /**
+ * Monitoring state values (off-chain execution lifecycle)
+ */
+export const MONITORING_STATES = ['idle', 'monitoring', 'triggered', 'suspended'] as const;
+export type MonitoringState = (typeof MONITORING_STATES)[number];
+
+/**
  * Serialized close order for API responses
  */
 export interface SerializedCloseOrder {
@@ -82,7 +88,17 @@ export interface SerializedCloseOrder {
   closeOrderHash: string | null;
   closeOrderType: CloseOrderType;
   status: CloseOrderStatus;
+  monitoringState: MonitoringState;
   positionId: string;
+  chainId: number;
+  nftId: string;
+  triggerMode: TriggerMode;
+  triggerTick: number | null;
+  slippageBps: number | null;
+  swapDirection: SwapDirection | null;
+  swapSlippageBps: number | null;
+  validUntil: string | null;
+  payoutAddress: string | null;
   automationContractConfig: SerializedAutomationContractConfig;
   config: Record<string, unknown>;
   state: Record<string, unknown>;

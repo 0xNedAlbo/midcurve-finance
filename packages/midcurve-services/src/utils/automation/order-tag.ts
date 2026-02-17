@@ -9,6 +9,7 @@ import {
   formatCompactValue,
   pricePerToken0InToken1,
   pricePerToken1InToken0,
+  tickToSqrtRatioX96,
 } from '@midcurve/shared';
 
 /**
@@ -72,6 +73,32 @@ export interface OrderTagParams {
  * });
  * // Returns: "SL@1450.12"
  */
+/**
+ * Parameters for generating an order tag from a tick (no sqrtPriceX96 needed)
+ */
+export interface OrderTagFromTickParams {
+  triggerSide: 'lower' | 'upper';
+  triggerTick: number;
+  token0IsQuote: boolean;
+  token0Decimals: number;
+  token1Decimals: number;
+}
+
+/**
+ * Generates an order tag from a trigger tick.
+ * Convenience wrapper that converts tick → sqrtPriceX96 internally.
+ */
+export function generateOrderTagFromTick(params: OrderTagFromTickParams): string {
+  const sqrtPriceX96 = BigInt(tickToSqrtRatioX96(params.triggerTick).toString());
+  return generateOrderTag({
+    triggerSide: params.triggerSide,
+    sqrtPriceX96,
+    token0IsQuote: params.token0IsQuote,
+    token0Decimals: params.token0Decimals,
+    token1Decimals: params.token1Decimals,
+  });
+}
+
 export function generateOrderTag(params: OrderTagParams): string {
   const {
     triggerSide,

@@ -3,12 +3,17 @@
  *
  * RabbitMQ consumer that processes triggered orders.
  * Uses competing consumers pattern for parallel execution.
+ *
+ * Execution lifecycle tracked via CloseOrderExecutionService (per-attempt entities):
+ * - First attempt: atomicTransitionToTriggered + executionService.create
+ * - Retry: executionService.incrementRetryCount + transitionToMonitoring
+ * - Success: executionService.markCompleted + markOnChainExecuted
+ * - Permanent failure: executionService.markFailed + transitionToSuspended
  */
 
-import type { AutomationContractConfig } from '@midcurve/shared';
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
-import { getCloseOrderService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
+import { getOnChainCloseOrderService, getCloseOrderExecutionService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -164,7 +169,8 @@ export class OrderExecutor {
       triggerSide,
     });
 
-    const closeOrderService = getCloseOrderService();
+    const onChainCloseOrderService = getOnChainCloseOrderService();
+    const executionService = getCloseOrderExecutionService();
 
     try {
       await this.executeOrder(orderId, positionId, poolAddress, chainId, currentPrice, triggerPrice, triggerSide);
@@ -177,18 +183,28 @@ export class OrderExecutor {
       const error = err as Error;
       autoLog.methodError(log, 'handleMessage.execute', error, { orderId, positionId });
 
-      // Increment retry counter and record error
+      // Track execution failure
       const automationLogService = getAutomationLogService();
       try {
-        const { retryCount } = await closeOrderService.incrementExecutionAttempt(
-          orderId,
+        // Find the current execution attempt
+        const execution = await executionService.findLatestByOrderId(orderId);
+        if (!execution) {
+          // Edge case: execution record not created yet (failure before create)
+          log.error({ orderId, msg: 'No execution record found for failed order' });
+          await mq.ack(msg);
+          this.failedTotal++;
+          return;
+        }
+
+        // Increment retry count on the execution
+        const updatedExecution = await executionService.incrementRetryCount(
+          execution.id,
           error.message
         );
-
+        const retryCount = updatedExecution.retryCount;
         const willRetry = retryCount < MAX_EXECUTION_ATTEMPTS;
 
         // Log ORDER_FAILED for user visibility
-        // Note: Using simple direction-only tag since full order details aren't fetched in error path
         const orderTag = triggerSide === 'upper' ? 'TP' : 'SL';
         await automationLogService.logOrderFailed(positionId, orderId, {
           platform: 'evm',
@@ -212,11 +228,31 @@ export class OrderExecutor {
             retryDelayMs: ORDER_RETRY_DELAY_MS,
             scheduledRetryAt: new Date(Date.now() + ORDER_RETRY_DELAY_MS).toISOString(),
           });
-        }
 
-        if (retryCount >= MAX_EXECUTION_ATTEMPTS) {
-          // Permanently failed - mark as failed and remove from queue
-          await closeOrderService.markFailed(orderId, error.message);
+          // Transition order back to monitoring for re-trigger
+          await onChainCloseOrderService.transitionToMonitoring(orderId);
+
+          await mq.ack(msg); // Remove from main queue
+
+          // Republish to delay queue (will dead-letter back to main queue after TTL)
+          const delayContent = serializeMessage(message);
+          await mq.publishToQueue(QUEUES.ORDERS_RETRY_DELAY, delayContent);
+
+          log.warn(
+            {
+              orderId,
+              positionId,
+              retryCount,
+              maxAttempts: MAX_EXECUTION_ATTEMPTS,
+              retryDelayMs: ORDER_RETRY_DELAY_MS,
+            },
+            `Order execution failed, scheduled for retry after ${ORDER_RETRY_DELAY_MS / 1000}s delay`
+          );
+        } else {
+          // Permanently failed - mark execution as failed and suspend order
+          await executionService.markFailed(execution.id, { error: error.message });
+          await onChainCloseOrderService.transitionToSuspended(orderId);
+
           await mq.ack(msg); // Remove from queue - don't requeue
           log.error(
             { orderId, positionId, retryCount, error: error.message },
@@ -244,24 +280,6 @@ export class OrderExecutor {
           } catch (notifyErr) {
             autoLog.methodError(log, 'handleMessage.notifyFailure', notifyErr, { orderId, positionId });
           }
-        } else {
-          // Temporary failure - send to delay queue for retry after delay
-          await mq.ack(msg); // Remove from main queue
-
-          // Republish to delay queue (will dead-letter back to main queue after TTL)
-          const delayContent = serializeMessage(message);
-          await mq.publishToQueue(QUEUES.ORDERS_RETRY_DELAY, delayContent);
-
-          log.warn(
-            {
-              orderId,
-              positionId,
-              retryCount,
-              maxAttempts: MAX_EXECUTION_ATTEMPTS,
-              retryDelayMs: ORDER_RETRY_DELAY_MS,
-            },
-            `Order execution failed, scheduled for retry after ${ORDER_RETRY_DELAY_MS / 1000}s delay`
-          );
         }
       } catch (trackingErr) {
         const trackingError = trackingErr as Error;
@@ -300,7 +318,8 @@ export class OrderExecutor {
     triggerPrice: string,
     triggerSide: 'lower' | 'upper'
   ): Promise<void> {
-    const closeOrderService = getCloseOrderService();
+    const onChainCloseOrderService = getOnChainCloseOrderService();
+    const executionService = getCloseOrderExecutionService();
     const poolSubscriptionService = getPoolSubscriptionService();
     const signerClient = getSignerClient();
     const feeConfig = getFeeConfig();
@@ -310,36 +329,23 @@ export class OrderExecutor {
       throw new Error(`Unsupported chain: ${chainId}`);
     }
 
-    // Get order details
-    const order = await closeOrderService.findById(orderId);
+    // Get order details from explicit columns
+    const order = await onChainCloseOrderService.findById(orderId);
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    // Read on-chain triggerMode from DB config (not derived from triggerSide).
-    // config.triggerMode stores the on-chain value which accounts for isToken0Quote inversion.
-    const orderTriggerMode = (order.config as Record<string, unknown>).triggerMode as string;
-    const triggerMode = orderTriggerMode === 'UPPER' ? 1 : 0;
+    // triggerMode is already an int (0=LOWER, 1=UPPER) - no conversion needed
+    const triggerMode = order.triggerMode;
 
-    // Get contract address from automationContractConfig (immutable at registration)
-    const contractConfig = order.automationContractConfig as AutomationContractConfig;
-    const contractAddress = contractConfig.contractAddress;
+    // Contract address is a direct column
+    const contractAddress = order.contractAddress;
     if (!contractAddress) {
       throw new Error(`Contract address not configured for order: ${orderId}`);
     }
 
-    // Get closeId and operatorAddress from order config
-    // NOTE: swapConfig is no longer used - we read swap state from on-chain
-    const orderConfig = order.config as {
-      closeId?: number;
-      operatorAddress?: string;
-    };
-    const closeId = orderConfig.closeId;
-    if (closeId === undefined) {
-      throw new Error(`Order not registered on-chain: ${orderId}`);
-    }
-
-    const operatorAddress = orderConfig.operatorAddress;
+    // Operator address is a direct column
+    const operatorAddress = order.operatorAddress;
     if (!operatorAddress) {
       throw new Error(`Operator address not configured for order: ${orderId}`);
     }
@@ -385,7 +391,6 @@ export class OrderExecutor {
     log.info({
       orderId,
       positionId,
-      closeId,
       onChainSwapDirection: onChainOrder.swapDirection,
       swapEnabled,
       swapDirection: swapEnabled ? swapDirection : null,
@@ -464,8 +469,8 @@ export class OrderExecutor {
       }
     }
 
-    // Check if this is a retry attempt (order already in 'triggering' status)
-    const isRetry = order.status === 'triggering';
+    // Check if this is a retry attempt (order already in 'triggered' monitoring state)
+    const isRetry = order.monitoringState === 'triggered';
 
     // Always fetch on-chain nonce before signing
     // Signer service is stateless and does not manage nonces
@@ -482,9 +487,15 @@ export class OrderExecutor {
     // Only mark as triggering on first attempt, not retries
     const automationLogService = getAutomationLogService();
     if (!isRetry) {
-      // Mark order as triggering (use BigInt for the price)
-      await closeOrderService.markTriggered(orderId, {
-        triggerSqrtPriceX96: BigInt(triggerPrice),
+      // Atomic transition: monitoring -> triggered (race-safe)
+      await onChainCloseOrderService.atomicTransitionToTriggered(orderId);
+
+      // Create execution record
+      await executionService.create({
+        onChainCloseOrderId: orderId,
+        positionId,
+        triggerSqrtPriceX96: triggerPrice,
+        triggeredAt: new Date(),
       });
 
       // Log ORDER_TRIGGERED for user visibility
@@ -499,6 +510,12 @@ export class OrderExecutor {
         humanTriggerPrice: formatCurrency(triggerPrice, quoteTokenDecimals),
         humanCurrentPrice: formatCurrency(_currentPrice, quoteTokenDecimals),
       });
+    }
+
+    // Mark execution as executing (pending -> executing)
+    const currentExecution = await executionService.findLatestByOrderId(orderId);
+    if (currentExecution) {
+      await executionService.markExecuting(currentExecution.id);
     }
 
     // =========================================================================
@@ -697,7 +714,6 @@ export class OrderExecutor {
       }
 
       // Log simulation failure to database for UI visibility
-      const automationLogService = getAutomationLogService();
       const orderTagSim = triggerSide === 'upper' ? 'TP' : 'SL';
       await automationLogService.logSimulationFailed(positionId, orderId, {
         platform: 'evm',
@@ -705,7 +721,8 @@ export class OrderExecutor {
         orderTag: orderTagSim,
         error: simulation.error || 'Unknown simulation error',
         decodedError: simulation.decodedError,
-        closeId,
+        nftId: nftId.toString(),
+        triggerMode,
         contractAddress,
         feeRecipient: feeConfig.recipient,
         feeBps: feeConfig.bps,
@@ -844,15 +861,18 @@ export class OrderExecutor {
       throw new Error(`Transaction reverted: ${revertReason || 'unknown reason'} (tx: ${txHash})`);
     }
 
-    // Mark order as executed with proper input shape
-    // Note: amount0Out and amount1Out would ideally be parsed from tx logs
-    // For now, using 0n as placeholder - real implementation would decode the tx receipt
-    await closeOrderService.markExecuted(orderId, {
-      executionTxHash: txHash,
-      executionFeeBps: feeConfig.bps,
-      amount0Out: 0n, // TODO: Parse from tx receipt
-      amount1Out: 0n, // TODO: Parse from tx receipt
-    });
+    // Mark execution as completed and order as executed
+    const completedExecution = await executionService.findLatestByOrderId(orderId);
+    if (completedExecution) {
+      await executionService.markCompleted(completedExecution.id, {
+        txHash,
+        executionSqrtPriceX96: _currentPrice,
+        executionFeeBps: feeConfig.bps,
+        amount0Out: '0', // TODO: Parse from tx receipt
+        amount1Out: '0', // TODO: Parse from tx receipt
+      });
+    }
+    await onChainCloseOrderService.markOnChainExecuted(orderId);
 
     // Decrement pool subscription order count
     // Use position.pool.id (database UUID), not poolAddress (contract address)

@@ -10,23 +10,24 @@
  * Events handled (8 total):
  * - OrderRegistered: Create new order or activate existing pending/registering order
  * - OrderCancelled: Cancel order, decrement pool subscription
- * - OrderOperatorUpdated: Update config.operatorAddress
- * - OrderPayoutUpdated: Update config.payoutAddress
- * - OrderTriggerTickUpdated: Update config trigger price + recalculate closeOrderHash
- * - OrderValidUntilUpdated: Update config.validUntil
- * - OrderSlippageUpdated: Update config.slippageBps
- * - OrderSwapIntentUpdated: Update config.swapConfig
+ * - OrderOperatorUpdated: Update operatorAddress
+ * - OrderPayoutUpdated: Update payoutAddress
+ * - OrderTriggerTickUpdated: Update triggerTick + recalculate closeOrderHash
+ * - OrderValidUntilUpdated: Update validUntil
+ * - OrderSlippageUpdated: Update slippageBps
+ * - OrderSwapIntentUpdated: Update swapDirection + swapSlippageBps
  */
 
 import type { ConsumeMessage } from 'amqplib';
 import { prisma, type PrismaClient } from '@midcurve/database';
+import type { OnChainCloseOrder } from '@midcurve/database';
 import {
-  CloseOrderService,
+  OnChainCloseOrderService,
   PoolSubscriptionService,
   AutomationLogService,
   UniswapV3PositionService,
-  deriveCloseOrderHash,
-  generateOrderTag,
+  deriveCloseOrderHashFromTick,
+  generateOrderTagFromTick,
 } from '@midcurve/services';
 import type {
   OrderCreatedContext,
@@ -35,9 +36,9 @@ import type {
   OrderModifiedContext,
 } from '@midcurve/services';
 import {
-  tickToSqrtRatioX96,
-  type CloseOrderInterface,
-  type TriggerMode,
+  ContractTriggerMode,
+  ContractSwapDirection,
+  OnChainOrderStatus,
 } from '@midcurve/shared';
 
 /** Transaction client type — subset of PrismaClient usable inside $transaction */
@@ -45,6 +46,8 @@ type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 import { BusinessRule } from '../base';
 import type {
   AnyCloseOrderEvent,
+  TriggerModeString,
+  SwapDirectionString,
   OrderRegisteredEvent,
   OrderCancelledEvent,
   OrderOperatorUpdatedEvent,
@@ -68,8 +71,25 @@ const QUEUE_NAME = 'business-logic.process-close-order-events';
 /** Routing pattern to subscribe to all close order events */
 const ROUTING_PATTERN = 'closer.#';
 
-/** Terminal close order statuses */
-const TERMINAL_STATUSES = ['executed', 'cancelled', 'expired', 'failed'];
+/** Terminal on-chain statuses (order no longer active on contract) */
+const TERMINAL_ON_CHAIN_STATUSES = [
+  OnChainOrderStatus.EXECUTED,
+  OnChainOrderStatus.CANCELLED,
+];
+
+// =============================================================================
+// String → Numeric Enum Mapping
+// =============================================================================
+
+function parseTriggerMode(s: TriggerModeString): ContractTriggerMode {
+  return s === 'LOWER' ? ContractTriggerMode.LOWER : ContractTriggerMode.UPPER;
+}
+
+function parseSwapDirection(s: SwapDirectionString): ContractSwapDirection {
+  if (s === 'TOKEN0_TO_1') return ContractSwapDirection.TOKEN0_TO_1;
+  if (s === 'TOKEN1_TO_0') return ContractSwapDirection.TOKEN1_TO_0;
+  return ContractSwapDirection.NONE;
+}
 
 // =============================================================================
 // Rule Implementation
@@ -81,14 +101,14 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     'Processes close order lifecycle events from on-chain data (registration, cancellation, config updates)';
 
   private consumerTag: string | null = null;
-  private closeOrderService: CloseOrderService;
+  private orderService: OnChainCloseOrderService;
   private poolSubscriptionService: PoolSubscriptionService;
   private automationLogService: AutomationLogService;
   private positionService: UniswapV3PositionService;
 
   constructor() {
     super();
-    this.closeOrderService = new CloseOrderService({ prisma });
+    this.orderService = new OnChainCloseOrderService({ prisma });
     this.poolSubscriptionService = new PoolSubscriptionService({ prisma });
     this.automationLogService = new AutomationLogService({ prisma });
     this.positionService = new UniswapV3PositionService({ prisma });
@@ -213,16 +233,17 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Finds the close order matching the event's on-chain identifiers.
-   * Returns null if no matching order exists in the database.
+   * Uses the (chainId, nftId, triggerMode) unique index.
    */
   private async resolveOrder(
     event: AnyCloseOrderEvent,
     tx?: TxClient
-  ): Promise<CloseOrderInterface | null> {
-    const order = await this.closeOrderService.findByNftIdAndTriggerMode(
-      event.nftId,
-      event.triggerMode as TriggerMode,
+  ): Promise<OnChainCloseOrder | null> {
+    const triggerMode = parseTriggerMode(event.triggerMode);
+    const order = await this.orderService.findByOnChainIdentity(
       event.chainId,
+      event.nftId,
+      triggerMode,
       tx
     );
 
@@ -243,7 +264,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Finds a position by nftId and chainId using Prisma JSON path filtering.
-   * Same pattern as UpdatePositionOnLiquidityEventRule.
    */
   private async findPositionByNftIdAndChain(
     nftId: string,
@@ -272,15 +292,14 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Builds an orderTag for automation log messages.
-   * Uses UniswapV3PositionService to retrieve position/pool data needed for
-   * price formatting (token decimals and quote/base assignment).
-   *
-   * Returns null if position cannot be found (logs warning, caller should skip logging).
+   * Uses explicit columns (triggerMode, triggerTick) instead of JSON config parsing.
    */
   private async buildOrderTag(
-    order: CloseOrderInterface,
+    order: OnChainCloseOrder,
     tx?: TxClient
   ): Promise<string | null> {
+    if (order.triggerTick === null) return null;
+
     const position = await this.positionService.findById(order.positionId, tx);
     if (!position) {
       this.logger.warn(
@@ -290,25 +309,51 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return null;
     }
 
-    const config = order.config as Record<string, unknown>;
-    const triggerMode = config.triggerMode as string;
     // Derive semantic triggerSide from on-chain triggerMode + isToken0Quote
     // When isToken0Quote, on-chain UPPER = semantic lower (SL), on-chain LOWER = semantic upper (TP)
     const triggerSide: 'lower' | 'upper' = position.isToken0Quote
-      ? (triggerMode === 'UPPER' ? 'lower' : 'upper')
-      : (triggerMode === 'LOWER' ? 'lower' : 'upper');
-    // Read sqrtPriceX96 from the semantic field (Lower = SL, Upper = TP)
-    const sqrtPriceX96Str = triggerSide === 'lower'
-      ? (config.sqrtPriceX96Lower as string)
-      : (config.sqrtPriceX96Upper as string);
+      ? (order.triggerMode === ContractTriggerMode.UPPER ? 'lower' : 'upper')
+      : (order.triggerMode === ContractTriggerMode.LOWER ? 'lower' : 'upper');
 
-    return generateOrderTag({
+    return generateOrderTagFromTick({
       triggerSide,
-      sqrtPriceX96: BigInt(sqrtPriceX96Str),
+      triggerTick: order.triggerTick,
       token0IsQuote: position.isToken0Quote,
       token0Decimals: position.pool.token0.decimals,
       token1Decimals: position.pool.token1.decimals,
     });
+  }
+
+  /**
+   * Builds a UpsertFromOnChainEventInput from a registered event.
+   */
+  private buildUpsertInput(
+    event: OrderRegisteredEvent,
+    positionId: string,
+  ) {
+    const triggerMode = parseTriggerMode(event.triggerMode);
+    const { payload } = event;
+
+    return {
+      positionId,
+      chainId: event.chainId,
+      nftId: event.nftId,
+      triggerMode,
+      contractAddress: event.contractAddress,
+      onChainStatus: OnChainOrderStatus.ACTIVE,
+      triggerTick: payload.triggerTick,
+      slippageBps: payload.slippageBps,
+      payoutAddress: payload.payout,
+      operatorAddress: payload.operator,
+      owner: payload.owner,
+      pool: payload.pool,
+      validUntil: new Date(Number(payload.validUntil) * 1000),
+      swapDirection: parseSwapDirection(payload.swapDirection),
+      swapSlippageBps: payload.swapSlippageBps,
+      registrationTxHash: event.transactionHash,
+      blockNumber: parseInt(event.blockNumber, 10),
+      closeOrderHash: deriveCloseOrderHashFromTick(triggerMode, payload.triggerTick),
+    };
   }
 
   // ===========================================================================
@@ -318,136 +363,80 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   /**
    * Handles OrderRegistered events.
    *
-   * Four scenarios:
-   * 1. Order already exists in pending/registering → activate it
-   * 2. Order already exists in active → idempotent skip
-   * 3. Order exists in terminal state (cancelled/executed/expired/failed) → reactivate with fresh config
-   * 4. No order exists → create from on-chain event (if position is tracked)
+   * Three scenarios:
+   * 1. Order already exists and is ACTIVE → idempotent skip
+   * 2. Order already exists but not ACTIVE (pending-from-UI or terminal reactivation)
+   *    → upsert overwrites all fields, sets ACTIVE + monitoring
+   * 3. No order exists → find position, upsert creates new order
    */
   private async handleRegistered(event: OrderRegisteredEvent): Promise<void> {
-    const { chainId, nftId, triggerMode, contractAddress, transactionHash, blockNumber, payload } =
-      event;
+    const { chainId, nftId, triggerMode, transactionHash, payload } = event;
+    const triggerModeNum = parseTriggerMode(triggerMode);
 
-    // Transaction returns poolId if a new order was created (for post-tx subscription update)
-    const createdForPoolId = await prisma.$transaction(async (tx) => {
+    // Transaction returns { poolId, isNew, wasTerminal } for post-tx subscription management
+    const result = await prisma.$transaction(async (tx) => {
       // Check if order already exists
-      const existingOrder = await this.closeOrderService.findByNftIdAndTriggerMode(
-        nftId,
-        triggerMode as TriggerMode,
+      const existingOrder = await this.orderService.findByOnChainIdentity(
         chainId,
+        nftId,
+        triggerModeNum,
         tx
       );
 
       if (existingOrder) {
-        if (
-          existingOrder.status === 'pending' ||
-          existingOrder.status === 'registering'
-        ) {
-          // Order was created by UI/API flow — activate it
-          await this.closeOrderService.markRegistered(existingOrder.id, {
-            closeId: 0,
-            registrationTxHash: transactionHash,
-          }, tx);
-          this.logger.info(
-            { orderId: existingOrder.id, status: existingOrder.status },
-            'Existing order activated from on-chain registration'
-          );
-
-          // Log ORDER_REGISTERED
-          const orderTag = await this.buildOrderTag(existingOrder, tx);
-          if (orderTag) {
-            await this.automationLogService.logOrderRegistered(
-              existingOrder.positionId,
-              existingOrder.id,
-              {
-                orderTag,
-                registrationTxHash: transactionHash,
-                chainId,
-              } satisfies OrderRegisteredContext,
-              tx
-            );
-          }
-        } else if (existingOrder.status === 'active') {
+        if (existingOrder.onChainStatus === OnChainOrderStatus.ACTIVE) {
           // Already active — idempotent skip
           this.logger.debug(
             { orderId: existingOrder.id },
             'Order already active, skipping registered event'
           );
-        } else if (TERMINAL_STATUSES.includes(existingOrder.status)) {
-          // Order was previously cancelled/executed/expired/failed but re-registered on-chain.
-          // The contract allows re-registration over non-active orders.
-          // Reactivate with fresh config from the event.
-          await this.closeOrderService.markRegistered(existingOrder.id, {
-            closeId: 0,
-            registrationTxHash: transactionHash,
-          }, tx);
+          return null;
+        }
 
-          // Update config to match new registration parameters
-          const newSqrtPriceX96 = BigInt(
-            tickToSqrtRatioX96(payload.triggerTick).toString()
-          );
-          const tm = triggerMode as TriggerMode;
-          const newCloseOrderHash = deriveCloseOrderHash(tm, newSqrtPriceX96);
+        // Non-ACTIVE order: pending-from-UI or terminal reactivation
+        const wasTerminal = TERMINAL_ON_CHAIN_STATUSES.includes(
+          existingOrder.onChainStatus as 2 | 3
+        );
 
-          // Determine semantic sqrtPriceX96 field based on isToken0Quote.
-          // When isToken0Quote, tick direction is inverse to user price direction:
-          //   On-chain UPPER → semantically LOWER (stop loss)
-          //   On-chain LOWER → semantically UPPER (take profit)
-          const reactivatePosition = await this.positionService.findById(existingOrder.positionId, tx);
-          const reactivateIsToken0Quote = reactivatePosition?.isToken0Quote ?? false;
-          const reactivateIsSemanticallyLower = reactivateIsToken0Quote
-            ? tm === 'UPPER'
-            : tm === 'LOWER';
+        // Upsert overwrites all fields, sets ACTIVE + monitoring
+        const upsertInput = this.buildUpsertInput(event, existingOrder.positionId);
+        const updated = await this.orderService.upsertFromOnChainEvent(upsertInput, tx);
 
-          await this.closeOrderService.updateConfigField(existingOrder.id, {
-            triggerMode: tm,
-            sqrtPriceX96Lower: reactivateIsSemanticallyLower ? newSqrtPriceX96.toString() : '0',
-            sqrtPriceX96Upper: reactivateIsSemanticallyLower ? '0' : newSqrtPriceX96.toString(),
-            payoutAddress: payload.payout,
-            operatorAddress: payload.operator,
-            validUntil: new Date(Number(payload.validUntil) * 1000).toISOString(),
-            slippageBps: payload.slippageBps,
-            poolAddress: payload.pool,
-            swapConfig: payload.swapDirection === 'NONE'
-              ? { enabled: false, direction: 'NONE', slippageBps: 0 }
-              : { enabled: true, direction: payload.swapDirection, slippageBps: payload.swapSlippageBps },
-          }, newCloseOrderHash, tx);
+        this.logger.info(
+          {
+            orderId: updated.id,
+            previousStatus: existingOrder.onChainStatus,
+            wasTerminal,
+          },
+          'Existing order activated from on-chain registration'
+        );
 
-          this.logger.info(
-            { orderId: existingOrder.id, previousStatus: existingOrder.status },
-            'Terminal order reactivated from on-chain re-registration'
-          );
-
-          // Log ORDER_REGISTERED — use fresh data since existingOrder config is stale
-          const position = reactivatePosition;
-          if (position) {
-            // Derive semantic triggerSide from on-chain triggerMode + isToken0Quote
-            const triggerSide: 'lower' | 'upper' = reactivateIsSemanticallyLower ? 'lower' : 'upper';
-            const orderTag = generateOrderTag({
-              triggerSide,
-              sqrtPriceX96: newSqrtPriceX96,
-              token0IsQuote: position.isToken0Quote,
-              token0Decimals: position.pool.token0.decimals,
-              token1Decimals: position.pool.token1.decimals,
-            });
-            await this.automationLogService.logOrderRegistered(
-              existingOrder.positionId,
-              existingOrder.id,
-              {
-                orderTag,
-                registrationTxHash: transactionHash,
-                chainId,
-              } satisfies OrderRegisteredContext,
-              tx
-            );
-          }
-        } else {
-          this.logger.warn(
-            { orderId: existingOrder.id, status: existingOrder.status },
-            'Registered event for order in truly unexpected state'
+        // Log ORDER_REGISTERED
+        const orderTag = await this.buildOrderTag(updated, tx);
+        if (orderTag) {
+          await this.automationLogService.logOrderRegistered(
+            updated.positionId,
+            updated.id,
+            {
+              orderTag,
+              registrationTxHash: transactionHash,
+              chainId,
+            } satisfies OrderRegisteredContext,
+            tx
           );
         }
-        return null;
+
+        // Look up poolId for post-tx subscription management
+        const position = await tx.position.findUnique({
+          where: { id: existingOrder.positionId },
+          select: { poolId: true },
+        });
+
+        return {
+          poolId: position?.poolId ?? null,
+          isNew: false,
+          wasTerminal,
+        };
       }
 
       // No existing order — find the position
@@ -460,28 +449,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         return null;
       }
 
-      // Create the order from on-chain event data
-      const created = await this.closeOrderService.createFromOnChainEvent({
-        positionId: position.id,
-        automationContractConfig: {
-          chainId,
-          contractAddress,
-          positionManager: '',
-        },
-        nftId,
-        poolAddress: payload.pool,
-        triggerMode: triggerMode as TriggerMode,
-        triggerTick: payload.triggerTick,
-        owner: payload.owner,
-        operator: payload.operator,
-        payout: payload.payout,
-        validUntil: payload.validUntil,
-        slippageBps: payload.slippageBps,
-        swapDirection: payload.swapDirection,
-        swapSlippageBps: payload.swapSlippageBps,
-        registrationTxHash: transactionHash,
-        blockNumber,
-      }, tx);
+      // Create the order via upsert
+      const upsertInput = this.buildUpsertInput(event, position.id);
+      const created = await this.orderService.upsertFromOnChainEvent(upsertInput, tx);
 
       this.logger.info(
         {
@@ -508,13 +478,23 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return position.poolId;
+      return {
+        poolId: position.poolId,
+        isNew: true,
+        wasTerminal: false,
+      };
     });
 
-    // Manage pool subscription outside transaction (PoolSubscriptionService is not tx-aware)
-    if (createdForPoolId) {
-      await this.poolSubscriptionService.ensureSubscription(createdForPoolId);
-      await this.poolSubscriptionService.incrementOrderCount(createdForPoolId);
+    // Manage pool subscription outside transaction
+    if (result && result.poolId) {
+      if (result.isNew) {
+        await this.poolSubscriptionService.ensureSubscription(result.poolId);
+        await this.poolSubscriptionService.incrementOrderCount(result.poolId);
+      } else if (result.wasTerminal) {
+        // Reactivated terminal order — subscription count was decremented on cancel/execute
+        await this.poolSubscriptionService.ensureSubscription(result.poolId);
+        await this.poolSubscriptionService.incrementOrderCount(result.poolId);
+      }
     }
   }
 
@@ -523,24 +503,23 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
    * Cancels the order and decrements the pool subscription order count.
    */
   private async handleCancelled(event: OrderCancelledEvent): Promise<void> {
-    // Cancel order inside transaction, pool subscription outside
     const poolId = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
 
-      // Skip if already in terminal state
-      if (TERMINAL_STATUSES.includes(order.status)) {
+      // Skip if already in terminal on-chain state
+      if (TERMINAL_ON_CHAIN_STATUSES.includes(order.onChainStatus as 2 | 3)) {
         this.logger.debug(
-          { orderId: order.id, status: order.status },
+          { orderId: order.id, onChainStatus: order.onChainStatus },
           'Order already in terminal state, skipping cancel'
         );
         return null;
       }
 
-      // Build order tag before cancel (order still has config data)
+      // Build order tag before cancel (order still has data)
       const orderTag = await this.buildOrderTag(order, tx);
 
-      await this.closeOrderService.cancel(order.id, tx);
+      await this.orderService.markOnChainCancelled(order.id, tx);
 
       // Look up position poolId for post-tx subscription update
       const position = await tx.position.findUnique({
@@ -586,9 +565,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.closeOrderService.updateConfigField(order.id, {
-        operatorAddress: event.payload.newOperator,
-      }, undefined, tx);
+      await this.orderService.updateOnChainFields(
+        order.id,
+        { operatorAddress: event.payload.newOperator },
+        tx
+      );
 
       this.logger.info(
         { orderId: order.id, newOperator: event.payload.newOperator },
@@ -621,9 +602,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.closeOrderService.updateConfigField(order.id, {
-        payoutAddress: event.payload.newPayout,
-      }, undefined, tx);
+      await this.orderService.updateOnChainFields(
+        order.id,
+        { payoutAddress: event.payload.newPayout },
+        tx
+      );
 
       this.logger.info(
         { orderId: order.id, newPayout: event.payload.newPayout },
@@ -649,8 +632,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   /**
    * Handles OrderTriggerTickUpdated events.
    *
-   * Special: changing the trigger tick changes the sqrtPriceX96 threshold
-   * and the closeOrderHash (which is part of the unique constraint).
+   * Updates triggerTick and recalculates closeOrderHash.
+   * No more isToken0Quote/sqrtPriceX96 logic — tick is stored directly.
    */
   private async handleTriggerTickUpdated(
     event: OrderTriggerTickUpdatedEvent
@@ -662,32 +645,15 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       // Build order tag BEFORE update (captures old trigger price)
       const oldOrderTag = await this.buildOrderTag(order, tx);
 
-      const triggerMode = event.triggerMode as TriggerMode;
       const newTick = event.payload.newTick;
-      const newSqrtPriceX96 = BigInt(
-        tickToSqrtRatioX96(newTick).toString()
-      );
-      const newCloseOrderHash = deriveCloseOrderHash(
-        triggerMode,
-        newSqrtPriceX96
+      const newCloseOrderHash = deriveCloseOrderHashFromTick(
+        order.triggerMode as ContractTriggerMode,
+        newTick
       );
 
-      // Determine semantic sqrtPriceX96 field based on isToken0Quote.
-      // When isToken0Quote, on-chain UPPER → semantic LOWER (SL), on-chain LOWER → semantic UPPER (TP).
-      const tickUpdatePosition = await this.positionService.findById(order.positionId, tx);
-      const tickUpdateIsToken0Quote = tickUpdatePosition?.isToken0Quote ?? false;
-      const tickUpdateIsSemanticallyLower = tickUpdateIsToken0Quote
-        ? triggerMode === 'UPPER'
-        : triggerMode === 'LOWER';
-
-      // Update the appropriate threshold based on semantic meaning
-      const updates: Record<string, unknown> = tickUpdateIsSemanticallyLower
-        ? { sqrtPriceX96Lower: newSqrtPriceX96.toString() }
-        : { sqrtPriceX96Upper: newSqrtPriceX96.toString() };
-
-      await this.closeOrderService.updateConfigField(
+      await this.orderService.updateTriggerTick(
         order.id,
-        updates,
+        newTick,
         newCloseOrderHash,
         tx
       );
@@ -729,14 +695,16 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
       const newValidUntil = new Date(
         Number(event.payload.newValidUntil) * 1000
-      ).toISOString();
+      );
 
-      await this.closeOrderService.updateConfigField(order.id, {
-        validUntil: newValidUntil,
-      }, undefined, tx);
+      await this.orderService.updateOnChainFields(
+        order.id,
+        { validUntil: newValidUntil },
+        tx
+      );
 
       this.logger.info(
-        { orderId: order.id, newValidUntil },
+        { orderId: order.id, newValidUntil: newValidUntil.toISOString() },
         'Close order valid-until updated'
       );
 
@@ -766,12 +734,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      const previousSlippageBps = (order.config as Record<string, unknown>)
-        .slippageBps as number | undefined;
-
-      await this.closeOrderService.updateConfigField(order.id, {
-        slippageBps: event.payload.newSlippageBps,
-      }, undefined, tx);
+      await this.orderService.updateOnChainFields(
+        order.id,
+        { slippageBps: event.payload.newSlippageBps },
+        tx
+      );
 
       this.logger.info(
         { orderId: order.id, newSlippageBps: event.payload.newSlippageBps },
@@ -786,7 +753,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           {
             orderTag,
             changes: 'slippage',
-            previousSlippageBps,
+            previousSlippageBps: order.slippageBps ?? undefined,
             newSlippageBps: event.payload.newSlippageBps,
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
@@ -806,9 +773,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.closeOrderService.updateSwapConfig(
+      await this.orderService.updateSwapConfig(
         order.id,
-        event.payload.newDirection,
+        parseSwapDirection(event.payload.newDirection),
         event.payload.swapSlippageBps,
         tx
       );

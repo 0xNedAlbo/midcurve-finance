@@ -2,11 +2,19 @@
  * Order Button Utilities
  *
  * Shared utilities for Stop Loss and Take Profit action buttons.
- * Handles price formatting, order filtering, and label generation.
+ * Handles price formatting, order filtering, and visual state derivation.
+ *
+ * Button visual state is driven by monitoringState (execution lifecycle),
+ * not by onChainStatus (registration state).
  */
 
-import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
-import { pricePerToken0InToken1, pricePerToken1InToken0, formatCompactValue } from '@midcurve/shared';
+import type { SerializedCloseOrder, TriggerMode, MonitoringState } from '@midcurve/api-shared';
+import {
+  pricePerToken0InToken1,
+  pricePerToken1InToken0,
+  formatCompactValue,
+  tickToSqrtRatioX96,
+} from '@midcurve/shared';
 
 /**
  * Token configuration for price calculations
@@ -21,35 +29,118 @@ export interface TokenConfig {
 }
 
 /**
- * Typed config from SerializedCloseOrder
+ * Visual state for the order button.
+ * Derived from monitoringState, determines icon + color.
  */
-interface CloseOrderConfig {
-  triggerMode?: TriggerMode;
-  sqrtPriceX96Lower?: string;
-  sqrtPriceX96Upper?: string;
-  swapConfig?: {
-    enabled: boolean;
-    direction: 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
-  };
+export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended';
+
+/**
+ * MonitoringState values that indicate an order should be visible in the button.
+ * 'idle' orders are not shown (not yet being monitored or already terminal).
+ */
+const VISIBLE_MONITORING_STATES: MonitoringState[] = ['monitoring', 'triggered', 'suspended'];
+
+/**
+ * Find the order for a trigger mode that should be shown in the button.
+ *
+ * With the new data model there is at most 1 order per (position, triggerMode)
+ * due to the unique constraint. We return it if it's in a visible state.
+ */
+export function findOrderForTriggerMode(
+  orders: SerializedCloseOrder[],
+  triggerMode: TriggerMode,
+): SerializedCloseOrder | undefined {
+  return orders.find(
+    (order) =>
+      order.triggerMode === triggerMode &&
+      VISIBLE_MONITORING_STATES.includes(order.monitoringState)
+  );
 }
 
 /**
- * Get the trigger sqrtPriceX96 from a close order config.
- * Each order has exactly one trigger price in either sqrtPriceX96Lower or
- * sqrtPriceX96Upper (the other is "0"). Which field is used depends on the
- * on-chain triggerMode and isToken0Quote, so we return whichever is non-zero.
+ * Derive the visual state for a button from an order's monitoringState.
+ *
+ * - 'monitoring' → emerald (watching price)
+ * - 'triggered'  → blue (execution in progress)
+ * - 'suspended'  → red (execution failed, needs attention)
  */
-function getTriggerSqrtPriceX96(config: CloseOrderConfig): string | undefined {
-  if (config.sqrtPriceX96Upper && config.sqrtPriceX96Upper !== '0') return config.sqrtPriceX96Upper;
-  if (config.sqrtPriceX96Lower && config.sqrtPriceX96Lower !== '0') return config.sqrtPriceX96Lower;
-  return undefined;
+export function getOrderButtonVisualState(order: SerializedCloseOrder): OrderButtonVisualState {
+  if (order.monitoringState === 'triggered') return 'executing';
+  if (order.monitoringState === 'suspended') return 'suspended';
+  return 'monitoring';
+}
+
+/**
+ * Structured label data for order buttons.
+ * Allows components to render with icons instead of plain text.
+ */
+export interface OrderButtonLabel {
+  /** Order type prefix: "SL" or "TP" */
+  prefix: string;
+  /** Formatted trigger price */
+  priceDisplay: string;
+  /** Target token symbol (when swap is enabled) */
+  targetSymbol?: string;
+  /** Whether swap is enabled for this order */
+  hasSwap: boolean;
+}
+
+/**
+ * Generate button label data for an existing order.
+ *
+ * Uses triggerTick (explicit column) for price formatting and
+ * swapDirection (explicit column) for swap indicator.
+ */
+export function getOrderButtonLabel(
+  order: SerializedCloseOrder,
+  orderType: 'stopLoss' | 'takeProfit',
+  tokenConfig: TokenConfig
+): OrderButtonLabel {
+  const prefix = orderType === 'stopLoss' ? 'SL' : 'TP';
+  const priceDisplay = formatTriggerPriceFromTick(order.triggerTick, tokenConfig);
+
+  // swapDirection is non-null when a post-close swap is configured
+  if (order.swapDirection) {
+    const baseIsToken0 =
+      BigInt(tokenConfig.baseTokenAddress) < BigInt(tokenConfig.quoteTokenAddress);
+
+    // TOKEN0_TO_1 means swapping token0 → token1 (target is token1)
+    // TOKEN1_TO_0 means swapping token1 → token0 (target is token0)
+    const targetIsToken1 = order.swapDirection === 'TOKEN0_TO_1';
+    const targetIsBase = baseIsToken0 ? !targetIsToken1 : targetIsToken1;
+    const targetSymbol = targetIsBase
+      ? tokenConfig.baseTokenSymbol
+      : tokenConfig.quoteTokenSymbol;
+    return { prefix, priceDisplay, targetSymbol, hasSwap: true };
+  }
+
+  return { prefix, priceDisplay, hasSwap: false };
+}
+
+/**
+ * Format a trigger tick to human-readable price.
+ *
+ * Converts tick → sqrtPriceX96 → price in quote token terms.
+ */
+export function formatTriggerPriceFromTick(
+  triggerTick: number | null,
+  tokenConfig: TokenConfig,
+): string {
+  if (triggerTick === null) return '-';
+
+  try {
+    const sqrtPriceX96 = BigInt(tickToSqrtRatioX96(triggerTick).toString());
+    return formatTriggerPrice(sqrtPriceX96.toString(), tokenConfig);
+  } catch {
+    return '-';
+  }
 }
 
 /**
  * Format sqrtPriceX96 to human-readable price using proper token ordering.
  *
- * This is the same logic as CloseOrderCard.tsx formatTriggerPrice.
  * Determines token0/token1 ordering from addresses, not isToken0Quote.
+ * Kept for backward compatibility (used by CancelOrderConfirmModal, uniswapv3-actions).
  */
 export function formatTriggerPrice(
   sqrtPriceX96: string | undefined,
@@ -71,162 +162,4 @@ export function formatTriggerPrice(
   } catch {
     return '-';
   }
-}
-
-/**
- * Convert sqrtPriceX96 to a numeric value for comparison.
- * Returns the price in quote token terms.
- */
-function sqrtPriceX96ToNumber(
-  sqrtPriceX96: string,
-  tokenConfig: TokenConfig
-): number {
-  try {
-    const sqrtPrice = BigInt(sqrtPriceX96);
-    const baseIsToken0 =
-      BigInt(tokenConfig.baseTokenAddress) < BigInt(tokenConfig.quoteTokenAddress);
-
-    const price = baseIsToken0
-      ? pricePerToken0InToken1(sqrtPrice, tokenConfig.baseTokenDecimals)
-      : pricePerToken1InToken0(sqrtPrice, tokenConfig.baseTokenDecimals);
-
-    // Convert to number with proper decimal scaling
-    return Number(price) / Math.pow(10, tokenConfig.quoteTokenDecimals);
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Find the close order with trigger price closest to current price.
- *
- * @param orders - Array of close orders to filter
- * @param currentPriceDisplay - Current price as display string (for parsing)
- * @param triggerMode - 'LOWER' for stop-loss, 'UPPER' for take-profit
- * @param tokenConfig - Token configuration for price conversion
- * @returns The closest order, or undefined if none found
- */
-export function findClosestOrder(
-  orders: SerializedCloseOrder[],
-  currentPriceDisplay: string,
-  triggerMode: TriggerMode,
-  tokenConfig: TokenConfig
-): SerializedCloseOrder | undefined {
-  // Filter for active or triggering orders of the specified trigger mode
-  // Include 'triggering' status to show executing state in UI
-  const relevantOrders = orders.filter((order) => {
-    const config = order.config as CloseOrderConfig;
-    return (
-      config.triggerMode === triggerMode &&
-      (order.status === 'active' || order.status === 'triggering')
-    );
-  });
-
-  if (relevantOrders.length === 0) return undefined;
-  if (relevantOrders.length === 1) return relevantOrders[0];
-
-  // Parse current price for comparison
-  const currentPrice = parseFloat(currentPriceDisplay.replace(/,/g, ''));
-  if (isNaN(currentPrice)) return relevantOrders[0];
-
-  // Find order with trigger price closest to current price
-  let closestOrder = relevantOrders[0];
-  let closestDistance = Infinity;
-
-  for (const order of relevantOrders) {
-    const config = order.config as CloseOrderConfig;
-    const sqrtPriceX96 = getTriggerSqrtPriceX96(config);
-
-    if (!sqrtPriceX96) continue;
-
-    const triggerPrice = sqrtPriceX96ToNumber(sqrtPriceX96, tokenConfig);
-    const distance = Math.abs(triggerPrice - currentPrice);
-
-    if (distance < closestDistance) {
-      closestDistance = distance;
-      closestOrder = order;
-    }
-  }
-
-  return closestOrder;
-}
-
-/**
- * Structured label data for order buttons.
- * Allows components to render with icons instead of plain text.
- */
-export interface OrderButtonLabel {
-  /** Order type prefix: "SL" or "TP" */
-  prefix: string;
-  /** Formatted trigger price */
-  priceDisplay: string;
-  /** Target token symbol (when swap is enabled) */
-  targetSymbol?: string;
-  /** Whether swap is enabled for this order */
-  hasSwap: boolean;
-}
-
-/**
- * Generate button label data for an existing order.
- *
- * @param order - The close order
- * @param orderType - 'stopLoss' or 'takeProfit'
- * @param tokenConfig - Token configuration
- * @returns Structured label data for rendering
- */
-export function getOrderButtonLabel(
-  order: SerializedCloseOrder,
-  orderType: 'stopLoss' | 'takeProfit',
-  tokenConfig: TokenConfig
-): OrderButtonLabel {
-  const config = order.config as CloseOrderConfig;
-  const prefix = orderType === 'stopLoss' ? 'SL' : 'TP';
-
-  // Get the trigger sqrtPriceX96 (whichever field is non-zero)
-  const sqrtPriceX96 = getTriggerSqrtPriceX96(config);
-
-  const priceDisplay = formatTriggerPrice(sqrtPriceX96, tokenConfig);
-
-  // Check if swap is enabled
-  if (config.swapConfig?.enabled) {
-    // Determine target token based on swap direction
-    // First determine which token is token0 (lower address) vs token1 (higher address)
-    const baseIsToken0 =
-      BigInt(tokenConfig.baseTokenAddress) < BigInt(tokenConfig.quoteTokenAddress);
-
-    // TOKEN0_TO_1 means swapping token0 → token1 (target is token1)
-    // TOKEN1_TO_0 means swapping token1 → token0 (target is token0)
-    const targetIsToken1 = config.swapConfig.direction === 'TOKEN0_TO_1';
-    const targetIsBase = baseIsToken0 ? !targetIsToken1 : targetIsToken1;
-    const targetSymbol = targetIsBase
-      ? tokenConfig.baseTokenSymbol
-      : tokenConfig.quoteTokenSymbol;
-    return { prefix, priceDisplay, targetSymbol, hasSwap: true };
-  }
-
-  return { prefix, priceDisplay, hasSwap: false };
-}
-
-/**
- * Check if a close order has a displayable status (active or executing).
- */
-export function isOrderActive(order: SerializedCloseOrder): boolean {
-  return order.status === 'active' || order.status === 'triggering';
-}
-
-/**
- * Check if a close order is currently executing.
- */
-export function isOrderExecuting(order: SerializedCloseOrder): boolean {
-  return order.status === 'triggering';
-}
-
-/**
- * Get the trigger price from an order based on its type.
- */
-export function getOrderTriggerPrice(
-  order: SerializedCloseOrder,
-): string | undefined {
-  const config = order.config as CloseOrderConfig;
-  return getTriggerSqrtPriceX96(config);
 }

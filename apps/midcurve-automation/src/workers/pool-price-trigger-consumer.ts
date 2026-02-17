@@ -9,12 +9,16 @@
  * - Subscriber lifecycle tied to order/vault lifecycle
  * - Multiple subscribers for same pool is OK (RabbitMQ handles fan-out)
  * - No deduplication needed (pool-prices backend handles that)
+ *
+ * Trigger detection for close orders uses direct TICK comparison:
+ * - LOWER (triggerMode=0): triggered when currentTick <= triggerTick
+ * - UPPER (triggerMode=1): triggered when currentTick >= triggerTick
  */
 
 import { prisma } from '@midcurve/database';
+import type { OnChainCloseOrder } from '@midcurve/database';
 import {
-  getCloseOrderService,
-  getPositionService,
+  getOnChainCloseOrderService,
   getHedgeVaultService,
 } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -31,11 +35,6 @@ import {
   type PoolPriceSubscriber,
   type RawSwapEventWrapper,
 } from '@midcurve/services';
-import {
-  pricePerToken0InToken1,
-  pricePerToken1InToken0,
-  formatCurrency,
-} from '@midcurve/shared';
 
 const log = automationLogger.child({ component: 'PoolPriceTriggerConsumer' });
 
@@ -82,30 +81,15 @@ export interface PoolPriceTriggerConsumerStatus {
 // =============================================================================
 
 /**
- * Extract sqrtPriceX96 from raw Swap event
+ * Extract sqrtPriceX96, tick, and blockNumber from raw Swap event
  */
-function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; blockNumber: bigint } {
+function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number; blockNumber: bigint } {
   const swapLog = raw as RawSwapLog;
   return {
     sqrtPriceX96: BigInt(swapLog.args.sqrtPriceX96),
+    tick: Number(swapLog.args.tick),
     blockNumber: BigInt(swapLog.blockNumber),
   };
-}
-
-/**
- * Convert sqrtPriceX96 to actual token price (quote per base)
- * Takes isToken0Quote into account to return the user-facing price
- */
-function sqrtPriceToActualPrice(
-  sqrtPriceX96: bigint,
-  isToken0Quote: boolean,
-  baseTokenDecimals: number
-): bigint {
-  if (isToken0Quote) {
-    return pricePerToken1InToken0(sqrtPriceX96, baseTokenDecimals);
-  } else {
-    return pricePerToken0InToken1(sqrtPriceX96, baseTokenDecimals);
-  }
 }
 
 // =============================================================================
@@ -235,42 +219,18 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Sync order subscriptions
+   * Sync order subscriptions using OnChainCloseOrderService
    */
   private async syncOrderSubscriptions(): Promise<void> {
-    const closeOrderService = getCloseOrderService();
+    const onChainCloseOrderService = getOnChainCloseOrderService();
 
-    // Get all pools with active orders
-    const poolsWithOrders = await closeOrderService.getPoolsWithActiveOrders();
-
-    // Collect all active orders from all pools
-    const allActiveOrders: Array<{
-      id: string;
-      positionId: string;
-      poolAddress: string;
-      poolId: string;
-      chainId: number;
-      config: unknown;
-    }> = [];
-
-    for (const pool of poolsWithOrders) {
-      const ordersForPool = await closeOrderService.findActiveOrdersForPool(pool.poolAddress);
-      for (const order of ordersForPool) {
-        allActiveOrders.push({
-          id: order.id,
-          positionId: order.positionId,
-          poolAddress: pool.poolAddress,
-          poolId: pool.poolId,
-          chainId: pool.chainId,
-          config: order.config,
-        });
-      }
-    }
+    // Get all monitoring orders with position→pool relations
+    const monitoringOrders = await onChainCloseOrderService.findMonitoringOrders();
 
     // Get set of active order IDs
-    const activeOrderIds = new Set(allActiveOrders.map((o) => o.id));
+    const activeOrderIds = new Set(monitoringOrders.map((o) => o.id));
 
-    // Remove subscribers for orders that are no longer active
+    // Remove subscribers for orders that are no longer monitoring
     for (const [orderId, subscriber] of this.orderSubscribers.entries()) {
       if (!activeOrderIds.has(orderId)) {
         log.debug({ orderId }, 'Removing subscriber for inactive order');
@@ -281,10 +241,32 @@ export class PoolPriceTriggerConsumer {
       }
     }
 
-    // Add subscribers for new active orders
-    for (const order of allActiveOrders) {
+    // Add subscribers for new monitoring orders
+    for (const order of monitoringOrders) {
       if (!this.orderSubscribers.has(order.id)) {
-        await this.createOrderSubscriber(order);
+        // pool column is the on-chain pool address
+        const poolAddress = order.pool;
+        // position.pool.id is the database pool ID (for subscriber record)
+        const poolId = order.position?.pool?.id;
+
+        if (poolAddress && poolId) {
+          await this.createOrderSubscriber({
+            id: order.id,
+            positionId: order.positionId,
+            poolAddress,
+            poolId,
+            chainId: order.chainId,
+            triggerTick: order.triggerTick,
+            triggerMode: order.triggerMode,
+          });
+        } else {
+          log.warn({
+            orderId: order.id,
+            poolAddress,
+            poolId,
+            msg: 'Cannot create subscriber: missing pool data',
+          });
+        }
       }
     }
   }
@@ -327,7 +309,8 @@ export class PoolPriceTriggerConsumer {
     poolAddress: string;
     poolId: string;
     chainId: number;
-    config: unknown;
+    triggerTick: number | null;
+    triggerMode: number;
   }): Promise<void> {
     try {
       // Create or find the subscriber record in the database
@@ -514,7 +497,7 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Handle Swap event for an order
+   * Handle Swap event for an order — tick-based trigger detection
    */
   private async handleOrderSwapEvent(
     orderId: string,
@@ -525,8 +508,8 @@ export class PoolPriceTriggerConsumer {
 
     try {
       // Get fresh order data (may have been modified)
-      const closeOrderService = getCloseOrderService();
-      const order = await closeOrderService.findById(orderId);
+      const onChainCloseOrderService = getOnChainCloseOrderService();
+      const order = await onChainCloseOrderService.findById(orderId);
 
       if (!order) {
         log.debug({ orderId }, 'Order not found, shutting down subscriber');
@@ -534,28 +517,20 @@ export class PoolPriceTriggerConsumer {
         return;
       }
 
-      if (order.status !== 'active') {
-        log.debug({ orderId, status: order.status }, 'Order no longer active');
+      if (order.monitoringState !== 'monitoring') {
+        log.debug({ orderId, monitoringState: order.monitoringState }, 'Order no longer monitoring');
         await this.shutdownOrderSubscriber(orderId);
         return;
       }
 
-      const { sqrtPriceX96 } = extractSwapData(message.raw);
-      const orderConfig = order.config as {
-        sqrtPriceX96Lower?: string;
-        sqrtPriceX96Upper?: string;
-      };
+      const { sqrtPriceX96, tick } = extractSwapData(message.raw);
 
       const triggered = await this.checkOrderTrigger(
-        order.id,
-        order.positionId,
+        order,
         message.poolAddress,
         message.chainId,
         sqrtPriceX96,
-        {
-          sqrtPriceX96Lower: BigInt(orderConfig.sqrtPriceX96Lower || '0'),
-          sqrtPriceX96Upper: BigInt(orderConfig.sqrtPriceX96Upper || '0'),
-        }
+        tick
       );
 
       if (triggered) {
@@ -658,94 +633,72 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Check if an order's trigger condition is met
+   * Check if an order's trigger condition is met using direct tick comparison.
+   *
+   * - LOWER (triggerMode=0): triggered when currentTick <= triggerTick
+   * - UPPER (triggerMode=1): triggered when currentTick >= triggerTick
    */
   private async checkOrderTrigger(
-    orderId: string,
-    positionId: string,
+    order: OnChainCloseOrder,
     poolAddress: string,
     chainId: number,
-    currentSqrtPrice: bigint,
-    config: { sqrtPriceX96Lower: bigint; sqrtPriceX96Upper: bigint }
+    currentSqrtPriceX96: bigint,
+    currentTick: number
   ): Promise<boolean> {
-    const { sqrtPriceX96Lower, sqrtPriceX96Upper } = config;
-
-    // Fetch position to get isToken0Quote and token decimals
-    const positionService = getPositionService();
-    const position = await positionService.findById(positionId);
-
-    if (!position) {
-      log.warn({ orderId, positionId, msg: 'Position not found for trigger evaluation' });
+    // Guard: triggerTick must be set
+    if (order.triggerTick === null || order.triggerTick === undefined) {
+      log.warn({ orderId: order.id, msg: 'Order has no triggerTick set' });
       return false;
     }
 
-    const { isToken0Quote } = position;
-    const baseTokenDecimals = isToken0Quote
-      ? position.pool.token1.decimals
-      : position.pool.token0.decimals;
-    const quoteTokenDecimals = isToken0Quote
-      ? position.pool.token0.decimals
-      : position.pool.token1.decimals;
+    // Tick-based trigger comparison
+    let triggered = false;
+    let triggerSide: 'lower' | 'upper';
 
-    // Convert sqrtPrices to actual token prices
-    const currentPrice = sqrtPriceToActualPrice(currentSqrtPrice, isToken0Quote, baseTokenDecimals);
-    const lowerTriggerPrice =
-      sqrtPriceX96Lower > 0n
-        ? sqrtPriceToActualPrice(sqrtPriceX96Lower, isToken0Quote, baseTokenDecimals)
-        : 0n;
-    const upperTriggerPrice =
-      sqrtPriceX96Upper > 0n
-        ? sqrtPriceToActualPrice(sqrtPriceX96Upper, isToken0Quote, baseTokenDecimals)
-        : 0n;
-
-    let triggerSide: 'lower' | 'upper' | null = null;
-    let triggerPrice: bigint | null = null;
-
-    // Lower trigger = stop loss
-    if (lowerTriggerPrice > 0n && currentPrice <= lowerTriggerPrice) {
+    if (order.triggerMode === 0) {
+      // LOWER: triggered when currentTick <= triggerTick
+      triggered = currentTick <= order.triggerTick;
       triggerSide = 'lower';
-      triggerPrice = lowerTriggerPrice;
-    }
-    // Upper trigger = take profit
-    else if (upperTriggerPrice > 0n && currentPrice >= upperTriggerPrice) {
+    } else {
+      // UPPER: triggered when currentTick >= triggerTick
+      triggered = currentTick >= order.triggerTick;
       triggerSide = 'upper';
-      triggerPrice = upperTriggerPrice;
     }
 
-    if (!triggerSide || !triggerPrice) {
+    if (!triggered) {
       return false;
     }
 
-    // Verify order is still active before publishing
-    const closeOrderService = getCloseOrderService();
-    const order = await closeOrderService.findById(orderId);
-
-    if (!order || order.status !== 'active') {
-      log.debug({ orderId, status: order?.status }, 'Order no longer active, skipping trigger');
+    // Verify order is still monitoring before publishing (race safety)
+    const onChainCloseOrderService = getOnChainCloseOrderService();
+    const freshOrder = await onChainCloseOrderService.findById(order.id);
+    if (!freshOrder || freshOrder.monitoringState !== 'monitoring') {
+      log.debug(
+        { orderId: order.id, monitoringState: freshOrder?.monitoringState },
+        'Order no longer monitoring, skipping trigger'
+      );
       return false;
     }
 
-    // Log with human-readable prices
-    const currentPriceFormatted = formatCurrency(currentPrice.toString(), quoteTokenDecimals);
-    const triggerPriceFormatted = formatCurrency(triggerPrice.toString(), quoteTokenDecimals);
-
+    // Log trigger detection
     autoLog.orderTriggered(
       log,
-      orderId,
-      positionId,
+      order.id,
+      order.positionId,
       poolAddress,
-      currentPriceFormatted,
-      triggerPriceFormatted
+      `tick=${currentTick}`,
+      `triggerTick=${order.triggerTick}`
     );
 
     // Publish trigger message
+    // Include currentSqrtPriceX96 as the price context for the executor
     await this.publishOrderTrigger({
-      orderId,
-      positionId,
+      orderId: order.id,
+      positionId: order.positionId,
       poolAddress,
       chainId,
-      currentPrice: currentPrice.toString(),
-      triggerPrice: triggerPrice.toString(),
+      currentPrice: currentSqrtPriceX96.toString(),
+      triggerPrice: currentSqrtPriceX96.toString(),
       triggerSide,
       triggeredAt: new Date().toISOString(),
     });

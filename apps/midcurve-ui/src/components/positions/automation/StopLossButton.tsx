@@ -3,24 +3,26 @@
  *
  * Action button for creating or displaying a stop-loss order.
  *
- * States:
- * - No order: Green "+ | Stop Loss" button (navigates to Risk Triggers wizard)
- * - Order active: Pink "SL @{price}" button (navigates to Risk Triggers wizard)
- * - Order executing: Amber spinner + "SL @{price}" (no navigation, order is being executed)
+ * Visual states (driven by monitoringState):
+ * - Disabled: Slate, Plus icon (automation unavailable)
+ * - No order: Green, Plus icon (navigates to Risk Triggers wizard)
+ * - Monitoring: Emerald, Eye icon (actively watching price)
+ * - Executing: Blue, Loader2 spinner (trigger fired, execution in progress)
+ * - Suspended: Red, AlertTriangle icon (execution failed, needs attention)
  */
 
 'use client';
 
 import { useMemo } from 'react';
-import { Plus, ArrowRight, Loader2 } from 'lucide-react';
+import { Plus, Eye, ArrowRight, Loader2, AlertTriangle } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { Address } from 'viem';
 import type { ListPositionData, TriggerMode, SerializedCloseOrder } from '@midcurve/api-shared';
 import { getChainSlugByChainId } from '@/config/chains';
 import {
-  findClosestOrder,
+  findOrderForTriggerMode,
   getOrderButtonLabel,
-  isOrderExecuting,
+  getOrderButtonVisualState,
   type TokenConfig,
 } from './order-button-utils';
 
@@ -54,7 +56,6 @@ interface StopLossButtonProps {
 export function StopLossButton({
   chainId,
   nftId,
-  currentPriceDisplay,
   baseToken,
   quoteToken,
   disabled = false,
@@ -63,8 +64,6 @@ export function StopLossButton({
 }: StopLossButtonProps) {
   const navigate = useNavigate();
   const location = useLocation();
-
-  const orders = activeCloseOrders;
 
   // Build token config for utilities
   const tokenConfig: TokenConfig = useMemo(
@@ -79,10 +78,10 @@ export function StopLossButton({
     [baseToken, quoteToken]
   );
 
-  // Find the closest active stop-loss order
+  // Find the stop-loss order (at most 1 per position for LOWER trigger mode)
   const activeOrder = useMemo(() => {
-    return findClosestOrder(orders, currentPriceDisplay, 'LOWER' as TriggerMode, tokenConfig);
-  }, [orders, currentPriceDisplay, tokenConfig]);
+    return findOrderForTriggerMode(activeCloseOrders, 'LOWER' as TriggerMode);
+  }, [activeCloseOrders]);
 
   // Generate button label if order exists
   const buttonLabel = useMemo(() => {
@@ -90,8 +89,8 @@ export function StopLossButton({
     return getOrderButtonLabel(activeOrder, 'stopLoss', tokenConfig);
   }, [activeOrder, tokenConfig]);
 
-  // Check if order is currently executing
-  const isExecuting = activeOrder ? isOrderExecuting(activeOrder) : false;
+  // Derive visual state from monitoringState
+  const visualState = activeOrder ? getOrderButtonVisualState(activeOrder) : null;
 
   // If disabled, show disabled button with tooltip
   if (disabled) {
@@ -118,53 +117,65 @@ export function StopLossButton({
     }
   };
 
-  // If order is executing, show amber spinner state (no navigation)
-  if (isExecuting) {
+  // Price label content (shared across monitoring/executing/suspended states)
+  const priceLabel = buttonLabel && (
+    <span className="flex items-center gap-0.5">
+      {buttonLabel.prefix} @{buttonLabel.priceDisplay}
+      {buttonLabel.hasSwap && (
+        <>
+          <ArrowRight className="w-3 h-3 mx-0.5" />
+          {buttonLabel.targetSymbol}
+        </>
+      )}
+    </span>
+  );
+
+  // Executing state — blue, spinner, non-interactive
+  if (visualState === 'executing') {
     return (
-      <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-amber-300 bg-amber-900/20 border-amber-600/50">
+      <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-blue-300 bg-blue-900/20 border-blue-600/50">
         <Loader2 className="w-3 h-3 animate-spin" />
-        <span className="flex items-center gap-0.5">
-          {buttonLabel!.prefix} @{buttonLabel!.priceDisplay}
-          {buttonLabel!.hasSwap && (
-            <>
-              <ArrowRight className="w-3 h-3 mx-0.5" />
-              {buttonLabel!.targetSymbol}
-            </>
-          )}
-        </span>
+        {priceLabel}
       </div>
     );
   }
 
-  // If no active order, show create button (green)
-  if (!activeOrder) {
+  // Suspended state — red, warning icon, clickable
+  if (visualState === 'suspended') {
     return (
       <button
         onClick={handleNavigateToWizard}
-        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
+        title="Execution failed — click to manage"
+        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-red-300 bg-red-900/20 hover:bg-red-800/30 border-red-600/50 transition-colors cursor-pointer"
       >
-        <Plus className="w-3 h-3" />
-        Stop Loss
+        <AlertTriangle className="w-3 h-3" />
+        {priceLabel}
       </button>
     );
   }
 
-  // If active order exists, show display button (pink) - navigates to wizard
+  // Monitoring state — emerald, eye icon, clickable
+  if (visualState === 'monitoring') {
+    return (
+      <button
+        onClick={handleNavigateToWizard}
+        title="Click to manage triggers"
+        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-emerald-300 bg-emerald-900/20 hover:bg-emerald-800/30 border-emerald-600/50 transition-colors cursor-pointer"
+      >
+        <Eye className="w-3 h-3" />
+        {priceLabel}
+      </button>
+    );
+  }
+
+  // No order — green, plus icon, create button
   return (
     <button
       onClick={handleNavigateToWizard}
-      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-pink-300 bg-pink-900/20 hover:bg-pink-800/30 border-pink-600/50 transition-colors cursor-pointer"
-      title="Click to manage triggers"
+      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
     >
-      <span className="flex items-center gap-0.5">
-        {buttonLabel!.prefix} @{buttonLabel!.priceDisplay}
-        {buttonLabel!.hasSwap && (
-          <>
-            <ArrowRight className="w-3 h-3 mx-0.5" />
-            {buttonLabel!.targetSymbol}
-          </>
-        )}
-      </span>
+      <Plus className="w-3 h-3" />
+      Stop Loss
     </button>
   );
 }

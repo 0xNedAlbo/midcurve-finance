@@ -113,7 +113,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         id: log.id,
         createdAt: log.createdAt.toISOString(),
         positionId: log.positionId,
-        closeOrderId: log.closeOrderId,
+        closeOrderId: log.onChainCloseOrderId,
         level: log.level as 0 | 1 | 2 | 3,
         levelName: getAutomationLogLevelName(log.level),
         logType: log.logType as AutomationLogData['logType'],

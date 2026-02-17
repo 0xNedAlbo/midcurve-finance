@@ -7,12 +7,13 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, Loader2, CheckCircle, Trash2 } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
+import { tickToSqrtRatioX96 } from '@midcurve/shared';
 import { useCancelCloseOrder, type OrderType } from '@/hooks/automation';
-import { formatTriggerPrice, type TokenConfig } from './order-button-utils';
+import { formatTriggerPriceFromTick, type TokenConfig } from './order-button-utils';
 import { PnLSimulation } from './PnLSimulation';
 
 interface CancelOrderConfirmModalProps {
@@ -151,22 +152,20 @@ export function CancelOrderConfirmModal({
     }
   }, [isSuccess, onSuccess]);
 
-  // Extract order config
-  const config = order.config as {
-    triggerMode?: TriggerMode;
-    sqrtPriceX96Lower?: string;
-    sqrtPriceX96Upper?: string;
-    closeId?: number;
-  };
-
-  const triggerMode = config.triggerMode ?? 'LOWER';
-  const sqrtPriceX96 =
-    triggerMode === 'LOWER'
-      ? config.sqrtPriceX96Lower
-      : config.sqrtPriceX96Upper;
-
-  const priceDisplay = formatTriggerPrice(sqrtPriceX96, tokenConfig);
+  // Use explicit fields from the order
+  const triggerMode = order.triggerMode;
+  const priceDisplay = formatTriggerPriceFromTick(order.triggerTick, tokenConfig);
   const orderTypeLabel = getOrderTypeLabel(triggerMode);
+
+  // Convert triggerTick to sqrtPriceX96 for PnLSimulation
+  const triggerSqrtPriceX96 = useMemo(() => {
+    if (order.triggerTick === null) return undefined;
+    try {
+      return tickToSqrtRatioX96(order.triggerTick).toString();
+    } catch {
+      return undefined;
+    }
+  }, [order.triggerTick]);
 
   // Handle cancel confirmation
   const handleConfirm = () => {
@@ -284,14 +283,14 @@ export function CancelOrderConfirmModal({
                 </div>
 
                 {/* PnL Simulation - shows expected PnL if order triggers */}
-                {sqrtPriceX96 && (
+                {triggerSqrtPriceX96 && (
                   <PnLSimulation
                     liquidity={liquidity}
                     tickLower={tickLower}
                     tickUpper={tickUpper}
                     currentCostBasis={currentCostBasis}
                     unclaimedFees={unclaimedFees}
-                    triggerSqrtPriceX96={sqrtPriceX96}
+                    triggerSqrtPriceX96={triggerSqrtPriceX96}
                     currentSqrtPriceX96={currentSqrtPriceX96}
                     isToken0Quote={isToken0Quote}
                     quoteToken={{

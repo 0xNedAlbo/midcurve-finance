@@ -15,10 +15,11 @@ import {
   ApiErrorCode,
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
-import { serializeCloseOrder } from '@/lib/serializers';
+import { serializeOnChainCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getCloseOrderService, getUniswapV3PositionService } from '@/lib/services';
+import { getOnChainCloseOrderService, getUniswapV3PositionService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
+import { OnChainOrderStatus } from '@midcurve/shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,35 @@ const QueryParamsSchema = z.object({
     .optional(),
   type: z.enum(['sl', 'tp']).optional(),
 });
+
+/**
+ * Map old status query param to OnChainCloseOrder filter options.
+ */
+function statusToFilterOptions(status: string | undefined) {
+  if (!status) return {};
+
+  switch (status) {
+    case 'pending':
+      return { onChainStatus: OnChainOrderStatus.NONE };
+    case 'registering':
+      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'idle' as const };
+    case 'active':
+      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'monitoring' as const };
+    case 'triggering':
+      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'triggered' as const };
+    case 'failed':
+      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'suspended' as const };
+    case 'executed':
+      return { onChainStatus: OnChainOrderStatus.EXECUTED };
+    case 'cancelled':
+      return { onChainStatus: OnChainOrderStatus.CANCELLED };
+    case 'expired':
+      // No direct mapping — expired is a subset of cancelled
+      return { onChainStatus: OnChainOrderStatus.CANCELLED };
+    default:
+      return {};
+  }
+}
 
 /**
  * Handle CORS preflight
@@ -158,18 +188,11 @@ export async function GET(
       );
 
       // 4. Fetch close orders for position
-      const closeOrderService = getCloseOrderService();
-      let orders = await closeOrderService.findByPositionId(position.id, {
-        status: status as
-          | 'pending'
-          | 'active'
-          | 'triggering'
-          | 'executed'
-          | 'cancelled'
-          | 'expired'
-          | 'failed'
-          | undefined,
-      });
+      const filterOptions = statusToFilterOptions(status);
+      let orders = await getOnChainCloseOrderService().findByPositionId(
+        position.id,
+        filterOptions
+      );
 
       // 5. Filter by type if specified
       if (type) {
@@ -180,7 +203,7 @@ export async function GET(
       }
 
       // 6. Serialize and return
-      const serializedOrders = orders.map(serializeCloseOrder);
+      const serializedOrders = orders.map(serializeOnChainCloseOrder);
 
       const response = createSuccessResponse(serializedOrders);
 

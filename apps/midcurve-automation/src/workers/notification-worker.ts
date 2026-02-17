@@ -5,9 +5,9 @@
  * Creates notification records in database and sends webhooks.
  */
 
-import type { UserNotification } from '@midcurve/database';
+import type { UserNotification, OnChainCloseOrder } from '@midcurve/database';
 import type { NotificationEventType, NotificationPayload } from '@midcurve/api-shared';
-import type { UniswapV3Position, UniswapV3Pool, CloseOrderInterface } from '@midcurve/shared';
+import type { UniswapV3Position, UniswapV3Pool } from '@midcurve/shared';
 import {
   formatCompactValue,
   tickToSqrtRatioX96,
@@ -21,7 +21,7 @@ import {
   getNotificationService,
   getWebhookDeliveryService,
   getPositionService,
-  getCloseOrderService,
+  getOnChainCloseOrderService,
 } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
@@ -153,19 +153,27 @@ function serializePositionForWebhook(position: UniswapV3Position): Record<string
 }
 
 /**
- * Serialize a close order for webhook payload
+ * Serialize an on-chain close order for webhook payload
  */
-function serializeCloseOrderForWebhook(closeOrder: CloseOrderInterface): Record<string, unknown> {
+function serializeCloseOrderForWebhook(order: OnChainCloseOrder): Record<string, unknown> {
   return {
-    id: closeOrder.id,
-    closeOrderType: closeOrder.closeOrderType,
-    status: closeOrder.status,
-    positionId: closeOrder.positionId,
-    automationContractConfig: closeOrder.automationContractConfig,
-    config: closeOrder.config,
-    state: closeOrder.state,
-    createdAt: closeOrder.createdAt.toISOString(),
-    updatedAt: closeOrder.updatedAt.toISOString(),
+    id: order.id,
+    closeOrderHash: order.closeOrderHash,
+    chainId: order.chainId,
+    nftId: order.nftId,
+    triggerMode: order.triggerMode,
+    triggerTick: order.triggerTick,
+    onChainStatus: order.onChainStatus,
+    monitoringState: order.monitoringState,
+    contractAddress: order.contractAddress,
+    operatorAddress: order.operatorAddress,
+    slippageBps: order.slippageBps,
+    swapDirection: order.swapDirection,
+    swapSlippageBps: order.swapSlippageBps,
+    payoutAddress: order.payoutAddress,
+    positionId: order.positionId,
+    createdAt: order.createdAt.toISOString(),
+    updatedAt: order.updatedAt.toISOString(),
   };
 }
 
@@ -463,15 +471,15 @@ export class NotificationWorker {
 
     // Fetch position and close order for enrichment
     const positionService = getPositionService();
-    const closeOrderService = getCloseOrderService();
+    const onChainCloseOrderService = getOnChainCloseOrderService();
 
     let position: UniswapV3Position | null = null;
-    let closeOrder: CloseOrderInterface | null = null;
+    let closeOrder: OnChainCloseOrder | null = null;
 
     try {
       [position, closeOrder] = await Promise.all([
         positionService.findById(message.positionId),
-        closeOrderService.findById(message.orderId),
+        onChainCloseOrderService.findById(message.orderId),
       ]);
     } catch (err) {
       log.warn({

@@ -8,7 +8,7 @@
  * - tick = Integer tick derived from sqrtPriceX96
  */
 
-import { type TriggerMode, sqrtPriceX96ToTick } from '@midcurve/shared';
+import { type TriggerMode, ContractTriggerMode, sqrtPriceX96ToTick } from '@midcurve/shared';
 
 /**
  * Close order type prefix
@@ -74,6 +74,23 @@ export function deriveCloseOrderHashFromConfig(
     }
     return deriveCloseOrderHash(triggerMode, sqrtPriceX96Upper);
   }
+}
+
+/**
+ * Derives a close order hash from numeric trigger mode and tick directly.
+ * Avoids the sqrtPriceX96 roundtrip of `deriveCloseOrderHash()`.
+ *
+ * @param triggerMode - Numeric trigger mode (ContractTriggerMode.LOWER=0 or .UPPER=1)
+ * @param tick - The trigger tick (int24)
+ * @returns Close order hash in format "{sl|tp}@{tick}"
+ */
+export function deriveCloseOrderHashFromTick(
+  triggerMode: ContractTriggerMode,
+  tick: number
+): string {
+  return triggerMode === ContractTriggerMode.LOWER
+    ? `sl@${tick}`
+    : `tp@${tick}`;
 }
 
 /**

@@ -2,18 +2,16 @@
  * Close Order Card
  *
  * Displays a single close order with:
- * - Trigger type (Lower/Upper/Both)
- * - Trigger price(s)
+ * - Trigger type (Lower/Upper)
+ * - Trigger price (from triggerTick)
  * - Status badge
  * - Expiration date
- * - Cancel button (if cancellable)
  */
 
 import { AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react';
 import type { SerializedCloseOrder, TriggerMode } from '@midcurve/api-shared';
-import { pricePerToken0InToken1, pricePerToken1InToken0 } from '@midcurve/shared';
 import { CloseOrderStatusBadge } from './CloseOrderStatusBadge';
-import { formatCompactValue } from '@/lib/fraction-format';
+import { formatTriggerPriceFromTick, type TokenConfig } from './order-button-utils';
 
 interface CloseOrderCardProps {
   /**
@@ -80,33 +78,6 @@ function getTriggerLabel(mode: TriggerMode): string {
   }
 }
 
-/**
- * Format sqrtPriceX96 to human-readable price using proper token ordering
- */
-function formatTriggerPrice(
-  sqrtPriceX96: string | undefined,
-  baseTokenAddress: string,
-  quoteTokenAddress: string,
-  baseTokenDecimals: number,
-  quoteTokenDecimals: number
-): string {
-  if (!sqrtPriceX96 || sqrtPriceX96 === '0') return '-';
-
-  try {
-    const sqrtPrice = BigInt(sqrtPriceX96);
-    const baseIsToken0 = BigInt(baseTokenAddress) < BigInt(quoteTokenAddress);
-
-    // Get price in quote token raw units (quote per base)
-    const price = baseIsToken0
-      ? pricePerToken0InToken1(sqrtPrice, baseTokenDecimals)
-      : pricePerToken1InToken0(sqrtPrice, baseTokenDecimals);
-
-    return formatCompactValue(price, quoteTokenDecimals);
-  } catch {
-    return '-';
-  }
-}
-
 export function CloseOrderCard({
   order,
   quoteTokenSymbol,
@@ -115,18 +86,23 @@ export function CloseOrderCard({
   baseTokenAddress,
   quoteTokenAddress,
 }: CloseOrderCardProps) {
-  const config = order.config as {
-    triggerMode?: TriggerMode;
-    sqrtPriceX96Lower?: string;
-    sqrtPriceX96Upper?: string;
-    validUntil?: string;
-    slippageBps?: number;
+  const triggerMode = order.triggerMode;
+
+  // Build token config for price formatting
+  const tokenConfig: TokenConfig = {
+    baseTokenAddress,
+    quoteTokenAddress,
+    baseTokenDecimals,
+    quoteTokenDecimals,
+    baseTokenSymbol: '',
+    quoteTokenSymbol,
   };
 
-  const triggerMode = config.triggerMode ?? 'LOWER';
+  // Format trigger price from tick
+  const priceDisplay = formatTriggerPriceFromTick(order.triggerTick, tokenConfig);
 
-  // Format expiration — epoch (0) means "no expiry" per smart contract convention
-  const parsedExpiry = config.validUntil ? new Date(config.validUntil) : null;
+  // Format expiration — null or epoch 0 means "no expiry"
+  const parsedExpiry = order.validUntil ? new Date(order.validUntil) : null;
   const expiresAt = parsedExpiry && parsedExpiry.getTime() > 0 ? parsedExpiry : null;
   const isExpiringSoon = expiresAt && expiresAt.getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -141,14 +117,13 @@ export function CloseOrderCard({
         <CloseOrderStatusBadge status={order.status} size="sm" />
       </div>
 
-      {/* Trigger Prices — read whichever sqrtPriceX96 field is non-zero
-           (the field used depends on on-chain triggerMode and isToken0Quote) */}
+      {/* Trigger Price */}
       <div className="space-y-2 mb-3">
         {triggerMode === 'LOWER' && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Lower trigger:</span>
             <span className="text-red-400 font-mono">
-              {formatTriggerPrice(config.sqrtPriceX96Lower !== '0' ? config.sqrtPriceX96Lower : config.sqrtPriceX96Upper, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
+              {priceDisplay} {quoteTokenSymbol}
             </span>
           </div>
         )}
@@ -156,7 +131,7 @@ export function CloseOrderCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Upper trigger:</span>
             <span className="text-green-400 font-mono">
-              {formatTriggerPrice(config.sqrtPriceX96Upper !== '0' ? config.sqrtPriceX96Upper : config.sqrtPriceX96Lower, baseTokenAddress, quoteTokenAddress, baseTokenDecimals, quoteTokenDecimals)} {quoteTokenSymbol}
+              {priceDisplay} {quoteTokenSymbol}
             </span>
           </div>
         )}
@@ -170,8 +145,8 @@ export function CloseOrderCard({
             Expires: {expiresAt ? expiresAt.toLocaleDateString() : 'Never'}
           </span>
         </div>
-        {config.slippageBps && (
-          <span>Slippage: {(config.slippageBps / 100).toFixed(1)}%</span>
+        {order.slippageBps != null && (
+          <span>Slippage: {(order.slippageBps / 100).toFixed(1)}%</span>
         )}
       </div>
 

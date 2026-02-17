@@ -11,10 +11,21 @@ import type {
   UniswapV3Position,
   UniswapV3PositionState,
   Erc20Token,
-  CloseOrderInterface,
+} from '@midcurve/shared';
+import {
+  OnChainOrderStatus,
+  ContractTriggerMode,
+  ContractSwapDirection,
 } from '@midcurve/shared';
 
-import type { SerializedCloseOrder } from '@midcurve/api-shared';
+import type {
+  SerializedCloseOrder,
+  CloseOrderStatus,
+  MonitoringState,
+  SwapDirection,
+} from '@midcurve/api-shared';
+
+import type { OnChainCloseOrder } from '@midcurve/database';
 
 // ============================================================================
 // GENERIC SERIALIZATION HELPERS
@@ -248,29 +259,79 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
 // ============================================================================
 
 /**
- * Serialize CloseOrder for JSON response
+ * Derive CloseOrderStatus from (onChainStatus, monitoringState) for backward compatibility.
  *
- * Converts all bigint fields in config/state to strings and Date fields to ISO strings.
- *
- * @param order - CloseOrderInterface from service layer
- * @returns JSON-serializable close order object
+ * The old CloseOrderStatus is still used by CloseOrderStatusBadge and PositionCloseOrdersPanel.
  */
-export function serializeCloseOrder(
-  order: CloseOrderInterface
+function deriveCloseOrderStatus(
+  onChainStatus: number,
+  monitoringState: string
+): CloseOrderStatus {
+  if (onChainStatus === OnChainOrderStatus.EXECUTED) return 'executed';
+  if (onChainStatus === OnChainOrderStatus.CANCELLED) return 'cancelled';
+  if (onChainStatus === OnChainOrderStatus.ACTIVE) {
+    if (monitoringState === 'triggered') return 'triggering';
+    if (monitoringState === 'suspended') return 'failed';
+    if (monitoringState === 'monitoring') return 'active';
+    return 'registering'; // idle + ACTIVE = still registering
+  }
+  // NONE
+  return 'pending';
+}
+
+/**
+ * Map contract SwapDirection integer to API SwapDirection string (or null for NONE).
+ */
+function mapSwapDirection(swapDirection: number): SwapDirection | null {
+  if (swapDirection === ContractSwapDirection.TOKEN0_TO_1) return 'TOKEN0_TO_1';
+  if (swapDirection === ContractSwapDirection.TOKEN1_TO_0) return 'TOKEN1_TO_0';
+  return null;
+}
+
+/**
+ * Serialize OnChainCloseOrder (Prisma model) for JSON response.
+ *
+ * Maps explicit columns to the SerializedCloseOrder response type.
+ * Legacy config/state blobs are populated for backward compatibility with
+ * UI components that haven't migrated yet.
+ */
+export function serializeOnChainCloseOrder(
+  order: OnChainCloseOrder
 ): SerializedCloseOrder {
   return {
     id: order.id,
     closeOrderHash: order.closeOrderHash,
-    closeOrderType: order.closeOrderType,
-    status: order.status,
+    closeOrderType: 'uniswapv3',
+
+    // Derived status (backward compat for CloseOrderStatusBadge, etc.)
+    status: deriveCloseOrderStatus(order.onChainStatus, order.monitoringState),
+    monitoringState: order.monitoringState as MonitoringState,
+
+    // Explicit identity fields
     positionId: order.positionId,
-    automationContractConfig: order.automationContractConfig as {
-      chainId: number;
-      contractAddress: string;
-      positionManager: string;
+    chainId: order.chainId,
+    nftId: order.nftId,
+    triggerMode: order.triggerMode === ContractTriggerMode.LOWER ? 'LOWER' : 'UPPER',
+    triggerTick: order.triggerTick,
+    slippageBps: order.slippageBps,
+
+    // Swap config
+    swapDirection: mapSwapDirection(order.swapDirection),
+    swapSlippageBps: order.swapSlippageBps,
+
+    // Additional explicit fields
+    validUntil: order.validUntil?.toISOString() ?? null,
+    payoutAddress: order.payoutAddress,
+
+    // Legacy fields — populated from explicit columns for backward compat
+    automationContractConfig: {
+      chainId: order.chainId,
+      contractAddress: order.contractAddress,
+      positionManager: '', // No longer tracked per-order
     },
-    config: serializeBigInt(order.config) as Record<string, unknown>,
-    state: serializeBigInt(order.state) as Record<string, unknown>,
+    config: {},
+    state: {},
+
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
   };

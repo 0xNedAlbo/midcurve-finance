@@ -6,7 +6,8 @@
  */
 
 import {
-  CloseOrderService,
+  OnChainCloseOrderService,
+  CloseOrderExecutionService,
   PoolSubscriptionService,
   UniswapV3PoolService,
   AutomationLogService,
@@ -18,7 +19,8 @@ import {
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
-let _closeOrderService: CloseOrderService | null = null;
+let _onChainCloseOrderService: OnChainCloseOrderService | null = null;
+let _closeOrderExecutionService: CloseOrderExecutionService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
@@ -29,13 +31,23 @@ let _webhookDeliveryService: WebhookDeliveryService | null = null;
 let _hedgeVaultService: HedgeVaultService | null = null;
 
 /**
- * Get singleton instance of CloseOrderService
+ * Get singleton instance of OnChainCloseOrderService
  */
-export function getCloseOrderService(): CloseOrderService {
-  if (!_closeOrderService) {
-    _closeOrderService = new CloseOrderService();
+export function getOnChainCloseOrderService(): OnChainCloseOrderService {
+  if (!_onChainCloseOrderService) {
+    _onChainCloseOrderService = new OnChainCloseOrderService();
   }
-  return _closeOrderService;
+  return _onChainCloseOrderService;
+}
+
+/**
+ * Get singleton instance of CloseOrderExecutionService
+ */
+export function getCloseOrderExecutionService(): CloseOrderExecutionService {
+  if (!_closeOrderExecutionService) {
+    _closeOrderExecutionService = new CloseOrderExecutionService();
+  }
+  return _closeOrderExecutionService;
 }
 
 /**
