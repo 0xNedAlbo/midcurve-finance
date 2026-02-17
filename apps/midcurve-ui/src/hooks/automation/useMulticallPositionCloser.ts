@@ -158,9 +158,6 @@ export function useMulticallPositionCloser(
         queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
       });
     }
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.lists(),
-    });
   }, [isTxSuccess, txHash, queryClient, chainId, nftId]);
 
   // Handle errors

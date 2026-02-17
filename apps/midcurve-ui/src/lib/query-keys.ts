@@ -9,7 +9,7 @@
  * fine-grained cache invalidation and updates.
  */
 
-import type { ListPositionsParams, ListCloseOrdersRequest } from '@midcurve/api-shared';
+import type { ListPositionsParams } from '@midcurve/api-shared';
 
 export const queryKeys = {
   // ============================================
@@ -191,32 +191,6 @@ export const queryKeys = {
   automation: {
     // Root
     all: ['automation'] as const,
-
-    // ---------------------------------------------------------------------------
-    // Close Orders
-    // ---------------------------------------------------------------------------
-    closeOrders: {
-      all: ['automation', 'close-orders'] as const,
-
-      // List operations
-      lists: () => [...queryKeys.automation.closeOrders.all, 'list'] as const,
-      list: (params?: ListCloseOrdersRequest) =>
-        [...queryKeys.automation.closeOrders.lists(), params ?? {}] as const,
-
-      // By position (common filter)
-      byPosition: (positionId: string) =>
-        [...queryKeys.automation.closeOrders.all, 'position', positionId] as const,
-
-      // Single order detail
-      details: () => [...queryKeys.automation.closeOrders.all, 'detail'] as const,
-      detail: (orderId: string) =>
-        [...queryKeys.automation.closeOrders.details(), orderId] as const,
-
-      // Order status (for polling)
-      statuses: () => [...queryKeys.automation.closeOrders.all, 'status'] as const,
-      status: (orderId: string) =>
-        [...queryKeys.automation.closeOrders.statuses(), orderId] as const,
-    },
 
     // ---------------------------------------------------------------------------
     // Shared Contracts

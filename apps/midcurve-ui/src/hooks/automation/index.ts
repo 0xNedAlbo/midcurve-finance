@@ -47,8 +47,6 @@ export {
 
 // Close Orders - Read only (position-scoped)
 export { useCloseOrders, useCloseOrderByHash } from './useCloseOrders';
-// Legacy exports for backward compatibility
-export { useLegacyCloseOrders, useCloseOrder } from './useCloseOrders';
 
 // Automation Logs
 export {

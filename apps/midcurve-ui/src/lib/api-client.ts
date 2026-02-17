@@ -175,17 +175,12 @@ import type {
   RouterSwapQuoteData,
   RouterSupportedChainsData,
   // Close Orders
-  ListCloseOrdersRequest,
   ListCloseOrdersResponse,
-  RegisterCloseOrderRequest,
   RegisterCloseOrderResponse,
   GetCloseOrderResponse,
   UpdateCloseOrderRequest,
   UpdateCloseOrderResponse,
   CancelCloseOrderResponse,
-  GetCloseOrderStatusResponse,
-  NotifyOrderCancelledRequest,
-  NotifyOrderCancelledResponse,
   // Shared Contracts
   GetPositionSharedContractsResponseData,
   GetChainSharedContractsResponseData,
@@ -226,68 +221,7 @@ function buildQueryString(params: object): string {
  */
 export const automationApi = {
   // ---------------------------------------------------------------------------
-  // Close Orders (Legacy - ID-based)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * List close orders for the current user
-   * @deprecated Use positionCloseOrders.list() instead
-   */
-  listCloseOrders(params: ListCloseOrdersRequest = {}) {
-    const qs = buildQueryString(params);
-    return apiClient.get<ListCloseOrdersResponse['data']>(`/api/v1/automation/close-orders${qs}`);
-  },
-
-  /**
-   * Create a new close order (async - returns 202)
-   */
-  createCloseOrder(input: RegisterCloseOrderRequest) {
-    return apiClient.post<RegisterCloseOrderResponse['data']>('/api/v1/automation/close-orders', input);
-  },
-
-  /**
-   * Get a single close order by ID
-   * @deprecated Use positionCloseOrders.get() instead
-   */
-  getCloseOrder(id: string) {
-    return apiClient.get<GetCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
-  },
-
-  /**
-   * Get close order registration status (for polling)
-   */
-  getCloseOrderStatus(id: string) {
-    return apiClient.get<GetCloseOrderStatusResponse['data']>(`/api/v1/automation/close-orders/${id}/status`);
-  },
-
-  /**
-   * Update an existing close order
-   * @deprecated Use positionCloseOrders.update() instead
-   */
-  updateCloseOrder(id: string, input: UpdateCloseOrderRequest) {
-    return apiClient.put<UpdateCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`, input);
-  },
-
-  /**
-   * Cancel a close order
-   * @deprecated Use positionCloseOrders.cancel() instead
-   */
-  cancelCloseOrder(id: string) {
-    return apiClient.delete<CancelCloseOrderResponse['data']>(`/api/v1/automation/close-orders/${id}`);
-  },
-
-  /**
-   * Notify API after user cancels a close order on-chain
-   */
-  notifyOrderCancelled(orderId: string, input: NotifyOrderCancelledRequest) {
-    return apiClient.post<NotifyOrderCancelledResponse['data']>(
-      `/api/v1/automation/close-orders/${orderId}/cancelled`,
-      input
-    );
-  },
-
-  // ---------------------------------------------------------------------------
-  // Close Orders (Position-Scoped - New)
+  // Close Orders (Position-Scoped)
   // ---------------------------------------------------------------------------
 
   /**

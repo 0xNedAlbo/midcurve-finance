@@ -118,9 +118,6 @@ export function useCancelCloseOrder(
     queryClient.invalidateQueries({
       queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
     });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.lists(),
-    });
   }, [isTxSuccess, txHash, result, queryClient, chainId, nftId]);
 
   // Handle errors

@@ -200,15 +200,6 @@ export function useUpdateCloseOrder(
     queryClient.invalidateQueries({
       queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
     });
-    // Also invalidate legacy caches for backward compatibility
-    if (currentParams.positionId) {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
-      });
-    }
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.lists(),
-    });
   }, [isTxSuccess, txHash, currentParams, queryClient, chainId, nftId]);
 
   // Handle errors

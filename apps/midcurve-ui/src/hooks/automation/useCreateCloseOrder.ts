@@ -205,12 +205,6 @@ export function useCreateCloseOrder(
     queryClient.invalidateQueries({
       queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
     });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.byPosition(currentParams.positionId),
-    });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.automation.closeOrders.lists(),
-    });
   }, [isTxSuccess, receipt, txHash, currentParams, queryClient, abi, contractAddress, chainId, nftId]);
 
   // Handle errors

@@ -25,7 +25,6 @@ import {
   SharedContractService,
   PoolSubscriptionService,
   AutomationLogService,
-  PnLCurveService,
   NotificationService,
   WebhookConfigService,
   WebhookDeliveryService,
@@ -56,7 +55,6 @@ let _closeOrderService: CloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
-let _pnlCurveService: PnLCurveService | null = null;
 let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _webhookDeliveryService: WebhookDeliveryService | null = null;
@@ -247,16 +245,6 @@ export function getAutomationLogService(): AutomationLogService {
     _automationLogService = new AutomationLogService();
   }
   return _automationLogService;
-}
-
-/**
- * Get singleton instance of PnLCurveService
- */
-export function getPnLCurveService(): PnLCurveService {
-  if (!_pnlCurveService) {
-    _pnlCurveService = new PnLCurveService();
-  }
-  return _pnlCurveService;
 }
 
 /**
