@@ -7,7 +7,7 @@
 
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
-import { OrderExecutor, type OrderExecutorStatus } from './order-executor';
+import { CloseOrderExecutor, type CloseOrderExecutorStatus } from './close-order-executor';
 import {
   CloseOrderMonitor,
   type CloseOrderMonitorStatus,
@@ -38,7 +38,7 @@ export interface WorkerManagerStatus {
   startedAt: string | null;
   workers: {
     closeOrderMonitor: CloseOrderMonitorStatus;
-    orderExecutor: OrderExecutorStatus;
+    orderExecutor: CloseOrderExecutorStatus;
     outboxPublisher: OutboxPublisherStatus;
     positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
     rangeMonitor: RangeMonitorStatus;
@@ -54,7 +54,7 @@ class WorkerManager {
   private startedAt: Date | null = null;
 
   private closeOrderMonitor: CloseOrderMonitor | null = null;
-  private orderExecutor: OrderExecutor | null = null;
+  private orderExecutor: CloseOrderExecutor | null = null;
   private outboxPublisher: OutboxPublisher | null = null;
   private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
   private rangeMonitor: RangeMonitor | null = null;
@@ -83,8 +83,8 @@ class WorkerManager {
       // Create worker instances
       const startPromises: Promise<void>[] = [];
 
-      // Start OrderExecutor (executes triggered orders)
-      this.orderExecutor = new OrderExecutor();
+      // Start CloseOrderExecutor (executes triggered orders)
+      this.orderExecutor = new CloseOrderExecutor();
       startPromises.push(this.orderExecutor.start());
 
       // Start CloseOrderMonitor (monitors pool prices, triggers close orders)
@@ -256,5 +256,5 @@ export async function stopWorkers(): Promise<void> {
 
 // Re-export types
 export { CloseOrderMonitor, type CloseOrderMonitorStatus };
-export { OrderExecutor, type OrderExecutorStatus };
+export { CloseOrderExecutor, type CloseOrderExecutorStatus };
 export { RangeMonitor, type RangeMonitorStatus };

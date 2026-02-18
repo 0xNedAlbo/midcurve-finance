@@ -40,7 +40,7 @@ import {
 } from '../mq/messages';
 import { getSignerClient, type SwapParamsInput } from '../clients/signer-client';
 
-const log = automationLogger.child({ component: 'OrderExecutor' });
+const log = automationLogger.child({ component: 'CloseOrderExecutor' });
 
 // Maximum number of execution attempts before marking order as permanently failed
 const MAX_EXECUTION_ATTEMPTS = 3;
@@ -49,7 +49,7 @@ const MAX_EXECUTION_ATTEMPTS = 3;
 // Types
 // =============================================================================
 
-export interface OrderExecutorStatus {
+export interface CloseOrderExecutorStatus {
   status: 'idle' | 'running' | 'stopping' | 'stopped';
   consumerCount: number;
   processedTotal: number;
@@ -61,7 +61,7 @@ export interface OrderExecutorStatus {
 // Worker
 // =============================================================================
 
-export class OrderExecutor {
+export class CloseOrderExecutor {
   private status: 'idle' | 'running' | 'stopping' | 'stopped' = 'idle';
   private consumerCount: number;
   private consumerTags: string[] = [];
@@ -79,11 +79,11 @@ export class OrderExecutor {
    */
   async start(): Promise<void> {
     if (this.status === 'running') {
-      log.warn({ msg: 'OrderExecutor already running' });
+      log.warn({ msg: 'CloseOrderExecutor already running' });
       return;
     }
 
-    autoLog.workerLifecycle(log, 'OrderExecutor', 'starting');
+    autoLog.workerLifecycle(log, 'CloseOrderExecutor', 'starting');
     this.status = 'running';
 
     const mq = getRabbitMQConnection();
@@ -98,7 +98,7 @@ export class OrderExecutor {
       this.consumerTags.push(tag);
     }
 
-    autoLog.workerLifecycle(log, 'OrderExecutor', 'started', {
+    autoLog.workerLifecycle(log, 'CloseOrderExecutor', 'started', {
       consumerCount: this.consumerCount,
     });
   }
@@ -111,7 +111,7 @@ export class OrderExecutor {
       return;
     }
 
-    autoLog.workerLifecycle(log, 'OrderExecutor', 'stopping');
+    autoLog.workerLifecycle(log, 'CloseOrderExecutor', 'stopping');
     this.status = 'stopping';
 
     const mq = getRabbitMQConnection();
@@ -123,13 +123,13 @@ export class OrderExecutor {
     this.consumerTags = [];
 
     this.status = 'stopped';
-    autoLog.workerLifecycle(log, 'OrderExecutor', 'stopped');
+    autoLog.workerLifecycle(log, 'CloseOrderExecutor', 'stopped');
   }
 
   /**
    * Get current status
    */
-  getStatus(): OrderExecutorStatus {
+  getStatus(): CloseOrderExecutorStatus {
     return {
       status: this.status,
       consumerCount: this.consumerCount,
