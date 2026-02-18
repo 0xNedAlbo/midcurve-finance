@@ -4,53 +4,47 @@
  * Maps chain IDs to The Graph subgraph endpoints for Uniswap V3 protocol.
  * These endpoints provide historical data, metrics, and analytics for Uniswap V3 pools.
  *
+ * Subgraph deployment IDs are configured via environment variables:
+ * - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM
+ * - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM
+ * - UNISWAP_V3_SUBGRAPH_ID_BASE
+ * - UNISWAP_V3_SUBGRAPH_ID_OPTIMISM
+ * - UNISWAP_V3_SUBGRAPH_ID_POLYGON
+ * - UNISWAP_V3_SUBGRAPH_ID_BSC
+ *
+ * Find deployment IDs at: https://thegraph.com/explorer
  * Official documentation: https://docs.uniswap.org/api/subgraph/overview
  */
 
 import { SupportedChainId } from "./evm.js";
 
 /**
- * Uniswap V3 subgraph endpoints by chain ID
- *
- * These are hosted subgraphs on The Graph's decentralized network.
- * Each subgraph indexes Uniswap V3 events and provides a GraphQL API.
- *
- * Sources:
- * - Ethereum: https://thegraph.com/explorer/subgraphs/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV
- * - Arbitrum: https://thegraph.com/explorer/subgraphs/FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM
- * - Base: https://api.studio.thegraph.com/query/48211/uniswap-v3-base/version/latest
- * - Optimism: https://thegraph.com/explorer/subgraphs/Cghf4LfVqPiFw6fp6Y5X5Ubc8UpmUhSfJL82zwiBFLaj
- * - Polygon: https://thegraph.com/explorer/subgraphs/3hCPRGf4z88VC5rsBKU5AA9FBBq5nF3jbKJG7VZCbhjm
- * - BSC: Community-maintained subgraph (if available)
+ * Environment variable names for Uniswap V3 subgraph deployment IDs
  */
-export const UNISWAP_V3_SUBGRAPH_ENDPOINTS: Partial<
-    Record<SupportedChainId, string>
-> = {
-    // Ethereum Mainnet
-    [SupportedChainId.ETHEREUM]:
-        "https://gateway.thegraph.com/api/[api-key]/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
-
-    // Arbitrum One
-    [SupportedChainId.ARBITRUM]:
-        "https://gateway.thegraph.com/api/[api-key]/subgraphs/id/FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM",
-
-    // Base
-    [SupportedChainId.BASE]:
-        "https://gateway.thegraph.com/api/[api-key]/subgraphs/id/HMuAwufqZ1YCRmzL2SfHTVkzZovC9VL2UAKhjvRqKiR1",
-
-    // Optimism
-    [SupportedChainId.OPTIMISM]:
-        "https://gateway.thegraph.com/api/[api-key]/subgraphs/id/AUpZ47RTWDBpco7YTTffGyRkBJ2i26Ms8dQSkUdxPHGc",
-
-    // Polygon
-    [SupportedChainId.POLYGON]:
-        "https://gateway.thegraph.com/api/[api-key]/subgraphs/id/3hCPRGf4z88VC5rsBKU5AA9FBBq5nF3jbKJG7VZCbhjm",
-
-    // BSC - Note: Uniswap V3 may not be officially deployed on BSC
-    // Uncomment if/when a reliable subgraph becomes available
-    // [SupportedChainId.BSC]:
-    //   'https://api.thegraph.com/subgraphs/name/ianlapham/uniswap-v3-bsc',
+const SUBGRAPH_ENV_VARS: Partial<Record<SupportedChainId, string>> = {
+    [SupportedChainId.ETHEREUM]: "UNISWAP_V3_SUBGRAPH_ID_ETHEREUM",
+    [SupportedChainId.ARBITRUM]: "UNISWAP_V3_SUBGRAPH_ID_ARBITRUM",
+    [SupportedChainId.BASE]: "UNISWAP_V3_SUBGRAPH_ID_BASE",
+    [SupportedChainId.OPTIMISM]: "UNISWAP_V3_SUBGRAPH_ID_OPTIMISM",
+    [SupportedChainId.POLYGON]: "UNISWAP_V3_SUBGRAPH_ID_POLYGON",
+    [SupportedChainId.BSC]: "UNISWAP_V3_SUBGRAPH_ID_BSC",
 };
+
+/**
+ * The Graph gateway base URL
+ */
+const THE_GRAPH_GATEWAY = "https://gateway.thegraph.com/api";
+
+/**
+ * Get the subgraph deployment ID for a chain from environment variables
+ *
+ * @param chainId - The chain ID
+ * @returns The subgraph deployment ID or undefined if not configured
+ */
+function getSubgraphId(chainId: SupportedChainId): string | undefined {
+    const envVar = SUBGRAPH_ENV_VARS[chainId];
+    return envVar ? process.env[envVar] : undefined;
+}
 
 /**
  * Get The Graph API key from environment variable
@@ -62,10 +56,8 @@ function getTheGraphApiKey(): string {
     const apiKey = process.env.THE_GRAPH_API_KEY;
 
     if (!apiKey) {
-        // In test mode, return a placeholder to avoid breaking tests
-        // This allows unit tests to run without a real API key
-        if (process.env.NODE_ENV === 'test') {
-            return 'test-api-key-placeholder';
+        if (process.env.NODE_ENV === "test") {
+            return "test-api-key-placeholder";
         }
 
         throw new Error(
@@ -83,26 +75,29 @@ function getTheGraphApiKey(): string {
 /**
  * Get the Uniswap V3 subgraph endpoint for a given chain
  *
- * Automatically replaces the [api-key] placeholder with the API key
- * from the THE_GRAPH_API_KEY environment variable.
+ * Builds the endpoint URL from environment variables:
+ * - THE_GRAPH_API_KEY: Your API key from The Graph
+ * - UNISWAP_V3_SUBGRAPH_ID_<CHAIN>: The deployment ID for the chain
  *
  * @param chainId - The chain ID to get the endpoint for
- * @returns The subgraph GraphQL endpoint URL with API key
- * @throws Error if chain is not supported or API key not configured
+ * @returns The subgraph GraphQL endpoint URL
+ * @throws Error if chain is not supported or required env vars not configured
  *
  * @example
  * ```typescript
- * // With THE_GRAPH_API_KEY=abc123 in environment
- * const endpoint = getUniswapV3SubgraphEndpoint(1); // Ethereum
+ * // With env vars:
+ * // THE_GRAPH_API_KEY=abc123
+ * // UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV
+ *
+ * const endpoint = getUniswapV3SubgraphEndpoint(1);
  * // Returns: 'https://gateway.thegraph.com/api/abc123/subgraphs/id/5zvR82Q...'
  * ```
  */
 export function getUniswapV3SubgraphEndpoint(chainId: number): string {
-    const endpointTemplate =
-        UNISWAP_V3_SUBGRAPH_ENDPOINTS[chainId as SupportedChainId];
+    const envVar = SUBGRAPH_ENV_VARS[chainId as SupportedChainId];
 
-    if (!endpointTemplate) {
-        const supportedChains = Object.keys(UNISWAP_V3_SUBGRAPH_ENDPOINTS)
+    if (!envVar) {
+        const supportedChains = Object.keys(SUBGRAPH_ENV_VARS)
             .map(Number)
             .join(", ");
 
@@ -115,15 +110,28 @@ export function getUniswapV3SubgraphEndpoint(chainId: number): string {
         );
     }
 
-    // Replace [api-key] placeholder with actual API key
-    const apiKey = getTheGraphApiKey();
-    const endpoint = endpointTemplate.replace("[api-key]", apiKey);
+    const subgraphId = getSubgraphId(chainId as SupportedChainId);
 
-    return endpoint;
+    if (!subgraphId) {
+        throw new Error(
+            `Uniswap V3 subgraph ID not configured for chain ${chainId}.\n\n` +
+                `Please set the ${envVar} environment variable.\n` +
+                `You can find deployment IDs at: https://thegraph.com/explorer\n\n` +
+                `Example:\n` +
+                `${envVar}=5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV`
+        );
+    }
+
+    const apiKey = getTheGraphApiKey();
+
+    return `${THE_GRAPH_GATEWAY}/${apiKey}/subgraphs/id/${subgraphId}`;
 }
 
 /**
  * Check if Uniswap V3 subgraph is available for a given chain
+ *
+ * Returns true only if both the chain is supported AND the subgraph ID
+ * environment variable is configured.
  *
  * @param chainId - The chain ID to check
  * @returns true if subgraph is available, false otherwise
@@ -136,20 +144,28 @@ export function getUniswapV3SubgraphEndpoint(chainId: number): string {
  * ```
  */
 export function isUniswapV3SubgraphSupported(chainId: number): boolean {
-    return chainId in UNISWAP_V3_SUBGRAPH_ENDPOINTS;
+    const envVar = SUBGRAPH_ENV_VARS[chainId as SupportedChainId];
+    if (!envVar) return false;
+
+    const subgraphId = process.env[envVar];
+    return !!subgraphId;
 }
 
 /**
- * Get all chain IDs with Uniswap V3 subgraph support
+ * Get all chain IDs with Uniswap V3 subgraph support configured
+ *
+ * Only returns chains that have their subgraph ID environment variable set.
  *
  * @returns Array of supported chain IDs
  *
  * @example
  * ```typescript
  * const chains = getSupportedUniswapV3SubgraphChains();
- * // Returns: [1, 42161, 8453, 10, 137]
+ * // Returns: [1, 42161, 8453, 10, 137] (depending on configured env vars)
  * ```
  */
 export function getSupportedUniswapV3SubgraphChains(): number[] {
-    return Object.keys(UNISWAP_V3_SUBGRAPH_ENDPOINTS).map(Number);
+    return Object.entries(SUBGRAPH_ENV_VARS)
+        .filter(([, envVar]) => envVar && process.env[envVar])
+        .map(([chainId]) => Number(chainId));
 }

@@ -28,7 +28,6 @@ export {
 } from './quote-tokens.js';
 
 export {
-  UNISWAP_V3_SUBGRAPH_ENDPOINTS,
   getUniswapV3SubgraphEndpoint,
   isUniswapV3SubgraphSupported,
   getSupportedUniswapV3SubgraphChains,
