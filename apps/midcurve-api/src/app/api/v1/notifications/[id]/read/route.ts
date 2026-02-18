@@ -4,9 +4,14 @@
  * PATCH /api/v1/notifications/:id/read - Mark a notification as read
  *
  * Authentication: Required (session only)
+ *
+ * ARCHITECTURE NOTE: These routes access @midcurve/database (Prisma) directly
+ * rather than going through a service class. Notifications are a UI-only concern
+ * with no business logic beyond CRUD — a service wrapper adds no value here.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@midcurve/database';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import {
   createSuccessResponse,
@@ -17,7 +22,6 @@ import {
   type NotificationPayload,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getNotificationService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -45,12 +49,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
     const startTime = Date.now();
 
     try {
-      const notificationService = getNotificationService();
+      // Verify the notification exists and belongs to user
+      const existing = await prisma.userNotification.findUnique({
+        where: { id },
+      });
 
-      // First verify the notification exists and belongs to user
-      const existingNotification = await notificationService.findById(id);
-
-      if (!existingNotification) {
+      if (!existing) {
         const errorResponse = createErrorResponse(ApiErrorCode.NOT_FOUND, 'Notification not found');
         apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
         return NextResponse.json(errorResponse, {
@@ -59,7 +63,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       }
 
       // Verify ownership
-      if (existingNotification.userId !== user.id) {
+      if (existing.userId !== user.id) {
         const errorResponse = createErrorResponse(ApiErrorCode.FORBIDDEN, 'Access denied');
         apiLog.requestEnd(apiLogger, requestId, 403, Date.now() - startTime);
         return NextResponse.json(errorResponse, {
@@ -68,7 +72,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams): Prom
       }
 
       // Mark as read
-      const notification = await notificationService.markAsRead(id);
+      const notification = await prisma.userNotification.update({
+        where: { id },
+        data: { isRead: true, readAt: new Date() },
+      });
 
       const responseData: NotificationData = {
         id: notification.id,

@@ -4,33 +4,7 @@
  * Input types for notification-related service operations.
  */
 
-import type { NotificationEventType, NotificationPayload } from '@midcurve/api-shared';
-
-// =============================================================================
-// NOTIFICATION INPUTS
-// =============================================================================
-
-/**
- * Input for creating a notification
- */
-export interface CreateNotificationInput {
-  userId: string;
-  eventType: NotificationEventType;
-  positionId?: string | null;
-  title: string;
-  message: string;
-  payload: NotificationPayload;
-}
-
-/**
- * Options for listing notifications
- */
-export interface ListNotificationsOptions {
-  eventType?: NotificationEventType;
-  isRead?: boolean;
-  limit?: number;
-  cursor?: string;
-}
+import type { NotificationEventType } from '@midcurve/api-shared';
 
 // =============================================================================
 // WEBHOOK CONFIG INPUTS

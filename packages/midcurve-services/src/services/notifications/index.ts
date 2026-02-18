@@ -4,13 +4,6 @@
  * Barrel export for notification-related services, adapters, and events.
  */
 
-// Core CRUD service (used by API routes and DbNotificationAdapter)
-export {
-  NotificationService,
-  type NotificationServiceDependencies,
-  type ListNotificationsResult,
-} from './notification-service.js';
-
 // User-facing notification service (dispatch to adapters)
 export {
   UserNotificationService,
@@ -36,8 +29,8 @@ export {
 // Adapters
 export type { NotificationAdapter } from './adapters/index.js';
 export {
-  DbNotificationAdapter,
-  type DbNotificationAdapterDependencies,
+  UiNotificationAdapter,
+  type UiNotificationAdapterDependencies,
   WebhookNotificationAdapter,
   type WebhookNotificationAdapterDependencies,
   type WebhookDeliveryResult,

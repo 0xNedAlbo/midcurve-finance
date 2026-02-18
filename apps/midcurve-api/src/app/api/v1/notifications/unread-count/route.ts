@@ -4,9 +4,14 @@
  * GET /api/v1/notifications/unread-count - Get count of unread notifications
  *
  * Authentication: Required (session only)
+ *
+ * ARCHITECTURE NOTE: These routes access @midcurve/database (Prisma) directly
+ * rather than going through a service class. Notifications are a UI-only concern
+ * with no business logic beyond CRUD — a service wrapper adds no value here.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@midcurve/database';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import {
   createSuccessResponse,
@@ -16,7 +21,6 @@ import {
   type UnreadCountResponseData,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getNotificationService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -36,7 +40,9 @@ export async function GET(request: NextRequest): Promise<Response> {
     const startTime = Date.now();
 
     try {
-      const count = await getNotificationService().getUnreadCount(user.id);
+      const count = await prisma.userNotification.count({
+        where: { userId: user.id, isRead: false },
+      });
 
       const responseData: UnreadCountResponseData = { count };
 

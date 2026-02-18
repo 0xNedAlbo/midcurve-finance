@@ -5,9 +5,14 @@
  * DELETE /api/v1/notifications - Bulk delete notifications
  *
  * Authentication: Required (session only)
+ *
+ * ARCHITECTURE NOTE: These routes access @midcurve/database (Prisma) directly
+ * rather than going through a service class. Notifications are a UI-only concern
+ * with no business logic beyond CRUD — a service wrapper adds no value here.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma, type Prisma } from '@midcurve/database';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import {
   createSuccessResponse,
@@ -22,7 +27,6 @@ import {
   type NotificationPayload,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getNotificationService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -64,18 +68,39 @@ export async function GET(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { limit, cursor, eventType, isRead } = parseResult.data;
+      const { limit = 10, cursor, eventType, isRead } = parseResult.data;
 
-      // Fetch notifications
-      const result = await getNotificationService().listByUser(user.id, {
-        limit,
-        cursor,
-        eventType,
-        isRead,
+      // Build where clause
+      const where: Prisma.UserNotificationWhereInput = { userId: user.id };
+      if (eventType !== undefined) where.eventType = eventType;
+      if (isRead !== undefined) where.isRead = isRead;
+
+      // Cursor-based pagination
+      if (cursor) {
+        const cursorNotification = await prisma.userNotification.findUnique({
+          where: { id: cursor },
+          select: { createdAt: true },
+        });
+        if (cursorNotification) {
+          where.createdAt = { lt: cursorNotification.createdAt };
+        }
+      }
+
+      // Fetch limit + 1 to determine if there are more results
+      const notifications = await prisma.userNotification.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
       });
 
+      const hasMore = notifications.length > limit;
+      if (hasMore) notifications.pop();
+
+      const lastNotification = notifications[notifications.length - 1];
+      const nextCursor = hasMore && lastNotification ? lastNotification.id : null;
+
       // Map to API response format
-      const notifications: NotificationData[] = result.notifications.map((n) => ({
+      const mapped: NotificationData[] = notifications.map((n) => ({
         id: n.id,
         eventType: n.eventType as NotificationData['eventType'],
         positionId: n.positionId,
@@ -88,9 +113,9 @@ export async function GET(request: NextRequest): Promise<Response> {
       }));
 
       const responseData: ListNotificationsResponseData = {
-        notifications,
-        nextCursor: result.nextCursor,
-        hasMore: result.hasMore,
+        notifications: mapped,
+        nextCursor,
+        hasMore,
       };
 
       const response = createSuccessResponse(responseData);
@@ -154,30 +179,16 @@ export async function DELETE(request: NextRequest): Promise<Response> {
 
       const { ids } = parseResult.data;
 
-      // Verify notifications belong to user before deleting
-      // For now, bulkDelete in service doesn't filter by user, so we need to verify ownership
-      const notificationService = getNotificationService();
-
-      // Verify each notification belongs to the user
-      for (const id of ids) {
-        const notification = await notificationService.findById(id);
-        if (notification && notification.userId !== user.id) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.FORBIDDEN,
-            'Cannot delete notifications belonging to another user'
-          );
-          apiLog.requestEnd(apiLogger, requestId, 403, Date.now() - startTime);
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.FORBIDDEN],
-          });
-        }
-      }
-
-      // Delete notifications
-      const deletedCount = await notificationService.bulkDelete(ids);
+      // Delete only notifications belonging to the authenticated user
+      const result = await prisma.userNotification.deleteMany({
+        where: {
+          id: { in: ids },
+          userId: user.id,
+        },
+      });
 
       const responseData: BulkDeleteNotificationsResponseData = {
-        deletedCount,
+        deletedCount: result.count,
       };
 
       const response = createSuccessResponse(responseData);

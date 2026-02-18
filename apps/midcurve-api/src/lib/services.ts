@@ -25,7 +25,6 @@ import {
   SharedContractService,
   PoolSubscriptionService,
   AutomationLogService,
-  NotificationService,
   WebhookConfigService,
   FavoritePoolService,
   UniswapV3SubgraphClient,
@@ -54,7 +53,6 @@ let _onChainCloseOrderService: OnChainCloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
-let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
@@ -243,16 +241,6 @@ export function getAutomationLogService(): AutomationLogService {
     _automationLogService = new AutomationLogService();
   }
   return _automationLogService;
-}
-
-/**
- * Get singleton instance of NotificationService
- */
-export function getNotificationService(): NotificationService {
-  if (!_notificationService) {
-    _notificationService = new NotificationService();
-  }
-  return _notificationService;
 }
 
 /**

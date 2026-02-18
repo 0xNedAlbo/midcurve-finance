@@ -13,10 +13,9 @@ import {
   AutomationLogService,
   UniswapV3PositionService,
   PositionRangeTrackerService,
-  NotificationService,
   WebhookConfigService,
   UserNotificationService,
-  DbNotificationAdapter,
+  UiNotificationAdapter,
   WebhookNotificationAdapter,
   HedgeVaultService,
 } from '@midcurve/services';
@@ -29,7 +28,6 @@ let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
 let _positionRangeTrackerService: PositionRangeTrackerService | null = null;
-let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
 let _hedgeVaultService: HedgeVaultService | null = null;
@@ -105,16 +103,6 @@ export function getPositionRangeTrackerService(): PositionRangeTrackerService {
 }
 
 /**
- * Get singleton instance of NotificationService
- */
-export function getNotificationService(): NotificationService {
-  if (!_notificationService) {
-    _notificationService = new NotificationService();
-  }
-  return _notificationService;
-}
-
-/**
  * Get singleton instance of WebhookConfigService
  */
 export function getWebhookConfigService(): WebhookConfigService {
@@ -131,8 +119,7 @@ export function getUserNotificationService(): UserNotificationService {
   if (!_userNotificationService) {
     _userNotificationService = new UserNotificationService({
       adapters: [
-        new DbNotificationAdapter({
-          notificationService: getNotificationService(),
+        new UiNotificationAdapter({
           positionService: getPositionService(),
         }),
         new WebhookNotificationAdapter({

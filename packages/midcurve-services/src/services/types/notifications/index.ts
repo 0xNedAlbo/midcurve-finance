@@ -5,9 +5,6 @@
  */
 
 export type {
-  // Notification inputs
-  CreateNotificationInput,
-  ListNotificationsOptions,
   // Webhook config inputs
   UpdateWebhookConfigInput,
   // Range status inputs

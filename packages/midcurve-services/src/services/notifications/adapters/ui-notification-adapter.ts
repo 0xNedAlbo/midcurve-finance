@@ -1,13 +1,14 @@
 /**
- * Database Notification Adapter
+ * UI Notification Adapter
  *
- * Persists notifications to the UserNotification table.
+ * Persists notifications to the UserNotification table for the UI inbox.
  * Handles enrichment by fetching position data for token symbols,
  * and generates human-readable title/message via the notification formatter.
  *
  * Best-effort: all errors are caught and logged, never thrown.
  */
 
+import { prisma, type Prisma } from '@midcurve/database';
 import { getQuoteToken, getBaseToken } from '@midcurve/shared';
 import type { NotificationPayload } from '@midcurve/api-shared';
 import { createServiceLogger, log } from '../../../logging/index.js';
@@ -16,15 +17,13 @@ import type { NotificationAdapter } from './notification-adapter.js';
 import type { NotificationEvent } from '../events/index.js';
 import { isRangeEvent, isExecutionSuccessEvent } from '../events/index.js';
 import { formatNotification, type TokenSymbols } from '../formatters/index.js';
-import type { NotificationService } from '../notification-service.js';
 import type { UniswapV3PositionService } from '../../position/uniswapv3-position-service.js';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface DbNotificationAdapterDependencies {
-  notificationService: NotificationService;
+export interface UiNotificationAdapterDependencies {
   positionService: UniswapV3PositionService;
 }
 
@@ -32,15 +31,13 @@ export interface DbNotificationAdapterDependencies {
 // ADAPTER
 // =============================================================================
 
-export class DbNotificationAdapter implements NotificationAdapter {
-  readonly name = 'DbNotificationAdapter';
+export class UiNotificationAdapter implements NotificationAdapter {
+  readonly name = 'UiNotificationAdapter';
   private readonly logger: ServiceLogger;
-  private readonly notificationService: NotificationService;
   private readonly positionService: UniswapV3PositionService;
 
-  constructor(deps: DbNotificationAdapterDependencies) {
-    this.logger = createServiceLogger('DbNotificationAdapter');
-    this.notificationService = deps.notificationService;
+  constructor(deps: UiNotificationAdapterDependencies) {
+    this.logger = createServiceLogger('UiNotificationAdapter');
     this.positionService = deps.positionService;
   }
 
@@ -63,13 +60,15 @@ export class DbNotificationAdapter implements NotificationAdapter {
       const { title, message } = formatNotification(event, tokenSymbols);
       const payload = buildDbPayload(event);
 
-      await this.notificationService.create({
-        userId: event.userId,
-        eventType: event.type,
-        positionId: event.positionId,
-        title,
-        message,
-        payload,
+      await prisma.userNotification.create({
+        data: {
+          userId: event.userId,
+          eventType: event.type,
+          positionId: event.positionId ?? null,
+          title,
+          message,
+          payload: payload as unknown as Prisma.InputJsonValue,
+        },
       });
 
       this.logger.debug(

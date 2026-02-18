@@ -5,9 +5,14 @@
  * DELETE /api/v1/notifications/:id - Delete a notification
  *
  * Authentication: Required (session only)
+ *
+ * ARCHITECTURE NOTE: These routes access @midcurve/database (Prisma) directly
+ * rather than going through a service class. Notifications are a UI-only concern
+ * with no business logic beyond CRUD — a service wrapper adds no value here.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@midcurve/database';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import {
   createSuccessResponse,
@@ -19,7 +24,6 @@ import {
   type DeleteNotificationResponseData,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getNotificationService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -47,7 +51,9 @@ export async function GET(request: NextRequest, { params }: RouteParams): Promis
     const startTime = Date.now();
 
     try {
-      const notification = await getNotificationService().findById(id);
+      const notification = await prisma.userNotification.findUnique({
+        where: { id },
+      });
 
       if (!notification) {
         const errorResponse = createErrorResponse(ApiErrorCode.NOT_FOUND, 'Notification not found');
@@ -121,8 +127,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams): Pro
     const startTime = Date.now();
 
     try {
-      const notificationService = getNotificationService();
-      const notification = await notificationService.findById(id);
+      const notification = await prisma.userNotification.findUnique({
+        where: { id },
+      });
 
       if (!notification) {
         const errorResponse = createErrorResponse(ApiErrorCode.NOT_FOUND, 'Notification not found');
@@ -141,7 +148,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams): Pro
         });
       }
 
-      await notificationService.delete(id);
+      await prisma.userNotification.delete({ where: { id } });
 
       const responseData: DeleteNotificationResponseData = { deleted: true };
 

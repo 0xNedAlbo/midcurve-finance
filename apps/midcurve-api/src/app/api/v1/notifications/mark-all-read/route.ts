@@ -4,9 +4,14 @@
  * POST /api/v1/notifications/mark-all-read - Mark all notifications as read
  *
  * Authentication: Required (session only)
+ *
+ * ARCHITECTURE NOTE: These routes access @midcurve/database (Prisma) directly
+ * rather than going through a service class. Notifications are a UI-only concern
+ * with no business logic beyond CRUD — a service wrapper adds no value here.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@midcurve/database';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import {
   createSuccessResponse,
@@ -16,7 +21,6 @@ import {
   type MarkAllReadResponseData,
 } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getNotificationService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -36,9 +40,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     const startTime = Date.now();
 
     try {
-      const count = await getNotificationService().markAllAsRead(user.id);
+      const result = await prisma.userNotification.updateMany({
+        where: { userId: user.id, isRead: false },
+        data: { isRead: true, readAt: new Date() },
+      });
 
-      const responseData: MarkAllReadResponseData = { count };
+      const responseData: MarkAllReadResponseData = { count: result.count };
 
       const response = createSuccessResponse(responseData);
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

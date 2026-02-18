@@ -2,7 +2,7 @@
  * Notification Formatter
  *
  * Pure functions for generating notification title and message text.
- * Used by the DbNotificationAdapter to produce human-readable content
+ * Used by the UiNotificationAdapter to produce human-readable content
  * for storage and UI display.
  */
 

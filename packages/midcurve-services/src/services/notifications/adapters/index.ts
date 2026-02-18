@@ -7,9 +7,9 @@
 export type { NotificationAdapter } from './notification-adapter.js';
 
 export {
-  DbNotificationAdapter,
-  type DbNotificationAdapterDependencies,
-} from './db-notification-adapter.js';
+  UiNotificationAdapter,
+  type UiNotificationAdapterDependencies,
+} from './ui-notification-adapter.js';
 
 export {
   WebhookNotificationAdapter,
