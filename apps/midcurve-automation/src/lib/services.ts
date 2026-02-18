@@ -15,7 +15,6 @@ import {
   PositionRangeTrackerService,
   NotificationService,
   WebhookConfigService,
-  WebhookDeliveryService,
   UserNotificationService,
   DbNotificationAdapter,
   WebhookNotificationAdapter,
@@ -32,7 +31,6 @@ let _positionService: UniswapV3PositionService | null = null;
 let _positionRangeTrackerService: PositionRangeTrackerService | null = null;
 let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
-let _webhookDeliveryService: WebhookDeliveryService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
 let _hedgeVaultService: HedgeVaultService | null = null;
 
@@ -127,16 +125,6 @@ export function getWebhookConfigService(): WebhookConfigService {
 }
 
 /**
- * Get singleton instance of WebhookDeliveryService
- */
-export function getWebhookDeliveryService(): WebhookDeliveryService {
-  if (!_webhookDeliveryService) {
-    _webhookDeliveryService = new WebhookDeliveryService();
-  }
-  return _webhookDeliveryService;
-}
-
-/**
  * Get singleton instance of UserNotificationService (with adapters wired)
  */
 export function getUserNotificationService(): UserNotificationService {
@@ -149,7 +137,6 @@ export function getUserNotificationService(): UserNotificationService {
         }),
         new WebhookNotificationAdapter({
           webhookConfigService: getWebhookConfigService(),
-          webhookDeliveryService: getWebhookDeliveryService(),
           positionService: getPositionService(),
           onChainCloseOrderService: getOnChainCloseOrderService(),
         }),

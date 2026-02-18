@@ -8,6 +8,7 @@
  * Best-effort: all errors are caught and logged, never thrown.
  */
 
+import type { UserWebhookConfig } from '@midcurve/database';
 import type { UniswapV3Position, UniswapV3Pool } from '@midcurve/shared';
 import { getQuoteToken, getBaseToken } from '@midcurve/shared';
 import type { WebhookDeliveryPayload } from '@midcurve/api-shared';
@@ -28,7 +29,6 @@ import {
   serializeCloseOrderForWebhook,
 } from '../formatters/index.js';
 import type { WebhookConfigService } from '../webhook-config-service.js';
-import type { WebhookDeliveryService } from '../webhook-delivery-service.js';
 import type { UniswapV3PositionService } from '../../position/uniswapv3-position-service.js';
 import type { OnChainCloseOrderService } from '../../automation/on-chain-close-order-service.js';
 
@@ -36,11 +36,20 @@ import type { OnChainCloseOrderService } from '../../automation/on-chain-close-o
 // TYPES
 // =============================================================================
 
+/** Result of a webhook delivery attempt */
+export interface WebhookDeliveryResult {
+  success: boolean;
+  statusCode: number | null;
+  error: string | null;
+  durationMs: number;
+}
+
 export interface WebhookNotificationAdapterDependencies {
   webhookConfigService: WebhookConfigService;
-  webhookDeliveryService: WebhookDeliveryService;
   positionService: UniswapV3PositionService;
   onChainCloseOrderService: OnChainCloseOrderService;
+  /** Timeout for webhook HTTP requests in milliseconds (default: 10000) */
+  timeoutMs?: number;
 }
 
 // =============================================================================
@@ -51,16 +60,16 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
   readonly name = 'WebhookNotificationAdapter';
   private readonly logger: ServiceLogger;
   private readonly webhookConfigService: WebhookConfigService;
-  private readonly webhookDeliveryService: WebhookDeliveryService;
   private readonly positionService: UniswapV3PositionService;
   private readonly onChainCloseOrderService: OnChainCloseOrderService;
+  private readonly timeoutMs: number;
 
   constructor(deps: WebhookNotificationAdapterDependencies) {
     this.logger = createServiceLogger('WebhookNotificationAdapter');
     this.webhookConfigService = deps.webhookConfigService;
-    this.webhookDeliveryService = deps.webhookDeliveryService;
     this.positionService = deps.positionService;
     this.onChainCloseOrderService = deps.onChainCloseOrderService;
+    this.timeoutMs = deps.timeoutMs ?? 10000;
   }
 
   async deliver(event: NotificationEvent): Promise<void> {
@@ -80,7 +89,7 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
       const payload = await this.buildEnrichedPayload(event);
 
       // 3. Send webhook
-      const result = await this.webhookDeliveryService.sendWebhook(config, payload);
+      const result = await this.sendWebhook(config, payload);
 
       // 4. Update delivery status
       await this.webhookConfigService.updateDeliveryStatus(
@@ -330,5 +339,83 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
     }
 
     return this.buildBasePayload(event, title, message, extra);
+  }
+
+  // =============================================================================
+  // HTTP DELIVERY
+  // =============================================================================
+
+  /**
+   * Send a webhook HTTP POST request to the user's configured endpoint.
+   * Includes secret header authentication and configurable timeout.
+   */
+  private async sendWebhook(
+    config: UserWebhookConfig,
+    payload: WebhookDeliveryPayload
+  ): Promise<WebhookDeliveryResult> {
+    const startTime = Date.now();
+
+    if (!config.webhookUrl) {
+      return {
+        success: false,
+        statusCode: null,
+        error: 'No webhook URL configured',
+        durationMs: Date.now() - startTime,
+      };
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Midcurve-Webhook/1.0',
+      };
+
+      if (config.webhookSecret) {
+        headers['X-Webhook-Secret'] = config.webhookSecret;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      try {
+        const response = await fetch(config.webhookUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        const success = response.ok;
+        return {
+          success,
+          statusCode: response.status,
+          error: success ? null : `HTTP ${response.status}: ${response.statusText}`,
+          durationMs: Date.now() - startTime,
+        };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      let errorMessage: string;
+
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          errorMessage = `Request timeout (${this.timeoutMs}ms)`;
+        } else {
+          errorMessage = error.message;
+        }
+      } else {
+        errorMessage = 'Unknown error';
+      }
+
+      return {
+        success: false,
+        statusCode: null,
+        error: errorMessage,
+        durationMs: Date.now() - startTime,
+      };
+    }
   }
 }

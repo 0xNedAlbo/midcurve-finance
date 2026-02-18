@@ -26,13 +26,6 @@ export {
   type WebhookConfigServiceDependencies,
 } from './webhook-config-service.js';
 
-// Webhook delivery service
-export {
-  WebhookDeliveryService,
-  type WebhookDeliveryServiceDependencies,
-  type WebhookDeliveryResult,
-} from './webhook-delivery-service.js';
-
 // Position range tracker service
 export {
   PositionRangeTrackerService,
@@ -47,6 +40,7 @@ export {
   type DbNotificationAdapterDependencies,
   WebhookNotificationAdapter,
   type WebhookNotificationAdapterDependencies,
+  type WebhookDeliveryResult,
 } from './adapters/index.js';
 
 // Event types

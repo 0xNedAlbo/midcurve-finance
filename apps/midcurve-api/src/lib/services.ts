@@ -27,7 +27,6 @@ import {
   AutomationLogService,
   NotificationService,
   WebhookConfigService,
-  WebhookDeliveryService,
   FavoritePoolService,
   UniswapV3SubgraphClient,
   EvmTransactionStatusService,
@@ -57,7 +56,6 @@ let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _notificationService: NotificationService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
-let _webhookDeliveryService: WebhookDeliveryService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
 
@@ -265,16 +263,6 @@ export function getWebhookConfigService(): WebhookConfigService {
     _webhookConfigService = new WebhookConfigService();
   }
   return _webhookConfigService;
-}
-
-/**
- * Get singleton instance of WebhookDeliveryService
- */
-export function getWebhookDeliveryService(): WebhookDeliveryService {
-  if (!_webhookDeliveryService) {
-    _webhookDeliveryService = new WebhookDeliveryService();
-  }
-  return _webhookDeliveryService;
 }
 
 /**

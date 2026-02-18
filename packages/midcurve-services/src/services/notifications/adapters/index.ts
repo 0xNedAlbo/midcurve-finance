@@ -14,4 +14,5 @@ export {
 export {
   WebhookNotificationAdapter,
   type WebhookNotificationAdapterDependencies,
+  type WebhookDeliveryResult,
 } from './webhook-notification-adapter.js';
