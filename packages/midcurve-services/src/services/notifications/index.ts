@@ -19,13 +19,6 @@ export {
   type WebhookConfigServiceDependencies,
 } from './webhook-config-service.js';
 
-// Position range tracker service
-export {
-  PositionRangeTrackerService,
-  type PositionRangeTrackerServiceDependencies,
-  type RangeCheckResult,
-} from './position-range-tracker-service.js';
-
 // Adapters
 export type { NotificationAdapter } from './adapters/index.js';
 export {

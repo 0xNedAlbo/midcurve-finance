@@ -12,7 +12,6 @@ import {
   UniswapV3PoolService,
   AutomationLogService,
   UniswapV3PositionService,
-  PositionRangeTrackerService,
   WebhookConfigService,
   UserNotificationService,
   UiNotificationAdapter,
@@ -27,7 +26,6 @@ let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
-let _positionRangeTrackerService: PositionRangeTrackerService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
 let _hedgeVaultService: HedgeVaultService | null = null;
@@ -90,16 +88,6 @@ export function getPositionService(): UniswapV3PositionService {
     _positionService = new UniswapV3PositionService();
   }
   return _positionService;
-}
-
-/**
- * Get singleton instance of PositionRangeTrackerService
- */
-export function getPositionRangeTrackerService(): PositionRangeTrackerService {
-  if (!_positionRangeTrackerService) {
-    _positionRangeTrackerService = new PositionRangeTrackerService();
-  }
-  return _positionRangeTrackerService;
 }
 
 /**

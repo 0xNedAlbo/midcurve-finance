@@ -5,10 +5,5 @@
  */
 
 export type {
-  // Webhook config inputs
   UpdateWebhookConfigInput,
-  // Range status inputs
-  UpdateRangeStatusInput,
-  PositionRangeTrackingInfo,
-  RangeStatusChangeResult,
 } from './notification-input.js';

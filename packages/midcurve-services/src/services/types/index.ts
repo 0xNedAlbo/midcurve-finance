@@ -126,10 +126,5 @@ export type {
 
 // Notification input types
 export type {
-  CreateNotificationInput,
-  ListNotificationsOptions,
   UpdateWebhookConfigInput,
-  UpdateRangeStatusInput,
-  PositionRangeTrackingInfo,
-  RangeStatusChangeResult,
 } from './notifications/index.js';

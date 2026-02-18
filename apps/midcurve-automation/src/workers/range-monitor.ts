@@ -7,6 +7,10 @@
  * Uses PoolPriceSubscriber to receive real-time Swap events from the pool-prices
  * exchange instead of RPC polling.
  *
+ * Range tracking is handled inline via direct Prisma calls to the
+ * PositionRangeStatus table — no service wrapper needed for this
+ * single-consumer use case.
+ *
  * Key design:
  * - 1 PoolPriceSubscriber per pool (not per position)
  * - Multiple positions in the same pool share one subscriber
@@ -14,7 +18,7 @@
  */
 
 import { prisma } from '@midcurve/database';
-import { getPositionRangeTrackerService, getUniswapV3PoolService, getUserNotificationService } from '../lib/services';
+import { getUniswapV3PoolService, getUserNotificationService } from '../lib/services';
 import { isSupportedChain } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import {
@@ -63,6 +67,32 @@ export interface RangeMonitorStatus {
   lastSyncAt: string | null;
 }
 
+/** Position info needed for range checking */
+interface PositionTrackingInfo {
+  positionId: string;
+  userId: string;
+  poolId: string;
+  tickLower: number;
+  tickUpper: number;
+  chainId: number;
+  poolAddress: string;
+  currentRangeStatus: {
+    isInRange: boolean;
+    lastTick: number;
+  } | null;
+}
+
+/** A detected range status change with full position context */
+interface RangeChange {
+  positionId: string;
+  userId: string;
+  nowInRange: boolean;
+  currentTick: number;
+  sqrtPriceX96: string;
+  tickLower: number;
+  tickUpper: number;
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -77,6 +107,13 @@ function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number; bl
     tick: Number(swapLog.args.tick),
     blockNumber: BigInt(swapLog.blockNumber),
   };
+}
+
+/**
+ * Check if a tick is within a position's range: [tickLower, tickUpper)
+ */
+function isTickInRange(currentTick: number, tickLower: number, tickUpper: number): boolean {
+  return currentTick >= tickLower && currentTick < tickUpper;
 }
 
 // =============================================================================
@@ -169,7 +206,136 @@ export class RangeMonitor {
   }
 
   // ===========================================================================
-  // Private Methods
+  // Range Tracking (direct Prisma operations)
+  // ===========================================================================
+
+  /**
+   * Get all unique pool IDs that have active positions
+   */
+  private async getActivePoolIds(): Promise<string[]> {
+    const pools = await prisma.position.findMany({
+      where: { isActive: true },
+      select: { poolId: true },
+      distinct: ['poolId'],
+    });
+    return pools.map((p) => p.poolId);
+  }
+
+  /**
+   * Get all active positions for a pool with their range status
+   */
+  private async getPositionsForPool(poolId: string): Promise<PositionTrackingInfo[]> {
+    const positions = await prisma.position.findMany({
+      where: { poolId, isActive: true },
+      include: { rangeStatus: true, pool: true },
+    });
+
+    return positions.map((position) => {
+      const config = position.config as {
+        chainId: number;
+        nftId: number;
+        poolAddress: string;
+        tickLower: number;
+        tickUpper: number;
+      };
+      const poolConfig = position.pool.config as {
+        chainId: number;
+        poolAddress: string;
+      };
+
+      return {
+        positionId: position.id,
+        userId: position.userId,
+        poolId: position.poolId,
+        tickLower: config.tickLower,
+        tickUpper: config.tickUpper,
+        chainId: poolConfig.chainId,
+        poolAddress: poolConfig.poolAddress,
+        currentRangeStatus: position.rangeStatus
+          ? {
+              isInRange: position.rangeStatus.isInRange,
+              lastTick: position.rangeStatus.lastTick,
+            }
+          : null,
+      };
+    });
+  }
+
+  /**
+   * Check all positions in a pool against the current tick and detect range changes.
+   * Updates PositionRangeStatus records and returns positions whose status changed.
+   */
+  private async batchCheckAndUpdate(
+    poolId: string,
+    currentTick: number,
+    sqrtPriceX96: string
+  ): Promise<RangeChange[]> {
+    const positions = await this.getPositionsForPool(poolId);
+    const changes: RangeChange[] = [];
+
+    for (const position of positions) {
+      const nowInRange = isTickInRange(currentTick, position.tickLower, position.tickUpper);
+
+      // Get existing range status
+      const existing = await prisma.positionRangeStatus.findUnique({
+        where: { positionId: position.positionId },
+      });
+
+      const statusChanged = existing !== null && existing.isInRange !== nowInRange;
+
+      // Upsert range status
+      await prisma.positionRangeStatus.upsert({
+        where: { positionId: position.positionId },
+        update: {
+          isInRange: nowInRange,
+          lastSqrtPriceX96: sqrtPriceX96,
+          lastTick: currentTick,
+          lastCheckedAt: new Date(),
+        },
+        create: {
+          positionId: position.positionId,
+          isInRange: nowInRange,
+          lastSqrtPriceX96: sqrtPriceX96,
+          lastTick: currentTick,
+          lastCheckedAt: new Date(),
+        },
+      });
+
+      if (statusChanged) {
+        log.info(
+          {
+            positionId: position.positionId,
+            previouslyInRange: existing!.isInRange,
+            nowInRange,
+            tick: currentTick,
+          },
+          'Position range status changed'
+        );
+
+        changes.push({
+          positionId: position.positionId,
+          userId: position.userId,
+          nowInRange,
+          currentTick,
+          sqrtPriceX96,
+          tickLower: position.tickLower,
+          tickUpper: position.tickUpper,
+        });
+      }
+    }
+
+    log.debug({
+      poolId,
+      positionsChecked: positions.length,
+      changesDetected: changes.length,
+      msg: 'Batch range check completed',
+    });
+
+    return changes;
+  }
+
+  // ===========================================================================
+  // Subscription Management
   // ===========================================================================
 
   /**
@@ -179,11 +345,10 @@ export class RangeMonitor {
     autoLog.methodEntry(log, 'syncSubscriptions');
 
     try {
-      const rangeTrackerService = getPositionRangeTrackerService();
       const poolService = getUniswapV3PoolService();
 
       // Get all unique pools with active positions
-      const activePoolIds = await rangeTrackerService.getActivePoolIds();
+      const activePoolIds = await this.getActivePoolIds();
       const activePoolIdSet = new Set(activePoolIds);
 
       // Remove subscribers for pools that no longer have active positions
@@ -201,7 +366,7 @@ export class RangeMonitor {
       let totalPositions = 0;
       for (const poolId of activePoolIds) {
         // Count positions for this pool
-        const positions = await rangeTrackerService.getPositionsForPool(poolId);
+        const positions = await this.getPositionsForPool(poolId);
         totalPositions += positions.length;
 
         if (this.poolSubscribers.has(poolId)) {
@@ -316,6 +481,10 @@ export class RangeMonitor {
     }
   }
 
+  // ===========================================================================
+  // Event Handling
+  // ===========================================================================
+
   /**
    * Handle Swap event for a pool
    */
@@ -325,27 +494,16 @@ export class RangeMonitor {
 
     try {
       const { sqrtPriceX96, tick } = extractSwapData(message.raw);
-      const rangeTrackerService = getPositionRangeTrackerService();
 
       // Check all positions for this pool and detect range changes
-      const changes = await rangeTrackerService.batchCheckAndUpdate(
-        poolId,
-        tick,
-        sqrtPriceX96.toString()
-      );
+      const changes = await this.batchCheckAndUpdate(poolId, tick, sqrtPriceX96.toString());
 
       if (changes.length === 0) {
         return;
       }
 
-      // Get positions info for publishing messages
-      const positions = await rangeTrackerService.getPositionsForPool(poolId);
-
       // Publish notification events for any status changes
       for (const change of changes) {
-        const position = positions.find((p) => p.positionId === change.positionId);
-        if (!position) continue;
-
         const userNotificationService = getUserNotificationService();
         const notifyMethod = change.nowInRange
           ? userNotificationService.notifyPositionInRange
@@ -359,8 +517,8 @@ export class RangeMonitor {
           chainId: message.chainId,
           currentTick: change.currentTick,
           currentSqrtPriceX96: change.sqrtPriceX96,
-          tickLower: position.tickLower,
-          tickUpper: position.tickUpper,
+          tickLower: change.tickLower,
+          tickUpper: change.tickUpper,
         });
 
         this.rangeChangesDetected++;
