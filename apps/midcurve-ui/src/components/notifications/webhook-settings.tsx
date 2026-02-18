@@ -200,7 +200,6 @@ const EXAMPLE_CLOSE_ORDER_DATA = {
       srcAmount: '5000000000000000000',
       destAmount: '15030440000',
       minDestAmount: '14880000000',
-      augustusAddress: '0xDEF171Fe48CF0115B1d80b88dc8eAB59176FEe57',
       swapSlippageBps: 100,
     },
   },

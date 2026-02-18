@@ -2,8 +2,6 @@
  * Router Swap Quote Hook
  *
  * Fetches swap quotes from MidcurveSwapRouter with automatic refresh.
- * Replaces useSwapQuote for the SwapDialog context.
- * No expiration tracking — router quotes don't expire like Paraswap quotes.
  */
 
 import { useCallback, useMemo } from 'react';

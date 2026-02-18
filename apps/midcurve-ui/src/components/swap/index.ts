@@ -1,11 +1,8 @@
 /**
  * Swap Components
  *
- * ParaSwap-based token swapping components.
+ * Token swapping components using MidcurveSwapRouter.
  */
-
-export { SwapWidget } from './swap-widget';
-export type { SwapWidgetProps } from './swap-widget';
 
 export { SwapDialog } from './swap-dialog';
 export type { SwapDialogProps } from './swap-dialog';

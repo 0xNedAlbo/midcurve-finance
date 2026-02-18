@@ -1,7 +1,7 @@
 /**
  * Swap Approval Hook
  *
- * Manages ERC20 token approvals for ParaSwap's TokenTransferProxy.
+ * Manages ERC20 token approvals for the swap spender contract.
  * The spender address is dynamic and comes from the quote response.
  */
 
@@ -43,14 +43,14 @@ export interface UseSwapApprovalResult {
 }
 
 /**
- * Hook to manage ERC20 token approvals for ParaSwap swaps
+ * Hook to manage ERC20 token approvals for swap operations
  *
  * Unlike the position wizard approval hook, this one accepts a dynamic
- * spender address from the quote (ParaSwap's TokenTransferProxy).
+ * spender address from the quote response.
  *
  * @param tokenAddress - The ERC20 token address to approve
  * @param ownerAddress - The wallet address that owns the tokens
- * @param spenderAddress - The ParaSwap TokenTransferProxy address (from quote)
+ * @param spenderAddress - The swap contract spender address (from quote)
  * @param requiredAmount - The amount of tokens needed (in smallest unit)
  * @param chainId - The chain ID for the operation
  * @param enabled - Whether to enable the hook

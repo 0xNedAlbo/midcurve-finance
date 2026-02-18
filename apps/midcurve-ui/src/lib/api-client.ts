@@ -167,10 +167,6 @@ export async function apiClientFn<TResponse>(
 // =============================================================================
 
 import type {
-  // Swap (ParaSwap)
-  SwapQuoteData,
-  BuildSwapTransactionRequest,
-  SwapTransactionData,
   // Swap (MidcurveSwapRouter)
   RouterSwapQuoteData,
   RouterSupportedChainsData,
@@ -420,47 +416,7 @@ export const notificationsApi = {
 };
 
 // =============================================================================
-// SWAP API
-// =============================================================================
-
-/**
- * Quote request parameters
- */
-export interface SwapQuoteParams {
-  chainId: number;
-  srcToken: string;
-  srcDecimals: number;
-  destToken: string;
-  destDecimals: number;
-  amount: string;
-  userAddress: string;
-  /** SELL (default) = fixed input, BUY = fixed output */
-  side?: 'SELL' | 'BUY';
-  slippageBps?: number;
-}
-
-/**
- * Swap API client for ParaSwap-based token swapping (used by SwapWidget)
- */
-export const swapApi = {
-  /**
-   * Get a swap quote
-   */
-  getQuote(params: SwapQuoteParams) {
-    const qs = buildQueryString(params);
-    return apiClient.get<SwapQuoteData>(`/api/v1/swap/quote${qs}`);
-  },
-
-  /**
-   * Build a swap transaction from a quote
-   */
-  buildTransaction(params: BuildSwapTransactionRequest) {
-    return apiClient.post<SwapTransactionData>('/api/v1/swap/transaction', params);
-  },
-};
-
-// =============================================================================
-// SWAP ROUTER API (MidcurveSwapRouter — used by SwapDialog)
+// SWAP API (MidcurveSwapRouter)
 // =============================================================================
 
 /**

@@ -830,8 +830,7 @@ export async function simulateExecuteOrder(
  * Calculate minimum output amount for a direct pool swap (fallback mode)
  *
  * Uses the current pool price (sqrtPriceX96) and slippage tolerance to determine
- * the minimum acceptable output. This replaces the Paraswap quote when falling
- * back to direct pool swaps.
+ * the minimum acceptable output for direct pool swaps.
  *
  * @param srcAmount - Amount of source token to swap
  * @param sqrtPriceX96 - Current pool price as sqrtPriceX96

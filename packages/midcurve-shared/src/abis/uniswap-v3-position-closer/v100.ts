@@ -16,7 +16,7 @@
 export const UniswapV3PositionCloserV100Abi = [
   {
     type: 'function',
-    name: 'augustusRegistry',
+    name: 'swapRouter',
     inputs: [],
     outputs: [{ name: '', type: 'address', internalType: 'address' }],
     stateMutability: 'view',
@@ -54,10 +54,19 @@ export const UniswapV3PositionCloserV100Abi = [
         type: 'tuple',
         internalType: 'struct IUniswapV3PositionCloserV1.SwapParams',
         components: [
-          { name: 'augustus', type: 'address', internalType: 'address' },
-          { name: 'swapCalldata', type: 'bytes', internalType: 'bytes' },
-          { name: 'deadline', type: 'uint256', internalType: 'uint256' },
           { name: 'minAmountOut', type: 'uint256', internalType: 'uint256' },
+          { name: 'deadline', type: 'uint256', internalType: 'uint256' },
+          {
+            name: 'hops',
+            type: 'tuple[]',
+            internalType: 'struct IMidcurveSwapRouter.Hop[]',
+            components: [
+              { name: 'venueId', type: 'bytes32', internalType: 'bytes32' },
+              { name: 'tokenIn', type: 'address', internalType: 'address' },
+              { name: 'tokenOut', type: 'address', internalType: 'address' },
+              { name: 'venueData', type: 'bytes', internalType: 'bytes' },
+            ],
+          },
         ],
       },
     ],

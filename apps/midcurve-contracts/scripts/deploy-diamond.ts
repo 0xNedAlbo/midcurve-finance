@@ -5,22 +5,15 @@
  * export commands for use with the db:upsert-contract script.
  *
  * Usage:
- *   AUGUSTUS_REGISTRY=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond
+ *   SWAP_ROUTER=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond
  *
  * Add --broadcast to actually deploy (default is dry-run):
- *   AUGUSTUS_REGISTRY=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond -- --broadcast --verify
+ *   SWAP_ROUTER=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond -- --broadcast --verify
  *
  * Environment variables:
- *   AUGUSTUS_REGISTRY  - Paraswap AugustusRegistry address (required)
- *   OWNER             - Diamond owner address (required)
- *   CHAIN             - RPC endpoint name from foundry.toml: arbitrum, base, mainnet, optimism, polygon (required)
- *
- * Known AugustusRegistry addresses:
- *   Ethereum:  0xa68bEA62Dc4034A689AA0F58A76681433caCa663
- *   Arbitrum:  0xdC6E2b14260F972ad4e5a31c68294Fba7E720701
- *   Optimism:  0x6e7bE86000dF697facF4396efD2aE2C322165dC3
- *   Polygon:   0xca35a4866747Ff7A604EF7a2A7F246bb870f3ca1
- *   Base:      0x7E31B336F9E8bA52ba3c4ac861b033Ba90900bb3
+ *   SWAP_ROUTER  - MidcurveSwapRouter address (required)
+ *   OWNER        - Diamond owner address (required)
+ *   CHAIN        - RPC endpoint name from foundry.toml: arbitrum, base, mainnet, optimism, polygon (required)
  */
 
 import { spawn } from 'child_process';
@@ -106,18 +99,18 @@ function runForge(args: string[]): Promise<string> {
 async function main(): Promise<void> {
   loadEnv();
 
-  const augustusRegistry = process.env.AUGUSTUS_REGISTRY;
+  const swapRouter = process.env.SWAP_ROUTER;
   const owner = process.env.OWNER;
   const chain = process.env.CHAIN;
 
-  if (!augustusRegistry || !owner || !chain) {
+  if (!swapRouter || !owner || !chain) {
     console.error('Missing required environment variables.');
     console.error('');
     console.error('Usage:');
-    console.error('  AUGUSTUS_REGISTRY=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond');
+    console.error('  SWAP_ROUTER=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond');
     console.error('');
     console.error('Add extra forge flags after --:');
-    console.error('  AUGUSTUS_REGISTRY=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond -- --broadcast --verify');
+    console.error('  SWAP_ROUTER=0x... OWNER=0x... CHAIN=arbitrum pnpm deploy:diamond -- --broadcast --verify');
     process.exit(1);
   }
 
@@ -131,10 +124,10 @@ async function main(): Promise<void> {
   const extraArgs = process.argv.slice(2).filter((arg) => arg !== '--');
 
   console.log('=== Deploy PositionCloser Diamond ===');
-  console.log('  Chain:            ', chain, `(${chainId})`);
-  console.log('  Augustus Registry:', augustusRegistry);
-  console.log('  Owner:            ', owner);
-  console.log('  Extra flags:      ', extraArgs.length > 0 ? extraArgs.join(' ') : '(dry-run)');
+  console.log('  Chain:       ', chain, `(${chainId})`);
+  console.log('  Swap Router: ', swapRouter);
+  console.log('  Owner:       ', owner);
+  console.log('  Extra flags: ', extraArgs.length > 0 ? extraArgs.join(' ') : '(dry-run)');
   console.log('');
 
   const forgeArgs = [
@@ -142,7 +135,7 @@ async function main(): Promise<void> {
     'script/DeployPositionCloserDiamond.s.sol',
     '--sig',
     'run(address,address)',
-    augustusRegistry,
+    swapRouter,
     owner,
     '--rpc-url',
     chain,

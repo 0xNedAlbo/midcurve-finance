@@ -73,25 +73,4 @@ export {
   type LifecycleOperationResponse,
 } from './evm/index.js';
 
-export {
-  ParaswapClient,
-  getParaswapClient,
-  ParaswapApiError,
-  ParaswapChainNotSupportedError,
-  type ParaswapQuoteRequest,
-  type ParaswapQuoteResult,
-  type ParaswapBuildTxRequest,
-  type ParaswapTransactionData,
-  type ParaswapTransactionResult,
-  type ParaswapSwapParams,
-  // Mock client for local chain testing
-  MockParaswapClient,
-  getMockParaswapClient,
-  resetMockParaswapClient,
-  type MockParaswapQuoteRequest,
-  // Swap client factory
-  getSwapClient,
-  type SwapClient,
-} from './paraswap/index.js';
-
 export { type PrismaTransactionClient } from './prisma/index.js';

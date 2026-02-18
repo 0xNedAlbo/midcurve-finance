@@ -312,7 +312,7 @@ export function CloseOrderReviewStep({
           <li>3. When price reaches your trigger, we execute the close</li>
           {formData.swapEnabled ? (
             <>
-              <li>4. Withdrawn assets are swapped to {isSwapToQuote ? quoteToken.symbol : baseToken.symbol} via Paraswap</li>
+              <li>4. Withdrawn assets are swapped to {isSwapToQuote ? quoteToken.symbol : baseToken.symbol}</li>
               <li>5. Final proceeds sent directly to your wallet</li>
             </>
           ) : (

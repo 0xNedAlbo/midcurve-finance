@@ -2,19 +2,19 @@
  * Swap Config Section
  *
  * Optional section in close order configuration for post-close swap.
- * Allows user to swap all withdrawn assets into a single token via Paraswap.
+ * Allows user to swap all withdrawn assets into a single token after closing.
  */
 
 import { Info, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import type { CloseOrderFormData, SwapDirection } from '../CloseOrderModal';
 
-// Chains supported for Paraswap swap integration
-const PARASWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
+// Chains supported for post-close swap
+const SWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
 
 // In development, also support local test chain
-const PARASWAP_SUPPORTED_CHAINS = import.meta.env.DEV
-  ? [...PARASWAP_PRODUCTION_CHAINS, 31337] // Include Hardhat local chain in dev
-  : PARASWAP_PRODUCTION_CHAINS;
+const SWAP_SUPPORTED_CHAINS = import.meta.env.DEV
+  ? [...SWAP_PRODUCTION_CHAINS, 31337] // Include Hardhat local chain in dev
+  : SWAP_PRODUCTION_CHAINS;
 
 const SWAP_SLIPPAGE_OPTIONS = [
   { value: 50, label: '0.5%' },
@@ -47,8 +47,7 @@ export function SwapConfigSection({
   quoteToken,
   chainId,
 }: SwapConfigSectionProps) {
-  // Check if chain supports Paraswap
-  const isChainSupported = (PARASWAP_SUPPORTED_CHAINS as readonly number[]).includes(chainId);
+  const isChainSupported = (SWAP_SUPPORTED_CHAINS as readonly number[]).includes(chainId);
 
   // If chain doesn't support swap, don't show the section
   if (!isChainSupported) {
@@ -178,7 +177,7 @@ export function SwapConfigSection({
           <div className="flex items-start gap-2 p-3 bg-slate-700/30 border border-slate-600/50 rounded-lg">
             <Info className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
             <p className="text-xs text-slate-400">
-              The swap executes at trigger time using live market rates via Paraswap. Current prices
+              The swap executes at trigger time using live market rates. Current prices
               shown are estimates only.
             </p>
           </div>
