@@ -1,12 +1,12 @@
 /**
- * Pool Price Trigger Consumer
+ * Close Order Monitor
  *
  * Consumes raw Swap events from the pool-prices exchange via PoolPriceSubscriber
- * and checks for trigger conditions on close orders and hedge vaults.
+ * and checks for trigger conditions on close orders.
  *
  * Key design:
- * - 1 PoolPriceSubscriber per active order or vault
- * - Subscriber lifecycle tied to order/vault lifecycle
+ * - 1 PoolPriceSubscriber per active order
+ * - Subscriber lifecycle tied to order lifecycle
  * - Multiple subscribers for same pool is OK (RabbitMQ handles fan-out)
  * - No deduplication needed (pool-prices backend handles that)
  *
@@ -17,18 +17,13 @@
 
 import { prisma } from '@midcurve/database';
 import type { OnChainCloseOrder } from '@midcurve/database';
-import {
-  getOnChainCloseOrderService,
-  getHedgeVaultService,
-} from '../lib/services';
+import { getOnChainCloseOrderService } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
 import {
   serializeMessage,
   type OrderTriggerMessage,
-  type HedgeVaultTriggerMessage,
-  type HedgeVaultTriggerType,
 } from '../mq/messages';
 import {
   createPoolPriceSubscriber,
@@ -36,7 +31,7 @@ import {
   type RawSwapEventWrapper,
 } from '@midcurve/services';
 
-const log = automationLogger.child({ component: 'PoolPriceTriggerConsumer' });
+const log = automationLogger.child({ component: 'CloseOrderMonitor' });
 
 // =============================================================================
 // Constants
@@ -66,10 +61,9 @@ interface RawSwapLog {
   blockNumber: bigint;
 }
 
-export interface PoolPriceTriggerConsumerStatus {
+export interface CloseOrderMonitorStatus {
   status: 'idle' | 'running' | 'stopping' | 'stopped';
   orderSubscribers: number;
-  vaultSubscribers: number;
   eventsProcessed: number;
   triggersPublished: number;
   lastProcessedAt: string | null;
@@ -96,10 +90,9 @@ function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number; bl
 // Worker
 // =============================================================================
 
-export class PoolPriceTriggerConsumer {
+export class CloseOrderMonitor {
   private status: 'idle' | 'running' | 'stopping' | 'stopped' = 'idle';
   private orderSubscribers = new Map<string, PoolPriceSubscriber>();
-  private vaultSubscribers = new Map<string, PoolPriceSubscriber>();
   private eventsProcessed = 0;
   private triggersPublished = 0;
   private lastProcessedAt: Date | null = null;
@@ -107,15 +100,15 @@ export class PoolPriceTriggerConsumer {
   private syncTimer: NodeJS.Timeout | null = null;
 
   /**
-   * Start the pool price trigger consumer
+   * Start the close order monitor
    */
   async start(): Promise<void> {
     if (this.status === 'running') {
-      log.warn({ msg: 'PoolPriceTriggerConsumer already running' });
+      log.warn({ msg: 'CloseOrderMonitor already running' });
       return;
     }
 
-    autoLog.workerLifecycle(log, 'PoolPriceTriggerConsumer', 'starting');
+    autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'starting');
     this.status = 'running';
 
     try {
@@ -125,9 +118,8 @@ export class PoolPriceTriggerConsumer {
       // Schedule periodic subscription sync
       this.scheduleSyncTimer();
 
-      autoLog.workerLifecycle(log, 'PoolPriceTriggerConsumer', 'started', {
+      autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'started', {
         orderSubscribers: this.orderSubscribers.size,
-        vaultSubscribers: this.vaultSubscribers.size,
       });
     } catch (err) {
       this.status = 'stopped';
@@ -137,14 +129,14 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Stop the pool price trigger consumer
+   * Stop the close order monitor
    */
   async stop(): Promise<void> {
     if (this.status !== 'running') {
       return;
     }
 
-    autoLog.workerLifecycle(log, 'PoolPriceTriggerConsumer', 'stopping');
+    autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'stopping');
     this.status = 'stopping';
 
     // Stop sync timer
@@ -160,30 +152,21 @@ export class PoolPriceTriggerConsumer {
       })
     );
 
-    // Shutdown all vault subscribers
-    const vaultShutdowns = Array.from(this.vaultSubscribers.values()).map((sub) =>
-      sub.shutdown().catch((err) => {
-        log.warn({ error: err, msg: 'Error shutting down vault subscriber' });
-      })
-    );
-
-    await Promise.all([...orderShutdowns, ...vaultShutdowns]);
+    await Promise.all(orderShutdowns);
 
     this.orderSubscribers.clear();
-    this.vaultSubscribers.clear();
 
     this.status = 'stopped';
-    autoLog.workerLifecycle(log, 'PoolPriceTriggerConsumer', 'stopped');
+    autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'stopped');
   }
 
   /**
    * Get current status
    */
-  getStatus(): PoolPriceTriggerConsumerStatus {
+  getStatus(): CloseOrderMonitorStatus {
     return {
       status: this.status,
       orderSubscribers: this.orderSubscribers.size,
-      vaultSubscribers: this.vaultSubscribers.size,
       eventsProcessed: this.eventsProcessed,
       triggersPublished: this.triggersPublished,
       lastProcessedAt: this.lastProcessedAt?.toISOString() || null,
@@ -196,19 +179,18 @@ export class PoolPriceTriggerConsumer {
   // ===========================================================================
 
   /**
-   * Sync subscriptions with active orders and vaults
+   * Sync subscriptions with active orders
    */
   private async syncSubscriptions(): Promise<void> {
     autoLog.methodEntry(log, 'syncSubscriptions');
 
     try {
-      await Promise.all([this.syncOrderSubscriptions(), this.syncVaultSubscriptions()]);
+      await this.syncOrderSubscriptions();
 
       this.lastSyncAt = new Date();
 
       log.info({
         orderSubscribers: this.orderSubscribers.size,
-        vaultSubscribers: this.vaultSubscribers.size,
         msg: 'Subscription sync complete',
       });
 
@@ -267,35 +249,6 @@ export class PoolPriceTriggerConsumer {
             msg: 'Cannot create subscriber: missing pool data',
           });
         }
-      }
-    }
-  }
-
-  /**
-   * Sync vault subscriptions
-   */
-  private async syncVaultSubscriptions(): Promise<void> {
-    const hedgeVaultService = getHedgeVaultService();
-    const activeVaults = await hedgeVaultService.findActiveVaults();
-
-    // Get set of active vault IDs
-    const activeVaultIds = new Set(activeVaults.map((v) => v.id));
-
-    // Remove subscribers for vaults that are no longer active
-    for (const [vaultId, subscriber] of this.vaultSubscribers.entries()) {
-      if (!activeVaultIds.has(vaultId)) {
-        log.debug({ vaultId }, 'Removing subscriber for inactive vault');
-        await subscriber.shutdown().catch((err) => {
-          log.warn({ error: err, vaultId, msg: 'Error shutting down vault subscriber' });
-        });
-        this.vaultSubscribers.delete(vaultId);
-      }
-    }
-
-    // Add subscribers for new active vaults
-    for (const vault of activeVaults) {
-      if (!this.vaultSubscribers.has(vault.id)) {
-        await this.createVaultSubscriber(vault);
       }
     }
   }
@@ -372,131 +325,6 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Create a subscriber for a vault
-   */
-  private async createVaultSubscriber(vault: {
-    id: string;
-    vaultAddress: string;
-    poolAddress: string;
-    chainId: number;
-    state: string;
-    token0IsQuote: boolean;
-    silSqrtPriceX96: string;
-    tipSqrtPriceX96: string;
-    lastCloseBlock: string | null;
-    reopenCooldownBlocks: string;
-  }): Promise<void> {
-    try {
-      // First, find the pool record by chainId and poolAddress
-      const poolAddress = vault.poolAddress.toLowerCase();
-      const pool = await prisma.pool.findFirst({
-        where: {
-          config: {
-            path: ['chainId'],
-            equals: vault.chainId,
-          },
-        },
-      });
-
-      // If we found a potential pool, verify it has the right address
-      // Since Prisma doesn't support filtering JSON string fields easily, we need to check manually
-      let poolId: string | null = null;
-      if (pool) {
-        const poolConfig = pool.config as { address?: string };
-        if (poolConfig.address?.toLowerCase() === poolAddress) {
-          poolId = pool.id;
-        }
-      }
-
-      // If no matching pool found, try a different approach - search all pools for this chain
-      if (!poolId) {
-        const pools = await prisma.pool.findMany({
-          where: {
-            config: {
-              path: ['chainId'],
-              equals: vault.chainId,
-            },
-          },
-        });
-
-        for (const p of pools) {
-          const pConfig = p.config as { address?: string };
-          if (pConfig.address?.toLowerCase() === poolAddress) {
-            poolId = p.id;
-            break;
-          }
-        }
-      }
-
-      if (!poolId) {
-        log.warn({
-          vaultId: vault.id,
-          chainId: vault.chainId,
-          poolAddress: vault.poolAddress,
-          msg: 'Pool not found for vault, cannot create subscriber',
-        });
-        return;
-      }
-
-      // Create or find the subscriber record in the database
-      const subscriptionTag = `vault-trigger-${vault.id}`;
-
-      // Try to find existing record
-      let subscriberRecord = await prisma.poolPriceSubscribers.findFirst({
-        where: {
-          poolId,
-          subscriptionTag,
-        },
-      });
-
-      // Create if not found
-      if (!subscriberRecord) {
-        subscriberRecord = await prisma.poolPriceSubscribers.create({
-          data: {
-            poolId,
-            subscriptionTag,
-            isActive: true,
-          },
-        });
-        log.debug({ vaultId: vault.id, subscriptionTag }, 'Created subscriber record');
-      } else {
-        // Update existing to mark as active
-        await prisma.poolPriceSubscribers.update({
-          where: { id: subscriberRecord.id },
-          data: { isActive: true },
-        });
-        log.debug({ vaultId: vault.id, subscriptionTag }, 'Reusing existing subscriber record');
-      }
-
-      const subscriber = createPoolPriceSubscriber({
-        subscriberId: subscriberRecord.id,
-        chainId: vault.chainId,
-        poolAddress: vault.poolAddress,
-        messageHandler: async (message) => {
-          await this.handleVaultSwapEvent(vault.id, message);
-        },
-        errorHandler: async (error) => {
-          log.error({ error: error.message, vaultId: vault.id }, 'Vault subscriber error');
-          // Remove from map so it can be recreated on next sync
-          this.vaultSubscribers.delete(vault.id);
-        },
-      });
-
-      await subscriber.start();
-      this.vaultSubscribers.set(vault.id, subscriber);
-      log.info({
-        vaultId: vault.id,
-        chainId: vault.chainId,
-        poolAddress: vault.poolAddress,
-        subscriberId: subscriberRecord.id,
-        msg: 'Created vault subscriber',
-      });
-    } catch (err) {
-      log.error({ error: err, vaultId: vault.id, msg: 'Failed to start vault subscriber' });
-    }
-  }
-
-  /**
    * Handle Swap event for an order — tick-based trigger detection
    */
   private async handleOrderSwapEvent(
@@ -544,69 +372,6 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Handle Swap event for a vault
-   */
-  private async handleVaultSwapEvent(
-    vaultId: string,
-    message: RawSwapEventWrapper
-  ): Promise<void> {
-    this.eventsProcessed++;
-    this.lastProcessedAt = new Date();
-
-    try {
-      // Get fresh vault data (may have been modified)
-      const hedgeVaultService = getHedgeVaultService();
-      const vault = await hedgeVaultService.findById(vaultId);
-
-      if (!vault) {
-        log.debug({ vaultId }, 'Vault not found, shutting down subscriber');
-        await this.shutdownVaultSubscriber(vaultId);
-        return;
-      }
-
-      if (vault.monitoringStatus !== 'active') {
-        log.debug({ vaultId, status: vault.monitoringStatus }, 'Vault no longer active');
-        await this.shutdownVaultSubscriber(vaultId);
-        return;
-      }
-
-      const { sqrtPriceX96, blockNumber } = extractSwapData(message.raw);
-
-      const triggerType = this.checkHedgeVaultTrigger(sqrtPriceX96, blockNumber, vault);
-
-      if (triggerType) {
-        autoLog.hedgeVaultTriggered(
-          log,
-          vault.id,
-          vault.vaultAddress,
-          vault.poolAddress,
-          triggerType,
-          sqrtPriceX96.toString()
-        );
-
-        await this.publishHedgeVaultTrigger({
-          vaultId: vault.id,
-          vaultAddress: vault.vaultAddress,
-          poolAddress: vault.poolAddress,
-          chainId: vault.chainId,
-          triggerType,
-          currentSqrtPriceX96: sqrtPriceX96.toString(),
-          silSqrtPriceX96: vault.silSqrtPriceX96,
-          tipSqrtPriceX96: vault.tipSqrtPriceX96,
-          token0IsQuote: vault.token0IsQuote,
-          currentBlock: blockNumber.toString(),
-          triggeredAt: new Date().toISOString(),
-        });
-
-        this.triggersPublished++;
-        // Note: Don't shutdown vault subscriber - it may need to trigger again (reopen)
-      }
-    } catch (err) {
-      autoLog.methodError(log, 'handleVaultSwapEvent', err, { vaultId });
-    }
-  }
-
-  /**
    * Shutdown an order subscriber
    */
   private async shutdownOrderSubscriber(orderId: string): Promise<void> {
@@ -616,19 +381,6 @@ export class PoolPriceTriggerConsumer {
         log.warn({ error: err, orderId, msg: 'Error shutting down order subscriber' });
       });
       this.orderSubscribers.delete(orderId);
-    }
-  }
-
-  /**
-   * Shutdown a vault subscriber
-   */
-  private async shutdownVaultSubscriber(vaultId: string): Promise<void> {
-    const subscriber = this.vaultSubscribers.get(vaultId);
-    if (subscriber) {
-      await subscriber.shutdown().catch((err) => {
-        log.warn({ error: err, vaultId, msg: 'Error shutting down vault subscriber' });
-      });
-      this.vaultSubscribers.delete(vaultId);
     }
   }
 
@@ -707,60 +459,6 @@ export class PoolPriceTriggerConsumer {
   }
 
   /**
-   * Check hedge vault trigger condition
-   */
-  private checkHedgeVaultTrigger(
-    currentSqrtPrice: bigint,
-    currentBlock: bigint,
-    vault: {
-      state: string;
-      token0IsQuote: boolean;
-      silSqrtPriceX96: string;
-      tipSqrtPriceX96: string;
-      lastCloseBlock: string | null;
-      reopenCooldownBlocks: string;
-    }
-  ): HedgeVaultTriggerType | null {
-    const silSqrtPriceX96 = BigInt(vault.silSqrtPriceX96);
-    const tipSqrtPriceX96 = BigInt(vault.tipSqrtPriceX96);
-
-    // Check SIL/TIP triggers when IN_POSITION
-    if (vault.state === 'IN_POSITION') {
-      if (vault.token0IsQuote) {
-        // sqrtPrice UP = actual price DOWN (price inversion)
-        if (currentSqrtPrice >= silSqrtPriceX96) return 'sil';
-        if (currentSqrtPrice <= tipSqrtPriceX96) return 'tip';
-      } else {
-        // sqrtPrice DOWN = actual price DOWN (no inversion)
-        if (currentSqrtPrice <= silSqrtPriceX96) return 'sil';
-        if (currentSqrtPrice >= tipSqrtPriceX96) return 'tip';
-      }
-    }
-
-    // Check reopen trigger when OUT_OF_POSITION
-    if (vault.state === 'OUT_OF_POSITION_QUOTE' || vault.state === 'OUT_OF_POSITION_BASE') {
-      const lastCloseBlock = vault.lastCloseBlock ? BigInt(vault.lastCloseBlock) : 0n;
-      const reopenCooldownBlocks = BigInt(vault.reopenCooldownBlocks);
-
-      // Check cooldown
-      const cooldownExpired = currentBlock >= lastCloseBlock + reopenCooldownBlocks;
-      if (!cooldownExpired) return null;
-
-      // Price must be between SIL and TIP
-      let priceInRange: boolean;
-      if (vault.token0IsQuote) {
-        priceInRange = currentSqrtPrice < silSqrtPriceX96 && currentSqrtPrice > tipSqrtPriceX96;
-      } else {
-        priceInRange = currentSqrtPrice > silSqrtPriceX96 && currentSqrtPrice < tipSqrtPriceX96;
-      }
-
-      if (priceInRange) return 'reopen';
-    }
-
-    return null;
-  }
-
-  /**
    * Publish order trigger message
    */
   private async publishOrderTrigger(message: OrderTriggerMessage): Promise<void> {
@@ -773,22 +471,6 @@ export class PoolPriceTriggerConsumer {
       orderId: message.orderId,
       routingKey: ROUTING_KEYS.ORDER_TRIGGERED,
       source: 'pool-price',
-    });
-  }
-
-  /**
-   * Publish hedge vault trigger message
-   */
-  private async publishHedgeVaultTrigger(message: HedgeVaultTriggerMessage): Promise<void> {
-    const mq = getRabbitMQConnection();
-    const content = serializeMessage(message);
-
-    await mq.publish(EXCHANGES.TRIGGERS, ROUTING_KEYS.HEDGE_VAULT_TRIGGERED, content);
-
-    autoLog.mqEvent(log, 'published', EXCHANGES.TRIGGERS, {
-      vaultId: message.vaultId,
-      triggerType: message.triggerType,
-      routingKey: ROUTING_KEYS.HEDGE_VAULT_TRIGGERED,
     });
   }
 

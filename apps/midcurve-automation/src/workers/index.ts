@@ -9,9 +9,9 @@ import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { OrderExecutor, type OrderExecutorStatus } from './order-executor';
 import {
-  PoolPriceTriggerConsumer,
-  type PoolPriceTriggerConsumerStatus,
-} from './pool-price-trigger-consumer';
+  CloseOrderMonitor,
+  type CloseOrderMonitorStatus,
+} from './close-order-monitor';
 import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
 import {
   OutboxPublisher,
@@ -37,7 +37,7 @@ export interface WorkerManagerStatus {
   status: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped';
   startedAt: string | null;
   workers: {
-    poolPriceTriggerConsumer: PoolPriceTriggerConsumerStatus;
+    closeOrderMonitor: CloseOrderMonitorStatus;
     orderExecutor: OrderExecutorStatus;
     outboxPublisher: OutboxPublisherStatus;
     positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
@@ -53,7 +53,7 @@ class WorkerManager {
   private status: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' = 'idle';
   private startedAt: Date | null = null;
 
-  private poolPriceTriggerConsumer: PoolPriceTriggerConsumer | null = null;
+  private closeOrderMonitor: CloseOrderMonitor | null = null;
   private orderExecutor: OrderExecutor | null = null;
   private outboxPublisher: OutboxPublisher | null = null;
   private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
@@ -87,9 +87,9 @@ class WorkerManager {
       this.orderExecutor = new OrderExecutor();
       startPromises.push(this.orderExecutor.start());
 
-      // Start PoolPriceTriggerConsumer (monitors pool prices, triggers orders/vaults)
-      this.poolPriceTriggerConsumer = new PoolPriceTriggerConsumer();
-      startPromises.push(this.poolPriceTriggerConsumer.start());
+      // Start CloseOrderMonitor (monitors pool prices, triggers close orders)
+      this.closeOrderMonitor = new CloseOrderMonitor();
+      startPromises.push(this.closeOrderMonitor.start());
 
       // Start RangeMonitor (monitors all positions for range changes)
       this.rangeMonitor = new RangeMonitor();
@@ -132,7 +132,7 @@ class WorkerManager {
     try {
       // Stop all workers in parallel
       await Promise.all([
-        this.poolPriceTriggerConsumer?.stop(),
+        this.closeOrderMonitor?.stop(),
         this.orderExecutor?.stop(),
         this.positionClosedOrderCanceller?.stop(),
         this.rangeMonitor?.stop(),
@@ -163,10 +163,9 @@ class WorkerManager {
       status: this.status,
       startedAt: this.startedAt?.toISOString() || null,
       workers: {
-        poolPriceTriggerConsumer: this.poolPriceTriggerConsumer?.getStatus() || {
+        closeOrderMonitor: this.closeOrderMonitor?.getStatus() || {
           status: 'idle',
           orderSubscribers: 0,
-          vaultSubscribers: 0,
           eventsProcessed: 0,
           triggersPublished: 0,
           lastProcessedAt: null,
@@ -206,13 +205,13 @@ class WorkerManager {
       return false;
     }
 
-    const poolPriceTriggerStatus = this.poolPriceTriggerConsumer?.getStatus();
+    const closeOrderMonitorStatus = this.closeOrderMonitor?.getStatus();
     const orderExecutorStatus = this.orderExecutor?.getStatus();
     const outboxPublisherRunning = this.outboxPublisher?.isRunning() ?? false;
     const orderCancellerRunning = this.positionClosedOrderCanceller?.isRunning() ?? false;
 
     return (
-      poolPriceTriggerStatus?.status === 'running' &&
+      closeOrderMonitorStatus?.status === 'running' &&
       orderExecutorStatus?.status === 'running' &&
       outboxPublisherRunning &&
       orderCancellerRunning
@@ -256,6 +255,6 @@ export async function stopWorkers(): Promise<void> {
 }
 
 // Re-export types
-export { PoolPriceTriggerConsumer, type PoolPriceTriggerConsumerStatus };
+export { CloseOrderMonitor, type CloseOrderMonitorStatus };
 export { OrderExecutor, type OrderExecutorStatus };
 export { RangeMonitor, type RangeMonitorStatus };
