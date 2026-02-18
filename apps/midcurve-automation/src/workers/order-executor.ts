@@ -13,7 +13,7 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
-import { getOnChainCloseOrderService, getCloseOrderExecutionService, getPoolSubscriptionService, getAutomationLogService, getPositionService } from '../lib/services';
+import { getOnChainCloseOrderService, getCloseOrderExecutionService, getPoolSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -32,12 +32,11 @@ import {
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
-import { QUEUES, EXCHANGES, ROUTING_KEYS, ORDER_RETRY_DELAY_MS } from '../mq/topology';
+import { QUEUES, ORDER_RETRY_DELAY_MS } from '../mq/topology';
 import {
   deserializeMessage,
   serializeMessage,
   type OrderTriggerMessage,
-  type ExecutionResultNotificationMessage,
 } from '../mq/messages';
 import { getSignerClient, type SwapParamsInput } from '../clients/signer-client';
 
@@ -259,22 +258,24 @@ export class OrderExecutor {
             'Order permanently failed after max attempts'
           );
 
-          // Publish failure notification
+          // Send failure notification
           try {
             const positionService = getPositionService();
             const position = await positionService.findById(positionId);
             if (position) {
-              await this.publishExecutionNotification({
+              const userNotificationService = getUserNotificationService();
+              const notifyMethod = triggerSide === 'lower'
+                ? userNotificationService.notifyStopLossFailed
+                : userNotificationService.notifyTakeProfitFailed;
+
+              await notifyMethod.call(userNotificationService, {
                 userId: position.userId,
                 positionId,
                 orderId,
-                eventType: triggerSide === 'lower' ? 'STOP_LOSS_FAILED' : 'TAKE_PROFIT_FAILED',
                 chainId,
-                triggerSide,
                 triggerSqrtPriceX96: triggerPrice,
                 error: error.message,
                 retryCount,
-                timestamp: new Date().toISOString(),
               });
             }
           } catch (notifyErr) {
@@ -911,55 +912,26 @@ export class OrderExecutor {
       msg: 'Order executed successfully',
     });
 
-    // Publish execution success notification
-    await this.publishExecutionNotification({
-      userId,
-      positionId,
-      orderId,
-      eventType: triggerSide === 'lower' ? 'STOP_LOSS_EXECUTED' : 'TAKE_PROFIT_EXECUTED',
-      chainId,
-      txHash,
-      amount0Out: '0', // TODO: Parse from tx receipt
-      amount1Out: '0', // TODO: Parse from tx receipt
-      triggerSide,
-      triggerSqrtPriceX96: triggerPrice,
-      executionSqrtPriceX96: _currentPrice,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  /**
-   * Publish execution result notification to the notifications queue
-   */
-  private async publishExecutionNotification(
-    message: ExecutionResultNotificationMessage
-  ): Promise<void> {
+    // Send execution success notification
     try {
-      const mq = getRabbitMQConnection();
-      const content = serializeMessage(message);
+      const userNotificationService = getUserNotificationService();
+      const notifyMethod = triggerSide === 'lower'
+        ? userNotificationService.notifyStopLossExecuted
+        : userNotificationService.notifyTakeProfitExecuted;
 
-      await mq.publish(
-        EXCHANGES.NOTIFICATIONS,
-        ROUTING_KEYS.NOTIFICATION_EXECUTION_RESULT,
-        content
-      );
-
-      log.info(
-        {
-          userId: message.userId,
-          positionId: message.positionId,
-          orderId: message.orderId,
-          eventType: message.eventType,
-          routingKey: ROUTING_KEYS.NOTIFICATION_EXECUTION_RESULT,
-        },
-        'Execution result notification published'
-      );
-    } catch (err) {
-      // Log but don't fail the main operation
-      autoLog.methodError(log, 'publishExecutionNotification', err, {
-        orderId: message.orderId,
-        eventType: message.eventType,
+      await notifyMethod.call(userNotificationService, {
+        userId,
+        positionId,
+        orderId,
+        chainId,
+        txHash,
+        amount0Out: '0', // TODO: Parse from tx receipt
+        amount1Out: '0', // TODO: Parse from tx receipt
+        triggerSqrtPriceX96: triggerPrice,
+        executionSqrtPriceX96: _currentPrice,
       });
+    } catch (notifyErr) {
+      autoLog.methodError(log, 'executeOrder.notify', notifyErr, { orderId, positionId });
     }
   }
 }

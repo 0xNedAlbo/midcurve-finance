@@ -18,8 +18,6 @@ const log = automationLogger.child({ component: 'Topology' });
 export const EXCHANGES = {
   /** Direct exchange for order trigger events */
   TRIGGERS: 'automation.triggers',
-  /** Direct exchange for notification events */
-  NOTIFICATIONS: 'automation.notifications',
 } as const;
 
 /** Queue names */
@@ -28,8 +26,6 @@ export const QUEUES = {
   ORDERS_PENDING: 'orders.pending',
   /** Delay queue for order retries (60s TTL, dead-letters back to orders.pending) */
   ORDERS_RETRY_DELAY: 'orders.retry-delay',
-  /** Queue for pending notifications to be processed */
-  NOTIFICATIONS_PENDING: 'notifications.pending',
   /** Queue for hedge vault triggers ready for execution */
   HEDGE_VAULT_PENDING: 'hedge.vault.pending',
   /** Delay queue for hedge vault retries (60s TTL, dead-letters back to hedge.vault.pending) */
@@ -43,14 +39,8 @@ export const ORDER_RETRY_DELAY_MS = 60000;
 export const ROUTING_KEYS = {
   /** Routing key for triggered orders */
   ORDER_TRIGGERED: 'triggered',
-  /** Routing key for position range change notifications */
-  NOTIFICATION_RANGE_CHANGE: 'range.change',
-  /** Routing key for order execution result notifications */
-  NOTIFICATION_EXECUTION_RESULT: 'execution.result',
   /** Routing key for hedge vault triggers (SIL/TIP/Reopen) */
   HEDGE_VAULT_TRIGGERED: 'hedge.triggered',
-  /** Routing key for hedge vault execution result notifications */
-  NOTIFICATION_HEDGE_VAULT_RESULT: 'hedge.result',
 } as const;
 
 // ============================================================
@@ -63,9 +53,10 @@ export const ROUTING_KEYS = {
  *
  * Creates:
  * - automation.triggers (direct exchange)
- * - automation.notifications (direct exchange)
  * - orders.pending queue (bound to automation.triggers)
- * - notifications.pending queue (bound to automation.notifications)
+ * - orders.retry-delay queue (dead-letters back to orders.pending)
+ * - hedge.vault.pending queue (bound to automation.triggers)
+ * - hedge.vault.retry-delay queue (dead-letters back to hedge.vault.pending)
  */
 export async function setupAutomationTopology(channel: Channel): Promise<void> {
   log.info({ msg: 'Setting up automation topology...' });
@@ -116,60 +107,6 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     deadLetterExchange: EXCHANGES.TRIGGERS,
     deadLetterRoutingKey: ROUTING_KEYS.ORDER_TRIGGERED,
     msg: 'Delay queue declared with TTL and dead-letter config',
-  });
-
-  // Create notifications exchange
-  await channel.assertExchange(EXCHANGES.NOTIFICATIONS, 'direct', {
-    durable: true,
-    autoDelete: false,
-  });
-  log.info({ exchange: EXCHANGES.NOTIFICATIONS, type: 'direct', msg: 'Exchange declared' });
-
-  // Create notifications.pending queue
-  await channel.assertQueue(QUEUES.NOTIFICATIONS_PENDING, {
-    durable: true,
-    exclusive: false,
-    autoDelete: false,
-  });
-  log.info({ queue: QUEUES.NOTIFICATIONS_PENDING, msg: 'Queue declared' });
-
-  // Bind notifications.pending to notifications exchange for range changes
-  await channel.bindQueue(
-    QUEUES.NOTIFICATIONS_PENDING,
-    EXCHANGES.NOTIFICATIONS,
-    ROUTING_KEYS.NOTIFICATION_RANGE_CHANGE
-  );
-  log.info({
-    exchange: EXCHANGES.NOTIFICATIONS,
-    queue: QUEUES.NOTIFICATIONS_PENDING,
-    routingKey: ROUTING_KEYS.NOTIFICATION_RANGE_CHANGE,
-    msg: 'Queue bound to exchange',
-  });
-
-  // Bind notifications.pending to notifications exchange for execution results
-  await channel.bindQueue(
-    QUEUES.NOTIFICATIONS_PENDING,
-    EXCHANGES.NOTIFICATIONS,
-    ROUTING_KEYS.NOTIFICATION_EXECUTION_RESULT
-  );
-  log.info({
-    exchange: EXCHANGES.NOTIFICATIONS,
-    queue: QUEUES.NOTIFICATIONS_PENDING,
-    routingKey: ROUTING_KEYS.NOTIFICATION_EXECUTION_RESULT,
-    msg: 'Queue bound to exchange',
-  });
-
-  // Bind notifications.pending to notifications exchange for hedge vault results
-  await channel.bindQueue(
-    QUEUES.NOTIFICATIONS_PENDING,
-    EXCHANGES.NOTIFICATIONS,
-    ROUTING_KEYS.NOTIFICATION_HEDGE_VAULT_RESULT
-  );
-  log.info({
-    exchange: EXCHANGES.NOTIFICATIONS,
-    queue: QUEUES.NOTIFICATIONS_PENDING,
-    routingKey: ROUTING_KEYS.NOTIFICATION_HEDGE_VAULT_RESULT,
-    msg: 'Queue bound to exchange',
   });
 
   // Create hedge.vault.pending queue
@@ -223,10 +160,8 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
 export async function verifyAutomationTopology(channel: Channel): Promise<boolean> {
   try {
     await channel.checkExchange(EXCHANGES.TRIGGERS);
-    await channel.checkExchange(EXCHANGES.NOTIFICATIONS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
     await channel.checkQueue(QUEUES.ORDERS_RETRY_DELAY);
-    await channel.checkQueue(QUEUES.NOTIFICATIONS_PENDING);
     await channel.checkQueue(QUEUES.HEDGE_VAULT_PENDING);
     await channel.checkQueue(QUEUES.HEDGE_VAULT_RETRY_DELAY);
     return true;

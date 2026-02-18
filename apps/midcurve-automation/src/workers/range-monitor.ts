@@ -14,12 +14,9 @@
  */
 
 import { prisma } from '@midcurve/database';
-import { getPositionRangeTrackerService, getUniswapV3PoolService } from '../lib/services';
+import { getPositionRangeTrackerService, getUniswapV3PoolService, getUserNotificationService } from '../lib/services';
 import { isSupportedChain } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
-import { getRabbitMQConnection } from '../mq/connection-manager';
-import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
-import { serializeMessage, type RangeChangeNotificationMessage } from '../mq/messages';
 import {
   createPoolPriceSubscriber,
   type PoolPriceSubscriber,
@@ -349,20 +346,21 @@ export class RangeMonitor {
         const position = positions.find((p) => p.positionId === change.positionId);
         if (!position) continue;
 
-        const eventType = change.nowInRange ? 'POSITION_IN_RANGE' : 'POSITION_OUT_OF_RANGE';
+        const userNotificationService = getUserNotificationService();
+        const notifyMethod = change.nowInRange
+          ? userNotificationService.notifyPositionInRange
+          : userNotificationService.notifyPositionOutOfRange;
 
-        await this.publishRangeChangeNotification({
+        await notifyMethod.call(userNotificationService, {
           userId: change.userId,
           positionId: change.positionId,
           poolId,
           poolAddress: message.poolAddress,
           chainId: message.chainId,
-          eventType,
           currentTick: change.currentTick,
           currentSqrtPriceX96: change.sqrtPriceX96,
           tickLower: position.tickLower,
           tickUpper: position.tickUpper,
-          detectedAt: new Date().toISOString(),
         });
 
         this.rangeChangesDetected++;
@@ -376,28 +374,6 @@ export class RangeMonitor {
     } catch (err) {
       autoLog.methodError(log, 'handleSwapEvent', err, { poolId });
     }
-  }
-
-  /**
-   * Publish range change notification message to RabbitMQ
-   */
-  private async publishRangeChangeNotification(
-    message: RangeChangeNotificationMessage
-  ): Promise<void> {
-    const mq = getRabbitMQConnection();
-    const content = serializeMessage(message);
-
-    await mq.publish(EXCHANGES.NOTIFICATIONS, ROUTING_KEYS.NOTIFICATION_RANGE_CHANGE, content);
-
-    log.info(
-      {
-        userId: message.userId,
-        positionId: message.positionId,
-        eventType: message.eventType,
-        routingKey: ROUTING_KEYS.NOTIFICATION_RANGE_CHANGE,
-      },
-      'Range change notification published'
-    );
   }
 
   /**

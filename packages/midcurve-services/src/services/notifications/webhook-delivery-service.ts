@@ -456,7 +456,7 @@ export class WebhookDeliveryService {
   /**
    * Sends a webhook HTTP POST request
    */
-  private async sendWebhook(
+  async sendWebhook(
     config: UserWebhookConfig,
     payload: WebhookDeliveryPayload
   ): Promise<WebhookDeliveryResult> {

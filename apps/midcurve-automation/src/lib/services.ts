@@ -14,7 +14,11 @@ import {
   UniswapV3PositionService,
   PositionRangeTrackerService,
   NotificationService,
+  WebhookConfigService,
   WebhookDeliveryService,
+  UserNotificationService,
+  DbNotificationAdapter,
+  WebhookNotificationAdapter,
   HedgeVaultService,
 } from '@midcurve/services';
 
@@ -27,7 +31,9 @@ let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
 let _positionRangeTrackerService: PositionRangeTrackerService | null = null;
 let _notificationService: NotificationService | null = null;
+let _webhookConfigService: WebhookConfigService | null = null;
 let _webhookDeliveryService: WebhookDeliveryService | null = null;
+let _userNotificationService: UserNotificationService | null = null;
 let _hedgeVaultService: HedgeVaultService | null = null;
 
 /**
@@ -111,6 +117,16 @@ export function getNotificationService(): NotificationService {
 }
 
 /**
+ * Get singleton instance of WebhookConfigService
+ */
+export function getWebhookConfigService(): WebhookConfigService {
+  if (!_webhookConfigService) {
+    _webhookConfigService = new WebhookConfigService();
+  }
+  return _webhookConfigService;
+}
+
+/**
  * Get singleton instance of WebhookDeliveryService
  */
 export function getWebhookDeliveryService(): WebhookDeliveryService {
@@ -118,6 +134,29 @@ export function getWebhookDeliveryService(): WebhookDeliveryService {
     _webhookDeliveryService = new WebhookDeliveryService();
   }
   return _webhookDeliveryService;
+}
+
+/**
+ * Get singleton instance of UserNotificationService (with adapters wired)
+ */
+export function getUserNotificationService(): UserNotificationService {
+  if (!_userNotificationService) {
+    _userNotificationService = new UserNotificationService({
+      adapters: [
+        new DbNotificationAdapter({
+          notificationService: getNotificationService(),
+          positionService: getPositionService(),
+        }),
+        new WebhookNotificationAdapter({
+          webhookConfigService: getWebhookConfigService(),
+          webhookDeliveryService: getWebhookDeliveryService(),
+          positionService: getPositionService(),
+          onChainCloseOrderService: getOnChainCloseOrderService(),
+        }),
+      ],
+    });
+  }
+  return _userNotificationService;
 }
 
 /**

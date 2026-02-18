@@ -26,72 +26,6 @@ export interface OrderTriggerMessage {
   triggeredAt: string;
 }
 
-/**
- * Range change notification message - published when position goes in/out of range
- */
-export interface RangeChangeNotificationMessage {
-  /** User ID to notify */
-  userId: string;
-  /** Position ID */
-  positionId: string;
-  /** Pool ID */
-  poolId: string;
-  /** Pool address */
-  poolAddress: string;
-  /** Chain ID */
-  chainId: number;
-  /** Event type */
-  eventType: 'POSITION_OUT_OF_RANGE' | 'POSITION_IN_RANGE';
-  /** Current tick */
-  currentTick: number;
-  /** Current sqrtPriceX96 */
-  currentSqrtPriceX96: string;
-  /** Position tick lower */
-  tickLower: number;
-  /** Position tick upper */
-  tickUpper: number;
-  /** Timestamp of detection */
-  detectedAt: string;
-}
-
-/**
- * Execution result notification message - published when order execution completes
- */
-export interface ExecutionResultNotificationMessage {
-  /** User ID to notify */
-  userId: string;
-  /** Position ID */
-  positionId: string;
-  /** Order ID */
-  orderId: string;
-  /** Event type */
-  eventType:
-    | 'STOP_LOSS_EXECUTED'
-    | 'STOP_LOSS_FAILED'
-    | 'TAKE_PROFIT_EXECUTED'
-    | 'TAKE_PROFIT_FAILED';
-  /** Chain ID */
-  chainId: number;
-  /** For success: transaction hash */
-  txHash?: string;
-  /** For success: amount of token0 received */
-  amount0Out?: string;
-  /** For success: amount of token1 received */
-  amount1Out?: string;
-  /** Trigger side (lower = stop loss, upper = take profit) */
-  triggerSide: 'lower' | 'upper';
-  /** Trigger sqrtPriceX96 */
-  triggerSqrtPriceX96: string;
-  /** For success: execution sqrtPriceX96 */
-  executionSqrtPriceX96?: string;
-  /** For failure: error message */
-  error?: string;
-  /** For failure: retry count */
-  retryCount?: number;
-  /** Timestamp */
-  timestamp: string;
-}
-
 // =============================================================================
 // HEDGE VAULT MESSAGES
 // =============================================================================
@@ -127,46 +61,6 @@ export interface HedgeVaultTriggerMessage {
   currentBlock: string;
   /** Timestamp of trigger detection */
   triggeredAt: string;
-}
-
-/**
- * Hedge vault execution result notification message
- */
-export interface HedgeVaultExecutionResultMessage {
-  /** User ID to notify (if vault has associated position) */
-  userId?: string;
-  /** Vault ID */
-  vaultId: string;
-  /** Vault address */
-  vaultAddress: string;
-  /** Execution ID from database */
-  executionId: string;
-  /** Event type */
-  eventType:
-    | 'HEDGE_SIL_EXECUTED'
-    | 'HEDGE_SIL_FAILED'
-    | 'HEDGE_TIP_EXECUTED'
-    | 'HEDGE_TIP_FAILED'
-    | 'HEDGE_REOPEN_EXECUTED'
-    | 'HEDGE_REOPEN_FAILED';
-  /** Chain ID */
-  chainId: number;
-  /** For success: transaction hash */
-  txHash?: string;
-  /** For success: quote token amount */
-  quoteAmount?: string;
-  /** For success: base token amount */
-  baseAmount?: string;
-  /** Trigger sqrtPriceX96 */
-  triggerSqrtPriceX96: string;
-  /** For success: execution sqrtPriceX96 */
-  executionSqrtPriceX96?: string;
-  /** For failure: error message */
-  error?: string;
-  /** For failure: retry count */
-  retryCount?: number;
-  /** Timestamp */
-  timestamp: string;
 }
 
 /**

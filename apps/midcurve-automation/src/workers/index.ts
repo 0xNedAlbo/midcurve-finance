@@ -13,7 +13,6 @@ import {
   type PoolPriceTriggerConsumerStatus,
 } from './pool-price-trigger-consumer';
 import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
-import { NotificationWorker, type NotificationWorkerStatus } from './notification-worker';
 import {
   OutboxPublisher,
   PositionClosedOrderCanceller,
@@ -43,7 +42,6 @@ export interface WorkerManagerStatus {
     outboxPublisher: OutboxPublisherStatus;
     positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
     rangeMonitor: RangeMonitorStatus;
-    notificationWorker: NotificationWorkerStatus;
   };
 }
 
@@ -60,7 +58,6 @@ class WorkerManager {
   private outboxPublisher: OutboxPublisher | null = null;
   private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
   private rangeMonitor: RangeMonitor | null = null;
-  private notificationWorker: NotificationWorker | null = null;
 
   /**
    * Start all workers
@@ -97,10 +94,6 @@ class WorkerManager {
       // Start RangeMonitor (monitors all positions for range changes)
       this.rangeMonitor = new RangeMonitor();
       startPromises.push(this.rangeMonitor.start());
-
-      // Start NotificationWorker (processes notification events)
-      this.notificationWorker = new NotificationWorker();
-      startPromises.push(this.notificationWorker.start());
 
       // Start all workers in parallel
       await Promise.all(startPromises);
@@ -143,7 +136,6 @@ class WorkerManager {
         this.orderExecutor?.stop(),
         this.positionClosedOrderCanceller?.stop(),
         this.rangeMonitor?.stop(),
-        this.notificationWorker?.stop(),
       ]);
 
       // Stop outbox publisher (synchronous)
@@ -201,14 +193,6 @@ class WorkerManager {
           rangeChangesDetected: 0,
           lastEventAt: null,
           lastSyncAt: null,
-        },
-        notificationWorker: this.notificationWorker?.getStatus() || {
-          status: 'idle',
-          consumerCount: 0,
-          processedTotal: 0,
-          failedTotal: 0,
-          webhooksSentTotal: 0,
-          lastProcessedAt: null,
         },
       },
     };
@@ -275,4 +259,3 @@ export async function stopWorkers(): Promise<void> {
 export { PoolPriceTriggerConsumer, type PoolPriceTriggerConsumerStatus };
 export { OrderExecutor, type OrderExecutorStatus };
 export { RangeMonitor, type RangeMonitorStatus };
-export { NotificationWorker, type NotificationWorkerStatus };
