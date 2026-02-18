@@ -43,7 +43,6 @@ export * from './services/coingecko-token/index.js';
 export * from './services/favorite-pool/index.js';
 export * from './services/block/index.js';
 export * from './services/automation/index.js';
-export * from './services/pnl-curve/index.js';
 export * from './services/notifications/index.js';
 export * from './services/transaction/index.js';
 export * from './services/swap-router/index.js';
