@@ -912,7 +912,11 @@ export class UniswapV3PositionService {
             }
 
             // 2.2 Early exit for truly closed positions (no liquidity, no owed tokens)
+            // Only skip for routine "latest" refreshes. For block-specific refreshes
+            // (triggered by new events via business rules), always proceed to ensure
+            // the Position table reflects the latest ledger aggregates.
             if (
+                blockNumber === "latest" &&
                 currentState.isClosed &&
                 onChainState.liquidity === 0n &&
                 onChainState.tokensOwed0 === 0n &&
