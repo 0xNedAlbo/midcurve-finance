@@ -6,11 +6,12 @@
  */
 
 import { useState } from 'react';
-import { X, Loader2, ExternalLink, Copy, Check } from 'lucide-react';
+import { X, Copy, Check } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
-import { useSendTransaction, useWaitForTransactionReceipt, useBalance, useAccount } from 'wagmi';
+import { useSendTransaction, useBalance, useAccount } from 'wagmi';
 import { getChainMetadataByChainId, getChainSlugByChainId } from '@/config/chains';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
+import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useQueryClient } from '@tanstack/react-query';
 import { autowalletQueryKey } from '@/hooks/automation';
 
@@ -43,12 +44,7 @@ export function FundAutowalletModal({
   });
 
   // Send transaction hook
-  const { sendTransaction, isPending: isSending, data: txHash } = useSendTransaction();
-
-  // Wait for transaction receipt
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
-    hash: txHash,
-  });
+  const { sendTransaction, isPending: isSending, data: txHash, error: sendError, reset } = useSendTransaction();
 
   const handleCopyAddress = async () => {
     await navigator.clipboard.writeText(autowalletAddress);
@@ -68,8 +64,23 @@ export function FundAutowalletModal({
     });
   };
 
+  // Transaction prompt for status tracking and action button
+  const fundPrompt = useEvmTransactionPrompt({
+    label: `Send ${amount || '0'} ${symbol}`,
+    buttonLabel: `Send ${amount || '0'} ${symbol}`,
+    retryButtonLabel: 'Retry',
+    chainId,
+    enabled: !!amount && parseFloat(amount) > 0 && !isWrongNetwork,
+    showActionButton: true,
+    txHash,
+    isSubmitting: isSending,
+    error: sendError,
+    onExecute: handleFund,
+    onReset: () => reset(),
+  });
+
   const handleClose = () => {
-    if (isConfirmed) {
+    if (fundPrompt.isSuccess) {
       // Invalidate autowallet query to refresh balances
       queryClient.invalidateQueries({ queryKey: autowalletQueryKey });
       // Invalidate wagmi balance queries for the autowallet address
@@ -146,7 +157,7 @@ export function FundAutowalletModal({
           )}
 
           {/* Amount input */}
-          {!isConfirmed && (
+          {fundPrompt.status === 'idle' && (
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">
                 Amount
@@ -160,7 +171,6 @@ export function FundAutowalletModal({
                   step="0.01"
                   min="0"
                   className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
-                  disabled={isSending || isConfirming}
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
                   {symbol}
@@ -174,60 +184,21 @@ export function FundAutowalletModal({
             </div>
           )}
 
-          {/* Transaction status */}
-          {txHash && (
-            <div className="p-3 bg-slate-800/50 rounded-lg">
-              {isConfirming && (
-                <div className="flex items-center gap-2 text-sm text-yellow-400">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Confirming transaction...</span>
-                </div>
-              )}
-              {isConfirmed && (
-                <div className="flex items-center gap-2 text-sm text-green-400">
-                  <Check className="w-4 h-4" />
-                  <span>Transaction confirmed!</span>
-                </div>
-              )}
-              <a
-                href={`${chainMetadata?.explorer}/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 mt-2 text-xs text-blue-400 hover:text-blue-300"
-              >
-                View on Explorer
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          )}
+          {/* Transaction prompt */}
+          {fundPrompt.element}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-700/50">
-          {isConfirmed ? (
+        {/* Footer - Done button after success */}
+        {fundPrompt.isSuccess && (
+          <div className="px-6 py-4 border-t border-slate-700/50">
             <button
               onClick={handleClose}
               className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors cursor-pointer"
             >
               Done
             </button>
-          ) : (
-            <button
-              onClick={handleFund}
-              disabled={!amount || parseFloat(amount) <= 0 || isSending || isConfirming || isWrongNetwork}
-              className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {isSending || isConfirming ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {isSending ? 'Sending...' : 'Confirming...'}
-                </span>
-              ) : (
-                `Send ${amount || '0'} ${symbol}`
-              )}
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
