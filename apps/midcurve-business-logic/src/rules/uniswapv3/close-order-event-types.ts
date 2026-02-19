@@ -23,6 +23,7 @@ export type SwapDirectionString = 'NONE' | 'TOKEN0_TO_1' | 'TOKEN1_TO_0';
 export type CloseOrderEventType =
   | 'close-order.uniswapv3.registered'
   | 'close-order.uniswapv3.cancelled'
+  | 'close-order.uniswapv3.executed'
   | 'close-order.uniswapv3.operator-updated'
   | 'close-order.uniswapv3.payout-updated'
   | 'close-order.uniswapv3.trigger-tick-updated'
@@ -70,6 +71,16 @@ export interface OrderCancelledPayload {
   owner: string;
 }
 
+export interface OrderExecutedPayload {
+  owner: string;
+  payout: string;
+  executionTick: number;
+  /** Amount of token0 received (as string for bigint) */
+  amount0Out: string;
+  /** Amount of token1 received (as string for bigint) */
+  amount1Out: string;
+}
+
 export interface OrderOperatorUpdatedPayload {
   oldOperator: string;
   newOperator: string;
@@ -113,6 +124,10 @@ export type OrderCancelledEvent = CloseOrderDomainEvent<
   'close-order.uniswapv3.cancelled',
   OrderCancelledPayload
 >;
+export type OrderExecutedEvent = CloseOrderDomainEvent<
+  'close-order.uniswapv3.executed',
+  OrderExecutedPayload
+>;
 export type OrderOperatorUpdatedEvent = CloseOrderDomainEvent<
   'close-order.uniswapv3.operator-updated',
   OrderOperatorUpdatedPayload
@@ -145,6 +160,7 @@ export type OrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<
 export type AnyCloseOrderEvent =
   | OrderRegisteredEvent
   | OrderCancelledEvent
+  | OrderExecutedEvent
   | OrderOperatorUpdatedEvent
   | OrderPayoutUpdatedEvent
   | OrderTriggerTickUpdatedEvent

@@ -18,6 +18,7 @@
 import type { CloseOrder } from '@midcurve/database';
 import { getCloseOrderService, getAutomationSubscriptionService } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
+import { readPoolPrice, type SupportedChainId } from '../lib/evm';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
 import {
@@ -28,6 +29,8 @@ import {
   createPoolPriceSubscriber,
   type PoolPriceSubscriber,
   type RawSwapEventWrapper,
+  DOMAIN_EVENTS_EXCHANGE,
+  DOMAIN_EVENTS_DLX,
 } from '@midcurve/services';
 
 const log = automationLogger.child({ component: 'CloseOrderMonitor' });
@@ -89,9 +92,16 @@ function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number; bl
 // Worker
 // =============================================================================
 
+/** Queue name for order domain event notifications */
+const ORDER_EVENTS_QUEUE = 'automation.close-order-monitor.order-events';
+
+/** Routing pattern to match all order domain events */
+const ORDER_EVENTS_ROUTING_PATTERN = 'order.#';
+
 export class CloseOrderMonitor {
   private status: 'idle' | 'running' | 'stopping' | 'stopped' = 'idle';
   private orderSubscribers = new Map<string, PoolPriceSubscriber>();
+  private orderEventConsumerTag: string | null = null;
   private eventsProcessed = 0;
   private triggersPublished = 0;
   private lastProcessedAt: Date | null = null;
@@ -111,6 +121,9 @@ export class CloseOrderMonitor {
     this.status = 'running';
 
     try {
+      // Subscribe to order domain events for immediate sync on new registrations
+      await this.subscribeToOrderEvents();
+
       // Sync subscriptions on startup
       await this.syncSubscriptions();
 
@@ -142,6 +155,15 @@ export class CloseOrderMonitor {
     if (this.syncTimer) {
       clearInterval(this.syncTimer);
       this.syncTimer = null;
+    }
+
+    // Cancel order event consumer
+    if (this.orderEventConsumerTag) {
+      const mq = getRabbitMQConnection();
+      await mq.cancelConsumer(this.orderEventConsumerTag).catch((err) => {
+        log.warn({ error: err, msg: 'Error cancelling order event consumer' });
+      });
+      this.orderEventConsumerTag = null;
     }
 
     // Shutdown all order subscribers
@@ -291,6 +313,34 @@ export class CloseOrderMonitor {
         poolAddress: order.poolAddress,
         msg: 'Created order subscriber',
       });
+
+      // Immediately check current price against trigger condition.
+      // The subscriber only receives FUTURE messages, so if the price already
+      // satisfies the trigger, we'd miss it without this check.
+      try {
+        const { sqrtPriceX96, tick } = await readPoolPrice(
+          order.chainId as SupportedChainId,
+          order.poolAddress as `0x${string}`
+        );
+
+        const closeOrderService = getCloseOrderService();
+        const freshOrder = await closeOrderService.findById(order.id);
+        if (freshOrder && freshOrder.monitoringState === 'monitoring') {
+          const triggered = await this.checkOrderTrigger(
+            freshOrder,
+            order.poolAddress,
+            order.chainId,
+            sqrtPriceX96,
+            tick
+          );
+          if (triggered) {
+            this.triggersPublished++;
+            await this.shutdownOrderSubscriber(order.id);
+          }
+        }
+      } catch (err) {
+        log.warn({ error: err, orderId: order.id, msg: 'Failed immediate trigger check (will rely on MQ updates)' });
+      }
     } catch (err) {
       log.error({ error: err, orderId: order.id, msg: 'Failed to start order subscriber' });
     }
@@ -468,5 +518,62 @@ export class CloseOrderMonitor {
       intervalMs: SUBSCRIPTION_SYNC_INTERVAL_MS,
       msg: 'Scheduled periodic subscription sync',
     });
+  }
+
+  /**
+   * Subscribe to order domain events (close-order.registered, etc.) for immediate sync.
+   * When the business-logic service activates an order, it publishes a close-order.registered
+   * event. We consume it here to trigger an immediate syncSubscriptions() instead of
+   * waiting for the next 5-minute polling cycle.
+   */
+  private async subscribeToOrderEvents(): Promise<void> {
+    try {
+      const mq = getRabbitMQConnection();
+      const channel = await mq.getChannel();
+
+      // Ensure domain-events exchange exists (idempotent)
+      await channel.assertExchange(DOMAIN_EVENTS_EXCHANGE, 'topic', {
+        durable: true,
+        autoDelete: false,
+      });
+
+      // Create a durable queue bound to order events
+      await channel.assertQueue(ORDER_EVENTS_QUEUE, {
+        durable: true,
+        exclusive: false,
+        autoDelete: false,
+        arguments: {
+          'x-dead-letter-exchange': DOMAIN_EVENTS_DLX,
+        },
+      });
+      await channel.bindQueue(ORDER_EVENTS_QUEUE, DOMAIN_EVENTS_EXCHANGE, ORDER_EVENTS_ROUTING_PATTERN);
+
+      const { consumerTag } = await channel.consume(
+        ORDER_EVENTS_QUEUE,
+        async (msg) => {
+          if (!msg) return;
+          try {
+            log.info({ msg: 'Received order domain event, triggering immediate sync' });
+            await this.syncSubscriptions();
+            channel.ack(msg);
+          } catch (err) {
+            log.warn({ error: err, msg: 'Error handling order domain event' });
+            channel.nack(msg, false, false);
+          }
+        },
+        { noAck: false }
+      );
+
+      this.orderEventConsumerTag = consumerTag;
+      log.info({
+        queue: ORDER_EVENTS_QUEUE,
+        exchange: DOMAIN_EVENTS_EXCHANGE,
+        routingPattern: ORDER_EVENTS_ROUTING_PATTERN,
+        msg: 'Subscribed to order domain events',
+      });
+    } catch (err) {
+      // Non-fatal — polling still works as fallback
+      log.warn({ error: err, msg: 'Failed to subscribe to order domain events (will rely on polling)' });
+    }
   }
 }

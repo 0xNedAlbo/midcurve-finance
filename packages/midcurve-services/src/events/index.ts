@@ -81,7 +81,7 @@ export type {
   // Event types
   DomainEventType,
   PositionEventType,
-  OrderEventType,
+  CloseOrderEventType,
   UserEventType,
   DomainEntityType,
   DomainEventSource,
@@ -96,14 +96,16 @@ export type {
   PositionLiquidityDecreasedPayload,
   PositionFeesCollectedPayload,
   PositionStateRefreshedPayload,
-  // Order payloads
-  OrderCancelReason,
-  OrderCreatedPayload,
-  OrderRegisteredPayload,
-  OrderTriggeredPayload,
-  OrderExecutedPayload,
-  OrderCancelledPayload,
-  OrderFailedPayload,
+  // Close order payloads (on-chain state changes)
+  CloseOrderCancelReason,
+  CloseOrderRegisteredPayload,
+  CloseOrderCancelledPayload,
+  CloseOrderExecutedPayload,
+  CloseOrderModifiedPayload,
+  // Close order payloads (executor-specific)
+  CloseOrderCreatedPayload,
+  CloseOrderTriggeredPayload,
+  CloseOrderFailedPayload,
   // User payloads
   UserRegisteredPayload,
   // Typed events
@@ -111,9 +113,10 @@ export type {
   PositionLiquidityIncreasedEvent,
   PositionLiquidityDecreasedEvent,
   PositionFeesCollectedEvent,
-  OrderCancelledEvent,
-  OrderTriggeredEvent,
-  OrderExecutedEvent,
+  CloseOrderCancelledEvent,
+  CloseOrderTriggeredEvent,
+  CloseOrderExecutedEvent,
+  CloseOrderModifiedEvent,
   UserRegisteredEvent,
   // Outbox
   OutboxStatus,

@@ -24,15 +24,13 @@ export type PositionEventType =
   | 'position.state.refreshed';
 
 /**
- * Automation/Order event types - emitted when close order state changes
+ * Close order event types - emitted when close order on-chain state changes
  */
-export type OrderEventType =
-  | 'order.created'
-  | 'order.registered'
-  | 'order.triggered'
-  | 'order.executed'
-  | 'order.cancelled'
-  | 'order.failed';
+export type CloseOrderEventType =
+  | 'close-order.registered'
+  | 'close-order.cancelled'
+  | 'close-order.executed'
+  | 'close-order.modified';
 
 /**
  * User event types - emitted when user lifecycle changes occur
@@ -42,7 +40,7 @@ export type UserEventType = 'user.registered';
 /**
  * All supported domain event types
  */
-export type DomainEventType = PositionEventType | OrderEventType | UserEventType;
+export type DomainEventType = PositionEventType | CloseOrderEventType | UserEventType;
 
 /**
  * Entity types for routing and filtering
@@ -52,7 +50,7 @@ export type DomainEntityType = 'position' | 'order' | 'pool' | 'user';
 /**
  * Source services that can publish events
  */
-export type DomainEventSource = 'api' | 'automation' | 'ledger-sync';
+export type DomainEventSource = 'api' | 'automation' | 'business-logic' | 'ledger-sync';
 
 // ============================================================
 // Event Envelope
@@ -79,7 +77,7 @@ export interface DomainEvent<TPayload = unknown> {
   /** Unique event ID (CUID) for idempotency */
   id: string;
 
-  /** Event type discriminator (e.g., 'position.closed', 'order.cancelled') */
+  /** Event type discriminator (e.g., 'position.closed', 'close-order.cancelled') */
   type: DomainEventType;
 
   /** Aggregate/entity ID (positionId, orderId) */
@@ -209,35 +207,19 @@ export interface PositionStateRefreshedPayload {
 }
 
 // ============================================================
-// Order Event Payloads
+// Close Order Event Payloads
 // ============================================================
 
 /**
- * Reason for order cancellation
+ * Reason for close order cancellation
  */
-export type OrderCancelReason = 'position_closed' | 'user_cancelled' | 'expired';
+export type CloseOrderCancelReason = 'position_closed' | 'user_cancelled' | 'expired' | 'on_chain';
 
 /**
- * Payload for order.created event
+ * Payload for close-order.registered event
+ * Emitted when a close order is activated on-chain (NONE→ACTIVE)
  */
-export interface OrderCreatedPayload {
-  orderId: string;
-  positionId: string;
-  poolId: string;
-  chainId: number;
-  /** Trigger mode: 'stop_loss', 'take_profit', 'stop_loss_and_take_profit' */
-  triggerMode: string;
-  /** Lower price boundary (sqrtPriceX96 as string) */
-  sqrtPriceX96Lower?: string;
-  /** Upper price boundary (sqrtPriceX96 as string) */
-  sqrtPriceX96Upper?: string;
-}
-
-/**
- * Payload for order.registered event
- * Emitted when order is registered on-chain
- */
-export interface OrderRegisteredPayload {
+export interface CloseOrderRegisteredPayload {
   orderId: string;
   positionId: string;
   chainId: number;
@@ -249,26 +231,24 @@ export interface OrderRegisteredPayload {
 }
 
 /**
- * Payload for order.triggered event
- * Emitted when price condition is met
+ * Payload for close-order.cancelled event
+ * Emitted when a close order is cancelled on-chain (ACTIVE→CANCELLED)
  */
-export interface OrderTriggeredPayload {
+export interface CloseOrderCancelledPayload {
   orderId: string;
   positionId: string;
-  poolId: string;
-  chainId: number;
-  /** Which boundary was crossed */
-  triggerSide: 'lower' | 'upper';
-  /** Price at trigger time (sqrtPriceX96 as string) */
-  triggerPrice: string;
-  triggeredAt: string;
+  /** Reason for cancellation */
+  reason: CloseOrderCancelReason;
+  /** Status before cancellation */
+  previousStatus: string;
+  cancelledAt: string;
 }
 
 /**
- * Payload for order.executed event
- * Emitted when position is successfully closed
+ * Payload for close-order.executed event
+ * Emitted when a close order is executed on-chain (ACTIVE→EXECUTED)
  */
-export interface OrderExecutedPayload {
+export interface CloseOrderExecutedPayload {
   orderId: string;
   positionId: string;
   chainId: number;
@@ -284,22 +264,53 @@ export interface OrderExecutedPayload {
 }
 
 /**
- * Payload for order.cancelled event
+ * Payload for close-order.modified event
+ * Emitted when a close order's on-chain config is updated
  */
-export interface OrderCancelledPayload {
+export interface CloseOrderModifiedPayload {
   orderId: string;
   positionId: string;
-  /** Reason for cancellation */
-  reason: OrderCancelReason;
-  /** Status before cancellation */
-  previousStatus: string;
-  cancelledAt: string;
+  chainId: number;
+  /** Which fields were modified */
+  modifiedFields: string[];
+  modifiedAt: string;
 }
 
 /**
- * Payload for order.failed event
+ * Payload for close-order.created (user-initiated, not on-chain)
  */
-export interface OrderFailedPayload {
+export interface CloseOrderCreatedPayload {
+  orderId: string;
+  positionId: string;
+  poolId: string;
+  chainId: number;
+  /** Trigger mode: 'stop_loss', 'take_profit', 'stop_loss_and_take_profit' */
+  triggerMode: string;
+  /** Lower price boundary (sqrtPriceX96 as string) */
+  sqrtPriceX96Lower?: string;
+  /** Upper price boundary (sqrtPriceX96 as string) */
+  sqrtPriceX96Upper?: string;
+}
+
+/**
+ * Payload for close-order.triggered (executor-specific, not on-chain)
+ */
+export interface CloseOrderTriggeredPayload {
+  orderId: string;
+  positionId: string;
+  poolId: string;
+  chainId: number;
+  /** Which boundary was crossed */
+  triggerSide: 'lower' | 'upper';
+  /** Price at trigger time (sqrtPriceX96 as string) */
+  triggerPrice: string;
+  triggeredAt: string;
+}
+
+/**
+ * Payload for close-order.failed (executor-specific, not on-chain)
+ */
+export interface CloseOrderFailedPayload {
   orderId: string;
   positionId: string;
   chainId: number;
@@ -337,19 +348,24 @@ export type PositionLiquidityDecreasedEvent = DomainEvent<PositionLiquidityDecre
 export type PositionFeesCollectedEvent = DomainEvent<PositionFeesCollectedPayload>;
 
 /**
- * Order cancelled event with typed payload
+ * Close order cancelled event with typed payload
  */
-export type OrderCancelledEvent = DomainEvent<OrderCancelledPayload>;
+export type CloseOrderCancelledEvent = DomainEvent<CloseOrderCancelledPayload>;
 
 /**
- * Order triggered event with typed payload
+ * Close order triggered event with typed payload
  */
-export type OrderTriggeredEvent = DomainEvent<OrderTriggeredPayload>;
+export type CloseOrderTriggeredEvent = DomainEvent<CloseOrderTriggeredPayload>;
 
 /**
- * Order executed event with typed payload
+ * Close order executed event with typed payload
  */
-export type OrderExecutedEvent = DomainEvent<OrderExecutedPayload>;
+export type CloseOrderExecutedEvent = DomainEvent<CloseOrderExecutedPayload>;
+
+/**
+ * Close order modified event with typed payload
+ */
+export type CloseOrderModifiedEvent = DomainEvent<CloseOrderModifiedPayload>;
 
 // ============================================================
 // User Event Payloads

@@ -7,9 +7,10 @@
  * - Cancels orders when OrderCancelled events are observed
  * - Updates order config when config-change events are observed
  *
- * Events handled (8 total):
+ * Events handled (9 total):
  * - OrderRegistered: Create new order or activate existing pending/registering order
  * - OrderCancelled: Cancel order, decrement pool subscription
+ * - OrderExecuted: Mark order as on-chain executed, store execution data
  * - OrderOperatorUpdated: Update operatorAddress
  * - OrderPayoutUpdated: Update payoutAddress
  * - OrderTriggerTickUpdated: Update triggerTick + recalculate closeOrderHash
@@ -28,12 +29,19 @@ import {
   UniswapV3PositionService,
   deriveCloseOrderHashFromTick,
   generateOrderTagFromTick,
+  getDomainEventPublisher,
+  createDomainEvent,
 } from '@midcurve/services';
 import type {
   OrderCreatedContext,
   OrderRegisteredContext,
+  OrderExecutedContext,
   OrderCancelledContext,
   OrderModifiedContext,
+  CloseOrderRegisteredPayload,
+  CloseOrderCancelledPayload,
+  CloseOrderExecutedPayload,
+  CloseOrderModifiedPayload,
 } from '@midcurve/services';
 import {
   ContractTriggerMode,
@@ -51,6 +59,7 @@ import type {
   SwapDirectionString,
   OrderRegisteredEvent,
   OrderCancelledEvent,
+  OrderExecutedEvent,
   OrderOperatorUpdatedEvent,
   OrderPayoutUpdatedEvent,
   OrderTriggerTickUpdatedEvent,
@@ -99,7 +108,7 @@ function parseSwapDirection(s: SwapDirectionString): ContractSwapDirection {
 export class ProcessCloseOrderEventsRule extends BusinessRule {
   readonly ruleName = 'process-close-order-events';
   readonly ruleDescription =
-    'Processes close order lifecycle events from on-chain data (registration, cancellation, config updates)';
+    'Processes close order lifecycle events from on-chain data (registration, cancellation, execution, config updates)';
 
   private consumerTag: string | null = null;
   private orderService: CloseOrderService;
@@ -121,6 +130,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   protected async onStartup(): Promise<void> {
     if (!this.channel) throw new Error('No channel available');
+
+    // Set channel on domain event publisher for direct publishing
+    getDomainEventPublisher().setChannel(this.channel);
 
     // Assert exchange (idempotent) — prevents startup failure if onchain-data
     // hasn't created the exchange yet
@@ -208,6 +220,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         return this.handleRegistered(event);
       case 'close-order.uniswapv3.cancelled':
         return this.handleCancelled(event);
+      case 'close-order.uniswapv3.executed':
+        return this.handleExecuted(event);
       case 'close-order.uniswapv3.operator-updated':
         return this.handleOperatorUpdated(event);
       case 'close-order.uniswapv3.payout-updated':
@@ -463,6 +477,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         const poolAddress = (poolConfig?.address as string | undefined)?.toLowerCase();
 
         return {
+          orderId: updated.id,
+          positionId: existingOrder.positionId,
           poolId: position?.poolId ?? null,
           poolAddress: poolAddress ?? null,
           isNew: false,
@@ -510,6 +526,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       }
 
       return {
+        orderId: created.id,
+        positionId: position.id,
         poolId: position.poolId,
         isNew: true,
         wasTerminal: false,
@@ -523,6 +541,22 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         await this.automationSubscriptionService.ensurePoolSubscription(chainId, poolAddress);
       }
     }
+
+    // Publish close-order.registered domain event (direct, best-effort)
+    // This notifies the automation service to immediately start monitoring
+    if (result) {
+      this.publishDomainEvent<CloseOrderRegisteredPayload>('close-order.registered', {
+        entityId: result.orderId,
+        payload: {
+          orderId: result.orderId,
+          positionId: result.positionId,
+          chainId,
+          registrationTxHash: transactionHash,
+          closeId: nftId,
+          registeredAt: new Date().toISOString(),
+        },
+      });
+    }
   }
 
   /**
@@ -530,7 +564,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
    * Cancels the order and decrements the pool subscription order count.
    */
   private async handleCancelled(event: OrderCancelledEvent): Promise<void> {
-    const poolId = await prisma.$transaction(async (tx) => {
+    const cancelResult = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
 
@@ -542,6 +576,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
         return null;
       }
+
+      const previousStatus = String(order.onChainStatus);
 
       // Build order tag before cancel (order still has data)
       const orderTag = await this.buildOrderTag(order, tx);
@@ -573,14 +609,183 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return position?.poolId ?? null;
+      return {
+        orderId: order.id,
+        positionId: order.positionId,
+        previousStatus,
+        poolId: position?.poolId ?? null,
+      };
     });
+
+    const poolId = cancelResult?.poolId ?? null;
 
     // Remove pool subscription if no more monitoring orders
     if (poolId) {
       await this.automationSubscriptionService.removePoolSubscriptionIfUnused(poolId);
     }
+
+    // Publish close-order.cancelled domain event (direct, best-effort)
+    if (cancelResult) {
+      this.publishDomainEvent<CloseOrderCancelledPayload>('close-order.cancelled', {
+        entityId: cancelResult.orderId,
+        payload: {
+          orderId: cancelResult.orderId,
+          positionId: cancelResult.positionId,
+          reason: 'on_chain',
+          previousStatus: cancelResult.previousStatus,
+          cancelledAt: new Date().toISOString(),
+        },
+      });
+    }
   }
+
+  /**
+   * Handles OrderExecuted events.
+   * Marks the order as on-chain executed and stores execution data.
+   */
+  private async handleExecuted(event: OrderExecutedEvent): Promise<void> {
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await this.resolveOrder(event, tx);
+      if (!order) return null;
+
+      // Skip if already in terminal on-chain state (idempotent)
+      if (TERMINAL_ON_CHAIN_STATUSES.includes(order.onChainStatus as 2 | 3)) {
+        this.logger.debug(
+          { orderId: order.id, onChainStatus: order.onChainStatus },
+          'Order already in terminal state, skipping executed event'
+        );
+        return null;
+      }
+
+      await this.orderService.markOnChainExecuted(order.id, tx);
+
+      // Store execution data in order state
+      await this.orderService.mergeState(
+        order.id,
+        {
+          executionTick: event.payload.executionTick,
+          amount0Out: event.payload.amount0Out,
+          amount1Out: event.payload.amount1Out,
+          executionTxHash: event.transactionHash,
+          executedAt: new Date().toISOString(),
+        },
+        tx
+      );
+
+      this.logger.info(
+        {
+          orderId: order.id,
+          executionTick: event.payload.executionTick,
+          txHash: event.transactionHash,
+        },
+        'Close order marked as on-chain executed'
+      );
+
+      // Log ORDER_EXECUTED
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderExecuted(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            chainId: event.chainId,
+            txHash: event.transactionHash,
+            amount0Out: event.payload.amount0Out,
+            amount1Out: event.payload.amount1Out,
+            executionFeeBps: 0,
+          } satisfies OrderExecutedContext,
+          tx
+        );
+      }
+
+      // Look up position poolId for post-tx subscription update
+      const position = await tx.position.findUnique({
+        where: { id: order.positionId },
+        select: { poolId: true },
+      });
+
+      return {
+        orderId: order.id,
+        positionId: order.positionId,
+        poolId: position?.poolId ?? null,
+      };
+    });
+
+    // Remove pool subscription if no more monitoring orders
+    if (result?.poolId) {
+      await this.automationSubscriptionService.removePoolSubscriptionIfUnused(result.poolId);
+    }
+
+    // Publish close-order.executed domain event (direct, best-effort)
+    if (result) {
+      this.publishDomainEvent<CloseOrderExecutedPayload>('close-order.executed', {
+        entityId: result.orderId,
+        payload: {
+          orderId: result.orderId,
+          positionId: result.positionId,
+          chainId: event.chainId,
+          executionTxHash: event.transactionHash,
+          amount0Out: event.payload.amount0Out,
+          amount1Out: event.payload.amount1Out,
+          executionFeeBps: 0,
+          executedAt: new Date().toISOString(),
+        },
+      });
+    }
+  }
+
+  // ===========================================================================
+  // Domain Event Publishing Helpers
+  // ===========================================================================
+
+  /**
+   * Publishes a domain event (best-effort, fire-and-forget).
+   * Failures are logged but do not affect the main processing flow.
+   */
+  private publishDomainEvent<TPayload>(
+    type: 'close-order.registered' | 'close-order.cancelled' | 'close-order.executed' | 'close-order.modified',
+    opts: { entityId: string; payload: TPayload }
+  ): void {
+    const event = createDomainEvent<TPayload>({
+      type,
+      entityType: 'order',
+      entityId: opts.entityId,
+      payload: opts.payload,
+      source: 'business-logic',
+    });
+    getDomainEventPublisher().publishDirect(event).catch((err) => {
+      this.logger.warn(
+        { error: err instanceof Error ? err.message : String(err), eventType: type },
+        `Failed to publish ${type} domain event (non-critical)`
+      );
+    });
+  }
+
+  /**
+   * Publishes a close-order.modified domain event for config change handlers.
+   */
+  private publishModifiedEvent(
+    orderId: string,
+    positionId: string,
+    chainId: number,
+    modifiedFields: string[]
+  ): void {
+    this.publishDomainEvent<CloseOrderModifiedPayload>('close-order.modified', {
+      entityId: orderId,
+      payload: {
+        orderId,
+        positionId,
+        chainId,
+        modifiedFields,
+        modifiedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  // ===========================================================================
+  // Config Change Event Handlers
+  // ===========================================================================
 
   /**
    * Handles OrderOperatorUpdated events.
@@ -588,9 +793,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private async handleOperatorUpdated(
     event: OrderOperatorUpdatedEvent
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
-      if (!order) return;
+      if (!order) return null;
 
       await this.orderService.mergeState(
         order.id,
@@ -616,7 +821,13 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           tx
         );
       }
+
+      return { orderId: order.id, positionId: order.positionId };
     });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['operatorAddress']);
+    }
   }
 
   /**
@@ -625,9 +836,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private async handlePayoutUpdated(
     event: OrderPayoutUpdatedEvent
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
-      if (!order) return;
+      if (!order) return null;
 
       await this.orderService.mergeState(
         order.id,
@@ -653,7 +864,13 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           tx
         );
       }
+
+      return { orderId: order.id, positionId: order.positionId };
     });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['payoutAddress']);
+    }
   }
 
   /**
@@ -665,9 +882,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private async handleTriggerTickUpdated(
     event: OrderTriggerTickUpdatedEvent
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
-      if (!order) return;
+      if (!order) return null;
 
       // Build order tag BEFORE update (captures old trigger price)
       const oldOrderTag = await this.buildOrderTag(order, tx);
@@ -709,7 +926,13 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           tx
         );
       }
+
+      return { orderId: order.id, positionId: order.positionId };
     });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['triggerTick']);
+    }
   }
 
   /**
@@ -718,9 +941,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private async handleValidUntilUpdated(
     event: OrderValidUntilUpdatedEvent
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
-      if (!order) return;
+      if (!order) return null;
 
       const newValidUntil = new Date(
         Number(event.payload.newValidUntil) * 1000
@@ -750,7 +973,13 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           tx
         );
       }
+
+      return { orderId: order.id, positionId: order.positionId };
     });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['validUntil']);
+    }
   }
 
   /**
@@ -759,9 +988,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private async handleSlippageUpdated(
     event: OrderSlippageUpdatedEvent
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
-      if (!order) return;
+      if (!order) return null;
 
       const orderState = (order.state ?? {}) as Record<string, unknown>;
       const previousSlippageBps = orderState.slippageBps as number | null | undefined;
@@ -792,7 +1021,13 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           tx
         );
       }
+
+      return { orderId: order.id, positionId: order.positionId };
     });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['slippageBps']);
+    }
   }
 
   /**
@@ -801,9 +1036,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private async handleSwapIntentUpdated(
     event: OrderSwapIntentUpdatedEvent
   ): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
-      if (!order) return;
+      if (!order) return null;
 
       await this.orderService.mergeState(
         order.id,
@@ -832,6 +1067,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           tx
         );
       }
+
+      return { orderId: order.id, positionId: order.positionId };
     });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['swapDirection', 'swapSlippageBps']);
+    }
   }
 }

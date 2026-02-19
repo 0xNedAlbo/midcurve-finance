@@ -5,7 +5,7 @@
  * Published to RabbitMQ for downstream processing by business rule consumers.
  *
  * Events covered:
- * - Registration: OrderRegistered, OrderCancelled
+ * - Lifecycle: OrderRegistered, OrderCancelled, OrderExecuted
  * - Config Updates: OrderOperatorUpdated, OrderPayoutUpdated, OrderTriggerTickUpdated,
  *   OrderValidUntilUpdated, OrderSlippageUpdated, OrderSwapIntentUpdated
  */
@@ -39,6 +39,7 @@ export function swapDirectionToString(value: number | bigint): SwapDirectionStri
 export type CloseOrderEventType =
   | 'close-order.uniswapv3.registered'
   | 'close-order.uniswapv3.cancelled'
+  | 'close-order.uniswapv3.executed'
   | 'close-order.uniswapv3.operator-updated'
   | 'close-order.uniswapv3.payout-updated'
   | 'close-order.uniswapv3.trigger-tick-updated'
@@ -52,6 +53,7 @@ export type CloseOrderEventType =
 const LIFECYCLE_EVENT_NAMES = [
   'OrderRegistered',
   'OrderCancelled',
+  'OrderExecuted',
   'OrderOperatorUpdated',
   'OrderPayoutUpdated',
   'OrderTriggerTickUpdated',
@@ -68,6 +70,7 @@ type LifecycleEventName = (typeof LIFECYCLE_EVENT_NAMES)[number];
 const EVENT_NAME_TO_DOMAIN_TYPE: Record<LifecycleEventName, CloseOrderEventType> = {
   OrderRegistered: 'close-order.uniswapv3.registered',
   OrderCancelled: 'close-order.uniswapv3.cancelled',
+  OrderExecuted: 'close-order.uniswapv3.executed',
   OrderOperatorUpdated: 'close-order.uniswapv3.operator-updated',
   OrderPayoutUpdated: 'close-order.uniswapv3.payout-updated',
   OrderTriggerTickUpdated: 'close-order.uniswapv3.trigger-tick-updated',
@@ -117,6 +120,16 @@ export interface OrderCancelledPayload {
   owner: string;
 }
 
+export interface OrderExecutedPayload {
+  owner: string;
+  payout: string;
+  executionTick: number;
+  /** Amount of token0 received (as string for bigint) */
+  amount0Out: string;
+  /** Amount of token1 received (as string for bigint) */
+  amount1Out: string;
+}
+
 export interface OrderOperatorUpdatedPayload {
   oldOperator: string;
   newOperator: string;
@@ -154,6 +167,7 @@ export interface OrderSwapIntentUpdatedPayload {
 
 export type OrderRegisteredEvent = CloseOrderDomainEvent<'close-order.uniswapv3.registered', OrderRegisteredPayload>;
 export type OrderCancelledEvent = CloseOrderDomainEvent<'close-order.uniswapv3.cancelled', OrderCancelledPayload>;
+export type OrderExecutedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.executed', OrderExecutedPayload>;
 export type OrderOperatorUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.operator-updated', OrderOperatorUpdatedPayload>;
 export type OrderPayoutUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.payout-updated', OrderPayoutUpdatedPayload>;
 export type OrderTriggerTickUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.trigger-tick-updated', OrderTriggerTickUpdatedPayload>;
@@ -164,6 +178,7 @@ export type OrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.uni
 export type AnyCloseOrderEvent =
   | OrderRegisteredEvent
   | OrderCancelledEvent
+  | OrderExecutedEvent
   | OrderOperatorUpdatedEvent
   | OrderPayoutUpdatedEvent
   | OrderTriggerTickUpdatedEvent
@@ -176,7 +191,7 @@ export type AnyCloseOrderEvent =
 // ============================================================
 
 /**
- * Filtered ABI containing only the 8 lifecycle events.
+ * Filtered ABI containing only the 9 lifecycle events.
  * Used for watchEvent subscriptions and decodeEventLog.
  */
 export const CLOSER_LIFECYCLE_EVENT_ABIS = UniswapV3PositionCloserV100Abi.filter(
@@ -272,6 +287,19 @@ export function buildCloseOrderEvent(
         ...envelope,
         payload: {
           owner: args.owner as string,
+        },
+      };
+
+    case 'OrderExecuted':
+      return {
+        type: domainType as 'close-order.uniswapv3.executed',
+        ...envelope,
+        payload: {
+          owner: args.owner as string,
+          payout: args.payout as string,
+          executionTick: Number(args.executionTick),
+          amount0Out: String(args.amount0Out),
+          amount1Out: String(args.amount1Out),
         },
       };
 
