@@ -1,9 +1,11 @@
 /**
- * Position Closed Order Canceller Consumer
+ * Position Closed Order Suspender Consumer
  *
- * Listens for position.closed events and automatically cancels any active
- * close orders for that position. This decouples order cancellation from
- * the ledger sync process.
+ * Listens for position.closed events and automatically suspends monitoring
+ * for any active close orders for that position. On-chain order status is
+ * left unchanged — only the off-chain monitoringState is set to 'suspended'.
+ *
+ * This decouples order suspension from the ledger sync process.
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
@@ -28,16 +30,15 @@ export interface PositionClosedOrderCancellerDependencies {
 /**
  * Position Closed Order Canceller
  *
- * Subscribes to `position.*.closed` events and cancels any active close orders
- * for the position. This replaces the direct function call in ledger-sync.ts
- * with an event-driven approach.
+ * Subscribes to `position.*.closed` events and suspends monitoring for any
+ * active close orders for the position. On-chain order status remains unchanged.
  *
  * **Idempotency**: This handler is idempotent because:
- * 1. Cancelling an already-cancelled order is a no-op
- * 2. Multiple cancellation attempts for the same order don't cause issues
+ * 1. Suspending an already-suspended order is a no-op
+ * 2. Multiple suspension attempts for the same order don't cause issues
  *
- * **Error Handling**: If cancellation fails for one order, we continue
- * attempting to cancel the remaining orders. Partial success is acceptable.
+ * **Error Handling**: If suspension fails for one order, we continue
+ * attempting to suspend the remaining orders. Partial success is acceptable.
  */
 export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionClosedPayload> {
   readonly eventPattern = ROUTING_PATTERNS.POSITION_CLOSED;
@@ -55,7 +56,7 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
   }
 
   /**
-   * Handle a position.closed event by cancelling all active close orders.
+   * Handle a position.closed event by suspending monitoring for all active close orders.
    */
   async handle(event: DomainEvent<PositionClosedPayload>, _routingKey: string): Promise<void> {
     const positionId = event.payload.id;
@@ -69,20 +70,20 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
       'Processing position.closed event'
     );
 
-    // Find active orders for this position (ACTIVE on-chain + not idle monitoring)
+    // Find active orders for this position (ACTIVE on-chain + currently monitoring)
     const activeOrders = await this.orderService.findByPositionId(positionId, {
       onChainStatus: OnChainOrderStatus.ACTIVE,
-      monitoringState: ['monitoring', 'triggered', 'suspended'],
+      monitoringState: ['monitoring', 'triggered'],
     });
 
     if (activeOrders.length === 0) {
-      this.logger.debug({ positionId }, 'No active close orders to cancel');
+      this.logger.debug({ positionId }, 'No monitoring close orders to suspend');
       return;
     }
 
     this.logger.info(
       { positionId, orderCount: activeOrders.length },
-      'Cancelling active close orders for closed position'
+      'Suspending monitoring for close orders on closed position'
     );
 
     // Get poolId for subscription management
@@ -92,32 +93,32 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
     });
 
     // Track results
-    let cancelledCount = 0;
+    let suspendedCount = 0;
     let failedCount = 0;
 
-    // Cancel each order
+    // Suspend each order
     for (const order of activeOrders) {
       try {
-        await this.orderService.markOnChainCancelled(order.id);
+        await this.orderService.transitionToSuspended(order.id);
 
         this.logger.info(
           { positionId, orderId: order.id },
-          'Cancelled close order due to position closure'
+          'Suspended close order monitoring due to position closure'
         );
 
-        cancelledCount++;
+        suspendedCount++;
       } catch (error) {
-        // Log but continue - order may already be cancelled
+        // Log but continue - order may already be suspended
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.logger.warn(
           { positionId, orderId: order.id, error: errorMessage },
-          'Failed to cancel close order (may already be in terminal state)'
+          'Failed to suspend close order (may already be in terminal state)'
         );
         failedCount++;
       }
     }
 
-    // Remove pool subscription if no more monitoring orders (single check after all cancellations)
+    // Remove pool subscription if no more monitoring orders
     if (position?.poolId) {
       try {
         await this.automationSubscriptionService.removePoolSubscriptionIfUnused(position.poolId);
@@ -125,7 +126,7 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.logger.warn(
           { positionId, poolId: position.poolId, error: errorMessage },
-          'Failed to check pool subscription usage after cancellations'
+          'Failed to check pool subscription usage after suspensions'
         );
       }
     }
@@ -135,10 +136,10 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
         eventId: event.id,
         positionId,
         totalOrders: activeOrders.length,
-        cancelled: cancelledCount,
+        suspended: suspendedCount,
         failed: failedCount,
       },
-      'Completed order cancellation for closed position'
+      'Completed order suspension for closed position'
     );
   }
 }

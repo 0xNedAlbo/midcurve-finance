@@ -33,7 +33,10 @@ import type {
 import { createServiceLogger, log } from "../../logging/index.js";
 import type { ServiceLogger } from "../../logging/index.js";
 import { getDomainEventPublisher } from "../../events/index.js";
-import type { DomainEventPublisher } from "../../events/index.js";
+import type {
+    DomainEventPublisher,
+    PositionClosedPayload,
+} from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
     getPositionManagerAddress,
@@ -998,6 +1001,20 @@ export class UniswapV3PositionService {
                         `Position not found after close update: ${id}`,
                     );
                 }
+
+                // Publish position.closed domain event (transactional via outbox)
+                await this.eventPublisher.createAndPublish<PositionClosedPayload>(
+                    {
+                        type: "position.closed",
+                        entityType: "position",
+                        entityId: closedPosition.id,
+                        userId: closedPosition.userId,
+                        payload: closedPosition.toJSON(),
+                        source: "ledger-sync",
+                    },
+                    dbTx,
+                );
+
                 log.methodExit(this.logger, "refresh", { id, closed: true });
                 return closedPosition;
             }
@@ -2363,6 +2380,19 @@ export class UniswapV3PositionService {
                 `Position not found after burned transition: ${id}`,
             );
         }
+
+        // Publish position.closed domain event (transactional via outbox)
+        await this.eventPublisher.createAndPublish<PositionClosedPayload>(
+            {
+                type: "position.closed",
+                entityType: "position",
+                entityId: burnedPosition.id,
+                userId: burnedPosition.userId,
+                payload: burnedPosition.toJSON(),
+                source: "ledger-sync",
+            },
+            tx,
+        );
 
         return burnedPosition;
     }
