@@ -10,12 +10,12 @@
  * - Automation logs (user-facing event logs)
  */
 
-// On-chain close order service (replaces old CloseOrderService)
-export { OnChainCloseOrderService } from './on-chain-close-order-service.js';
+// Close order service
+export { CloseOrderService } from './close-order-service.js';
 export type {
-  OnChainCloseOrderServiceDependencies,
-  OnChainCloseOrderWithPosition,
-} from './on-chain-close-order-service.js';
+  CloseOrderServiceDependencies,
+  CloseOrderWithPosition,
+} from './close-order-service.js';
 
 // Close order execution service
 export { CloseOrderExecutionService } from './close-order-execution-service.js';

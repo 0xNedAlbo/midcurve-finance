@@ -6,7 +6,7 @@
  * into human-readable format for webhook consumers.
  */
 
-import type { OnChainCloseOrder } from '@midcurve/database';
+import type { CloseOrder } from '@midcurve/database';
 import type { UniswapV3Position, UniswapV3Pool } from '@midcurve/shared';
 import {
   formatCompactValue,
@@ -140,24 +140,21 @@ export function serializePositionForWebhook(position: UniswapV3Position): Record
 
 /**
  * Serialize an on-chain close order for webhook payload.
+ * Extracts protocol-specific fields from config/state JSON.
  */
-export function serializeCloseOrderForWebhook(order: OnChainCloseOrder): Record<string, unknown> {
+export function serializeCloseOrderForWebhook(order: CloseOrder): Record<string, unknown> {
+  const config = (order.config ?? {}) as Record<string, unknown>;
+  const state = (order.state ?? {}) as Record<string, unknown>;
+
   return {
     id: order.id,
+    protocol: order.protocol,
     closeOrderHash: order.closeOrderHash,
-    chainId: order.chainId,
-    nftId: order.nftId,
-    triggerMode: order.triggerMode,
-    triggerTick: order.triggerTick,
     onChainStatus: order.onChainStatus,
     monitoringState: order.monitoringState,
-    contractAddress: order.contractAddress,
-    operatorAddress: order.operatorAddress,
-    slippageBps: order.slippageBps,
-    swapDirection: order.swapDirection,
-    swapSlippageBps: order.swapSlippageBps,
-    payoutAddress: order.payoutAddress,
     positionId: order.positionId,
+    config,
+    state,
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
   };

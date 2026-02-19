@@ -1,111 +1,76 @@
 /**
  * Close Order Input Types
  *
- * Input types for OnChainCloseOrderService and CloseOrderExecutionService.
+ * Input types for CloseOrderService and CloseOrderExecutionService.
  * These types are specific to the service layer — not shared with UI/API.
+ *
+ * All protocol-specific data flows through generic `config` and `state` JSON fields.
+ * Callers are responsible for passing correctly-typed JSON matching the protocol.
  */
 
 import type {
   OnChainOrderStatus,
-  ContractTriggerMode,
-  ContractSwapDirection,
   MonitoringState,
 } from '@midcurve/shared';
 
 // =============================================================================
-// ON-CHAIN CLOSE ORDER INPUT TYPES
+// CLOSE ORDER INPUT TYPES
 // =============================================================================
 
 /**
- * Input for creating a new on-chain close order record.
+ * Input for creating a new close order record.
  *
  * Used by the API registration flow when a user registers an order via the UI.
  * Typically the order is already confirmed on-chain before this is called.
  */
-export interface CreateOnChainCloseOrderInput {
+export interface CreateCloseOrderInput {
+  protocol: string;
   positionId: string;
-  chainId: number;
-  nftId: string;
-  triggerMode: ContractTriggerMode;
-  contractAddress: string;
   sharedContractId?: string;
-
-  onChainStatus?: OnChainOrderStatus;
-  triggerTick?: number;
-  slippageBps?: number;
-  payoutAddress?: string;
-  operatorAddress?: string;
-  owner?: string;
-  pool?: string;
-  validUntil?: Date;
-
-  swapDirection?: ContractSwapDirection;
-  swapSlippageBps?: number;
-
-  registrationTxHash?: string;
-  registeredAt?: Date;
+  orderIdentityHash: string;
   closeOrderHash?: string;
+  onChainStatus?: OnChainOrderStatus;
   monitoringState?: MonitoringState;
+  config: Record<string, unknown>;
+  state: Record<string, unknown>;
 }
 
 /**
  * Input for upserting an order from an on-chain event (OrderRegistered).
  *
  * Used by ProcessCloseOrderEventsRule when indexing contract events.
- * Upserts on (chainId, nftId, triggerMode) unique constraint.
- * All on-chain fields are required since we have the full event data.
+ * Upserts on orderIdentityHash unique constraint.
+ * All fields are required since we have the full event data.
  */
 export interface UpsertFromOnChainEventInput {
+  protocol: string;
   positionId: string;
-  chainId: number;
-  nftId: string;
-  triggerMode: ContractTriggerMode;
-  contractAddress: string;
   sharedContractId?: string;
-
-  onChainStatus: OnChainOrderStatus;
-  triggerTick: number;
-  slippageBps: number;
-  payoutAddress: string;
-  operatorAddress: string;
-  owner: string;
-  pool: string;
-  validUntil: Date;
-  swapDirection: ContractSwapDirection;
-  swapSlippageBps: number;
-
-  registrationTxHash: string;
-  blockNumber: number;
+  orderIdentityHash: string;
   closeOrderHash: string;
+  onChainStatus: OnChainOrderStatus;
+  monitoringState?: MonitoringState;
+  config: Record<string, unknown>;
+  state: Record<string, unknown>;
 }
 
 /**
- * Input for syncing all on-chain fields from a getOrder() call.
+ * Input for syncing all on-chain state from a getOrder() call.
  *
- * Used for periodic DB refresh from the contract's ViewFacet.
- * All fields are nullable since the order may be in NONE status.
+ * Used for periodic DB refresh from the contract.
+ * onChainStatus is a top-level column; the rest goes into state JSON.
  */
 export interface SyncFromChainInput {
   onChainStatus: OnChainOrderStatus;
-  triggerTick: number | null;
-  slippageBps: number | null;
-  payoutAddress: string | null;
-  operatorAddress: string | null;
-  owner: string | null;
-  pool: string | null;
-  validUntil: Date | null;
-  swapDirection: ContractSwapDirection;
-  swapSlippageBps: number;
-  lastSyncBlock: number;
+  state: Record<string, unknown>;
 }
 
 /**
- * Options for finding on-chain close orders.
+ * Options for finding close orders.
  */
-export interface FindOnChainCloseOrderOptions {
+export interface FindCloseOrderOptions {
   onChainStatus?: OnChainOrderStatus | OnChainOrderStatus[];
   monitoringState?: MonitoringState | MonitoringState[];
-  triggerMode?: ContractTriggerMode;
 }
 
 // =============================================================================
@@ -116,25 +81,23 @@ export interface FindOnChainCloseOrderOptions {
  * Input for creating a new execution attempt.
  *
  * Created by the trigger consumer when a price threshold is crossed.
- * Captures the trigger context (price, timestamp) at detection time.
+ * Captures the trigger context in protocol-specific config JSON.
  */
 export interface CreateCloseOrderExecutionInput {
-  onChainCloseOrderId: string;
+  protocol: string;
+  closeOrderId: string;
   positionId: string;
-  triggerSqrtPriceX96: string;
   triggeredAt: Date;
+  config: Record<string, unknown>;
+  state: Record<string, unknown>;
 }
 
 /**
  * Input for marking an execution as completed (success).
+ * State JSON contains protocol-specific results (txHash, amounts, etc.).
  */
 export interface MarkCloseOrderExecutionCompletedInput {
-  txHash: string;
-  executionSqrtPriceX96?: string;
-  executionFeeBps?: number;
-  amount0Out?: string;
-  amount1Out?: string;
-  swapExecution?: Record<string, unknown>;
+  state: Record<string, unknown>;
 }
 
 /**

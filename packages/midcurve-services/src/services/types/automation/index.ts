@@ -4,12 +4,12 @@
  * Barrel export for automation-related service types.
  */
 
-// Close order inputs (new: OnChainCloseOrder + CloseOrderExecution)
+// Close order inputs (CloseOrder + CloseOrderExecution)
 export type {
-  CreateOnChainCloseOrderInput,
+  CreateCloseOrderInput,
   UpsertFromOnChainEventInput,
   SyncFromChainInput,
-  FindOnChainCloseOrderOptions,
+  FindCloseOrderOptions,
   CreateCloseOrderExecutionInput,
   MarkCloseOrderExecutionCompletedInput,
   MarkCloseOrderExecutionFailedInput,

@@ -72,10 +72,14 @@ export const MONITORING_STATES = ['idle', 'monitoring', 'triggered', 'suspended'
 export type MonitoringState = (typeof MONITORING_STATES)[number];
 
 /**
- * Serialized close order for API responses
+ * Serialized close order for API responses.
+ *
+ * Contains generic fields (protocol, status, config, state) plus
+ * protocol-specific fields extracted from JSON for backward compatibility.
  */
 export interface SerializedCloseOrder {
   id: string;
+  protocol: string;
   closeOrderHash: string | null;
   closeOrderType: CloseOrderType;
   status: CloseOrderStatus;

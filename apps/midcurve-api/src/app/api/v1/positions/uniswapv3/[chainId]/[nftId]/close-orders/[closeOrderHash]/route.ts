@@ -20,10 +20,10 @@ import {
   ErrorCodeToHttpStatus,
   CloseOrderHashSchema,
 } from '@midcurve/api-shared';
-import { serializeOnChainCloseOrder } from '@/lib/serializers';
+import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
-  getOnChainCloseOrderService,
+  getCloseOrderService,
   getUniswapV3PositionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
@@ -120,7 +120,7 @@ export async function GET(
       );
 
       // 3. Find close order by position + hash
-      const order = await getOnChainCloseOrderService().findByPositionAndHash(
+      const order = await getCloseOrderService().findByPositionAndHash(
         position.id,
         closeOrderHash
       );
@@ -140,7 +140,7 @@ export async function GET(
       }
 
       // 4. Serialize and return
-      const serialized = serializeOnChainCloseOrder(order);
+      const serialized = serializeCloseOrder(order);
       const response = createSuccessResponse(serialized);
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

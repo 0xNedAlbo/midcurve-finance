@@ -4,6 +4,10 @@
  * Provides CRUD operations and lifecycle management for close order execution attempts.
  * Each execution records the trigger context, execution lifecycle, and result.
  *
+ * Platform-independent: all protocol-specific data lives in JSON config/state columns.
+ * - config: immutable trigger context (e.g. triggerSqrtPriceX96 for UniswapV3)
+ * - state: mutable execution results (e.g. txHash, amounts for UniswapV3)
+ *
  * Execution attempts are separate entities from the order itself,
  * allowing clean tracking of retries.
  *
@@ -51,33 +55,37 @@ export class CloseOrderExecutionService {
 
   /**
    * Creates a new execution attempt when a trigger is detected.
-   * Captures the trigger context (price, timestamp) at detection time.
+   * Captures the trigger context (price, timestamp) in config JSON.
    */
   async create(
     input: CreateCloseOrderExecutionInput,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrderExecution> {
     log.methodEntry(this.logger, 'create', {
-      onChainCloseOrderId: input.onChainCloseOrderId,
+      closeOrderId: input.closeOrderId,
       positionId: input.positionId,
+      protocol: input.protocol,
     });
 
     try {
       const db = tx ?? this.prisma;
       const result = await db.closeOrderExecution.create({
         data: {
-          onChainCloseOrderId: input.onChainCloseOrderId,
+          protocol: input.protocol,
+          closeOrderId: input.closeOrderId,
           positionId: input.positionId,
-          triggerSqrtPriceX96: input.triggerSqrtPriceX96,
           triggeredAt: input.triggeredAt,
           status: 'pending',
+          config: input.config as Prisma.InputJsonValue,
+          state: input.state as Prisma.InputJsonValue,
         },
       });
 
       this.logger.info(
         {
           executionId: result.id,
-          onChainCloseOrderId: input.onChainCloseOrderId,
+          closeOrderId: input.closeOrderId,
+          protocol: input.protocol,
         },
         'Close order execution created',
       );
@@ -104,12 +112,12 @@ export class CloseOrderExecutionService {
    * Finds all executions for an order, newest first.
    */
   async findByOrderId(
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrderExecution[]> {
     const db = tx ?? this.prisma;
     return db.closeOrderExecution.findMany({
-      where: { onChainCloseOrderId },
+      where: { closeOrderId },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -119,12 +127,12 @@ export class CloseOrderExecutionService {
    * Used by executor to get current attempt.
    */
   async findLatestByOrderId(
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrderExecution | null> {
     const db = tx ?? this.prisma;
     const results = await db.closeOrderExecution.findMany({
-      where: { onChainCloseOrderId },
+      where: { closeOrderId },
       orderBy: { createdAt: 'desc' },
       take: 1,
     });
@@ -163,14 +171,14 @@ export class CloseOrderExecutionService {
 
   /**
    * Marks execution as completed (executing → completed).
-   * Records tx hash, execution results, and completion time.
+   * Records execution results in state JSON and sets completion time.
    */
   async markCompleted(
     id: string,
     input: MarkCloseOrderExecutionCompletedInput,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrderExecution> {
-    log.methodEntry(this.logger, 'markCompleted', { id, txHash: input.txHash });
+    log.methodEntry(this.logger, 'markCompleted', { id });
 
     try {
       const db = tx ?? this.prisma;
@@ -178,18 +186,13 @@ export class CloseOrderExecutionService {
         where: { id },
         data: {
           status: 'completed',
-          txHash: input.txHash,
-          executionSqrtPriceX96: input.executionSqrtPriceX96,
-          executionFeeBps: input.executionFeeBps,
-          amount0Out: input.amount0Out,
-          amount1Out: input.amount1Out,
-          swapExecution: (input.swapExecution as Prisma.InputJsonValue) ?? undefined,
+          state: input.state as Prisma.InputJsonValue,
           completedAt: new Date(),
         },
       });
 
       this.logger.info(
-        { executionId: id, txHash: input.txHash },
+        { executionId: id },
         'Execution completed successfully',
       );
       log.methodExit(this.logger, 'markCompleted', { id });

@@ -21,7 +21,7 @@ import {
   UniswapV3PoolSearchService,
   UniswapV3PositionService,
   PositionListService,
-  OnChainCloseOrderService,
+  CloseOrderService,
   SharedContractService,
   PoolSubscriptionService,
   AutomationLogService,
@@ -49,7 +49,7 @@ let _uniswapV3PoolDiscoveryService: UniswapV3PoolDiscoveryService | null = null;
 let _uniswapV3PoolSearchService: UniswapV3PoolSearchService | null = null;
 let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _positionListService: PositionListService | null = null;
-let _onChainCloseOrderService: OnChainCloseOrderService | null = null;
+let _closeOrderService: CloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
@@ -204,13 +204,13 @@ export function getPositionListService(): PositionListService {
 }
 
 /**
- * Get singleton instance of OnChainCloseOrderService
+ * Get singleton instance of CloseOrderService
  */
-export function getOnChainCloseOrderService(): OnChainCloseOrderService {
-  if (!_onChainCloseOrderService) {
-    _onChainCloseOrderService = new OnChainCloseOrderService();
+export function getCloseOrderService(): CloseOrderService {
+  if (!_closeOrderService) {
+    _closeOrderService = new CloseOrderService();
   }
-  return _onChainCloseOrderService;
+  return _closeOrderService;
 }
 
 /**

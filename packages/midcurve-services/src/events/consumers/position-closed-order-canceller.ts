@@ -11,7 +11,7 @@ import { OnChainOrderStatus } from '@midcurve/shared';
 import { DomainEventConsumer } from '../consumer.js';
 import { DOMAIN_QUEUES, ROUTING_PATTERNS } from '../topology.js';
 import type { DomainEvent, PositionClosedPayload } from '../types.js';
-import { OnChainCloseOrderService } from '../../services/automation/on-chain-close-order-service.js';
+import { CloseOrderService } from '../../services/automation/close-order-service.js';
 import { PoolSubscriptionService } from '../../services/automation/pool-subscription-service.js';
 
 // ============================================================
@@ -44,13 +44,13 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
   readonly queueName = DOMAIN_QUEUES.POSITION_CLOSED_ORDER_CANCELLER;
 
   private readonly prisma: PrismaClient;
-  private readonly orderService: OnChainCloseOrderService;
+  private readonly orderService: CloseOrderService;
   private readonly poolSubscriptionService: PoolSubscriptionService;
 
   constructor(deps: PositionClosedOrderCancellerDependencies = {}) {
     super();
     this.prisma = deps.prisma ?? prismaClient;
-    this.orderService = new OnChainCloseOrderService({ prisma: this.prisma });
+    this.orderService = new CloseOrderService({ prisma: this.prisma });
     this.poolSubscriptionService = new PoolSubscriptionService({ prisma: this.prisma });
   }
 

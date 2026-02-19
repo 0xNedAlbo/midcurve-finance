@@ -6,7 +6,7 @@
  */
 
 import {
-  OnChainCloseOrderService,
+  CloseOrderService,
   CloseOrderExecutionService,
   PoolSubscriptionService,
   UniswapV3PoolService,
@@ -19,7 +19,7 @@ import {
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
-let _onChainCloseOrderService: OnChainCloseOrderService | null = null;
+let _closeOrderService: CloseOrderService | null = null;
 let _closeOrderExecutionService: CloseOrderExecutionService | null = null;
 let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
@@ -29,13 +29,13 @@ let _webhookConfigService: WebhookConfigService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
 
 /**
- * Get singleton instance of OnChainCloseOrderService
+ * Get singleton instance of CloseOrderService
  */
-export function getOnChainCloseOrderService(): OnChainCloseOrderService {
-  if (!_onChainCloseOrderService) {
-    _onChainCloseOrderService = new OnChainCloseOrderService();
+export function getCloseOrderService(): CloseOrderService {
+  if (!_closeOrderService) {
+    _closeOrderService = new CloseOrderService();
   }
-  return _onChainCloseOrderService;
+  return _closeOrderService;
 }
 
 /**
@@ -111,7 +111,7 @@ export function getUserNotificationService(): UserNotificationService {
         new WebhookNotificationAdapter({
           webhookConfigService: getWebhookConfigService(),
           positionService: getPositionService(),
-          onChainCloseOrderService: getOnChainCloseOrderService(),
+          closeOrderService: getCloseOrderService(),
         }),
       ],
     });

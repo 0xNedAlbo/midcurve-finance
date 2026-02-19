@@ -15,9 +15,9 @@ import {
   ApiErrorCode,
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
-import { serializeOnChainCloseOrder } from '@/lib/serializers';
+import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getOnChainCloseOrderService, getUniswapV3PositionService } from '@/lib/services';
+import { getCloseOrderService, getUniswapV3PositionService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 import { OnChainOrderStatus } from '@midcurve/shared';
 
@@ -189,7 +189,7 @@ export async function GET(
 
       // 4. Fetch close orders for position
       const filterOptions = statusToFilterOptions(status);
-      let orders = await getOnChainCloseOrderService().findByPositionId(
+      let orders = await getCloseOrderService().findByPositionId(
         position.id,
         filterOptions
       );
@@ -203,7 +203,7 @@ export async function GET(
       }
 
       // 6. Serialize and return
-      const serializedOrders = orders.map(serializeOnChainCloseOrder);
+      const serializedOrders = orders.map(serializeCloseOrder);
 
       const response = createSuccessResponse(serializedOrders);
 

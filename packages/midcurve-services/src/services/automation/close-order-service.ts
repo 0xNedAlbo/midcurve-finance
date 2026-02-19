@@ -1,30 +1,30 @@
 /**
- * On-Chain Close Order Service
+ * Close Order Service
  *
- * Provides CRUD operations and lifecycle management for on-chain close orders.
- * Replaces the old CloseOrderService that used JSON blobs (config/state columns).
- *
- * Operates on `prisma.onChainCloseOrder` with explicit columns that mirror
- * the smart contract's CloseOrder struct. Returns Prisma-generated types directly
- * — no domain class hierarchy, no factory pattern.
+ * Provides CRUD operations and lifecycle management for close orders.
+ * Platform-independent: all protocol-specific data lives in JSON config/state columns.
  *
  * Key concepts:
+ * - protocol: discriminator ('uniswapv3', future: 'aave', 'hyperliquid', etc.)
+ * - config: immutable identity data (JSON) — chainId, nftId, contractAddress, etc.
+ * - state: mutable on-chain state (JSON) — triggerTick, pool, slippage, etc.
+ * - orderIdentityHash: unique identifier, e.g. "uniswapv3/{chainId}/{nftId}/{triggerMode}"
  * - onChainStatus: mirrors contract OrderStatus enum (NONE/ACTIVE/EXECUTED/CANCELLED)
- * - monitoringState: off-chain state managed by our price monitor (idle/monitoring/triggered/suspended)
+ * - monitoringState: off-chain state managed by price monitor (idle/monitoring/triggered/suspended)
  * - closeOrderHash: URL-friendly identifier "sl@{tick}" or "tp@{tick}"
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
-import type { OnChainCloseOrder, Prisma } from '@midcurve/database';
+import type { CloseOrder, Prisma } from '@midcurve/database';
 import { OnChainOrderStatus, type MonitoringState } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import type {
-  CreateOnChainCloseOrderInput,
+  CreateCloseOrderInput,
   UpsertFromOnChainEventInput,
   SyncFromChainInput,
-  FindOnChainCloseOrderOptions,
+  FindCloseOrderOptions,
 } from '../types/automation/index.js';
 
 // ============================================================================
@@ -32,17 +32,17 @@ import type {
 // ============================================================================
 
 /**
- * Dependencies for OnChainCloseOrderService
+ * Dependencies for CloseOrderService
  */
-export interface OnChainCloseOrderServiceDependencies {
+export interface CloseOrderServiceDependencies {
   prisma?: PrismaClient;
 }
 
 /**
- * OnChainCloseOrder with position and pool relations included.
+ * CloseOrder with position and pool relations included.
  * Used by price monitor for subscription sync.
  */
-export interface OnChainCloseOrderWithPosition extends OnChainCloseOrder {
+export interface CloseOrderWithPosition extends CloseOrder {
   position: {
     id: string;
     pool: {
@@ -56,13 +56,13 @@ export interface OnChainCloseOrderWithPosition extends OnChainCloseOrder {
 // Service
 // ============================================================================
 
-export class OnChainCloseOrderService {
+export class CloseOrderService {
   private readonly prisma: PrismaClient;
   private readonly logger: ServiceLogger;
 
-  constructor(dependencies: OnChainCloseOrderServiceDependencies = {}) {
+  constructor(dependencies: CloseOrderServiceDependencies = {}) {
     this.prisma = dependencies.prisma ?? prismaClient;
-    this.logger = createServiceLogger('OnChainCloseOrderService');
+    this.logger = createServiceLogger('CloseOrderService');
   }
 
   // ==========================================================================
@@ -70,51 +70,39 @@ export class OnChainCloseOrderService {
   // ==========================================================================
 
   /**
-   * Creates a new on-chain close order record.
+   * Creates a new close order record.
    * Used by the API registration flow when a user registers via UI.
    */
   async create(
-    input: CreateOnChainCloseOrderInput,
+    input: CreateCloseOrderInput,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'create', {
       positionId: input.positionId,
-      chainId: input.chainId,
-      nftId: input.nftId,
-      triggerMode: input.triggerMode,
+      protocol: input.protocol,
+      orderIdentityHash: input.orderIdentityHash,
     });
 
     try {
       const db = tx ?? this.prisma;
 
-      const result = await db.onChainCloseOrder.create({
+      const result = await db.closeOrder.create({
         data: {
+          protocol: input.protocol,
           positionId: input.positionId,
-          chainId: input.chainId,
-          nftId: input.nftId,
-          triggerMode: input.triggerMode,
-          contractAddress: input.contractAddress,
           sharedContractId: input.sharedContractId,
-          onChainStatus: input.onChainStatus ?? OnChainOrderStatus.NONE,
-          triggerTick: input.triggerTick,
-          slippageBps: input.slippageBps,
-          payoutAddress: input.payoutAddress,
-          operatorAddress: input.operatorAddress,
-          owner: input.owner,
-          pool: input.pool,
-          validUntil: input.validUntil,
-          swapDirection: input.swapDirection ?? 0,
-          swapSlippageBps: input.swapSlippageBps ?? 0,
-          registrationTxHash: input.registrationTxHash,
-          registeredAt: input.registeredAt,
+          orderIdentityHash: input.orderIdentityHash,
           closeOrderHash: input.closeOrderHash,
+          onChainStatus: input.onChainStatus ?? OnChainOrderStatus.NONE,
           monitoringState: input.monitoringState ?? 'idle',
+          config: input.config as Prisma.InputJsonValue,
+          state: input.state as Prisma.InputJsonValue,
         },
       });
 
       this.logger.info(
-        { id: result.id, positionId: result.positionId },
-        'On-chain close order created',
+        { id: result.id, positionId: result.positionId, protocol: result.protocol },
+        'Close order created',
       );
       log.methodExit(this.logger, 'create', { id: result.id });
       return result;
@@ -127,70 +115,53 @@ export class OnChainCloseOrderService {
   /**
    * Upserts an order from an on-chain event (OrderRegistered).
    * Used by ProcessCloseOrderEventsRule when indexing contract events.
-   * Upserts on (chainId, nftId, triggerMode) unique constraint.
+   * Upserts on orderIdentityHash unique constraint.
    */
   async upsertFromOnChainEvent(
     input: UpsertFromOnChainEventInput,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'upsertFromOnChainEvent', {
       positionId: input.positionId,
-      chainId: input.chainId,
-      nftId: input.nftId,
-      triggerMode: input.triggerMode,
+      protocol: input.protocol,
+      orderIdentityHash: input.orderIdentityHash,
     });
 
     try {
       const db = tx ?? this.prisma;
 
-      const data = {
+      const sharedData = {
         positionId: input.positionId,
-        contractAddress: input.contractAddress,
         sharedContractId: input.sharedContractId,
         onChainStatus: input.onChainStatus,
-        triggerTick: input.triggerTick,
-        slippageBps: input.slippageBps,
-        payoutAddress: input.payoutAddress,
-        operatorAddress: input.operatorAddress,
-        owner: input.owner,
-        pool: input.pool,
-        validUntil: input.validUntil,
-        swapDirection: input.swapDirection,
-        swapSlippageBps: input.swapSlippageBps,
-        registrationTxHash: input.registrationTxHash,
-        registeredAt: new Date(),
         closeOrderHash: input.closeOrderHash,
-        lastSyncBlock: input.blockNumber,
         lastSyncedAt: new Date(),
-        monitoringState: 'monitoring' as MonitoringState,
+        monitoringState: input.monitoringState ?? ('monitoring' as MonitoringState),
+        config: input.config as Prisma.InputJsonValue,
+        state: input.state as Prisma.InputJsonValue,
       };
 
-      const result = await db.onChainCloseOrder.upsert({
+      const result = await db.closeOrder.upsert({
         where: {
-          chainId_nftId_triggerMode: {
-            chainId: input.chainId,
-            nftId: input.nftId,
-            triggerMode: input.triggerMode,
-          },
+          orderIdentityHash: input.orderIdentityHash,
         },
         create: {
-          chainId: input.chainId,
-          nftId: input.nftId,
-          triggerMode: input.triggerMode,
-          ...data,
+          protocol: input.protocol,
+          orderIdentityHash: input.orderIdentityHash,
+          ...sharedData,
         },
-        update: data,
+        update: sharedData,
       });
 
       this.logger.info(
         {
           id: result.id,
           positionId: input.positionId,
-          nftId: input.nftId,
-          triggerMode: input.triggerMode,
+          protocol: input.protocol,
+          orderIdentityHash: input.orderIdentityHash,
           closeOrderHash: input.closeOrderHash,
         },
-        'On-chain close order upserted from event',
+        'Close order upserted from event',
       );
       log.methodExit(this.logger, 'upsertFromOnChainEvent', { id: result.id });
       return result;
@@ -208,61 +179,41 @@ export class OnChainCloseOrderService {
   async findById(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder | null> {
+  ): Promise<CloseOrder | null> {
     const db = tx ?? this.prisma;
-    return db.onChainCloseOrder.findUnique({ where: { id } });
+    return db.closeOrder.findUnique({ where: { id } });
   }
 
   /**
-   * Finds an order by its on-chain identity (chainId, nftId, triggerMode).
-   * Direct unique index lookup — replaces the old JSON path filtering.
+   * Finds an order by its unique identity hash.
+   * E.g. "uniswapv3/1/12345/0" for UniswapV3 orders.
    */
-  async findByOnChainIdentity(
-    chainId: number,
-    nftId: string,
-    triggerMode: number,
+  async findByOrderIdentityHash(
+    orderIdentityHash: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder | null> {
+  ): Promise<CloseOrder | null> {
     const db = tx ?? this.prisma;
-    return db.onChainCloseOrder.findUnique({
-      where: {
-        chainId_nftId_triggerMode: { chainId, nftId, triggerMode },
-      },
-    });
-  }
-
-  /**
-   * Finds an order by position ID and trigger mode.
-   * Uses @@unique([positionId, triggerMode]).
-   */
-  async findByPositionAndTriggerMode(
-    positionId: string,
-    triggerMode: number,
-    tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder | null> {
-    const db = tx ?? this.prisma;
-    return db.onChainCloseOrder.findUnique({
-      where: {
-        positionId_triggerMode: { positionId, triggerMode },
-      },
+    return db.closeOrder.findUnique({
+      where: { orderIdentityHash },
     });
   }
 
   /**
    * Finds an order by position ID and close order hash.
    * URL-friendly lookup for API endpoints.
+   * Uses @@unique([positionId, closeOrderHash]).
    */
   async findByPositionAndHash(
     positionId: string,
     closeOrderHash: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder | null> {
+  ): Promise<CloseOrder | null> {
     const db = tx ?? this.prisma;
-    const results = await db.onChainCloseOrder.findMany({
-      where: { positionId, closeOrderHash },
-      take: 1,
+    return db.closeOrder.findUnique({
+      where: {
+        positionId_closeOrderHash: { positionId, closeOrderHash },
+      },
     });
-    return results[0] ?? null;
   }
 
   /**
@@ -270,13 +221,13 @@ export class OnChainCloseOrderService {
    */
   async findByPositionId(
     positionId: string,
-    options: FindOnChainCloseOrderOptions = {},
+    options: FindCloseOrderOptions = {},
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder[]> {
+  ): Promise<CloseOrder[]> {
     const db = tx ?? this.prisma;
     const where = this.buildWhereClause({ ...options, positionId });
 
-    return db.onChainCloseOrder.findMany({
+    return db.closeOrder.findMany({
       where,
       orderBy: { createdAt: 'desc' },
     });
@@ -289,9 +240,9 @@ export class OnChainCloseOrderService {
    */
   async findMonitoringOrders(
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrderWithPosition[]> {
+  ): Promise<CloseOrderWithPosition[]> {
     const db = tx ?? this.prisma;
-    return db.onChainCloseOrder.findMany({
+    return db.closeOrder.findMany({
       where: {
         onChainStatus: OnChainOrderStatus.ACTIVE,
         monitoringState: 'monitoring',
@@ -304,12 +255,13 @@ export class OnChainCloseOrderService {
           },
         },
       },
-    }) as Promise<OnChainCloseOrderWithPosition[]>;
+    }) as Promise<CloseOrderWithPosition[]>;
   }
 
   /**
    * Gets distinct pools with actively monitoring orders.
    * Used for pool price subscription sync.
+   * Extracts chainId/poolAddress from position→pool config (platform-independent).
    */
   async getPoolsWithMonitoringOrders(
     tx?: PrismaTransactionClient,
@@ -318,18 +270,15 @@ export class OnChainCloseOrderService {
 
     try {
       const db = tx ?? this.prisma;
-      const orders = await db.onChainCloseOrder.findMany({
+      const orders = await db.closeOrder.findMany({
         where: {
           onChainStatus: OnChainOrderStatus.ACTIVE,
           monitoringState: 'monitoring',
-          pool: { not: null },
         },
         select: {
-          chainId: true,
-          pool: true,
           position: {
             select: {
-              pool: { select: { id: true } },
+              pool: { select: { id: true, config: true } },
             },
           },
         },
@@ -341,14 +290,20 @@ export class OnChainCloseOrderService {
       >();
 
       for (const order of orders) {
-        const poolAddress = order.pool;
-        const poolId = order.position?.pool?.id;
-        if (poolAddress && poolId) {
-          const key = `${order.chainId}-${poolAddress.toLowerCase()}`;
+        const pool = order.position?.pool;
+        if (!pool) continue;
+
+        const poolConfig = pool.config as Record<string, unknown> | null;
+        if (!poolConfig) continue;
+
+        const chainId = poolConfig.chainId as number | undefined;
+        const poolAddress = poolConfig.address as string | undefined;
+        if (chainId && poolAddress) {
+          const key = `${chainId}-${poolAddress.toLowerCase()}`;
           poolsMap.set(key, {
-            chainId: order.chainId,
+            chainId,
             poolAddress,
-            poolId,
+            poolId: pool.id,
           });
         }
       }
@@ -371,16 +326,18 @@ export class OnChainCloseOrderService {
 
   /**
    * Finds actively monitoring orders for a specific pool.
-   * Uses @@index([pool]) directly.
+   * Filters via position→pool relation since pool address is now in JSON config.
    */
   async findMonitoringOrdersForPool(
-    poolAddress: string,
+    poolId: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder[]> {
+  ): Promise<CloseOrder[]> {
     const db = tx ?? this.prisma;
-    return db.onChainCloseOrder.findMany({
+    return db.closeOrder.findMany({
       where: {
-        pool: poolAddress,
+        position: {
+          pool: { id: poolId },
+        },
         onChainStatus: OnChainOrderStatus.ACTIVE,
         monitoringState: 'monitoring',
       },
@@ -395,12 +352,12 @@ export class OnChainCloseOrderService {
 
     try {
       const db = tx ?? this.prisma;
-      const existing = await db.onChainCloseOrder.findUnique({
+      const existing = await db.closeOrder.findUnique({
         where: { id },
       });
 
       if (!existing) {
-        throw new Error(`On-chain close order not found: ${id}`);
+        throw new Error(`Close order not found: ${id}`);
       }
 
       const terminalStatuses = [
@@ -420,9 +377,9 @@ export class OnChainCloseOrderService {
         );
       }
 
-      await db.onChainCloseOrder.delete({ where: { id } });
+      await db.closeOrder.delete({ where: { id } });
 
-      this.logger.info({ id }, 'On-chain close order deleted');
+      this.logger.info({ id }, 'Close order deleted');
       log.methodExit(this.logger, 'delete', { id });
     } catch (error) {
       log.methodError(this.logger, 'delete', error as Error, { id });
@@ -431,152 +388,128 @@ export class OnChainCloseOrderService {
   }
 
   // ==========================================================================
-  // ON-CHAIN STATE UPDATES (from ProcessCloseOrderEventsRule)
+  // STATE UPDATES
   // ==========================================================================
 
   /**
-   * Updates on-chain fields from contract config-change events.
-   * Generic field update for operator, payout, validUntil, slippage changes.
+   * Merges partial updates into the order's state JSON (read-modify-write).
+   * Used for on-chain config-change events (operator, payout, validUntil, slippage).
    */
-  async updateOnChainFields(
+  async mergeState(
     id: string,
-    data: Prisma.OnChainCloseOrderUpdateInput,
+    stateUpdates: Record<string, unknown>,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
-    log.methodEntry(this.logger, 'updateOnChainFields', {
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'mergeState', {
       id,
-      updateKeys: Object.keys(data),
+      updateKeys: Object.keys(stateUpdates),
     });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+      const existing = await db.closeOrder.findUnique({ where: { id } });
+      if (!existing) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      const currentState = (existing.state as Record<string, unknown>) ?? {};
+      const mergedState = { ...currentState, ...stateUpdates };
+
+      const result = await db.closeOrder.update({
         where: { id },
-        data,
+        data: { state: mergedState as Prisma.InputJsonValue },
       });
 
       this.logger.info(
-        { id, updatedFields: Object.keys(data) },
-        'On-chain close order fields updated',
+        { id, updatedFields: Object.keys(stateUpdates) },
+        'Close order state merged',
       );
-      log.methodExit(this.logger, 'updateOnChainFields', { id });
+      log.methodExit(this.logger, 'mergeState', { id });
       return result;
     } catch (error) {
-      log.methodError(this.logger, 'updateOnChainFields', error as Error, {
-        id,
-      });
+      log.methodError(this.logger, 'mergeState', error as Error, { id });
       throw error;
     }
   }
 
   /**
-   * Updates trigger tick and recalculates closeOrderHash.
+   * Updates the closeOrderHash column (e.g. when trigger tick changes).
+   * Also merges state updates if provided.
    */
-  async updateTriggerTick(
+  async updateCloseOrderHash(
     id: string,
-    newTriggerTick: number,
     newCloseOrderHash: string,
+    stateUpdates?: Record<string, unknown>,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
-    log.methodEntry(this.logger, 'updateTriggerTick', {
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'updateCloseOrderHash', {
       id,
-      newTriggerTick,
       newCloseOrderHash,
     });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+
+      if (stateUpdates) {
+        const existing = await db.closeOrder.findUnique({ where: { id } });
+        if (!existing) {
+          throw new Error(`Close order not found: ${id}`);
+        }
+
+        const currentState = (existing.state as Record<string, unknown>) ?? {};
+        const mergedState = { ...currentState, ...stateUpdates };
+
+        const result = await db.closeOrder.update({
+          where: { id },
+          data: {
+            closeOrderHash: newCloseOrderHash,
+            state: mergedState as Prisma.InputJsonValue,
+          },
+        });
+
+        this.logger.info({ id, newCloseOrderHash }, 'Close order hash and state updated');
+        log.methodExit(this.logger, 'updateCloseOrderHash', { id });
+        return result;
+      }
+
+      const result = await db.closeOrder.update({
         where: { id },
-        data: {
-          triggerTick: newTriggerTick,
-          closeOrderHash: newCloseOrderHash,
-        },
+        data: { closeOrderHash: newCloseOrderHash },
       });
 
-      this.logger.info(
-        { id, newTriggerTick, newCloseOrderHash },
-        'Trigger tick updated',
-      );
-      log.methodExit(this.logger, 'updateTriggerTick', { id });
+      this.logger.info({ id, newCloseOrderHash }, 'Close order hash updated');
+      log.methodExit(this.logger, 'updateCloseOrderHash', { id });
       return result;
     } catch (error) {
-      log.methodError(this.logger, 'updateTriggerTick', error as Error, {
+      log.methodError(this.logger, 'updateCloseOrderHash', error as Error, {
         id,
-        newTriggerTick,
+        newCloseOrderHash,
       });
       throw error;
     }
   }
 
   /**
-   * Updates swap configuration from on-chain SwapIntentUpdated event.
-   */
-  async updateSwapConfig(
-    id: string,
-    swapDirection: number,
-    swapSlippageBps: number,
-    tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
-    log.methodEntry(this.logger, 'updateSwapConfig', {
-      id,
-      swapDirection,
-      swapSlippageBps,
-    });
-
-    try {
-      const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
-        where: { id },
-        data: { swapDirection, swapSlippageBps },
-      });
-
-      this.logger.info(
-        { id, swapDirection, swapSlippageBps },
-        'Swap config updated',
-      );
-      log.methodExit(this.logger, 'updateSwapConfig', { id });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'updateSwapConfig', error as Error, {
-        id,
-        swapDirection,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Refreshes all on-chain fields from a getOrder() call.
-   * Sets lastSyncedAt and lastSyncBlock.
+   * Refreshes all on-chain state from a getOrder() call.
+   * Replaces the full state JSON and updates onChainStatus + lastSyncedAt.
    */
   async syncFromChain(
     id: string,
     chainData: SyncFromChainInput,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'syncFromChain', {
       id,
       onChainStatus: chainData.onChainStatus,
-      lastSyncBlock: chainData.lastSyncBlock,
     });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+      const result = await db.closeOrder.update({
         where: { id },
         data: {
           onChainStatus: chainData.onChainStatus,
-          triggerTick: chainData.triggerTick,
-          slippageBps: chainData.slippageBps,
-          payoutAddress: chainData.payoutAddress,
-          operatorAddress: chainData.operatorAddress,
-          owner: chainData.owner,
-          pool: chainData.pool,
-          validUntil: chainData.validUntil,
-          swapDirection: chainData.swapDirection,
-          swapSlippageBps: chainData.swapSlippageBps,
-          lastSyncBlock: chainData.lastSyncBlock,
+          state: chainData.state as Prisma.InputJsonValue,
           lastSyncedAt: new Date(),
         },
       });
@@ -598,24 +531,37 @@ export class OnChainCloseOrderService {
   // ==========================================================================
 
   /**
-   * Marks order as ACTIVE on-chain. Sets registration metadata and starts monitoring.
+   * Marks order as ACTIVE on-chain. Merges registration metadata into state
+   * and starts monitoring.
    */
   async markOnChainActive(
     id: string,
     input: { registrationTxHash: string; registeredAt?: Date },
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'markOnChainActive', { id });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+
+      const existing = await db.closeOrder.findUnique({ where: { id } });
+      if (!existing) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      const currentState = (existing.state as Record<string, unknown>) ?? {};
+      const mergedState = {
+        ...currentState,
+        registrationTxHash: input.registrationTxHash,
+        registeredAt: (input.registeredAt ?? new Date()).toISOString(),
+      };
+
+      const result = await db.closeOrder.update({
         where: { id },
         data: {
           onChainStatus: OnChainOrderStatus.ACTIVE,
-          registrationTxHash: input.registrationTxHash,
-          registeredAt: input.registeredAt ?? new Date(),
           monitoringState: 'monitoring',
+          state: mergedState as Prisma.InputJsonValue,
         },
       });
 
@@ -636,12 +582,12 @@ export class OnChainCloseOrderService {
   async markOnChainExecuted(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'markOnChainExecuted', { id });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+      const result = await db.closeOrder.update({
         where: { id },
         data: {
           onChainStatus: OnChainOrderStatus.EXECUTED,
@@ -666,12 +612,12 @@ export class OnChainCloseOrderService {
   async markOnChainCancelled(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'markOnChainCancelled', { id });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+      const result = await db.closeOrder.update({
         where: { id },
         data: {
           onChainStatus: OnChainOrderStatus.CANCELLED,
@@ -703,13 +649,13 @@ export class OnChainCloseOrderService {
   async atomicTransitionToTriggered(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'atomicTransitionToTriggered', { id });
 
     try {
       const db = tx ?? this.prisma;
 
-      const updateResult = await db.onChainCloseOrder.updateMany({
+      const updateResult = await db.closeOrder.updateMany({
         where: {
           id,
           monitoringState: 'monitoring',
@@ -720,7 +666,7 @@ export class OnChainCloseOrderService {
       });
 
       if (updateResult.count === 0) {
-        const current = await db.onChainCloseOrder.findUnique({
+        const current = await db.closeOrder.findUnique({
           where: { id },
           select: { monitoringState: true },
         });
@@ -731,7 +677,7 @@ export class OnChainCloseOrderService {
         );
       }
 
-      const result = await db.onChainCloseOrder.findUnique({ where: { id } });
+      const result = await db.closeOrder.findUnique({ where: { id } });
       if (!result) {
         throw new Error(`Order ${id} not found after transition`);
       }
@@ -756,7 +702,7 @@ export class OnChainCloseOrderService {
   async transitionToMonitoring(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     return this.updateMonitoringState(id, 'monitoring', tx);
   }
 
@@ -766,7 +712,7 @@ export class OnChainCloseOrderService {
   async transitionToSuspended(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     return this.updateMonitoringState(id, 'suspended', tx);
   }
 
@@ -776,7 +722,7 @@ export class OnChainCloseOrderService {
   async transitionToIdle(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     return this.updateMonitoringState(id, 'idle', tx);
   }
 
@@ -786,7 +732,7 @@ export class OnChainCloseOrderService {
   async startMonitoring(
     id: string,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     return this.updateMonitoringState(id, 'monitoring', tx);
   }
 
@@ -798,12 +744,12 @@ export class OnChainCloseOrderService {
     id: string,
     newState: MonitoringState,
     tx?: PrismaTransactionClient,
-  ): Promise<OnChainCloseOrder> {
+  ): Promise<CloseOrder> {
     log.methodEntry(this.logger, 'updateMonitoringState', { id, newState });
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.onChainCloseOrder.update({
+      const result = await db.closeOrder.update({
         where: { id },
         data: { monitoringState: newState },
       });
@@ -821,9 +767,9 @@ export class OnChainCloseOrderService {
   }
 
   private buildWhereClause(
-    options: FindOnChainCloseOrderOptions & { positionId?: string },
-  ): Prisma.OnChainCloseOrderWhereInput {
-    const where: Prisma.OnChainCloseOrderWhereInput = {};
+    options: FindCloseOrderOptions & { positionId?: string },
+  ): Prisma.CloseOrderWhereInput {
+    const where: Prisma.CloseOrderWhereInput = {};
 
     if (options.positionId) {
       where.positionId = options.positionId;
@@ -843,10 +789,6 @@ export class OnChainCloseOrderService {
       } else {
         where.monitoringState = options.monitoringState;
       }
-    }
-
-    if (options.triggerMode !== undefined) {
-      where.triggerMode = options.triggerMode;
     }
 
     return where;

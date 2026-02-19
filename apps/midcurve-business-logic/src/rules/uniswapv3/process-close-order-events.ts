@@ -20,9 +20,9 @@
 
 import type { ConsumeMessage } from 'amqplib';
 import { prisma, type PrismaClient } from '@midcurve/database';
-import type { OnChainCloseOrder } from '@midcurve/database';
+import type { CloseOrder } from '@midcurve/database';
 import {
-  OnChainCloseOrderService,
+  CloseOrderService,
   PoolSubscriptionService,
   AutomationLogService,
   UniswapV3PositionService,
@@ -39,6 +39,7 @@ import {
   ContractTriggerMode,
   ContractSwapDirection,
   OnChainOrderStatus,
+  createUniswapV3OrderIdentityHash,
 } from '@midcurve/shared';
 
 /** Transaction client type — subset of PrismaClient usable inside $transaction */
@@ -101,14 +102,14 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     'Processes close order lifecycle events from on-chain data (registration, cancellation, config updates)';
 
   private consumerTag: string | null = null;
-  private orderService: OnChainCloseOrderService;
+  private orderService: CloseOrderService;
   private poolSubscriptionService: PoolSubscriptionService;
   private automationLogService: AutomationLogService;
   private positionService: UniswapV3PositionService;
 
   constructor() {
     super();
-    this.orderService = new OnChainCloseOrderService({ prisma });
+    this.orderService = new CloseOrderService({ prisma });
     this.poolSubscriptionService = new PoolSubscriptionService({ prisma });
     this.automationLogService = new AutomationLogService({ prisma });
     this.positionService = new UniswapV3PositionService({ prisma });
@@ -233,17 +234,20 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Finds the close order matching the event's on-chain identifiers.
-   * Uses the (chainId, nftId, triggerMode) unique index.
+   * Uses the orderIdentityHash unique index.
    */
   private async resolveOrder(
     event: AnyCloseOrderEvent,
     tx?: TxClient
-  ): Promise<OnChainCloseOrder | null> {
+  ): Promise<CloseOrder | null> {
     const triggerMode = parseTriggerMode(event.triggerMode);
-    const order = await this.orderService.findByOnChainIdentity(
+    const orderIdentityHash = createUniswapV3OrderIdentityHash(
       event.chainId,
       event.nftId,
-      triggerMode,
+      triggerMode
+    );
+    const order = await this.orderService.findByOrderIdentityHash(
+      orderIdentityHash,
       tx
     );
 
@@ -253,6 +257,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           chainId: event.chainId,
           nftId: event.nftId,
           triggerMode: event.triggerMode,
+          orderIdentityHash,
           eventType: event.type,
         },
         'No matching close order found for event'
@@ -292,13 +297,18 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Builds an orderTag for automation log messages.
-   * Uses explicit columns (triggerMode, triggerTick) instead of JSON config parsing.
+   * Extracts triggerMode from config JSON and triggerTick from state JSON.
    */
   private async buildOrderTag(
-    order: OnChainCloseOrder,
+    order: CloseOrder,
     tx?: TxClient
   ): Promise<string | null> {
-    if (order.triggerTick === null) return null;
+    const config = (order.config ?? {}) as Record<string, unknown>;
+    const state = (order.state ?? {}) as Record<string, unknown>;
+    const triggerTick = state.triggerTick as number | null | undefined;
+    const triggerMode = config.triggerMode as number;
+
+    if (triggerTick === null || triggerTick === undefined) return null;
 
     const position = await this.positionService.findById(order.positionId, tx);
     if (!position) {
@@ -312,12 +322,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     // Derive semantic triggerSide from on-chain triggerMode + isToken0Quote
     // When isToken0Quote, on-chain UPPER = semantic lower (SL), on-chain LOWER = semantic upper (TP)
     const triggerSide: 'lower' | 'upper' = position.isToken0Quote
-      ? (order.triggerMode === ContractTriggerMode.UPPER ? 'lower' : 'upper')
-      : (order.triggerMode === ContractTriggerMode.LOWER ? 'lower' : 'upper');
+      ? (triggerMode === ContractTriggerMode.UPPER ? 'lower' : 'upper')
+      : (triggerMode === ContractTriggerMode.LOWER ? 'lower' : 'upper');
 
     return generateOrderTagFromTick({
       triggerSide,
-      triggerTick: order.triggerTick,
+      triggerTick,
       token0IsQuote: position.isToken0Quote,
       token0Decimals: position.pool.token0.decimals,
       token1Decimals: position.pool.token1.decimals,
@@ -326,6 +336,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Builds a UpsertFromOnChainEventInput from a registered event.
+   * Packs protocol-specific data into config/state JSON.
    */
   private buildUpsertInput(
     event: OrderRegisteredEvent,
@@ -334,25 +345,38 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     const triggerMode = parseTriggerMode(event.triggerMode);
     const { payload } = event;
 
+    const orderIdentityHash = createUniswapV3OrderIdentityHash(
+      event.chainId,
+      event.nftId,
+      triggerMode
+    );
+
     return {
+      protocol: 'uniswapv3' as const,
       positionId,
-      chainId: event.chainId,
-      nftId: event.nftId,
-      triggerMode,
-      contractAddress: event.contractAddress,
+      orderIdentityHash,
       onChainStatus: OnChainOrderStatus.ACTIVE,
-      triggerTick: payload.triggerTick,
-      slippageBps: payload.slippageBps,
-      payoutAddress: payload.payout,
-      operatorAddress: payload.operator,
-      owner: payload.owner,
-      pool: payload.pool,
-      validUntil: new Date(Number(payload.validUntil) * 1000),
-      swapDirection: parseSwapDirection(payload.swapDirection),
-      swapSlippageBps: payload.swapSlippageBps,
-      registrationTxHash: event.transactionHash,
-      blockNumber: parseInt(event.blockNumber, 10),
       closeOrderHash: deriveCloseOrderHashFromTick(triggerMode, payload.triggerTick),
+      config: {
+        chainId: event.chainId,
+        nftId: event.nftId,
+        triggerMode,
+        contractAddress: event.contractAddress,
+      },
+      state: {
+        triggerTick: payload.triggerTick,
+        slippageBps: payload.slippageBps,
+        payoutAddress: payload.payout,
+        operatorAddress: payload.operator,
+        owner: payload.owner,
+        pool: payload.pool,
+        validUntil: new Date(Number(payload.validUntil) * 1000).toISOString(),
+        swapDirection: parseSwapDirection(payload.swapDirection),
+        swapSlippageBps: payload.swapSlippageBps,
+        registrationTxHash: event.transactionHash,
+        registeredAt: new Date().toISOString(),
+        lastSyncBlock: parseInt(event.blockNumber, 10),
+      },
     };
   }
 
@@ -373,13 +397,17 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     const { chainId, nftId, triggerMode, transactionHash, payload } = event;
     const triggerModeNum = parseTriggerMode(triggerMode);
 
+    const orderIdentityHash = createUniswapV3OrderIdentityHash(
+      chainId,
+      nftId,
+      triggerModeNum
+    );
+
     // Transaction returns { poolId, isNew, wasTerminal } for post-tx subscription management
     const result = await prisma.$transaction(async (tx) => {
       // Check if order already exists
-      const existingOrder = await this.orderService.findByOnChainIdentity(
-        chainId,
-        nftId,
-        triggerModeNum,
+      const existingOrder = await this.orderService.findByOrderIdentityHash(
+        orderIdentityHash,
         tx
       );
 
@@ -565,7 +593,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.orderService.updateOnChainFields(
+      await this.orderService.mergeState(
         order.id,
         { operatorAddress: event.payload.newOperator },
         tx
@@ -602,7 +630,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.orderService.updateOnChainFields(
+      await this.orderService.mergeState(
         order.id,
         { payoutAddress: event.payload.newPayout },
         tx
@@ -645,16 +673,18 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       // Build order tag BEFORE update (captures old trigger price)
       const oldOrderTag = await this.buildOrderTag(order, tx);
 
+      const orderConfig = (order.config ?? {}) as Record<string, unknown>;
+      const triggerMode = orderConfig.triggerMode as number;
       const newTick = event.payload.newTick;
       const newCloseOrderHash = deriveCloseOrderHashFromTick(
-        order.triggerMode as ContractTriggerMode,
+        triggerMode as ContractTriggerMode,
         newTick
       );
 
-      await this.orderService.updateTriggerTick(
+      await this.orderService.updateCloseOrderHash(
         order.id,
-        newTick,
         newCloseOrderHash,
+        { triggerTick: newTick },
         tx
       );
 
@@ -697,9 +727,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         Number(event.payload.newValidUntil) * 1000
       );
 
-      await this.orderService.updateOnChainFields(
+      await this.orderService.mergeState(
         order.id,
-        { validUntil: newValidUntil },
+        { validUntil: newValidUntil.toISOString() },
         tx
       );
 
@@ -734,7 +764,10 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.orderService.updateOnChainFields(
+      const orderState = (order.state ?? {}) as Record<string, unknown>;
+      const previousSlippageBps = orderState.slippageBps as number | null | undefined;
+
+      await this.orderService.mergeState(
         order.id,
         { slippageBps: event.payload.newSlippageBps },
         tx
@@ -753,7 +786,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           {
             orderTag,
             changes: 'slippage',
-            previousSlippageBps: order.slippageBps ?? undefined,
+            previousSlippageBps: previousSlippageBps ?? undefined,
             newSlippageBps: event.payload.newSlippageBps,
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
@@ -773,10 +806,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const order = await this.resolveOrder(event, tx);
       if (!order) return;
 
-      await this.orderService.updateSwapConfig(
+      await this.orderService.mergeState(
         order.id,
-        parseSwapDirection(event.payload.newDirection),
-        event.payload.swapSlippageBps,
+        {
+          swapDirection: parseSwapDirection(event.payload.newDirection),
+          swapSlippageBps: event.payload.swapSlippageBps,
+        },
         tx
       );
 

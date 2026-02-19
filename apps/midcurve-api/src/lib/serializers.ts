@@ -25,7 +25,7 @@ import type {
   SwapDirection,
 } from '@midcurve/api-shared';
 
-import type { OnChainCloseOrder } from '@midcurve/database';
+import type { CloseOrder } from '@midcurve/database';
 
 // ============================================================================
 // GENERIC SERIALIZATION HELPERS
@@ -289,17 +289,21 @@ function mapSwapDirection(swapDirection: number): SwapDirection | null {
 }
 
 /**
- * Serialize OnChainCloseOrder (Prisma model) for JSON response.
+ * Serialize CloseOrder (Prisma model) for JSON response.
  *
- * Maps explicit columns to the SerializedCloseOrder response type.
- * Legacy config/state blobs are populated for backward compatibility with
- * UI components that haven't migrated yet.
+ * Extracts protocol-specific fields from JSON config/state columns.
+ * Currently only supports 'uniswapv3' protocol for backward compatibility
+ * with UI components.
  */
-export function serializeOnChainCloseOrder(
-  order: OnChainCloseOrder
+export function serializeCloseOrder(
+  order: CloseOrder
 ): SerializedCloseOrder {
+  const config = (order.config ?? {}) as Record<string, unknown>;
+  const state = (order.state ?? {}) as Record<string, unknown>;
+
   return {
     id: order.id,
+    protocol: order.protocol,
     closeOrderHash: order.closeOrderHash,
     closeOrderType: 'uniswapv3',
 
@@ -307,23 +311,25 @@ export function serializeOnChainCloseOrder(
     status: deriveCloseOrderStatus(order.onChainStatus, order.monitoringState),
     monitoringState: order.monitoringState as MonitoringState,
 
-    // Explicit identity fields
+    // Identity fields (from config JSON)
     positionId: order.positionId,
-    chainId: order.chainId,
-    nftId: order.nftId,
-    triggerMode: order.triggerMode === ContractTriggerMode.LOWER ? 'LOWER' : 'UPPER',
-    triggerTick: order.triggerTick,
-    slippageBps: order.slippageBps,
+    chainId: (config.chainId as number) ?? 0,
+    nftId: (config.nftId as string) ?? '',
+    triggerMode: (config.triggerMode as number) === ContractTriggerMode.LOWER ? 'LOWER' : 'UPPER',
 
-    // Swap config
-    swapDirection: mapSwapDirection(order.swapDirection),
-    swapSlippageBps: order.swapSlippageBps,
+    // On-chain state (from state JSON)
+    triggerTick: (state.triggerTick as number | null) ?? null,
+    slippageBps: (state.slippageBps as number | null) ?? null,
 
-    // Additional explicit fields
-    validUntil: order.validUntil?.toISOString() ?? null,
-    payoutAddress: order.payoutAddress,
-    contractAddress: order.contractAddress,
-    operatorAddress: order.operatorAddress,
+    // Swap config (from state JSON)
+    swapDirection: mapSwapDirection((state.swapDirection as number) ?? 0),
+    swapSlippageBps: (state.swapSlippageBps as number | null) ?? null,
+
+    // Additional fields (from config + state JSON)
+    validUntil: (state.validUntil as string | null) ?? null,
+    payoutAddress: (state.payoutAddress as string | null) ?? null,
+    contractAddress: (config.contractAddress as string) ?? '',
+    operatorAddress: (state.operatorAddress as string | null) ?? null,
 
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),

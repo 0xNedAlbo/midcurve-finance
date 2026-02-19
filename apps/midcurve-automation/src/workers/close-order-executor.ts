@@ -13,7 +13,7 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
-import { getOnChainCloseOrderService, getCloseOrderExecutionService, getPoolSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
+import { getCloseOrderService, getCloseOrderExecutionService, getPoolSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -168,7 +168,7 @@ export class CloseOrderExecutor {
       triggerSide,
     });
 
-    const onChainCloseOrderService = getOnChainCloseOrderService();
+    const closeOrderService = getCloseOrderService();
     const executionService = getCloseOrderExecutionService();
 
     try {
@@ -229,7 +229,7 @@ export class CloseOrderExecutor {
           });
 
           // Transition order back to monitoring for re-trigger
-          await onChainCloseOrderService.transitionToMonitoring(orderId);
+          await closeOrderService.transitionToMonitoring(orderId);
 
           await mq.ack(msg); // Remove from main queue
 
@@ -250,7 +250,7 @@ export class CloseOrderExecutor {
         } else {
           // Permanently failed - mark execution as failed and suspend order
           await executionService.markFailed(execution.id, { error: error.message });
-          await onChainCloseOrderService.transitionToSuspended(orderId);
+          await closeOrderService.transitionToSuspended(orderId);
 
           await mq.ack(msg); // Remove from queue - don't requeue
           log.error(
@@ -319,7 +319,7 @@ export class CloseOrderExecutor {
     triggerPrice: string,
     triggerSide: 'lower' | 'upper'
   ): Promise<void> {
-    const onChainCloseOrderService = getOnChainCloseOrderService();
+    const closeOrderService = getCloseOrderService();
     const executionService = getCloseOrderExecutionService();
     const poolSubscriptionService = getPoolSubscriptionService();
     const signerClient = getSignerClient();
@@ -330,23 +330,26 @@ export class CloseOrderExecutor {
       throw new Error(`Unsupported chain: ${chainId}`);
     }
 
-    // Get order details from explicit columns
-    const order = await onChainCloseOrderService.findById(orderId);
+    // Get order details — protocol-specific data is in config/state JSON
+    const order = await closeOrderService.findById(orderId);
     if (!order) {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    // triggerMode is already an int (0=LOWER, 1=UPPER) - no conversion needed
-    const triggerMode = order.triggerMode;
+    const orderConfig = (order.config ?? {}) as Record<string, unknown>;
+    const orderState = (order.state ?? {}) as Record<string, unknown>;
 
-    // Contract address is a direct column
-    const contractAddress = order.contractAddress;
+    // triggerMode from config JSON (0=LOWER, 1=UPPER)
+    const triggerMode = orderConfig.triggerMode as number;
+
+    // Contract address from config JSON
+    const contractAddress = orderConfig.contractAddress as string | undefined;
     if (!contractAddress) {
       throw new Error(`Contract address not configured for order: ${orderId}`);
     }
 
-    // Operator address is a direct column
-    const operatorAddress = order.operatorAddress;
+    // Operator address from state JSON
+    const operatorAddress = orderState.operatorAddress as string | undefined;
     if (!operatorAddress) {
       throw new Error(`Operator address not configured for order: ${orderId}`);
     }
@@ -489,14 +492,16 @@ export class CloseOrderExecutor {
     const automationLogService = getAutomationLogService();
     if (!isRetry) {
       // Atomic transition: monitoring -> triggered (race-safe)
-      await onChainCloseOrderService.atomicTransitionToTriggered(orderId);
+      await closeOrderService.atomicTransitionToTriggered(orderId);
 
       // Create execution record
       await executionService.create({
-        onChainCloseOrderId: orderId,
+        protocol: order.protocol,
+        closeOrderId: orderId,
         positionId,
-        triggerSqrtPriceX96: triggerPrice,
         triggeredAt: new Date(),
+        config: { triggerSqrtPriceX96: triggerPrice },
+        state: {},
       });
 
       // Log ORDER_TRIGGERED for user visibility
@@ -866,14 +871,16 @@ export class CloseOrderExecutor {
     const completedExecution = await executionService.findLatestByOrderId(orderId);
     if (completedExecution) {
       await executionService.markCompleted(completedExecution.id, {
-        txHash,
-        executionSqrtPriceX96: _currentPrice,
-        executionFeeBps: feeConfig.bps,
-        amount0Out: '0', // TODO: Parse from tx receipt
-        amount1Out: '0', // TODO: Parse from tx receipt
+        state: {
+          txHash,
+          executionSqrtPriceX96: _currentPrice,
+          executionFeeBps: feeConfig.bps,
+          amount0Out: '0', // TODO: Parse from tx receipt
+          amount1Out: '0', // TODO: Parse from tx receipt
+        },
       });
     }
-    await onChainCloseOrderService.markOnChainExecuted(orderId);
+    await closeOrderService.markOnChainExecuted(orderId);
 
     // Decrement pool subscription order count
     // Use position.pool.id (database UUID), not poolAddress (contract address)

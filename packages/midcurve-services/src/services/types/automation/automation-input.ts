@@ -314,9 +314,9 @@ export interface CreateAutomationLogInput {
   positionId: string;
 
   /**
-   * Optional on-chain close order ID (for order-specific logs)
+   * Optional close order ID (for order-specific logs)
    */
-  onChainCloseOrderId?: string;
+  closeOrderId?: string;
 
   /**
    * Log level (0=DEBUG, 1=INFO, 2=WARN, 3=ERROR)

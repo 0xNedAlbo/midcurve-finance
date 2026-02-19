@@ -250,6 +250,20 @@ export type {
   SwapConfig,
 } from './automation/index.js';
 
+// UniswapV3 Close Order config/state types
+export type {
+  UniswapV3CloseOrderConfig,
+  UniswapV3CloseOrderState,
+  UniswapV3CloseOrderExecutionConfig,
+  UniswapV3CloseOrderExecutionState,
+} from './automation/index.js';
+
+export {
+  createUniswapV3OrderIdentityHash,
+  createEmptyUniswapV3CloseOrderState,
+  createEmptyUniswapV3ExecutionState,
+} from './automation/index.js';
+
 // ============================================================================
 // Shared Contract Types (platform-independent contract registry)
 // ============================================================================

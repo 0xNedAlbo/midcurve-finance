@@ -16,8 +16,8 @@
  */
 
 import { prisma } from '@midcurve/database';
-import type { OnChainCloseOrder } from '@midcurve/database';
-import { getOnChainCloseOrderService } from '../lib/services';
+import type { CloseOrder } from '@midcurve/database';
+import { getCloseOrderService } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
@@ -201,13 +201,13 @@ export class CloseOrderMonitor {
   }
 
   /**
-   * Sync order subscriptions using OnChainCloseOrderService
+   * Sync order subscriptions using CloseOrderService
    */
   private async syncOrderSubscriptions(): Promise<void> {
-    const onChainCloseOrderService = getOnChainCloseOrderService();
+    const closeOrderService = getCloseOrderService();
 
     // Get all monitoring orders with position→pool relations
-    const monitoringOrders = await onChainCloseOrderService.findMonitoringOrders();
+    const monitoringOrders = await closeOrderService.findMonitoringOrders();
 
     // Get set of active order IDs
     const activeOrderIds = new Set(monitoringOrders.map((o) => o.id));
@@ -226,27 +226,29 @@ export class CloseOrderMonitor {
     // Add subscribers for new monitoring orders
     for (const order of monitoringOrders) {
       if (!this.orderSubscribers.has(order.id)) {
-        // pool column is the on-chain pool address
-        const poolAddress = order.pool;
-        // position.pool.id is the database pool ID (for subscriber record)
+        // Extract pool data from position→pool relation
         const poolId = order.position?.pool?.id;
+        const poolConfig = order.position?.pool?.config as Record<string, unknown> | null;
+        const poolAddress = poolConfig?.address as string | undefined;
+        // Extract chainId from order config JSON
+        const orderConfig = (order.config ?? {}) as Record<string, unknown>;
+        const chainId = orderConfig.chainId as number | undefined;
 
-        if (poolAddress && poolId) {
+        if (poolAddress && poolId && chainId) {
           await this.createOrderSubscriber({
             id: order.id,
             positionId: order.positionId,
             poolAddress,
             poolId,
-            chainId: order.chainId,
-            triggerTick: order.triggerTick,
-            triggerMode: order.triggerMode,
+            chainId,
           });
         } else {
           log.warn({
             orderId: order.id,
             poolAddress,
             poolId,
-            msg: 'Cannot create subscriber: missing pool data',
+            chainId,
+            msg: 'Cannot create subscriber: missing pool data or chainId',
           });
         }
       }
@@ -262,8 +264,6 @@ export class CloseOrderMonitor {
     poolAddress: string;
     poolId: string;
     chainId: number;
-    triggerTick: number | null;
-    triggerMode: number;
   }): Promise<void> {
     try {
       // Create or find the subscriber record in the database
@@ -336,8 +336,8 @@ export class CloseOrderMonitor {
 
     try {
       // Get fresh order data (may have been modified)
-      const onChainCloseOrderService = getOnChainCloseOrderService();
-      const order = await onChainCloseOrderService.findById(orderId);
+      const closeOrderService = getCloseOrderService();
+      const order = await closeOrderService.findById(orderId);
 
       if (!order) {
         log.debug({ orderId }, 'Order not found, shutting down subscriber');
@@ -387,18 +387,24 @@ export class CloseOrderMonitor {
   /**
    * Check if an order's trigger condition is met using direct tick comparison.
    *
+   * Extracts triggerTick from state JSON and triggerMode from config JSON.
    * - LOWER (triggerMode=0): triggered when currentTick <= triggerTick
    * - UPPER (triggerMode=1): triggered when currentTick >= triggerTick
    */
   private async checkOrderTrigger(
-    order: OnChainCloseOrder,
+    order: CloseOrder,
     poolAddress: string,
     chainId: number,
     currentSqrtPriceX96: bigint,
     currentTick: number
   ): Promise<boolean> {
+    const config = (order.config ?? {}) as Record<string, unknown>;
+    const state = (order.state ?? {}) as Record<string, unknown>;
+    const triggerTick = state.triggerTick as number | null | undefined;
+    const triggerMode = config.triggerMode as number;
+
     // Guard: triggerTick must be set
-    if (order.triggerTick === null || order.triggerTick === undefined) {
+    if (triggerTick === null || triggerTick === undefined) {
       log.warn({ orderId: order.id, msg: 'Order has no triggerTick set' });
       return false;
     }
@@ -407,13 +413,13 @@ export class CloseOrderMonitor {
     let triggered = false;
     let triggerSide: 'lower' | 'upper';
 
-    if (order.triggerMode === 0) {
+    if (triggerMode === 0) {
       // LOWER: triggered when currentTick <= triggerTick
-      triggered = currentTick <= order.triggerTick;
+      triggered = currentTick <= triggerTick;
       triggerSide = 'lower';
     } else {
       // UPPER: triggered when currentTick >= triggerTick
-      triggered = currentTick >= order.triggerTick;
+      triggered = currentTick >= triggerTick;
       triggerSide = 'upper';
     }
 
@@ -422,8 +428,8 @@ export class CloseOrderMonitor {
     }
 
     // Verify order is still monitoring before publishing (race safety)
-    const onChainCloseOrderService = getOnChainCloseOrderService();
-    const freshOrder = await onChainCloseOrderService.findById(order.id);
+    const closeOrderService = getCloseOrderService();
+    const freshOrder = await closeOrderService.findById(order.id);
     if (!freshOrder || freshOrder.monitoringState !== 'monitoring') {
       log.debug(
         { orderId: order.id, monitoringState: freshOrder?.monitoringState },
@@ -439,7 +445,7 @@ export class CloseOrderMonitor {
       order.positionId,
       poolAddress,
       `tick=${currentTick}`,
-      `triggerTick=${order.triggerTick}`
+      `triggerTick=${triggerTick}`
     );
 
     // Publish trigger message

@@ -284,7 +284,7 @@ model Position {
   ledgerEvents     PositionLedgerEvent[]
   aprPeriods       PositionAprPeriod[]
   syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
-  onChainCloseOrders   OnChainCloseOrder[] // On-chain close order cache (SL/TP)
+  closeOrders          CloseOrder[] // Close order cache (SL/TP)
   closeOrderExecutions CloseOrderExecution[] // Execution attempts for close orders
   automationLogs       AutomationLog[] // Automation event logs for this position
   notifications    UserNotification[] // Notifications related to this position
@@ -556,7 +556,7 @@ model SharedContract {
   isActive Boolean @default(true)
 
   // Relations
-  onChainOrders OnChainCloseOrder[]
+  closeOrders CloseOrder[]
 
   // Indexes for efficient lookups
   // Note: sharedContractHash provides uniqueness (includes type, name, version, and is derived from config)
@@ -572,127 +572,108 @@ model SharedContract {
 // Position Automation Models
 // =============================================================================
 
-// OnChainCloseOrder - Cache of on-chain close order state
-// Mirrors what getOrder(nftId, triggerMode) returns from the ViewFacet.
-// Each position can have at most one LOWER and one UPPER order.
-// Can be refreshed from chain at any time via getOrder().
-model OnChainCloseOrder {
+// CloseOrder - Platform-independent close order model
+// Follows the Position model pattern: protocol discriminator + JSON config/state.
+// Generic columns for universal lifecycle; protocol-specific data in config/state JSON.
+model CloseOrder {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Protocol discrimination (matches Position.protocol)
+  protocol String // 'uniswapv3', future: 'aave', etc.
 
   // Position link
   positionId String
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
-  // On-chain identity (the composite key for getOrder)
-  chainId     Int
-  nftId       String // bigint as string (contract uint256)
-  triggerMode Int    // 0=LOWER, 1=UPPER (matches contract TriggerMode enum)
-
   // Contract reference
-  contractAddress  String          // Diamond proxy address
   sharedContractId String?
   sharedContract   SharedContract? @relation(fields: [sharedContractId], references: [id], onDelete: SetNull)
 
-  // === ON-CHAIN STATE (from contract CloseOrder struct) ===
-  // These fields are refreshable via getOrder(nftId, triggerMode)
+  // === UNIVERSAL LIFECYCLE ===
+  onChainStatus   Int    @default(0) // 0=NONE, 1=ACTIVE, 2=EXECUTED, 3=CANCELLED
+  monitoringState String @default("idle") // idle/monitoring/triggered/suspended
 
-  onChainStatus   Int      @default(0) // 0=NONE, 1=ACTIVE, 2=EXECUTED, 3=CANCELLED
-  triggerTick     Int? // int24
-  slippageBps     Int? // uint16 (0-10000)
-  payoutAddress   String? // address
-  operatorAddress String? // address (automation wallet)
-  owner           String? // address (NFT owner at registration)
-  pool            String? // address (Uniswap V3 pool)
-  validUntil      DateTime? // uint256 as DateTime (0 = no expiry)
+  // === IDENTITY HASH (replaces protocol-specific unique constraints) ===
+  // Format: "{protocol}/{identity-components}"
+  // UniswapV3: "uniswapv3/{chainId}/{nftId}/{triggerMode}"
+  orderIdentityHash String @unique
 
-  // Swap intent (from contract)
-  swapDirection   Int @default(0) // 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0
-  swapSlippageBps Int @default(0) // uint16 (0-10000)
-
-  // === OFF-CHAIN MONITORING STATE ===
-  // Tracks whether our price monitor is watching this order
-  // idle:       not being monitored (NONE/EXECUTED/CANCELLED, or not yet started)
-  // monitoring: price monitor actively watching for trigger
-  // triggered:  trigger detected, execution in progress
-  // suspended:  monitoring paused (e.g., max retries exhausted)
-  monitoringState String @default("idle")
+  // URL-friendly lookup hash (protocol-specific format)
+  // UniswapV3: "sl@{tick}" or "tp@{tick}"
+  closeOrderHash String?
 
   // === SYNC METADATA ===
-  lastSyncedAt  DateTime? // When last refreshed from chain
-  lastSyncBlock Int?      // Block number of last chain read
+  lastSyncedAt DateTime? // When last refreshed from chain/source
 
-  // Registration metadata (off-chain, captured when our service registers)
-  registrationTxHash String?   // Tx hash of the registerOrder call
-  registeredAt       DateTime? // When registration was confirmed
+  // === PROTOCOL-SPECIFIC DATA ===
+  // config: Immutable identity + registration data
+  //   UniswapV3: { chainId, nftId, triggerMode, contractAddress }
+  config Json
 
-  // URL-friendly lookup hash: "sl@{tick}" or "tp@{tick}"
-  closeOrderHash String?
+  // state: Mutable on-chain + off-chain state (refreshable)
+  //   UniswapV3: { triggerTick, slippageBps, payoutAddress, operatorAddress,
+  //                owner, pool, validUntil, swapDirection, swapSlippageBps,
+  //                registrationTxHash, registeredAt, lastSyncBlock }
+  state Json
 
   // Relations
   executions CloseOrderExecution[]
   logs       AutomationLog[]
 
   // Constraints
-  @@unique([positionId, triggerMode])     // At most 1 LOWER + 1 UPPER per position
-  @@unique([chainId, nftId, triggerMode]) // Unique by on-chain identity
+  @@unique([positionId, closeOrderHash])
 
   // Indexes
+  @@index([protocol])
   @@index([onChainStatus])
   @@index([monitoringState])
   @@index([positionId])
-  @@index([chainId, contractAddress])
-  @@index([pool])                           // Price monitor: find orders by pool
   @@index([onChainStatus, monitoringState]) // Active + monitoring orders
   @@index([closeOrderHash])
   @@index([sharedContractId])
   @@map("on_chain_close_orders")
 }
 
-// CloseOrderExecution - Individual execution attempt for a close order
+// CloseOrderExecution - Platform-independent execution attempt for a close order
 // One record per trigger event. Tracks the full lifecycle of a single execution attempt.
-// Execution attempts are separate entities for clean separation of concerns.
+// Follows the same protocol + config/state pattern as CloseOrder.
 model CloseOrderExecution {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Protocol discrimination
+  protocol String // 'uniswapv3', future: 'aave', etc.
+
   // Parent order
-  onChainCloseOrderId String
-  onChainCloseOrder   OnChainCloseOrder @relation(fields: [onChainCloseOrderId], references: [id], onDelete: Cascade)
+  closeOrderId String     @map("onChainCloseOrderId")
+  closeOrder   CloseOrder @relation(fields: [closeOrderId], references: [id], onDelete: Cascade)
 
   // Denormalized for efficient querying
   positionId String
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
-  // === TRIGGER CONTEXT (immutable, captured when trigger detected) ===
-  triggerSqrtPriceX96 String   // Price that caused the trigger (bigint as string)
-  triggeredAt         DateTime // When the price monitor detected the trigger
-
-  // === EXECUTION LIFECYCLE ===
-  // pending → executing → completed | failed
-  status String @default("pending")
-
-  // === TRANSACTION DETAILS ===
-  txHash                String? // On-chain execution tx hash
-  executionSqrtPriceX96 String? // Pool price at execution time (bigint as string)
-  executionFeeBps       Int?    // Fee charged by operator
-
-  // === RESULT ===
-  amount0Out    String? // Token0 received after close (bigint as string)
-  amount1Out    String? // Token1 received after close (bigint as string)
-  swapExecution Json?   // Post-close swap details (SwapExecution type as JSON)
-
-  // === ERROR TRACKING ===
-  error      String?      // Error message if failed
-  retryCount Int @default(0) // Retries within this execution
-
-  // === TIMING ===
+  // === UNIVERSAL EXECUTION LIFECYCLE ===
+  triggeredAt DateTime // When the trigger condition was detected
+  status      String   @default("pending") // pending/executing/completed/failed
+  error       String? // Error message if failed
+  retryCount  Int      @default(0) // Retries within this execution
   completedAt DateTime? // When execution finished (success or permanent failure)
 
+  // === PROTOCOL-SPECIFIC DATA ===
+  // config: Immutable trigger context captured at detection time
+  //   UniswapV3: { triggerSqrtPriceX96 }
+  config Json
+
+  // state: Mutable execution results populated during/after execution
+  //   UniswapV3: { txHash, executionSqrtPriceX96, executionFeeBps,
+  //                amount0Out, amount1Out, swapExecution }
+  state Json
+
   // Indexes
-  @@index([onChainCloseOrderId])
+  @@index([closeOrderId])
   @@index([positionId])
   @@index([status])
   @@index([createdAt])
@@ -805,9 +786,9 @@ model AutomationLog {
   positionId String
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
-  // Optional: Link to specific on-chain close order
-  onChainCloseOrderId String?
-  onChainCloseOrder   OnChainCloseOrder? @relation(fields: [onChainCloseOrderId], references: [id], onDelete: SetNull)
+  // Optional: Link to specific close order
+  closeOrderId String?     @map("onChainCloseOrderId")
+  closeOrder   CloseOrder? @relation(fields: [closeOrderId], references: [id], onDelete: SetNull)
 
   // Log classification
   level   Int // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
@@ -826,7 +807,7 @@ model AutomationLog {
   // Indexes for efficient queries
   @@index([positionId, createdAt])
   @@index([positionId, level, createdAt])
-  @@index([onChainCloseOrderId])
+  @@index([closeOrderId])
   @@map("automation_logs")
 }
 

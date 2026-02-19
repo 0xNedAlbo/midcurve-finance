@@ -30,7 +30,7 @@ import {
 } from '../formatters/index.js';
 import type { WebhookConfigService } from '../webhook-config-service.js';
 import type { UniswapV3PositionService } from '../../position/uniswapv3-position-service.js';
-import type { OnChainCloseOrderService } from '../../automation/on-chain-close-order-service.js';
+import type { CloseOrderService } from '../../automation/close-order-service.js';
 
 // =============================================================================
 // TYPES
@@ -47,7 +47,7 @@ export interface WebhookDeliveryResult {
 export interface WebhookNotificationAdapterDependencies {
   webhookConfigService: WebhookConfigService;
   positionService: UniswapV3PositionService;
-  onChainCloseOrderService: OnChainCloseOrderService;
+  closeOrderService: CloseOrderService;
   /** Timeout for webhook HTTP requests in milliseconds (default: 10000) */
   timeoutMs?: number;
 }
@@ -61,14 +61,14 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
   private readonly logger: ServiceLogger;
   private readonly webhookConfigService: WebhookConfigService;
   private readonly positionService: UniswapV3PositionService;
-  private readonly onChainCloseOrderService: OnChainCloseOrderService;
+  private readonly closeOrderService: CloseOrderService;
   private readonly timeoutMs: number;
 
   constructor(deps: WebhookNotificationAdapterDependencies) {
     this.logger = createServiceLogger('WebhookNotificationAdapter');
     this.webhookConfigService = deps.webhookConfigService;
     this.positionService = deps.positionService;
-    this.onChainCloseOrderService = deps.onChainCloseOrderService;
+    this.closeOrderService = deps.closeOrderService;
     this.timeoutMs = deps.timeoutMs ?? 10000;
   }
 
@@ -239,7 +239,7 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
     // Fetch close order for enrichment
     let closeOrder = null;
     try {
-      closeOrder = await this.onChainCloseOrderService.findById(event.orderId);
+      closeOrder = await this.closeOrderService.findById(event.orderId);
     } catch {
       // Enrichment failure is not critical
     }
@@ -303,7 +303,7 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
     // Fetch close order for enrichment
     let closeOrder = null;
     try {
-      closeOrder = await this.onChainCloseOrderService.findById(event.orderId);
+      closeOrder = await this.closeOrderService.findById(event.orderId);
     } catch {
       // Enrichment failure is not critical
     }

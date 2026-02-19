@@ -894,7 +894,7 @@ export function calculatePoolSwapMinAmountOut(
 /**
  * On-chain close order data (relevant swap fields)
  */
-export interface OnChainCloseOrderSwapInfo {
+export interface CloseOrderSwapInfo {
   /** SwapDirection enum: 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0 */
   swapDirection: number;
   /** Swap slippage in basis points */
@@ -918,7 +918,7 @@ export async function getOnChainOrder(
   contractAddress: `0x${string}`,
   nftId: bigint,
   triggerMode: number
-): Promise<OnChainCloseOrderSwapInfo> {
+): Promise<CloseOrderSwapInfo> {
   const client = getPublicClient(chainId);
 
   const result = await client.readContract({

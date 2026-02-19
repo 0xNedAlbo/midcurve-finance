@@ -143,7 +143,7 @@ export class AutomationLogService {
       const result = await db.automationLog.create({
         data: {
           positionId: input.positionId,
-          onChainCloseOrderId: input.onChainCloseOrderId,
+          closeOrderId: input.closeOrderId,
           level: input.level,
           logType: input.logType,
           message: input.message,
@@ -250,14 +250,14 @@ export class AutomationLogService {
    * @returns Paginated log results
    */
   async listByCloseOrder(
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     options: ListAutomationLogsOptions = {},
     tx?: PrismaTransactionClient
   ): Promise<ListAutomationLogsResult> {
     const { level, limit = 50, cursor } = options;
 
     log.methodEntry(this.logger, 'listByCloseOrder', {
-      onChainCloseOrderId,
+      closeOrderId,
       level,
       limit,
       cursor,
@@ -267,7 +267,7 @@ export class AutomationLogService {
       const db = tx ?? this.prisma;
 
       const where: Prisma.AutomationLogWhereInput = {
-        onChainCloseOrderId,
+        closeOrderId,
       };
 
       if (level !== undefined) {
@@ -304,7 +304,7 @@ export class AutomationLogService {
       };
     } catch (error) {
       log.methodError(this.logger, 'listByCloseOrder', error as Error, {
-        onChainCloseOrderId,
+        closeOrderId,
         options,
       });
       throw error;
@@ -320,14 +320,14 @@ export class AutomationLogService {
    */
   async logOrderCreated(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderCreatedContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderCreatedMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_CREATED,
       message,
@@ -340,14 +340,14 @@ export class AutomationLogService {
    */
   async logOrderRegistered(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderRegisteredContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderRegisteredMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_REGISTERED,
       message,
@@ -360,14 +360,14 @@ export class AutomationLogService {
    */
   async logOrderTriggered(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderTriggeredContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderTriggeredMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_TRIGGERED,
       message,
@@ -380,14 +380,14 @@ export class AutomationLogService {
    */
   async logOrderExecuting(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderExecutingContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderExecutingMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_EXECUTING,
       message,
@@ -400,14 +400,14 @@ export class AutomationLogService {
    */
   async logOrderExecuted(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderExecutedContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderExecutedMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_EXECUTED,
       message,
@@ -420,14 +420,14 @@ export class AutomationLogService {
    */
   async logOrderFailed(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderFailedContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderFailedMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.ERROR,
       logType: AutomationLogType.ORDER_FAILED,
       message,
@@ -440,14 +440,14 @@ export class AutomationLogService {
    */
   async logOrderCancelled(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderCancelledContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderCancelledMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_CANCELLED,
       message,
@@ -460,14 +460,14 @@ export class AutomationLogService {
    */
   async logOrderExpired(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderExpiredContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderExpiredMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_EXPIRED,
       message,
@@ -480,14 +480,14 @@ export class AutomationLogService {
    */
   async logOrderModified(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: OrderModifiedContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatOrderModifiedMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.INFO,
       logType: AutomationLogType.ORDER_MODIFIED,
       message,
@@ -500,14 +500,14 @@ export class AutomationLogService {
    */
   async logRetryScheduled(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: RetryScheduledContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatRetryScheduledMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.WARN,
       logType: AutomationLogType.RETRY_SCHEDULED,
       message,
@@ -520,14 +520,14 @@ export class AutomationLogService {
    */
   async logPreflightValidation(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: PreflightValidationContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatPreflightValidationMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: context.isValid ? LogLevel.INFO : LogLevel.ERROR,
       logType: AutomationLogType.PREFLIGHT_VALIDATION,
       message,
@@ -540,14 +540,14 @@ export class AutomationLogService {
    */
   async logSimulationFailed(
     positionId: string,
-    onChainCloseOrderId: string,
+    closeOrderId: string,
     context: SimulationFailedContext,
     tx?: PrismaTransactionClient
   ): Promise<void> {
     const message = this.formatSimulationFailedMessage(context);
     await this.log({
       positionId,
-      onChainCloseOrderId,
+      closeOrderId,
       level: LogLevel.ERROR,
       logType: AutomationLogType.SIMULATION_FAILED,
       message,

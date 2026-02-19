@@ -29,13 +29,13 @@ import {
   CreateUniswapV3PositionParamsSchema,
   CreateUniswapV3PositionRequestSchema,
 } from '@midcurve/api-shared';
-import { serializeUniswapV3Position, serializeOnChainCloseOrder } from '@/lib/serializers';
+import { serializeUniswapV3Position, serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3PoolService,
-  getOnChainCloseOrderService,
+  getCloseOrderService,
 } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
@@ -135,7 +135,7 @@ export async function GET(
         });
 
         // 3b. Fetch active close orders for this position
-        const activeCloseOrders = await getOnChainCloseOrderService().findByPositionId(
+        const activeCloseOrders = await getCloseOrderService().findByPositionId(
           position.id,
           { onChainStatus: OnChainOrderStatus.ACTIVE },
           tx
@@ -170,7 +170,7 @@ export async function GET(
       // 4. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
-        activeCloseOrders: activeCloseOrders.map(serializeOnChainCloseOrder),
+        activeCloseOrders: activeCloseOrders.map(serializeCloseOrder),
       };
 
       const response = createSuccessResponse(serializedPosition);
