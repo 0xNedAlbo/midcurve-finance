@@ -58,6 +58,7 @@ export function TakeProfitButton({
   nftId,
   baseToken,
   quoteToken,
+  isToken0Quote,
   disabled = false,
   disabledReason,
   activeCloseOrders,
@@ -78,10 +79,11 @@ export function TakeProfitButton({
     [baseToken, quoteToken]
   );
 
-  // Find the take-profit order (at most 1 per position for UPPER trigger mode)
+  // Find the take-profit order — trigger mode depends on isToken0Quote
+  const tpTriggerMode = (isToken0Quote ? 'LOWER' : 'UPPER') as TriggerMode;
   const activeOrder = useMemo(() => {
-    return findOrderForTriggerMode(activeCloseOrders, 'UPPER' as TriggerMode);
-  }, [activeCloseOrders]);
+    return findOrderForTriggerMode(activeCloseOrders, tpTriggerMode);
+  }, [activeCloseOrders, tpTriggerMode]);
 
   // Generate button label if order exists
   const buttonLabel = useMemo(() => {

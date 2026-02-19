@@ -252,6 +252,10 @@ export function SwapStep() {
       return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
     }
 
+    const isT0Q = !isToken0Base;
+    const slMode = isT0Q ? 'UPPER' : 'LOWER';
+    const tpMode = isT0Q ? 'LOWER' : 'UPPER';
+
     for (const order of state.activeCloseOrders) {
       if (!order.triggerMode || order.triggerTick == null) continue;
 
@@ -281,8 +285,8 @@ export function SwapStep() {
         };
 
         const price = computePrice();
-        if (order.triggerMode === 'LOWER') stopLossPrice = price;
-        if (order.triggerMode === 'UPPER') takeProfitPrice = price;
+        if (order.triggerMode === slMode) stopLossPrice = price;
+        if (order.triggerMode === tpMode) takeProfitPrice = price;
       } catch { /* ignore */ }
 
       // Extract swap config from explicit fields
@@ -292,8 +296,8 @@ export function SwapStep() {
           direction: order.swapDirection!,
           slippageBps: order.swapSlippageBps ?? 100,
         };
-        if (order.triggerMode === 'LOWER') slSwapConfig = cfg;
-        if (order.triggerMode === 'UPPER') tpSwapConfig = cfg;
+        if (order.triggerMode === slMode) slSwapConfig = cfg;
+        if (order.triggerMode === tpMode) tpSwapConfig = cfg;
       }
     }
 

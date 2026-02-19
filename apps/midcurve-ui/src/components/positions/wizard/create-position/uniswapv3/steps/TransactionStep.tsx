@@ -768,7 +768,7 @@ export function TransactionStep() {
         args: [{
           nftId: mintedTokenId,
           pool: poolAddress,
-          triggerMode: 0, // LOWER (Stop Loss)
+          triggerMode: isToken0Quote ? 1 : 0, // SL: UPPER when isToken0Quote, LOWER otherwise
           triggerTick: state.stopLossTick,
           payout: walletAddress,
           operator: autowalletAddress,
@@ -787,7 +787,7 @@ export function TransactionStep() {
         args: [{
           nftId: mintedTokenId,
           pool: poolAddress,
-          triggerMode: 1, // UPPER (Take Profit)
+          triggerMode: isToken0Quote ? 0 : 1, // TP: LOWER when isToken0Quote, UPPER otherwise
           triggerTick: state.takeProfitTick,
           payout: walletAddress,
           operator: autowalletAddress,

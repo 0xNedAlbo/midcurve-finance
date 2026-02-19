@@ -612,6 +612,7 @@ export function calculatePositionValue(
     const sqrtPriceBigint = typeof sqrtPriceCurrentX96 === 'bigint' ? sqrtPriceCurrentX96 : BigInt(sqrtPriceCurrentX96);
 
     if (liquidityBigint === 0n) return 0n;
+    if (sqrtPriceBigint === 0n) return 0n;
 
     // Get token amounts from liquidity
     const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(

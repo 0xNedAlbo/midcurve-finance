@@ -58,6 +58,7 @@ export function StopLossButton({
   nftId,
   baseToken,
   quoteToken,
+  isToken0Quote,
   disabled = false,
   disabledReason,
   activeCloseOrders,
@@ -78,10 +79,11 @@ export function StopLossButton({
     [baseToken, quoteToken]
   );
 
-  // Find the stop-loss order (at most 1 per position for LOWER trigger mode)
+  // Find the stop-loss order — trigger mode depends on isToken0Quote
+  const slTriggerMode = (isToken0Quote ? 'UPPER' : 'LOWER') as TriggerMode;
   const activeOrder = useMemo(() => {
-    return findOrderForTriggerMode(activeCloseOrders, 'LOWER' as TriggerMode);
-  }, [activeCloseOrders]);
+    return findOrderForTriggerMode(activeCloseOrders, slTriggerMode);
+  }, [activeCloseOrders, slTriggerMode]);
 
   // Generate button label if order exists
   const buttonLabel = useMemo(() => {

@@ -40,7 +40,7 @@ export function useUniswapV3LiveMetrics(
   });
 
   return useMemo(() => {
-    if (sqrtPriceX96BigInt == null || currentTick == null) {
+    if (sqrtPriceX96BigInt == null || sqrtPriceX96BigInt === 0n || currentTick == null) {
       return position;
     }
 

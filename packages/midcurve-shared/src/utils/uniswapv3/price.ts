@@ -214,6 +214,7 @@ export function valueOfToken1AmountInToken0(
   token1Amount: bigint,
   sqrtPriceX96: bigint
 ): bigint {
+  if (sqrtPriceX96 === 0n) return 0n;
   return (token1Amount * Q192) / (sqrtPriceX96 * sqrtPriceX96);
 }
 

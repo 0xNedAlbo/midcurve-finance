@@ -236,6 +236,11 @@ export function ConfigureStep() {
       return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
     }
 
+    // When isToken0Quote, contract trigger modes are inverted relative to user price direction
+    const isT0Q = position?.isToken0Quote ?? false;
+    const slMode = isT0Q ? 'UPPER' : 'LOWER';
+    const tpMode = isT0Q ? 'LOWER' : 'UPPER';
+
     for (const order of state.activeCloseOrders) {
       if (!order.triggerMode || order.triggerTick == null) continue;
 
@@ -267,8 +272,8 @@ export function ConfigureStep() {
         };
 
         const price = computePrice();
-        if (order.triggerMode === 'LOWER') stopLossPrice = price;
-        if (order.triggerMode === 'UPPER') takeProfitPrice = price;
+        if (order.triggerMode === slMode) stopLossPrice = price;
+        if (order.triggerMode === tpMode) takeProfitPrice = price;
       } catch {
         // Ignore conversion errors for individual orders
       }
@@ -280,8 +285,8 @@ export function ConfigureStep() {
           direction: order.swapDirection!,
           slippageBps: order.swapSlippageBps ?? 100,
         };
-        if (order.triggerMode === 'LOWER') slSwapConfig = cfg;
-        if (order.triggerMode === 'UPPER') tpSwapConfig = cfg;
+        if (order.triggerMode === slMode) slSwapConfig = cfg;
+        if (order.triggerMode === tpMode) tpSwapConfig = cfg;
       }
     }
 

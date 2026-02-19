@@ -87,6 +87,8 @@ export function UniswapV3MiniPnLCurve({
 
     const token0Decimals = position.pool.token0.decimals;
     const token1Decimals = position.pool.token1.decimals;
+    const slMode = isToken0Base ? 'LOWER' : 'UPPER';
+    const tpMode = isToken0Base ? 'UPPER' : 'LOWER';
 
     for (const order of position.activeCloseOrders) {
       if (!order.triggerMode || order.triggerTick == null) continue;
@@ -105,7 +107,7 @@ export function UniswapV3MiniPnLCurve({
           slippageBps: order.swapSlippageBps ?? 100,
         } : null;
 
-        if (order.triggerMode === 'LOWER') {
+        if (order.triggerMode === slMode) {
           if (isToken0Base) {
             const decimalDiff = token0Decimals - token1Decimals;
             if (decimalDiff >= 0) {
@@ -124,7 +126,7 @@ export function UniswapV3MiniPnLCurve({
           if (swapCfg) slSwapConfig = swapCfg;
         }
 
-        if (order.triggerMode === 'UPPER') {
+        if (order.triggerMode === tpMode) {
           if (isToken0Base) {
             const decimalDiff = token0Decimals - token1Decimals;
             if (decimalDiff >= 0) {

@@ -245,6 +245,9 @@ export function WithdrawWizardSummaryPanel({
     if (!state.activeCloseOrders.length || !position) return { slSwapConfig, tpSwapConfig };
 
     const isToken0Quote = position.isToken0Quote;
+    // When isToken0Quote, contract trigger modes are inverted relative to user price direction
+    const slMode = isToken0Quote ? 'UPPER' : 'LOWER';
+    const tpMode = isToken0Quote ? 'LOWER' : 'UPPER';
 
     for (const order of state.activeCloseOrders) {
       if (!order.triggerMode) continue;
@@ -260,8 +263,8 @@ export function WithdrawWizardSummaryPanel({
           }
         : { enabled: false, slippageBps: 100, swapToQuote: true };
 
-      if (order.triggerMode === 'LOWER') slSwapConfig = display;
-      if (order.triggerMode === 'UPPER') tpSwapConfig = display;
+      if (order.triggerMode === slMode) slSwapConfig = display;
+      if (order.triggerMode === tpMode) tpSwapConfig = display;
     }
 
     return { slSwapConfig, tpSwapConfig };

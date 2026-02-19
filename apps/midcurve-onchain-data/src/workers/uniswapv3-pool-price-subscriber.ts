@@ -10,7 +10,8 @@
  * API endpoint handles reactivation when a paused subscription is polled.
  */
 
-import { prisma } from '@midcurve/database';
+import { prisma, Prisma } from '@midcurve/database';
+import { getEvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger.js';
 import {
   getConfiguredWssUrls,
@@ -24,7 +25,10 @@ import {
   createPoolPriceSubscriptionBatches,
   type PoolPriceInfo,
 } from '../ws/providers/uniswapv3-pool-price.js';
-import type { UniswapV3PoolPriceSubscriptionConfig } from '@midcurve/shared';
+import type {
+  UniswapV3PoolPriceSubscriptionConfig,
+  UniswapV3PoolPriceSubscriptionState,
+} from '@midcurve/shared';
 
 const log = onchainDataLogger.child({ component: 'UniswapV3PoolPriceSubscriber' });
 
@@ -106,6 +110,29 @@ export class UniswapV3PoolPriceSubscriber {
       } else {
         // Start all batches
         await Promise.all(this.batches.map((batch) => batch.start()));
+      }
+
+      // Read initial prices for all subscribed pools via slot0()
+      // Group by (chainId, poolAddress) to avoid redundant reads
+      const poolGroups = new Map<string, { chainId: SupportedChainId; poolAddress: string; dbIds: string[] }>();
+      for (const [, poolInfo] of this.subscribedPools) {
+        const key = `${poolInfo.chainId}:${poolInfo.poolAddress}`;
+        const group = poolGroups.get(key);
+        if (group) {
+          group.dbIds.push(poolInfo.id);
+        } else {
+          poolGroups.set(key, {
+            chainId: poolInfo.chainId,
+            poolAddress: poolInfo.poolAddress,
+            dbIds: [poolInfo.id],
+          });
+        }
+      }
+
+      for (const group of poolGroups.values()) {
+        // Fire and forget — don't block startup
+        this.readInitialPrice(group.chainId, group.poolAddress, group.dbIds)
+          .catch(() => {}); // Error already logged inside readInitialPrice
       }
 
       // Start cleanup timer (pause stale, prune deleted)
@@ -310,6 +337,9 @@ export class UniswapV3PoolPriceSubscriber {
     // Add to batch
     await this.addPoolToBatch(supportedChainId, wssUrl, poolInfo);
 
+    // Read initial price from slot0() so the subscription has a valid price immediately
+    await this.readInitialPrice(supportedChainId, poolInfo.poolAddress, [poolInfo.id]);
+
     log.info({
       chainId,
       subscriptionId,
@@ -398,6 +428,77 @@ export class UniswapV3PoolPriceSubscriber {
         subscriptionId: pool.subscriptionId,
         batchIndex,
         msg: 'Created new batch for pool',
+      });
+    }
+  }
+
+  /**
+   * Read the current pool price via slot0() and update subscription state in DB.
+   * Called on startup and when dynamically adding new subscriptions so the price
+   * is immediately correct without waiting for the next Swap event.
+   */
+  private async readInitialPrice(
+    chainId: SupportedChainId,
+    poolAddress: string,
+    subscriptionDbIds: string[],
+  ): Promise<void> {
+    try {
+      const client = getEvmConfig().getPublicClient(chainId);
+      const result = await client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: [{
+          name: 'slot0',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [],
+          outputs: [
+            { name: 'sqrtPriceX96', type: 'uint160' },
+            { name: 'tick', type: 'int24' },
+            { name: 'observationIndex', type: 'uint16' },
+            { name: 'observationCardinality', type: 'uint16' },
+            { name: 'observationCardinalityNext', type: 'uint16' },
+            { name: 'feeProtocol', type: 'uint8' },
+            { name: 'unlocked', type: 'bool' },
+          ],
+        }],
+        functionName: 'slot0',
+      });
+
+      const [sqrtPriceX96, tick] = result as unknown as [bigint, number];
+
+      if (sqrtPriceX96 === 0n) return; // Pool not initialized
+
+      const now = new Date();
+      const newState: UniswapV3PoolPriceSubscriptionState = {
+        sqrtPriceX96: sqrtPriceX96.toString(),
+        tick,
+        lastEventBlock: null,
+        lastEventTxHash: null,
+        lastUpdatedAt: now.toISOString(),
+      };
+
+      await prisma.onchainDataSubscribers.updateMany({
+        where: { id: { in: subscriptionDbIds }, status: { not: 'deleted' } },
+        data: {
+          state: newState as unknown as Prisma.InputJsonValue,
+          updatedAt: now,
+        },
+      });
+
+      log.info({
+        chainId,
+        poolAddress,
+        sqrtPriceX96: sqrtPriceX96.toString(),
+        tick,
+        subscriptionCount: subscriptionDbIds.length,
+        msg: 'Initial slot0 read completed',
+      });
+    } catch (error) {
+      log.warn({
+        chainId,
+        poolAddress,
+        error: error instanceof Error ? error.message : String(error),
+        msg: 'Failed initial slot0 read (will rely on Swap events)',
       });
     }
   }
