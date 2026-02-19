@@ -661,13 +661,15 @@ export class UniswapV3LedgerService {
     async findAll(
         tx?: PrismaTransactionClient,
     ): Promise<UniswapV3PositionLedgerEvent[]> {
+        // Use raw SQL for deterministic ordering by blockchain coordinates.
+        // timestamp-based ordering is non-deterministic for intra-block events.
         const db = tx ?? this.prisma;
-        const results = await db.positionLedgerEvent.findMany({
-            where: {
-                positionId: this.positionId,
-            },
-            orderBy: [{ timestamp: "desc" }],
-        });
+        const results = await db.$queryRaw<unknown[]>`
+            SELECT * FROM position_ledger_events
+            WHERE "positionId" = ${this.positionId}
+            ORDER BY (config->>'blockNumber')::BIGINT DESC,
+                     (config->>'logIndex')::INTEGER DESC
+        `;
 
         return results.map((result) =>
             UniswapV3PositionLedgerEvent.fromDB(
@@ -834,7 +836,7 @@ export class UniswapV3LedgerService {
     /**
      * Get the last (most recent) event for this position.
      *
-     * Events are sorted by timestamp descending, so the first result is the most recent.
+     * Events are sorted by blockchain coordinates (blockNumber DESC, logIndex DESC).
      *
      * @param tx - Optional transaction client
      * @returns The most recent event, or null if no events exist
@@ -842,20 +844,24 @@ export class UniswapV3LedgerService {
     async findLast(
         tx?: PrismaTransactionClient,
     ): Promise<UniswapV3PositionLedgerEvent | null> {
+        // Use raw SQL for deterministic ordering by blockchain coordinates.
+        // timestamp-based ordering is non-deterministic for intra-block events
+        // (e.g., DECREASE_LIQUIDITY + COLLECT in the same block share the same timestamp).
         const db = tx ?? this.prisma;
-        const result = await db.positionLedgerEvent.findFirst({
-            where: {
-                positionId: this.positionId,
-            },
-            orderBy: [{ timestamp: "desc" }],
-        });
+        const results = await db.$queryRaw<unknown[]>`
+            SELECT * FROM position_ledger_events
+            WHERE "positionId" = ${this.positionId}
+            ORDER BY (config->>'blockNumber')::BIGINT DESC,
+                     (config->>'logIndex')::INTEGER DESC
+            LIMIT 1
+        `;
 
-        if (!result) {
+        if (results.length === 0) {
             return null;
         }
 
         return UniswapV3PositionLedgerEvent.fromDB(
-            result as unknown as UniswapV3PositionLedgerEventRow,
+            results[0] as unknown as UniswapV3PositionLedgerEventRow,
         );
     }
 
@@ -879,25 +885,26 @@ export class UniswapV3LedgerService {
             return this.findLast(tx);
         }
 
+        // Use raw SQL for correct numeric comparison on blockNumber.
+        // Prisma's JSON path lte uses lexicographic comparison (string-based),
+        // which is incorrect: "9999999" > "21000000" lexicographically.
+        // The expression index on (config->>'blockNumber')::BIGINT makes this efficient.
         const db = tx ?? this.prisma;
-        const result = await db.positionLedgerEvent.findFirst({
-            where: {
-                positionId: this.positionId,
-                config: {
-                    path: ["blockNumber"],
-                    // blockNumber is stored as string in JSON, must compare as string
-                    lte: blockNumber.toString(),
-                },
-            },
-            orderBy: [{ timestamp: "desc" }],
-        });
+        const results = await db.$queryRaw<unknown[]>`
+            SELECT * FROM position_ledger_events
+            WHERE "positionId" = ${this.positionId}
+              AND (config->>'blockNumber')::BIGINT <= ${blockNumber}
+            ORDER BY (config->>'blockNumber')::BIGINT DESC,
+                     (config->>'logIndex')::INTEGER DESC
+            LIMIT 1
+        `;
 
-        if (!result) {
+        if (results.length === 0) {
             return null;
         }
 
         return UniswapV3PositionLedgerEvent.fromDB(
-            result as unknown as UniswapV3PositionLedgerEventRow,
+            results[0] as unknown as UniswapV3PositionLedgerEventRow,
         );
     }
 
@@ -917,36 +924,36 @@ export class UniswapV3LedgerService {
     ): Promise<UniswapV3PositionLedgerEvent | null> {
         const db = tx ?? this.prisma;
 
-        // Build where clause
-        const whereClause: {
-            positionId: string;
-            eventType: string;
-            config?: { path: string[]; lte: string };
-        } = {
-            positionId: this.positionId,
-            eventType: "COLLECT",
-        };
-
-        // Filter by block number if specified
-        if (blockNumber !== "latest") {
-            whereClause.config = {
-                path: ["blockNumber"],
-                // blockNumber is stored as string in JSON, must compare as string
-                lte: blockNumber.toString(),
-            };
+        // Use raw SQL for correct numeric comparison and ordering.
+        // See fetchLatestEvent() for explanation of the lexicographic bug.
+        let results: unknown[];
+        if (blockNumber === "latest") {
+            results = await db.$queryRaw<unknown[]>`
+                SELECT * FROM position_ledger_events
+                WHERE "positionId" = ${this.positionId}
+                  AND "eventType" = 'COLLECT'
+                ORDER BY (config->>'blockNumber')::BIGINT DESC,
+                         (config->>'logIndex')::INTEGER DESC
+                LIMIT 1
+            `;
+        } else {
+            results = await db.$queryRaw<unknown[]>`
+                SELECT * FROM position_ledger_events
+                WHERE "positionId" = ${this.positionId}
+                  AND "eventType" = 'COLLECT'
+                  AND (config->>'blockNumber')::BIGINT <= ${blockNumber}
+                ORDER BY (config->>'blockNumber')::BIGINT DESC,
+                         (config->>'logIndex')::INTEGER DESC
+                LIMIT 1
+            `;
         }
 
-        const result = await db.positionLedgerEvent.findFirst({
-            where: whereClause,
-            orderBy: [{ timestamp: "desc" }],
-        });
-
-        if (!result) {
+        if (results.length === 0) {
             return null;
         }
 
         return UniswapV3PositionLedgerEvent.fromDB(
-            result as unknown as UniswapV3PositionLedgerEventRow,
+            results[0] as unknown as UniswapV3PositionLedgerEventRow,
         );
     }
 
