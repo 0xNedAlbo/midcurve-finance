@@ -15,12 +15,6 @@ export type {
   MarkCloseOrderExecutionFailedInput,
 } from './close-order-input.js';
 
-// Pool subscription inputs
-export type {
-  UpdatePoolSubscriptionInput,
-  FindPoolSubscriptionOptions,
-} from './automation-input.js';
-
 // Automation log types - base contexts
 export type {
   AutomationPlatform,

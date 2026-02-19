@@ -2,21 +2,8 @@
  * Automation Types
  *
  * Type system for position automation features.
- * Includes on-chain close order types and pool subscriptions.
+ * Includes on-chain close order types.
  */
-
-// ============================================================================
-// Pool Subscription Types
-// ============================================================================
-
-export {
-  type PoolPriceSubscriptionState,
-  type PoolPriceSubscriptionData,
-  type PoolPriceSubscriptionJSON,
-  poolSubscriptionToJSON,
-  poolSubscriptionFromJSON,
-  emptySubscriptionState,
-} from './pool-subscription.types.js';
 
 // ============================================================================
 // On-Chain Close Order Types (contract enum mirrors)

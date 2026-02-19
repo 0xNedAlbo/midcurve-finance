@@ -5,57 +5,8 @@
  * These types are NOT shared with UI/API - they're specific to the service layer.
  *
  * NOTE: Close order input types have been moved to close-order-input.ts.
- * This file retains pool subscription and automation log types.
+ * This file retains automation log types.
  */
-
-// =============================================================================
-// POOL SUBSCRIPTION INPUT TYPES
-// =============================================================================
-
-/**
- * Input for creating/updating a pool subscription
- */
-export interface UpdatePoolSubscriptionInput {
-  /**
-   * Pool ID (from Pool table)
-   */
-  poolId: string;
-
-  /**
-   * Whether subscription is active
-   */
-  isActive?: boolean;
-
-  /**
-   * Number of active orders for this pool
-   */
-  activeOrderCount?: number;
-
-  /**
-   * Last known sqrtPriceX96
-   */
-  lastSqrtPriceX96?: bigint;
-
-  /**
-   * Last known tick
-   */
-  lastTick?: number;
-}
-
-/**
- * Options for finding pool subscriptions
- */
-export interface FindPoolSubscriptionOptions {
-  /**
-   * Filter by active status
-   */
-  isActive?: boolean;
-
-  /**
-   * Filter by having active orders
-   */
-  hasActiveOrders?: boolean;
-}
 
 // =============================================================================
 // AUTOMATION LOG INPUT TYPES

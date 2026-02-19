@@ -15,9 +15,8 @@
  * - UPPER (triggerMode=1): triggered when currentTick >= triggerTick
  */
 
-import { prisma } from '@midcurve/database';
 import type { CloseOrder } from '@midcurve/database';
-import { getCloseOrderService } from '../lib/services';
+import { getCloseOrderService, getAutomationSubscriptionService } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
@@ -266,38 +265,12 @@ export class CloseOrderMonitor {
     chainId: number;
   }): Promise<void> {
     try {
-      // Create or find the subscriber record in the database
-      const subscriptionTag = `order-trigger-${order.id}`;
-
-      // Try to find existing record
-      let subscriberRecord = await prisma.poolPriceSubscribers.findFirst({
-        where: {
-          poolId: order.poolId,
-          subscriptionTag,
-        },
-      });
-
-      // Create if not found
-      if (!subscriberRecord) {
-        subscriberRecord = await prisma.poolPriceSubscribers.create({
-          data: {
-            poolId: order.poolId,
-            subscriptionTag,
-            isActive: true,
-          },
-        });
-        log.debug({ orderId: order.id, subscriptionTag }, 'Created subscriber record');
-      } else {
-        // Update existing to mark as active
-        await prisma.poolPriceSubscribers.update({
-          where: { id: subscriberRecord.id },
-          data: { isActive: true },
-        });
-        log.debug({ orderId: order.id, subscriptionTag }, 'Reusing existing subscriber record');
-      }
+      // Ensure onchain-data worker is monitoring this pool (persistent subscription)
+      const automationSubscriptionService = getAutomationSubscriptionService();
+      await automationSubscriptionService.ensurePoolSubscription(order.chainId, order.poolAddress);
 
       const subscriber = createPoolPriceSubscriber({
-        subscriberId: subscriberRecord.id,
+        subscriberId: `order-trigger-${order.id}`,
         chainId: order.chainId,
         poolAddress: order.poolAddress,
         messageHandler: async (message) => {
@@ -316,7 +289,6 @@ export class CloseOrderMonitor {
         orderId: order.id,
         chainId: order.chainId,
         poolAddress: order.poolAddress,
-        subscriberId: subscriberRecord.id,
         msg: 'Created order subscriber',
       });
     } catch (err) {

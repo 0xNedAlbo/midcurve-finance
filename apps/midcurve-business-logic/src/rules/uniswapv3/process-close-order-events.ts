@@ -23,7 +23,7 @@ import { prisma, type PrismaClient } from '@midcurve/database';
 import type { CloseOrder } from '@midcurve/database';
 import {
   CloseOrderService,
-  PoolSubscriptionService,
+  AutomationSubscriptionService,
   AutomationLogService,
   UniswapV3PositionService,
   deriveCloseOrderHashFromTick,
@@ -103,14 +103,14 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   private consumerTag: string | null = null;
   private orderService: CloseOrderService;
-  private poolSubscriptionService: PoolSubscriptionService;
+  private automationSubscriptionService: AutomationSubscriptionService;
   private automationLogService: AutomationLogService;
   private positionService: UniswapV3PositionService;
 
   constructor() {
     super();
     this.orderService = new CloseOrderService({ prisma });
-    this.poolSubscriptionService = new PoolSubscriptionService({ prisma });
+    this.automationSubscriptionService = new AutomationSubscriptionService({ prisma });
     this.automationLogService = new AutomationLogService({ prisma });
     this.positionService = new UniswapV3PositionService({ prisma });
   }
@@ -454,14 +454,17 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           );
         }
 
-        // Look up poolId for post-tx subscription management
+        // Look up pool data for post-tx subscription management
         const position = await tx.position.findUnique({
           where: { id: existingOrder.positionId },
-          select: { poolId: true },
+          select: { poolId: true, pool: { select: { config: true } } },
         });
+        const poolConfig = position?.pool?.config as Record<string, unknown> | null;
+        const poolAddress = (poolConfig?.address as string | undefined)?.toLowerCase();
 
         return {
           poolId: position?.poolId ?? null,
+          poolAddress: poolAddress ?? null,
           isNew: false,
           wasTerminal,
         };
@@ -513,15 +516,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       };
     });
 
-    // Manage pool subscription outside transaction
-    if (result && result.poolId) {
-      if (result.isNew) {
-        await this.poolSubscriptionService.ensureSubscription(result.poolId);
-        await this.poolSubscriptionService.incrementOrderCount(result.poolId);
-      } else if (result.wasTerminal) {
-        // Reactivated terminal order — subscription count was decremented on cancel/execute
-        await this.poolSubscriptionService.ensureSubscription(result.poolId);
-        await this.poolSubscriptionService.incrementOrderCount(result.poolId);
+    // Ensure pool subscription outside transaction
+    if (result && (result.isNew || result.wasTerminal)) {
+      const poolAddress = result.poolAddress ?? payload.pool;
+      if (poolAddress) {
+        await this.automationSubscriptionService.ensurePoolSubscription(chainId, poolAddress);
       }
     }
   }
@@ -577,9 +576,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return position?.poolId ?? null;
     });
 
-    // Decrement pool subscription order count outside transaction
+    // Remove pool subscription if no more monitoring orders
     if (poolId) {
-      await this.poolSubscriptionService.decrementOrderCount(poolId);
+      await this.automationSubscriptionService.removePoolSubscriptionIfUnused(poolId);
     }
   }
 

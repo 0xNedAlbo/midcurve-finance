@@ -8,7 +8,7 @@
 import {
   CloseOrderService,
   CloseOrderExecutionService,
-  PoolSubscriptionService,
+  AutomationSubscriptionService,
   UniswapV3PoolService,
   AutomationLogService,
   UniswapV3PositionService,
@@ -21,7 +21,7 @@ import {
 // Service instances (lazy-initialized)
 let _closeOrderService: CloseOrderService | null = null;
 let _closeOrderExecutionService: CloseOrderExecutionService | null = null;
-let _poolSubscriptionService: PoolSubscriptionService | null = null;
+let _automationSubscriptionService: AutomationSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
@@ -49,13 +49,13 @@ export function getCloseOrderExecutionService(): CloseOrderExecutionService {
 }
 
 /**
- * Get singleton instance of PoolSubscriptionService
+ * Get singleton instance of AutomationSubscriptionService
  */
-export function getPoolSubscriptionService(): PoolSubscriptionService {
-  if (!_poolSubscriptionService) {
-    _poolSubscriptionService = new PoolSubscriptionService();
+export function getAutomationSubscriptionService(): AutomationSubscriptionService {
+  if (!_automationSubscriptionService) {
+    _automationSubscriptionService = new AutomationSubscriptionService();
   }
-  return _poolSubscriptionService;
+  return _automationSubscriptionService;
 }
 
 /**

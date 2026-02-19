@@ -23,7 +23,6 @@ import {
   PositionListService,
   CloseOrderService,
   SharedContractService,
-  PoolSubscriptionService,
   AutomationLogService,
   WebhookConfigService,
   FavoritePoolService,
@@ -51,7 +50,6 @@ let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _positionListService: PositionListService | null = null;
 let _closeOrderService: CloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
-let _poolSubscriptionService: PoolSubscriptionService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
@@ -221,16 +219,6 @@ export function getSharedContractService(): SharedContractService {
     _sharedContractService = new SharedContractService();
   }
   return _sharedContractService;
-}
-
-/**
- * Get singleton instance of PoolSubscriptionService
- */
-export function getPoolSubscriptionService(): PoolSubscriptionService {
-  if (!_poolSubscriptionService) {
-    _poolSubscriptionService = new PoolSubscriptionService();
-  }
-  return _poolSubscriptionService;
 }
 
 /**

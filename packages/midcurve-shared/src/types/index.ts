@@ -222,19 +222,6 @@ export type {
 // Automation Types (position automation features)
 // ============================================================================
 
-// Pool Subscription types
-export type {
-  PoolPriceSubscriptionState,
-  PoolPriceSubscriptionData,
-  PoolPriceSubscriptionJSON,
-} from './automation/index.js';
-
-export {
-  poolSubscriptionToJSON,
-  poolSubscriptionFromJSON,
-  emptySubscriptionState,
-} from './automation/index.js';
-
 // On-Chain Close Order types (contract enum mirrors)
 export {
   OnChainOrderStatus,

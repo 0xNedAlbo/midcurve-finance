@@ -205,8 +205,6 @@ model Pool {
   token1            Token                  @relation("PoolToken1", fields: [token1Id], references: [id])
   positions         Position[]
   poolPrices        PoolPrice[]
-  priceSubscription PoolPriceSubscription? // 1:1 relation for automation price monitoring
-  priceSubscribers  PoolPriceSubscribers[] @relation("PoolPriceSubscribers") // 1:N relation for WebSocket price subscriptions
   pricesUniswapV3   PoolPricesUniswapV3[]  @relation("PoolPricesUniswapV3") // Historical prices from Swap events
   favoritedBy       FavoritePool[] // Users who favorited this pool
 
@@ -678,61 +676,6 @@ model CloseOrderExecution {
   @@index([status])
   @@index([createdAt])
   @@map("close_order_executions")
-}
-
-// PoolPriceSubscription - Pools being monitored for price changes
-// Used by the automation service to track which pools need WebSocket subscriptions
-model PoolPriceSubscription {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Direct link to Pool entity (1:1 relation)
-  poolId String @unique
-  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
-
-  // Subscription state
-  isActive         Boolean @default(true)
-  activeOrderCount Int     @default(0) // Number of active orders watching this pool
-
-  // Last known price state (JSON) - Mutable
-  // { lastSqrtPriceX96: string, lastTick: number, lastUpdatedAt: string }
-  state Json
-
-  // Indexes
-  @@index([isActive])
-  @@index([activeOrderCount]) // Find pools with active orders
-  @@map("pool_price_subscriptions")
-}
-
-// PoolPriceSubscribers - Tracks WebSocket subscriptions for pool price monitoring
-// Used by midcurve-pool-prices service to manage real-time price feeds
-// Relationship: 1 Pool -> N Subscribers (one pool can have multiple subscribers)
-model PoolPriceSubscribers {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Subscription identification
-  subscriptionTag String // Unique tag for WebSocket subscription management
-
-  // Pool reference (N:1 relation with cascading delete)
-  poolId String
-  pool   Pool   @relation("PoolPriceSubscribers", fields: [poolId], references: [id], onDelete: Cascade)
-
-  // Subscription state
-  isActive    Boolean   @default(true)
-  lastAliveAt DateTime? // Last heartbeat from subscriber (updated by consumer every 15s)
-
-  // RabbitMQ queue tracking (set by PoolPriceSubscriber.start())
-  queueName String? // Queue name in RabbitMQ - used for cleanup during pruning
-
-  // Indexes
-  @@index([poolId])
-  @@index([isActive])
-  @@index([subscriptionTag])
-  @@index([queueName])
-  @@map("pool_price_subscribers")
 }
 
 // OnchainDataSubscribers - Generic table for onchain event subscriptions

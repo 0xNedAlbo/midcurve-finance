@@ -18,7 +18,7 @@
  */
 
 import { prisma } from '@midcurve/database';
-import { getUniswapV3PoolService, getUserNotificationService } from '../lib/services';
+import { getUniswapV3PoolService, getUserNotificationService, getAutomationSubscriptionService } from '../lib/services';
 import { isSupportedChain } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import {
@@ -423,38 +423,12 @@ export class RangeMonitor {
     poolAddress: string
   ): Promise<void> {
     try {
-      // Create or find the subscriber record in the database
-      const subscriptionTag = `range-monitor-${poolId}`;
-
-      // Try to find existing record
-      let subscriberRecord = await prisma.poolPriceSubscribers.findFirst({
-        where: {
-          poolId,
-          subscriptionTag,
-        },
-      });
-
-      // Create if not found
-      if (!subscriberRecord) {
-        subscriberRecord = await prisma.poolPriceSubscribers.create({
-          data: {
-            poolId,
-            subscriptionTag,
-            isActive: true,
-          },
-        });
-        log.debug({ poolId, subscriptionTag }, 'Created subscriber record');
-      } else {
-        // Update existing to mark as active
-        await prisma.poolPriceSubscribers.update({
-          where: { id: subscriberRecord.id },
-          data: { isActive: true },
-        });
-        log.debug({ poolId, subscriptionTag }, 'Reusing existing subscriber record');
-      }
+      // Ensure onchain-data worker is monitoring this pool (persistent subscription)
+      const automationSubscriptionService = getAutomationSubscriptionService();
+      await automationSubscriptionService.ensurePoolSubscription(chainId, poolAddress);
 
       const subscriber = createPoolPriceSubscriber({
-        subscriberId: subscriberRecord.id,
+        subscriberId: `range-monitor-${poolId}`,
         chainId,
         poolAddress,
         messageHandler: async (message) => {
@@ -473,7 +447,6 @@ export class RangeMonitor {
         poolId,
         chainId,
         poolAddress,
-        subscriberId: subscriberRecord.id,
         msg: 'Created pool subscriber',
       });
     } catch (err) {

@@ -1,16 +1,52 @@
 /**
  * Pool Price Subscriber Types
  *
- * Type definitions for the PoolPriceSubscriber class.
+ * Type definitions for the PoolPriceSubscriber class and RabbitMQ message formats.
+ * Used by automation workers (CloseOrderMonitor, RangeMonitor) for consuming
+ * pool price events from the pool-prices exchange.
  */
 
 import type { ChannelModel } from 'amqplib';
 import type { ServiceLogger } from '../../logging/index.js';
-import type { RabbitMQConfig, RawSwapEventWrapper } from '../types.js';
 
 // Forward declaration - PoolPriceSubscriber type for handler signatures
-// The actual class is in pool-price-subscriber.ts
 import type { PoolPriceSubscriber } from './pool-price-subscriber.js';
+
+// ============================================================================
+// RabbitMQ Message Types
+// ============================================================================
+
+/**
+ * RabbitMQ connection configuration
+ */
+export interface RabbitMQConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  vhost?: string;
+}
+
+/**
+ * Raw swap event wrapper - matches midcurve-onchain-data message format.
+ *
+ * This is the structure of messages published to the pool-prices exchange
+ * by the onchain-data worker.
+ */
+export interface RawSwapEventWrapper {
+  /** Chain ID for routing context */
+  chainId: number;
+  /** Pool address (lowercase) for routing context */
+  poolAddress: string;
+  /** Raw WebSocket payload from viem (Swap event log data) */
+  raw: unknown;
+  /** ISO timestamp when event was received by pool-prices service */
+  receivedAt: string;
+}
+
+// ============================================================================
+// Subscriber Types
+// ============================================================================
 
 /**
  * Message handler callback type.
@@ -49,7 +85,7 @@ export type PoolPriceSubscriberState =
  * Options for creating a pool price subscriber.
  */
 export interface PoolPriceSubscriberOptions {
-  /** Database subscriber record ID (required for queue name registration) */
+  /** Opaque identifier for logging (e.g. "order-trigger-<orderId>") */
   subscriberId: string;
 
   /** Chain ID of the pool (e.g., 1 for Ethereum) */
@@ -81,30 +117,13 @@ export interface PoolPriceSubscriberOptions {
  * Subscriber status information.
  */
 export interface PoolPriceSubscriberStatus {
-  /** Current lifecycle state */
   state: PoolPriceSubscriberState;
-
-  /** Chain ID being subscribed to */
   chainId: number;
-
-  /** Pool address being subscribed to */
   poolAddress: string;
-
-  /** Routing key used for subscription */
   routingKey: string;
-
-  /** Queue name (unique per subscriber instance) */
   queueName: string;
-
-  /** Total messages received since start */
   messagesReceived: number;
-
-  /** Timestamp of last received message */
   lastMessageAt: Date | null;
-
-  /** Timestamp when subscriber was started */
   startedAt: Date | null;
-
-  /** RabbitMQ consumer tag (null if not consuming) */
   consumerTag: string | null;
 }

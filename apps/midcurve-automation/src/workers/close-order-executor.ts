@@ -13,7 +13,7 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
-import { getCloseOrderService, getCloseOrderExecutionService, getPoolSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
+import { getCloseOrderService, getCloseOrderExecutionService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -321,7 +321,7 @@ export class CloseOrderExecutor {
   ): Promise<void> {
     const closeOrderService = getCloseOrderService();
     const executionService = getCloseOrderExecutionService();
-    const poolSubscriptionService = getPoolSubscriptionService();
+    const automationSubscriptionService = getAutomationSubscriptionService();
     const signerClient = getSignerClient();
     const feeConfig = getFeeConfig();
 
@@ -882,13 +882,12 @@ export class CloseOrderExecutor {
     }
     await closeOrderService.markOnChainExecuted(orderId);
 
-    // Decrement pool subscription order count
-    // Use position.pool.id (database UUID), not poolAddress (contract address)
+    // Remove pool subscription if no more monitoring orders
     try {
-      await poolSubscriptionService.decrementOrderCount(position.pool.id);
-      log.info({ orderId, poolId: position.pool.id, msg: 'Decremented pool subscription order count' });
+      await automationSubscriptionService.removePoolSubscriptionIfUnused(position.pool.id);
+      log.info({ orderId, poolId: position.pool.id, msg: 'Checked pool subscription usage after execution' });
     } catch (err) {
-      log.warn({ orderId, poolId: position.pool.id, error: err, msg: 'Failed to decrement order count' });
+      log.warn({ orderId, poolId: position.pool.id, error: err, msg: 'Failed to check pool subscription usage' });
     }
 
     // Log ORDER_EXECUTED for user visibility

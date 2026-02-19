@@ -6,7 +6,8 @@
  * - On-chain close orders (price-triggered position closing)
  * - Close order executions (individual execution attempt tracking)
  * - Shared contracts (versioned contract registry)
- * - Pool subscriptions (price monitoring)
+ * - Automation subscriptions (pool price monitoring via OnchainDataSubscribers)
+ * - Pool price subscriber (RabbitMQ consumer for swap events)
  * - Automation logs (user-facing event logs)
  */
 
@@ -27,8 +28,21 @@ export type {
   UpsertSharedContractInput,
 } from './shared-contract-service.js';
 
-export { PoolSubscriptionService } from './pool-subscription-service.js';
-export type { PoolSubscriptionServiceDependencies } from './pool-subscription-service.js';
+// Automation subscription service (replaces PoolSubscriptionService)
+export { AutomationSubscriptionService } from './automation-subscription-service.js';
+export type { AutomationSubscriptionServiceDependencies } from './automation-subscription-service.js';
+
+// Pool price subscriber (RabbitMQ consumer for swap events)
+export { PoolPriceSubscriber, createPoolPriceSubscriber, EXCHANGE_POOL_PRICES, buildPoolPriceRoutingKey } from './pool-price-subscriber.js';
+export type {
+  RabbitMQConfig,
+  RawSwapEventWrapper,
+  PoolPriceMessageHandler,
+  PoolPriceErrorHandler,
+  PoolPriceSubscriberState,
+  PoolPriceSubscriberOptions,
+  PoolPriceSubscriberStatus,
+} from './pool-price-subscriber.types.js';
 
 export {
   AutomationLogService,

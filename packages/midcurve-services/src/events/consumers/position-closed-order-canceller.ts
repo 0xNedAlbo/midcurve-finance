@@ -12,7 +12,7 @@ import { DomainEventConsumer } from '../consumer.js';
 import { DOMAIN_QUEUES, ROUTING_PATTERNS } from '../topology.js';
 import type { DomainEvent, PositionClosedPayload } from '../types.js';
 import { CloseOrderService } from '../../services/automation/close-order-service.js';
-import { PoolSubscriptionService } from '../../services/automation/pool-subscription-service.js';
+import { AutomationSubscriptionService } from '../../services/automation/automation-subscription-service.js';
 
 // ============================================================
 // Consumer Implementation
@@ -45,13 +45,13 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
 
   private readonly prisma: PrismaClient;
   private readonly orderService: CloseOrderService;
-  private readonly poolSubscriptionService: PoolSubscriptionService;
+  private readonly automationSubscriptionService: AutomationSubscriptionService;
 
   constructor(deps: PositionClosedOrderCancellerDependencies = {}) {
     super();
     this.prisma = deps.prisma ?? prismaClient;
     this.orderService = new CloseOrderService({ prisma: this.prisma });
-    this.poolSubscriptionService = new PoolSubscriptionService({ prisma: this.prisma });
+    this.automationSubscriptionService = new AutomationSubscriptionService({ prisma: this.prisma });
   }
 
   /**
@@ -95,15 +95,10 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
     let cancelledCount = 0;
     let failedCount = 0;
 
-    // Cancel each order and decrement pool subscription counts
+    // Cancel each order
     for (const order of activeOrders) {
       try {
         await this.orderService.markOnChainCancelled(order.id);
-
-        // Decrement pool subscription order count
-        if (position?.poolId) {
-          await this.poolSubscriptionService.decrementOrderCount(position.poolId);
-        }
 
         this.logger.info(
           { positionId, orderId: order.id },
@@ -119,6 +114,19 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
           'Failed to cancel close order (may already be in terminal state)'
         );
         failedCount++;
+      }
+    }
+
+    // Remove pool subscription if no more monitoring orders (single check after all cancellations)
+    if (position?.poolId) {
+      try {
+        await this.automationSubscriptionService.removePoolSubscriptionIfUnused(position.poolId);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          { positionId, poolId: position.poolId, error: errorMessage },
+          'Failed to check pool subscription usage after cancellations'
+        );
       }
     }
 

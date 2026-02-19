@@ -4,51 +4,77 @@
  * Subscribes to pool price events from RabbitMQ's pool-prices exchange.
  * Consumes messages for a specific pool identified by chainId and poolAddress.
  *
- * ## Features
- * - Single-use lifecycle (can only be started once)
- * - Exclusive queue (auto-deletes when consumer disconnects)
- * - Graceful shutdown with message acknowledgment
- * - Error handling with optional user callback
- *
- * ## Usage
- * ```typescript
- * const subscriber = createPoolPriceSubscriber({
- *   chainId: 1,
- *   poolAddress: '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8',
- *   messageHandler: async (message, sub) => {
- *     console.log('Received:', message);
- *   },
- *   errorHandler: async (error, sub) => {
- *     console.error('Connection lost:', error);
- *     await sub.shutdown();
- *   },
- * });
- *
- * await subscriber.start();
- * // ... later
- * await subscriber.shutdown();
- * ```
+ * Pure MQ consumer — no database dependency. Used by automation workers
+ * (CloseOrderMonitor, RangeMonitor) to receive Swap events.
  */
 
 import amqplib, { type Channel, type ChannelModel, type ConsumeMessage } from 'amqplib';
-import { prisma } from '@midcurve/database';
 import { createServiceLogger, LogPatterns } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
-import {
-  EXCHANGE_POOL_PRICES,
-  buildPoolPriceRoutingKey,
-  buildSubscriberQueueName,
-  getRabbitMQConfig,
-  buildConnectionUrl,
-} from '../config.js';
-import type { RawSwapEventWrapper } from '../types.js';
 import type {
+  RabbitMQConfig,
+  RawSwapEventWrapper,
   PoolPriceSubscriberOptions,
   PoolPriceSubscriberState,
   PoolPriceSubscriberStatus,
   PoolPriceMessageHandler,
   PoolPriceErrorHandler,
-} from './types.js';
+} from './pool-price-subscriber.types.js';
+
+// ============================================================================
+// RabbitMQ Constants & Helpers
+// ============================================================================
+
+/**
+ * Pool prices exchange name.
+ * Must match the exchange created by midcurve-onchain-data.
+ */
+export const EXCHANGE_POOL_PRICES = 'pool-prices';
+
+/**
+ * Build routing key for UniswapV3 pool price events.
+ * Format: uniswapv3.{chainId}.{poolAddress}
+ */
+export function buildPoolPriceRoutingKey(chainId: number, poolAddress: string): string {
+  return `uniswapv3.${chainId}.${poolAddress.toLowerCase()}`;
+}
+
+/**
+ * Build unique queue name for a pool price subscriber.
+ * Auto-deletes when consumer disconnects. Uses timestamp for uniqueness.
+ */
+function buildSubscriberQueueName(chainId: number, poolAddress: string): string {
+  const uniqueId = Date.now().toString(36);
+  const shortAddress = poolAddress.toLowerCase().slice(0, 10);
+  return `pool-price-sub.${chainId}.${shortAddress}.${uniqueId}`;
+}
+
+/**
+ * Get RabbitMQ configuration from environment variables.
+ */
+function getRabbitMQConfig(): RabbitMQConfig {
+  return {
+    host: process.env.RABBITMQ_HOST || 'localhost',
+    port: parseInt(process.env.RABBITMQ_PORT || '5672', 10),
+    username: process.env.RABBITMQ_USER || 'midcurve',
+    password: process.env.RABBITMQ_PASS || 'midcurve_dev',
+    vhost: process.env.RABBITMQ_VHOST,
+  };
+}
+
+/**
+ * Build AMQP connection URL from configuration.
+ */
+function buildConnectionUrl(config: RabbitMQConfig): string {
+  const encodedUser = encodeURIComponent(config.username);
+  const encodedPass = encodeURIComponent(config.password);
+  const vhost = config.vhost ? `/${encodeURIComponent(config.vhost)}` : '';
+  return `amqp://${encodedUser}:${encodedPass}@${config.host}:${config.port}${vhost}`;
+}
+
+// ============================================================================
+// PoolPriceSubscriber Class
+// ============================================================================
 
 /**
  * PoolPriceSubscriber - Subscribes to pool price events from RabbitMQ.
@@ -131,7 +157,6 @@ export class PoolPriceSubscriber {
    * @throws Error if already started (subscribers can only be started once)
    */
   async start(): Promise<void> {
-    // Enforce single-start semantics
     if (this.state !== 'idle') {
       throw new Error(
         `Cannot start subscriber: already in state '${this.state}'. ` +
@@ -160,23 +185,14 @@ export class PoolPriceSubscriber {
 
       // 4. Create queue (non-exclusive to allow cleanup, auto-deletes when consumer disconnects)
       await this.channel.assertQueue(this.queueName, {
-        exclusive: false, // Non-exclusive to allow external cleanup during pruning
-        autoDelete: true, // Delete when last consumer disconnects
-        durable: false, // No persistence needed for ephemeral subscriptions
+        exclusive: false,
+        autoDelete: true,
+        durable: false,
       });
 
       this.logger.debug({ queueName: this.queueName }, 'Queue declared');
 
-      // 5. Update database with queue name (for cleanup during pruning)
-      await prisma.poolPriceSubscribers.update({
-        where: { id: this.subscriberId },
-        data: { queueName: this.queueName },
-      });
-
-      this.logger.debug({ subscriberId: this.subscriberId, queueName: this.queueName }, 'Queue name registered in database');
-
-      // 6. Bind queue to pool-prices exchange with routing key
-      // Note: We assume the exchange already exists (created by midcurve-pool-prices)
+      // 5. Bind queue to pool-prices exchange with routing key
       await this.channel.bindQueue(this.queueName, EXCHANGE_POOL_PRICES, this.routingKey);
 
       this.logger.debug(
@@ -184,11 +200,11 @@ export class PoolPriceSubscriber {
         'Queue bound to exchange'
       );
 
-      // 7. Start consuming
+      // 6. Start consuming
       const result = await this.channel.consume(
         this.queueName,
         (msg) => this.onMessage(msg),
-        { noAck: false } // Manual acknowledgment
+        { noAck: false }
       );
 
       this.consumerTag = result.consumerTag;
@@ -219,9 +235,6 @@ export class PoolPriceSubscriber {
 
   /**
    * Gracefully shutdown the subscriber.
-   *
-   * Cancels the consumer, closes the channel, and optionally closes
-   * the connection (if we created it).
    */
   async shutdown(): Promise<void> {
     if (this.state === 'idle' || this.state === 'stopped') {
@@ -320,9 +333,6 @@ export class PoolPriceSubscriber {
 
   /**
    * Get the queue name.
-   *
-   * This is available immediately after construction (before start()).
-   * Useful for registering the queue name in the database.
    */
   getQueueName(): string {
     return this.queueName;
@@ -332,9 +342,6 @@ export class PoolPriceSubscriber {
   // PRIVATE METHODS
   // ============================================================================
 
-  /**
-   * Connect to RabbitMQ.
-   */
   private async connect(): Promise<void> {
     const config = getRabbitMQConfig();
     const url = buildConnectionUrl(config);
@@ -347,9 +354,6 @@ export class PoolPriceSubscriber {
     this.logger.debug({}, 'Connected to RabbitMQ');
   }
 
-  /**
-   * Setup connection event listeners.
-   */
   private setupConnectionListeners(): void {
     if (!this.connection) return;
 
@@ -366,9 +370,6 @@ export class PoolPriceSubscriber {
     });
   }
 
-  /**
-   * Setup channel event listeners.
-   */
   private setupChannelListeners(): void {
     if (!this.channel) return;
 
@@ -385,17 +386,12 @@ export class PoolPriceSubscriber {
     });
   }
 
-  /**
-   * Handle connection/channel errors.
-   */
   private handleConnectionError(error: Error): void {
     this.state = 'error';
 
-    // Call user's error handler if provided
     if (this.errorHandler) {
       try {
         const result = this.errorHandler(error, this);
-        // If it returns a promise, catch any errors
         if (result instanceof Promise) {
           result.catch((err) => {
             this.logger.error(
@@ -413,18 +409,13 @@ export class PoolPriceSubscriber {
     }
   }
 
-  /**
-   * Handle incoming message from queue.
-   */
   private async onMessage(msg: ConsumeMessage | null): Promise<void> {
     if (!msg || !this.channel) return;
 
     try {
-      // Parse message
       const content = msg.content.toString();
       const message = JSON.parse(content) as RawSwapEventWrapper;
 
-      // Update stats
       this.messagesReceived++;
       this.lastMessageAt = new Date();
 
@@ -438,10 +429,8 @@ export class PoolPriceSubscriber {
         'Message received'
       );
 
-      // Invoke user's handler
       await this.messageHandler(message, this);
 
-      // Acknowledge message (guard against shutdown race)
       if (this.channel) {
         this.channel.ack(msg);
       }
@@ -450,7 +439,6 @@ export class PoolPriceSubscriber {
 
       this.logger.error({ error: errorMessage }, 'Error processing message');
 
-      // Reject message without requeue (avoid infinite loop)
       if (this.channel) {
         this.channel.nack(msg, false, false);
       }
@@ -464,29 +452,6 @@ export class PoolPriceSubscriber {
 
 /**
  * Create a new pool price subscriber instance.
- *
- * This is the recommended way to create subscribers as it follows
- * the factory pattern used throughout midcurve-services.
- *
- * @param options - Subscriber configuration
- * @returns New PoolPriceSubscriber instance
- *
- * @example
- * ```typescript
- * const subscriber = createPoolPriceSubscriber({
- *   chainId: 1,
- *   poolAddress: '0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8',
- *   messageHandler: async (message, sub) => {
- *     console.log('Swap event:', message);
- *   },
- *   errorHandler: async (error, sub) => {
- *     console.error('Connection lost:', error);
- *     await sub.shutdown();
- *   },
- * });
- *
- * await subscriber.start();
- * ```
  */
 export function createPoolPriceSubscriber(
   options: PoolPriceSubscriberOptions
