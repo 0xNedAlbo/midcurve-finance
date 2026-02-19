@@ -26,43 +26,6 @@ export interface OrderTriggerMessage {
   triggeredAt: string;
 }
 
-// =============================================================================
-// HEDGE VAULT MESSAGES
-// =============================================================================
-
-/**
- * Trigger type for hedge vault operations
- */
-export type HedgeVaultTriggerType = 'sil' | 'tip' | 'reopen';
-
-/**
- * Hedge vault trigger message - published when SIL/TIP/Reopen condition is met
- */
-export interface HedgeVaultTriggerMessage {
-  /** Vault ID from database */
-  vaultId: string;
-  /** On-chain vault contract address */
-  vaultAddress: string;
-  /** Pool address where trigger occurred */
-  poolAddress: string;
-  /** Chain ID */
-  chainId: number;
-  /** Type of trigger (sil, tip, reopen) */
-  triggerType: HedgeVaultTriggerType;
-  /** Current sqrtPriceX96 at trigger time */
-  currentSqrtPriceX96: string;
-  /** SIL trigger threshold */
-  silSqrtPriceX96: string;
-  /** TIP trigger threshold */
-  tipSqrtPriceX96: string;
-  /** Whether token0 is the quote token (for trigger logic) */
-  token0IsQuote: boolean;
-  /** Current block number (for reopen cooldown check) */
-  currentBlock: string;
-  /** Timestamp of trigger detection */
-  triggeredAt: string;
-}
-
 /**
  * Serialize a message for publishing
  */

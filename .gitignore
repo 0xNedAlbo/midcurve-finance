@@ -72,11 +72,5 @@ apps/midcurve-evm/contracts/lib/
 apps/midcurve-evm/contracts/cache/
 apps/midcurve-evm/contracts/broadcast/
 
-# Midcurve Hedges (Foundry)
-apps/midcurve-hedges/lib/
-apps/midcurve-hedges/cache/
-apps/midcurve-hedges/out/
-apps/midcurve-hedges/broadcast/
-
 # Deployment artifacts
 apps/midcurve-automation/deployments/

@@ -4,8 +4,8 @@
  * Provides CRUD operations and lifecycle management for close order execution attempts.
  * Each execution records the trigger context, execution lifecycle, and result.
  *
- * Follows the HedgeVaultExecution pattern: execution attempts are separate
- * entities from the order itself, allowing clean tracking of retries.
+ * Execution attempts are separate entities from the order itself,
+ * allowing clean tracking of retries.
  *
  * Lifecycle: pending → executing → completed | failed
  */

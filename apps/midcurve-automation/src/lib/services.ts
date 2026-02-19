@@ -16,7 +16,6 @@ import {
   UserNotificationService,
   UiNotificationAdapter,
   WebhookNotificationAdapter,
-  HedgeVaultService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -28,7 +27,6 @@ let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
-let _hedgeVaultService: HedgeVaultService | null = null;
 
 /**
  * Get singleton instance of OnChainCloseOrderService
@@ -119,14 +117,4 @@ export function getUserNotificationService(): UserNotificationService {
     });
   }
   return _userNotificationService;
-}
-
-/**
- * Get singleton instance of HedgeVaultService
- */
-export function getHedgeVaultService(): HedgeVaultService {
-  if (!_hedgeVaultService) {
-    _hedgeVaultService = new HedgeVaultService();
-  }
-  return _hedgeVaultService;
 }

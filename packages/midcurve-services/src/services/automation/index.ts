@@ -8,7 +8,6 @@
  * - Shared contracts (versioned contract registry)
  * - Pool subscriptions (price monitoring)
  * - Automation logs (user-facing event logs)
- * - Hedge vaults (automated LP management)
  */
 
 // On-chain close order service (replaces old CloseOrderService)
@@ -42,9 +41,3 @@ export type {
   LogLevelType,
   AutomationLogTypeValue,
 } from './automation-log-service.js';
-
-export { HedgeVaultService } from './hedge-vault-service.js';
-export type {
-  HedgeVaultServiceDependencies,
-  HedgeVaultWithExecutions,
-} from './hedge-vault-service.js';

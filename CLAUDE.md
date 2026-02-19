@@ -480,14 +480,14 @@ midcurve-automation/
 ### Languages & Runtimes
 - **TypeScript 5.3+** - Strict mode, ESM modules
 - **Node.js 20.19.x** - Server-side runtime
-- **Solidity 0.8.20** - Smart contracts (position closer, hedge vaults)
+- **Solidity 0.8.20** - Smart contracts (position closer)
 
 ### Build Tools
 - **Vite** - Frontend build tool (midcurve-ui)
 - **Next.js 15** - Backend API framework (api, automation, signer)
 - **Turborepo** - Monorepo build orchestration
 - **pnpm 9.12.0** - Package manager
-- **Foundry** - Smart contract development (midcurve-automation, midcurve-hedges)
+- **Foundry** - Smart contract development (midcurve-contracts)
 
 ### Frontend
 - **React 19** - UI framework
