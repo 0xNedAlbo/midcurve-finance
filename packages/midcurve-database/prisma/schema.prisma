@@ -205,7 +205,6 @@ model Pool {
   token1            Token                  @relation("PoolToken1", fields: [token1Id], references: [id])
   positions         Position[]
   poolPrices        PoolPrice[]
-  pricesUniswapV3   PoolPricesUniswapV3[]  @relation("PoolPricesUniswapV3") // Historical prices from Swap events
   favoritedBy       FavoritePool[] // Users who favorited this pool
 
   // Indexes for efficient queries
@@ -951,48 +950,4 @@ model FavoritePool {
   @@index([poolId])
   @@index([userId, createdAt]) // For listing user's favorites in order
   @@map("favorite_pools")
-}
-
-// PoolPricesUniswapV3 - Historical pool prices from Swap events
-// Prices are sourced by subscribing to Swap events the pool contract emits
-// Events with removed=true (chain reorgs) should delete corresponding entries
-model PoolPricesUniswapV3 {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Chain identification
-  chainId Int
-
-  // Transaction identification (for uniqueness and ordering)
-  blockHash        String
-  transactionHash  String
-  transactionIndex Int
-  logIndex         Int    // Position of log within the block (not transaction)
-  blockNumber      Int
-  blockTimestamp   DateTime
-
-  // Pool reference (cascade delete when pool is deleted)
-  poolId String
-  pool   Pool   @relation("PoolPricesUniswapV3", fields: [poolId], references: [id], onDelete: Cascade)
-
-  // Price data (stored as string for bigint precision)
-  sqrtPriceX96         String // bigint as string
-  token1PricePerToken0 String // bigint as string
-  token0PricePerToken1 String // bigint as string
-
-  // Finality flag (false until confirmed)
-  isFinal Boolean @default(false)
-
-  // Unique constraint for deduplication
-  @@unique([chainId, blockHash, transactionHash, logIndex])
-
-  // Indexes for efficient querying
-  // Ordering (latest first): blockNumber DESC, logIndex DESC
-  // Ordering (earliest first): blockNumber ASC, logIndex ASC
-  @@index([poolId, blockNumber(sort: Desc), logIndex(sort: Desc)], map: "pool_prices_uniswapv3_latest_first_idx")
-  @@index([poolId, blockNumber(sort: Asc), logIndex(sort: Asc)], map: "pool_prices_uniswapv3_earliest_first_idx")
-  @@index([chainId])
-  @@index([isFinal])
-  @@map("pool_prices_uniswapv3")
 }
