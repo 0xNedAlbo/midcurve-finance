@@ -633,7 +633,7 @@ model CloseOrder {
   @@index([onChainStatus, monitoringState]) // Active + monitoring orders
   @@index([closeOrderHash])
   @@index([sharedContractId])
-  @@map("on_chain_close_orders")
+  @@map("close_orders")
 }
 
 // CloseOrderExecution - Platform-independent execution attempt for a close order
@@ -648,7 +648,7 @@ model CloseOrderExecution {
   protocol String // 'uniswapv3', future: 'aave', etc.
 
   // Parent order
-  closeOrderId String     @map("onChainCloseOrderId")
+  closeOrderId String
   closeOrder   CloseOrder @relation(fields: [closeOrderId], references: [id], onDelete: Cascade)
 
   // Denormalized for efficient querying
@@ -787,7 +787,7 @@ model AutomationLog {
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
   // Optional: Link to specific close order
-  closeOrderId String?     @map("onChainCloseOrderId")
+  closeOrderId String?
   closeOrder   CloseOrder? @relation(fields: [closeOrderId], references: [id], onDelete: SetNull)
 
   // Log classification
