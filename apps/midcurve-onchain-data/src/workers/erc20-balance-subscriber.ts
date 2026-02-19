@@ -510,21 +510,25 @@ export class Erc20BalanceSubscriber {
    * Removes them from WebSocket but keeps the DB record.
    */
   private async pauseStaleSubscriptions(): Promise<void> {
-    const cutoffTime = new Date(Date.now() - PAUSE_THRESHOLD_MS);
-
-    // Find active subscriptions with stale lastPolledAt
-    const staleSubscriptions = await prisma.onchainDataSubscribers.findMany({
+    // Find active subscriptions that have an expiry (persistent subscriptions with null expiresAfterMs are skipped)
+    const candidates = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'erc20-balance',
         status: 'active',
-        lastPolledAt: {
-          lt: cutoffTime,
-        },
+        expiresAfterMs: { not: null },
       },
       select: {
         id: true,
         subscriptionId: true,
+        lastPolledAt: true,
+        expiresAfterMs: true,
       },
+    });
+
+    const now = Date.now();
+    const staleSubscriptions = candidates.filter((sub) => {
+      if (!sub.lastPolledAt || sub.expiresAfterMs == null) return false;
+      return now - sub.lastPolledAt.getTime() > sub.expiresAfterMs;
     });
 
     if (staleSubscriptions.length === 0) {
@@ -533,7 +537,7 @@ export class Erc20BalanceSubscriber {
 
     log.info({ count: staleSubscriptions.length, msg: 'Pausing stale subscriptions' });
 
-    const now = new Date();
+    const pausedAt = new Date();
 
     for (const sub of staleSubscriptions) {
       // Update database status to paused
@@ -541,7 +545,7 @@ export class Erc20BalanceSubscriber {
         where: { id: sub.id },
         data: {
           status: 'paused',
-          pausedAt: now,
+          pausedAt,
         },
       });
 

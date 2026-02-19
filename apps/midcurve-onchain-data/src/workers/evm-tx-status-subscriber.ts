@@ -582,42 +582,43 @@ export class EvmTxStatusSubscriber {
    * Pause subscriptions that haven't been polled by the client.
    */
   private async pauseStaleSubscriptions(): Promise<void> {
-    const cutoffTime = new Date(Date.now() - PAUSE_THRESHOLD_MS);
-
-    const staleSubscriptions = await prisma.onchainDataSubscribers.findMany({
+    // Find active subscriptions that have an expiry (persistent subscriptions with null expiresAfterMs are skipped)
+    const candidates = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'evm-tx-status',
         status: 'active',
-        lastPolledAt: {
-          lt: cutoffTime,
-        },
+        expiresAfterMs: { not: null },
       },
       select: {
         id: true,
         subscriptionId: true,
+        lastPolledAt: true,
+        expiresAfterMs: true,
         state: true,
       },
+    });
+
+    const now = Date.now();
+    const staleSubscriptions = candidates.filter((sub) => {
+      if (!sub.lastPolledAt || sub.expiresAfterMs == null) return false;
+      // Don't pause completed subscriptions (they'll be cleaned up separately)
+      const state = sub.state as unknown as EvmTxStatusSubscriptionState;
+      if (state.isComplete) return false;
+      return now - sub.lastPolledAt.getTime() > sub.expiresAfterMs;
     });
 
     if (staleSubscriptions.length === 0) {
       return;
     }
 
-    const now = new Date();
+    const pausedAt = new Date();
 
     for (const sub of staleSubscriptions) {
-      const state = sub.state as unknown as EvmTxStatusSubscriptionState;
-
-      // Don't pause completed subscriptions (they'll be cleaned up separately)
-      if (state.isComplete) {
-        continue;
-      }
-
       await prisma.onchainDataSubscribers.update({
         where: { id: sub.id },
         data: {
           status: 'paused',
-          pausedAt: now,
+          pausedAt,
         },
       });
 

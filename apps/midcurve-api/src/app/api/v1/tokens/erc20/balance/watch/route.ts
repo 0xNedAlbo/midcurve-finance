@@ -191,6 +191,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               subscriptionType: 'erc20-balance',
               subscriptionId,
               status: 'active',
+              expiresAfterMs: 60_000,
               lastPolledAt: createdAt,
               config: config as unknown as Prisma.InputJsonValue,
               state: state as unknown as Prisma.InputJsonValue,

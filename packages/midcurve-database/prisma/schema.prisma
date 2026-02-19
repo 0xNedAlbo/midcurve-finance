@@ -755,6 +755,11 @@ model OnchainDataSubscribers {
   // deleted: marked for cleanup (will be removed by pruning job)
   status String @default("active") // 'active', 'paused', 'deleted'
 
+  // Lifecycle expiry (ms without polling before pause)
+  // null = persistent (never expires, e.g. automation subscriptions)
+  // number = ms threshold (e.g. 60000 for UI subscriptions)
+  expiresAfterMs Int?
+
   // Heartbeat tracking
   lastPolledAt DateTime? // Updated when client polls GET endpoint
   pausedAt     DateTime? // When subscription was paused

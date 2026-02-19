@@ -34,6 +34,8 @@ export interface OnchainSubscriptionData {
   subscriptionType: OnchainSubscriptionType;
   subscriptionId: string;
   status: OnchainSubscriptionStatus;
+  /** null = persistent (never expires), number = ms without polling before pause */
+  expiresAfterMs: number | null;
   lastPolledAt: Date | null;
   pausedAt: Date | null;
   config: unknown;
@@ -50,6 +52,8 @@ export interface OnchainSubscriptionJSON {
   subscriptionType: OnchainSubscriptionType;
   subscriptionId: string;
   status: OnchainSubscriptionStatus;
+  /** null = persistent (never expires), number = ms without polling before pause */
+  expiresAfterMs: number | null;
   lastPolledAt: string | null;
   pausedAt: string | null;
   config: unknown;
@@ -306,6 +310,7 @@ export function subscriptionToJSON(data: OnchainSubscriptionData): OnchainSubscr
     subscriptionType: data.subscriptionType,
     subscriptionId: data.subscriptionId,
     status: data.status,
+    expiresAfterMs: data.expiresAfterMs,
     lastPolledAt: data.lastPolledAt?.toISOString() ?? null,
     pausedAt: data.pausedAt?.toISOString() ?? null,
     config: data.config,
@@ -324,6 +329,7 @@ export function subscriptionFromJSON(json: OnchainSubscriptionJSON): OnchainSubs
     subscriptionType: json.subscriptionType,
     subscriptionId: json.subscriptionId,
     status: json.status,
+    expiresAfterMs: json.expiresAfterMs,
     lastPolledAt: json.lastPolledAt ? new Date(json.lastPolledAt) : null,
     pausedAt: json.pausedAt ? new Date(json.pausedAt) : null,
     config: json.config,
@@ -410,6 +416,12 @@ export function isUniswapV3PoolPriceSubscription(
 ): data is UniswapV3PoolPriceSubscriptionData {
   return data.subscriptionType === 'uniswapv3-pool-price';
 }
+
+/**
+ * Default expiry for polling-based subscriptions (60 seconds).
+ * Subscriptions without a poll within this window are paused.
+ */
+export const DEFAULT_SUBSCRIPTION_EXPIRY_MS = 60_000;
 
 /**
  * MAX_UINT256 constant for unlimited approval detection.
