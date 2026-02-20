@@ -74,25 +74,17 @@ export function useWizardUrlState({
     hasHydrated.current = true;
 
     const params = parseWizardUrlParams(searchParams);
-    console.log('[WizardURL] Parsed URL params:', params);
 
     // Skip hydration if no pool params
-    if (!params.chainId || !params.poolAddress) {
-      console.log('[WizardURL] No chain/pool in URL, skipping hydration');
-      return;
-    }
+    if (!params.chainId || !params.poolAddress) return;
 
     // Validate params - silently clear URL and start fresh on failure
-    const chainValid = isValidChainId(params.chainId);
-    const poolValid = isValidPoolAddress(params.poolAddress);
-    if (!chainValid || !poolValid) {
-      console.log('[WizardURL] Validation failed — chainValid:', chainValid, 'poolValid:', poolValid, '→ clearing URL');
+    if (!isValidChainId(params.chainId) || !isValidPoolAddress(params.poolAddress)) {
       clearUrlParams();
       return;
     }
 
     // Start hydration
-    console.log('[WizardURL] Starting hydration for chain', params.chainId, 'pool', params.poolAddress);
     setIsHydrating(true);
     isHydratingRef.current = true;
 
@@ -103,7 +95,6 @@ export function useWizardUrlState({
         address: params.poolAddress,
       })
       .then((result) => {
-        console.log('[WizardURL] Pool discovered:', result.pool);
         const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
 
         // Create minimal PoolSearchResultItem for selectPool
@@ -134,7 +125,7 @@ export function useWizardUrlState({
         setDiscoveredPool(poolInstance);
 
         // Dispatch hydration with remaining params
-        const hydrationPayload = {
+        onHydrate({
           isToken0Quote: params.isToken0Quote,
           baseInputAmount: params.baseInputAmount,
           quoteInputAmount: params.quoteInputAmount,
@@ -144,16 +135,12 @@ export function useWizardUrlState({
           takeProfitTick: params.takeProfitTick,
           currentStepIndex: params.currentStepIndex,
           configurationTab: params.configurationTab,
-        };
-        console.log('[WizardURL] Dispatching HYDRATE_FROM_URL:', hydrationPayload);
-        onHydrate(hydrationPayload);
+        });
 
         setIsHydrating(false);
         isHydratingRef.current = false;
-        console.log('[WizardURL] Hydration complete');
       })
-      .catch((error) => {
-        console.log('[WizardURL] Pool discovery failed:', error, '→ clearing URL');
+      .catch(() => {
         clearUrlParams();
         setIsHydrating(false);
         isHydratingRef.current = false;
