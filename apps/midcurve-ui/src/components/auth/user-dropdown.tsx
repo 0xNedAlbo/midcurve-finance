@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/providers/AuthProvider";
 import { LogOut, ChevronDown, Wallet, Bell, ArrowLeftRight } from "lucide-react";
 import { SwapDialog } from "@/components/swap";
+import { WalletAvatar } from "@/components/ui/wallet-avatar";
 
 interface UserDropdownProps {
   mode?: "loading" | "unauthenticated" | "authenticated";
@@ -35,7 +36,6 @@ export function UserDropdown({ mode }: UserDropdownProps) {
   // Get user data from session
   const userAddress = user?.address || "";
   const displayName = userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : "";
-  const userInitial = displayName.charAt(0).toUpperCase();
   const fullAddress = userAddress;
 
   // Handle sign out
@@ -73,9 +73,7 @@ export function UserDropdown({ mode }: UserDropdownProps) {
         className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 backdrop-blur-sm rounded-lg border border-slate-700/50 hover:border-slate-600 transition-colors group cursor-pointer"
       >
         {/* Avatar */}
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-medium">
-          {userInitial}
-        </div>
+        <WalletAvatar address={userAddress} size={32} />
 
         {/* Name */}
         <span className="text-slate-200 text-sm font-medium max-w-24 truncate">
