@@ -225,11 +225,11 @@ export const automationApi = {
      * List close orders for a specific position
      * @param chainId - Chain ID
      * @param nftId - Uniswap V3 NFT token ID
-     * @param params - Optional filters (status, type)
+     * @param params - Optional filters (automationState, type)
      */
-    list(chainId: number, nftId: string, params?: { status?: string; type?: 'sl' | 'tp' }) {
+    list(chainId: number, nftId: string, params?: { automationState?: string; type?: 'sl' | 'tp' }) {
       const searchParams = new URLSearchParams();
-      if (params?.status) searchParams.set('status', params.status);
+      if (params?.automationState) searchParams.set('automationState', params.automationState);
       if (params?.type) searchParams.set('type', params.type);
       const query = searchParams.toString();
       const url = `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders${query ? `?${query}` : ''}`;

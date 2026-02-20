@@ -4,7 +4,6 @@
  * Re-exports all automation service classes and types.
  * These services handle position automation features:
  * - On-chain close orders (price-triggered position closing)
- * - Close order executions (individual execution attempt tracking)
  * - Shared contracts (versioned contract registry)
  * - Automation subscriptions (pool price monitoring via OnchainDataSubscribers)
  * - Pool price subscriber (RabbitMQ consumer for swap events)
@@ -17,10 +16,6 @@ export type {
   CloseOrderServiceDependencies,
   CloseOrderWithPosition,
 } from './close-order-service.js';
-
-// Close order execution service
-export { CloseOrderExecutionService } from './close-order-execution-service.js';
-export type { CloseOrderExecutionServiceDependencies } from './close-order-execution-service.js';
 
 export { SharedContractService } from './shared-contract-service.js';
 export type {

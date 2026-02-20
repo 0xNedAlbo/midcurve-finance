@@ -35,7 +35,7 @@ export function CloseOrderSuccessStep({ order, quoteTokenSymbol: _quoteTokenSymb
       <div className="bg-slate-700/30 rounded-lg p-4 text-left space-y-3 max-w-sm mx-auto">
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-400">Status</span>
-          <CloseOrderStatusBadge status={order.status} size="sm" />
+          <CloseOrderStatusBadge status={order.automationState} size="sm" />
         </div>
 
         <div className="flex items-center justify-between">

@@ -16,7 +16,7 @@ import type {
   UniswapV3PositionConfigData,
   UniswapV3PositionState,
 } from '@midcurve/shared';
-import { normalizeAddress, OnChainOrderStatus } from '@midcurve/shared';
+import { normalizeAddress } from '@midcurve/shared';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -137,7 +137,7 @@ export async function GET(
         // 3b. Fetch active close orders for this position
         const activeCloseOrders = await getCloseOrderService().findByPositionId(
           position.id,
-          { onChainStatus: OnChainOrderStatus.ACTIVE },
+          { automationState: ['monitoring', 'executing', 'retrying'] },
           tx
         );
 

@@ -18,20 +18,16 @@ export const CLOSE_ORDER_TYPES = ['uniswapv3'] as const;
 export type CloseOrderType = (typeof CLOSE_ORDER_TYPES)[number];
 
 /**
- * Close order status values
+ * Automation state values — direct mapping from DB, no derivation needed.
+ *
+ * monitoring: Price monitor is watching for trigger condition
+ * executing:  Execution in progress (simulation/signing/broadcasting)
+ * retrying:   Execution failed, waiting before retry (60s delay)
+ * failed:     Max execution attempts exhausted (terminal)
+ * executed:   Order executed successfully on-chain (terminal)
  */
-export const CLOSE_ORDER_STATUSES = [
-  'pending',
-  'registering',
-  'active',
-  'triggering',
-  'executed',
-  'cancelled',
-  'expired',
-  'failed',
-  'superseded',
-] as const;
-export type CloseOrderStatus = (typeof CLOSE_ORDER_STATUSES)[number];
+export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed', 'executed'] as const;
+export type AutomationState = (typeof AUTOMATION_STATES)[number];
 
 /**
  * Trigger mode values
@@ -67,24 +63,18 @@ export interface SwapConfig {
 }
 
 /**
- * Monitoring state values (off-chain execution lifecycle)
- */
-export const MONITORING_STATES = ['idle', 'monitoring', 'triggered', 'suspended'] as const;
-export type MonitoringState = (typeof MONITORING_STATES)[number];
-
-/**
  * Serialized close order for API responses.
  *
- * Contains generic fields (protocol, status, config, state) plus
- * protocol-specific fields extracted from JSON for backward compatibility.
+ * automationState is the single lifecycle field — no derived status needed.
  */
 export interface SerializedCloseOrder {
   id: string;
   protocol: string;
   closeOrderHash: string | null;
   closeOrderType: CloseOrderType;
-  status: CloseOrderStatus;
-  monitoringState: MonitoringState;
+  automationState: AutomationState;
+  executionAttempts: number;
+  lastError: string | null;
   positionId: string;
   chainId: number;
   nftId: string;

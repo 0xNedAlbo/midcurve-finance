@@ -6,13 +6,13 @@
  *
  * Polling behavior:
  * - When polling=true: polls every 10s normally
- * - When any order is in 'triggering' state: polls every 2s for faster UI updates
+ * - When any order is executing/retrying: polls every 2s for faster UI updates
  */
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { automationApi } from '@/lib/api-client';
-import type { SerializedCloseOrder, CloseOrderStatus } from '@midcurve/api-shared';
+import type { SerializedCloseOrder, AutomationState } from '@midcurve/api-shared';
 
 /** Normal polling interval (10 seconds) */
 const POLLING_INTERVAL_NORMAL = 10_000;
@@ -35,9 +35,9 @@ interface UseCloseOrdersParams {
   nftId: string;
 
   /**
-   * Filter by status
+   * Filter by automation state
    */
-  status?: CloseOrderStatus;
+  automationState?: AutomationState;
 
   /**
    * Filter by order type (sl = stop-loss, tp = take-profit)
@@ -51,10 +51,12 @@ interface UseCloseOrdersParams {
 }
 
 /**
- * Check if any order is currently executing (triggering status)
+ * Check if any order is currently executing or retrying
  */
 function hasExecutingOrder(orders: SerializedCloseOrder[] | undefined): boolean {
-  return orders?.some((order) => order.monitoringState === 'triggered') ?? false;
+  return orders?.some((order) =>
+    order.automationState === 'executing' || order.automationState === 'retrying'
+  ) ?? false;
 }
 
 /**
@@ -66,12 +68,12 @@ export function useCloseOrders(
   params: UseCloseOrdersParams,
   options?: Omit<UseQueryOptions<SerializedCloseOrder[]>, 'queryKey' | 'queryFn'>
 ) {
-  const { chainId, nftId, status, type, polling = false } = params;
+  const { chainId, nftId, automationState, type, polling = false } = params;
 
   return useQuery({
-    queryKey: queryKeys.positions.uniswapv3.closeOrders.list(chainId, nftId, { status, type }),
+    queryKey: queryKeys.positions.uniswapv3.closeOrders.list(chainId, nftId, { automationState, type }),
     queryFn: async () => {
-      const response = await automationApi.positionCloseOrders.list(chainId, nftId, { status, type });
+      const response = await automationApi.positionCloseOrders.list(chainId, nftId, { automationState, type });
       return response.data;
     },
     staleTime: 30_000, // 30 seconds

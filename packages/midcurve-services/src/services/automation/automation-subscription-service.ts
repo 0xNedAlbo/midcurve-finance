@@ -12,7 +12,6 @@
 
 import { prisma as prismaClient, PrismaClient, Prisma } from '@midcurve/database';
 import {
-  OnChainOrderStatus,
   emptyUniswapV3PoolPriceState,
 } from '@midcurve/shared';
 import type { UniswapV3PoolPriceSubscriptionConfig } from '@midcurve/shared';
@@ -96,8 +95,7 @@ export class AutomationSubscriptionService {
       const remainingOrders = await this.prisma.closeOrder.count({
         where: {
           position: { pool: { id: poolId } },
-          onChainStatus: OnChainOrderStatus.ACTIVE,
-          monitoringState: 'monitoring',
+          automationState: 'monitoring',
         },
       });
 

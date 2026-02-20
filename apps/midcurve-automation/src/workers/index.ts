@@ -15,7 +15,6 @@ import {
 import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
 import {
   OutboxPublisher,
-  PositionClosedOrderCanceller,
   setupDomainEventsTopology,
 } from '@midcurve/services';
 
@@ -29,10 +28,6 @@ export interface OutboxPublisherStatus {
   running: boolean;
 }
 
-export interface PositionClosedOrderCancellerStatus {
-  running: boolean;
-}
-
 export interface WorkerManagerStatus {
   status: 'idle' | 'starting' | 'running' | 'stopping' | 'stopped';
   startedAt: string | null;
@@ -40,7 +35,6 @@ export interface WorkerManagerStatus {
     closeOrderMonitor: CloseOrderMonitorStatus;
     orderExecutor: CloseOrderExecutorStatus;
     outboxPublisher: OutboxPublisherStatus;
-    positionClosedOrderCanceller: PositionClosedOrderCancellerStatus;
     rangeMonitor: RangeMonitorStatus;
   };
 }
@@ -56,7 +50,6 @@ class WorkerManager {
   private closeOrderMonitor: CloseOrderMonitor | null = null;
   private orderExecutor: CloseOrderExecutor | null = null;
   private outboxPublisher: OutboxPublisher | null = null;
-  private positionClosedOrderCanceller: PositionClosedOrderCanceller | null = null;
   private rangeMonitor: RangeMonitor | null = null;
 
   /**
@@ -102,9 +95,6 @@ class WorkerManager {
       this.outboxPublisher = new OutboxPublisher({ channel });
       this.outboxPublisher.start();
 
-      this.positionClosedOrderCanceller = new PositionClosedOrderCanceller();
-      await this.positionClosedOrderCanceller.start(channel);
-
       this.status = 'running';
       this.startedAt = new Date();
 
@@ -134,7 +124,6 @@ class WorkerManager {
       await Promise.all([
         this.closeOrderMonitor?.stop(),
         this.orderExecutor?.stop(),
-        this.positionClosedOrderCanceller?.stop(),
         this.rangeMonitor?.stop(),
       ]);
 
@@ -181,9 +170,6 @@ class WorkerManager {
         outboxPublisher: {
           running: this.outboxPublisher?.isRunning() ?? false,
         },
-        positionClosedOrderCanceller: {
-          running: this.positionClosedOrderCanceller?.isRunning() ?? false,
-        },
         rangeMonitor: this.rangeMonitor?.getStatus() || {
           status: 'idle',
           poolSubscribers: 0,
@@ -208,13 +194,11 @@ class WorkerManager {
     const closeOrderMonitorStatus = this.closeOrderMonitor?.getStatus();
     const orderExecutorStatus = this.orderExecutor?.getStatus();
     const outboxPublisherRunning = this.outboxPublisher?.isRunning() ?? false;
-    const orderCancellerRunning = this.positionClosedOrderCanceller?.isRunning() ?? false;
 
     return (
       closeOrderMonitorStatus?.status === 'running' &&
       orderExecutorStatus?.status === 'running' &&
-      outboxPublisherRunning &&
-      orderCancellerRunning
+      outboxPublisherRunning
     );
   }
 }

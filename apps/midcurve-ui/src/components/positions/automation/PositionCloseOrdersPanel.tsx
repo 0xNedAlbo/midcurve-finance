@@ -100,8 +100,8 @@ export function PositionCloseOrdersPanel({
   );
 
   // Filter to show active orders first, then terminal ones
-  const activeOrders = orders?.filter((o) => !isCloseOrderTerminal(o.status)) ?? [];
-  const terminalOrders = orders?.filter((o) => isCloseOrderTerminal(o.status)) ?? [];
+  const activeOrders = orders?.filter((o) => !isCloseOrderTerminal(o.automationState)) ?? [];
+  const terminalOrders = orders?.filter((o) => isCloseOrderTerminal(o.automationState)) ?? [];
 
   // Has any active (non-terminal) orders
   const hasActiveOrders = activeOrders.length > 0;

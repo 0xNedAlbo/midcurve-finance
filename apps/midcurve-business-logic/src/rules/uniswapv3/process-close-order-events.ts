@@ -2,15 +2,15 @@
  * Process Close Order Events Rule
  *
  * Subscribes to close order lifecycle events from the onchain-data service
- * and synchronizes the database with on-chain state:
- * - Creates new close orders when OrderRegistered events are observed
- * - Cancels orders when OrderCancelled events are observed
- * - Updates order config when config-change events are observed
+ * and synchronizes the database with on-chain state.
  *
- * Events handled (9 total):
- * - OrderRegistered: Create new order or activate existing pending/registering order
- * - OrderCancelled: Cancel order, decrement pool subscription
- * - OrderExecuted: Mark order as on-chain executed, store execution data
+ * DB lifecycle driven by on-chain events:
+ * - OrderRegistered → INSERT new order (automationState=monitoring)
+ * - OrderCancelled → DELETE order from DB
+ * - OrderExecuted → UPDATE automationState=executed
+ * - Re-registration at same slot → DELETE old + INSERT new
+ *
+ * Config-change events (9 total):
  * - OrderOperatorUpdated: Update operatorAddress
  * - OrderPayoutUpdated: Update payoutAddress
  * - OrderTriggerTickUpdated: Update triggerTick + recalculate closeOrderHash
@@ -46,7 +46,6 @@ import type {
 import {
   ContractTriggerMode,
   ContractSwapDirection,
-  OnChainOrderStatus,
   createUniswapV3OrderIdentityHash,
 } from '@midcurve/shared';
 
@@ -81,11 +80,8 @@ const QUEUE_NAME = 'business-logic.process-close-order-events';
 /** Routing pattern to subscribe to all close order events */
 const ROUTING_PATTERN = 'closer.#';
 
-/** Terminal on-chain statuses (order no longer active on contract) */
-const TERMINAL_ON_CHAIN_STATUSES = [
-  OnChainOrderStatus.EXECUTED,
-  OnChainOrderStatus.CANCELLED,
-];
+/** Terminal automation states — order lifecycle is complete */
+const TERMINAL_AUTOMATION_STATES = ['executed', 'failed'];
 
 // =============================================================================
 // String → Numeric Enum Mapping
@@ -349,10 +345,10 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   }
 
   /**
-   * Builds a UpsertFromOnChainEventInput from a registered event.
+   * Builds a CreateCloseOrderInput from a registered event.
    * Packs protocol-specific data into config/state JSON.
    */
-  private buildUpsertInput(
+  private buildCreateInput(
     event: OrderRegisteredEvent,
     positionId: string,
   ) {
@@ -369,7 +365,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       protocol: 'uniswapv3' as const,
       positionId,
       orderIdentityHash,
-      onChainStatus: OnChainOrderStatus.ACTIVE,
       closeOrderHash: deriveCloseOrderHashFromTick(triggerMode, payload.triggerTick),
       config: {
         chainId: event.chainId,
@@ -401,11 +396,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   /**
    * Handles OrderRegistered events.
    *
+   * DB lifecycle: on-chain registration → INSERT into DB.
+   *
    * Three scenarios:
-   * 1. Order already exists and is ACTIVE → idempotent skip
-   * 2. Order already exists but not ACTIVE (pending-from-UI or terminal reactivation)
-   *    → upsert overwrites all fields, sets ACTIVE + monitoring
-   * 3. No order exists → find position, upsert creates new order
+   * 1. Order already exists with automationState=monitoring → idempotent skip
+   * 2. Order already exists (terminal or stale) → DELETE old, INSERT new (re-registration)
+   * 3. No order exists → find position, INSERT new order
    */
   private async handleRegistered(event: OrderRegisteredEvent): Promise<void> {
     const { chainId, nftId, triggerMode, transactionHash, payload } = event;
@@ -417,77 +413,54 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       triggerModeNum
     );
 
-    // Transaction returns { poolId, isNew, wasTerminal } for post-tx subscription management
     const result = await prisma.$transaction(async (tx) => {
-      // Check if order already exists
+      // Check if order already exists at this identity slot
       const existingOrder = await this.orderService.findByOrderIdentityHash(
         orderIdentityHash,
         tx
       );
 
       if (existingOrder) {
-        if (existingOrder.onChainStatus === OnChainOrderStatus.ACTIVE) {
-          // Already active — idempotent skip
+        if (existingOrder.automationState === 'monitoring') {
+          // Already monitoring — idempotent skip
           this.logger.debug(
             { orderId: existingOrder.id },
-            'Order already active, skipping registered event'
+            'Order already monitoring, skipping registered event'
           );
           return null;
         }
 
-        // Non-ACTIVE order: pending-from-UI or terminal reactivation
-        const wasTerminal = TERMINAL_ON_CHAIN_STATUSES.includes(
-          existingOrder.onChainStatus as 2 | 3
-        );
+        // Stale or terminal order at this slot — delete and re-create
+        const wasTerminal = TERMINAL_AUTOMATION_STATES.includes(existingOrder.automationState);
 
-        // Upsert overwrites all fields, sets ACTIVE + monitoring
-        const upsertInput = this.buildUpsertInput(event, existingOrder.positionId);
-        const updated = await this.orderService.upsertFromOnChainEvent(upsertInput, tx);
+        await this.orderService.delete(existingOrder.id, tx);
 
         this.logger.info(
           {
-            orderId: updated.id,
-            previousStatus: existingOrder.onChainStatus,
+            deletedOrderId: existingOrder.id,
+            previousState: existingOrder.automationState,
             wasTerminal,
           },
-          'Existing order activated from on-chain registration'
+          'Deleted existing order for re-registration'
         );
-
-        // Log ORDER_REGISTERED
-        const orderTag = await this.buildOrderTag(updated, tx);
-        if (orderTag) {
-          await this.automationLogService.logOrderRegistered(
-            updated.positionId,
-            updated.id,
-            {
-              orderTag,
-              registrationTxHash: transactionHash,
-              chainId,
-            } satisfies OrderRegisteredContext,
-            tx
-          );
-        }
-
-        // Look up pool data for post-tx subscription management
-        const position = await tx.position.findUnique({
-          where: { id: existingOrder.positionId },
-          select: { poolId: true, pool: { select: { config: true } } },
-        });
-        const poolConfig = position?.pool?.config as Record<string, unknown> | null;
-        const poolAddress = (poolConfig?.address as string | undefined)?.toLowerCase();
-
-        return {
-          orderId: updated.id,
-          positionId: existingOrder.positionId,
-          poolId: position?.poolId ?? null,
-          poolAddress: poolAddress ?? null,
-          isNew: false,
-          wasTerminal,
-        };
       }
 
-      // No existing order — find the position
-      const position = await this.findPositionByNftIdAndChain(nftId, chainId, tx);
+      // Find the position for this nftId + chainId
+      const position = existingOrder
+        ? await tx.position.findUnique({
+            where: { id: existingOrder.positionId },
+            select: { id: true, poolId: true, pool: { select: { config: true } } },
+          })
+        : await this.findPositionByNftIdAndChain(nftId, chainId, tx)
+          .then(async (p) => {
+            if (!p) return null;
+            const pool = await tx.pool.findUnique({
+              where: { id: p.poolId },
+              select: { config: true },
+            });
+            return { id: p.id, poolId: p.poolId, pool };
+          });
+
       if (!position) {
         this.logger.warn(
           { chainId, nftId },
@@ -496,9 +469,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         return null;
       }
 
-      // Create the order via upsert
-      const upsertInput = this.buildUpsertInput(event, position.id);
-      const created = await this.orderService.upsertFromOnChainEvent(upsertInput, tx);
+      // INSERT new order
+      const createInput = this.buildCreateInput(event, position.id);
+      const created = await this.orderService.create(createInput, tx);
+
+      const isNew = !existingOrder;
 
       this.logger.info(
         {
@@ -506,13 +481,16 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           positionId: position.id,
           nftId,
           triggerMode,
+          isNew,
         },
-        'Close order created from on-chain registration'
+        isNew
+          ? 'Close order created from on-chain registration'
+          : 'Close order re-created from on-chain re-registration'
       );
 
-      // Log ORDER_CREATED
+      // Log appropriate event
       const orderTag = await this.buildOrderTag(created, tx);
-      if (orderTag) {
+      if (orderTag && isNew) {
         await this.automationLogService.logOrderCreated(
           created.positionId,
           created.id,
@@ -523,19 +501,33 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           } satisfies OrderCreatedContext,
           tx
         );
+      } else if (orderTag) {
+        await this.automationLogService.logOrderRegistered(
+          created.positionId,
+          created.id,
+          {
+            orderTag,
+            registrationTxHash: transactionHash,
+            chainId,
+          } satisfies OrderRegisteredContext,
+          tx
+        );
       }
+
+      const poolConfig = position.pool?.config as Record<string, unknown> | null;
+      const poolAddress = (poolConfig?.address as string | undefined)?.toLowerCase();
 
       return {
         orderId: created.id,
         positionId: position.id,
         poolId: position.poolId,
-        isNew: true,
-        wasTerminal: false,
+        poolAddress: poolAddress ?? null,
+        isNew,
       };
     });
 
     // Ensure pool subscription outside transaction
-    if (result && (result.isNew || result.wasTerminal)) {
+    if (result) {
       const poolAddress = result.poolAddress ?? payload.pool;
       if (poolAddress) {
         await this.automationSubscriptionService.ensurePoolSubscription(chainId, poolAddress);
@@ -543,7 +535,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     }
 
     // Publish close-order.registered domain event (direct, best-effort)
-    // This notifies the automation service to immediately start monitoring
     if (result) {
       this.publishDomainEvent<CloseOrderRegisteredPayload>('close-order.registered', {
         entityId: result.orderId,
@@ -561,28 +552,18 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Handles OrderCancelled events.
-   * Cancels the order and decrements the pool subscription order count.
+   * DB lifecycle: on-chain cancellation → DELETE from DB.
+   * Removes the pool subscription if no more monitoring orders reference that pool.
    */
   private async handleCancelled(event: OrderCancelledEvent): Promise<void> {
     const cancelResult = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
 
-      // Skip if already in terminal on-chain state
-      if (TERMINAL_ON_CHAIN_STATUSES.includes(order.onChainStatus as 2 | 3)) {
-        this.logger.debug(
-          { orderId: order.id, onChainStatus: order.onChainStatus },
-          'Order already in terminal state, skipping cancel'
-        );
-        return null;
-      }
+      const previousState = order.automationState;
 
-      const previousStatus = String(order.onChainStatus);
-
-      // Build order tag before cancel (order still has data)
+      // Build order tag before delete (order still has data)
       const orderTag = await this.buildOrderTag(order, tx);
-
-      await this.orderService.markOnChainCancelled(order.id, tx);
 
       // Look up position poolId for post-tx subscription update
       const position = await tx.position.findUnique({
@@ -590,12 +571,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         select: { poolId: true },
       });
 
-      this.logger.info(
-        { orderId: order.id },
-        'Close order cancelled from on-chain event'
-      );
-
-      // Log ORDER_CANCELLED
+      // Log ORDER_CANCELLED before deleting (needs order.id reference)
       if (orderTag) {
         await this.automationLogService.logOrderCancelled(
           order.positionId,
@@ -609,19 +585,25 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
+      // DELETE the order from DB
+      await this.orderService.delete(order.id, tx);
+
+      this.logger.info(
+        { orderId: order.id, previousState },
+        'Close order deleted from on-chain cancellation'
+      );
+
       return {
         orderId: order.id,
         positionId: order.positionId,
-        previousStatus,
+        previousState,
         poolId: position?.poolId ?? null,
       };
     });
 
-    const poolId = cancelResult?.poolId ?? null;
-
     // Remove pool subscription if no more monitoring orders
-    if (poolId) {
-      await this.automationSubscriptionService.removePoolSubscriptionIfUnused(poolId);
+    if (cancelResult?.poolId) {
+      await this.automationSubscriptionService.removePoolSubscriptionIfUnused(cancelResult.poolId);
     }
 
     // Publish close-order.cancelled domain event (direct, best-effort)
@@ -632,7 +614,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           orderId: cancelResult.orderId,
           positionId: cancelResult.positionId,
           reason: 'on_chain',
-          previousStatus: cancelResult.previousStatus,
+          previousStatus: cancelResult.previousState,
           cancelledAt: new Date().toISOString(),
         },
       });
@@ -641,23 +623,25 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Handles OrderExecuted events.
-   * Marks the order as on-chain executed and stores execution data.
+   * DB lifecycle: on-chain execution → UPDATE automationState=executed.
+   * Also stores execution data in state JSON.
    */
   private async handleExecuted(event: OrderExecutedEvent): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
 
-      // Skip if already in terminal on-chain state (idempotent)
-      if (TERMINAL_ON_CHAIN_STATUSES.includes(order.onChainStatus as 2 | 3)) {
+      // Skip if already in terminal state (idempotent)
+      if (TERMINAL_AUTOMATION_STATES.includes(order.automationState)) {
         this.logger.debug(
-          { orderId: order.id, onChainStatus: order.onChainStatus },
+          { orderId: order.id, automationState: order.automationState },
           'Order already in terminal state, skipping executed event'
         );
         return null;
       }
 
-      await this.orderService.markOnChainExecuted(order.id, tx);
+      // Mark as executed
+      await this.orderService.markExecuted(order.id, tx);
 
       // Store execution data in order state
       await this.orderService.mergeState(
@@ -678,7 +662,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           executionTick: event.payload.executionTick,
           txHash: event.transactionHash,
         },
-        'Close order marked as on-chain executed'
+        'Close order marked as executed'
       );
 
       // Log ORDER_EXECUTED

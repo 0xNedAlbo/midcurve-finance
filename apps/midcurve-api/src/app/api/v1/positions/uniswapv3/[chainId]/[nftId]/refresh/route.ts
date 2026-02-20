@@ -20,7 +20,6 @@ import {
 } from '@midcurve/api-shared';
 import { GetUniswapV3PositionParamsSchema } from '@midcurve/api-shared';
 import { serializeUniswapV3Position, serializeCloseOrder } from '@/lib/serializers';
-import { OnChainOrderStatus } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
@@ -122,7 +121,7 @@ export async function POST(
         // 3c. Fetch active close orders for this position
         const activeCloseOrders = await getCloseOrderService().findByPositionId(
           dbPosition.id,
-          { onChainStatus: OnChainOrderStatus.ACTIVE },
+          { automationState: ['monitoring', 'executing', 'retrying'] },
           tx
         );
 

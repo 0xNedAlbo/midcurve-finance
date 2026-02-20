@@ -9,20 +9,23 @@
  * - config: immutable identity data (JSON) — chainId, nftId, contractAddress, etc.
  * - state: mutable on-chain state (JSON) — triggerTick, pool, slippage, etc.
  * - orderIdentityHash: unique identifier, e.g. "uniswapv3/{chainId}/{nftId}/{triggerMode}"
- * - onChainStatus: mirrors contract OrderStatus enum (NONE/ACTIVE/EXECUTED/CANCELLED)
- * - monitoringState: off-chain state managed by price monitor (idle/monitoring/triggered/suspended)
- * - closeOrderHash: URL-friendly identifier "sl@{tick}" or "tp@{tick}"
+ * - automationState: single lifecycle field (monitoring|executing|retrying|failed|executed)
+ * - executionAttempts: retry counter, resets when price moves away from trigger
+ *
+ * DB lifecycle driven by on-chain events:
+ * - OrderRegistered → INSERT (automationState=monitoring)
+ * - OrderCancelled → DELETE
+ * - OrderExecuted → UPDATE automationState=executed
+ * - Re-registration at same slot → DELETE old, INSERT new
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { CloseOrder, Prisma } from '@midcurve/database';
-import { OnChainOrderStatus, type MonitoringState } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import type {
   CreateCloseOrderInput,
-  UpsertFromOnChainEventInput,
   SyncFromChainInput,
   FindCloseOrderOptions,
 } from '../types/automation/index.js';
@@ -71,7 +74,7 @@ export class CloseOrderService {
 
   /**
    * Creates a new close order record.
-   * Used by the API registration flow when a user registers via UI.
+   * Called when an OrderRegistered event is received from the chain.
    */
   async create(
     input: CreateCloseOrderInput,
@@ -93,8 +96,7 @@ export class CloseOrderService {
           sharedContractId: input.sharedContractId,
           orderIdentityHash: input.orderIdentityHash,
           closeOrderHash: input.closeOrderHash,
-          onChainStatus: input.onChainStatus ?? OnChainOrderStatus.NONE,
-          monitoringState: input.monitoringState ?? 'idle',
+          automationState: input.automationState ?? 'monitoring',
           config: input.config as Prisma.InputJsonValue,
           state: input.state as Prisma.InputJsonValue,
         },
@@ -108,67 +110,6 @@ export class CloseOrderService {
       return result;
     } catch (error) {
       log.methodError(this.logger, 'create', error as Error, { input });
-      throw error;
-    }
-  }
-
-  /**
-   * Upserts an order from an on-chain event (OrderRegistered).
-   * Used by ProcessCloseOrderEventsRule when indexing contract events.
-   * Upserts on orderIdentityHash unique constraint.
-   */
-  async upsertFromOnChainEvent(
-    input: UpsertFromOnChainEventInput,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'upsertFromOnChainEvent', {
-      positionId: input.positionId,
-      protocol: input.protocol,
-      orderIdentityHash: input.orderIdentityHash,
-    });
-
-    try {
-      const db = tx ?? this.prisma;
-
-      const sharedData = {
-        positionId: input.positionId,
-        sharedContractId: input.sharedContractId,
-        onChainStatus: input.onChainStatus,
-        closeOrderHash: input.closeOrderHash,
-        lastSyncedAt: new Date(),
-        monitoringState: input.monitoringState ?? ('monitoring' as MonitoringState),
-        config: input.config as Prisma.InputJsonValue,
-        state: input.state as Prisma.InputJsonValue,
-      };
-
-      const result = await db.closeOrder.upsert({
-        where: {
-          orderIdentityHash: input.orderIdentityHash,
-        },
-        create: {
-          protocol: input.protocol,
-          orderIdentityHash: input.orderIdentityHash,
-          ...sharedData,
-        },
-        update: sharedData,
-      });
-
-      this.logger.info(
-        {
-          id: result.id,
-          positionId: input.positionId,
-          protocol: input.protocol,
-          orderIdentityHash: input.orderIdentityHash,
-          closeOrderHash: input.closeOrderHash,
-        },
-        'Close order upserted from event',
-      );
-      log.methodExit(this.logger, 'upsertFromOnChainEvent', { id: result.id });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'upsertFromOnChainEvent', error as Error, {
-        input,
-      });
       throw error;
     }
   }
@@ -235,7 +176,7 @@ export class CloseOrderService {
 
   /**
    * Finds all orders that are actively being monitored.
-   * onChainStatus=ACTIVE AND monitoringState=monitoring.
+   * automationState=monitoring.
    * Includes position→pool relations for subscription sync.
    */
   async findMonitoringOrders(
@@ -244,8 +185,7 @@ export class CloseOrderService {
     const db = tx ?? this.prisma;
     return db.closeOrder.findMany({
       where: {
-        onChainStatus: OnChainOrderStatus.ACTIVE,
-        monitoringState: 'monitoring',
+        automationState: 'monitoring',
       },
       include: {
         position: {
@@ -261,7 +201,6 @@ export class CloseOrderService {
   /**
    * Gets distinct pools with actively monitoring orders.
    * Used for pool price subscription sync.
-   * Extracts chainId/poolAddress from position→pool config (platform-independent).
    */
   async getPoolsWithMonitoringOrders(
     tx?: PrismaTransactionClient,
@@ -272,8 +211,7 @@ export class CloseOrderService {
       const db = tx ?? this.prisma;
       const orders = await db.closeOrder.findMany({
         where: {
-          onChainStatus: OnChainOrderStatus.ACTIVE,
-          monitoringState: 'monitoring',
+          automationState: 'monitoring',
         },
         select: {
           position: {
@@ -326,7 +264,6 @@ export class CloseOrderService {
 
   /**
    * Finds actively monitoring orders for a specific pool.
-   * Filters via position→pool relation since pool address is now in JSON config.
    */
   async findMonitoringOrdersForPool(
     poolId: string,
@@ -338,45 +275,32 @@ export class CloseOrderService {
         position: {
           pool: { id: poolId },
         },
-        onChainStatus: OnChainOrderStatus.ACTIVE,
-        monitoringState: 'monitoring',
+        automationState: 'monitoring',
       },
     });
   }
 
   /**
-   * Deletes an order. Only allowed for terminal on-chain states with idle monitoring.
+   * Finds orders in retrying state (for startup recovery).
+   */
+  async findRetryingOrders(
+    tx?: PrismaTransactionClient,
+  ): Promise<CloseOrder[]> {
+    const db = tx ?? this.prisma;
+    return db.closeOrder.findMany({
+      where: { automationState: 'retrying' },
+    });
+  }
+
+  /**
+   * Deletes an order. Used when OrderCancelled event is received,
+   * or when a new registration overwrites an existing slot.
    */
   async delete(id: string, tx?: PrismaTransactionClient): Promise<void> {
     log.methodEntry(this.logger, 'delete', { id });
 
     try {
       const db = tx ?? this.prisma;
-      const existing = await db.closeOrder.findUnique({
-        where: { id },
-      });
-
-      if (!existing) {
-        throw new Error(`Close order not found: ${id}`);
-      }
-
-      const terminalStatuses = [
-        OnChainOrderStatus.NONE,
-        OnChainOrderStatus.EXECUTED,
-        OnChainOrderStatus.CANCELLED,
-      ];
-      if (!terminalStatuses.includes(existing.onChainStatus as 0 | 2 | 3)) {
-        throw new Error(
-          `Cannot delete order with onChainStatus=${existing.onChainStatus}. Must be NONE, EXECUTED, or CANCELLED.`,
-        );
-      }
-
-      if (existing.monitoringState !== 'idle') {
-        throw new Error(
-          `Cannot delete order with monitoringState=${existing.monitoringState}. Must be idle.`,
-        );
-      }
-
       await db.closeOrder.delete({ where: { id } });
 
       this.logger.info({ id }, 'Close order deleted');
@@ -490,34 +414,27 @@ export class CloseOrderService {
   }
 
   /**
-   * Refreshes all on-chain state from a getOrder() call.
-   * Replaces the full state JSON and updates onChainStatus + lastSyncedAt.
+   * Refreshes on-chain state from a getOrder() call.
+   * Updates state JSON and lastSyncedAt.
    */
   async syncFromChain(
     id: string,
     chainData: SyncFromChainInput,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'syncFromChain', {
-      id,
-      onChainStatus: chainData.onChainStatus,
-    });
+    log.methodEntry(this.logger, 'syncFromChain', { id });
 
     try {
       const db = tx ?? this.prisma;
       const result = await db.closeOrder.update({
         where: { id },
         data: {
-          onChainStatus: chainData.onChainStatus,
           state: chainData.state as Prisma.InputJsonValue,
           lastSyncedAt: new Date(),
         },
       });
 
-      this.logger.info(
-        { id, onChainStatus: chainData.onChainStatus },
-        'Order synced from chain',
-      );
+      this.logger.info({ id }, 'Order synced from chain');
       log.methodExit(this.logger, 'syncFromChain', { id });
       return result;
     } catch (error) {
@@ -527,168 +444,64 @@ export class CloseOrderService {
   }
 
   // ==========================================================================
-  // ON-CHAIN STATUS LIFECYCLE
+  // AUTOMATION STATE TRANSITIONS
   // ==========================================================================
 
   /**
-   * Marks order as ACTIVE on-chain. Merges registration metadata into state
-   * and starts monitoring.
-   */
-  async markOnChainActive(
-    id: string,
-    input: { registrationTxHash: string; registeredAt?: Date },
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'markOnChainActive', { id });
-
-    try {
-      const db = tx ?? this.prisma;
-
-      const existing = await db.closeOrder.findUnique({ where: { id } });
-      if (!existing) {
-        throw new Error(`Close order not found: ${id}`);
-      }
-
-      const currentState = (existing.state as Record<string, unknown>) ?? {};
-      const mergedState = {
-        ...currentState,
-        registrationTxHash: input.registrationTxHash,
-        registeredAt: (input.registeredAt ?? new Date()).toISOString(),
-      };
-
-      const result = await db.closeOrder.update({
-        where: { id },
-        data: {
-          onChainStatus: OnChainOrderStatus.ACTIVE,
-          monitoringState: 'monitoring',
-          state: mergedState as Prisma.InputJsonValue,
-        },
-      });
-
-      this.logger.info({ id }, 'Order marked on-chain ACTIVE');
-      log.methodExit(this.logger, 'markOnChainActive', { id });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'markOnChainActive', error as Error, {
-        id,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Marks order as EXECUTED on-chain. Sets monitoringState to idle.
-   */
-  async markOnChainExecuted(
-    id: string,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'markOnChainExecuted', { id });
-
-    try {
-      const db = tx ?? this.prisma;
-      const result = await db.closeOrder.update({
-        where: { id },
-        data: {
-          onChainStatus: OnChainOrderStatus.EXECUTED,
-          monitoringState: 'idle',
-        },
-      });
-
-      this.logger.info({ id }, 'Order marked on-chain EXECUTED');
-      log.methodExit(this.logger, 'markOnChainExecuted', { id });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'markOnChainExecuted', error as Error, {
-        id,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Marks order as CANCELLED on-chain. Sets monitoringState to idle.
-   */
-  async markOnChainCancelled(
-    id: string,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'markOnChainCancelled', { id });
-
-    try {
-      const db = tx ?? this.prisma;
-      const result = await db.closeOrder.update({
-        where: { id },
-        data: {
-          onChainStatus: OnChainOrderStatus.CANCELLED,
-          monitoringState: 'idle',
-        },
-      });
-
-      this.logger.info({ id }, 'Order marked on-chain CANCELLED');
-      log.methodExit(this.logger, 'markOnChainCancelled', { id });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'markOnChainCancelled', error as Error, {
-        id,
-      });
-      throw error;
-    }
-  }
-
-  // ==========================================================================
-  // MONITORING STATE TRANSITIONS
-  // ==========================================================================
-
-  /**
-   * Atomic conditional transition: monitoring → triggered.
+   * Atomic conditional transition: monitoring|retrying → executing.
    *
-   * Concurrency gate: uses updateMany with WHERE monitoringState='monitoring'
-   * to ensure only one trigger consumer wins the race. Throws if lost the race.
+   * Concurrency gate: uses updateMany with WHERE automationState IN ('monitoring','retrying')
+   * to ensure only one consumer wins the race. Increments executionAttempts.
+   * Throws if lost the race.
    */
-  async atomicTransitionToTriggered(
+  async atomicTransitionToExecuting(
     id: string,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'atomicTransitionToTriggered', { id });
+    log.methodEntry(this.logger, 'atomicTransitionToExecuting', { id });
 
     try {
       const db = tx ?? this.prisma;
 
+      // CAS: only transition if in monitoring or retrying
       const updateResult = await db.closeOrder.updateMany({
         where: {
           id,
-          monitoringState: 'monitoring',
+          automationState: { in: ['monitoring', 'retrying'] },
         },
         data: {
-          monitoringState: 'triggered',
+          automationState: 'executing',
         },
       });
 
       if (updateResult.count === 0) {
         const current = await db.closeOrder.findUnique({
           where: { id },
-          select: { monitoringState: true },
+          select: { automationState: true },
         });
         throw new Error(
-          `Failed to transition order ${id} to triggered: ` +
-            `current monitoringState='${current?.monitoringState}' (expected 'monitoring'). ` +
+          `Failed to transition order ${id} to executing: ` +
+            `current automationState='${current?.automationState}' (expected 'monitoring' or 'retrying'). ` +
             `Race condition detected.`,
         );
       }
 
-      const result = await db.closeOrder.findUnique({ where: { id } });
-      if (!result) {
-        throw new Error(`Order ${id} not found after transition`);
-      }
+      // Increment executionAttempts in follow-up update
+      const result = await db.closeOrder.update({
+        where: { id },
+        data: { executionAttempts: { increment: 1 } },
+      });
 
-      this.logger.info({ id }, 'Order transitioned to triggered');
-      log.methodExit(this.logger, 'atomicTransitionToTriggered', { id });
+      this.logger.info(
+        { id, executionAttempts: result.executionAttempts },
+        'Order transitioned to executing',
+      );
+      log.methodExit(this.logger, 'atomicTransitionToExecuting', { id });
       return result;
     } catch (error) {
       log.methodError(
         this.logger,
-        'atomicTransitionToTriggered',
+        'atomicTransitionToExecuting',
         error as Error,
         { id },
       );
@@ -697,101 +510,123 @@ export class CloseOrderService {
   }
 
   /**
-   * Transitions triggered → monitoring (execution failed, retry scheduled).
+   * Transitions executing → retrying (execution failed, waiting for retry).
+   * Sets lastError for diagnostics.
    */
-  async transitionToMonitoring(
+  async transitionToRetrying(
     id: string,
+    error: string,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrder> {
-    return this.updateMonitoringState(id, 'monitoring', tx);
-  }
-
-  /**
-   * Transitions to suspended state with an optional reason.
-   *
-   * When a reason is provided, it is stored as `suspendedReason` in the
-   * order's state JSON so the API serializer can distinguish between
-   * execution failures and position-closure suspensions.
-   *
-   * @param id - Close order ID
-   * @param reason - Why the order was suspended:
-   *   - 'execution_failed': max execution retries exhausted (genuine failure)
-   *   - 'position_closed': position was closed by another order (superseded)
-   * @param tx - Optional Prisma transaction client
-   */
-  async transitionToSuspended(
-    id: string,
-    reason?: 'execution_failed' | 'position_closed',
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    if (reason) {
-      log.methodEntry(this.logger, 'transitionToSuspended', { id, reason });
-      const db = tx ?? this.prisma;
-      const existing = await db.closeOrder.findUniqueOrThrow({ where: { id } });
-      const currentState = (existing.state as Record<string, unknown>) ?? {};
-      const result = await db.closeOrder.update({
-        where: { id },
-        data: {
-          monitoringState: 'suspended',
-          state: { ...currentState, suspendedReason: reason } as Prisma.InputJsonValue,
-        },
-      });
-      this.logger.info({ id, monitoringState: 'suspended', reason }, 'Monitoring state updated with reason');
-      log.methodExit(this.logger, 'transitionToSuspended', { id });
-      return result;
-    }
-    return this.updateMonitoringState(id, 'suspended', tx);
-  }
-
-  /**
-   * Transitions any → idle (terminal on-chain state reached).
-   */
-  async transitionToIdle(
-    id: string,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    return this.updateMonitoringState(id, 'idle', tx);
-  }
-
-  /**
-   * Transitions idle → monitoring (order became ACTIVE on-chain).
-   */
-  async startMonitoring(
-    id: string,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    return this.updateMonitoringState(id, 'monitoring', tx);
-  }
-
-  // ==========================================================================
-  // PRIVATE HELPERS
-  // ==========================================================================
-
-  private async updateMonitoringState(
-    id: string,
-    newState: MonitoringState,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'updateMonitoringState', { id, newState });
+    log.methodEntry(this.logger, 'transitionToRetrying', { id, error });
 
     try {
       const db = tx ?? this.prisma;
       const result = await db.closeOrder.update({
         where: { id },
-        data: { monitoringState: newState },
+        data: {
+          automationState: 'retrying',
+          lastError: error,
+        },
       });
 
-      this.logger.info({ id, monitoringState: newState }, 'Monitoring state updated');
-      log.methodExit(this.logger, 'updateMonitoringState', { id });
+      this.logger.info({ id, automationState: 'retrying' }, 'Order transitioned to retrying');
+      log.methodExit(this.logger, 'transitionToRetrying', { id });
+      return result;
+    } catch (err) {
+      log.methodError(this.logger, 'transitionToRetrying', err as Error, { id });
+      throw err;
+    }
+  }
+
+  /**
+   * Resets retrying → monitoring (price moved away from trigger).
+   * Clears executionAttempts and lastError.
+   */
+  async resetToMonitoring(
+    id: string,
+    tx?: PrismaTransactionClient,
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'resetToMonitoring', { id });
+
+    try {
+      const db = tx ?? this.prisma;
+      const result = await db.closeOrder.update({
+        where: { id },
+        data: {
+          automationState: 'monitoring',
+          executionAttempts: 0,
+          lastError: null,
+        },
+      });
+
+      this.logger.info({ id }, 'Order reset to monitoring (price moved away)');
+      log.methodExit(this.logger, 'resetToMonitoring', { id });
       return result;
     } catch (error) {
-      log.methodError(this.logger, 'updateMonitoringState', error as Error, {
-        id,
-        newState,
-      });
+      log.methodError(this.logger, 'resetToMonitoring', error as Error, { id });
       throw error;
     }
   }
+
+  /**
+   * Marks order as failed (max execution attempts exhausted, terminal).
+   * User must cancel on-chain and re-register to try again.
+   */
+  async markFailed(
+    id: string,
+    error: string,
+    tx?: PrismaTransactionClient,
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'markFailed', { id, error });
+
+    try {
+      const db = tx ?? this.prisma;
+      const result = await db.closeOrder.update({
+        where: { id },
+        data: {
+          automationState: 'failed',
+          lastError: error,
+        },
+      });
+
+      this.logger.warn({ id, automationState: 'failed' }, 'Order marked as failed');
+      log.methodExit(this.logger, 'markFailed', { id });
+      return result;
+    } catch (err) {
+      log.methodError(this.logger, 'markFailed', err as Error, { id });
+      throw err;
+    }
+  }
+
+  /**
+   * Marks order as executed (tx confirmed on-chain, terminal).
+   */
+  async markExecuted(
+    id: string,
+    tx?: PrismaTransactionClient,
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'markExecuted', { id });
+
+    try {
+      const db = tx ?? this.prisma;
+      const result = await db.closeOrder.update({
+        where: { id },
+        data: { automationState: 'executed' },
+      });
+
+      this.logger.info({ id, automationState: 'executed' }, 'Order marked as executed');
+      log.methodExit(this.logger, 'markExecuted', { id });
+      return result;
+    } catch (error) {
+      log.methodError(this.logger, 'markExecuted', error as Error, { id });
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // PRIVATE HELPERS
+  // ==========================================================================
 
   private buildWhereClause(
     options: FindCloseOrderOptions & { positionId?: string },
@@ -802,19 +637,11 @@ export class CloseOrderService {
       where.positionId = options.positionId;
     }
 
-    if (options.onChainStatus !== undefined) {
-      if (Array.isArray(options.onChainStatus)) {
-        where.onChainStatus = { in: options.onChainStatus };
+    if (options.automationState !== undefined) {
+      if (Array.isArray(options.automationState)) {
+        where.automationState = { in: options.automationState };
       } else {
-        where.onChainStatus = options.onChainStatus;
-      }
-    }
-
-    if (options.monitoringState !== undefined) {
-      if (Array.isArray(options.monitoringState)) {
-        where.monitoringState = { in: options.monitoringState };
-      } else {
-        where.monitoringState = options.monitoringState;
+        where.automationState = options.automationState;
       }
     }
 

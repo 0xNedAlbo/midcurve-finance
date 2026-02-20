@@ -7,7 +7,6 @@
 
 import {
   CloseOrderService,
-  CloseOrderExecutionService,
   AutomationSubscriptionService,
   UniswapV3PoolService,
   AutomationLogService,
@@ -20,7 +19,6 @@ import {
 
 // Service instances (lazy-initialized)
 let _closeOrderService: CloseOrderService | null = null;
-let _closeOrderExecutionService: CloseOrderExecutionService | null = null;
 let _automationSubscriptionService: AutomationSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
@@ -36,16 +34,6 @@ export function getCloseOrderService(): CloseOrderService {
     _closeOrderService = new CloseOrderService();
   }
   return _closeOrderService;
-}
-
-/**
- * Get singleton instance of CloseOrderExecutionService
- */
-export function getCloseOrderExecutionService(): CloseOrderExecutionService {
-  if (!_closeOrderExecutionService) {
-    _closeOrderExecutionService = new CloseOrderExecutionService();
-  }
-  return _closeOrderExecutionService;
 }
 
 /**

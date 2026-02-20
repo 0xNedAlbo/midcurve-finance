@@ -161,11 +161,10 @@ function DataFetcher({ chainId, nftId }: { chainId: number; nftId: string }) {
   const positionQuery = useUniswapV3Position(chainId, nftId);
   const discoverPool = useDiscoverPool();
 
-  // Fetch close orders
+  // Fetch close orders (all non-deleted orders for this position)
   const closeOrdersQuery = useCloseOrders({
     chainId,
     nftId,
-    status: 'active',
   });
 
   // Load position into context when fetched

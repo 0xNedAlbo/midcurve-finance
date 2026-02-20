@@ -13,7 +13,8 @@ export {
   OnChainOrderStatus,
   ContractTriggerMode,
   ContractSwapDirection,
-  type MonitoringState,
+  AUTOMATION_STATES,
+  type AutomationState,
 } from './on-chain-close-order.types.js';
 
 // ============================================================================

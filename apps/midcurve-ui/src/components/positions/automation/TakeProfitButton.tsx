@@ -3,7 +3,7 @@
  *
  * Action button for creating or displaying a take-profit order.
  *
- * Visual states (driven by monitoringState):
+ * Visual states (driven by automationState):
  * - Disabled: Slate, Plus icon (automation unavailable)
  * - No order: Green, Plus icon (navigates to Risk Triggers wizard)
  * - Monitoring: Emerald, Eye icon (actively watching price)
@@ -91,7 +91,7 @@ export function TakeProfitButton({
     return getOrderButtonLabel(activeOrder, 'takeProfit', tokenConfig);
   }, [activeOrder, tokenConfig]);
 
-  // Derive visual state from monitoringState
+  // Derive visual state from automationState
   const visualState = activeOrder ? getOrderButtonVisualState(activeOrder) : null;
 
   // If disabled, show disabled button with tooltip

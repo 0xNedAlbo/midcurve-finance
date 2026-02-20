@@ -19,7 +19,6 @@ import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getCloseOrderService, getUniswapV3PositionService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
-import { OnChainOrderStatus } from '@midcurve/shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,52 +35,11 @@ const PathParamsSchema = z.object({
  * Query params schema for filtering
  */
 const QueryParamsSchema = z.object({
-  status: z
-    .enum([
-      'pending',
-      'registering',
-      'active',
-      'triggering',
-      'executed',
-      'cancelled',
-      'expired',
-      'failed',
-      'superseded',
-    ])
+  automationState: z
+    .enum(['monitoring', 'executing', 'retrying', 'failed', 'executed'])
     .optional(),
   type: z.enum(['sl', 'tp']).optional(),
 });
-
-/**
- * Map old status query param to OnChainCloseOrder filter options.
- */
-function statusToFilterOptions(status: string | undefined) {
-  if (!status) return {};
-
-  switch (status) {
-    case 'pending':
-      return { onChainStatus: OnChainOrderStatus.NONE };
-    case 'registering':
-      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'idle' as const };
-    case 'active':
-      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'monitoring' as const };
-    case 'triggering':
-      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'triggered' as const };
-    case 'failed':
-    case 'superseded':
-      // Both map to ACTIVE + suspended; the distinction is in the serializer via suspendedReason
-      return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'suspended' as const };
-    case 'executed':
-      return { onChainStatus: OnChainOrderStatus.EXECUTED };
-    case 'cancelled':
-      return { onChainStatus: OnChainOrderStatus.CANCELLED };
-    case 'expired':
-      // No direct mapping — expired is a subset of cancelled
-      return { onChainStatus: OnChainOrderStatus.CANCELLED };
-    default:
-      return {};
-  }
-}
 
 /**
  * Handle CORS preflight
@@ -137,7 +95,7 @@ export async function GET(
       // 2. Parse query parameters
       const { searchParams } = new URL(request.url);
       const queryParams = {
-        status: searchParams.get('status') ?? undefined,
+        automationState: searchParams.get('automationState') ?? undefined,
         type: searchParams.get('type') ?? undefined,
       };
 
@@ -158,7 +116,7 @@ export async function GET(
         });
       }
 
-      const { status, type } = queryValidation.data;
+      const { automationState, type } = queryValidation.data;
 
       // 3. Find position by positionHash
       const positionHash = `uniswapv3/${chainId}/${nftId}`;
@@ -187,11 +145,11 @@ export async function GET(
         'list',
         'close-orders',
         position.id,
-        { chainId, nftId, status, type }
+        { chainId, nftId, automationState, type }
       );
 
       // 4. Fetch close orders for position
-      const filterOptions = statusToFilterOptions(status);
+      const filterOptions = automationState ? { automationState } : {};
       let orders = await getCloseOrderService().findByPositionId(
         position.id,
         filterOptions

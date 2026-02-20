@@ -4,11 +4,10 @@
  * Shared utilities for Stop Loss and Take Profit action buttons.
  * Handles price formatting, order filtering, and visual state derivation.
  *
- * Button visibility and visual state are driven by the derived `status` field,
- * which accounts for both on-chain state and suspension reason.
+ * Button visibility and visual state are driven by `automationState`.
  */
 
-import type { SerializedCloseOrder, TriggerMode, CloseOrderStatus } from '@midcurve/api-shared';
+import type { SerializedCloseOrder, TriggerMode, AutomationState } from '@midcurve/api-shared';
 import {
   pricePerToken0InToken1,
   pricePerToken1InToken0,
@@ -30,25 +29,25 @@ export interface TokenConfig {
 
 /**
  * Visual state for the order button.
- * Derived from status, determines icon + color.
+ * Derived from automationState, determines icon + color.
  */
 export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended';
 
 /**
- * Status values that make an order visible in the action button.
+ * Automation states that make an order visible in the action button.
  *
- * Terminal statuses (executed, cancelled, expired, superseded) are hidden.
- * Failed orders remain visible (red warning) to prompt user action.
+ * Terminal state 'executed' is hidden.
+ * 'failed' orders remain visible (red warning) to prompt user action.
  */
-const VISIBLE_BUTTON_STATUSES: CloseOrderStatus[] = [
-  'pending', 'registering', 'active', 'triggering', 'failed',
+const VISIBLE_BUTTON_STATES: AutomationState[] = [
+  'monitoring', 'executing', 'retrying', 'failed',
 ];
 
 /**
  * Find the order for a trigger mode that should be shown in the button.
  *
- * With the new data model there is at most 1 order per (position, triggerMode)
- * due to the unique constraint. We return it if it's in a visible status.
+ * With the data model there is at most 1 order per (position, triggerMode)
+ * due to the unique constraint. We return it if it's in a visible state.
  */
 export function findOrderForTriggerMode(
   orders: SerializedCloseOrder[],
@@ -57,20 +56,20 @@ export function findOrderForTriggerMode(
   return orders.find(
     (order) =>
       order.triggerMode === triggerMode &&
-      VISIBLE_BUTTON_STATUSES.includes(order.status)
+      VISIBLE_BUTTON_STATES.includes(order.automationState)
   );
 }
 
 /**
- * Derive the visual state for a button from an order's status.
+ * Derive the visual state for a button from an order's automationState.
  *
- * - 'active'/'registering'/'pending' → emerald (watching price)
- * - 'triggering'                     → blue (execution in progress)
- * - 'failed'                         → red (execution failed, needs attention)
+ * - 'monitoring'              → emerald (watching price)
+ * - 'executing'/'retrying'    → blue (execution in progress)
+ * - 'failed'                  → red (execution failed, needs attention)
  */
 export function getOrderButtonVisualState(order: SerializedCloseOrder): OrderButtonVisualState {
-  if (order.status === 'triggering') return 'executing';
-  if (order.status === 'failed') return 'suspended';
+  if (order.automationState === 'executing' || order.automationState === 'retrying') return 'executing';
+  if (order.automationState === 'failed') return 'suspended';
   return 'monitoring';
 }
 

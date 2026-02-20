@@ -325,7 +325,7 @@ export class CloseOrderMonitor {
 
         const closeOrderService = getCloseOrderService();
         const freshOrder = await closeOrderService.findById(order.id);
-        if (freshOrder && freshOrder.monitoringState === 'monitoring') {
+        if (freshOrder && freshOrder.automationState === 'monitoring') {
           const triggered = await this.checkOrderTrigger(
             freshOrder,
             order.poolAddress,
@@ -367,8 +367,8 @@ export class CloseOrderMonitor {
         return;
       }
 
-      if (order.monitoringState !== 'monitoring') {
-        log.debug({ orderId, monitoringState: order.monitoringState }, 'Order no longer monitoring');
+      if (order.automationState !== 'monitoring') {
+        log.debug({ orderId, automationState: order.automationState }, 'Order no longer monitoring');
         await this.shutdownOrderSubscriber(orderId);
         return;
       }
@@ -452,9 +452,9 @@ export class CloseOrderMonitor {
     // Verify order is still monitoring before publishing (race safety)
     const closeOrderService = getCloseOrderService();
     const freshOrder = await closeOrderService.findById(order.id);
-    if (!freshOrder || freshOrder.monitoringState !== 'monitoring') {
+    if (!freshOrder || freshOrder.automationState !== 'monitoring') {
       log.debug(
-        { orderId: order.id, monitoringState: freshOrder?.monitoringState },
+        { orderId: order.id, automationState: freshOrder?.automationState },
         'Order no longer monitoring, skipping trigger'
       );
       return false;

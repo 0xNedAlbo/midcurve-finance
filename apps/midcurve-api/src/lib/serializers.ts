@@ -13,15 +13,13 @@ import type {
   Erc20Token,
 } from '@midcurve/shared';
 import {
-  OnChainOrderStatus,
   ContractTriggerMode,
   ContractSwapDirection,
 } from '@midcurve/shared';
 
 import type {
   SerializedCloseOrder,
-  CloseOrderStatus,
-  MonitoringState,
+  AutomationState,
   SwapDirection,
 } from '@midcurve/api-shared';
 
@@ -259,32 +257,6 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
 // ============================================================================
 
 /**
- * Derive CloseOrderStatus from (onChainStatus, monitoringState, state).
- *
- * When monitoringState is 'suspended', the suspendedReason in the state JSON
- * distinguishes genuine execution failures ('failed') from orders that became
- * moot because the position was closed by another order ('superseded').
- */
-function deriveCloseOrderStatus(
-  onChainStatus: number,
-  monitoringState: string,
-  state: Record<string, unknown>,
-): CloseOrderStatus {
-  if (onChainStatus === OnChainOrderStatus.EXECUTED) return 'executed';
-  if (onChainStatus === OnChainOrderStatus.CANCELLED) return 'cancelled';
-  if (onChainStatus === OnChainOrderStatus.ACTIVE) {
-    if (monitoringState === 'triggered') return 'triggering';
-    if (monitoringState === 'suspended') {
-      return state.suspendedReason === 'position_closed' ? 'superseded' : 'failed';
-    }
-    if (monitoringState === 'monitoring') return 'active';
-    return 'registering'; // idle + ACTIVE = still registering
-  }
-  // NONE
-  return 'pending';
-}
-
-/**
  * Map contract SwapDirection integer to API SwapDirection string (or null for NONE).
  */
 function mapSwapDirection(swapDirection: number): SwapDirection | null {
@@ -312,9 +284,10 @@ export function serializeCloseOrder(
     closeOrderHash: order.closeOrderHash,
     closeOrderType: 'uniswapv3',
 
-    // Derived status (backward compat for CloseOrderStatusBadge, etc.)
-    status: deriveCloseOrderStatus(order.onChainStatus, order.monitoringState, state),
-    monitoringState: order.monitoringState as MonitoringState,
+    // Lifecycle state (single field, no derivation needed)
+    automationState: order.automationState as AutomationState,
+    executionAttempts: order.executionAttempts,
+    lastError: order.lastError,
 
     // Identity fields (from config JSON)
     positionId: order.positionId,

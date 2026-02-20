@@ -1,24 +1,21 @@
 /**
  * Close Order Status Badge
  *
- * Displays a color-coded badge for close order statuses.
- * - pending: Yellow "Setting up..."
- * - registering: Yellow "Registering..."
- * - active: Green "Active"
- * - triggering: Blue "Executing..."
- * - executed: Gray "Executed"
- * - cancelled: Gray "Cancelled"
- * - failed: Red "Failed"
- * - expired: Gray "Expired"
+ * Displays a color-coded badge for close order automation states.
+ * - monitoring: Green "Monitoring"
+ * - executing:  Blue "Executing..."
+ * - retrying:   Orange "Retrying..."
+ * - failed:     Red "Failed"
+ * - executed:   Gray "Executed"
  */
 
-import type { CloseOrderStatus } from '@midcurve/api-shared';
+import type { AutomationState } from '@midcurve/api-shared';
 
 interface CloseOrderStatusBadgeProps {
   /**
-   * Close order status value
+   * Close order automation state
    */
-  status: CloseOrderStatus;
+  status: AutomationState;
   /**
    * Optional size variant
    */
@@ -29,7 +26,7 @@ interface CloseOrderStatusBadgeProps {
  * Status configuration for styling and display
  */
 const STATUS_CONFIG: Record<
-  CloseOrderStatus,
+  AutomationState,
   {
     label: string;
     textColor: string;
@@ -39,31 +36,15 @@ const STATUS_CONFIG: Record<
     dotColor?: string;
   }
 > = {
-  pending: {
-    label: 'Setting up...',
-    textColor: 'text-amber-300',
-    bgColor: 'bg-amber-900/30',
-    borderColor: 'border-amber-700/50',
-    dot: true,
-    dotColor: 'bg-amber-400',
-  },
-  registering: {
-    label: 'Registering...',
-    textColor: 'text-amber-300',
-    bgColor: 'bg-amber-900/30',
-    borderColor: 'border-amber-700/50',
-    dot: true,
-    dotColor: 'bg-amber-400',
-  },
-  active: {
-    label: 'Active',
+  monitoring: {
+    label: 'Monitoring',
     textColor: 'text-emerald-300',
     bgColor: 'bg-emerald-900/30',
     borderColor: 'border-emerald-700/50',
     dot: true,
     dotColor: 'bg-emerald-400',
   },
-  triggering: {
+  executing: {
     label: 'Executing...',
     textColor: 'text-blue-300',
     bgColor: 'bg-blue-900/30',
@@ -71,23 +52,13 @@ const STATUS_CONFIG: Record<
     dot: true,
     dotColor: 'bg-blue-400',
   },
-  executed: {
-    label: 'Executed',
-    textColor: 'text-slate-400',
-    bgColor: 'bg-slate-800/50',
-    borderColor: 'border-slate-700/50',
-  },
-  cancelled: {
-    label: 'Cancelled',
-    textColor: 'text-slate-400',
-    bgColor: 'bg-slate-800/50',
-    borderColor: 'border-slate-700/50',
-  },
-  expired: {
-    label: 'Expired',
-    textColor: 'text-slate-400',
-    bgColor: 'bg-slate-800/50',
-    borderColor: 'border-slate-700/50',
+  retrying: {
+    label: 'Retrying...',
+    textColor: 'text-amber-300',
+    bgColor: 'bg-amber-900/30',
+    borderColor: 'border-amber-700/50',
+    dot: true,
+    dotColor: 'bg-amber-400',
   },
   failed: {
     label: 'Failed',
@@ -95,8 +66,8 @@ const STATUS_CONFIG: Record<
     bgColor: 'bg-red-900/30',
     borderColor: 'border-red-700/50',
   },
-  superseded: {
-    label: 'Superseded',
+  executed: {
+    label: 'Executed',
     textColor: 'text-slate-400',
     bgColor: 'bg-slate-800/50',
     borderColor: 'border-slate-700/50',
@@ -104,7 +75,7 @@ const STATUS_CONFIG: Record<
 };
 
 export function CloseOrderStatusBadge({ status, size = 'md' }: CloseOrderStatusBadgeProps) {
-  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
+  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.monitoring;
 
   const sizeClasses = size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs';
   const dotSize = size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2';
@@ -120,7 +91,7 @@ export function CloseOrderStatusBadge({ status, size = 'md' }: CloseOrderStatusB
       {config.dot && (
         <span
           className={`${dotSize} rounded-full ${config.dotColor} ${
-            status === 'pending' || status === 'registering' || status === 'triggering'
+            status === 'executing' || status === 'retrying'
               ? 'animate-pulse'
               : ''
           }`}
@@ -134,27 +105,27 @@ export function CloseOrderStatusBadge({ status, size = 'md' }: CloseOrderStatusB
 /**
  * Get status label for display
  */
-export function getCloseOrderStatusLabel(status: CloseOrderStatus): string {
+export function getCloseOrderStatusLabel(status: AutomationState): string {
   return STATUS_CONFIG[status]?.label ?? status;
 }
 
 /**
  * Check if order is in a processing state (requires polling)
  */
-export function isCloseOrderProcessing(status: CloseOrderStatus): boolean {
-  return status === 'pending' || status === 'registering' || status === 'triggering';
+export function isCloseOrderProcessing(status: AutomationState): boolean {
+  return status === 'executing' || status === 'retrying';
 }
 
 /**
- * Check if order can be cancelled
+ * Check if order can be cancelled (only monitoring orders)
  */
-export function canCancelCloseOrder(status: CloseOrderStatus): boolean {
-  return status === 'pending' || status === 'active';
+export function canCancelCloseOrder(status: AutomationState): boolean {
+  return status === 'monitoring';
 }
 
 /**
  * Check if order is in a terminal state
  */
-export function isCloseOrderTerminal(status: CloseOrderStatus): boolean {
-  return status === 'executed' || status === 'cancelled' || status === 'expired' || status === 'failed' || status === 'superseded';
+export function isCloseOrderTerminal(status: AutomationState): boolean {
+  return status === 'executed' || status === 'failed';
 }

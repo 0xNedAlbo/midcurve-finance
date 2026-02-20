@@ -24,12 +24,10 @@ export const EXCHANGES = {
 export const QUEUES = {
   /** Queue for orders ready for execution (competing consumers) */
   ORDERS_PENDING: 'orders.pending',
-  /** Delay queue for order retries (60s TTL, dead-letters back to orders.pending) */
-  ORDERS_RETRY_DELAY: 'orders.retry-delay',
 } as const;
 
 /** Retry delay in milliseconds (60 seconds) */
-export const ORDER_RETRY_DELAY_MS = 60000;
+export const ORDER_RETRY_DELAY_MS = 60_000;
 
 /** Routing keys */
 export const ROUTING_KEYS = {
@@ -48,7 +46,6 @@ export const ROUTING_KEYS = {
  * Creates:
  * - automation.triggers (direct exchange)
  * - orders.pending queue (bound to automation.triggers)
- * - orders.retry-delay queue (dead-letters back to orders.pending)
  */
 export async function setupAutomationTopology(channel: Channel): Promise<void> {
   log.info({ msg: 'Setting up automation topology...' });
@@ -81,26 +78,6 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     msg: 'Queue bound to exchange',
   });
 
-  // Create orders.retry-delay queue (for delayed retries)
-  // Messages in this queue will dead-letter back to orders.pending after TTL expires
-  await channel.assertQueue(QUEUES.ORDERS_RETRY_DELAY, {
-    durable: true,
-    exclusive: false,
-    autoDelete: false,
-    arguments: {
-      'x-message-ttl': ORDER_RETRY_DELAY_MS,
-      'x-dead-letter-exchange': EXCHANGES.TRIGGERS,
-      'x-dead-letter-routing-key': ROUTING_KEYS.ORDER_TRIGGERED,
-    },
-  });
-  log.info({
-    queue: QUEUES.ORDERS_RETRY_DELAY,
-    ttlMs: ORDER_RETRY_DELAY_MS,
-    deadLetterExchange: EXCHANGES.TRIGGERS,
-    deadLetterRoutingKey: ROUTING_KEYS.ORDER_TRIGGERED,
-    msg: 'Delay queue declared with TTL and dead-letter config',
-  });
-
   log.info({ msg: 'Automation topology setup complete' });
 }
 
@@ -112,7 +89,6 @@ export async function verifyAutomationTopology(channel: Channel): Promise<boolea
   try {
     await channel.checkExchange(EXCHANGES.TRIGGERS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
-    await channel.checkQueue(QUEUES.ORDERS_RETRY_DELAY);
     return true;
   } catch {
     return false;

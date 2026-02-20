@@ -114,7 +114,7 @@ export function CloseOrderCard({
           {getTriggerIcon(triggerMode)}
           <span className="font-medium text-slate-200">{getTriggerLabel(triggerMode)}</span>
         </div>
-        <CloseOrderStatusBadge status={order.status} size="sm" />
+        <CloseOrderStatusBadge status={order.automationState} size="sm" />
       </div>
 
       {/* Trigger Price */}

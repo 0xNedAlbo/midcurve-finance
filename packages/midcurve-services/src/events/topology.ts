@@ -28,8 +28,6 @@ export const DOMAIN_EVENTS_DLX = 'domain-events-dlx';
 export const DOMAIN_QUEUES = {
   /** Dead letter queue for failed events */
   DLQ: 'domain.events.dlq',
-  /** Order cancellation handler queue */
-  POSITION_CLOSED_ORDER_CANCELLER: 'domain.position-closed.order-canceller',
 } as const;
 
 /**
@@ -284,38 +282,6 @@ export async function setupDomainEventsTopology(channel: Channel): Promise<void>
   console.log(`[DomainEvents] Binding: ${DOMAIN_EVENTS_DLX} -> ${DOMAIN_QUEUES.DLQ}`);
 
   console.log('[DomainEvents] Core topology setup complete');
-}
-
-/**
- * Setup the position-closed order canceller consumer queue.
- * Called when starting the order cancellation consumer.
- *
- * Creates:
- * - domain.position-closed.order-canceller queue
- * - Binding: position.*.closed -> queue
- */
-export async function setupPositionClosedOrderCancellerQueue(
-  channel: Channel
-): Promise<void> {
-  const queueName = DOMAIN_QUEUES.POSITION_CLOSED_ORDER_CANCELLER;
-  console.log(`[DomainEvents] Setting up queue: ${queueName}`);
-
-  // Create queue with dead letter routing
-  await channel.assertQueue(queueName, {
-    durable: true,
-    exclusive: false,
-    autoDelete: false,
-    arguments: {
-      'x-dead-letter-exchange': DOMAIN_EVENTS_DLX,
-    },
-  });
-  console.log(`[DomainEvents] Queue declared: ${queueName}`);
-
-  // Bind to position closed events
-  await channel.bindQueue(queueName, DOMAIN_EVENTS_EXCHANGE, ROUTING_PATTERNS.POSITION_CLOSED);
-  console.log(
-    `[DomainEvents] Binding: ${DOMAIN_EVENTS_EXCHANGE} -> ${queueName} (pattern: ${ROUTING_PATTERNS.POSITION_CLOSED})`
-  );
 }
 
 /**

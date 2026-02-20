@@ -227,8 +227,9 @@ export {
   OnChainOrderStatus,
   ContractTriggerMode,
   ContractSwapDirection,
+  AUTOMATION_STATES,
 } from './automation/index.js';
-export type { MonitoringState } from './automation/index.js';
+export type { AutomationState } from './automation/index.js';
 
 // UniswapV3 Automation types
 export type {
@@ -241,14 +242,11 @@ export type {
 export type {
   UniswapV3CloseOrderConfig,
   UniswapV3CloseOrderState,
-  UniswapV3CloseOrderExecutionConfig,
-  UniswapV3CloseOrderExecutionState,
 } from './automation/index.js';
 
 export {
   createUniswapV3OrderIdentityHash,
   createEmptyUniswapV3CloseOrderState,
-  createEmptyUniswapV3ExecutionState,
 } from './automation/index.js';
 
 // ============================================================================

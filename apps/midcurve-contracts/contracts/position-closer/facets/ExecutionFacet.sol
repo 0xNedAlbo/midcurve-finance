@@ -59,6 +59,12 @@ contract ExecutionFacet is Modifiers {
         uint256 feeAmount1
     );
 
+    event OrderCancelled(
+        uint256 indexed nftId,
+        TriggerMode indexed triggerMode,
+        address indexed owner
+    );
+
     event SwapExecuted(
         uint256 indexed nftId,
         TriggerMode indexed triggerMode,
@@ -173,6 +179,11 @@ contract ExecutionFacet is Modifiers {
             order.owner,
             nftId
         );
+
+        // 14) Cancel counterpart order on full close
+        // Since we always decrease ALL liquidity, every execution is a full close.
+        // The opposite trigger mode's order (if active) is now stale and must be cancelled.
+        _cancelCounterpartOrder(s, nftId, triggerMode, order.owner);
     }
 
     // ========================================
@@ -192,6 +203,30 @@ contract ExecutionFacet is Modifiers {
             // UPPER triggers when price rises: currentTick >= triggerTick
             return currentTick >= triggerTick;
         }
+    }
+
+    /// @dev Cancel the counterpart order (opposite triggerMode) if it exists and is ACTIVE.
+    ///      Called after full position close to prevent stale orders.
+    function _cancelCounterpartOrder(
+        AppStorage storage s,
+        uint256 nftId,
+        TriggerMode executedTriggerMode,
+        address owner
+    ) internal {
+        TriggerMode oppositeTriggerMode = executedTriggerMode == TriggerMode.LOWER
+            ? TriggerMode.UPPER
+            : TriggerMode.LOWER;
+
+        if (!s.orderExists[nftId][oppositeTriggerMode]) return;
+
+        bytes32 counterpartKey = LibAppStorage.orderKey(nftId, oppositeTriggerMode);
+        CloseOrder storage counterpart = s.orders[counterpartKey];
+
+        if (counterpart.status != OrderStatus.ACTIVE) return;
+
+        counterpart.status = OrderStatus.CANCELLED;
+
+        emit OrderCancelled(nftId, oppositeTriggerMode, owner);
     }
 
     /// @dev Validate NFT ownership and approval

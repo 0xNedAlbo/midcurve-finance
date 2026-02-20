@@ -26,10 +26,8 @@ export {
 export {
   CLOSE_ORDER_TYPES,
   type CloseOrderType,
-  CLOSE_ORDER_STATUSES,
-  type CloseOrderStatus,
-  MONITORING_STATES,
-  type MonitoringState,
+  AUTOMATION_STATES,
+  type AutomationState,
   TRIGGER_MODES,
   type TriggerMode,
   SWAP_DIRECTIONS,

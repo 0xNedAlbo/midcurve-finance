@@ -13,12 +13,9 @@ export type {
 export type {
   UniswapV3CloseOrderConfig,
   UniswapV3CloseOrderState,
-  UniswapV3CloseOrderExecutionConfig,
-  UniswapV3CloseOrderExecutionState,
 } from './uniswapv3-close-order.js';
 
 export {
   createUniswapV3OrderIdentityHash,
   createEmptyUniswapV3CloseOrderState,
-  createEmptyUniswapV3ExecutionState,
 } from './uniswapv3-close-order.js';

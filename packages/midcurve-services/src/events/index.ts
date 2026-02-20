@@ -147,7 +147,6 @@ export {
   buildRoutingKey,
   // Functions - Topology setup
   setupDomainEventsTopology,
-  setupPositionClosedOrderCancellerQueue,
   setupConsumerQueue,
   verifyDomainEventsTopology,
 } from './topology.js';
@@ -198,13 +197,3 @@ export {
   DomainEventConsumerRegistry,
 } from './consumer.js';
 
-// ============================================================
-// Built-in Consumers
-// ============================================================
-
-export {
-  PositionClosedOrderCanceller,
-  createPositionClosedOrderCanceller,
-} from './consumers/position-closed-order-canceller.js';
-
-export type { PositionClosedOrderCancellerDependencies } from './consumers/position-closed-order-canceller.js';

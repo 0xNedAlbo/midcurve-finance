@@ -4,15 +4,11 @@
  * Barrel export for automation-related service types.
  */
 
-// Close order inputs (CloseOrder + CloseOrderExecution)
+// Close order inputs
 export type {
   CreateCloseOrderInput,
-  UpsertFromOnChainEventInput,
   SyncFromChainInput,
   FindCloseOrderOptions,
-  CreateCloseOrderExecutionInput,
-  MarkCloseOrderExecutionCompletedInput,
-  MarkCloseOrderExecutionFailedInput,
 } from './close-order-input.js';
 
 // Automation log types - base contexts

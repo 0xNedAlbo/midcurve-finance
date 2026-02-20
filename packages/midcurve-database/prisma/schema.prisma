@@ -282,7 +282,6 @@ model Position {
   aprPeriods       PositionAprPeriod[]
   syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
   closeOrders          CloseOrder[] // Close order cache (SL/TP)
-  closeOrderExecutions CloseOrderExecution[] // Execution attempts for close orders
   automationLogs       AutomationLog[] // Automation event logs for this position
   notifications    UserNotification[] // Notifications related to this position
   rangeStatus      PositionRangeStatus? // 1:1 range tracking for notifications
@@ -588,9 +587,16 @@ model CloseOrder {
   sharedContractId String?
   sharedContract   SharedContract? @relation(fields: [sharedContractId], references: [id], onDelete: SetNull)
 
-  // === UNIVERSAL LIFECYCLE ===
-  onChainStatus   Int    @default(0) // 0=NONE, 1=ACTIVE, 2=EXECUTED, 3=CANCELLED
-  monitoringState String @default("idle") // idle/monitoring/triggered/suspended
+  // === AUTOMATION LIFECYCLE ===
+  // Single field tracking our system's engagement with the order.
+  // monitoring: price monitor watching for trigger condition
+  // executing:  execution in progress (simulation/signing/broadcasting)
+  // retrying:   execution failed, waiting 60s before retry
+  // failed:     max execution attempts exhausted (terminal)
+  // executed:   order executed successfully on-chain (terminal)
+  automationState   String @default("monitoring") // monitoring|executing|retrying|failed|executed
+  executionAttempts Int    @default(0) // resets to 0 when price moves away from trigger
+  lastError         String? // last execution error for diagnostics
 
   // === IDENTITY HASH (replaces protocol-specific unique constraints) ===
   // Format: "{protocol}/{identity-components}"
@@ -616,65 +622,18 @@ model CloseOrder {
   state Json
 
   // Relations
-  executions CloseOrderExecution[]
-  logs       AutomationLog[]
+  logs AutomationLog[]
 
   // Constraints
   @@unique([positionId, closeOrderHash])
 
   // Indexes
   @@index([protocol])
-  @@index([onChainStatus])
-  @@index([monitoringState])
+  @@index([automationState])
   @@index([positionId])
-  @@index([onChainStatus, monitoringState]) // Active + monitoring orders
   @@index([closeOrderHash])
   @@index([sharedContractId])
   @@map("close_orders")
-}
-
-// CloseOrderExecution - Platform-independent execution attempt for a close order
-// One record per trigger event. Tracks the full lifecycle of a single execution attempt.
-// Follows the same protocol + config/state pattern as CloseOrder.
-model CloseOrderExecution {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Protocol discrimination
-  protocol String // 'uniswapv3', future: 'aave', etc.
-
-  // Parent order
-  closeOrderId String
-  closeOrder   CloseOrder @relation(fields: [closeOrderId], references: [id], onDelete: Cascade)
-
-  // Denormalized for efficient querying
-  positionId String
-  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
-
-  // === UNIVERSAL EXECUTION LIFECYCLE ===
-  triggeredAt DateTime // When the trigger condition was detected
-  status      String   @default("pending") // pending/executing/completed/failed
-  error       String? // Error message if failed
-  retryCount  Int      @default(0) // Retries within this execution
-  completedAt DateTime? // When execution finished (success or permanent failure)
-
-  // === PROTOCOL-SPECIFIC DATA ===
-  // config: Immutable trigger context captured at detection time
-  //   UniswapV3: { triggerSqrtPriceX96 }
-  config Json
-
-  // state: Mutable execution results populated during/after execution
-  //   UniswapV3: { txHash, executionSqrtPriceX96, executionFeeBps,
-  //                amount0Out, amount1Out, swapExecution }
-  state Json
-
-  // Indexes
-  @@index([closeOrderId])
-  @@index([positionId])
-  @@index([status])
-  @@index([createdAt])
-  @@map("close_order_executions")
 }
 
 // OnchainDataSubscribers - Generic table for onchain event subscriptions

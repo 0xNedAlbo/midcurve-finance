@@ -1,9 +1,8 @@
 /**
  * UniswapV3 Close Order Config/State Types
  *
- * Platform-specific types for the OnChainCloseOrder and CloseOrderExecution
- * JSON config/state columns. These mirror the UniswapV3PositionCloser contract's
- * on-chain state and the execution lifecycle data.
+ * Platform-specific types for the CloseOrder JSON config/state columns.
+ * These mirror the UniswapV3PositionCloser contract's on-chain state.
  *
  * Pattern: Same as Position model — generic Prisma columns for universal fields,
  * typed JSON config (immutable) and state (mutable) for protocol-specific data.
@@ -72,42 +71,6 @@ export interface UniswapV3CloseOrderState {
 }
 
 // =============================================================================
-// CloseOrderExecution Config/State
-// =============================================================================
-
-/**
- * UniswapV3 Close Order Execution Config (Immutable)
- *
- * Trigger context captured when the price monitor detects a trigger.
- * Stored in CloseOrderExecution.config JSON column.
- */
-export interface UniswapV3CloseOrderExecutionConfig {
-  /** Pool price (sqrtPriceX96) that caused the trigger (bigint as string) */
-  triggerSqrtPriceX96: string;
-}
-
-/**
- * UniswapV3 Close Order Execution State (Mutable)
- *
- * Execution results populated during/after order execution.
- * Stored in CloseOrderExecution.state JSON column.
- */
-export interface UniswapV3CloseOrderExecutionState {
-  /** On-chain transaction hash */
-  txHash: string | null;
-  /** Pool price at execution time (bigint as string) */
-  executionSqrtPriceX96: string | null;
-  /** Fee charged by operator in basis points */
-  executionFeeBps: number | null;
-  /** Token0 received after close (bigint as string) */
-  amount0Out: string | null;
-  /** Token1 received after close (bigint as string) */
-  amount1Out: string | null;
-  /** Post-close swap details */
-  swapExecution: Record<string, unknown> | null;
-}
-
-// =============================================================================
 // Factory Functions
 // =============================================================================
 
@@ -145,16 +108,3 @@ export function createEmptyUniswapV3CloseOrderState(): UniswapV3CloseOrderState 
   };
 }
 
-/**
- * Create empty UniswapV3 execution state (for initial creation before execution completes).
- */
-export function createEmptyUniswapV3ExecutionState(): UniswapV3CloseOrderExecutionState {
-  return {
-    txHash: null,
-    executionSqrtPriceX96: null,
-    executionFeeBps: null,
-    amount0Out: null,
-    amount1Out: null,
-    swapExecution: null,
-  };
-}

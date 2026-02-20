@@ -55,7 +55,7 @@ export const queryKeys = {
           [...queryKeys.positions.uniswapv3.detail(chainId, nftId), 'close-orders'] as const,
 
         // List with optional filters
-        list: (chainId: number, nftId: string, filters?: { status?: string; type?: string }) =>
+        list: (chainId: number, nftId: string, filters?: { automationState?: string; type?: string }) =>
           [...queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId), 'list', filters] as const,
 
         // Single close order by semantic hash

@@ -159,7 +159,6 @@ function DataFetcher({
   const closeOrdersQuery = useCloseOrders({
     chainId,
     nftId,
-    status: 'active',
   });
 
   // Load position into context

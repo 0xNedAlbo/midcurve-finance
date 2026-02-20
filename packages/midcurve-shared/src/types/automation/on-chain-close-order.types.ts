@@ -1,10 +1,8 @@
 /**
- * On-Chain Close Order Types
+ * Close Order Types
  *
- * Types that mirror the smart contract's OrderStatus, TriggerMode, and SwapDirection enums.
- * These represent on-chain state that can be read via getOrder(nftId, triggerMode).
- *
- * Separated from off-chain execution state (see close-order-execution.types.ts).
+ * Contract enum mirrors (OrderStatus, TriggerMode, SwapDirection) for reading on-chain state,
+ * plus the off-chain AutomationState that tracks our system's lifecycle for each order.
  */
 
 // =============================================================================
@@ -59,17 +57,17 @@ export type ContractSwapDirection =
   (typeof ContractSwapDirection)[keyof typeof ContractSwapDirection];
 
 // =============================================================================
-// Off-chain Monitoring State
+// Automation State
 // =============================================================================
 
 /**
- * Off-chain monitoring state for an on-chain close order.
+ * Off-chain automation lifecycle state for a close order.
  *
- * This is managed by our price monitor service and is NOT stored on-chain.
- *
- * idle:       Not being monitored (terminal on-chain status, or not yet started)
- * monitoring: Price monitor is actively watching for trigger condition
- * triggered:  Trigger detected, execution attempt in progress
- * suspended:  Monitoring paused (e.g., max retries exhausted, manual pause)
+ * monitoring: Price monitor is watching for trigger condition
+ * executing:  Execution in progress (simulation/signing/broadcasting)
+ * retrying:   Execution failed, waiting before retry (60s delay)
+ * failed:     Max execution attempts exhausted (terminal — user must re-register)
+ * executed:   Order executed successfully on-chain (terminal)
  */
-export type MonitoringState = 'idle' | 'monitoring' | 'triggered' | 'suspended';
+export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed', 'executed'] as const;
+export type AutomationState = (typeof AUTOMATION_STATES)[number];
