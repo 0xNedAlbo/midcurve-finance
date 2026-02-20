@@ -250,7 +250,7 @@ export class CloseOrderExecutor {
         } else {
           // Permanently failed - mark execution as failed and suspend order
           await executionService.markFailed(execution.id, { error: error.message });
-          await closeOrderService.transitionToSuspended(orderId);
+          await closeOrderService.transitionToSuspended(orderId, 'execution_failed');
 
           await mq.ack(msg); // Remove from queue - don't requeue
           log.error(

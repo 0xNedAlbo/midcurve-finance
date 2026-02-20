@@ -707,12 +707,39 @@ export class CloseOrderService {
   }
 
   /**
-   * Transitions triggered → suspended (max retries exhausted).
+   * Transitions to suspended state with an optional reason.
+   *
+   * When a reason is provided, it is stored as `suspendedReason` in the
+   * order's state JSON so the API serializer can distinguish between
+   * execution failures and position-closure suspensions.
+   *
+   * @param id - Close order ID
+   * @param reason - Why the order was suspended:
+   *   - 'execution_failed': max execution retries exhausted (genuine failure)
+   *   - 'position_closed': position was closed by another order (superseded)
+   * @param tx - Optional Prisma transaction client
    */
   async transitionToSuspended(
     id: string,
+    reason?: 'execution_failed' | 'position_closed',
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrder> {
+    if (reason) {
+      log.methodEntry(this.logger, 'transitionToSuspended', { id, reason });
+      const db = tx ?? this.prisma;
+      const existing = await db.closeOrder.findUniqueOrThrow({ where: { id } });
+      const currentState = (existing.state as Record<string, unknown>) ?? {};
+      const result = await db.closeOrder.update({
+        where: { id },
+        data: {
+          monitoringState: 'suspended',
+          state: { ...currentState, suspendedReason: reason } as Prisma.InputJsonValue,
+        },
+      });
+      this.logger.info({ id, monitoringState: 'suspended', reason }, 'Monitoring state updated with reason');
+      log.methodExit(this.logger, 'transitionToSuspended', { id });
+      return result;
+    }
     return this.updateMonitoringState(id, 'suspended', tx);
   }
 

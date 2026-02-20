@@ -46,6 +46,7 @@ const QueryParamsSchema = z.object({
       'cancelled',
       'expired',
       'failed',
+      'superseded',
     ])
     .optional(),
   type: z.enum(['sl', 'tp']).optional(),
@@ -67,6 +68,8 @@ function statusToFilterOptions(status: string | undefined) {
     case 'triggering':
       return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'triggered' as const };
     case 'failed':
+    case 'superseded':
+      // Both map to ACTIVE + suspended; the distinction is in the serializer via suspendedReason
       return { onChainStatus: OnChainOrderStatus.ACTIVE, monitoringState: 'suspended' as const };
     case 'executed':
       return { onChainStatus: OnChainOrderStatus.EXECUTED };

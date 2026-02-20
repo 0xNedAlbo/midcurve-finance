@@ -95,6 +95,12 @@ const STATUS_CONFIG: Record<
     bgColor: 'bg-red-900/30',
     borderColor: 'border-red-700/50',
   },
+  superseded: {
+    label: 'Superseded',
+    textColor: 'text-slate-400',
+    bgColor: 'bg-slate-800/50',
+    borderColor: 'border-slate-700/50',
+  },
 };
 
 export function CloseOrderStatusBadge({ status, size = 'md' }: CloseOrderStatusBadgeProps) {
@@ -150,5 +156,5 @@ export function canCancelCloseOrder(status: CloseOrderStatus): boolean {
  * Check if order is in a terminal state
  */
 export function isCloseOrderTerminal(status: CloseOrderStatus): boolean {
-  return status === 'executed' || status === 'cancelled' || status === 'expired' || status === 'failed';
+  return status === 'executed' || status === 'cancelled' || status === 'expired' || status === 'failed' || status === 'superseded';
 }

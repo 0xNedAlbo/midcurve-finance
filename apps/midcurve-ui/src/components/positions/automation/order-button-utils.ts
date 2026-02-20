@@ -4,11 +4,11 @@
  * Shared utilities for Stop Loss and Take Profit action buttons.
  * Handles price formatting, order filtering, and visual state derivation.
  *
- * Button visual state is driven by monitoringState (execution lifecycle),
- * not by onChainStatus (registration state).
+ * Button visibility and visual state are driven by the derived `status` field,
+ * which accounts for both on-chain state and suspension reason.
  */
 
-import type { SerializedCloseOrder, TriggerMode, MonitoringState } from '@midcurve/api-shared';
+import type { SerializedCloseOrder, TriggerMode, CloseOrderStatus } from '@midcurve/api-shared';
 import {
   pricePerToken0InToken1,
   pricePerToken1InToken0,
@@ -30,21 +30,25 @@ export interface TokenConfig {
 
 /**
  * Visual state for the order button.
- * Derived from monitoringState, determines icon + color.
+ * Derived from status, determines icon + color.
  */
 export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended';
 
 /**
- * MonitoringState values that indicate an order should be visible in the button.
- * 'idle' orders are not shown (not yet being monitored or already terminal).
+ * Status values that make an order visible in the action button.
+ *
+ * Terminal statuses (executed, cancelled, expired, superseded) are hidden.
+ * Failed orders remain visible (red warning) to prompt user action.
  */
-const VISIBLE_MONITORING_STATES: MonitoringState[] = ['monitoring', 'triggered', 'suspended'];
+const VISIBLE_BUTTON_STATUSES: CloseOrderStatus[] = [
+  'pending', 'registering', 'active', 'triggering', 'failed',
+];
 
 /**
  * Find the order for a trigger mode that should be shown in the button.
  *
  * With the new data model there is at most 1 order per (position, triggerMode)
- * due to the unique constraint. We return it if it's in a visible state.
+ * due to the unique constraint. We return it if it's in a visible status.
  */
 export function findOrderForTriggerMode(
   orders: SerializedCloseOrder[],
@@ -53,20 +57,20 @@ export function findOrderForTriggerMode(
   return orders.find(
     (order) =>
       order.triggerMode === triggerMode &&
-      VISIBLE_MONITORING_STATES.includes(order.monitoringState)
+      VISIBLE_BUTTON_STATUSES.includes(order.status)
   );
 }
 
 /**
- * Derive the visual state for a button from an order's monitoringState.
+ * Derive the visual state for a button from an order's status.
  *
- * - 'monitoring' → emerald (watching price)
- * - 'triggered'  → blue (execution in progress)
- * - 'suspended'  → red (execution failed, needs attention)
+ * - 'active'/'registering'/'pending' → emerald (watching price)
+ * - 'triggering'                     → blue (execution in progress)
+ * - 'failed'                         → red (execution failed, needs attention)
  */
 export function getOrderButtonVisualState(order: SerializedCloseOrder): OrderButtonVisualState {
-  if (order.monitoringState === 'triggered') return 'executing';
-  if (order.monitoringState === 'suspended') return 'suspended';
+  if (order.status === 'triggering') return 'executing';
+  if (order.status === 'failed') return 'suspended';
   return 'monitoring';
 }
 

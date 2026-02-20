@@ -99,7 +99,7 @@ export class PositionClosedOrderCanceller extends DomainEventConsumer<PositionCl
     // Suspend each order
     for (const order of activeOrders) {
       try {
-        await this.orderService.transitionToSuspended(order.id);
+        await this.orderService.transitionToSuspended(order.id, 'position_closed');
 
         this.logger.info(
           { positionId, orderId: order.id },

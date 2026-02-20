@@ -259,19 +259,24 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
 // ============================================================================
 
 /**
- * Derive CloseOrderStatus from (onChainStatus, monitoringState) for backward compatibility.
+ * Derive CloseOrderStatus from (onChainStatus, monitoringState, state).
  *
- * The old CloseOrderStatus is still used by CloseOrderStatusBadge and PositionCloseOrdersPanel.
+ * When monitoringState is 'suspended', the suspendedReason in the state JSON
+ * distinguishes genuine execution failures ('failed') from orders that became
+ * moot because the position was closed by another order ('superseded').
  */
 function deriveCloseOrderStatus(
   onChainStatus: number,
-  monitoringState: string
+  monitoringState: string,
+  state: Record<string, unknown>,
 ): CloseOrderStatus {
   if (onChainStatus === OnChainOrderStatus.EXECUTED) return 'executed';
   if (onChainStatus === OnChainOrderStatus.CANCELLED) return 'cancelled';
   if (onChainStatus === OnChainOrderStatus.ACTIVE) {
     if (monitoringState === 'triggered') return 'triggering';
-    if (monitoringState === 'suspended') return 'failed';
+    if (monitoringState === 'suspended') {
+      return state.suspendedReason === 'position_closed' ? 'superseded' : 'failed';
+    }
     if (monitoringState === 'monitoring') return 'active';
     return 'registering'; // idle + ACTIVE = still registering
   }
@@ -308,7 +313,7 @@ export function serializeCloseOrder(
     closeOrderType: 'uniswapv3',
 
     // Derived status (backward compat for CloseOrderStatusBadge, etc.)
-    status: deriveCloseOrderStatus(order.onChainStatus, order.monitoringState),
+    status: deriveCloseOrderStatus(order.onChainStatus, order.monitoringState, state),
     monitoringState: order.monitoringState as MonitoringState,
 
     // Identity fields (from config JSON)

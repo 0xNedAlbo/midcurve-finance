@@ -29,6 +29,7 @@ export const CLOSE_ORDER_STATUSES = [
   'cancelled',
   'expired',
   'failed',
+  'superseded',
 ] as const;
 export type CloseOrderStatus = (typeof CLOSE_ORDER_STATUSES)[number];
 
