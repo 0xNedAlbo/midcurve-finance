@@ -1063,7 +1063,21 @@ export class UniswapV3LedgerService {
             let deltaPnl = 0n;
             let deltaCollectedFees = 0n;
 
-            if (state.eventType === "INCREASE_LIQUIDITY") {
+            if (
+                state.eventType === "MINT" ||
+                state.eventType === "BURN" ||
+                state.eventType === "TRANSFER"
+            ) {
+                // Lifecycle events: no financial impact, pass through all running totals
+                deltaL = 0n;
+                liquidityAfter = previousLiquidity;
+                deltaCostBasis = 0n;
+                costBasisAfter = previousCostBasis;
+                deltaPnl = 0n;
+                pnlAfter = previousPnl;
+                uncollectedPrincipal0After = previousUncollectedPrincipal0;
+                uncollectedPrincipal1After = previousUncollectedPrincipal1;
+            } else if (state.eventType === "INCREASE_LIQUIDITY") {
                 // Use stored tokenValue for cost basis (already calculated with correct price)
                 deltaL = state.liquidity;
                 liquidityAfter = previousLiquidity + deltaL;
@@ -1255,6 +1269,111 @@ export class UniswapV3LedgerService {
             uncollectedPrincipal0: uncollectedPrincipal0After,
             uncollectedPrincipal1: uncollectedPrincipal1After,
         };
+    }
+
+    // ============================================================================
+    // LIFECYCLE EVENT METHODS
+    // ============================================================================
+
+    /**
+     * Create a lifecycle ledger event (MINT, BURN, or TRANSFER).
+     *
+     * These events have deltaL=0 and no financial impact. They serve as
+     * lifecycle markers in the position ledger.
+     *
+     * @param params - Lifecycle event parameters
+     * @param params.chainId - EVM chain ID
+     * @param params.nftId - NFT token ID
+     * @param params.blockNumber - Block number of the event
+     * @param params.txIndex - Transaction index
+     * @param params.logIndex - Log index
+     * @param params.txHash - Transaction hash
+     * @param params.blockHash - Block hash
+     * @param params.timestamp - Block timestamp
+     * @param params.sqrtPriceX96 - Pool price at event time
+     * @param params.state - Event-specific state (UniswapV3MintEvent, UniswapV3BurnEvent, or UniswapV3TransferEvent)
+     * @param tx - Optional transaction client
+     * @returns The created event, or null if already exists
+     */
+    async createLifecycleEvent(
+        params: {
+            chainId: number;
+            nftId: bigint;
+            blockNumber: bigint;
+            txIndex: number;
+            logIndex: number;
+            txHash: string;
+            blockHash: string;
+            timestamp: Date;
+            sqrtPriceX96: bigint;
+            state: UniswapV3LedgerEventState;
+        },
+        tx?: PrismaTransactionClient,
+    ): Promise<UniswapV3PositionLedgerEvent | null> {
+        const inputHash = UniswapV3LedgerService.createHash(
+            params.chainId,
+            params.txHash,
+            params.blockHash,
+            params.logIndex,
+        );
+
+        // Dedup check
+        const existingId = await this.findIdByHash(inputHash, tx);
+        if (existingId) {
+            this.logger.debug({ inputHash }, "Lifecycle event already exists, skipping");
+            return null;
+        }
+
+        // Map state eventType to ledger EventType
+        const eventType = params.state.eventType as EventType;
+
+        const config: UniswapV3LedgerEventConfig = {
+            chainId: params.chainId,
+            nftId: params.nftId,
+            blockNumber: params.blockNumber,
+            txIndex: params.txIndex,
+            logIndex: params.logIndex,
+            txHash: params.txHash,
+            blockHash: params.blockHash,
+            deltaL: 0n,
+            liquidityAfter: 0n, // Will be fixed by recalculateAggregates
+            feesCollected0: 0n,
+            feesCollected1: 0n,
+            uncollectedPrincipal0After: 0n,
+            uncollectedPrincipal1After: 0n,
+            sqrtPriceX96: params.sqrtPriceX96,
+        };
+
+        const createInput: CreateLedgerEventInput = {
+            previousId: null, // Will be fixed by recalculateAggregates
+            timestamp: params.timestamp,
+            eventType,
+            inputHash,
+            poolPrice: params.sqrtPriceX96,
+            token0Amount: 0n,
+            token1Amount: 0n,
+            tokenValue: 0n,
+            rewards: [],
+            deltaCostBasis: 0n,
+            costBasisAfter: 0n,
+            deltaPnl: 0n,
+            pnlAfter: 0n,
+            deltaCollectedFees: 0n,
+            collectedFeesAfter: 0n,
+            deltaRealizedCashflow: 0n,
+            realizedCashflowAfter: 0n,
+            config,
+            state: params.state,
+        };
+
+        const event = await this.create(createInput, tx);
+
+        this.logger.info(
+            { inputHash, eventType, positionId: this.positionId },
+            "Lifecycle ledger event created",
+        );
+
+        return event;
     }
 
     // ============================================================================

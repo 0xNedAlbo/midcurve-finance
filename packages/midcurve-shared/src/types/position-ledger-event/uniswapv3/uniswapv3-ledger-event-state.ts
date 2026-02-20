@@ -84,19 +84,88 @@ export interface UniswapV3CollectEvent {
 }
 
 // ============================================================================
+// MINT EVENT (Lifecycle)
+// ============================================================================
+
+/**
+ * UniswapV3MintEvent
+ *
+ * ERC-721 Transfer from address(0) — position NFT created.
+ * Lifecycle event with no liquidity change.
+ */
+export interface UniswapV3MintEvent {
+  /** Event type discriminator */
+  eventType: 'MINT';
+
+  /** NFT token ID */
+  tokenId: bigint;
+
+  /** Recipient address (the position owner) */
+  to: string;
+}
+
+// ============================================================================
+// BURN EVENT (Lifecycle)
+// ============================================================================
+
+/**
+ * UniswapV3BurnEvent
+ *
+ * ERC-721 Transfer to address(0) — position NFT destroyed.
+ * Lifecycle event with no liquidity change.
+ */
+export interface UniswapV3BurnEvent {
+  /** Event type discriminator */
+  eventType: 'BURN';
+
+  /** NFT token ID */
+  tokenId: bigint;
+
+  /** Previous owner address */
+  from: string;
+}
+
+// ============================================================================
+// TRANSFER EVENT (Lifecycle)
+// ============================================================================
+
+/**
+ * UniswapV3TransferEvent
+ *
+ * ERC-721 Transfer between non-zero addresses — ownership change.
+ * Lifecycle event with no liquidity change.
+ */
+export interface UniswapV3TransferEvent {
+  /** Event type discriminator */
+  eventType: 'TRANSFER';
+
+  /** NFT token ID */
+  tokenId: bigint;
+
+  /** Previous owner address */
+  from: string;
+
+  /** New owner address */
+  to: string;
+}
+
+// ============================================================================
 // UNION TYPE
 // ============================================================================
 
 /**
  * UniswapV3LedgerEventState
  *
- * Union type representing any of the three event types.
+ * Union type representing all event types from the NFT Position Manager.
  * Discriminated by `eventType` field for type narrowing.
  */
 export type UniswapV3LedgerEventState =
   | UniswapV3IncreaseLiquidityEvent
   | UniswapV3DecreaseLiquidityEvent
-  | UniswapV3CollectEvent;
+  | UniswapV3CollectEvent
+  | UniswapV3MintEvent
+  | UniswapV3BurnEvent
+  | UniswapV3TransferEvent;
 
 // ============================================================================
 // JSON INTERFACES
@@ -136,12 +205,43 @@ export interface UniswapV3CollectEventJSON {
 }
 
 /**
+ * JSON representation of Mint event.
+ */
+export interface UniswapV3MintEventJSON {
+  eventType: 'MINT';
+  tokenId: string;
+  to: string;
+}
+
+/**
+ * JSON representation of Burn event.
+ */
+export interface UniswapV3BurnEventJSON {
+  eventType: 'BURN';
+  tokenId: string;
+  from: string;
+}
+
+/**
+ * JSON representation of Transfer event.
+ */
+export interface UniswapV3TransferEventJSON {
+  eventType: 'TRANSFER';
+  tokenId: string;
+  from: string;
+  to: string;
+}
+
+/**
  * Union type for JSON state.
  */
 export type UniswapV3LedgerEventStateJSON =
   | UniswapV3IncreaseLiquidityEventJSON
   | UniswapV3DecreaseLiquidityEventJSON
-  | UniswapV3CollectEventJSON;
+  | UniswapV3CollectEventJSON
+  | UniswapV3MintEventJSON
+  | UniswapV3BurnEventJSON
+  | UniswapV3TransferEventJSON;
 
 // ============================================================================
 // SERIALIZATION HELPERS
@@ -178,6 +278,25 @@ export function ledgerEventStateToJSON(
         amount0: state.amount0.toString(),
         amount1: state.amount1.toString(),
       };
+    case 'MINT':
+      return {
+        eventType: 'MINT',
+        tokenId: state.tokenId.toString(),
+        to: state.to,
+      };
+    case 'BURN':
+      return {
+        eventType: 'BURN',
+        tokenId: state.tokenId.toString(),
+        from: state.from,
+      };
+    case 'TRANSFER':
+      return {
+        eventType: 'TRANSFER',
+        tokenId: state.tokenId.toString(),
+        from: state.from,
+        to: state.to,
+      };
   }
 }
 
@@ -211,6 +330,25 @@ export function ledgerEventStateFromJSON(
         recipient: json.recipient,
         amount0: BigInt(json.amount0),
         amount1: BigInt(json.amount1),
+      };
+    case 'MINT':
+      return {
+        eventType: 'MINT',
+        tokenId: BigInt(json.tokenId),
+        to: json.to,
+      };
+    case 'BURN':
+      return {
+        eventType: 'BURN',
+        tokenId: BigInt(json.tokenId),
+        from: json.from,
+      };
+    case 'TRANSFER':
+      return {
+        eventType: 'TRANSFER',
+        tokenId: BigInt(json.tokenId),
+        from: json.from,
+        to: json.to,
       };
   }
 }

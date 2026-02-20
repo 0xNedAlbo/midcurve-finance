@@ -20,11 +20,23 @@ export type LedgerEventProtocol = 'uniswapv3';
 /**
  * Position Event Types
  *
+ * Liquidity events:
  * - INCREASE_POSITION: Liquidity added to position (capital deployed)
  * - DECREASE_POSITION: Liquidity removed from position (partial close)
  * - COLLECT: Tokens withdrawn from position (fees + principal)
+ *
+ * Lifecycle events (deltaLiquidity = 0):
+ * - MINT: Position NFT minted (position created on-chain)
+ * - BURN: Position NFT burned (position destroyed on-chain)
+ * - TRANSFER: Position NFT ownership changed
  */
-export type EventType = 'INCREASE_POSITION' | 'DECREASE_POSITION' | 'COLLECT';
+export type EventType =
+  | 'INCREASE_POSITION'
+  | 'DECREASE_POSITION'
+  | 'COLLECT'
+  | 'MINT'
+  | 'BURN'
+  | 'TRANSFER';
 
 // ============================================================================
 // REWARD STRUCTURE
