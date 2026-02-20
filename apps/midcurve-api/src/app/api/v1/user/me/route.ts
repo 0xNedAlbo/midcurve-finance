@@ -50,15 +50,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         });
       }
 
-      // Fetch user's wallets
-      const wallets = await getAuthUserService().getUserWallets(user.id);
-
       const response = createSuccessResponse({
         id: userData.id,
+        address: userData.address,
         name: userData.name,
-        email: userData.email,
-        image: userData.image,
-        wallets: wallets || [],
         createdAt: userData.createdAt.toISOString(),
         updatedAt: userData.updatedAt.toISOString(),
       });

@@ -18,23 +18,15 @@ export interface User {
   id: string;
 
   /**
+   * Ethereum address (EIP-55 checksummed, chain-agnostic)
+   */
+  address: string;
+
+  /**
    * User's display name
    * Optional - user may not have set a name yet
    */
   name: string | null;
-
-  /**
-   * User's email address
-   * Optional - used for email-based authentication (future)
-   * Must be unique if provided
-   */
-  email: string | null;
-
-  /**
-   * User's profile picture URL
-   * Optional - avatar or profile image
-   */
-  image: string | null;
 
   /**
    * Creation timestamp

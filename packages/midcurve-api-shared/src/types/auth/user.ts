@@ -5,17 +5,14 @@
  */
 
 import type { ApiResponse } from '../common';
-import type { AuthWalletAddress } from '@midcurve/shared';
 
 /**
- * User data with wallets
+ * User data returned in API responses
  */
 export interface UserData {
   id: string;
+  address: string;
   name: string | null;
-  email: string | null;
-  image: string | null;
-  wallets: AuthWalletAddress[];
   createdAt: string;
   updatedAt: string;
 }

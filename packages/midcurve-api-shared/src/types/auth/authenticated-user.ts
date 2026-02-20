@@ -2,10 +2,7 @@
  * Authenticated User Type
  *
  * Type for authenticated users in middleware and route handlers.
- * Extracted from session.types.ts to be framework-agnostic.
  */
-
-import type { AuthWalletAddress } from '@midcurve/shared';
 
 /**
  * Authenticated user type (for middleware usage)
@@ -15,8 +12,6 @@ import type { AuthWalletAddress } from '@midcurve/shared';
  */
 export interface AuthenticatedUser {
   id: string;
+  address: string;
   name?: string | null;
-  email?: string | null;
-  image?: string | null;
-  wallets?: AuthWalletAddress[];
 }

@@ -19,16 +19,8 @@ export type SignupRequest = z.infer<typeof SignupRequestSchema>;
 export interface SignupResponse {
   user: {
     id: string;
+    address: string;
     name: string | null;
-    email: string | null;
-    image: string | null;
-    createdAt: string; // ISO 8601 date string
-    updatedAt: string; // ISO 8601 date string
-  };
-  walletAddress: {
-    id: string;
-    address: string; // EIP-55 checksummed
-    isPrimary: boolean;
     createdAt: string;
     updatedAt: string;
   };
