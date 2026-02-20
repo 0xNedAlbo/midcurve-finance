@@ -11,8 +11,19 @@ interface UniswapV3RangeStatusProps {
 }
 
 export function UniswapV3RangeStatus({ position }: UniswapV3RangeStatusProps) {
-  // Only show for active positions
+  // Only show for active positions (burned positions show no badge)
   if (!position.isActive) return null;
+
+  const positionState = position.state as { liquidity: string };
+  const hasLiquidity = BigInt(positionState.liquidity || '0') > 0n;
+
+  if (!hasLiquidity) {
+    return (
+      <span className="px-1.5 md:px-2 py-0.5 rounded text-[10px] md:text-xs font-medium border text-slate-400 bg-slate-500/10 border-slate-500/20">
+        No Liquidity
+      </span>
+    );
+  }
 
   const config = position.config as {
     tickLower: number;
