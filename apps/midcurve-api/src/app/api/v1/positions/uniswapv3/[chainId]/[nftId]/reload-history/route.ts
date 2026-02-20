@@ -32,7 +32,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
-// TODO: UniswapV3PositionSyncState class was never implemented — sync state clearing is skipped
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -153,11 +152,7 @@ export async function POST(
         positionHash,
       });
 
-      // 3. Clear sync state (fresh start)
-      // TODO: UniswapV3PositionSyncState class was planned but never implemented.
-      // Sync state clearing is skipped — event discovery (step 4) still works without it.
-
-      // 4. Discover all historical events from blockchain
+      // 3. Discover all historical events from blockchain
       // TODO: discoverAllEvents was never implemented on UniswapV3LedgerService.
       // Use importLogsForPosition or similar when available.
 

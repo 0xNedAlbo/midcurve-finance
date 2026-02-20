@@ -260,7 +260,6 @@ model Position {
   // Relations
   ledgerEvents     PositionLedgerEvent[]
   aprPeriods       PositionAprPeriod[]
-  syncState        PositionSyncState? // 1:1 relation, optional for backward compatibility
   closeOrders          CloseOrder[] // Close order cache (SL/TP)
   automationLogs       AutomationLog[] // Automation event logs for this position
   notifications    UserNotification[] // Notifications related to this position
@@ -276,30 +275,6 @@ model Position {
   @@map("positions")
 }
 
-model PositionSyncState {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Position reference (1:1 relationship)
-  positionId String   @unique
-  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
-
-  // Sync tracking
-  lastSyncAt DateTime? // null = never synced yet
-  lastSyncBy String? // 'user-refresh', future: 'auto-refresh', 'webhook', etc.
-
-  // Protocol-specific sync state (JSON)
-  // For UniswapV3: { lastEventBlock: number, lastFinalizedBlock: number, lastEventId: string?, ... }
-  // For other protocols: protocol-specific sync metadata
-  state Json
-
-  // Indexes for efficient queries
-  @@index([positionId])
-  @@index([lastSyncAt])
-  @@index([lastSyncBy])
-  @@map("position_sync_states")
-}
 
 model PoolPrice {
   id        String   @id @default(cuid())
