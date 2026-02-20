@@ -4,6 +4,7 @@ import {
   useReducer,
   useCallback,
   useEffect,
+  useMemo,
   type ReactNode,
 } from 'react';
 import type { PoolSearchResultItem, PoolSearchTokenInfo } from '@midcurve/api-shared';
@@ -12,6 +13,8 @@ import type { WizardStep } from '@/components/layout/wizard';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { ZOOM_STORAGE_KEYS, ZOOM_DEFAULTS } from '@/lib/zoom-settings';
 import { useWizardUrlState, type HydrationPayload } from '../hooks/useWizardUrlState';
+import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
+import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 export {
   type SwapConfigState,
   computeSwapDirection,
@@ -584,6 +587,10 @@ interface CreatePositionWizardContextValue {
   steps: WizardStep[];
   currentStep: WizardStep;
 
+  // Derived tick range (custom if set, otherwise defaults)
+  effectiveTickLower: number;
+  effectiveTickUpper: number;
+
   // URL hydration state
   isHydrating: boolean;
 
@@ -907,8 +914,58 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     onHydrate: handleHydrate,
   });
 
+  // ========== Provider-level calculations (run regardless of active step) ==========
+
+  // Calculate default tick range (-20% / +10%) when pool is discovered
+  useDefaultTickRange(state.discoveredPool, setDefaultTickRange);
+
+  // Compute effective tick range (custom if set, otherwise defaults)
+  const effectiveTickLower = useMemo(
+    () => (state.tickLower !== 0 || state.tickUpper !== 0 ? state.tickLower : state.defaultTickLower),
+    [state.tickLower, state.tickUpper, state.defaultTickLower]
+  );
+  const effectiveTickUpper = useMemo(
+    () => (state.tickLower !== 0 || state.tickUpper !== 0 ? state.tickUpper : state.defaultTickUpper),
+    [state.tickLower, state.tickUpper, state.defaultTickUpper]
+  );
+
+  // Calculate capital allocation from input amounts + tick range
+  const calculations = useCapitalCalculations({
+    baseInputAmount: state.baseInputAmount,
+    quoteInputAmount: state.quoteInputAmount,
+    discoveredPool: state.discoveredPool,
+    baseToken: state.baseToken,
+    quoteToken: state.quoteToken,
+    tickLower: effectiveTickLower,
+    tickUpper: effectiveTickUpper,
+  });
+
+  // Sync calculation results to state
+  useEffect(() => {
+    setAllocatedAmounts(
+      calculations.allocatedBaseAmount,
+      calculations.allocatedQuoteAmount,
+      calculations.totalQuoteValue
+    );
+    setLiquidity(calculations.liquidity);
+  }, [
+    calculations.allocatedBaseAmount,
+    calculations.allocatedQuoteAmount,
+    calculations.totalQuoteValue,
+    calculations.liquidity,
+    setAllocatedAmounts,
+    setLiquidity,
+  ]);
+
+  // Update step validation for configure step
+  useEffect(() => {
+    dispatch({ type: 'SET_STEP_VALID', stepId: 'configure', valid: calculations.isValid });
+  }, [calculations.isValid]);
+
   const value: CreatePositionWizardContextValue = {
     state,
+    effectiveTickLower,
+    effectiveTickUpper,
     isHydrating,
     steps,
     currentStep,

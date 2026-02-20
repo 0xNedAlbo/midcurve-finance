@@ -22,8 +22,6 @@
 
 import type { ConfigurationTab, CreatePositionWizardState } from '../context/CreatePositionWizardContext';
 
-// Supported chain IDs for validation
-const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 137, 10] as const;
 
 /**
  * Parsed URL parameters for the wizard
@@ -160,11 +158,13 @@ export function isValidPoolAddress(address: string | null): address is string {
 }
 
 /**
- * Validate chain ID is supported
+ * Validate chain ID is a positive integer.
+ * We don't restrict to specific chains here — the pool discovery API
+ * will reject unsupported chains, providing a better error message.
  */
 export function isValidChainId(chainId: number | null): chainId is number {
   if (chainId === null) return false;
-  return (SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId);
+  return Number.isInteger(chainId) && chainId > 0;
 }
 
 /**

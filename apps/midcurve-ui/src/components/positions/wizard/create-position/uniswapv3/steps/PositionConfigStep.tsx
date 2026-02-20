@@ -29,8 +29,6 @@ import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { PositionRangeSection } from '../shared/PositionRangeSection';
 import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { PostCloseSwapSection } from '../shared/PostCloseSwapSection';
-import { useDefaultTickRange } from '../hooks/useDefaultTickRange';
-import { useCapitalCalculations } from '../hooks/useCapitalCalculations';
 import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
 
 // Configuration section tabs
@@ -43,14 +41,12 @@ const CONFIG_TABS: { id: ConfigurationTab; label: string; description: string; i
 export function PositionConfigStep() {
   const {
     state,
+    effectiveTickLower,
+    effectiveTickUpper,
     setConfigurationTab,
     setBaseInput,
     setQuoteInput,
-    setAllocatedAmounts,
-    setDefaultTickRange,
     setTickRange,
-    setLiquidity,
-    setStepValid,
     setInteractiveZoom,
     setStopLoss,
     setTakeProfit,
@@ -62,6 +58,7 @@ export function PositionConfigStep() {
     setTpSwapSlippage,
     setTpSwapToQuote,
     setTpExitSlippage,
+    isStepValid,
   } = useCreatePositionWizard();
 
   const { address: walletAddress, isConnected } = useAccount();
@@ -96,59 +93,9 @@ export function PositionConfigStep() {
     enabled: isConnected && !!state.quoteToken?.address,
   });
 
-  // Calculate default tick range (-20% / +10%) when pool is discovered
-  const handleDefaultRangeCalculated = useCallback(
-    (tickLower: number, tickUpper: number) => {
-      setDefaultTickRange(tickLower, tickUpper);
-    },
-    [setDefaultTickRange]
-  );
-
-  useDefaultTickRange(state.discoveredPool, handleDefaultRangeCalculated);
-
-  // Determine which tick range to use for calculations
-  // Use custom range if set (tickLower !== tickUpper), otherwise use default
-  const effectiveTickLower =
-    state.tickLower !== 0 || state.tickUpper !== 0
-      ? state.tickLower
-      : state.defaultTickLower;
-  const effectiveTickUpper =
-    state.tickLower !== 0 || state.tickUpper !== 0
-      ? state.tickUpper
-      : state.defaultTickUpper;
-
-  // Calculate allocations (always uses custom/independent mode now)
-  const calculations = useCapitalCalculations({
-    baseInputAmount: state.baseInputAmount,
-    quoteInputAmount: state.quoteInputAmount,
-    discoveredPool: state.discoveredPool,
-    baseToken: state.baseToken,
-    quoteToken: state.quoteToken,
-    tickLower: effectiveTickLower,
-    tickUpper: effectiveTickUpper,
-  });
-
-  // Update state when calculations change
-  useEffect(() => {
-    setAllocatedAmounts(
-      calculations.allocatedBaseAmount,
-      calculations.allocatedQuoteAmount,
-      calculations.totalQuoteValue
-    );
-    setLiquidity(calculations.liquidity);
-  }, [
-    calculations.allocatedBaseAmount,
-    calculations.allocatedQuoteAmount,
-    calculations.totalQuoteValue,
-    calculations.liquidity,
-    setAllocatedAmounts,
-    setLiquidity,
-  ]);
-
-  // Update step validation
-  useEffect(() => {
-    setStepValid('configure', calculations.isValid);
-  }, [calculations.isValid, setStepValid]);
+  // effectiveTickLower/Upper and capital calculations are computed at the
+  // provider level (CreatePositionWizardProvider) so they run regardless
+  // of which step is active. Results are in state.allocatedBaseAmount, etc.
 
   // ============================================================================
   // PnL Curve Data Calculations
@@ -1109,7 +1056,7 @@ export function PositionConfigStep() {
   const { baseLogoUrl, quoteLogoUrl } = getLogoUrls();
 
   const renderSummary = () => (
-    <WizardSummaryPanel nextDisabled={!calculations.isValid}>
+    <WizardSummaryPanel nextDisabled={!isStepValid('configure')}>
       <AllocatedCapitalSection
         allocatedBaseAmount={state.allocatedBaseAmount}
         allocatedQuoteAmount={state.allocatedQuoteAmount}
