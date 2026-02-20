@@ -6,7 +6,8 @@
  * - executing:  Blue "Executing..."
  * - retrying:   Orange "Retrying..."
  * - failed:     Red "Failed"
- * - executed:   Gray "Executed"
+ *
+ * Note: Executed orders are deleted from DB, so no 'executed' state badge is needed.
  */
 
 import type { AutomationState } from '@midcurve/api-shared';
@@ -66,12 +67,6 @@ const STATUS_CONFIG: Record<
     bgColor: 'bg-red-900/30',
     borderColor: 'border-red-700/50',
   },
-  executed: {
-    label: 'Executed',
-    textColor: 'text-slate-400',
-    bgColor: 'bg-slate-800/50',
-    borderColor: 'border-slate-700/50',
-  },
 };
 
 export function CloseOrderStatusBadge({ status, size = 'md' }: CloseOrderStatusBadgeProps) {
@@ -124,8 +119,8 @@ export function canCancelCloseOrder(status: AutomationState): boolean {
 }
 
 /**
- * Check if order is in a terminal state
+ * Check if order is in a terminal state (only failed — executed orders are deleted)
  */
 export function isCloseOrderTerminal(status: AutomationState): boolean {
-  return status === 'executed' || status === 'failed';
+  return status === 'failed';
 }

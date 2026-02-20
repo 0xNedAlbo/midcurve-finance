@@ -24,9 +24,10 @@ export type CloseOrderType = (typeof CLOSE_ORDER_TYPES)[number];
  * executing:  Execution in progress (simulation/signing/broadcasting)
  * retrying:   Execution failed, waiting before retry (60s delay)
  * failed:     Max execution attempts exhausted (terminal)
- * executed:   Order executed successfully on-chain (terminal)
+ *
+ * Note: Executed orders are deleted from the DB (execution history lives in AutomationLog).
  */
-export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed', 'executed'] as const;
+export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed'] as const;
 export type AutomationState = (typeof AUTOMATION_STATES)[number];
 
 /**

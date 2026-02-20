@@ -599,31 +599,6 @@ export class CloseOrderService {
     }
   }
 
-  /**
-   * Marks order as executed (tx confirmed on-chain, terminal).
-   */
-  async markExecuted(
-    id: string,
-    tx?: PrismaTransactionClient,
-  ): Promise<CloseOrder> {
-    log.methodEntry(this.logger, 'markExecuted', { id });
-
-    try {
-      const db = tx ?? this.prisma;
-      const result = await db.closeOrder.update({
-        where: { id },
-        data: { automationState: 'executed' },
-      });
-
-      this.logger.info({ id, automationState: 'executed' }, 'Order marked as executed');
-      log.methodExit(this.logger, 'markExecuted', { id });
-      return result;
-    } catch (error) {
-      log.methodError(this.logger, 'markExecuted', error as Error, { id });
-      throw error;
-    }
-  }
-
   // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================

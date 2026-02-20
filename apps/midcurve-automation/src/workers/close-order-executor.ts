@@ -972,8 +972,8 @@ export class CloseOrderExecutor {
       throw new Error(`Transaction reverted: ${revertReason || 'unknown reason'} (tx: ${txHash})`);
     }
 
-    // Mark order as executed
-    await closeOrderService.markExecuted(orderId);
+    // Order will be deleted from DB by the event handler when OrderExecuted event arrives.
+    // No need to update automationState here — the event handler handles cleanup.
 
     // Remove pool subscription if no more monitoring orders
     try {

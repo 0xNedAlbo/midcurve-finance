@@ -136,10 +136,7 @@ contract ExecutionFacet is Modifiers {
         // 8) Withdraw liquidity and collect tokens
         CloseContext memory ctx = _withdrawAndCollect(s, nftId, order.slippageBps, sqrtPriceX96);
 
-        // 9) Mark executed before external transfers (reentrancy hygiene)
-        order.status = OrderStatus.EXECUTED;
-
-        // 10) Apply optional operator fee
+        // 9) Apply optional operator fee
         (uint256 payout0, uint256 payout1) = _applyFees(
             nftId, triggerMode, ctx, feeRecipient, feeBps
         );
@@ -184,6 +181,11 @@ contract ExecutionFacet is Modifiers {
         // Since we always decrease ALL liquidity, every execution is a full close.
         // The opposite trigger mode's order (if active) is now stale and must be cancelled.
         _cancelCounterpartOrder(s, nftId, triggerMode, order.owner);
+
+        // 15) Clean up executed order storage (gas refund)
+        // All reads from `order` are complete — safe to delete.
+        delete s.orders[key];
+        s.orderExists[nftId][triggerMode] = false;
     }
 
     // ========================================
@@ -224,9 +226,11 @@ contract ExecutionFacet is Modifiers {
 
         if (counterpart.status != OrderStatus.ACTIVE) return;
 
-        counterpart.status = OrderStatus.CANCELLED;
-
         emit OrderCancelled(nftId, oppositeTriggerMode, owner);
+
+        // Delete counterpart from storage (gas refund)
+        delete s.orders[counterpartKey];
+        s.orderExists[nftId][oppositeTriggerMode] = false;
     }
 
     /// @dev Validate NFT ownership and approval

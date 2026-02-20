@@ -7,7 +7,7 @@
  * DB lifecycle driven by on-chain events:
  * - OrderRegistered → INSERT new order (automationState=monitoring)
  * - OrderCancelled → DELETE order from DB
- * - OrderExecuted → UPDATE automationState=executed
+ * - OrderExecuted → DELETE order from DB (execution data preserved in AutomationLog)
  * - Re-registration at same slot → DELETE old + INSERT new
  *
  * Config-change events (9 total):
@@ -80,8 +80,8 @@ const QUEUE_NAME = 'business-logic.process-close-order-events';
 /** Routing pattern to subscribe to all close order events */
 const ROUTING_PATTERN = 'closer.#';
 
-/** Terminal automation states — order lifecycle is complete */
-const TERMINAL_AUTOMATION_STATES = ['executed', 'failed'];
+/** Terminal automation states — executed orders are deleted, so only 'failed' remains */
+const TERMINAL_AUTOMATION_STATES = ['failed'];
 
 // =============================================================================
 // String → Numeric Enum Mapping
@@ -623,50 +623,18 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   /**
    * Handles OrderExecuted events.
-   * DB lifecycle: on-chain execution → UPDATE automationState=executed.
-   * Also stores execution data in state JSON.
+   * DB lifecycle: on-chain execution → DELETE from DB.
+   * Execution data is captured in AutomationLog before deletion.
    */
   private async handleExecuted(event: OrderExecutedEvent): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
 
-      // Skip if already in terminal state (idempotent)
-      if (TERMINAL_AUTOMATION_STATES.includes(order.automationState)) {
-        this.logger.debug(
-          { orderId: order.id, automationState: order.automationState },
-          'Order already in terminal state, skipping executed event'
-        );
-        return null;
-      }
-
-      // Mark as executed
-      await this.orderService.markExecuted(order.id, tx);
-
-      // Store execution data in order state
-      await this.orderService.mergeState(
-        order.id,
-        {
-          executionTick: event.payload.executionTick,
-          amount0Out: event.payload.amount0Out,
-          amount1Out: event.payload.amount1Out,
-          executionTxHash: event.transactionHash,
-          executedAt: new Date().toISOString(),
-        },
-        tx
-      );
-
-      this.logger.info(
-        {
-          orderId: order.id,
-          executionTick: event.payload.executionTick,
-          txHash: event.transactionHash,
-        },
-        'Close order marked as executed'
-      );
-
-      // Log ORDER_EXECUTED
+      // Build order tag before delete (needs order data)
       const orderTag = await this.buildOrderTag(order, tx);
+
+      // Log ORDER_EXECUTED before deleting (needs order.id reference)
       if (orderTag) {
         await this.automationLogService.logOrderExecuted(
           order.positionId,
@@ -688,6 +656,18 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         where: { id: order.positionId },
         select: { poolId: true },
       });
+
+      // DELETE the order from DB (execution history preserved in AutomationLog)
+      await this.orderService.delete(order.id, tx);
+
+      this.logger.info(
+        {
+          orderId: order.id,
+          executionTick: event.payload.executionTick,
+          txHash: event.transactionHash,
+        },
+        'Close order deleted after on-chain execution'
+      );
 
       return {
         orderId: order.id,

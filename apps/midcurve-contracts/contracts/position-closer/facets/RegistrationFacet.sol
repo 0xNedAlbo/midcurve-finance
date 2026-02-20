@@ -140,9 +140,13 @@ contract RegistrationFacet is Modifiers {
             revert WrongOrderStatus(OrderStatus.ACTIVE, order.status);
         }
 
-        // Mark as cancelled
-        order.status = OrderStatus.CANCELLED;
+        // Cache owner before delete
+        address orderOwner = order.owner;
 
-        emit OrderCancelled(nftId, triggerMode, order.owner);
+        emit OrderCancelled(nftId, triggerMode, orderOwner);
+
+        // Delete from storage (gas refund)
+        delete s.orders[key];
+        s.orderExists[nftId][triggerMode] = false;
     }
 }
