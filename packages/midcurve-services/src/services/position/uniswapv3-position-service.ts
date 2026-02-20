@@ -36,6 +36,7 @@ import { getDomainEventPublisher } from "../../events/index.js";
 import type {
     DomainEventPublisher,
     PositionClosedPayload,
+    PositionBurnedPayload,
 } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
@@ -2381,10 +2382,10 @@ export class UniswapV3PositionService {
             );
         }
 
-        // Publish position.closed domain event (transactional via outbox)
-        await this.eventPublisher.createAndPublish<PositionClosedPayload>(
+        // Publish position.burned domain event (transactional via outbox)
+        await this.eventPublisher.createAndPublish<PositionBurnedPayload>(
             {
-                type: "position.closed",
+                type: "position.burned",
                 entityType: "position",
                 entityId: burnedPosition.id,
                 userId: burnedPosition.userId,

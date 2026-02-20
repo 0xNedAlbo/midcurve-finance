@@ -91,6 +91,7 @@ export type {
   // Position payloads
   PositionCreatedPayload,
   PositionClosedPayload,
+  PositionBurnedPayload,
   PositionDeletedPayload,
   PositionLiquidityIncreasedPayload,
   PositionLiquidityDecreasedPayload,

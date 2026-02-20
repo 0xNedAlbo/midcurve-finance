@@ -17,6 +17,7 @@ import type { PositionJSON } from '@midcurve/shared';
 export type PositionEventType =
   | 'position.created'
   | 'position.closed'
+  | 'position.burned'
   | 'position.deleted'
   | 'position.liquidity.increased'
   | 'position.liquidity.decreased'
@@ -122,6 +123,15 @@ export type PositionCreatedPayload = PositionJSON;
  * for complete audit trails and downstream business processes.
  */
 export type PositionClosedPayload = PositionJSON;
+
+/**
+ * Payload for position.burned event
+ * Emitted when a position NFT is burned on-chain (destroyed permanently)
+ *
+ * Contains the full position data including nested pool and token information
+ * for complete audit trails and downstream business processes.
+ */
+export type PositionBurnedPayload = PositionJSON;
 
 /**
  * Payload for position.deleted event

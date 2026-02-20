@@ -52,6 +52,8 @@ export const ROUTING_PATTERNS = {
   POSITION_CREATED: 'positions.created.#',
   /** All position closed events */
   POSITION_CLOSED: 'positions.closed.#',
+  /** All position burned events (NFT destroyed on-chain) */
+  POSITION_BURNED: 'positions.burned.#',
   /** All position deleted events */
   POSITION_DELETED: 'positions.deleted.#',
   /** All position liquidity increased events */
@@ -100,6 +102,7 @@ export interface ParsedPositionRoutingKey extends PositionCoordinates {
 const POSITION_EVENT_TO_ACTION: Record<string, string> = {
   'position.created': 'created',
   'position.closed': 'closed',
+  'position.burned': 'burned',
   'position.deleted': 'deleted',
   'position.liquidity.increased': 'liquidity-increased',
   'position.liquidity.decreased': 'liquidity-decreased',

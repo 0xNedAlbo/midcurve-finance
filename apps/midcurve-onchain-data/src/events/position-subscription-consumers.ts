@@ -1,8 +1,8 @@
 /**
  * Position Event Handler
  *
- * Single event consumer that handles position.created, position.closed, and
- * position.deleted domain events to dynamically update WebSocket subscriptions.
+ * Single event consumer that handles position.created, position.closed, position.burned,
+ * and position.deleted domain events to dynamically update WebSocket subscriptions.
  *
  * Notifies both:
  * - PositionLiquiditySubscriber: for position liquidity event subscriptions (NFPM)
@@ -22,7 +22,7 @@ import type { PositionLiquiditySubscriber } from '../workers/position-liquidity-
 import type { PoolPriceSubscriber } from '../workers/pool-price-subscriber';
 
 /**
- * Handles position.created, position.closed, and position.deleted events for WebSocket subscription management.
+ * Handles position.created, position.closed, position.burned, and position.deleted events for WebSocket subscription management.
  *
  * Uses a single queue bound to all event patterns, dispatching based on event type.
  * Notifies both position and pool price subscribers.
@@ -63,7 +63,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   override async start(channel?: Channel, prefetch?: number): Promise<void> {
     await super.start(channel, prefetch);
 
-    // Add additional bindings for position.closed and position.deleted events
+    // Add additional bindings for position.closed, position.burned, and position.deleted events
     if (this.channel) {
       await this.channel.bindQueue(
         this.queueName,
@@ -73,6 +73,16 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
       this.logger.info(
         { pattern: ROUTING_PATTERNS.POSITION_CLOSED },
         'Added additional binding for position.closed events'
+      );
+
+      await this.channel.bindQueue(
+        this.queueName,
+        DOMAIN_EVENTS_EXCHANGE,
+        ROUTING_PATTERNS.POSITION_BURNED
+      );
+      this.logger.info(
+        { pattern: ROUTING_PATTERNS.POSITION_BURNED },
+        'Added additional binding for position.burned events'
       );
 
       await this.channel.bindQueue(
@@ -112,11 +122,11 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         { positionId: event.entityId, routingKey },
         'Position closed, keeping subscriptions active (may be reopened)'
       );
-    } else if (event.type === 'position.deleted') {
-      // For deleted events, extract coordinates from routing key
+    } else if (event.type === 'position.burned' || event.type === 'position.deleted') {
+      // For burned/deleted events, extract coordinates from routing key and unsubscribe
       const coords = parsePositionRoutingKey(routingKey);
       if (!coords) {
-        this.logger.error({ routingKey }, 'Invalid routing key for position.deleted event');
+        this.logger.error({ routingKey }, `Invalid routing key for ${event.type} event`);
         return;
       }
       // Notify both subscribers in parallel
