@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { AuthWalletAddress } from '@midcurve/shared';
 
 /**
  * Session Types
@@ -25,8 +24,7 @@ export type VerifySessionRequest = z.infer<typeof VerifySessionRequestSchema>;
  */
 export interface SessionUser {
   id: string;
-  primaryWalletAddress: string;
-  wallets: AuthWalletAddress[];
+  address: string;
   createdAt: string;
   updatedAt: string;
 }

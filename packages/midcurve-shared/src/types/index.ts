@@ -7,7 +7,6 @@
 export type { User } from './user.js';
 
 // Authentication types
-export type { AuthWalletAddress } from './auth-wallet-address.js';
 export type { ApiKeyDisplay } from './api-key.js';
 
 // ============================================================================

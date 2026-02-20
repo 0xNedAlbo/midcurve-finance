@@ -143,28 +143,25 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       );
     }
 
-    // 2. Look up owner's primary wallet address from database
-    const ownerWallet = await prisma.authWalletAddress.findFirst({
-      where: {
-        userId: wallet.userId,
-        isPrimary: true,
-      },
+    // 2. Look up owner's wallet address from database
+    const owner = await prisma.user.findUnique({
+      where: { id: wallet.userId },
     });
 
-    if (!ownerWallet) {
-      logger.error({ userId: wallet.userId }, 'Owner has no primary wallet address');
+    if (!owner) {
+      logger.error({ userId: wallet.userId }, 'Owner user not found');
       return NextResponse.json(
         {
           success: false,
           error: 'OWNER_WALLET_NOT_FOUND',
-          message: 'Owner does not have a primary wallet address configured',
+          message: 'Owner user not found',
           requestId,
         },
         { status: 404 }
       );
     }
 
-    const toAddress = ownerWallet.address as Address;
+    const toAddress = owner.address as Address;
     logger.info({ walletAddress, toAddress, amount }, 'Signing refund to owner');
 
     // 3. Get private key for the automation wallet

@@ -42,23 +42,6 @@ model Session {
   @@map("sessions")
 }
 
-// AuthWalletAddress - User wallet addresses (chain-agnostic, same key = same user across all EVM chains)
-model AuthWalletAddress {
-  id        String   @id @default(cuid())
-  userId    String
-  address   String // Normalized (EIP-55 checksum)
-  isPrimary Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Constraints — address alone is unique (same key controls all EVM chains)
-  @@unique([address])
-  @@index([userId])
-  @@map("auth_wallet_addresses")
-}
 
 // =============================================================================
 // Cache & Core Models
@@ -83,14 +66,12 @@ model User {
 
   // User identification
   name  String?
-  email String? @unique
-  image String?
+
+  // Wallet address (EIP-55 checksummed, chain-agnostic)
+  address String @unique
 
   // Session relation (custom server-side sessions)
   sessions Session[]
-
-  // Wallet addresses
-  walletAddresses AuthWalletAddress[]
 
   // Midcurve position relations
   positions             Position[]
@@ -105,7 +86,6 @@ model User {
 
   // Indexes for efficient queries
   @@index([name])
-  @@index([email])
   @@map("users")
 }
 

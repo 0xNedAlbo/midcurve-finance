@@ -33,7 +33,7 @@ export function UserDropdown({ mode }: UserDropdownProps) {
   const effectiveMode = mode || (status === "loading" ? "loading" : !user ? "unauthenticated" : "authenticated");
 
   // Get user data from session
-  const userAddress = user?.primaryWalletAddress || "";
+  const userAddress = user?.address || "";
   const displayName = userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : "";
   const userInitial = displayName.charAt(0).toUpperCase();
   const fullAddress = userAddress;

@@ -18,7 +18,6 @@ interface AuthContextValue {
   signIn: (address: string, message: string, signature: string) => Promise<void>;
   signUp: (address: string, message: string, signature: string) => Promise<void>;
   signOut: () => Promise<void>;
-  linkWallet: (message: string, signature: string) => Promise<void>;
   refreshSession: () => Promise<void>;
 }
 
@@ -104,19 +103,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const linkWallet = async (message: string, signature: string) => {
-    try {
-      await apiClient.post('/api/v1/auth/link-wallet', {
-        message,
-        signature,
-      });
-      // Refresh session to get updated wallet list
-      await refreshSession();
-    } catch (error) {
-      throw error;
-    }
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -125,7 +111,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         signIn,
         signUp,
         signOut,
-        linkWallet,
         refreshSession,
       }}
     >

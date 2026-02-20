@@ -140,10 +140,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     let user = await getAuthUserService().findUserByWallet(address);
 
     if (!user) {
-      // Create new user with wallet
+      // Create new user
       user = await getAuthUserService().createUser({
         name: `User ${address.slice(0, 6)}...${address.slice(-4)}`,
-        walletAddress: address,
+        address,
       });
 
       apiLog.businessOperation(apiLogger, requestId, 'created', 'user', user.id, { address });
@@ -181,23 +181,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     apiLog.authSuccess(apiLogger, requestId, user.id, 'session');
     apiLog.businessOperation(apiLogger, requestId, 'created', 'session', sessionId.slice(0, 10));
 
-    // 7. Fetch user wallets for response
-    const wallets = await getAuthUserService().getUserWallets(user.id);
-    const primaryWallet = wallets.find((w) => w.isPrimary);
-    const primaryWalletAddress = primaryWallet?.address || wallets[0]?.address || address;
-
-    // Transform to SessionUser format expected by UI
+    // 7. Build session user response
     const sessionUser: SessionUser = {
       id: user.id,
-      primaryWalletAddress,
-      wallets: wallets.map((w) => ({
-        id: w.id,
-        userId: w.userId,
-        address: w.address,
-        isPrimary: w.isPrimary,
-        createdAt: w.createdAt,
-        updatedAt: w.updatedAt,
-      })),
+      address: user.address,
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
     };

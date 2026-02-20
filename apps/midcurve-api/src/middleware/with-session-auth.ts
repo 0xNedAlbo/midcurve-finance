@@ -80,7 +80,7 @@ export async function withSessionAuth(
     return response;
   }
 
-  // Fetch user with wallets
+  // Fetch user
   const user = await getAuthUserService().findUserById(sessionData.userId);
   if (!user) {
     apiLog.authFailure(apiLogger, requestId, 'User not found', 'session');
@@ -101,14 +101,10 @@ export async function withSessionAuth(
     return response;
   }
 
-  const wallets = await getAuthUserService().getUserWallets(sessionData.userId);
-
   const authenticatedUser: AuthenticatedUser = {
     id: user.id,
+    address: user.address,
     name: user.name,
-    email: user.email,
-    image: user.image,
-    wallets: wallets || [],
   };
 
   apiLog.authSuccess(apiLogger, requestId, user.id, 'session');
