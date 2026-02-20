@@ -16,7 +16,7 @@
     "build": "turbo run build",
     "build:ui": "turbo run build --filter=@midcurve/ui...",
     "build:api": "turbo run build --filter=@midcurve/api...",
-    "dev": "turbo run dev --filter=@midcurve/ui --filter=@midcurve/api --filter=@midcurve/signer --filter=@midcurve/automation --filter=@midcurve/onchain-data --filter=@midcurve/business-logic",
+    "dev": "turbo run dev --filter=@midcurve/ui --filter=@midcurve/api --filter=@midcurve/signer --filter=@midcurve/automation --filter=@midcurve/business-logic",
     "dev:automation": "turbo run dev --filter=@midcurve/automation",
     "dev:onchain-data": "turbo run dev --filter=@midcurve/onchain-data",
     "dev:ui": "turbo run dev --filter=@midcurve/ui",

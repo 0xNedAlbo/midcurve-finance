@@ -106,17 +106,12 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         this.poolPriceSubscriber?.handlePositionCreated(event.payload),
       ]);
     } else if (event.type === 'position.closed') {
-      // For closed events, extract coordinates from routing key
-      const coords = parsePositionRoutingKey(routingKey);
-      if (!coords) {
-        this.logger.error({ routingKey }, 'Invalid routing key for position.closed event');
-        return;
-      }
-      // Notify both subscribers in parallel
-      await Promise.all([
-        this.positionSubscriber?.handlePositionClosed(coords.chainId, coords.nftId),
-        this.poolPriceSubscriber?.handlePositionClosed(coords.chainId, coords.nftId),
-      ]);
+      // Don't unsubscribe — position may be reopened (IncreaseLiquidity on same NFT).
+      // Subscriptions are cleaned up on position.deleted or by the inactive cleanup timer.
+      this.logger.info(
+        { positionId: event.entityId, routingKey },
+        'Position closed, keeping subscriptions active (may be reopened)'
+      );
     } else if (event.type === 'position.deleted') {
       // For deleted events, extract coordinates from routing key
       const coords = parsePositionRoutingKey(routingKey);
