@@ -99,8 +99,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const position = await getUniswapV3PositionService().discover(user.id, {
         chainId,
         nftId,
-        // quoteTokenAddress omitted → service uses QuoteTokenService
-        // This respects user preferences → chain defaults → token0 fallback
+        // quoteTokenAddress omitted → service uses chain defaults → token0 fallback
       });
 
       apiLog.businessOperation(apiLogger, requestId, 'imported', 'position', position.id, {

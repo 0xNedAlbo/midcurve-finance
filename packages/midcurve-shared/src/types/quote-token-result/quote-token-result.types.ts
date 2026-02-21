@@ -21,7 +21,7 @@ export type QuoteTokenResultProtocol = 'uniswapv3';
 /**
  * How the quote token was determined
  */
-export type QuoteTokenMatchType = 'user_preference' | 'default' | 'fallback';
+export type QuoteTokenMatchType = 'default' | 'fallback';
 
 // ============================================================================
 // QUOTE TOKEN RESULT INTERFACE

@@ -2,9 +2,8 @@
  * Uniswap V3 Quote Token Service
  *
  * Determines quote token for Uniswap V3 pools based on:
- * 1. User preferences (stored in database)
- * 2. Default preferences for chain (stablecoins > WETH > token0)
- * 3. Fallback: token0 (Uniswap convention)
+ * 1. Default preferences for chain (stablecoins > WETH > token0)
+ * 2. Fallback: token0 (Uniswap convention)
  */
 
 import { QuoteTokenService } from './quote-token-service.js';
@@ -18,9 +17,8 @@ import { log } from '../../logging/index.js';
  * UniswapV3QuoteTokenService
  *
  * Determines quote token for Uniswap V3 pools based on:
- * 1. User preferences (stored in database)
- * 2. Default preferences for chain (stablecoins > WETH > token0)
- * 3. Fallback: token0 (Uniswap convention)
+ * 1. Default preferences for chain (stablecoins > WETH > token0)
+ * 2. Fallback: token0 (Uniswap convention)
  */
 export class UniswapV3QuoteTokenService extends QuoteTokenService {
   protected readonly protocol: QuoteTokenResultProtocol = 'uniswapv3';
@@ -34,10 +32,9 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
   async determineQuoteToken(
     input: UniswapV3QuoteTokenInput
   ): Promise<QuoteTokenResult> {
-    const { userId, chainId, token0Address, token1Address } = input;
+    const { chainId, token0Address, token1Address } = input;
 
     log.methodEntry(this.logger, 'determineQuoteToken', {
-      userId,
       chainId,
       token0Address,
       token1Address,
@@ -48,29 +45,9 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
       const token0 = this.normalizeTokenId(token0Address);
       const token1 = this.normalizeTokenId(token1Address);
 
-      // 1. Try user preferences first
-      const userPrefs = await this.getUserPreferences(userId);
-      if (userPrefs && userPrefs.length > 0) {
-        const result = this.matchTokensAgainstPreferences(
-          token0,
-          token1,
-          userPrefs
-        );
-        if (result) {
-          log.methodExit(this.logger, 'determineQuoteToken', {
-            matchedBy: 'user_preference',
-          });
-          return {
-            ...result,
-            matchedBy: 'user_preference',
-            protocol: 'uniswapv3',
-          };
-        }
-      }
-
-      // 2. Fall back to default preferences for this chain
+      // 1. Chain-specific defaults (stablecoins > WETH)
       const defaults = this.getDefaultQuoteTokensForChain(chainId);
-      const result = this.matchTokensAgainstPreferences(token0, token1, defaults);
+      const result = this.matchTokensAgainstDefaults(token0, token1, defaults);
       if (result) {
         log.methodExit(this.logger, 'determineQuoteToken', {
           matchedBy: 'default',
@@ -78,7 +55,7 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
         return { ...result, matchedBy: 'default', protocol: 'uniswapv3' };
       }
 
-      // 3. Ultimate fallback: token0 is quote (Uniswap convention)
+      // 2. Ultimate fallback: token0 is quote (Uniswap convention)
       this.logger.debug(
         { token0, token1 },
         'No matches found, using token0 as quote (fallback)'
@@ -95,7 +72,6 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
       };
     } catch (error) {
       log.methodError(this.logger, 'determineQuoteToken', error as Error, {
-        userId,
         chainId,
         token0Address,
         token1Address,
@@ -106,7 +82,7 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
 
   /**
    * Get default quote tokens (global defaults, not chain-specific)
-   * Used when user has no preferences and chain-specific defaults don't match
+   * Used when chain-specific defaults don't match
    *
    * @returns Empty array (chain-specific defaults are primary)
    */
@@ -162,7 +138,7 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
   }
 
   /**
-   * Match tokens against preference list
+   * Match tokens against default quote token list
    * Returns result if match found, null otherwise
    *
    * Matching logic:
@@ -172,18 +148,18 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
    *
    * @param token0 - Normalized token0 address
    * @param token1 - Normalized token1 address
-   * @param preferences - Ordered list of preferred quote token addresses
+   * @param defaults - Ordered list of default quote token addresses
    * @returns Quote token result (without matchedBy and protocol), or null
    */
-  private matchTokensAgainstPreferences(
+  private matchTokensAgainstDefaults(
     token0: string,
     token1: string,
-    preferences: string[]
+    defaults: string[]
   ): Omit<QuoteTokenResult, 'matchedBy' | 'protocol'> | null {
-    const token0Matches = preferences.some((pref) =>
+    const token0Matches = defaults.some((pref) =>
       this.compareTokenIds(pref, token0)
     );
-    const token1Matches = preferences.some((pref) =>
+    const token1Matches = defaults.some((pref) =>
       this.compareTokenIds(pref, token1)
     );
 
@@ -204,12 +180,12 @@ export class UniswapV3QuoteTokenService extends QuoteTokenService {
       };
     }
 
-    // Both match - use list order: first token in preferences list wins
+    // Both match - use list order: first token in defaults list wins
     if (token0Matches && token1Matches) {
-      const token0Index = preferences.findIndex((pref) =>
+      const token0Index = defaults.findIndex((pref) =>
         this.compareTokenIds(pref, token0)
       );
-      const token1Index = preferences.findIndex((pref) =>
+      const token1Index = defaults.findIndex((pref) =>
         this.compareTokenIds(pref, token1)
       );
 

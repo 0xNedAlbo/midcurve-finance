@@ -332,7 +332,7 @@ export class UniswapV3PositionService {
             dependencies.etherscanClient ?? EtherscanClient.getInstance();
         this._quoteTokenService =
             dependencies.quoteTokenService ??
-            new UniswapV3QuoteTokenService({ prisma: this._prisma });
+            new UniswapV3QuoteTokenService();
         this._evmBlockService =
             dependencies.evmBlockService ??
             new EvmBlockService({ evmConfig: this._evmConfig });
@@ -748,8 +748,15 @@ export class UniswapV3PositionService {
                     );
                 }
             } else {
-                // Default: token0 is quote token when quoteTokenAddress not specified
-                isToken0Quote = true;
+                // Use QuoteTokenService: chain defaults → token0 fallback
+                const quoteResult =
+                    await this._quoteTokenService.determineQuoteToken({
+                        userId,
+                        chainId,
+                        token0Address: pool.token0.typedConfig.address,
+                        token1Address: pool.token1.typedConfig.address,
+                    });
+                isToken0Quote = quoteResult.isToken0Quote;
             }
 
             // f) Create position with default values

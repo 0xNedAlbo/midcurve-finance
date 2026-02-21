@@ -75,8 +75,6 @@ model User {
 
   // Midcurve position relations
   positions             Position[]
-  quoteTokenPreferences UserQuoteTokenPreference[]
-
   // Notification relations
   notifications UserNotification[]
   webhookConfig UserWebhookConfig?
@@ -394,32 +392,6 @@ model PositionAprPeriod {
   @@index([positionId, endTimestamp]) // Time-range queries for position
   @@index([aprBps]) // Sort/filter by APR performance
   @@map("position_apr_periods")
-}
-
-model UserQuoteTokenPreference {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // User reference
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Protocol (NO chainId - preferences are protocol-wide)
-  // User can have one preference set per protocol
-  protocol String // 'uniswapv3', 'orca', 'raydium', etc.
-
-  // Ordered list of preferred quote token identifiers (protocol-specific)
-  // - EVM protocols: normalized addresses ["0xA0b8...", "0xC02a..."]
-  // - Solana protocols: mint addresses ["EPjFWdd...", "So11111..."]
-  // First match wins when both tokens in pair are in this list
-  preferredQuoteTokens Json
-
-  // Composite unique constraint and indexes
-  @@unique([userId, protocol])
-  @@index([userId])
-  @@index([protocol])
-  @@map("user_quote_token_preferences")
 }
 
 // =============================================================================
