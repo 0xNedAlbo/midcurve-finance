@@ -1455,6 +1455,83 @@ export class UniswapV3PositionService {
     }
 
     /**
+     * Switch quote/base token assignment for a position.
+     *
+     * Flips `isToken0Quote` in the database, then calls `reset()` to
+     * completely rebuild the ledger history with the new orientation.
+     * All financial metrics (PnL, fees, cost basis, APR) are recalculated
+     * in terms of the new quote token.
+     *
+     * @param id - Position ID (database CUID)
+     * @returns The fully recalculated position with new quote token orientation
+     */
+    async switchQuoteToken(id: string): Promise<UniswapV3Position> {
+        log.methodEntry(this.logger, "switchQuoteToken", { id });
+
+        try {
+            // 1. Verify position exists
+            const existingPosition = await this.findById(id);
+            if (!existingPosition) {
+                const error = new Error(`Position not found: ${id}`);
+                log.methodError(this.logger, "switchQuoteToken", error, {
+                    id,
+                });
+                throw error;
+            }
+
+            // 2. Flip isToken0Quote in the database
+            const newIsToken0Quote = !existingPosition.isToken0Quote;
+
+            this.logger.info(
+                {
+                    positionId: id,
+                    previousIsToken0Quote: existingPosition.isToken0Quote,
+                    newIsToken0Quote,
+                },
+                "Flipping isToken0Quote before reset",
+            );
+
+            await this._prisma.position.update({
+                where: { id },
+                data: { isToken0Quote: newIsToken0Quote },
+            });
+
+            // 3. Call reset() to rebuild the entire ledger with new orientation
+            // reset() reads the updated isToken0Quote from DB and recalculates everything
+            const result = await this.reset(id);
+
+            this.logger.info(
+                {
+                    positionId: id,
+                    isToken0Quote: result.isToken0Quote,
+                    currentValue: result.currentValue.toString(),
+                    realizedPnl: result.realizedPnl.toString(),
+                    unrealizedPnl: result.unrealizedPnl.toString(),
+                },
+                "Quote token switch complete",
+            );
+
+            log.methodExit(this.logger, "switchQuoteToken", { id });
+            return result;
+        } catch (error) {
+            if (
+                !(
+                    error instanceof Error &&
+                    error.message.includes("not found")
+                )
+            ) {
+                log.methodError(
+                    this.logger,
+                    "switchQuoteToken",
+                    error as Error,
+                    { id },
+                );
+            }
+            throw error;
+        }
+    }
+
+    /**
      * Fetch on-chain position state with block-based caching
      *
      * Fetches position data from NFPM contract (positions() + ownerOf())

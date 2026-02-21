@@ -25,9 +25,11 @@ import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
 import { PositionActionsMenu } from "../../position-actions-menu";
 import { UniswapV3DeletePositionModal } from "./uniswapv3-delete-position-modal";
 import { UniswapV3ReloadHistoryModal } from "./uniswapv3-reload-history-modal";
+import { UniswapV3SwitchQuoteTokenModal } from "./uniswapv3-switch-quote-token-modal";
 import { useIsMutating } from "@tanstack/react-query";
 import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
+import { switchQuoteTokenMutationKey } from "@/hooks/positions/useSwitchQuoteToken";
 import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
 import { useUniswapV3AutoRefresh } from "@/hooks/positions/uniswapv3/useUniswapV3AutoRefresh";
 import { useUniswapV3Position } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
@@ -42,6 +44,7 @@ interface UniswapV3PositionCardProps {
 export function UniswapV3PositionCard({ chainId, nftId }: UniswapV3PositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
+  const [showSwitchQuoteTokenModal, setShowSwitchQuoteTokenModal] = useState(false);
 
   // Fetch position detail (auto-refreshes every 60s)
   const { data: position, isLoading } = useUniswapV3Position(chainId, String(nftId));
@@ -60,6 +63,8 @@ export function UniswapV3PositionCard({ chainId, nftId }: UniswapV3PositionCardP
       setShowDeleteModal={setShowDeleteModal}
       showReloadHistoryModal={showReloadHistoryModal}
       setShowReloadHistoryModal={setShowReloadHistoryModal}
+      showSwitchQuoteTokenModal={showSwitchQuoteTokenModal}
+      setShowSwitchQuoteTokenModal={setShowSwitchQuoteTokenModal}
     />
   );
 }
@@ -76,6 +81,8 @@ interface UniswapV3PositionCardLoadedProps {
   setShowDeleteModal: (show: boolean) => void;
   showReloadHistoryModal: boolean;
   setShowReloadHistoryModal: (show: boolean) => void;
+  showSwitchQuoteTokenModal: boolean;
+  setShowSwitchQuoteTokenModal: (show: boolean) => void;
 }
 
 function UniswapV3PositionCardLoaded({
@@ -86,6 +93,8 @@ function UniswapV3PositionCardLoaded({
   setShowDeleteModal,
   showReloadHistoryModal,
   setShowReloadHistoryModal,
+  showSwitchQuoteTokenModal,
+  setShowSwitchQuoteTokenModal,
 }: UniswapV3PositionCardLoadedProps) {
   // Patch live pool price into position data (5s polling)
   const position = useUniswapV3LiveMetrics(rawPosition);
@@ -95,6 +104,7 @@ function UniswapV3PositionCardLoaded({
 
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
+  const isSwitchingQuoteToken = useIsMutating({ mutationKey: switchQuoteTokenMutationKey(position.positionHash) }) > 0;
   const refreshMutation = useUniswapV3RefreshPosition();
   const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
 
@@ -191,9 +201,11 @@ function UniswapV3PositionCardLoaded({
           </button>
           <PositionActionsMenu
             onReloadHistory={() => setShowReloadHistoryModal(true)}
+            onSwitchQuoteToken={() => setShowSwitchQuoteTokenModal(true)}
             onDelete={() => setShowDeleteModal(true)}
             isDeleting={isDeleting}
             isReloadingHistory={isReloadingHistory}
+            isSwitchingQuoteToken={isSwitchingQuoteToken}
           />
         </div>
       </div>
@@ -212,6 +224,20 @@ function UniswapV3PositionCardLoaded({
         token0Symbol={position.pool.token0.symbol}
         token1Symbol={position.pool.token1.symbol}
         feeBps={position.pool.feeBps}
+      />
+
+      {/* Switch Quote Token Modal */}
+      <UniswapV3SwitchQuoteTokenModal
+        isOpen={showSwitchQuoteTokenModal}
+        onClose={() => setShowSwitchQuoteTokenModal(false)}
+        onSwitchSuccess={() => {}}
+        positionHash={position.positionHash}
+        chainId={chainId}
+        nftId={nftId}
+        token0Symbol={position.pool.token0.symbol}
+        token1Symbol={position.pool.token1.symbol}
+        feeBps={position.pool.feeBps}
+        isToken0Quote={position.isToken0Quote}
       />
 
       {/* Delete Position Modal */}

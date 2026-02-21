@@ -16,20 +16,24 @@
 
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { MoreVertical, Trash2, RotateCcw } from "lucide-react";
+import { MoreVertical, Trash2, RotateCcw, ArrowRightLeft } from "lucide-react";
 
 interface PositionActionsMenuProps {
   onReloadHistory: () => void;
+  onSwitchQuoteToken: () => void;
   onDelete: () => void;
   isDeleting?: boolean;
   isReloadingHistory?: boolean;
+  isSwitchingQuoteToken?: boolean;
 }
 
 export function PositionActionsMenu({
   onReloadHistory,
+  onSwitchQuoteToken,
   onDelete,
   isDeleting = false,
   isReloadingHistory = false,
+  isSwitchingQuoteToken = false,
 }: PositionActionsMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
@@ -53,7 +57,7 @@ export function PositionActionsMenu({
   }, [isOpen]);
 
   // Disable menu if any action is in progress
-  const isActionInProgress = isDeleting || isReloadingHistory;
+  const isActionInProgress = isDeleting || isReloadingHistory || isSwitchingQuoteToken;
 
   // Close menu when clicking outside
   const handleBackdropClick = () => {
@@ -64,6 +68,12 @@ export function PositionActionsMenu({
   const handleReloadHistory = () => {
     setIsOpen(false);
     onReloadHistory();
+  };
+
+  // Handle switch quote token action
+  const handleSwitchQuoteToken = () => {
+    setIsOpen(false);
+    onSwitchQuoteToken();
   };
 
   // Handle delete action
@@ -107,6 +117,14 @@ export function PositionActionsMenu({
               >
                 <RotateCcw className="w-4 h-4" />
                 Reload History
+              </button>
+              <button
+                onClick={handleSwitchQuoteToken}
+                disabled={isActionInProgress}
+                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                Switch Quote Token
               </button>
               <button
                 onClick={handleDelete}
