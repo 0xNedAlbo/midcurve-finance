@@ -18,7 +18,6 @@ interface PositionCardMetricsProps {
   realizedPnl: string; // BigInt as string (quote token units)
   unrealizedPnl: string; // BigInt as string (quote token units)
   unClaimedFees: string; // BigInt as string (quote token units)
-  collectedFees: string; // BigInt as string (quote token units)
   currentCostBasis: string; // BigInt as string (quote token units)
   lastFeesCollectedAt: string | null; // ISO timestamp or null
   positionOpenedAt: string; // ISO timestamp
@@ -34,7 +33,6 @@ export function PositionCardMetrics({
   realizedPnl,
   unrealizedPnl,
   unClaimedFees,
-  collectedFees,
   currentCostBasis: _currentCostBasis, // Reserved for future use
   lastFeesCollectedAt: _lastFeesCollectedAt, // Reserved for future use
   positionOpenedAt: _positionOpenedAt, // Reserved for future use
@@ -44,21 +42,19 @@ export function PositionCardMetrics({
   totalApr,
   pnlCurveSlot,
 }: PositionCardMetricsProps) {
-  // Calculate total PnL: realizedPnl + unrealizedPnl + unclaimedFees + collectedFees
-  // Add error handling for malformed BigInt strings
+  // Calculate total PnL: realizedPnl + unrealizedPnl + unclaimedFees
+  // Note: realizedPnl already includes collectedFees (fees are added to pnlAfter in the ledger)
   let totalPnl: string;
   try {
     const realized = BigInt(realizedPnl || '0');
     const unrealized = BigInt(unrealizedPnl || '0');
     const unclaimed = BigInt(unClaimedFees || '0');
-    const collected = BigInt(collectedFees || '0');
-    totalPnl = (realized + unrealized + unclaimed + collected).toString();
+    totalPnl = (realized + unrealized + unclaimed).toString();
   } catch (error) {
     console.error('Error calculating total PnL:', {
       realizedPnl,
       unrealizedPnl,
       unClaimedFees,
-      collectedFees,
       error,
     });
     totalPnl = '0';

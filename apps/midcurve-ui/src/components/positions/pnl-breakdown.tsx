@@ -22,7 +22,7 @@ export function PnLBreakdown({
   quoteTokenDecimals,
 }: PnLBreakdownProps) {
   // Calculate breakdown values
-  const realizedPnLAmount = BigInt(realizedPnL) + BigInt(collectedFees);
+  const realizedPnLAmount = BigInt(realizedPnL);
   const unrealizedPnLAmount =
     BigInt(unclaimedFees) + (BigInt(currentValue) - BigInt(currentCostBasis));
   const totalPnLAmount = realizedPnLAmount + unrealizedPnLAmount;
@@ -80,7 +80,7 @@ export function PnLBreakdown({
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">+ Realized PnL*</span>
                 <span className="text-white font-medium">
-                  {formatCompactValue(BigInt(realizedPnL), quoteTokenDecimals)}{" "}
+                  {formatCompactValue(BigInt(realizedPnL) - BigInt(collectedFees), quoteTokenDecimals)}{" "}
                   {quoteTokenSymbol}
                 </span>
               </div>

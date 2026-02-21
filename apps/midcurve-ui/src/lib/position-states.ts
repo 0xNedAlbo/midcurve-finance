@@ -141,12 +141,13 @@ function calculatePositionStateAtTick(
   const unclaimedFeesAtTick =
     tick === position.pool.state.currentTick ? unclaimedFees : 0n;
 
-  // PnL Including Fees = realizedPnL + unrealizedPnL + unclaimedFees + collectedFees
+  // PnL Including Fees = realizedPnL + unrealizedPnL + unclaimedFees
+  // Note: realizedPnL already includes collectedFees (fees are added to pnlAfter in the ledger)
   const pnlIncludingFees =
-    realizedPnL + unrealizedPnL + unclaimedFeesAtTick + collectedFees;
+    realizedPnL + unrealizedPnL + unclaimedFeesAtTick;
 
-  // PnL Excluding Fees = realizedPnL + unrealizedPnL + collectedFees
-  const pnlExcludingFees = realizedPnL + unrealizedPnL + collectedFees;
+  // PnL Excluding Fees = capital gains only (subtract fee portion from realizedPnL)
+  const pnlExcludingFees = realizedPnL - collectedFees + unrealizedPnL;
 
   return {
     baseTokenAmount,
@@ -225,11 +226,11 @@ export function calculateBreakEvenPrice(
   // Calculate target value (net investment amount)
   const currentCostBasis = BigInt(pnlBreakdown.currentCostBasis);
   const realizedPnL = BigInt(pnlBreakdown.realizedPnL);
-  const collectedFees = BigInt(pnlBreakdown.collectedFees);
   const unclaimedFees = BigInt(pnlBreakdown.unclaimedFees);
 
+  // Note: realizedPnL already includes collectedFees
   const targetValue =
-    currentCostBasis - realizedPnL - collectedFees - unclaimedFees;
+    currentCostBasis - realizedPnL - unclaimedFees;
 
   // If target value is negative or zero, position is already profitable
   if (targetValue <= 0n) {

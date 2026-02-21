@@ -152,7 +152,6 @@ function UniswapV3PositionCardLoaded({
           realizedPnl={position.realizedPnl}
           unrealizedPnl={position.unrealizedPnl}
           unClaimedFees={position.unClaimedFees}
-          collectedFees={position.collectedFees}
           currentCostBasis={position.currentCostBasis}
           lastFeesCollectedAt={position.lastFeesCollectedAt}
           positionOpenedAt={position.positionOpenedAt}
