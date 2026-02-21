@@ -1,6 +1,6 @@
 "use client";
 
-import { Wand2, FileText, ArrowRight, Loader2 } from "lucide-react";
+import { Wand2, FileText, Search, ArrowRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useImportPositionByNftId } from "@/hooks/positions/uniswapv3/useImportPositionByNftId";
@@ -8,6 +8,7 @@ import {
   getAllUniswapV3Chains,
   type UniswapV3ChainSlug,
 } from "@/config/protocols/uniswapv3";
+import { ScanPositionsModal } from "./scan-positions-modal";
 
 interface EmptyStateActionsProps {
   onImportSuccess?: (position: any) => void;
@@ -24,6 +25,8 @@ export function EmptyStateActions({
     chainName: string;
     nftId: string;
   } | null>(null);
+
+  const [showScanModal, setShowScanModal] = useState(false);
 
   // Import mutation hook
   const importMutation = useImportPositionByNftId();
@@ -81,7 +84,7 @@ export function EmptyStateActions({
       </div>
 
       {/* Action Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Wizard Card */}
         <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:border-blue-500/50 transition-all hover:shadow-lg hover:shadow-blue-500/10">
           <div className="flex flex-col h-full">
@@ -217,7 +220,44 @@ export function EmptyStateActions({
             )}
           </div>
         </div>
+
+        {/* Scan Wallet Card */}
+        <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-xl p-6 hover:border-blue-500/50 transition-all hover:shadow-lg hover:shadow-blue-500/10">
+          <div className="flex flex-col h-full">
+            {/* Icon */}
+            <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center mb-4">
+              <Search className="w-6 h-6 text-blue-400" />
+            </div>
+
+            {/* Content */}
+            <div className="flex-grow">
+              <h3 className="text-xl font-semibold text-white mb-2">
+                Scan for Positions
+              </h3>
+              <p className="text-sm text-slate-400 mb-6">
+                Automatically scan your wallet across multiple chains to find
+                existing Uniswap V3 positions
+              </p>
+            </div>
+
+            {/* Action Button */}
+            <button
+              onClick={() => setShowScanModal(true)}
+              className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Start Scan
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Scan Positions Modal */}
+      <ScanPositionsModal
+        isOpen={showScanModal}
+        onClose={() => setShowScanModal(false)}
+        onScanComplete={() => onImportSuccess?.(null)}
+      />
     </div>
   );
 }

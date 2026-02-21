@@ -9,6 +9,3 @@ export { UpdatePositionOnLiquidityEventRule } from './update-position-on-liquidi
 
 // Close order lifecycle event handler - syncs close orders with on-chain state
 export { ProcessCloseOrderEventsRule } from './process-close-order-events';
-
-// Auto-discover all open positions when a new user registers
-export { DiscoverPositionsOnUserRegisteredRule } from './discover-positions-on-user-registered';

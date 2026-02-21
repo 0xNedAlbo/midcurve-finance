@@ -864,28 +864,37 @@ export class UniswapV3PositionService {
      *
      * @param userId - User who owns the wallet
      * @param walletAddress - EVM wallet address to scan
+     * @param chainIds - Optional list of chain IDs to scan. If omitted, scans all supported chains.
      * @returns Discovery results including imported position objects
      */
     async discoverWalletPositions(
         userId: string,
         walletAddress: Address,
+        chainIds?: number[],
     ): Promise<WalletDiscoveryResult> {
         log.methodEntry(this.logger, "discoverWalletPositions", {
             userId,
             walletAddress,
         });
 
-        const chainIds = this._evmConfig
-            .getSupportedChainIds()
-            .filter((id) => id !== SupportedChainId.LOCAL);
+        const effectiveChainIds =
+            chainIds && chainIds.length > 0
+                ? chainIds.filter(
+                      (id) =>
+                          id !== SupportedChainId.LOCAL &&
+                          this._evmConfig.isChainSupported(id),
+                  )
+                : this._evmConfig
+                      .getSupportedChainIds()
+                      .filter((id) => id !== SupportedChainId.LOCAL);
 
         this.logger.info(
-            { userId, walletAddress, chainCount: chainIds.length },
+            { userId, walletAddress, chainCount: effectiveChainIds.length },
             "Starting position discovery across all chains",
         );
 
         const results = await Promise.allSettled(
-            chainIds.map((chainId) =>
+            effectiveChainIds.map((chainId) =>
                 this.discoverPositionsOnChain(userId, walletAddress, chainId),
             ),
         );
@@ -899,7 +908,7 @@ export class UniswapV3PositionService {
 
         for (let i = 0; i < results.length; i++) {
             const result = results[i]!;
-            const chainId = chainIds[i]!;
+            const chainId = effectiveChainIds[i]!;
 
             if (result.status === "fulfilled") {
                 allPositions.push(...result.value.positions);
@@ -927,7 +936,7 @@ export class UniswapV3PositionService {
             {
                 userId,
                 walletAddress,
-                chainsScanned: chainIds.length,
+                chainsScanned: effectiveChainIds.length,
                 positionsFound: totalFound,
                 positionsImported: totalImported,
                 positionsSkipped: totalSkipped,

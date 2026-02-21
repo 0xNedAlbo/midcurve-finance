@@ -20,7 +20,6 @@ import {
   UpdatePositionOnLiquidityEventRule,
   ProcessCloseOrderEventsRule,
   CreateAutomationWalletOnUserRegisteredRule,
-  DiscoverPositionsOnUserRegisteredRule,
   type BusinessRuleStatus,
 } from '../rules';
 import { getSchedulerService, type SchedulerStatus } from '../scheduler';
@@ -73,9 +72,6 @@ export class RuleManager {
     // User lifecycle rules
     // Auto-create automation wallet when new user registers
     this.registry.register(new CreateAutomationWalletOnUserRegisteredRule());
-
-    // Auto-discover all open UniswapV3 positions when new user registers
-    this.registry.register(new DiscoverPositionsOnUserRegisteredRule());
 
     log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
