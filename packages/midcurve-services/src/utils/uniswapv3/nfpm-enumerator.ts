@@ -9,10 +9,10 @@
  * - 1 RPC call: multicall(tokenOfOwnerByIndex(wallet, 0..count-1)) → nftIds
  * - 1 RPC call: multicall(positions(nftId) for each nftId) → position data
  *
- * Filters to active positions only (liquidity > 0 OR tokensOwed0 > 0 OR tokensOwed1 > 0).
+ * Filters to active positions only (liquidity > 0).
  */
 
-import type { Address, PublicClient } from 'viem';
+import { type Address, type PublicClient, parseAbiItem } from 'viem';
 import {
   UNISWAP_V3_POSITION_MANAGER_ABI,
   getPositionManagerAddress,
@@ -42,6 +42,14 @@ export interface EnumeratedPosition {
 
 /** Maximum calls per multicall batch to stay within gas estimation limits */
 const MULTICALL_BATCH_SIZE = 50;
+
+/** ERC-721 Transfer event ABI for getLogs filtering */
+const ERC721_TRANSFER_EVENT = parseAbiItem(
+  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
+);
+
+/** Zero address (mint = Transfer from address(0)) */
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
 
 // =============================================================================
 // Implementation
@@ -84,9 +92,7 @@ export async function enumerateWalletPositions(
   const positions = await fetchAllPositionData(client, nfpmAddress, nftIds);
 
   // Step 4: Filter to active positions
-  return positions.filter(
-    (p) => p.liquidity > 0n || p.tokensOwed0 > 0n || p.tokensOwed1 > 0n,
-  );
+  return positions.filter((p) => p.liquidity > 0n);
 }
 
 /**
@@ -169,4 +175,46 @@ async function fetchAllPositionData(
   }
 
   return positions;
+}
+
+// =============================================================================
+// Mint Block Lookup
+// =============================================================================
+
+/**
+ * Find the block number where an NFT was minted by searching for the
+ * ERC-721 Transfer event from address(0).
+ *
+ * All three Transfer params (from, to, tokenId) are indexed, so the RPC
+ * node can resolve this with its topic index in a single call across the
+ * full block range — no batch scanning required.
+ *
+ * @param client - viem PublicClient for the target chain
+ * @param nfpmAddress - NonfungiblePositionManager contract address
+ * @param nftId - The NFT token ID to look up
+ * @param deploymentBlock - NFPM deployment block (lower bound for search)
+ * @returns The block number of the mint, or null if not found
+ */
+export async function findNftMintBlock(
+  client: PublicClient,
+  nfpmAddress: Address,
+  nftId: bigint,
+  deploymentBlock: bigint,
+): Promise<bigint | null> {
+  const logs = await client.getLogs({
+    address: nfpmAddress,
+    event: ERC721_TRANSFER_EVENT,
+    args: {
+      from: ZERO_ADDRESS,
+      tokenId: nftId,
+    },
+    fromBlock: deploymentBlock,
+    toBlock: 'latest',
+  });
+
+  if (logs.length > 0) {
+    return logs[0]!.blockNumber;
+  }
+
+  return null;
 }

@@ -55,15 +55,15 @@ import { EvmBlockService } from "../block/evm-block-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
 import {
     UniswapV3LedgerService,
-    UNISWAP_V3_POSITION_EVENT_SIGNATURES,
     type RawLogInput,
 } from "../position-ledger/uniswapv3-ledger-service.js";
 import { UniswapV3AprService } from "../position-apr/uniswapv3-apr-service.js";
-import type { Address, PublicClient } from "viem";
+import { type Address, type PublicClient, parseAbiItem } from "viem";
 import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
 import { calculateUnclaimedFeeAmounts } from "@midcurve/shared";
 import { calculateTokenValueInQuote } from "../../utils/uniswapv3/ledger-calculations.js";
+import { findNftMintBlock } from "../../utils/uniswapv3/nfpm-enumerator.js";
 import { CacheService } from "../cache/cache-service.js";
 
 /**
@@ -641,10 +641,32 @@ export class UniswapV3PositionService {
                 return refreshed;
             }
 
-            // b) Load all log events via fetchAllPositionLogs()
+            // b) Find mint block, then load all log events from there
             const client = this._evmConfig.getPublicClient(chainId);
             const nfpmAddress = getPositionManagerAddress(chainId);
-            const fromBlock = getNfpmDeploymentBlock(chainId);
+            const deploymentBlock = getNfpmDeploymentBlock(chainId);
+
+            // Find the exact block where this NFT was minted (1 RPC call
+            // using fully-indexed Transfer event topics).
+            const mintBlock = await findNftMintBlock(
+                client,
+                nfpmAddress,
+                BigInt(nftId),
+                deploymentBlock,
+            );
+
+            if (!mintBlock) {
+                throw new Error(
+                    `Mint block not found for NFT ${nftId} on chain ${chainId}. ` +
+                    `NFPM address: ${nfpmAddress}, searched from block ${deploymentBlock}`,
+                );
+            }
+
+            const fromBlock = mintBlock;
+            this.logger.info(
+                { chainId, nftId, mintBlock: mintBlock.toString() },
+                "Found mint block, scanning logs from there",
+            );
 
             const logs = await this.fetchAllPositionLogs(
                 client,
@@ -1800,16 +1822,16 @@ export class UniswapV3PositionService {
     }
 
     /**
-     * Fetch all position logs via eth_getLogs RPC
+     * Fetch all position logs (IncreaseLiquidity, DecreaseLiquidity, Collect)
      *
-     * Queries NFPM contract for IncreaseLiquidity, DecreaseLiquidity, and Collect events
-     * from deployment block to latest. Batches requests in 5000 block chunks to avoid
-     * RPC provider limits.
+     * Uses 3 parallel getLogs calls (one per event type) across the full block range.
+     * All three events have `uint256 indexed tokenId` as topic[1], so the RPC node
+     * resolves each query via its topic index in a single call — no batch scanning.
      *
      * @param client - Viem public client for RPC calls
      * @param nfpmAddress - NonfungiblePositionManager contract address
      * @param nftId - NFT token ID
-     * @param fromBlock - Starting block number (usually NFPM deployment block)
+     * @param fromBlock - Starting block number (usually mint block)
      * @returns Array of raw log inputs compatible with importLogsForPosition
      */
     private async fetchAllPositionLogs(
@@ -1818,50 +1840,52 @@ export class UniswapV3PositionService {
         nftId: bigint,
         fromBlock: bigint,
     ): Promise<RawLogInput[]> {
-        const BATCH_SIZE = 5000n;
+        // All three NFPM events have `uint256 indexed tokenId` as topic[1].
+        // The RPC node resolves each query via its topic index in a single call
+        // across the full block range — no batch scanning required.
+        const increaseLiquidityEvent = parseAbiItem(
+            "event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+        );
+        const decreaseLiquidityEvent = parseAbiItem(
+            "event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)",
+        );
+        const collectEvent = parseAbiItem(
+            "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)",
+        );
 
-        // Convert NFT ID to padded hex topic (32 bytes)
-        const nftIdTopic = ("0x" +
-            nftId.toString(16).padStart(64, "0")) as `0x${string}`;
+        const commonParams = {
+            address: nfpmAddress,
+            args: { tokenId: nftId },
+            fromBlock,
+            toBlock: "latest" as const,
+        };
 
-        // Get all event signatures
-        const eventSignatures = Object.values(
-            UNISWAP_V3_POSITION_EVENT_SIGNATURES,
-        ) as `0x${string}`[];
+        // 3 parallel calls instead of thousands of sequential batches
+        const [increaseLogs, decreaseLogs, collectLogs] = await Promise.all([
+            client.getLogs({ ...commonParams, event: increaseLiquidityEvent }),
+            client.getLogs({ ...commonParams, event: decreaseLiquidityEvent }),
+            client.getLogs({ ...commonParams, event: collectEvent }),
+        ]);
 
-        // Get latest block number
-        const latestBlock = await client.getBlockNumber();
+        // Merge and sort by block number (then log index for same-block ordering)
+        const allLogs = [...increaseLogs, ...decreaseLogs, ...collectLogs];
+        allLogs.sort((a, b) => {
+            const blockDiff = Number(a.blockNumber! - b.blockNumber!);
+            if (blockDiff !== 0) return blockDiff;
+            return a.logIndex! - b.logIndex!;
+        });
 
-        // Fetch logs in batches of 5000 blocks
-        const allLogs: RawLogInput[] = [];
-        let currentFrom = fromBlock;
-
-        while (currentFrom <= latestBlock) {
-            const currentTo =
-                currentFrom + BATCH_SIZE - 1n < latestBlock
-                    ? currentFrom + BATCH_SIZE - 1n
-                    : latestBlock;
-
-            const batchLogs = (await client.request({
-                method: "eth_getLogs",
-                params: [
-                    {
-                        address: nfpmAddress,
-                        topics: [
-                            eventSignatures, // Array = OR condition for topic[0]
-                            nftIdTopic, // topic[1] = tokenId
-                        ],
-                        fromBlock: `0x${currentFrom.toString(16)}`,
-                        toBlock: `0x${currentTo.toString(16)}`,
-                    },
-                ],
-            })) as RawLogInput[];
-
-            allLogs.push(...batchLogs);
-            currentFrom = currentTo + 1n;
-        }
-
-        return allLogs;
+        // Convert viem log format to RawLogInput
+        return allLogs.map((log) => ({
+            address: log.address,
+            topics: log.topics as unknown as string[],
+            data: log.data,
+            blockNumber: log.blockNumber!,
+            blockHash: log.blockHash!,
+            transactionHash: log.transactionHash!,
+            transactionIndex: log.transactionIndex!,
+            logIndex: log.logIndex!,
+        }));
     }
 
     /**

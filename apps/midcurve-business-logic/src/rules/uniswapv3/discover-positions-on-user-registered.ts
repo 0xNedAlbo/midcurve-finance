@@ -9,7 +9,9 @@
  * 1. Check if position already exists in DB (skip if so)
  * 2. Call discover() to import position from on-chain data
  * 3. Publish position.created domain event
- * Steps 2+3 happen in the same DB transaction per position.
+ * Steps 2+3 are sequential (not wrapped in a transaction because
+ * discover() fetches historical logs across millions of blocks, which
+ * exceeds any reasonable Prisma interactive transaction timeout).
  *
  * Chains are scanned in parallel (Promise.allSettled) — one failing chain
  * does not block the others.
@@ -250,39 +252,49 @@ export class DiscoverPositionsOnUserRegisteredRule extends BusinessRule {
         });
 
         if (existing) {
+          this.logger.debug(
+            { userId, chainId, nftId: pos.nftId, positionHash },
+            'Position already exists, skipping',
+          );
           skipped++;
           continue;
         }
 
-        // Discover + publish position.created in same transaction
-        await prisma.$transaction(
-          async (tx) => {
-            const position = await this.positionService.discover(
-              userId,
-              { chainId, nftId: pos.nftId },
-              tx,
-            );
+        this.logger.info(
+          { userId, chainId, nftId: pos.nftId, positionHash },
+          'Position not in DB, calling discover()',
+        );
 
-            const eventPublisher = getDomainEventPublisher();
-            await eventPublisher.createAndPublish<PositionCreatedPayload>(
-              {
-                type: 'position.created',
-                entityType: 'position',
-                entityId: position.id,
-                userId: position.userId,
-                payload: position.toJSON(),
-                source: 'business-logic',
-                causedBy: event.id,
-              },
-              tx,
-            );
+        // Discover position (involves heavy RPC work: fetching historical
+        // logs across potentially millions of blocks, so this cannot run
+        // inside a Prisma interactive transaction with a timeout)
+        const position = await this.positionService.discover(
+          userId,
+          { chainId, nftId: pos.nftId },
+        );
 
-            this.logger.info(
-              { userId, chainId, nftId: pos.nftId, positionId: position.id },
-              'Position discovered and position.created event published',
-            );
+        this.logger.info(
+          { userId, chainId, nftId: pos.nftId, positionId: position.id },
+          'discover() returned successfully',
+        );
+
+        // Publish position.created domain event
+        const eventPublisher = getDomainEventPublisher();
+        await eventPublisher.createAndPublish<PositionCreatedPayload>(
+          {
+            type: 'position.created',
+            entityType: 'position',
+            entityId: position.id,
+            userId: position.userId,
+            payload: position.toJSON(),
+            source: 'business-logic',
+            causedBy: event.id,
           },
-          { timeout: 120_000 },
+        );
+
+        this.logger.info(
+          { userId, chainId, nftId: pos.nftId, positionId: position.id },
+          'Position discovered and position.created event published',
         );
 
         imported++;

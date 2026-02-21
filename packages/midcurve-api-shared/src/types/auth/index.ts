@@ -9,4 +9,3 @@ export * from './user.js';
 export * from './session.js';
 export * from './api-key.js';
 export * from './authenticated-user.js';
-export * from './signup.js';

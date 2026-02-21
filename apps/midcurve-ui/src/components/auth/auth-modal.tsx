@@ -11,7 +11,7 @@ export function AuthModal() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const modalType = searchParams.get("modal");
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
 
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -23,7 +23,7 @@ export function AuthModal() {
 
   // Open modal when modal param is present
   useEffect(() => {
-    if (modalType === "signin" || modalType === "signup") {
+    if (modalType === "signin") {
       setIsOpen(true);
     } else {
       setIsOpen(false);
@@ -96,11 +96,7 @@ export function AuthModal() {
 
       // 4. Submit to our auth system - send JSON stringified params for API parsing
       const messageJson = JSON.stringify(siweMessageParams);
-      if (modalType === "signup") {
-        await signUp(address, messageJson, signature);
-      } else {
-        await signIn(address, messageJson, signature);
-      }
+      await signIn(address, messageJson, signature);
 
       // Success - close modal and redirect
       closeModal();
@@ -117,10 +113,6 @@ export function AuthModal() {
           setError("Signature request was cancelled.");
         } else if (err.message.includes("nonce")) {
           setError("Failed to generate authentication nonce. Please try again.");
-        } else if (err.message.includes("WALLET_ALREADY_REGISTERED")) {
-          setError("This wallet is already registered. Please sign in instead.");
-        } else if (err.message.includes("WALLET_NOT_REGISTERED")) {
-          setError("This wallet is not registered. Please sign up first.");
         } else {
           setError(err.message || "Authentication failed. Please try again.");
         }
@@ -134,7 +126,7 @@ export function AuthModal() {
 
   if (!isOpen) return null;
 
-  const title = modalType === "signup" ? "Sign Up" : "Sign In";
+  const title = "Sign In";
 
   return (
     <>

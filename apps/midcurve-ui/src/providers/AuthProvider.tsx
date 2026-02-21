@@ -16,7 +16,6 @@ interface AuthContextValue {
   user: User | null;
   status: 'loading' | 'authenticated' | 'unauthenticated';
   signIn: (address: string, message: string, signature: string) => Promise<void>;
-  signUp: (address: string, message: string, signature: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -73,27 +72,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const signUp = async (address: string, message: string, signature: string) => {
-    try {
-      setStatus('loading');
-      const response = await apiClient.post<SessionResponse>('/api/v1/auth/signup', {
-        address,
-        message,
-        signature,
-      });
-
-      if (response.data && response.data.user) {
-        setUser(response.data.user as User);
-        setStatus('authenticated');
-      } else {
-        throw new Error('Invalid response from server');
-      }
-    } catch (error) {
-      setStatus('unauthenticated');
-      throw error;
-    }
-  };
-
   const signOut = async () => {
     try {
       await apiClient.post('/api/v1/auth/logout', {});
@@ -109,7 +87,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user,
         status,
         signIn,
-        signUp,
         signOut,
         refreshSession,
       }}
