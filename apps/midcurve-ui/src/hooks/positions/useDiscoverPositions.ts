@@ -16,6 +16,7 @@ import type { DiscoverPositionsData } from '@midcurve/api-shared';
 
 interface DiscoverPositionsParams {
   chainIds?: number[];
+  walletAddress?: string;
 }
 
 export function useDiscoverPositions() {
@@ -30,6 +31,7 @@ export function useDiscoverPositions() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chainIds: params.chainIds,
+            walletAddress: params.walletAddress,
           }),
         },
       );

@@ -8,6 +8,7 @@ import {
   getAllUniswapV3Chains,
   type UniswapV3ChainSlug,
 } from "@/config/protocols/uniswapv3";
+import { ScanPositionsModal } from "./scan-positions-modal";
 
 export function CreatePositionDropdown() {
   // Dropdown state
@@ -17,6 +18,7 @@ export function CreatePositionDropdown() {
   const [nftId, setNftId] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [showScanModal, setShowScanModal] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,6 +43,11 @@ export function CreatePositionDropdown() {
   const handleCreateNew = () => {
     setIsDropdownOpen(false);
     navigate('/positions/create', { state: { returnTo: location.pathname } });
+  };
+
+  const handleScanWallet = () => {
+    setIsDropdownOpen(false);
+    setShowScanModal(true);
   };
 
   const handleToggleNftForm = () => {
@@ -128,6 +135,19 @@ export function CreatePositionDropdown() {
               </div>
             </button>
 
+            {/* Option 3: Scan for Positions */}
+            <button
+              onClick={handleScanWallet}
+              className="w-full px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
+            >
+              <div className="text-left">
+                <div className="font-medium">Scan Wallet</div>
+                <div className="text-xs text-slate-400">
+                  Find existing positions across chains
+                </div>
+              </div>
+            </button>
+
             {/* NFT Import Form (expandable) */}
             {showNftForm && (
               <div className="px-4 py-3 border-t border-slate-700/50">
@@ -197,6 +217,12 @@ export function CreatePositionDropdown() {
         </div>
         )}
       </div>
+
+      {/* Scan Positions Modal */}
+      <ScanPositionsModal
+        isOpen={showScanModal}
+        onClose={() => setShowScanModal(false)}
+      />
     </>
   );
 }

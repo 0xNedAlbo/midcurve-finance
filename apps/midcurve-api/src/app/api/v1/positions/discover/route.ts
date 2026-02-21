@@ -75,13 +75,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { chainIds } = validation.data;
+      const { chainIds, walletAddress } = validation.data;
 
       // 2. Run wallet position discovery
       const result =
         await getUniswapV3PositionService().discoverWalletPositions(
           user.id,
-          user.address as Address,
+          (walletAddress ?? user.address) as Address,
           chainIds,
         );
 

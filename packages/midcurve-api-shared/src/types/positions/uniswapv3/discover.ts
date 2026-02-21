@@ -17,6 +17,13 @@ export interface DiscoverPositionsRequest {
    * @example [1, 42161, 8453]
    */
   chainIds?: number[];
+
+  /**
+   * Optional wallet address to scan. If omitted, the authenticated
+   * user's primary address (from the database) is used.
+   * @example "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+   */
+  walletAddress?: string;
 }
 
 /**
@@ -55,5 +62,9 @@ export const DiscoverPositionsRequestSchema = z.object({
         .int('Chain ID must be an integer')
         .positive('Chain ID must be positive'),
     )
+    .optional(),
+  walletAddress: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid EVM wallet address')
     .optional(),
 });

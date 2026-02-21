@@ -8,6 +8,7 @@
 
 import { X, Search, Loader2, CheckCircle2 } from "lucide-react";
 import { useEffect, useCallback, useState } from "react";
+import { useAccount } from "wagmi";
 import { useDiscoverPositions } from "@/hooks/positions/useDiscoverPositions";
 import { CHAIN_METADATA, type ChainMetadata } from "@/config/chains";
 import type { DiscoverPositionsData } from "@midcurve/api-shared";
@@ -30,6 +31,7 @@ export function ScanPositionsModal({
   onClose,
   onScanComplete,
 }: ScanPositionsModalProps) {
+  const { address: connectedAddress } = useAccount();
   const productionChains = getProductionChains();
   const allChainIds = productionChains.map((c) => c.chainId);
 
@@ -92,7 +94,7 @@ export function ScanPositionsModal({
 
   const handleStartScan = () => {
     discoverMutation.mutate(
-      { chainIds: Array.from(selectedChainIds) },
+      { chainIds: Array.from(selectedChainIds), walletAddress: connectedAddress },
       {
         onSuccess: (data) => {
           setScanResult(data);
