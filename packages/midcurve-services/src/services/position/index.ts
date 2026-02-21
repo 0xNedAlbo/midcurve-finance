@@ -9,4 +9,5 @@ export type {
     UniswapV3PositionServiceDependencies,
     PositionDbResult,
     PositionFeeState,
+    WalletDiscoveryResult,
 } from './uniswapv3-position-service.js';

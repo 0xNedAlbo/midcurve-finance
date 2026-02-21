@@ -1,34 +1,20 @@
 /**
  * Discover Positions on User Registered Rule
  *
- * When a user.registered domain event is received, this rule enumerates all
- * UniswapV3 positions owned by the user's wallet across all supported chains
- * and imports active positions (liquidity > 0 OR tokensOwed > 0).
- *
- * For each discovered position:
- * 1. Check if position already exists in DB (skip if so)
- * 2. Call discover() to import position from on-chain data
- * 3. Publish position.created domain event
- * Steps 2+3 are sequential (not wrapped in a transaction because
- * discover() fetches historical logs across millions of blocks, which
- * exceeds any reasonable Prisma interactive transaction timeout).
- *
- * Chains are scanned in parallel (Promise.allSettled) — one failing chain
- * does not block the others.
+ * When a user.registered domain event is received, this rule delegates to
+ * UniswapV3PositionService.discoverWalletPositions() to enumerate and import
+ * all active positions across all supported chains, then publishes
+ * position.created domain events for each newly discovered position.
  *
  * Events handled:
  * - user.registered: New user created via SIWE authentication
  */
 
 import type { ConsumeMessage } from 'amqplib';
-import { prisma } from '@midcurve/database';
 import {
   setupConsumerQueue,
   ROUTING_PATTERNS,
-  EvmConfig,
-  SupportedChainId,
   UniswapV3PositionService,
-  enumerateWalletPositions,
   getDomainEventPublisher,
   type DomainEvent,
   type UserRegisteredPayload,
@@ -58,12 +44,10 @@ export class DiscoverPositionsOnUserRegisteredRule extends BusinessRule {
 
   private consumerTag: string | null = null;
   private readonly positionService: UniswapV3PositionService;
-  private readonly evmConfig: EvmConfig;
 
   constructor() {
     super();
     this.positionService = new UniswapV3PositionService();
-    this.evmConfig = EvmConfig.getInstance();
   }
 
   // ===========================================================================
@@ -138,180 +122,35 @@ export class DiscoverPositionsOnUserRegisteredRule extends BusinessRule {
   ): Promise<void> {
     const { userId, walletAddress } = event.payload;
 
-    // Get all production chain IDs (exclude LOCAL)
-    const chainIds = this.evmConfig
-      .getSupportedChainIds()
-      .filter((id) => id !== SupportedChainId.LOCAL);
-
-    this.logger.info(
-      { userId, walletAddress, chainCount: chainIds.length },
-      'Starting position discovery across all chains',
+    const result = await this.positionService.discoverWalletPositions(
+      userId,
+      walletAddress as Address,
     );
 
-    // Scan all chains in parallel
-    const results = await Promise.allSettled(
-      chainIds.map((chainId) =>
-        this.discoverPositionsOnChain(userId, walletAddress as Address, chainId, event),
-      ),
-    );
-
-    // Aggregate and log results
-    let totalFound = 0;
-    let totalImported = 0;
-    let totalSkipped = 0;
-    let totalErrors = 0;
-
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!;
-      const chainId = chainIds[i]!;
-
-      if (result.status === 'fulfilled') {
-        totalFound += result.value.found;
-        totalImported += result.value.imported;
-        totalSkipped += result.value.skipped;
-        totalErrors += result.value.errors;
-      } else {
-        totalErrors++;
-        this.logger.error(
-          {
-            userId,
-            chainId,
-            error: result.reason instanceof Error
-              ? result.reason.message
-              : String(result.reason),
-          },
-          'Chain-level position discovery failed',
-        );
-      }
+    // Publish position.created events with causal link to the triggering event
+    const eventPublisher = getDomainEventPublisher();
+    for (const position of result.positions) {
+      await eventPublisher.createAndPublish<PositionCreatedPayload>({
+        type: 'position.created',
+        entityType: 'position',
+        entityId: position.id,
+        userId: position.userId,
+        payload: position.toJSON(),
+        source: 'business-logic',
+        causedBy: event.id,
+      });
     }
 
     this.logger.info(
       {
         userId,
         walletAddress,
-        chainsScanned: chainIds.length,
-        positionsFound: totalFound,
-        positionsImported: totalImported,
-        positionsSkipped: totalSkipped,
-        errors: totalErrors,
+        found: result.found,
+        imported: result.imported,
+        skipped: result.skipped,
+        errors: result.errors,
       },
       'Position discovery completed',
     );
-  }
-
-  /**
-   * Discover all positions on a single chain.
-   */
-  private async discoverPositionsOnChain(
-    userId: string,
-    walletAddress: Address,
-    chainId: number,
-    event: DomainEvent<UserRegisteredPayload>,
-  ): Promise<{ found: number; imported: number; skipped: number; errors: number }> {
-    let client;
-    try {
-      client = this.evmConfig.getPublicClient(chainId);
-    } catch {
-      // RPC URL not configured for this chain — skip silently
-      this.logger.debug({ chainId }, 'Skipping chain: no RPC configured');
-      return { found: 0, imported: 0, skipped: 0, errors: 0 };
-    }
-
-    // Enumerate all active positions for this wallet
-    const activePositions = await enumerateWalletPositions(
-      client,
-      walletAddress,
-      chainId,
-    );
-
-    if (activePositions.length === 0) {
-      this.logger.debug(
-        { userId, chainId },
-        'No active positions found on chain',
-      );
-      return { found: 0, imported: 0, skipped: 0, errors: 0 };
-    }
-
-    this.logger.info(
-      { userId, chainId, count: activePositions.length },
-      'Active positions found, importing',
-    );
-
-    let imported = 0;
-    let skipped = 0;
-    let errors = 0;
-
-    // Process positions sequentially within each chain
-    for (const pos of activePositions) {
-      try {
-        // Check if position already exists
-        const positionHash = `uniswapv3/${chainId}/${pos.nftId}`;
-        const existing = await prisma.position.findFirst({
-          where: { userId, positionHash },
-          select: { id: true },
-        });
-
-        if (existing) {
-          this.logger.debug(
-            { userId, chainId, nftId: pos.nftId, positionHash },
-            'Position already exists, skipping',
-          );
-          skipped++;
-          continue;
-        }
-
-        this.logger.info(
-          { userId, chainId, nftId: pos.nftId, positionHash },
-          'Position not in DB, calling discover()',
-        );
-
-        // Discover position (involves heavy RPC work: fetching historical
-        // logs across potentially millions of blocks, so this cannot run
-        // inside a Prisma interactive transaction with a timeout)
-        const position = await this.positionService.discover(
-          userId,
-          { chainId, nftId: pos.nftId },
-        );
-
-        this.logger.info(
-          { userId, chainId, nftId: pos.nftId, positionId: position.id },
-          'discover() returned successfully',
-        );
-
-        // Publish position.created domain event
-        const eventPublisher = getDomainEventPublisher();
-        await eventPublisher.createAndPublish<PositionCreatedPayload>(
-          {
-            type: 'position.created',
-            entityType: 'position',
-            entityId: position.id,
-            userId: position.userId,
-            payload: position.toJSON(),
-            source: 'business-logic',
-            causedBy: event.id,
-          },
-        );
-
-        this.logger.info(
-          { userId, chainId, nftId: pos.nftId, positionId: position.id },
-          'Position discovered and position.created event published',
-        );
-
-        imported++;
-      } catch (error) {
-        errors++;
-        this.logger.error(
-          {
-            userId,
-            chainId,
-            nftId: pos.nftId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          'Failed to discover position',
-        );
-      }
-    }
-
-    return { found: activePositions.length, imported, skipped, errors };
   }
 }

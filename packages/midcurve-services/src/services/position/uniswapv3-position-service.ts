@@ -63,7 +63,11 @@ import { calculatePositionValue } from "@midcurve/shared";
 import { tickToPrice } from "@midcurve/shared";
 import { calculateUnclaimedFeeAmounts } from "@midcurve/shared";
 import { calculateTokenValueInQuote } from "../../utils/uniswapv3/ledger-calculations.js";
-import { findNftMintBlock } from "../../utils/uniswapv3/nfpm-enumerator.js";
+import {
+    findNftMintBlock,
+    enumerateWalletPositions,
+} from "../../utils/uniswapv3/nfpm-enumerator.js";
+import { SupportedChainId } from "../../config/evm.js";
 import { CacheService } from "../cache/cache-service.js";
 
 /**
@@ -92,6 +96,22 @@ export interface PositionFeeState {
     tickUpperFeeGrowthOutside0X128: bigint;
     /** Fee growth outside upper tick for token1 (from pool.ticks(tickUpper)) */
     tickUpperFeeGrowthOutside1X128: bigint;
+}
+
+/**
+ * Result of discovering all positions for a wallet across all supported chains.
+ */
+export interface WalletDiscoveryResult {
+    /** Successfully discovered positions (for event publishing by caller) */
+    positions: UniswapV3Position[];
+    /** Total active positions found across all chains */
+    found: number;
+    /** Positions newly imported */
+    imported: number;
+    /** Positions already in DB (skipped) */
+    skipped: number;
+    /** Positions that failed to import */
+    errors: number;
 }
 
 // ============================================================================
@@ -827,6 +847,219 @@ export class UniswapV3PositionService {
             });
             throw error;
         }
+    }
+
+    // ============================================================================
+    // WALLET-LEVEL DISCOVERY
+    // ============================================================================
+
+    /**
+     * Discover and import all active UniswapV3 positions for a wallet across
+     * all supported chains.
+     *
+     * Chains are scanned in parallel (Promise.allSettled). Already-imported
+     * positions are skipped. Does NOT publish domain events — the caller is
+     * responsible for publishing position.created events with appropriate
+     * causal context.
+     *
+     * @param userId - User who owns the wallet
+     * @param walletAddress - EVM wallet address to scan
+     * @returns Discovery results including imported position objects
+     */
+    async discoverWalletPositions(
+        userId: string,
+        walletAddress: Address,
+    ): Promise<WalletDiscoveryResult> {
+        log.methodEntry(this.logger, "discoverWalletPositions", {
+            userId,
+            walletAddress,
+        });
+
+        const chainIds = this._evmConfig
+            .getSupportedChainIds()
+            .filter((id) => id !== SupportedChainId.LOCAL);
+
+        this.logger.info(
+            { userId, walletAddress, chainCount: chainIds.length },
+            "Starting position discovery across all chains",
+        );
+
+        const results = await Promise.allSettled(
+            chainIds.map((chainId) =>
+                this.discoverPositionsOnChain(userId, walletAddress, chainId),
+            ),
+        );
+
+        // Aggregate results
+        const allPositions: UniswapV3Position[] = [];
+        let totalFound = 0;
+        let totalImported = 0;
+        let totalSkipped = 0;
+        let totalErrors = 0;
+
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i]!;
+            const chainId = chainIds[i]!;
+
+            if (result.status === "fulfilled") {
+                allPositions.push(...result.value.positions);
+                totalFound += result.value.found;
+                totalImported += result.value.imported;
+                totalSkipped += result.value.skipped;
+                totalErrors += result.value.errors;
+            } else {
+                totalErrors++;
+                this.logger.error(
+                    {
+                        userId,
+                        chainId,
+                        error:
+                            result.reason instanceof Error
+                                ? result.reason.message
+                                : String(result.reason),
+                    },
+                    "Chain-level position discovery failed",
+                );
+            }
+        }
+
+        this.logger.info(
+            {
+                userId,
+                walletAddress,
+                chainsScanned: chainIds.length,
+                positionsFound: totalFound,
+                positionsImported: totalImported,
+                positionsSkipped: totalSkipped,
+                errors: totalErrors,
+            },
+            "Wallet position discovery completed",
+        );
+
+        log.methodExit(this.logger, "discoverWalletPositions", {
+            userId,
+            found: totalFound,
+            imported: totalImported,
+        });
+
+        return {
+            positions: allPositions,
+            found: totalFound,
+            imported: totalImported,
+            skipped: totalSkipped,
+            errors: totalErrors,
+        };
+    }
+
+    /**
+     * Discover all positions on a single chain for a wallet.
+     *
+     * @param userId - User who owns the wallet
+     * @param walletAddress - EVM wallet address to scan
+     * @param chainId - Chain to scan
+     * @returns Per-chain discovery results
+     */
+    private async discoverPositionsOnChain(
+        userId: string,
+        walletAddress: Address,
+        chainId: number,
+    ): Promise<{
+        positions: UniswapV3Position[];
+        found: number;
+        imported: number;
+        skipped: number;
+        errors: number;
+    }> {
+        let client;
+        try {
+            client = this._evmConfig.getPublicClient(chainId);
+        } catch {
+            this.logger.debug({ chainId }, "Skipping chain: no RPC configured");
+            return { positions: [], found: 0, imported: 0, skipped: 0, errors: 0 };
+        }
+
+        const activePositions = await enumerateWalletPositions(
+            client,
+            walletAddress,
+            chainId,
+        );
+
+        if (activePositions.length === 0) {
+            this.logger.debug(
+                { userId, chainId },
+                "No active positions found on chain",
+            );
+            return { positions: [], found: 0, imported: 0, skipped: 0, errors: 0 };
+        }
+
+        this.logger.info(
+            { userId, chainId, count: activePositions.length },
+            "Active positions found, importing",
+        );
+
+        const discoveredPositions: UniswapV3Position[] = [];
+        let imported = 0;
+        let skipped = 0;
+        let errors = 0;
+
+        for (const pos of activePositions) {
+            try {
+                const positionHash = this.createHash({ chainId, nftId: pos.nftId });
+                const existing = await this.findByPositionHash(
+                    userId,
+                    positionHash,
+                );
+
+                if (existing) {
+                    this.logger.debug(
+                        { userId, chainId, nftId: pos.nftId, positionHash },
+                        "Position already exists, skipping",
+                    );
+                    skipped++;
+                    continue;
+                }
+
+                this.logger.info(
+                    { userId, chainId, nftId: pos.nftId, positionHash },
+                    "Position not in DB, calling discover()",
+                );
+
+                const position = await this.discover(userId, {
+                    chainId,
+                    nftId: pos.nftId,
+                });
+
+                this.logger.info(
+                    { userId, chainId, nftId: pos.nftId, positionId: position.id },
+                    "discover() returned successfully",
+                );
+
+                discoveredPositions.push(position);
+                imported++;
+            } catch (error) {
+                errors++;
+                this.logger.error(
+                    {
+                        userId,
+                        chainId,
+                        nftId: pos.nftId,
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
+                    },
+                    "Failed to discover position",
+                );
+            }
+        }
+
+        return {
+            positions: discoveredPositions,
+            found: activePositions.length,
+            imported,
+            skipped,
+            errors,
+        };
     }
 
     // ============================================================================
