@@ -19,3 +19,7 @@ export {
   type FeeSeparationResult,
   type UncollectedPrincipalResult,
 } from './ledger-calculations.js';
+export {
+  enumerateWalletPositions,
+  type EnumeratedPosition,
+} from './nfpm-enumerator.js';
