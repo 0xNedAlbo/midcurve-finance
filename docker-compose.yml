@@ -238,9 +238,14 @@ services:
       - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
       # External APIs
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      # Signer service (for automation wallet creation on user registration)
+      - SIGNER_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
     depends_on:
       rabbitmq:
         condition: service_healthy
+      signer:
+        condition: service_started
     restart: unless-stopped
     networks:
       - backend
