@@ -59,4 +59,4 @@ COPY --from=builder /app/packages/midcurve-api-shared/package.json ./packages/mi
 COPY --from=builder /app/packages/midcurve-database/package.json ./packages/midcurve-database/package.json
 
 # Start the service
-CMD ["node", "dist/apps/midcurve-business-logic/src/index.js"]
+CMD ["node", "dist/index.js"]
