@@ -42,21 +42,11 @@ COPY --from=builder /app/apps/midcurve-onchain-data/dist ./dist
 # Copy package.json for module resolution
 COPY --from=builder /app/apps/midcurve-onchain-data/package.json ./
 
-# Copy node_modules (includes workspace packages)
+# Copy node_modules (non-workspace deps: amqplib, pino, viem, ws, etc.)
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/midcurve-onchain-data/node_modules ./apps/midcurve-onchain-data/node_modules
 
-# Copy Prisma client
+# Copy Prisma client (native bindings, not bundled by tsup)
 COPY --from=builder /app/packages/midcurve-database/src/generated/prisma ./packages/midcurve-database/src/generated/prisma
-
-# Copy built workspace packages
-COPY --from=builder /app/packages/midcurve-shared/dist ./packages/midcurve-shared/dist
-COPY --from=builder /app/packages/midcurve-shared/package.json ./packages/midcurve-shared/package.json
-COPY --from=builder /app/packages/midcurve-services/dist ./packages/midcurve-services/dist
-COPY --from=builder /app/packages/midcurve-services/package.json ./packages/midcurve-services/package.json
-COPY --from=builder /app/packages/midcurve-api-shared/dist ./packages/midcurve-api-shared/dist
-COPY --from=builder /app/packages/midcurve-api-shared/package.json ./packages/midcurve-api-shared/package.json
-COPY --from=builder /app/packages/midcurve-database/package.json ./packages/midcurve-database/package.json
 
 # Start the service
 CMD ["node", "dist/index.js"]

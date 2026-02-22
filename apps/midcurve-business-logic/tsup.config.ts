@@ -7,7 +7,7 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   sourcemap: true,
-  external: [
+  noExternal: [
     '@midcurve/shared',
     '@midcurve/services',
     '@midcurve/database',
