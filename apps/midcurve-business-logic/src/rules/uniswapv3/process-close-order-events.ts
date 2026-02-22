@@ -46,7 +46,6 @@ import type {
 import {
   ContractTriggerMode,
   ContractSwapDirection,
-  createUniswapV3OrderIdentityHash,
 } from '@midcurve/shared';
 
 /** Transaction client type — subset of PrismaClient usable inside $transaction */
@@ -86,6 +85,10 @@ const TERMINAL_AUTOMATION_STATES = ['failed'];
 // =============================================================================
 // String → Numeric Enum Mapping
 // =============================================================================
+
+function createOrderIdentityHash(chainId: number, nftId: string, triggerMode: number): string {
+  return `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
+}
 
 function parseTriggerMode(s: TriggerModeString): ContractTriggerMode {
   return s === 'LOWER' ? ContractTriggerMode.LOWER : ContractTriggerMode.UPPER;
@@ -251,7 +254,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     tx?: TxClient
   ): Promise<CloseOrder | null> {
     const triggerMode = parseTriggerMode(event.triggerMode);
-    const orderIdentityHash = createUniswapV3OrderIdentityHash(
+    const orderIdentityHash = createOrderIdentityHash(
       event.chainId,
       event.nftId,
       triggerMode
@@ -355,7 +358,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     const triggerMode = parseTriggerMode(event.triggerMode);
     const { payload } = event;
 
-    const orderIdentityHash = createUniswapV3OrderIdentityHash(
+    const orderIdentityHash = createOrderIdentityHash(
       event.chainId,
       event.nftId,
       triggerMode
@@ -407,7 +410,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     const { chainId, nftId, triggerMode, transactionHash, payload } = event;
     const triggerModeNum = parseTriggerMode(triggerMode);
 
-    const orderIdentityHash = createUniswapV3OrderIdentityHash(
+    const orderIdentityHash = createOrderIdentityHash(
       chainId,
       nftId,
       triggerModeNum
