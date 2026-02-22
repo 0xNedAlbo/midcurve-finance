@@ -5,6 +5,7 @@
 # - UI (Vite SPA served via nginx)
 # - API (Next.js backend)
 # - Onchain Data (Real-time pool price and position event subscriptions)
+# - Business Logic (RabbitMQ consumer for close order event processing)
 # - Automation (Close order execution)
 # - Signer (Private signing service)
 # - RabbitMQ (Message broker)
@@ -195,6 +196,32 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    restart: unless-stopped
+    networks:
+      - backend
+      - database
+
+  # ============================================
+  # BUSINESS LOGIC SERVICE
+  # - Consumes close order lifecycle events from RabbitMQ
+  # - Synchronizes on-chain state with database
+  # ============================================
+  business-logic:
+    build:
+      context: .
+      dockerfile: apps/midcurve-business-logic/Dockerfile
+    container_name: midcurve-business-logic
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # RabbitMQ
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - backend
