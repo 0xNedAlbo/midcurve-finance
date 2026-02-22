@@ -1,7 +1,8 @@
 /**
- * UniswapV3 Close Order Config Types
+ * Close Order Config Types
  *
- * Shared type definitions for trigger mode, swap direction, and swap config.
+ * Protocol-agnostic type definitions for trigger mode, swap direction, and swap config.
+ * These concepts apply to any concentrated liquidity protocol, not just UniswapV3.
  */
 
 /**
@@ -15,7 +16,7 @@ export type TriggerMode = 'LOWER' | 'UPPER';
 /**
  * Swap direction for post-close token conversion
  *
- * Uses Uniswap's native token ordering (token0/token1), role-agnostic.
+ * Uses the pool's native token ordering (token0/token1), role-agnostic.
  * - TOKEN0_TO_1: Swap token0 to token1
  * - TOKEN1_TO_0: Swap token1 to token0
  */

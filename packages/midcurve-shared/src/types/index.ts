@@ -226,22 +226,11 @@ export {
 } from './automation/index.js';
 export type { AutomationState } from './automation/index.js';
 
-// UniswapV3 Automation types
+// Close Order config types (protocol-agnostic)
 export type {
   TriggerMode,
   SwapDirection,
   SwapConfig,
-} from './automation/index.js';
-
-// UniswapV3 Close Order config/state types
-export type {
-  UniswapV3CloseOrderConfig,
-  UniswapV3CloseOrderState,
-} from './automation/index.js';
-
-export {
-  createUniswapV3OrderIdentityHash,
-  createEmptyUniswapV3CloseOrderState,
 } from './automation/index.js';
 
 // ============================================================================

@@ -1,5 +1,5 @@
 import { Q192 } from './constants.js';
-import type { SwapDirection } from '../../types/automation/uniswapv3/uniswapv3-close-order-config.js';
+import type { SwapDirection } from '../../types/automation/close-order-config.types.js';
 
 /**
  * Estimates the output amount for an exact-input swap through a UniswapV3 pool

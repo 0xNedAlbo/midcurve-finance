@@ -18,7 +18,7 @@ import type { TokenInterface } from '../../token/index.js';
 import type { PoolInterface } from '../../pool/index.js';
 import type { PositionInterface } from '../position.interface.js';
 import type { PositionProtocol, PositionJSON, PnLSimulationResult } from '../position.types.js';
-import type { SwapConfig } from '../../automation/uniswapv3/uniswapv3-close-order-config.js';
+import type { SwapConfig } from '../../automation/close-order-config.types.js';
 
 // ============================================================================
 // CONSTANTS

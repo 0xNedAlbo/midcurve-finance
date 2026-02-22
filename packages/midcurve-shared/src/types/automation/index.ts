@@ -2,7 +2,7 @@
  * Automation Types
  *
  * Type system for position automation features.
- * Includes on-chain close order types.
+ * Protocol-agnostic types for close orders, triggers, and swaps.
  */
 
 // ============================================================================
@@ -18,7 +18,11 @@ export {
 } from './on-chain-close-order.types.js';
 
 // ============================================================================
-// UniswapV3 Types
+// Close Order Config Types (protocol-agnostic)
 // ============================================================================
 
-export * from './uniswapv3/index.js';
+export type {
+  TriggerMode,
+  SwapDirection,
+  SwapConfig,
+} from './close-order-config.types.js';
