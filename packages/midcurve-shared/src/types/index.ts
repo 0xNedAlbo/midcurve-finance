@@ -215,14 +215,6 @@ export {
 } from './quote-token-result/index.js';
 
 // ============================================================================
-// Pool Discovery Result types
-// ============================================================================
-
-export type {
-  PoolDiscoveryResult,
-  UniswapV3PoolDiscoveryResult,
-} from './pool-discovery-result.js';
-
 // ============================================================================
 // Automation Types (position automation features)
 // ============================================================================

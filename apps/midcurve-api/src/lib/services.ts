@@ -17,7 +17,6 @@ import {
   Erc20ApprovalService,
   Erc721ApprovalService,
   UniswapV3PoolService,
-  UniswapV3PoolDiscoveryService,
   UniswapV3PoolSearchService,
   UniswapV3PositionService,
   PositionListService,
@@ -44,7 +43,6 @@ let _erc20ApprovalService: Erc20ApprovalService | null = null;
 let _erc721ApprovalService: Erc721ApprovalService | null = null;
 let _evmTransactionStatusService: EvmTransactionStatusService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
-let _uniswapV3PoolDiscoveryService: UniswapV3PoolDiscoveryService | null = null;
 let _uniswapV3PoolSearchService: UniswapV3PoolSearchService | null = null;
 let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _positionListService: PositionListService | null = null;
@@ -169,16 +167,6 @@ export function getEvmTransactionStatusService(): EvmTransactionStatusService {
     _evmTransactionStatusService = new EvmTransactionStatusService();
   }
   return _evmTransactionStatusService;
-}
-
-/**
- * Get singleton instance of UniswapV3PoolDiscoveryService
- */
-export function getUniswapV3PoolDiscoveryService(): UniswapV3PoolDiscoveryService {
-  if (!_uniswapV3PoolDiscoveryService) {
-    _uniswapV3PoolDiscoveryService = new UniswapV3PoolDiscoveryService();
-  }
-  return _uniswapV3PoolDiscoveryService;
 }
 
 /**

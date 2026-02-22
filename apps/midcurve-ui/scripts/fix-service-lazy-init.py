@@ -22,7 +22,6 @@ SERVICE_GETTERS = {
     'Erc20TokenService': 'getErc20TokenService',
     'UserTokenBalanceService': 'getUserTokenBalanceService',
     'UniswapV3PoolService': 'getUniswapV3PoolService',
-    'UniswapV3PoolDiscoveryService': 'getUniswapV3PoolDiscoveryService',
     'UniswapV3PositionService': 'getUniswapV3PositionService',
     'UniswapV3PositionLedgerService': 'getUniswapV3PositionLedgerService',
     'PositionListService': 'getPositionListService',

@@ -36,7 +36,6 @@ export * from './services/position-list/index.js';
 export * from './services/position-ledger/index.js';
 export * from './services/position-apr/index.js';
 export * from './services/quote-token/index.js';
-export * from './services/pool-discovery/index.js';
 export * from './services/pool-search/index.js';
 export * from './services/cache/index.js';
 export * from './services/coingecko-token/index.js';

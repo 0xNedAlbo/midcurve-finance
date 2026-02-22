@@ -11,7 +11,7 @@
  */
 
 import { useMemo } from "react";
-import type { UniswapV3PoolDiscoveryResultResponse, Erc20TokenResponse } from "@midcurve/api-shared";
+import type { UniswapV3PoolResponse, Erc20TokenResponse } from "@midcurve/api-shared";
 import type { EvmChainSlug } from "@/config/chains";
 import {
   getTokenAmountsFromLiquidity,
@@ -23,7 +23,7 @@ import { usePoolMetrics } from "./usePoolMetrics";
 
 interface UsePositionAprCalculationParams {
   chain: EvmChainSlug;
-  pool: UniswapV3PoolDiscoveryResultResponse;
+  pool: UniswapV3PoolResponse;
   liquidity: bigint;
   tickLower: number;
   tickUpper: number;
@@ -80,8 +80,8 @@ export function usePositionAprCalculation({
   // Fetch fresh metrics from backend API
   const { metrics, isLoading: isMetricsLoading } = usePoolMetrics({
     chain,
-    poolAddress: pool?.pool?.config?.address || null,
-    enabled: !!pool?.pool?.config?.address,
+    poolAddress: pool?.config?.address || null,
+    enabled: !!pool?.config?.address,
   });
 
   return useMemo(() => {
@@ -102,9 +102,9 @@ export function usePositionAprCalculation({
 
     // Validate required data
     if (
-      !pool?.pool?.state?.sqrtPriceX96 ||
-      !pool?.pool?.state?.liquidity ||
-      !pool?.pool?.state?.currentTick ||
+      !pool?.state?.sqrtPriceX96 ||
+      !pool?.state?.liquidity ||
+      !pool?.state?.currentTick ||
       tickLower === undefined ||
       tickUpper === undefined ||
       isNaN(tickLower) ||
@@ -119,17 +119,16 @@ export function usePositionAprCalculation({
     }
 
     try {
-      const poolData = pool.pool;
-      const currentTick = poolData.state.currentTick;
-      const sqrtPriceX96 = BigInt(poolData.state.sqrtPriceX96);
-      const poolLiquidity = BigInt(poolData.state.liquidity);
+      const currentTick = pool.state.currentTick;
+      const sqrtPriceX96 = BigInt(pool.state.sqrtPriceX96);
+      const poolLiquidity = BigInt(pool.state.liquidity);
 
       // Check if position is out of range
       const isOutOfRange = currentTick < tickLower || currentTick >= tickUpper;
 
       // Determine if token0 is quote (token0 is quote if baseToken is token1)
       const isToken0Quote =
-        compareAddresses(baseToken.config.address, poolData.token0.config.address) !== 0;
+        compareAddresses(baseToken.config.address, pool.token0.config.address) !== 0;
 
       // Check if we have metrics data from backend
       if (!metrics || isMetricsLoading) {
@@ -145,7 +144,7 @@ export function usePositionAprCalculation({
       const volumeToken1 = BigInt(metrics.volumeToken1);
 
       // Parse fee tier from feeBps (e.g., 500 basis points = 0.05%)
-      const feeTierBips = BigInt(poolData.config.feeBps);
+      const feeTierBips = BigInt(pool.config.feeBps);
       const FEE_DENOMINATOR = 1000000n;
 
       // Calculate daily fees from volume × fee tier
