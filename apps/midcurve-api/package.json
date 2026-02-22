@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "next dev -p 3001",
     "dev:pretty": "next dev -p 3001 | pino-pretty",
-    "build": "cd ../../packages/midcurve-database && npm run db:migrate:deploy && cd ../../apps/midcurve-api && next build",
+    "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -41,6 +41,6 @@
     "vitest": "^3.2.4"
   },
   "engines": {
-    "node": "20.19.x"
+    "node": ">=20"
   }
 }
