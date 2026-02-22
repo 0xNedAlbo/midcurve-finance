@@ -25,6 +25,7 @@ import {
 } from '../context/RiskTriggersWizardContext';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
+import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
@@ -423,15 +424,44 @@ export function TransactionStep() {
 
   const isDone = phase === 'done';
 
-  // ----- Handlers -----
-  const handleExecuteApproval = useCallback(() => {
-    if (operatorApproval.error) {
-      operatorApproval.reset();
-    }
-    setPhase('approval');
-    operatorApproval.approve();
-  }, [operatorApproval]);
+  // ----- Backend tx watchers -----
+  const approvalPrompt = useEvmTransactionPrompt({
+    label: 'Approve automation contract',
+    buttonLabel: 'Execute',
+    retryButtonLabel: 'Retry',
+    chainId,
+    enabled: !!contractAddress,
+    showActionButton: needsApproval && !approvalDone,
+    txHash: operatorApproval.txHash,
+    isSubmitting: operatorApproval.isApproving,
+    isWaitingForConfirmation: operatorApproval.isWaitingForConfirmation,
+    isSuccess: approvalDone || operatorApproval.isApprovalSuccess || operatorApproval.isApproved,
+    error: operatorApproval.error,
+    onExecute: () => {
+      if (operatorApproval.error) operatorApproval.reset();
+      setPhase('approval');
+      operatorApproval.approve();
+    },
+    onReset: () => operatorApproval.reset(),
+  });
 
+  const multicallPrompt = useEvmTransactionPrompt({
+    label: subOperations.length === 1
+      ? subOperations[0].label
+      : `Apply ${subOperations.length} Order Changes`,
+    chainId,
+    enabled: !!contractAddress && subOperations.length > 0,
+    showActionButton: false,
+    txHash: multicall.txHash,
+    isSubmitting: multicall.isSubmitting,
+    isWaitingForConfirmation: multicall.isWaitingForConfirmation,
+    isSuccess: multicall.isSuccess,
+    error: multicall.error,
+  });
+  // Suppress unused variable — multicallPrompt is used only for its backend subscription side-effect
+  void multicallPrompt;
+
+  // ----- Handlers -----
   const handleExecuteMulticall = useCallback(() => {
     if (multicall.error) {
       multicall.reset();
@@ -457,85 +487,6 @@ export function TransactionStep() {
   const handleFinish = useCallback(() => {
     navigate(returnTo);
   }, [navigate, returnTo]);
-
-  // ============================================================
-  // Render: Approval row
-  // ============================================================
-  const renderApprovalRow = () => {
-    if (!needsApproval && !approvalDone) return null;
-
-    const isActive = operatorApproval.isApproving || operatorApproval.isWaitingForConfirmation;
-    const approvalError = isUserRejection(operatorApproval.error) ? null : operatorApproval.error;
-    const isError = !!approvalError;
-    const isSuccess = approvalDone || operatorApproval.isApprovalSuccess || operatorApproval.isApproved;
-    const isPending = !isActive && !isError && !isSuccess;
-    const showButton = isPending || isError;
-
-    return (
-      <div
-        className={`py-3 px-4 rounded-lg transition-colors ${
-          isError
-            ? 'bg-red-500/10 border border-red-500/30'
-            : isSuccess
-              ? 'bg-green-500/10 border border-green-500/20'
-              : isActive
-                ? 'bg-blue-500/10 border border-blue-500/20'
-                : 'bg-slate-700/30 border border-slate-600/20'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {isPending && <Circle className="w-5 h-5 text-slate-500" />}
-            {operatorApproval.isApproving && <Circle className="w-5 h-5 text-blue-400" />}
-            {operatorApproval.isWaitingForConfirmation && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
-            {isSuccess && <Check className="w-5 h-5 text-green-400" />}
-            {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
-
-            <span className={isSuccess ? 'text-slate-400' : isError ? 'text-red-300' : 'text-white'}>
-              Approve automation contract
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {operatorApproval.txHash && (
-              <a
-                href={buildTxUrl(chainId, operatorApproval.txHash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-              >
-                {truncateTxHash(operatorApproval.txHash)}
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
-            {showButton && (
-              <button
-                onClick={handleExecuteApproval}
-                className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
-              >
-                {isError ? 'Retry' : 'Execute'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {isError && approvalError && (
-          <div className="mt-2 pl-8 flex gap-2">
-            <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
-              {approvalError.message}
-            </div>
-            <button
-              onClick={() => navigator.clipboard.writeText(approvalError.message)}
-              className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
-              title="Copy error to clipboard"
-            >
-              <Copy className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // ============================================================
   // Render: Multicall row with sub-items
@@ -704,7 +655,7 @@ export function TransactionStep() {
           Execute Transaction{txCount !== 1 ? 's' : ''}
         </h3>
         <div className="space-y-3">
-          {renderApprovalRow()}
+          {(needsApproval || approvalDone) && approvalPrompt.element}
           {renderMulticallRow()}
         </div>
       </div>
