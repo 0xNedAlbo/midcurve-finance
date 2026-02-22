@@ -20,9 +20,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useWriteContract, useAccount } from 'wagmi';
 import { useQueryClient } from '@tanstack/react-query';
-import { decodeEventLog, type Address, type Hash, type TransactionReceipt } from 'viem';
+import { decodeEventLog, type Address, type Hash } from 'viem';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import { queryKeys } from '@/lib/query-keys';
 import { useSharedContract } from './useSharedContract';
 import type { SerializedCloseOrder } from '@midcurve/api-shared';
@@ -104,12 +105,12 @@ export interface UseCreateCloseOrderResult {
  * Returns true if the event was found (order was registered)
  */
 function parseOrderRegisteredEvent(
-  receipt: TransactionReceipt,
+  logs: Array<{ address: string; topics: string[]; data: string }>,
   contractAddress: Address,
   abi: UniswapV3PositionCloserAbi
 ): boolean {
   try {
-    for (const log of receipt.logs) {
+    for (const log of logs) {
       if (log.address.toLowerCase() !== contractAddress.toLowerCase()) {
         continue;
       }
@@ -117,8 +118,8 @@ function parseOrderRegisteredEvent(
       try {
         const decoded = decodeEventLog({
           abi,
-          data: log.data,
-          topics: log.topics,
+          data: log.data as `0x${string}`,
+          topics: log.topics as [signature: `0x${string}`, ...args: `0x${string}`[]],
         });
 
         if (decoded.eventName === 'OrderRegistered') {
@@ -169,24 +170,25 @@ export function useCreateCloseOrder(
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for transaction confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess: isTxSuccess,
-    data: receipt,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: txHash,
+  // Wait for transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: txHash ?? null,
+    chainId,
+    targetConfirmations: 1,
+    enabled: !!txHash,
   });
+  const isWaitingForConfirmation = !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isTxSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle transaction success - validate event and invalidate caches
   // The backend event subscriber creates the DB record automatically.
   useEffect(() => {
-    if (!isTxSuccess || !receipt || !txHash || !currentParams || !abi || !contractAddress) return;
+    if (!isTxSuccess || !txWatch.logs || !txHash || !currentParams || !abi || !contractAddress) return;
 
     // Verify OrderRegistered event was emitted
     const eventFound = parseOrderRegisteredEvent(
-      receipt,
+      txWatch.logs,
       contractAddress as Address,
       abi
     );
@@ -205,7 +207,7 @@ export function useCreateCloseOrder(
     queryClient.invalidateQueries({
       queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
     });
-  }, [isTxSuccess, receipt, txHash, currentParams, queryClient, abi, contractAddress, chainId, nftId]);
+  }, [isTxSuccess, txWatch.logs, txHash, currentParams, queryClient, abi, contractAddress, chainId, nftId]);
 
   // Handle errors
   useEffect(() => {

@@ -4,8 +4,8 @@ import { maxUint256, getAddress } from 'viem';
 import {
   useReadContract,
   useWriteContract,
-  useWaitForTransactionReceipt,
 } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import { ERC20_ABI } from '@/config/tokens/erc20-abi';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
 
@@ -103,15 +103,16 @@ export function useTokenApproval({
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for approval transaction confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess: isApprovalConfirmed,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: approvalTxHash,
-    chainId,
+  // Wait for approval transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: approvalTxHash ?? null,
+    chainId: chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!approvalTxHash,
   });
+  const isWaitingForConfirmation = !!approvalTxHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isApprovalConfirmed = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle approval errors (both pre-transaction and post-transaction)
   useEffect(() => {

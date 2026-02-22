@@ -133,6 +133,7 @@ export async function GET(
         gasUsed: state.gasUsed,
         effectiveGasPrice: state.effectiveGasPrice,
         logsCount: state.logsCount,
+        logs: state.logs ?? null,
         contractAddress: state.contractAddress,
         pollUrl,
         createdAt: subscription.createdAt.toISOString(),

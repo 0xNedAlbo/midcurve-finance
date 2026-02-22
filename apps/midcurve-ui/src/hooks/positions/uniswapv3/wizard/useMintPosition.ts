@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import type { Address, TransactionReceipt } from 'viem';
+import type { Address } from 'viem';
 import { getAddress } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import type { SerializedTransactionLog } from '@midcurve/shared';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import {
   getNonfungiblePositionManagerAddress,
   NONFUNGIBLE_POSITION_MANAGER_ABI,
@@ -32,7 +34,8 @@ export interface UseMintPositionResult {
   // Position result
   tokenId: bigint | undefined;
   isSuccess: boolean;
-  receipt: TransactionReceipt | undefined;
+  /** Serialized transaction logs for event parsing */
+  logs: SerializedTransactionLog[] | null | undefined;
 
   // Reset state
   reset: () => void;
@@ -80,16 +83,16 @@ export function useMintPosition(
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for mint transaction confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess,
-    data: receipt,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: mintTxHash,
-    chainId: params?.chainId,
+  // Wait for mint transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: mintTxHash ?? null,
+    chainId: params?.chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!mintTxHash,
   });
+  const isWaitingForConfirmation = !!mintTxHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle mint errors (both pre-transaction and post-transaction)
   useEffect(() => {
@@ -105,29 +108,26 @@ export function useMintPosition(
     }
   }, [receiptError]);
 
-  // Extract tokenId from transaction receipt
+  // Extract tokenId from transaction logs
   useEffect(() => {
-    if (isSuccess && receipt) {
-      // Find the Transfer event from the NonfungiblePositionManager contract
-      // The tokenId is in the third topic (tokenId) of the Transfer event
-      const transferLog = receipt.logs.find(
+    if (isSuccess && txWatch.logs) {
+      const transferLog = txWatch.logs.find(
         (log) =>
           log.address.toLowerCase() === managerAddress?.toLowerCase() &&
           log.topics[0] ===
-            '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef' // Transfer event signature
+            '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
       );
 
       if (transferLog && transferLog.topics[3]) {
         try {
-          // TokenId is in the 4th topic (index 3)
           const extractedTokenId = BigInt(transferLog.topics[3]);
           setTokenId(extractedTokenId);
         } catch (error) {
-          console.error('Failed to extract tokenId from receipt:', error);
+          console.error('Failed to extract tokenId from logs:', error);
         }
       }
     }
-  }, [isSuccess, receipt, managerAddress]);
+  }, [isSuccess, txWatch.logs, managerAddress]);
 
   // Mint function
   const mint = () => {
@@ -175,7 +175,7 @@ export function useMintPosition(
     // Position result
     tokenId,
     isSuccess,
-    receipt,
+    logs: txWatch.logs,
 
     // Reset
     reset,

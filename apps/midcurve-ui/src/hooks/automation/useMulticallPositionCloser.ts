@@ -19,7 +19,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import { useQueryClient } from '@tanstack/react-query';
 import { encodeFunctionData, type Address, type Hash, type Hex } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
@@ -134,14 +135,16 @@ export function useMulticallPositionCloser(
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess: isTxSuccess,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: txHash,
+  // Wait for confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: txHash ?? null,
+    chainId,
+    targetConfirmations: 1,
+    enabled: !!txHash,
   });
+  const isWaitingForConfirmation = !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isTxSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle tx success — invalidate caches
   useEffect(() => {

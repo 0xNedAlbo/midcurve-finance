@@ -19,6 +19,7 @@ import { isSupportedChain, type SupportedChainId } from '../lib/config.js';
 import type {
   EvmTxStatusSubscriptionConfig,
   EvmTxStatusSubscriptionState,
+  SerializedTransactionLog,
   TxStatusValue,
 } from '@midcurve/shared';
 import { getEvmConfig } from '@midcurve/services';
@@ -355,6 +356,7 @@ export class EvmTxStatusSubscriber {
     let gasUsed: bigint | null = null;
     let effectiveGasPrice: bigint | null = null;
     let logsCount: number | null = null;
+    let serializedLogs: SerializedTransactionLog[] | null = null;
     let contractAddress: string | null = null;
     let isComplete = false;
 
@@ -380,6 +382,12 @@ export class EvmTxStatusSubscriber {
       gasUsed = receipt.gasUsed;
       effectiveGasPrice = receipt.effectiveGasPrice ?? null;
       logsCount = receipt.logs.length;
+      serializedLogs = receipt.logs.map((l) => ({
+        address: l.address,
+        topics: [...l.topics],
+        data: l.data,
+        logIndex: Number(l.logIndex),
+      }));
       contractAddress = receipt.contractAddress ?? null;
 
       // Calculate confirmations
@@ -410,6 +418,7 @@ export class EvmTxStatusSubscriber {
       gasUsed: gasUsed?.toString() ?? null,
       effectiveGasPrice: effectiveGasPrice?.toString() ?? null,
       logsCount,
+      logs: serializedLogs,
       contractAddress,
       lastCheckedAt: now.toISOString(),
       isComplete,

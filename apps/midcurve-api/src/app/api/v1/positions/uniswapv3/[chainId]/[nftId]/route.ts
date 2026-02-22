@@ -11,10 +11,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
-import { getDomainEventPublisher } from '@midcurve/services';
+import {
+  getDomainEventPublisher,
+  EvmConfig,
+  UniswapV3LedgerService,
+  getPositionManagerAddress,
+} from '@midcurve/services';
 import type {
   UniswapV3PositionConfigData,
   UniswapV3PositionState,
+  UniswapV3LedgerEventState,
 } from '@midcurve/shared';
 import { normalizeAddress } from '@midcurve/shared';
 import {
@@ -461,6 +467,7 @@ export async function PUT(
         ownerAddress,
         isToken0Quote,
         liquidity,
+        mintTxHash,
       } = bodyValidation.data;
 
       apiLog.businessOperation(apiLogger, requestId, 'create', 'position', `${chainId}/${nftId}`, {
@@ -566,7 +573,66 @@ export async function PUT(
         return createdPosition;
       });
 
-      // 4. Log position creation success
+      // 4. Create MINT lifecycle ledger event (fire-and-forget, non-fatal)
+      if (mintTxHash) {
+        try {
+          const evmConfig = EvmConfig.getInstance();
+          const client = evmConfig.getPublicClient(chainId);
+
+          const receipt = await client.getTransactionReceipt({
+            hash: mintTxHash as `0x${string}`,
+          });
+
+          // Find the ERC-721 Transfer event from NFPM (from=0x0 means mint)
+          const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+          const nftIdHex = '0x' + BigInt(nftId).toString(16).padStart(64, '0');
+          const nfpmAddress = getPositionManagerAddress(chainId);
+
+          const transferLog = receipt.logs.find(l =>
+            l.address.toLowerCase() === nfpmAddress.toLowerCase() &&
+            l.topics[0] === TRANSFER_TOPIC &&
+            l.topics[3]?.toLowerCase() === nftIdHex.toLowerCase()
+          );
+
+          if (transferLog) {
+            const block = await client.getBlock({ blockNumber: receipt.blockNumber });
+
+            const ledgerService = new UniswapV3LedgerService({ positionId: position.id });
+            await ledgerService.createLifecycleEvent({
+              chainId,
+              nftId: BigInt(nftId),
+              blockNumber: receipt.blockNumber,
+              txIndex: transferLog.transactionIndex,
+              logIndex: transferLog.logIndex,
+              txHash: receipt.transactionHash,
+              blockHash: receipt.blockHash,
+              timestamp: new Date(Number(block.timestamp) * 1000),
+              sqrtPriceX96: 0n,
+              state: {
+                eventType: 'MINT',
+                tokenId: BigInt(nftId),
+                to: normalizeAddress(ownerAddress),
+              } as UniswapV3LedgerEventState,
+            });
+
+            apiLog.businessOperation(apiLogger, requestId, 'created', 'mint-lifecycle-event', position.id, {
+              chainId,
+              nftId,
+              mintTxHash,
+            });
+          }
+        } catch (error) {
+          // Non-fatal: position was created, lifecycle event can be backfilled
+          apiLogger.warn({
+            requestId,
+            mintTxHash,
+            error: error instanceof Error ? error.message : String(error),
+            msg: 'Failed to create MINT lifecycle event from receipt',
+          });
+        }
+      }
+
+      // 5. Log position creation
       apiLog.businessOperation(apiLogger, requestId, 'created', 'position', position.id, {
         chainId,
         nftId,
@@ -577,7 +643,7 @@ export async function PUT(
         currentValue: position.currentValue.toString(),
       });
 
-      // 5. Serialize bigints to strings for JSON
+      // 6. Serialize bigints to strings for JSON
       const serializedPosition = serializeUniswapV3Position(position) as CreateUniswapV3PositionData;
 
       const response = createSuccessResponse(serializedPosition);

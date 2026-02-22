@@ -24,7 +24,7 @@ import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { usePriceAdjustment } from '../hooks/usePriceAdjustment';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
-import { useCreatePositionAPI, extractLiquidityFromReceipt } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
+import { useCreatePositionAPI, extractLiquidityFromLogs } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
@@ -672,7 +672,7 @@ export function TransactionStep() {
 
       // Call API to save position to database
       if (
-        mint.receipt &&
+        mint.logs &&
         chainId &&
         walletAddress &&
         state.discoveredPool &&
@@ -682,7 +682,7 @@ export function TransactionStep() {
       ) {
         const chainSlug = getChainSlugByChainId(chainId);
         if (chainSlug) {
-          const liquidity = extractLiquidityFromReceipt(mint.receipt);
+          const liquidity = extractLiquidityFromLogs(mint.logs);
           const isToken0Quote =
             (state.discoveredPool.token0.config.address as string).toLowerCase() ===
             quoteTokenAddress.toLowerCase();
@@ -696,6 +696,7 @@ export function TransactionStep() {
             ownerAddress: walletAddress,
             isToken0Quote,
             liquidity,
+            mintTxHash: mint.mintTxHash,
           });
         }
       }
@@ -711,7 +712,7 @@ export function TransactionStep() {
         setCurrentPhase('done');
       }
     }
-  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.receipt, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
+  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.logs, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
 
   // NFT approval phase
   useEffect(() => {

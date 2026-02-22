@@ -172,6 +172,21 @@ export interface Erc20BalanceSubscriptionJSON extends Omit<OnchainSubscriptionJS
 export type TxStatusValue = 'pending' | 'success' | 'reverted' | 'not_found';
 
 /**
+ * JSON-serializable transaction log for storing in database state.
+ * Contains only the fields needed for frontend event parsing.
+ */
+export interface SerializedTransactionLog {
+  /** Contract address that emitted the log */
+  address: string;
+  /** Indexed event topics */
+  topics: string[];
+  /** Non-indexed event data */
+  data: string;
+  /** Log index within the transaction */
+  logIndex: number;
+}
+
+/**
  * Config for EVM transaction status subscriptions (immutable after creation).
  */
 export interface EvmTxStatusSubscriptionConfig {
@@ -203,6 +218,8 @@ export interface EvmTxStatusSubscriptionState {
   effectiveGasPrice: string | null;
   /** Number of logs emitted */
   logsCount: number | null;
+  /** Serialized transaction logs for frontend event parsing */
+  logs?: SerializedTransactionLog[] | null;
   /** Contract address if contract creation */
   contractAddress: string | null;
   /** ISO 8601 timestamp of last check */

@@ -224,69 +224,20 @@ export class NfpmTransferMonitor {
   }
 
   /**
-   * Handle MINT event — auto-import position.
+   * Handle MINT event — log only.
    *
-   * 1. Look up user by wallet address (msg.to = the NFT recipient)
-   * 2. Call discover() to import the position from on-chain data
-   * 3. discover() is idempotent — safe if position already exists
+   * Position creation and MINT lifecycle event are handled by the
+   * PUT /api/v1/positions/uniswapv3/:chainId/:nftId endpoint, which
+   * has the user's quote token choice and the mint transaction hash.
    */
   private async handleMint(message: NfpmTransferMessage): Promise<void> {
     const { chainId, nftId, to } = message;
-    const normalizedTo = to.toLowerCase();
-
-    // Find user by wallet address
-    const user = await prisma.user.findFirst({
-      where: { address: { equals: normalizedTo, mode: 'insensitive' } },
-      select: { id: true },
-    });
-
-    if (!user) {
-      log.warn({
-        chainId,
-        nftId,
-        walletAddress: normalizedTo,
-        msg: 'No user found for MINT recipient, skipping auto-import',
-      });
-      return;
-    }
-
     log.info({
       chainId,
       nftId,
-      userId: user.id,
-      msg: 'Auto-importing minted position via discover()',
+      to: to.toLowerCase(),
+      msg: 'MINT event received — position creation handled by PUT endpoint',
     });
-
-    const positionService = getPositionService();
-
-    try {
-      const position = await positionService.discover(user.id, {
-        chainId,
-        nftId: parseInt(nftId, 10),
-      });
-
-      log.info({
-        chainId,
-        nftId,
-        positionId: position.id,
-        msg: 'Position auto-imported successfully',
-      });
-
-      // Add MINT lifecycle event to the ledger
-      await this.addLifecycleEvent(position.id, message, {
-        eventType: 'MINT',
-        tokenId: BigInt(nftId),
-        to: normalizedTo,
-      } as UniswapV3LedgerEventState);
-    } catch (error) {
-      log.error({
-        chainId,
-        nftId,
-        userId: user.id,
-        error: error instanceof Error ? error.message : String(error),
-        msg: 'Failed to auto-import minted position',
-      });
-    }
   }
 
   /**

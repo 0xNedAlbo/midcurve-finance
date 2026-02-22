@@ -149,6 +149,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             gasUsed: txStatus.gasUsed?.toString() ?? null,
             effectiveGasPrice: txStatus.effectiveGasPrice?.toString() ?? null,
             logsCount: txStatus.logsCount ?? null,
+            logs: txStatus.logs ?? null,
             contractAddress: txStatus.contractAddress ?? null,
             lastCheckedAt: txStatus.timestamp.toISOString(),
             isComplete:

@@ -115,7 +115,7 @@ export function UniswapV3CollectFeesForm({
     buttonLabel: 'Collect',
     chainId: config.chainId,
     enabled: canCollect,
-    txHash: collectFees.receipt?.transactionHash,
+    txHash: collectFees.collectTxHash,
     isSubmitting: collectFees.isCollecting,
     isWaitingForConfirmation: collectFees.isWaitingForConfirmation,
     isSuccess: collectFees.isSuccess,

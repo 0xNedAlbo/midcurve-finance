@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ADDRESSES,
   NONFUNGIBLE_POSITION_MANAGER_ABI,
@@ -23,9 +24,7 @@ export interface UseIncreaseLiquidityResult {
   increaseTxHash: Address | undefined;
 
   // Result
-  addedLiquidity: bigint | undefined;
   isSuccess: boolean;
-  receipt: import('viem').TransactionReceipt | undefined;
 
   // Reset state
   reset: () => void;
@@ -45,9 +44,6 @@ export function useIncreaseLiquidity(
   params: IncreaseLiquidityParams | null
 ): UseIncreaseLiquidityResult {
   const [increaseError, setIncreaseError] = useState<Error | null>(null);
-  const [addedLiquidity, setAddedLiquidity] = useState<bigint | undefined>(
-    undefined
-  );
 
   const slippageBps = params?.slippageBps ?? 50; // Default 0.5% slippage
 
@@ -70,16 +66,16 @@ export function useIncreaseLiquidity(
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for increase transaction confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess,
-    data: receipt,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: increaseTxHash,
-    chainId: params?.chainId,
+  // Wait for increase transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: increaseTxHash ?? null,
+    chainId: params?.chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!increaseTxHash,
   });
+  const isWaitingForConfirmation = !!increaseTxHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle increase errors (both write errors and receipt errors)
   useEffect(() => {
@@ -87,34 +83,6 @@ export function useIncreaseLiquidity(
       setIncreaseError(writeError || receiptError);
     }
   }, [writeError, receiptError]);
-
-  // Extract added liquidity from transaction receipt
-  useEffect(() => {
-    if (isSuccess && receipt) {
-      // Find the IncreaseLiquidity event from the NonfungiblePositionManager contract
-      // Event signature: IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
-      const increaseLiquidityLog = receipt.logs.find(
-        (log) =>
-          log.address.toLowerCase() === managerAddress?.toLowerCase() &&
-          log.topics[0] ===
-            '0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f' // IncreaseLiquidity event signature
-      );
-
-      if (increaseLiquidityLog && increaseLiquidityLog.data) {
-        try {
-          // Liquidity is the first 32 bytes of data (uint128)
-          const liquidityHex = '0x' + increaseLiquidityLog.data.slice(2, 66);
-          const extractedLiquidity = BigInt(liquidityHex);
-          setAddedLiquidity(extractedLiquidity);
-        } catch (error) {
-          console.error(
-            'Failed to extract added liquidity from receipt:',
-            error
-          );
-        }
-      }
-    }
-  }, [isSuccess, receipt, managerAddress]);
 
   // Increase function
   const increase = () => {
@@ -126,7 +94,6 @@ export function useIncreaseLiquidity(
     }
 
     setIncreaseError(null);
-    setAddedLiquidity(undefined);
 
     try {
       writeContract({
@@ -145,7 +112,6 @@ export function useIncreaseLiquidity(
   const reset = () => {
     resetWrite();
     setIncreaseError(null);
-    setAddedLiquidity(undefined);
   };
 
   return {
@@ -157,9 +123,7 @@ export function useIncreaseLiquidity(
     increaseTxHash,
 
     // Result
-    addedLiquidity,
     isSuccess,
-    receipt,
 
     // Reset
     reset,

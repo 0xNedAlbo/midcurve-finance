@@ -11,7 +11,7 @@
  * - No caching (transaction status can change rapidly)
  */
 
-import { normalizeAddress } from '@midcurve/shared';
+import { normalizeAddress, type SerializedTransactionLog } from '@midcurve/shared';
 import { EvmConfig } from '../../config/evm.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -43,6 +43,8 @@ export interface EvmTransactionStatus {
   confirmations?: number;
   /** Number of logs emitted by the transaction (if mined) */
   logsCount?: number;
+  /** Serialized transaction logs for event parsing (if mined) */
+  logs?: SerializedTransactionLog[];
   /** Contract address if this was a contract creation (if applicable) */
   contractAddress?: string | null;
   /** Timestamp when data was fetched */
@@ -187,6 +189,12 @@ export class EvmTransactionStatusService {
         effectiveGasPrice: receipt.effectiveGasPrice,
         confirmations,
         logsCount: receipt.logs.length,
+        logs: receipt.logs.map((l) => ({
+          address: l.address,
+          topics: [...l.topics],
+          data: l.data,
+          logIndex: Number(l.logIndex),
+        })),
         contractAddress: receipt.contractAddress
           ? normalizeAddress(receipt.contractAddress)
           : null,

@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
 import {
   useWriteContract,
-  useWaitForTransactionReceipt,
 } from "wagmi";
-import type { Address, TransactionReceipt } from "viem";
+import type { Address } from "viem";
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ABI,
   NONFUNGIBLE_POSITION_MANAGER_ADDRESSES
@@ -11,10 +10,6 @@ import {
 
 // Maximum uint128 value (collect all available fees)
 const MAX_UINT128 = BigInt("0xffffffffffffffffffffffffffffffff");
-
-// Collect event signature
-const COLLECT_EVENT_TOPIC =
-  "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01";
 
 export interface CollectFeesParams {
   tokenId: bigint;
@@ -27,10 +22,7 @@ export interface UseCollectFeesResult {
   isCollecting: boolean;
   isWaitingForConfirmation: boolean;
   isSuccess: boolean;
-  receipt: TransactionReceipt | undefined;
-  collectedAmount0: bigint | undefined;
-  collectedAmount1: bigint | undefined;
-  collectLogIndex: number | undefined;
+  collectTxHash: Address | undefined;
   error: Error | null;
   reset: () => void;
 }
@@ -41,7 +33,7 @@ export interface UseCollectFeesResult {
  * @param params - Collection parameters (can be null if wallet not connected or no fees)
  *
  * @example
- * const { collect, isCollecting, isSuccess, collectedAmount0, collectedAmount1 } = useCollectFees({
+ * const { collect, isCollecting, isSuccess } = useCollectFees({
  *   tokenId: 123456n,
  *   recipient: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
  *   chainId: 1
@@ -50,16 +42,6 @@ export interface UseCollectFeesResult {
 export function useCollectFees(
   params: CollectFeesParams | null
 ): UseCollectFeesResult {
-  const [collectedAmount0, setCollectedAmount0] = useState<bigint | undefined>(
-    undefined
-  );
-  const [collectedAmount1, setCollectedAmount1] = useState<bigint | undefined>(
-    undefined
-  );
-  const [collectLogIndex, setCollectLogIndex] = useState<number | undefined>(
-    undefined
-  );
-
   const {
     writeContract,
     data: collectTxHash,
@@ -68,48 +50,21 @@ export function useCollectFees(
     reset: resetWrite,
   } = useWriteContract();
 
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess,
-    data: receipt,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: collectTxHash,
+  const txWatch = useWatchTransactionStatus({
+    txHash: collectTxHash ?? null,
+    chainId: params?.chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!collectTxHash,
   });
+  const isWaitingForConfirmation = !!collectTxHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   const managerAddress = params
     ? NONFUNGIBLE_POSITION_MANAGER_ADDRESSES[
         params.chainId as keyof typeof NONFUNGIBLE_POSITION_MANAGER_ADDRESSES
       ]
     : undefined;
-
-  // Parse collected amounts from transaction receipt
-  useEffect(() => {
-    if (!isSuccess || !receipt || !managerAddress) return;
-
-    try {
-      // Find the Collect event log
-      const collectLog = receipt.logs.find(
-        (log) =>
-          log.address.toLowerCase() === managerAddress.toLowerCase() &&
-          log.topics[0] === COLLECT_EVENT_TOPIC
-      );
-
-      if (collectLog && collectLog.data) {
-        // Extract amounts from event data
-        // Event data format: recipient (address, 32 bytes) + amount0 (uint256, 32 bytes) + amount1 (uint256, 32 bytes)
-        // Skip recipient (bytes 0-32), extract amount0 and amount1
-        const amount0Hex = "0x" + collectLog.data.slice(66, 130);     // Bytes 32-64 (amount0)
-        const amount1Hex = "0x" + collectLog.data.slice(130, 194);    // Bytes 64-96 (amount1)
-
-        setCollectedAmount0(BigInt(amount0Hex));
-        setCollectedAmount1(BigInt(amount1Hex));
-        setCollectLogIndex(Number(collectLog.logIndex));
-      }
-    } catch (error) {
-      console.error("Failed to parse Collect event:", error);
-    }
-  }, [isSuccess, receipt, managerAddress]);
 
   const collect = () => {
     if (!params) {
@@ -142,9 +97,6 @@ export function useCollectFees(
 
   const reset = () => {
     resetWrite();
-    setCollectedAmount0(undefined);
-    setCollectedAmount1(undefined);
-    setCollectLogIndex(undefined);
   };
 
   const error = writeError || receiptError;
@@ -154,10 +106,7 @@ export function useCollectFees(
     isCollecting: isPending,
     isWaitingForConfirmation,
     isSuccess,
-    receipt,
-    collectedAmount0,
-    collectedAmount1,
-    collectLogIndex,
+    collectTxHash,
     error,
     reset,
   };

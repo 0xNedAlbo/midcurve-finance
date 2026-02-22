@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { decodeEventLog, type Address, type TransactionReceipt } from "viem";
+import { decodeEventLog, type Address } from "viem";
+import type { SerializedTransactionLog } from '@midcurve/shared';
 import type { EvmChainSlug } from "@/config/chains";
 import { getChainId } from "@/config/chains";
 import { apiClient } from "@/lib/api-client";
@@ -31,19 +32,21 @@ export interface CreatePositionData {
     isToken0Quote: boolean;
     /** Initial liquidity from the mint transaction (extracted from IncreaseLiquidity event) */
     liquidity: string;
+    /** Transaction hash of the mint transaction (for MINT lifecycle event creation) */
+    mintTxHash?: string;
 }
 
 /**
- * Extract liquidity from IncreaseLiquidity event in mint transaction receipt
+ * Extract liquidity from IncreaseLiquidity event in transaction logs
  *
- * @param receipt - Transaction receipt from the mint transaction
+ * @param logs - Serialized transaction logs from backend subscription
  * @returns Liquidity as a string (for API serialization)
  * @throws Error if IncreaseLiquidity event is not found
  */
-export function extractLiquidityFromReceipt(receipt: TransactionReceipt): string {
+export function extractLiquidityFromLogs(logs: SerializedTransactionLog[]): string {
     // Find the IncreaseLiquidity event
     // Event signature: 0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f
-    const increaseLiquidityLog = receipt.logs.find(
+    const increaseLiquidityLog = logs.find(
         (log) =>
             log.topics[0] ===
             "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f"
@@ -51,15 +54,15 @@ export function extractLiquidityFromReceipt(receipt: TransactionReceipt): string
 
     if (!increaseLiquidityLog) {
         throw new Error(
-            "IncreaseLiquidity event not found in transaction receipt"
+            "IncreaseLiquidity event not found in transaction logs"
         );
     }
 
     // Decode the event data using viem
     const decodedEvent = decodeEventLog({
         abi: [INCREASE_LIQUIDITY_EVENT_ABI],
-        data: increaseLiquidityLog.data,
-        topics: increaseLiquidityLog.topics,
+        data: increaseLiquidityLog.data as `0x${string}`,
+        topics: increaseLiquidityLog.topics as [signature: `0x${string}`, ...args: `0x${string}`[]],
     });
 
     const { liquidity } = decodedEvent.args;
@@ -99,6 +102,7 @@ export function useCreatePositionAPI() {
                     ownerAddress: data.ownerAddress,
                     isToken0Quote: data.isToken0Quote,
                     liquidity: data.liquidity,
+                    mintTxHash: data.mintTxHash,
                 }
             );
 

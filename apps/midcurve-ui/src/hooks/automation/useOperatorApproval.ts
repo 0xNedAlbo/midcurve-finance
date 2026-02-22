@@ -16,7 +16,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount } from 'wagmi';
+import { useWriteContract, useReadContract, useAccount } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import type { Address, Hash } from 'viem';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ABI,
@@ -92,14 +93,16 @@ export function useOperatorApproval(
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for approval transaction confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess: isApprovalSuccess,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: txHash,
+  // Wait for approval transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: txHash ?? null,
+    chainId: chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!txHash,
   });
+  const isWaitingForConfirmation = !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isApprovalSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Refetch approval status after successful transaction
   useEffect(() => {

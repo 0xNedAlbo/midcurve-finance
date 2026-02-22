@@ -33,7 +33,7 @@ import type {
   EvmTxStatusWatchResponseData,
   EvmTxStatusSubscriptionPollResponseData,
 } from '@midcurve/api-shared';
-import type { TxStatusValue } from '@midcurve/shared';
+import type { TxStatusValue, SerializedTransactionLog } from '@midcurve/shared';
 import { apiClient } from '@/lib/api-client';
 
 /** Default polling interval in milliseconds */
@@ -129,6 +129,11 @@ export interface UseWatchTransactionStatusReturn {
    * Number of logs emitted
    */
   logsCount: number | null | undefined;
+
+  /**
+   * Serialized transaction logs for event parsing
+   */
+  logs: SerializedTransactionLog[] | null | undefined;
 
   /**
    * Contract address if this was a deployment
@@ -364,6 +369,7 @@ export function useWatchTransactionStatus(
     gasUsed,
     effectiveGasPrice,
     logsCount: pollQuery.data?.logsCount,
+    logs: pollQuery.data?.logs,
     contractAddress: pollQuery.data?.contractAddress,
     subscriptionStatus: pollQuery.data?.subscriptionStatus,
     targetConfirmations: pollQuery.data?.targetConfirmations ?? targetConfirmations,

@@ -65,6 +65,14 @@ export interface CreateUniswapV3PositionRequest {
    * @example "1000000000000000000"
    */
   liquidity: string;
+
+  /**
+   * Transaction hash of the mint transaction (0x-prefixed, 64 hex chars)
+   * When provided, the backend fetches the receipt to create a MINT lifecycle ledger event.
+   *
+   * @example "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+   */
+  mintTxHash?: string;
 }
 
 /**
@@ -131,6 +139,12 @@ export const CreateUniswapV3PositionRequestSchema = z.object({
   liquidity: z
     .string()
     .regex(bigIntStringRegex, 'Liquidity must be a numeric string'),
+
+  // Optional mint transaction hash for MINT lifecycle event creation
+  mintTxHash: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash format')
+    .optional(),
 });
 
 /**

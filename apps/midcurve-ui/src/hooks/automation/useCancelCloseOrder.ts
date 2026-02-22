@@ -17,7 +17,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Address, Hash } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
@@ -95,14 +96,16 @@ export function useCancelCloseOrder(
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for transaction confirmation
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess: isTxSuccess,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: txHash,
+  // Wait for transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: txHash ?? null,
+    chainId,
+    targetConfirmations: 1,
+    enabled: !!txHash,
   });
+  const isWaitingForConfirmation = !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isTxSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle transaction success — invalidate caches so UI picks up
   // the cancellation made by the backend event subscriber.

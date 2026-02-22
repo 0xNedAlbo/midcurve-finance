@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import type { ApiResponse } from '../common/index.js';
-import type { TxStatusValue } from '@midcurve/shared';
+import type { TxStatusValue, SerializedTransactionLog } from '@midcurve/shared';
 
 // ============================================================================
 // Subscription Status
@@ -128,6 +128,8 @@ export interface EvmTxStatusSubscriptionPollResponseData {
   effectiveGasPrice: string | null;
   /** Number of logs emitted by the transaction */
   logsCount: number | null;
+  /** Serialized transaction logs for frontend event parsing */
+  logs?: SerializedTransactionLog[] | null;
   /** Contract address if this was a contract creation */
   contractAddress: string | null;
   /** URL for polling this subscription */

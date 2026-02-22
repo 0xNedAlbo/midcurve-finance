@@ -21,6 +21,7 @@ export type {
   Erc20BalanceSubscriptionJSON,
   // EVM Transaction Status
   TxStatusValue,
+  SerializedTransactionLog,
   EvmTxStatusSubscriptionConfig,
   EvmTxStatusSubscriptionState,
   EvmTxStatusSubscriptionData,

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { encodeFunctionData, type Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ADDRESSES,
   NONFUNGIBLE_POSITION_MANAGER_ABI,
@@ -29,7 +30,6 @@ export interface UseDecreaseLiquidityResult {
   // Overall status
   isSuccess: boolean;
   currentStep: 'idle' | 'withdrawing' | 'complete';
-  receipt: import('viem').TransactionReceipt | undefined;
 
   // Reset state
   reset: () => void;
@@ -73,16 +73,16 @@ export function useDecreaseLiquidity(params: DecreaseLiquidityParams | null): Us
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for transaction confirmation
-  const {
-    isLoading: isWaitingForWithdraw,
-    isSuccess: withdrawSuccess,
-    data: receipt,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: withdrawTxHash,
-    chainId: params?.chainId,
+  // Wait for transaction confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: withdrawTxHash ?? null,
+    chainId: params?.chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!withdrawTxHash,
   });
+  const isWaitingForWithdraw = !!withdrawTxHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const withdrawSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Handle write errors and receipt errors
   useEffect(() => {
@@ -175,7 +175,6 @@ export function useDecreaseLiquidity(params: DecreaseLiquidityParams | null): Us
     // Overall status
     isSuccess: withdrawSuccess,
     currentStep,
-    receipt,
 
     // Reset
     reset,

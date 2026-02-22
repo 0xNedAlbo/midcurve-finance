@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Address } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ADDRESSES,
   NONFUNGIBLE_POSITION_MANAGER_ABI,
@@ -42,14 +43,15 @@ export function useBurnPosition(params: BurnPositionParams | null): UseBurnPosit
     reset: resetWrite,
   } = useWriteContract();
 
-  const {
-    isLoading: isWaitingForBurn,
-    isSuccess: burnSuccess,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: burnTxHash,
-    chainId: params?.chainId,
+  const txWatch = useWatchTransactionStatus({
+    txHash: burnTxHash ?? null,
+    chainId: params?.chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!burnTxHash,
   });
+  const isWaitingForBurn = !!burnTxHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const burnSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   useEffect(() => {
     if (writeError || receiptError) {

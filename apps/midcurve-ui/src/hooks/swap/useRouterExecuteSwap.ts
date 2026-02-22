@@ -9,8 +9,8 @@ import { useState, useCallback } from 'react';
 import type { Address } from 'viem';
 import {
   useWriteContract,
-  useWaitForTransactionReceipt,
 } from 'wagmi';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import type { RouterSwapQuoteData } from '@midcurve/api-shared';
 
 const SWAP_ROUTER_SELL_ABI = [
@@ -82,14 +82,15 @@ export function useRouterExecuteSwap({
     reset: resetWrite,
   } = useWriteContract();
 
-  const {
-    isLoading: isWaitingForConfirmation,
-    isSuccess,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: txHash,
-    chainId,
+  const txWatch = useWatchTransactionStatus({
+    txHash: txHash ?? null,
+    chainId: chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!txHash,
   });
+  const isWaitingForConfirmation = !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const isSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   const executeSwap = useCallback(
     async (input: RouterExecuteSwapInput) => {
