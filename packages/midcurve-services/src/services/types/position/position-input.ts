@@ -7,7 +7,6 @@
 
 import type {
   PositionProtocol,
-  PositionType,
   UniswapV3PositionConfigData,
   UniswapV3PositionState,
 } from '@midcurve/shared';
@@ -54,7 +53,6 @@ export interface UniswapV3PositionDiscoverInput {
  */
 interface BaseCreatePositionInput {
   protocol: PositionProtocol;
-  positionType: PositionType;
   userId: string;
   poolId: string;
   isToken0Quote: boolean;
@@ -78,7 +76,6 @@ interface BaseUpdatePositionInput {
  */
 export interface CreateUniswapV3PositionInput extends BaseCreatePositionInput {
   protocol: 'uniswapv3';
-  positionType: 'CL_TICKS';
   config: UniswapV3PositionConfigData;
   state: UniswapV3PositionState;
 }

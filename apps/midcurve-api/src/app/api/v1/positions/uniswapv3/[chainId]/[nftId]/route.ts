@@ -537,7 +537,6 @@ export async function PUT(
         const createdPosition = await getUniswapV3PositionService().create(
           {
             protocol: 'uniswapv3',
-            positionType: 'CL_TICKS',
             userId: user.id,
             poolId: pool.id,
             isToken0Quote,

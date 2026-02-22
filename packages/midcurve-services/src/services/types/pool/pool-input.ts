@@ -8,7 +8,6 @@
 
 import type {
   Protocol,
-  PoolType,
   UniswapV3PoolConfigData,
   UniswapV3PoolState,
 } from '@midcurve/shared';
@@ -24,10 +23,6 @@ import type {
 interface BaseCreatePoolInput {
   /** Protocol discriminator */
   protocol: Protocol;
-  /** Pool type discriminator */
-  poolType: PoolType;
-  /** Fee in basis points */
-  feeBps: number;
   /**
    * Database ID of token0
    * Token must already exist in database
@@ -45,8 +40,7 @@ interface BaseCreatePoolInput {
  * All fields are optional except those that identify the pool
  */
 interface BaseUpdatePoolInput {
-  /** Fee in basis points */
-  feeBps?: number;
+  // Protocol-specific update fields defined in subtype interfaces
 }
 
 // =============================================================================
@@ -77,7 +71,6 @@ export interface UniswapV3PoolDiscoverInput {
  */
 export interface CreateUniswapV3PoolInput extends BaseCreatePoolInput {
   protocol: 'uniswapv3';
-  poolType: 'CL_TICKS';
   config: UniswapV3PoolConfigData;
   state: UniswapV3PoolState;
 }

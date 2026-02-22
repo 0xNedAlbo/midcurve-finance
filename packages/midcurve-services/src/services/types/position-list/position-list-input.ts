@@ -91,7 +91,6 @@ export interface PositionListRow {
   id: string;
   positionHash: string;
   protocol: string;
-  positionType: string;
 
   // Financial (stored as string in Prisma Decimal columns)
   currentValue: string;

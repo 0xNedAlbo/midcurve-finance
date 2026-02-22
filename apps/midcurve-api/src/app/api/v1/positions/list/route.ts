@@ -40,7 +40,6 @@ function serializeListRow(row: PositionListRow): PositionListItem {
   return {
     positionHash: row.positionHash,
     protocol: row.protocol,
-    positionType: row.positionType,
     currentValue: row.currentValue,
     currentCostBasis: row.currentCostBasis,
     realizedPnl: row.realizedPnl,

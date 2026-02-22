@@ -156,10 +156,8 @@ import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 export interface PoolDbResult {
   id: string;
   protocol: string;
-  poolType: string;
   token0Id: string;
   token1Id: string;
-  feeBps: number;
   config: unknown;
   state: unknown;
   createdAt: Date;
@@ -313,10 +311,8 @@ export class UniswapV3PoolService implements PoolServiceInterface {
     return UniswapV3Pool.fromDBWithTokens({
       id: dbResult.id,
       protocol: 'uniswapv3',
-      poolType: dbResult.poolType,
       token0Id: dbResult.token0Id,
       token1Id: dbResult.token1Id,
-      feeBps: dbResult.feeBps,
       config: dbResult.config as Record<string, unknown>,
       state: dbResult.state as Record<string, unknown>,
       createdAt: dbResult.createdAt,
@@ -1021,10 +1017,8 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       const pool = await this.create(
         {
           protocol: 'uniswapv3',
-          poolType: 'CL_TICKS',
           token0Id: token0.id,
           token1Id: token1.id,
-          feeBps: config.feeBps,
           config,
           state,
         },
@@ -1253,17 +1247,14 @@ export class UniswapV3PoolService implements PoolServiceInterface {
 
       log.dbOperation(this.logger, 'create', 'Pool', {
         protocol: input.protocol,
-        poolType: input.poolType,
         poolHash,
       });
 
       const result = await client.pool.create({
         data: {
           protocol: input.protocol,
-          poolType: input.poolType,
           token0Id: input.token0Id,
           token1Id: input.token1Id,
-          feeBps: input.feeBps,
           poolHash,
           config: config.toJSON() as object,
           state: stateDB as object,
@@ -1280,7 +1271,6 @@ export class UniswapV3PoolService implements PoolServiceInterface {
         {
           id: pool.id,
           protocol: pool.protocol,
-          poolType: pool.poolType,
         },
         'Pool created'
       );
@@ -1373,10 +1363,6 @@ export class UniswapV3PoolService implements PoolServiceInterface {
 
       // Build update data
       const data: Record<string, unknown> = {};
-
-      if (input.feeBps !== undefined) {
-        data.feeBps = input.feeBps;
-      }
 
       // Handle config update with address normalization
       if (input.config !== undefined) {
@@ -1532,7 +1518,7 @@ export class UniswapV3PoolService implements PoolServiceInterface {
       await client.pool.delete({ where: { id } });
 
       this.logger.info(
-        { id, protocol: existing.protocol, poolType: existing.poolType },
+        { id, protocol: existing.protocol },
         'Pool deleted successfully'
       );
 

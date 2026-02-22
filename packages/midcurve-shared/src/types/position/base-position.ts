@@ -8,12 +8,11 @@
  * and implement abstract methods for protocol-specific behavior.
  */
 
-import type { Erc20Token } from '../token/index.js';
-import type { UniswapV3Pool } from '../pool/index.js';
+import type { TokenInterface } from '../token/index.js';
+import type { PoolInterface } from '../pool/index.js';
 import type { PositionInterface } from './position.interface.js';
 import type {
   PositionProtocol,
-  PositionType,
   PositionJSON,
   BasePositionParams,
   PnLSimulationResult,
@@ -41,13 +40,12 @@ export abstract class BasePosition implements PositionInterface {
   readonly id: string;
   readonly positionHash: string;
   readonly userId: string;
-  readonly positionType: PositionType;
 
   // ============================================================================
   // Pool Reference
   // ============================================================================
 
-  readonly pool: UniswapV3Pool;
+  readonly pool: PoolInterface;
   readonly isToken0Quote: boolean;
 
   // ============================================================================
@@ -136,7 +134,6 @@ export abstract class BasePosition implements PositionInterface {
     this.id = params.id;
     this.positionHash = params.positionHash;
     this.userId = params.userId;
-    this.positionType = params.positionType;
 
     // Pool reference
     this.pool = params.pool;
@@ -190,7 +187,6 @@ export abstract class BasePosition implements PositionInterface {
       positionHash: this.positionHash,
       userId: this.userId,
       protocol: this.protocol,
-      positionType: this.positionType,
       pool: this.pool.toJSON(),
       isToken0Quote: this.isToken0Quote,
 
@@ -238,18 +234,18 @@ export abstract class BasePosition implements PositionInterface {
    * - Quote token = reference currency (what you measure value in)
    * - Base token = asset being priced (what you have exposure to)
    *
-   * @returns The base token (Erc20Token)
+   * @returns The base token
    */
-  getBaseToken(): Erc20Token {
+  getBaseToken(): TokenInterface {
     return this.isToken0Quote ? this.pool.token1 : this.pool.token0;
   }
 
   /**
    * Get the quote token (the reference/numeraire token).
    *
-   * @returns The quote token (Erc20Token)
+   * @returns The quote token
    */
-  getQuoteToken(): Erc20Token {
+  getQuoteToken(): TokenInterface {
     return this.isToken0Quote ? this.pool.token0 : this.pool.token1;
   }
 

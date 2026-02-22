@@ -48,11 +48,9 @@ export const MOCK_WETH: Erc20Token = {
  */
 export const MOCK_POOL = {
   id: 'pool-1',
-  poolType: 'CL_TICKS',
   protocol: 'uniswapv3',
   token0: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
   token1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-  feeBps: 500,
   state: {
     sqrtPriceX96: '0',
     tick: 0,
@@ -75,7 +73,6 @@ export const MOCK_POOL = {
  */
 export const MOCK_POSITION = {
   id: 'position-1',
-  positionType: 'CL_TICKS',
   userId: 'user-1',
   poolId: MOCK_POOL.id,
   quoteTokenId: MOCK_USDC.id,

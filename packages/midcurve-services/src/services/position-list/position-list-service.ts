@@ -30,7 +30,6 @@ const POSITION_LIST_SELECT = {
   id: true,
   positionHash: true,
   protocol: true,
-  positionType: true,
   currentValue: true,
   currentCostBasis: true,
   realizedPnl: true,

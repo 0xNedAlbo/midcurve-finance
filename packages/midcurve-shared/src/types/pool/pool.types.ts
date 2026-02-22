@@ -2,10 +2,10 @@
  * Pool Types
  *
  * Type definitions for pool data structures.
- * Provides Protocol, PoolType discriminators and serialization types.
+ * Provides Protocol discriminator and serialization types.
  */
 
-import type { Erc20Token, TokenJSON, Erc20TokenRow } from '../token/index.js';
+import type { TokenInterface, TokenJSON, TokenRow } from '../token/index.js';
 
 // ============================================================================
 // DISCRIMINATORS
@@ -17,13 +17,6 @@ import type { Erc20Token, TokenJSON, Erc20TokenRow } from '../token/index.js';
  * Extensible for future protocols (orca, raydium, etc.)
  */
 export type Protocol = 'uniswapv3';
-
-/**
- * Pool type identifier
- * - 'CL_TICKS': Concentrated liquidity with tick-based pricing (Uniswap V3 style)
- * Extensible for other pool types (constant product, stable pools, etc.)
- */
-export type PoolType = 'CL_TICKS';
 
 // ============================================================================
 // JSON SERIALIZATION
@@ -37,10 +30,8 @@ export type PoolType = 'CL_TICKS';
 export interface PoolJSON {
   id: string;
   protocol: Protocol;
-  poolType: PoolType;
   token0: TokenJSON;
   token1: TokenJSON;
-  feeBps: number;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
   createdAt: string;
@@ -57,10 +48,8 @@ export interface PoolJSON {
  */
 export interface BasePoolParams {
   id: string;
-  poolType: PoolType;
-  token0: Erc20Token;
-  token1: Erc20Token;
-  feeBps: number;
+  token0: TokenInterface;
+  token1: TokenInterface;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -77,10 +66,8 @@ export interface BasePoolParams {
 export interface PoolRow {
   id: string;
   protocol: string;
-  poolType: string;
   token0Id: string;
   token1Id: string;
-  feeBps: number;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
   createdAt: Date;
@@ -89,10 +76,10 @@ export interface PoolRow {
    * Included token0 relation (from Prisma with include)
    * Optional - may be fetched separately
    */
-  token0?: Erc20TokenRow;
+  token0?: TokenRow;
   /**
    * Included token1 relation (from Prisma with include)
    * Optional - may be fetched separately
    */
-  token1?: Erc20TokenRow;
+  token1?: TokenRow;
 }

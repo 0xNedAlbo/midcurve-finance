@@ -7,7 +7,7 @@
  */
 
 import type { PositionInterface } from '../types/position/index.js';
-import type { Erc20Token } from '../types/token/index.js';
+import type { TokenInterface } from '../types/token/index.js';
 
 /**
  * Get the quote token from a position.
@@ -16,7 +16,7 @@ import type { Erc20Token } from '../types/token/index.js';
  * position value. This is determined by the isToken0Quote flag.
  *
  * @param position - The position to get the quote token from
- * @returns The quote token (Erc20Token)
+ * @returns The quote token
  *
  * @example
  * ```typescript
@@ -26,7 +26,7 @@ import type { Erc20Token } from '../types/token/index.js';
  * console.log(`Measuring value in ${quote.symbol}`);
  * ```
  */
-export function getQuoteToken(position: PositionInterface): Erc20Token {
+export function getQuoteToken(position: PositionInterface): TokenInterface {
   return position.isToken0Quote ? position.pool.token0 : position.pool.token1;
 }
 
@@ -38,7 +38,7 @@ export function getQuoteToken(position: PositionInterface): Erc20Token {
  * quote tokens) changes accordingly.
  *
  * @param position - The position to get the base token from
- * @returns The base token (Erc20Token)
+ * @returns The base token
  *
  * @example
  * ```typescript
@@ -48,6 +48,6 @@ export function getQuoteToken(position: PositionInterface): Erc20Token {
  * console.log(`Risk exposure to ${base.symbol} price`);
  * ```
  */
-export function getBaseToken(position: PositionInterface): Erc20Token {
+export function getBaseToken(position: PositionInterface): TokenInterface {
   return position.isToken0Quote ? position.pool.token1 : position.pool.token0;
 }

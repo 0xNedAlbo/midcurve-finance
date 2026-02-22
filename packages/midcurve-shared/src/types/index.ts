@@ -46,7 +46,6 @@ export type {
 export type {
   PoolInterface,
   Protocol,
-  PoolType,
   PoolJSON,
   BasePoolParams,
   PoolRow,
@@ -74,7 +73,6 @@ export { stateToJSON, stateFromJSON } from './pool/index.js';
 export type {
   PositionInterface,
   PositionProtocol,
-  PositionType,
   PositionJSON,
   BasePositionParams,
   PositionRow,

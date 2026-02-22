@@ -41,7 +41,6 @@ export interface Erc20TokenResponse {
 export interface UniswapV3PoolResponse {
   id: string;
   protocol: 'uniswapv3';
-  poolType: 'CL_TICKS';
   token0: Erc20TokenResponse;
   token1: Erc20TokenResponse;
   feeBps: number;
@@ -64,7 +63,6 @@ export interface UniswapV3PositionResponse {
   positionHash: string;
   userId: string;
   protocol: 'uniswapv3';
-  positionType: 'CL_TICKS';
 
   // Pool reference
   pool: UniswapV3PoolResponse;

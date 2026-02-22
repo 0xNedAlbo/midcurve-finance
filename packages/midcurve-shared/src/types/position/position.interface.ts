@@ -5,9 +5,9 @@
  * Positions represent user liquidity positions in DeFi protocols.
  */
 
-import type { Erc20Token } from '../token/index.js';
-import type { UniswapV3Pool } from '../pool/index.js';
-import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from './position.types.js';
+import type { TokenInterface } from '../token/index.js';
+import type { PoolInterface } from '../pool/index.js';
+import type { PositionProtocol, PositionJSON, PnLSimulationResult } from './position.types.js';
 
 /**
  * PositionInterface
@@ -41,15 +41,9 @@ export interface PositionInterface {
   readonly protocol: PositionProtocol;
 
   /**
-   * Position type (concentrated liquidity, etc.)
-   * @example 'CL_TICKS'
-   */
-  readonly positionType: PositionType;
-
-  /**
    * Pool reference (full object for token access)
    */
-  readonly pool: UniswapV3Pool;
+  readonly pool: PoolInterface;
 
   /**
    * Whether token0 is the quote token
@@ -185,12 +179,12 @@ export interface PositionInterface {
   /**
    * Get the base token (the token with price risk exposure)
    */
-  getBaseToken(): Erc20Token;
+  getBaseToken(): TokenInterface;
 
   /**
    * Get the quote token (the reference/numeraire token)
    */
-  getQuoteToken(): Erc20Token;
+  getQuoteToken(): TokenInterface;
 
   /**
    * Get total realized PnL including cashflow

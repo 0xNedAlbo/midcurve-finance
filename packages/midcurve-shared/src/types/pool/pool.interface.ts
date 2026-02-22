@@ -5,8 +5,8 @@
  * Pools represent liquidity pool positions across different DEX protocols.
  */
 
-import type { Erc20Token } from '../token/index.js';
-import type { Protocol, PoolType, PoolJSON } from './pool.types.js';
+import type { TokenInterface } from '../token/index.js';
+import type { Protocol, PoolJSON } from './pool.types.js';
 
 /**
  * PoolInterface
@@ -30,31 +30,16 @@ export interface PoolInterface {
   readonly protocol: Protocol;
 
   /**
-   * Pool type identifier
-   * Identifies the pool mechanism (concentrated liquidity, constant product, etc.)
-   * @example 'CL_TICKS'
-   */
-  readonly poolType: PoolType;
-
-  /**
    * First token in the pair
-   * Full Erc20Token object with type-safe config access
-   * By convention, token0 < token1 (by address comparison)
+   * Concrete type depends on protocol (Erc20Token for EVM, SPL token for Solana, etc.)
    */
-  readonly token0: Erc20Token;
+  readonly token0: TokenInterface;
 
   /**
    * Second token in the pair
-   * Full Erc20Token object with type-safe config access
-   * By convention, token1 > token0 (by address comparison)
+   * Concrete type depends on protocol (Erc20Token for EVM, SPL token for Solana, etc.)
    */
-  readonly token1: Erc20Token;
-
-  /**
-   * Fee tier in basis points
-   * @example 500 = 0.05%, 3000 = 0.3%, 10000 = 1%
-   */
-  readonly feeBps: number;
+  readonly token1: TokenInterface;
 
   /**
    * Protocol-specific configuration (as generic Record)

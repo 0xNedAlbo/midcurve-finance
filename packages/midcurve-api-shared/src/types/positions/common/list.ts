@@ -54,8 +54,6 @@ export interface PositionListItem {
   positionHash: string;
   /** Protocol identifier e.g. "uniswapv3" */
   protocol: string;
-  /** Position type e.g. "CL_TICKS" */
-  positionType: string;
 
   // Financial (bigint as string) — for sorting/filtering by value
   currentValue: string;

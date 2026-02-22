@@ -19,7 +19,7 @@ import { useEffect, useMemo, useCallback, useState } from 'react';
 import { Check, Loader2, ArrowRight, Coins, PlusCircle, MinusCircle } from 'lucide-react';
 import { useAccount, useChainId } from 'wagmi';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
-import type { SwapConfig, PnLScenario } from '@midcurve/shared';
+import type { SwapConfig, PnLScenario, Erc20Token } from '@midcurve/shared';
 import {
   formatCompactValue,
   compareAddresses,
@@ -241,10 +241,10 @@ export function SwapStep() {
   const getTokenLogoUrl = (tokenAddress: string | undefined) => {
     if (!tokenAddress || !state.discoveredPool) return null;
     const normalizedAddress = tokenAddress.toLowerCase();
-    if (state.discoveredPool.token0.address.toLowerCase() === normalizedAddress) {
+    if ((state.discoveredPool.token0 as Erc20Token).address.toLowerCase() === normalizedAddress) {
       return state.discoveredPool.token0.logoUrl;
     }
-    if (state.discoveredPool.token1.address.toLowerCase() === normalizedAddress) {
+    if ((state.discoveredPool.token1 as Erc20Token).address.toLowerCase() === normalizedAddress) {
       return state.discoveredPool.token1.logoUrl;
     }
     return null;

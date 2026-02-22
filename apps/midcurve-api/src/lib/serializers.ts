@@ -96,9 +96,8 @@ export function serializeUniswapV3Pool(pool: UniswapV3Pool) {
   return {
     id: pool.id,
     protocol: pool.protocol,
-    poolType: pool.poolType,
-    token0: serializeErc20Token(pool.token0),
-    token1: serializeErc20Token(pool.token1),
+    token0: serializeErc20Token(pool.token0 as Erc20Token),
+    token1: serializeErc20Token(pool.token1 as Erc20Token),
     feeBps: pool.feeBps,
     config: {
       chainId: pool.typedConfig.chainId,
@@ -204,7 +203,6 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     id: position.id,
     positionHash: position.positionHash,
     protocol: position.protocol,
-    positionType: position.positionType,
     userId: position.userId,
 
     // PnL fields (bigint → string)
@@ -226,7 +224,7 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     priceRangeUpper: position.priceRangeUpper.toString(),
 
     // Pool and tokens (nested serialization)
-    pool: serializeUniswapV3Pool(position.pool),
+    pool: serializeUniswapV3Pool(position.pool as UniswapV3Pool),
 
     // Token roles
     isToken0Quote: position.isToken0Quote,

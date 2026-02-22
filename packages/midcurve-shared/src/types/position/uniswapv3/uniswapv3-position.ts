@@ -8,9 +8,9 @@
 import { TickMath } from '@uniswap/v3-sdk';
 import { BasePosition } from '../base-position.js';
 import { UniswapV3Pool } from '../../pool/index.js';
+import type { Erc20Token } from '../../token/index.js';
 import type {
   PositionProtocol,
-  PositionType,
   BasePositionParams,
   PositionRow,
   PnLSimulationResult,
@@ -257,8 +257,8 @@ export class UniswapV3Position extends BasePosition {
    * @returns Full simulation result including value, PnL, percent, and token amounts
    */
   simulatePnLAtPrice(price: bigint): UniswapV3PnLSimulationResult {
-    const baseToken = this.getBaseToken();
-    const quoteToken = this.getQuoteToken();
+    const baseToken = this.getBaseToken() as Erc20Token;
+    const quoteToken = this.getQuoteToken() as Erc20Token;
     const baseIsToken0 = !this.isToken0Quote;
 
     // Convert price → sqrtPriceX96 DIRECTLY (continuous, no tick snapping)
@@ -345,7 +345,6 @@ export class UniswapV3Position extends BasePosition {
       id: row.id,
       positionHash: row.positionHash,
       userId: row.userId,
-      positionType: row.positionType as PositionType,
 
       // Pool reference
       pool,
@@ -414,8 +413,8 @@ export class UniswapV3Position extends BasePosition {
     const now = new Date();
 
     // Compute actual price range from ticks (needed by CloseOrderSimulationOverlay.maxRunup/maxDrawdown)
-    const baseToken = params.isToken0Quote ? params.pool.token1 : params.pool.token0;
-    const quoteToken = params.isToken0Quote ? params.pool.token0 : params.pool.token1;
+    const baseToken = (params.isToken0Quote ? params.pool.token1 : params.pool.token0) as Erc20Token;
+    const quoteToken = (params.isToken0Quote ? params.pool.token0 : params.pool.token1) as Erc20Token;
     const priceRangeLower = tickToPrice(params.tickLower, baseToken.address, quoteToken.address, baseToken.decimals);
     const priceRangeUpper = tickToPrice(params.tickUpper, baseToken.address, quoteToken.address, baseToken.decimals);
 
@@ -424,7 +423,6 @@ export class UniswapV3Position extends BasePosition {
       id: 'simulation',
       positionHash: 'simulation',
       userId: 'simulation',
-      positionType: 'CL_TICKS',
 
       // Pool reference
       pool: params.pool,
@@ -517,7 +515,6 @@ export class UniswapV3Position extends BasePosition {
       id: json.id,
       positionHash: json.positionHash,
       userId: json.userId,
-      positionType: json.positionType,
 
       // Pool reference
       pool: UniswapV3Pool.fromJSON(json.pool),

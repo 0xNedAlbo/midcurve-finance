@@ -5,7 +5,8 @@
  * Handles protocol discrimination and type-safe instantiation.
  */
 
-import type { Erc20Token } from '../token/index.js';
+import type { TokenInterface } from '../token/index.js';
+import { Erc20Token } from '../token/index.js';
 import type { PoolInterface } from './pool.interface.js';
 import type { Protocol, PoolRow, PoolJSON } from './pool.types.js';
 import { UniswapV3Pool, type UniswapV3PoolRow } from './uniswapv3/index.js';
@@ -43,14 +44,14 @@ export class PoolFactory {
    */
   static fromDB(
     row: PoolRow,
-    token0: Erc20Token,
-    token1: Erc20Token
+    token0: TokenInterface,
+    token1: TokenInterface
   ): PoolInterface {
     const protocol = row.protocol as Protocol;
 
     switch (protocol) {
       case 'uniswapv3':
-        return UniswapV3Pool.fromDB(row as UniswapV3PoolRow, token0, token1);
+        return UniswapV3Pool.fromDB(row as UniswapV3PoolRow, token0 as Erc20Token, token1 as Erc20Token);
 
       default:
         throw new Error(`Unknown protocol: ${row.protocol}`);

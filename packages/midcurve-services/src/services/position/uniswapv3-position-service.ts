@@ -202,7 +202,6 @@ export interface PositionDbResult {
     createdAt: Date;
     updatedAt: Date;
     protocol: string;
-    positionType: string;
     userId: string;
     currentValue: string; // Prisma returns bigint as string
     currentCostBasis: string;
@@ -735,16 +734,18 @@ export class UniswapV3PositionService {
             );
 
             // Determine quote token (isToken0Quote)
+            const token0 = pool.token0 as Erc20Token;
+            const token1 = pool.token1 as Erc20Token;
             let isToken0Quote: boolean;
             if (quoteTokenAddress) {
                 const normalizedQuote = normalizeAddress(quoteTokenAddress);
-                if (normalizedQuote === pool.token0.typedConfig.address) {
+                if (normalizedQuote === token0.address) {
                     isToken0Quote = true;
-                } else if (normalizedQuote === pool.token1.typedConfig.address) {
+                } else if (normalizedQuote === token1.address) {
                     isToken0Quote = false;
                 } else {
                     throw new Error(
-                        `Quote token ${quoteTokenAddress} is not in pool. Pool tokens: ${pool.token0.typedConfig.address}, ${pool.token1.typedConfig.address}`,
+                        `Quote token ${quoteTokenAddress} is not in pool. Pool tokens: ${token0.address}, ${token1.address}`,
                     );
                 }
             } else {
@@ -753,8 +754,8 @@ export class UniswapV3PositionService {
                     await this._quoteTokenService.determineQuoteToken({
                         userId,
                         chainId,
-                        token0Address: pool.token0.typedConfig.address,
-                        token1Address: pool.token1.typedConfig.address,
+                        token0Address: token0.address,
+                        token1Address: token1.address,
                     });
                 isToken0Quote = quoteResult.isToken0Quote;
             }
@@ -797,7 +798,6 @@ export class UniswapV3PositionService {
             const position = await this.create(
                 {
                     protocol: "uniswapv3",
-                    positionType: "CL_TICKS",
                     userId,
                     poolId: pool.id,
                     isToken0Quote,
@@ -1971,7 +1971,7 @@ export class UniswapV3PositionService {
 
             // 10. Calculate price range (uses static token decimals from position.pool)
             const { priceRangeLower, priceRangeUpper } =
-                this.calculatePriceRange(position, position.pool);
+                this.calculatePriceRange(position, position.pool as UniswapV3Pool);
 
             const metrics: UniswapV3PositionMetrics = {
                 currentValue,
@@ -3302,7 +3302,6 @@ export class UniswapV3PositionService {
 
             log.dbOperation(this.logger, "create", "Position", {
                 protocol: input.protocol,
-                positionType: input.positionType,
                 userId: input.userId,
                 positionHash,
             });
@@ -3310,7 +3309,6 @@ export class UniswapV3PositionService {
             const result = await db.position.create({
                 data: {
                     protocol: input.protocol,
-                    positionType: input.positionType,
                     userId: input.userId,
                     poolId: input.poolId,
                     isToken0Quote: input.isToken0Quote,
@@ -3351,7 +3349,6 @@ export class UniswapV3PositionService {
                 {
                     id: position.id,
                     protocol: position.protocol,
-                    positionType: position.positionType,
                     userId: position.userId,
                 },
                 "Position created",
@@ -3520,8 +3517,8 @@ export class UniswapV3PositionService {
         // Determine token addresses and decimals based on token roles
         const baseToken = position.isToken0Quote ? pool.token1 : pool.token0;
         const quoteToken = position.isToken0Quote ? pool.token0 : pool.token1;
-        const baseTokenAddress = baseToken.address;
-        const quoteTokenAddress = quoteToken.address;
+        const baseTokenAddress = (baseToken as Erc20Token).address;
+        const quoteTokenAddress = (quoteToken as Erc20Token).address;
         const baseTokenDecimals = baseToken.decimals;
 
         // Convert ticks to prices (quote per base)
@@ -3702,7 +3699,6 @@ export class UniswapV3PositionService {
             positionHash: dbResult.positionHash ?? "",
             userId: dbResult.userId,
             protocol: dbResult.protocol,
-            positionType: dbResult.positionType,
             poolId: dbResult.poolId,
             isToken0Quote: dbResult.isToken0Quote,
             currentValue: BigInt(dbResult.currentValue),

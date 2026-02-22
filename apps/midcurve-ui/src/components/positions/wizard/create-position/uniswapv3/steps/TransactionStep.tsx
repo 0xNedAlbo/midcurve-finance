@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { Circle, Check, Loader2, ExternalLink, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, tickToPrice, formatCompactValue } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice, formatCompactValue } from '@midcurve/shared';
 import { useCreatePositionWizard, computeSwapDirection } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
@@ -304,10 +304,10 @@ export function TransactionStep() {
   const getTokenLogoUrl = (tokenAddress: string | undefined) => {
     if (!tokenAddress || !state.discoveredPool) return null;
     const normalizedAddress = tokenAddress.toLowerCase();
-    if (state.discoveredPool.token0.address.toLowerCase() === normalizedAddress) {
+    if ((state.discoveredPool.token0 as Erc20Token).address.toLowerCase() === normalizedAddress) {
       return state.discoveredPool.token0.logoUrl;
     }
-    if (state.discoveredPool.token1.address.toLowerCase() === normalizedAddress) {
+    if ((state.discoveredPool.token1 as Erc20Token).address.toLowerCase() === normalizedAddress) {
       return state.discoveredPool.token1.logoUrl;
     }
     return null;

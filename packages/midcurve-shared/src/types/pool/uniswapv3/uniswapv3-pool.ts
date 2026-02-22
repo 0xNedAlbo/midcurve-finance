@@ -7,7 +7,7 @@
 
 import { Erc20Token, type Erc20TokenRow } from '../../token/index.js';
 import { BasePool } from '../base-pool.js';
-import type { Protocol, PoolType, BasePoolParams, PoolRow, PoolJSON } from '../pool.types.js';
+import type { Protocol, BasePoolParams, PoolRow, PoolJSON } from '../pool.types.js';
 import {
   UniswapV3PoolConfig,
   type UniswapV3PoolConfigJSON,
@@ -139,6 +139,11 @@ export class UniswapV3Pool extends BasePool {
     return this._config.tickSpacing;
   }
 
+  /** Fee tier in basis points (from config) */
+  get feeBps(): number {
+    return this._config.feeBps;
+  }
+
   // ============================================================================
   // Convenience Accessors - State
   // ============================================================================
@@ -169,6 +174,30 @@ export class UniswapV3Pool extends BasePool {
   }
 
   // ============================================================================
+  // Serialization Override
+  // ============================================================================
+
+  /**
+   * Serialize pool to JSON, including feeBps from config.
+   */
+  override toJSON(): PoolJSON & { feeBps: number } {
+    return {
+      ...super.toJSON(),
+      feeBps: this.feeBps,
+    };
+  }
+
+  /**
+   * Get display name with fee tier.
+   * @returns "TOKEN0/TOKEN1 (fee%)" format
+   * @example "WETH/USDC (0.3%)"
+   */
+  override getDisplayName(): string {
+    const feePercent = this.feeBps / 100;
+    return `${this.token0.symbol}/${this.token1.symbol} (${feePercent}%)`;
+  }
+
+  // ============================================================================
   // Factory Methods
   // ============================================================================
 
@@ -195,10 +224,8 @@ export class UniswapV3Pool extends BasePool {
 
     return new UniswapV3Pool({
       id: row.id,
-      poolType: row.poolType as PoolType,
       token0,
       token1,
-      feeBps: row.feeBps,
       config: UniswapV3PoolConfig.fromJSON(configJSON),
       state: stateFromJSON(stateJSON),
       createdAt: row.createdAt,
@@ -254,10 +281,8 @@ export class UniswapV3Pool extends BasePool {
 
     return new UniswapV3Pool({
       id: json.id,
-      poolType: json.poolType,
       token0: Erc20Token.fromJSON(json.token0),
       token1: Erc20Token.fromJSON(json.token1),
-      feeBps: json.feeBps,
       config: UniswapV3PoolConfig.fromJSON(json.config as unknown as UniswapV3PoolConfigJSON),
       state: stateFromJSON(json.state as unknown as UniswapV3PoolStateJSON),
       createdAt: new Date(json.createdAt),

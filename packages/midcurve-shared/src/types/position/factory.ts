@@ -5,7 +5,8 @@
  * Handles protocol discrimination and delegates to appropriate concrete class.
  */
 
-import type { UniswapV3Pool } from '../pool/index.js';
+import type { PoolInterface } from '../pool/index.js';
+import { UniswapV3Pool } from '../pool/index.js';
 import type { PositionInterface } from './position.interface.js';
 import type { PositionProtocol, PositionRow, PositionJSON } from './position.types.js';
 import {
@@ -50,16 +51,16 @@ export class PositionFactory {
    * Create a position instance from a database row.
    *
    * @param row - Database row from Prisma
-   * @param pool - Pre-loaded UniswapV3Pool instance
+   * @param pool - Pre-loaded pool instance
    * @returns PositionInterface instance (concrete type based on protocol)
    * @throws Error if protocol is unknown
    */
-  static fromDB(row: PositionRow, pool: UniswapV3Pool): PositionInterface {
+  static fromDB(row: PositionRow, pool: PoolInterface): PositionInterface {
     const protocol = row.protocol as PositionProtocol;
 
     switch (protocol) {
       case 'uniswapv3':
-        return UniswapV3Position.fromDB(row as UniswapV3PositionRow, pool);
+        return UniswapV3Position.fromDB(row as UniswapV3PositionRow, pool as UniswapV3Pool);
 
       default:
         throw new Error(`Unknown position protocol: ${row.protocol}`);

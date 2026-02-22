@@ -157,10 +157,8 @@ model Pool {
 
   // Common required fields
   protocol String // 'uniswapv3', etc.
-  poolType String // 'CL_TICKS'
   token0Id String
   token1Id String
-  feeBps   Int // Fee in basis points (3000 = 0.3%)
 
   // Pool hash for fast lookups and uniqueness
   // Human-readable composite key, format: "{protocol}/{chainId}/{poolAddress}"
@@ -187,7 +185,6 @@ model Pool {
 
   // Indexes for efficient queries
   @@index([protocol])
-  @@index([poolType])
   @@index([token0Id])
   @@index([token1Id])
   @@index([poolHash])
@@ -200,8 +197,7 @@ model Position {
   updatedAt DateTime @updatedAt
 
   // Protocol identification
-  protocol     String // 'uniswapv3', etc.
-  positionType String // 'CL_TICKS'
+  protocol String // 'uniswapv3', etc.
 
   // Data ownership
   userId String
@@ -266,7 +262,6 @@ model Position {
   @@unique([userId, positionHash]) // Same user can't import same position twice; allows multi-user watching
   // Indexes for efficient queries
   @@index([protocol])
-  @@index([positionType])
   @@index([userId])
   @@index([poolId])
   @@index([isActive])

@@ -14,10 +14,10 @@
  * - ALL_QUOTE (swap to quote): value = constant (flat line)
  */
 
-import type { Erc20Token } from '../../token/index.js';
-import type { UniswapV3Pool } from '../../pool/index.js';
+import type { TokenInterface } from '../../token/index.js';
+import type { PoolInterface } from '../../pool/index.js';
 import type { PositionInterface } from '../position.interface.js';
-import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from '../position.types.js';
+import type { PositionProtocol, PositionJSON, PnLSimulationResult } from '../position.types.js';
 import type { SwapConfig } from '../../automation/uniswapv3/uniswapv3-close-order-config.js';
 
 // ============================================================================
@@ -380,15 +380,11 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
     return this._underlying.protocol;
   }
 
-  get positionType(): PositionType {
-    return this._underlying.positionType;
-  }
-
   // ============================================================================
   // PositionInterface - Pool Reference (always delegate)
   // ============================================================================
 
-  get pool(): UniswapV3Pool {
+  get pool(): PoolInterface {
     return this._underlying.pool;
   }
 
@@ -518,7 +514,6 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
       positionHash: this.positionHash,
       userId: this.userId,
       protocol: this.protocol,
-      positionType: this.positionType,
       pool: this.pool.toJSON(),
       isToken0Quote: this.isToken0Quote,
 
@@ -558,14 +553,14 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   /**
    * Get the base token (delegates to underlying).
    */
-  getBaseToken(): Erc20Token {
+  getBaseToken(): TokenInterface {
     return this._underlying.getBaseToken();
   }
 
   /**
    * Get the quote token (delegates to underlying).
    */
-  getQuoteToken(): Erc20Token {
+  getQuoteToken(): TokenInterface {
     return this._underlying.getQuoteToken();
   }
 

@@ -78,7 +78,6 @@ export function serializePositionForWebhook(position: UniswapV3Position): Record
     id: position.id,
     positionHash: position.positionHash,
     protocol: position.protocol,
-    positionType: position.positionType,
     isActive: position.isActive,
     currentValue: position.currentValue.toString(),
     currentCostBasis: position.currentCostBasis.toString(),
@@ -91,7 +90,6 @@ export function serializePositionForWebhook(position: UniswapV3Position): Record
     lastFeesCollectedAt: position.lastFeesCollectedAt?.toISOString() ?? null,
     pool: {
       id: pool.id,
-      poolType: pool.poolType,
       token0: {
         id: pool.token0.id,
         symbol: pool.token0.symbol,

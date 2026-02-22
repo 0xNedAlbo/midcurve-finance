@@ -8,9 +8,9 @@
  * and implement abstract methods for protocol-specific behavior.
  */
 
-import type { Erc20Token } from '../token/index.js';
+import type { TokenInterface } from '../token/index.js';
 import type { PoolInterface } from './pool.interface.js';
-import type { Protocol, PoolType, PoolJSON, BasePoolParams } from './pool.types.js';
+import type { Protocol, PoolJSON, BasePoolParams } from './pool.types.js';
 
 /**
  * BasePool
@@ -28,10 +28,8 @@ import type { Protocol, PoolType, PoolJSON, BasePoolParams } from './pool.types.
  */
 export abstract class BasePool implements PoolInterface {
   readonly id: string;
-  readonly poolType: PoolType;
-  readonly token0: Erc20Token;
-  readonly token1: Erc20Token;
-  readonly feeBps: number;
+  readonly token0: TokenInterface;
+  readonly token1: TokenInterface;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -59,10 +57,8 @@ export abstract class BasePool implements PoolInterface {
    */
   constructor(params: BasePoolParams) {
     this.id = params.id;
-    this.poolType = params.poolType;
     this.token0 = params.token0;
     this.token1 = params.token1;
-    this.feeBps = params.feeBps;
     this.createdAt = params.createdAt;
     this.updatedAt = params.updatedAt;
   }
@@ -80,10 +76,8 @@ export abstract class BasePool implements PoolInterface {
     return {
       id: this.id,
       protocol: this.protocol,
-      poolType: this.poolType,
       token0: this.token0.toJSON(),
       token1: this.token1.toJSON(),
-      feeBps: this.feeBps,
       config: this.config,
       state: this.state,
       createdAt: this.createdAt.toISOString(),
@@ -93,12 +87,12 @@ export abstract class BasePool implements PoolInterface {
 
   /**
    * Get a human-readable display name for the pool.
+   * Subclasses can override to include protocol-specific details (e.g., fee tier).
    *
-   * @returns "TOKEN0/TOKEN1 (fee%)" format
-   * @example "WETH/USDC (0.3%)"
+   * @returns "TOKEN0/TOKEN1" format
+   * @example "WETH/USDC"
    */
   getDisplayName(): string {
-    const feePercent = this.feeBps / 100;
-    return `${this.token0.symbol}/${this.token1.symbol} (${feePercent}%)`;
+    return `${this.token0.symbol}/${this.token1.symbol}`;
   }
 }

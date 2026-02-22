@@ -5,9 +5,8 @@
  * JSON serialization, and database row mapping.
  */
 
-import type { UniswapV3Pool } from '../pool/index.js';
-import type { PoolJSON, UniswapV3PoolRow } from '../pool/index.js';
-import type { Erc20TokenRow } from '../token/index.js';
+import type { PoolInterface, PoolJSON, PoolRow } from '../pool/index.js';
+import type { TokenRow } from '../token/index.js';
 
 // ============================================================================
 // PROTOCOL DISCRIMINATORS
@@ -18,12 +17,6 @@ import type { Erc20TokenRow } from '../token/index.js';
  * Extensible for future protocols (orca, raydium, etc.)
  */
 export type PositionProtocol = 'uniswapv3';
-
-/**
- * Position types.
- * CL_TICKS = Concentrated liquidity with tick-based ranges
- */
-export type PositionType = 'CL_TICKS';
 
 // ============================================================================
 // PNL SIMULATION
@@ -59,7 +52,6 @@ export interface PositionJSON {
   positionHash: string;
   userId: string;
   protocol: PositionProtocol;
-  positionType: PositionType;
   pool: PoolJSON;
   isToken0Quote: boolean;
 
@@ -107,8 +99,7 @@ export interface BasePositionParams {
   id: string;
   positionHash: string;
   userId: string;
-  positionType: PositionType;
-  pool: UniswapV3Pool;
+  pool: PoolInterface;
   isToken0Quote: boolean;
 
   // PnL fields
@@ -152,7 +143,6 @@ export interface PositionRow {
   positionHash: string;
   userId: string;
   protocol: string;
-  positionType: string;
   poolId: string;
   isToken0Quote: boolean;
 
@@ -188,8 +178,8 @@ export interface PositionRow {
   updatedAt: Date;
 
   // Included relation (from Prisma with include: { pool: { include: { token0: true, token1: true } } })
-  pool?: UniswapV3PoolRow & {
-    token0: Erc20TokenRow;
-    token1: Erc20TokenRow;
+  pool?: PoolRow & {
+    token0: TokenRow;
+    token1: TokenRow;
   };
 }

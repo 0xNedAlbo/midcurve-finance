@@ -25,6 +25,7 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { getSubgraphClient, getFavoritePoolService, getUniswapV3PoolService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 import { getEvmConfig, isUniswapV3SubgraphSupported } from '@midcurve/services';
+import type { Erc20Token } from '@midcurve/shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -104,12 +105,12 @@ export async function GET(request: NextRequest): Promise<Response> {
             chainName,
             feeTier: pool.feeBps,
             token0: {
-              address: pool.token0.address,
+              address: (pool.token0 as Erc20Token).address,
               symbol: pool.token0.symbol,
               decimals: pool.token0.decimals,
             },
             token1: {
-              address: pool.token1.address,
+              address: (pool.token1 as Erc20Token).address,
               symbol: pool.token1.symbol,
               decimals: pool.token1.decimals,
             },

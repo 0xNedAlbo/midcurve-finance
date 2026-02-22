@@ -104,7 +104,6 @@ test.describe('Import NFT by ID', () => {
             data: {
               id: 'test-position-id',
               protocol: 'uniswapv3',
-              positionType: 'CL_TICKS',
               positionHash: 'uniswapv3/42161/4973304',
               userId: 'test-user-id',
               currentValue: '1500000000',
