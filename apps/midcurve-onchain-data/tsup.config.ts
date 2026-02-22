@@ -13,4 +13,8 @@ export default defineConfig({
     '@midcurve/database',
     '@midcurve/api-shared',
   ],
+  // Prisma's generated client uses CJS require("fs") — create a require shim for ESM
+  banner: {
+    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+  },
 });
