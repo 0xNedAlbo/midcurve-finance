@@ -74,8 +74,9 @@ services:
       - PORT=3001
       - HOSTNAME=0.0.0.0
       - DATABASE_URL=${DATABASE_URL}
-      # CORS
+      # CORS & Cookies
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-.midcurve.finance}
       # RPC URLs
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
