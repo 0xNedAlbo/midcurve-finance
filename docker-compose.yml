@@ -122,6 +122,13 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASS=${RABBITMQ_PASS}
+      # RPC URLs (for close order catch-up, block finality checks)
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      - RPC_URL_BSC=${RPC_URL_BSC}
+      - RPC_URL_POLYGON=${RPC_URL_POLYGON}
+      - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
       # WebSocket RPC URLs (for Swap event subscriptions)
       - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
       - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
@@ -129,6 +136,8 @@ services:
       - WS_RPC_URL_BSC=${WS_RPC_URL_BSC:-}
       - WS_RPC_URL_POLYGON=${WS_RPC_URL_POLYGON:-}
       - WS_RPC_URL_OPTIMISM=${WS_RPC_URL_OPTIMISM:-}
+      # External APIs
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Worker configuration (optional, has sensible defaults)
       - MAX_POOLS_PER_CONNECTION=${MAX_POOLS_PER_CONNECTION:-1000}
       - RECONNECT_DELAY_MS=${RECONNECT_DELAY_MS:-5000}
@@ -220,6 +229,15 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASS=${RABBITMQ_PASS}
+      # RPC URLs (for on-chain state reads via @midcurve/services)
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      - RPC_URL_BSC=${RPC_URL_BSC}
+      - RPC_URL_POLYGON=${RPC_URL_POLYGON}
+      - RPC_URL_OPTIMISM=${RPC_URL_OPTIMISM}
+      # External APIs
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
     depends_on:
       rabbitmq:
         condition: service_healthy
