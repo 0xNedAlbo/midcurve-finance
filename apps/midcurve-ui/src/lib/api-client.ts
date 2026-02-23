@@ -167,9 +167,6 @@ export async function apiClientFn<TResponse>(
 // =============================================================================
 
 import type {
-  // Swap (MidcurveSwapRouter)
-  RouterSwapQuoteData,
-  RouterSupportedChainsData,
   // Close Orders
   ListCloseOrdersResponse,
   GetCloseOrderResponse,
@@ -415,41 +412,4 @@ export const notificationsApi = {
   },
 };
 
-// =============================================================================
-// SWAP API (MidcurveSwapRouter)
-// =============================================================================
-
-/**
- * Router quote request parameters
- */
-export interface RouterSwapQuoteParams {
-  chainId: number;
-  tokenIn: string;
-  tokenInDecimals: number;
-  tokenOut: string;
-  tokenOutDecimals: number;
-  amountIn: string;
-  maxDeviationBps: number;
-  maxHops?: number;
-}
-
-/**
- * Swap Router API client for MidcurveSwapRouter-based swapping
- */
-export const swapRouterApi = {
-  /**
-   * Get chains that have MidcurveSwapRouter deployed
-   */
-  getSupportedChains() {
-    return apiClient.get<RouterSupportedChainsData>('/api/v1/swap/router-supported-chains');
-  },
-
-  /**
-   * Get a swap quote from MidcurveSwapRouter
-   */
-  getQuote(params: RouterSwapQuoteParams) {
-    const qs = buildQueryString(params);
-    return apiClient.get<RouterSwapQuoteData>(`/api/v1/swap/router-quote${qs}`);
-  },
-};
 

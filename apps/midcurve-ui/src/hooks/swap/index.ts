@@ -1,23 +1,20 @@
 /**
  * Swap Hooks
  *
- * React hooks for token swapping functionality via MidcurveSwapRouter.
+ * React hooks for Paraswap (Velora) token swapping functionality.
  */
 
-// Token approval (shared)
+// Token approval (shared — works for any spender address)
 export { useSwapApproval } from './useSwapApproval';
 export type { UseSwapApprovalParams, UseSwapApprovalResult } from './useSwapApproval';
 
-// MidcurveSwapRouter hooks (SwapDialog)
-export { useSwapRouterSupportedChains } from './useSwapRouterSupportedChains';
-export type { UseSwapRouterSupportedChainsResult } from './useSwapRouterSupportedChains';
+// Paraswap hooks (SwapDialog)
+export { useParaswapQuote } from './useParaswapQuote';
+export type { UseParaswapQuoteParams, UseParaswapQuoteResult } from './useParaswapQuote';
 
-export { useRouterSwapQuote } from './useRouterSwapQuote';
-export type { UseRouterSwapQuoteParams, UseRouterSwapQuoteResult } from './useRouterSwapQuote';
-
-export { useRouterExecuteSwap } from './useRouterExecuteSwap';
+export { useParaswapExecuteSwap } from './useParaswapExecuteSwap';
 export type {
-  UseRouterExecuteSwapParams,
-  UseRouterExecuteSwapResult,
-  RouterExecuteSwapInput,
-} from './useRouterExecuteSwap';
+  UseParaswapExecuteSwapParams,
+  UseParaswapExecuteSwapResult,
+  ParaswapExecuteSwapInput,
+} from './useParaswapExecuteSwap';

@@ -152,28 +152,6 @@ export const queryKeys = {
   },
 
   // ============================================
-  // SWAP (MidcurveSwapRouter)
-  // ============================================
-  swap: {
-    all: ['swap'] as const,
-
-    // MidcurveSwapRouter quotes
-    routerQuotes: {
-      all: ['swap', 'router-quotes'] as const,
-      quote: (params: {
-        chainId: number;
-        tokenIn: string;
-        tokenOut: string;
-        amountIn: string;
-        maxDeviationBps: number;
-      }) => [...queryKeys.swap.routerQuotes.all, params] as const,
-    },
-
-    // MidcurveSwapRouter supported chains
-    routerSupportedChains: ['swap', 'router-supported-chains'] as const,
-  },
-
-  // ============================================
   // AUTOMATION (Close Orders + Contracts)
   // ============================================
   automation: {

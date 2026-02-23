@@ -3,7 +3,7 @@
  *
  * Modal wrapper for the free-form swap widget.
  * Accessible from the user dropdown menu.
- * Uses MidcurveSwapRouter — chains are dynamically loaded from the API.
+ * Uses Paraswap (Velora) for quoting and execution — no backend involved.
  */
 
 'use client';
@@ -13,67 +13,54 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import {
+  PARASWAP_SUPPORTED_CHAIN_IDS,
+  isParaswapSupportedChain,
+} from '@/lib/paraswap-client';
+import {
   getChainMetadataByChainId,
 } from '@/config/chains';
-import { useSwapRouterSupportedChains } from '@/hooks/swap';
 import { FreeFormSwapWidget } from './free-form-swap-widget';
+import type { SwapPrefill } from './free-form-swap-widget';
 
 export interface SwapDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Optional prefill values for tokens, amount, and direction */
+  prefill?: SwapPrefill;
+  /** Override the chain selector — when prefill includes tokens for a specific chain */
+  chainId?: number;
 }
 
 /**
  * Swap Dialog - Modal for standalone token swapping
  *
  * Provides a modal wrapper for the FreeFormSwapWidget component.
- * Includes a network selector populated from chains with MidcurveSwapRouter deployed.
+ * Includes a network selector for Paraswap-supported chains.
  */
-export function SwapDialog({ isOpen, onClose }: SwapDialogProps) {
+export function SwapDialog({ isOpen, onClose, prefill, chainId: propChainId }: SwapDialogProps) {
   const [mounted, setMounted] = useState(false);
   const { chain } = useAccount();
 
-  // Fetch chains that have MidcurveSwapRouter deployed
-  const { data: supportedChains, isLoading: isLoadingChains } =
-    useSwapRouterSupportedChains();
-
-  // Build list of supported chain IDs + router addresses
-  const chainEntries = useMemo(() => {
-    if (!supportedChains) return [];
-    return supportedChains.map((c) => ({
-      chainId: c.chainId,
-      swapRouterAddress: c.swapRouterAddress,
-    }));
-  }, [supportedChains]);
-
-  const supportedChainIds = useMemo(
-    () => chainEntries.map((e) => e.chainId),
-    [chainEntries]
-  );
-
-  // Default to wallet chain if supported, otherwise first supported chain
+  // Default to prop chainId > wallet chain > first supported chain
   const defaultChainId = useMemo(() => {
+    if (propChainId && isParaswapSupportedChain(propChainId)) {
+      return propChainId;
+    }
     const walletChainId = chain?.id;
-    if (walletChainId && supportedChainIds.includes(walletChainId)) {
+    if (walletChainId && isParaswapSupportedChain(walletChainId)) {
       return walletChainId;
     }
-    return supportedChainIds[0] ?? 0;
-  }, [chain?.id, supportedChainIds]);
+    return PARASWAP_SUPPORTED_CHAIN_IDS[0];
+  }, [propChainId, chain?.id]);
 
   const [selectedChainId, setSelectedChainId] = useState(defaultChainId);
 
-  // Sync default when wallet chain changes or chains load
+  // Sync default when wallet chain changes
   useEffect(() => {
     if (defaultChainId) {
       setSelectedChainId(defaultChainId);
     }
   }, [defaultChainId]);
-
-  // Look up swap router address for selected chain
-  const selectedRouterAddress = useMemo(() => {
-    const entry = chainEntries.find((e) => e.chainId === selectedChainId);
-    return entry?.swapRouterAddress ?? null;
-  }, [chainEntries, selectedChainId]);
 
   // Ensure component is mounted on client side for portal
   useEffect(() => {
@@ -97,7 +84,6 @@ export function SwapDialog({ isOpen, onClose }: SwapDialogProps) {
 
   const handleSwapClose = (reason: 'success' | 'cancelled' | 'error') => {
     if (reason === 'success') {
-      // Small delay to show success state before closing
       setTimeout(() => onClose(), 500);
     } else {
       onClose();
@@ -120,7 +106,7 @@ export function SwapDialog({ isOpen, onClose }: SwapDialogProps) {
             <div>
               <h2 className="text-xl font-bold text-white">Swap Tokens</h2>
               <p className="text-sm text-slate-400 mt-1">
-                Swap tokens via Midcurve Router
+                Exchange tokens via Velora (ParaSwap)
               </p>
             </div>
             <button
@@ -133,34 +119,25 @@ export function SwapDialog({ isOpen, onClose }: SwapDialogProps) {
 
           {/* Network Selector */}
           <div className="px-6 pt-4 pb-2">
-            {isLoadingChains ? (
-              <div className="flex gap-2">
-                <div className="h-8 w-20 bg-slate-700/40 rounded-lg animate-pulse" />
-                <div className="h-8 w-20 bg-slate-700/40 rounded-lg animate-pulse" />
-              </div>
-            ) : supportedChainIds.length === 0 ? (
-              <p className="text-sm text-slate-500">No chains with swap router available</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {supportedChainIds.map((cid) => {
-                  const meta = getChainMetadataByChainId(cid);
-                  const isSelected = cid === selectedChainId;
-                  return (
-                    <button
-                      key={cid}
-                      onClick={() => setSelectedChainId(cid)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                        isSelected
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                          : 'bg-slate-700/40 text-slate-400 border border-slate-600/40 hover:bg-slate-700/60 hover:text-slate-300'
-                      }`}
-                    >
-                      {meta?.shortName ?? `Chain ${cid}`}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {PARASWAP_SUPPORTED_CHAIN_IDS.map((cid) => {
+                const meta = getChainMetadataByChainId(cid);
+                const isSelected = cid === selectedChainId;
+                return (
+                  <button
+                    key={cid}
+                    onClick={() => setSelectedChainId(cid)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                        : 'bg-slate-700/40 text-slate-400 border border-slate-600/40 hover:bg-slate-700/60 hover:text-slate-300'
+                    }`}
+                  >
+                    {meta?.shortName ?? `Chain ${cid}`}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Content */}
@@ -172,19 +149,12 @@ export function SwapDialog({ isOpen, onClose }: SwapDialogProps) {
                   Connect a wallet to start swapping tokens
                 </p>
               </div>
-            ) : supportedChainIds.length === 0 && !isLoadingChains ? (
-              <div className="text-center py-8">
-                <p className="text-slate-300 mb-2">No swap router available</p>
-                <p className="text-slate-500 text-sm">
-                  MidcurveSwapRouter is not deployed on any chain yet
-                </p>
-              </div>
             ) : (
               <FreeFormSwapWidget
                 key={selectedChainId}
                 chainId={selectedChainId}
-                swapRouterAddress={selectedRouterAddress}
                 onClose={handleSwapClose}
+                prefill={selectedChainId === (propChainId ?? defaultChainId) ? prefill : undefined}
               />
             )}
           </div>
