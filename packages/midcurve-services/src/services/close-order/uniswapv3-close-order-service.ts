@@ -9,11 +9,12 @@
  * - config: immutable identity data (JSON) — chainId, nftId, contractAddress, etc.
  * - state: mutable on-chain state (JSON) — triggerTick, pool, slippage, etc.
  * - orderIdentityHash: unique identifier, e.g. "uniswapv3/{chainId}/{nftId}/{triggerMode}"
- * - automationState: single lifecycle field (monitoring|executing|retrying|failed)
+ * - automationState: single lifecycle field (inactive|monitoring|executing|retrying|failed|executed)
+ *     inactive = stored for display only, operator is not our automation wallet
  * - executionAttempts: retry counter, resets when price moves away from trigger
  *
  * DB lifecycle driven by on-chain events:
- * - OrderRegistered → INSERT (automationState=monitoring)
+ * - OrderRegistered → INSERT (automationState=monitoring if we are operator, inactive otherwise)
  * - OrderCancelled → DELETE
  * - OrderExecuted → UPDATE automationState=executed
  * - Re-registration at same slot → DELETE old, INSERT new
@@ -21,7 +22,7 @@
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { CloseOrder, Prisma } from '@midcurve/database';
-import { ContractTriggerMode, OnChainOrderStatus } from '@midcurve/shared';
+import { ContractTriggerMode, OnChainOrderStatus, compareAddresses } from '@midcurve/shared';
 import type { ContractSwapDirection } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -178,6 +179,19 @@ export class UniswapV3CloseOrderService {
       const chainId = posConfig.chainId as number;
       const nftId = String(posConfig.nftId);
 
+      // 1b. Look up user's EVM automation wallet to check operator ownership
+      const autoWallet = await db.automationWallet.findFirst({
+        where: {
+          userId: position.userId,
+          walletType: 'evm',
+          walletPurpose: 'automation',
+          isActive: true,
+        },
+      });
+      const ourOperatorAddress = autoWallet
+        ? (autoWallet.config as { walletAddress?: string }).walletAddress ?? null
+        : null;
+
       // 2. Find the PositionCloser contract for this chain
       const sharedContract = await this.sharedContractService.findLatestByChainAndName(
         chainId,
@@ -224,6 +238,10 @@ export class UniswapV3CloseOrderService {
             onChain.triggerTick,
           );
 
+          // Determine if we are the operator for this order
+          const isOurOrder = ourOperatorAddress !== null
+            && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
+
           const newOrder = await this.create(
             {
               protocol: this.protocol,
@@ -231,6 +249,7 @@ export class UniswapV3CloseOrderService {
               sharedContractId: sharedContract.id,
               orderIdentityHash,
               closeOrderHash,
+              automationState: isOurOrder ? 'monitoring' : 'inactive',
               config: {
                 chainId,
                 nftId,

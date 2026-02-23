@@ -511,12 +511,13 @@ model CloseOrder {
 
   // === AUTOMATION LIFECYCLE ===
   // Single field tracking our system's engagement with the order.
+  // inactive:   stored for display only, operator is not our automation wallet
   // monitoring: price monitor watching for trigger condition
   // executing:  execution in progress (simulation/signing/broadcasting)
   // retrying:   execution failed, waiting 60s before retry
   // failed:     max execution attempts exhausted (terminal)
   // executed:   order executed successfully on-chain (terminal)
-  automationState   String @default("monitoring") // monitoring|executing|retrying|failed|executed
+  automationState   String @default("monitoring") // inactive|monitoring|executing|retrying|failed|executed
   executionAttempts Int    @default(0) // resets to 0 when price moves away from trigger
   lastError         String? // last execution error for diagnostics
 

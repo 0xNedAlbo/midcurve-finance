@@ -63,6 +63,7 @@ export type ContractSwapDirection =
 /**
  * Off-chain automation lifecycle state for a close order.
  *
+ * inactive:   Stored for display only, operator is not our automation wallet
  * monitoring: Price monitor is watching for trigger condition
  * executing:  Execution in progress (simulation/signing/broadcasting)
  * retrying:   Execution failed, waiting before retry (60s delay)
@@ -70,5 +71,5 @@ export type ContractSwapDirection =
  *
  * Note: Executed orders are deleted from the DB (execution history lives in AutomationLog).
  */
-export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed'] as const;
+export const AUTOMATION_STATES = ['inactive', 'monitoring', 'executing', 'retrying', 'failed'] as const;
 export type AutomationState = (typeof AUTOMATION_STATES)[number];

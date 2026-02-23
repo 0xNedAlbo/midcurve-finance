@@ -50,9 +50,10 @@ const VISIBLE_BUTTON_STATES: AutomationState[] = [
  * due to the unique constraint. We return it if it's in a visible state.
  */
 export function findOrderForTriggerMode(
-  orders: SerializedCloseOrder[],
+  orders: SerializedCloseOrder[] | undefined,
   triggerMode: TriggerMode,
 ): SerializedCloseOrder | undefined {
+  if (!orders) return undefined;
   return orders.find(
     (order) =>
       order.triggerMode === triggerMode &&
