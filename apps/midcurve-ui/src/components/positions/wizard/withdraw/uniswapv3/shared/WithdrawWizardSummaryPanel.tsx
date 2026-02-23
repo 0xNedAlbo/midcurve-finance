@@ -6,11 +6,12 @@ import {
   UniswapV3Pool,
   type PoolJSON,
   getTokenAmountsFromLiquidity,
+  calculatePnL,
 } from '@midcurve/shared';
 import { useWithdrawWizard } from '../context/WithdrawWizardContext';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { RiskTriggersSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/RiskTriggersSection';
-import { PostCloseSwapSection, type SwapConfigDisplay } from '@/components/positions/wizard/create-position/uniswapv3/shared/PostCloseSwapSection';
+
 import { SelectedPoolSummary } from '@/components/positions/wizard/create-position/uniswapv3/shared/SelectedPoolSummary';
 
 // Zoom constants
@@ -220,6 +221,21 @@ export function WithdrawWizardSummaryPanel({
     }
   }, [position, state.discoveredPool, state.refreshedSqrtPriceX96, state.withdrawPercent, baseToken, quoteToken, isToken0Base]);
 
+  // Calculate PnL realized by this withdrawal
+  const withdrawalPnl = useMemo(() => {
+    if (!position || !withdrawInfo || state.withdrawPercent === 0) return null;
+    const currentCostBasis = BigInt(position.currentCostBasis || '0');
+    const positionState = position.state as { liquidity: string };
+    const currentLiquidity = BigInt(positionState.liquidity || '0');
+    if (currentLiquidity === 0n || currentCostBasis === 0n) return null;
+
+    const percentScaled = Math.floor(state.withdrawPercent * 100);
+    const liquidityToRemove = (currentLiquidity * BigInt(percentScaled)) / 10000n;
+    const proportionalCostBasis = (currentCostBasis * liquidityToRemove) / currentLiquidity;
+
+    return calculatePnL(withdrawInfo.withdrawalQuoteValue, proportionalCostBasis);
+  }, [position, withdrawInfo, state.withdrawPercent]);
+
   // Zoom handlers
   const handleZoomIn = useCallback(() => {
     setSummaryZoom(Math.min(state.summaryZoom + ZOOM_STEP, ZOOM_MAX));
@@ -240,39 +256,6 @@ export function WithdrawWizardSummaryPanel({
 
   const isCurrentStepValid = isStepValid(currentStep.id);
   const isNextDisabled = nextDisabled || !isCurrentStepValid;
-
-  // Extract swap configs from active close orders (read-only display)
-  const swapConfigs = useMemo(() => {
-    let slSwapConfig: SwapConfigDisplay | null = null;
-    let tpSwapConfig: SwapConfigDisplay | null = null;
-
-    if (!state.activeCloseOrders.length || !position) return { slSwapConfig, tpSwapConfig };
-
-    const isToken0Quote = position.isToken0Quote;
-    // When isToken0Quote, contract trigger modes are inverted relative to user price direction
-    const slMode = isToken0Quote ? 'UPPER' : 'LOWER';
-    const tpMode = isToken0Quote ? 'LOWER' : 'UPPER';
-
-    for (const order of state.activeCloseOrders) {
-      if (!order.triggerMode) continue;
-
-      const hasSwap = order.swapDirection !== null;
-      const display: SwapConfigDisplay = hasSwap
-        ? {
-            enabled: true,
-            slippageBps: order.swapSlippageBps ?? 100,
-            swapToQuote: isToken0Quote
-              ? order.swapDirection === 'TOKEN1_TO_0'
-              : order.swapDirection === 'TOKEN0_TO_1',
-          }
-        : { enabled: false, slippageBps: 100, swapToQuote: true };
-
-      if (order.triggerMode === slMode) slSwapConfig = display;
-      if (order.triggerMode === tpMode) tpSwapConfig = display;
-    }
-
-    return { slSwapConfig, tpSwapConfig };
-  }, [state.activeCloseOrders, position]);
 
   const quoteDecimals = quoteToken?.decimals ?? 18;
   const quoteSymbol = quoteToken?.symbol ?? '';
@@ -396,6 +379,21 @@ export function WithdrawWizardSummaryPanel({
                   {formatCompactValue(withdrawInfo.remainingQuoteValue, quoteDecimals)} {quoteSymbol}
                 </span>
               </div>
+              {withdrawalPnl && (
+                <div className="border-t border-slate-600/50 pt-1.5">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-400">Withdrawal PnL</span>
+                    <span className={`font-medium ${withdrawalPnl.pnl >= 0n ? 'text-green-400' : 'text-red-400'}`}>
+                      {withdrawalPnl.pnl >= 0n ? '+' : ''}
+                      {formatCompactValue(withdrawalPnl.pnl, quoteDecimals)} {quoteSymbol}
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({withdrawalPnl.pnlPercent >= 0 ? '+' : ''}
+                        {withdrawalPnl.pnlPercent.toFixed(1)}%)
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              )}
               {state.burnAfterWithdraw && state.withdrawPercent >= 100 && (
                 <div className="flex justify-between items-center text-sm pt-1.5 border-t border-slate-600/50">
                   <span className="text-slate-400">Burn NFT</span>
@@ -452,16 +450,6 @@ export function WithdrawWizardSummaryPanel({
           tpPnlAtTrigger={tpPnlAtTrigger}
           tpRunup={tpRunup}
           quoteTokenDecimals={quoteDecimals}
-        />
-
-        {/* Post-Close Swap (from existing close orders, read-only) */}
-        <PostCloseSwapSection
-          slSwapConfig={swapConfigs.slSwapConfig}
-          tpSwapConfig={swapConfigs.tpSwapConfig}
-          baseSymbol={baseToken?.symbol ?? ''}
-          quoteSymbol={quoteSymbol}
-          hasStopLoss={stopLossPrice != null}
-          hasTakeProfit={takeProfitPrice != null}
         />
 
         {/* Custom content from step */}
