@@ -244,7 +244,7 @@ export function PositionList({ className }: PositionListProps) {
       {!error && positions.length > 0 && (
         <>
           <div className="grid grid-cols-1 gap-4">
-            {positions.map((item) => {
+            {positions.map((item, index) => {
               try {
                 const parsed = parsePositionHash(item.positionHash);
                 switch (parsed.protocol) {
@@ -254,6 +254,7 @@ export function PositionList({ className }: PositionListProps) {
                         key={item.positionHash}
                         chainId={parsed.chainId}
                         nftId={parsed.nftId}
+                        index={index}
                       />
                     );
                   default:

@@ -39,19 +39,22 @@ import { getChainSlugByChainId } from "@/config/chains";
 interface UniswapV3PositionCardProps {
   chainId: number;
   nftId: number;
+  index?: number;
 }
 
-export function UniswapV3PositionCard({ chainId, nftId }: UniswapV3PositionCardProps) {
+export function UniswapV3PositionCard({ chainId, nftId, index = 0 }: UniswapV3PositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
   const [showSwitchQuoteTokenModal, setShowSwitchQuoteTokenModal] = useState(false);
+
+  const isAlt = index % 2 === 1;
 
   // Fetch position detail (auto-refreshes every 60s)
   const { data: position, isLoading } = useUniswapV3Position(chainId, String(nftId));
 
   // Show skeleton while loading
   if (isLoading || !position) {
-    return <UniswapV3PositionCardSkeleton />;
+    return <UniswapV3PositionCardSkeleton isAlt={isAlt} />;
   }
 
   return (
@@ -59,6 +62,7 @@ export function UniswapV3PositionCard({ chainId, nftId }: UniswapV3PositionCardP
       position={position}
       chainId={chainId}
       nftId={nftId}
+      isAlt={isAlt}
       showDeleteModal={showDeleteModal}
       setShowDeleteModal={setShowDeleteModal}
       showReloadHistoryModal={showReloadHistoryModal}
@@ -77,6 +81,7 @@ interface UniswapV3PositionCardLoadedProps {
   position: UniswapV3PositionData;
   chainId: number;
   nftId: number;
+  isAlt: boolean;
   showDeleteModal: boolean;
   setShowDeleteModal: (show: boolean) => void;
   showReloadHistoryModal: boolean;
@@ -89,6 +94,7 @@ function UniswapV3PositionCardLoaded({
   position: rawPosition,
   chainId,
   nftId,
+  isAlt,
   showDeleteModal,
   setShowDeleteModal,
   showReloadHistoryModal,
@@ -138,7 +144,7 @@ function UniswapV3PositionCardLoaded({
   };
 
   return (
-    <div className="bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-sm border border-slate-700/50 rounded-xl p-3 md:p-4 lg:p-6 hover:border-slate-600/50 transition-all duration-200">
+    <div className={`${isAlt ? "bg-gradient-to-br from-slate-800/90 to-slate-700/90" : "bg-gradient-to-br from-slate-900/90 to-slate-800/90"} backdrop-blur-sm border border-slate-700/50 rounded-xl p-3 md:p-4 lg:p-6 hover:border-slate-600/50 transition-all duration-200`}>
       <div className="flex items-center gap-2 md:gap-3">
         {/* LEFT: Header */}
         <PositionCardHeader
@@ -260,9 +266,9 @@ function UniswapV3PositionCardLoaded({
 // Skeleton
 // =============================================================================
 
-function UniswapV3PositionCardSkeleton() {
+function UniswapV3PositionCardSkeleton({ isAlt = false }: { isAlt?: boolean }) {
   return (
-    <div className="bg-gradient-to-br from-slate-900/90 to-slate-800/90 backdrop-blur-sm border border-slate-700/50 rounded-xl p-3 md:p-4 lg:p-6">
+    <div className={`${isAlt ? "bg-gradient-to-br from-slate-800/90 to-slate-700/90" : "bg-gradient-to-br from-slate-900/90 to-slate-800/90"} backdrop-blur-sm border border-slate-700/50 rounded-xl p-3 md:p-4 lg:p-6`}>
       <div className="flex items-center gap-2 md:gap-3">
         {/* LEFT: Header skeleton */}
         <div className="flex items-center gap-2 md:gap-3">
