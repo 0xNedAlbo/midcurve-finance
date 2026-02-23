@@ -13,6 +13,7 @@ import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { parseUnits, formatUnits } from 'viem';
 import type { SwapToken } from '@midcurve/api-shared';
+import { formatCompactValue } from '@midcurve/shared';
 import { ArrowDownUp } from 'lucide-react';
 import type { ParaswapSide } from '@/lib/paraswap-client';
 
@@ -25,18 +26,6 @@ import { TokenAmountInput } from './token-amount-input';
 import { QuoteDisplay } from './quote-display';
 import { SlippageSettings } from './slippage-settings';
 import { SwapButton } from './swap-button';
-
-function formatBalance(balance: bigint, decimals: number): string {
-  const formatted = formatUnits(balance, decimals);
-  const num = parseFloat(formatted);
-
-  if (num === 0) return '0';
-  if (num < 0.0001) return '<0.0001';
-  if (num < 1) return num.toFixed(4);
-  if (num < 1000) return num.toFixed(4);
-  if (num < 1000000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return `${(num / 1000000).toFixed(2)}M`;
-}
 
 function parseSwapError(error: Error | null): string | null {
   if (!error) return null;
@@ -242,7 +231,7 @@ export function FreeFormSwapWidget({
               {isLoadingSourceBalance ? (
                 <span className="animate-pulse">Loading...</span>
               ) : sourceTokenBalance !== undefined ? (
-                <>Balance: {formatBalance(sourceTokenBalance, sourceToken.decimals)} {sourceToken.symbol}</>
+                <>Balance: {formatCompactValue(sourceTokenBalance, sourceToken.decimals)} {sourceToken.symbol}</>
               ) : null}
             </span>
           )}
@@ -286,7 +275,7 @@ export function FreeFormSwapWidget({
               {isLoadingDestBalance ? (
                 <span className="animate-pulse">Loading...</span>
               ) : destTokenBalance !== undefined ? (
-                <>Balance: {formatBalance(destTokenBalance, destToken.decimals)} {destToken.symbol}</>
+                <>Balance: {formatCompactValue(destTokenBalance, destToken.decimals)} {destToken.symbol}</>
               ) : null}
             </span>
           )}

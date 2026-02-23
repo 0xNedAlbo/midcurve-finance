@@ -9,6 +9,7 @@
 
 import { formatUnits } from 'viem';
 import type { SwapToken } from '@midcurve/api-shared';
+import { formatCompactValue } from '@midcurve/shared';
 import type { ParaswapQuoteResult, ParaswapSide } from '@/lib/paraswap-client';
 
 interface QuoteDisplayProps {
@@ -21,16 +22,6 @@ interface QuoteDisplayProps {
   sourceToken: SwapToken;
   destToken: SwapToken;
   side: ParaswapSide;
-}
-
-function formatAmount(raw: string, decimals: number): string {
-  const formatted = formatUnits(BigInt(raw), decimals);
-  const num = parseFloat(formatted);
-  if (num === 0) return '0';
-  if (num < 0.0001) return '<0.0001';
-  if (num < 1) return num.toFixed(6);
-  if (num < 10000) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 export function QuoteDisplay({
@@ -58,8 +49,8 @@ export function QuoteDisplay({
 
   if (!quote) return null;
 
-  const srcAmountDisplay = formatAmount(quote.srcAmount, sourceToken.decimals);
-  const destAmountDisplay = formatAmount(quote.destAmount, destToken.decimals);
+  const srcAmountDisplay = formatCompactValue(BigInt(quote.srcAmount), sourceToken.decimals);
+  const destAmountDisplay = formatCompactValue(BigInt(quote.destAmount), destToken.decimals);
 
   // Calculate exchange rate
   const srcNum = parseFloat(formatUnits(BigInt(quote.srcAmount), sourceToken.decimals));
