@@ -52,7 +52,8 @@ Thumbs.db
 *.sublime-workspace
 
 # Claude Code
-.claude/
+.claude/*
+!.claude/rules/
 
 # Yalc (local package development)
 .yalc/
