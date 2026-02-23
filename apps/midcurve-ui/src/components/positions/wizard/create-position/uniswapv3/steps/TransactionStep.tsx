@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Circle, Check, Loader2, ExternalLink, AlertCircle, Copy } from 'lucide-react';
+import { Circle, Check, Loader2, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice, formatCompactValue } from '@midcurve/shared';
@@ -31,24 +31,11 @@ import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { SwapDirection } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
-import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { getChainSlugByChainId } from '@/config/chains';
 import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
-
-// Transaction item status
-type TxStatus = 'pending' | 'waiting' | 'confirming' | 'success' | 'error' | 'skipped';
-
-interface TransactionItem {
-  id: string;
-  label: string;
-  status: TxStatus;
-  txHash?: string;
-  error?: string;
-  hidden?: boolean;
-}
 
 // Transaction IDs
 const TX_IDS = {
@@ -68,7 +55,7 @@ export function TransactionStep() {
 
   // Current phase of execution
   const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'done'>('idle');
-  const [activeError, setActiveError] = useState<{ txId: string; message: string } | null>(null);
+  const [, setActiveError] = useState<{ txId: string; message: string } | null>(null);
 
   // Track which transactions have been attempted (prevents infinite retry loops on cancel)
   const [attemptedTxs, setAttemptedTxs] = useState<Set<string>>(new Set());
@@ -279,6 +266,32 @@ export function TransactionStep() {
     { abi: sharedContract?.abi, contractAddress: positionCloserAddress }
   );
 
+  // NFT approval transaction prompt using the unified component
+  const nftApprovalPrompt = useEvmTransactionPrompt({
+    label: 'Approve Position for Automation',
+    buttonLabel: 'Approve',
+    chainId,
+    enabled: hasAutomation && mintSucceeded,
+    showActionButton: currentPhase === 'nft-approval',
+    txHash: nftApproval.txHash,
+    isSubmitting: nftApproval.isApproving,
+    isWaitingForConfirmation: nftApproval.isWaitingForConfirmation,
+    isSuccess: nftApproval.isApprovalSuccess || nftApproval.isApproved,
+    error: nftApproval.error,
+    onExecute: () => {
+      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.APPROVE_NFT));
+      nftApproval.approve();
+    },
+    onReset: () => {
+      setAttemptedTxs(prev => {
+        const next = new Set(prev);
+        next.delete(TX_IDS.APPROVE_NFT);
+        return next;
+      });
+      nftApproval.reset();
+    },
+  });
+
   // Determine per-order swap directions from user-configured swap configs
   const isToken0Quote = useMemo(() => {
     if (!state.discoveredPool || !quoteTokenAddress) return false;
@@ -299,6 +312,89 @@ export function TransactionStep() {
     const dir = computeSwapDirection(state.tpSwapConfig.swapToQuote, isToken0Quote);
     return dir === 'TOKEN0_TO_1' ? SwapDirection.TOKEN0_TO_1 : SwapDirection.TOKEN1_TO_0;
   }, [state.tpSwapConfig, state.discoveredPool, quoteTokenAddress, isToken0Quote]);
+
+  // Build multicall calls for order registration
+  const buildRegisterOrderCalls = useCallback((): PositionCloserCall[] => {
+    if (!mintedTokenId || !walletAddress || !autowalletAddress) return [];
+
+    const poolAddress = state.discoveredPool?.typedConfig.address as Address | undefined;
+    if (!poolAddress) return [];
+
+    const calls: PositionCloserCall[] = [];
+
+    if (state.stopLossEnabled && state.stopLossTick !== null) {
+      calls.push({
+        functionName: 'registerOrder',
+        args: [{
+          nftId: mintedTokenId,
+          pool: poolAddress,
+          triggerMode: isToken0Quote ? 1 : 0,
+          triggerTick: state.stopLossTick,
+          payout: walletAddress,
+          operator: autowalletAddress,
+          validUntil: 0n,
+          slippageBps: state.slSwapConfig.exitSlippageBps,
+          swapDirection: slSwapDirection,
+          swapSlippageBps: state.slSwapConfig.enabled ? state.slSwapConfig.slippageBps : 0,
+        }],
+      });
+    }
+
+    if (state.takeProfitEnabled && state.takeProfitTick !== null) {
+      calls.push({
+        functionName: 'registerOrder',
+        args: [{
+          nftId: mintedTokenId,
+          pool: poolAddress,
+          triggerMode: isToken0Quote ? 0 : 1,
+          triggerTick: state.takeProfitTick,
+          payout: walletAddress,
+          operator: autowalletAddress,
+          validUntil: 0n,
+          slippageBps: state.tpSwapConfig.exitSlippageBps,
+          swapDirection: tpSwapDirection,
+          swapSlippageBps: state.tpSwapConfig.enabled ? state.tpSwapConfig.slippageBps : 0,
+        }],
+      });
+    }
+
+    return calls;
+  }, [mintedTokenId, walletAddress, autowalletAddress, state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, state.slSwapConfig, state.tpSwapConfig, isToken0Quote, slSwapDirection, tpSwapDirection]);
+
+  // Order registration label
+  const registerOrdersLabel = [
+    state.stopLossEnabled && 'Stop Loss',
+    state.takeProfitEnabled && 'Take Profit',
+  ].filter(Boolean).join(' & ');
+
+  // Order registration transaction prompt using the unified component
+  const registerOrdersPrompt = useEvmTransactionPrompt({
+    label: `Register ${registerOrdersLabel}`,
+    buttonLabel: 'Register',
+    chainId,
+    enabled: hasAutomation && !!mintedTokenId && multicallOrders.isReady,
+    showActionButton: currentPhase === 'automation',
+    txHash: multicallOrders.txHash,
+    isSubmitting: multicallOrders.isSubmitting,
+    isWaitingForConfirmation: multicallOrders.isWaitingForConfirmation,
+    isSuccess: multicallOrders.isSuccess,
+    error: multicallOrders.error,
+    onExecute: () => {
+      const calls = buildRegisterOrderCalls();
+      if (calls.length > 0) {
+        setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_ORDERS));
+        multicallOrders.execute(calls);
+      }
+    },
+    onReset: () => {
+      setAttemptedTxs(prev => {
+        const next = new Set(prev);
+        next.delete(TX_IDS.REGISTER_ORDERS);
+        return next;
+      });
+      multicallOrders.reset();
+    },
+  });
 
   // Determine correct logo based on which token is base/quote
   const getTokenLogoUrl = (tokenAddress: string | undefined) => {
@@ -464,117 +560,6 @@ export function TransactionStep() {
     }
   }, [slTpPrices.takeProfitPrice, simulationPosition]);
 
-  // Build transaction list
-  const transactions = useMemo((): TransactionItem[] => {
-    const txs: TransactionItem[] = [];
-
-    // Price adjustment (first item - confirms current pool price)
-    txs.push({
-      id: TX_IDS.PRICE_ADJUST,
-      label: 'Confirm Pool Price',
-      status: getPriceAdjustStatus(priceAdjustment.status, currentPhase),
-      error: priceAdjustment.error || undefined,
-    });
-
-    // Token approvals are rendered separately via useErc20TokenApprovalPrompt hooks
-    // Pool price refresh runs in background - not shown in list
-
-    // Mint position
-    const mintErrorFiltered = isUserRejection(mint.mintError) ? null : mint.mintError;
-    txs.push({
-      id: TX_IDS.MINT_POSITION,
-      label: 'Open UniswapV3 Position',
-      status: getMintStatus(mint, currentPhase),
-      txHash: mint.mintTxHash,
-      error: mintErrorFiltered?.message,
-    });
-
-    // NFT approval for automation
-    if (hasAutomation) {
-      const nftErrorFiltered = isUserRejection(nftApproval.error) ? null : nftApproval.error;
-      txs.push({
-        id: TX_IDS.APPROVE_NFT,
-        label: 'Approve Position for Automation',
-        status: getNftApprovalStatus(nftApproval, currentPhase),
-        txHash: nftApproval.txHash,
-        error: nftErrorFiltered?.message,
-      });
-    }
-
-    // Register SL/TP orders (batched into single multicall tx)
-    if (state.stopLossEnabled || state.takeProfitEnabled) {
-      const mcError = isUserRejection(multicallOrders.error) ? null : multicallOrders.error;
-      const orderLabels: string[] = [];
-      if (state.stopLossEnabled) orderLabels.push('Stop Loss');
-      if (state.takeProfitEnabled) orderLabels.push('Take Profit');
-      txs.push({
-        id: TX_IDS.REGISTER_ORDERS,
-        label: `Register ${orderLabels.join(' & ')}`,
-        status: getMulticallOrdersStatus(multicallOrders, currentPhase),
-        txHash: multicallOrders.txHash,
-        error: mcError?.message,
-      });
-    }
-
-    return txs;
-  }, [
-    priceAdjustment.status, priceAdjustment.error,
-    mint, nftApproval, multicallOrders,
-    currentPhase, hasAutomation, state.stopLossEnabled, state.takeProfitEnabled,
-    isUserRejection,
-  ]);
-
-  // Helper functions for status
-
-  function getPriceAdjustStatus(status: typeof priceAdjustment.status, phase: typeof currentPhase): TxStatus {
-    if (status === 'error') return 'error';
-    if (status === 'ready') return 'success';
-    if (status === 'calculating') return 'confirming';
-    // Show as pending until we're in refresh/mint phase where price adjustment is active
-    if (phase === 'refresh' || phase === 'mint') return 'waiting';
-    return 'pending';
-  }
-
-  function getMintStatus(m: typeof mint, phase: typeof currentPhase): TxStatus {
-    // Filter user rejection errors
-    const mintErrorFiltered = isUserRejection(m.mintError) ? null : m.mintError;
-    if (mintErrorFiltered) return 'error';
-    if (m.isSuccess) return 'success';
-    if (m.isWaitingForConfirmation) return 'confirming';
-    if (m.isMinting) return 'waiting';
-    if (phase === 'mint') return 'pending';
-    return 'pending';
-  }
-
-  function getNftApprovalStatus(approval: typeof nftApproval, phase: typeof currentPhase): TxStatus {
-    // Filter user rejection errors
-    const nftErrorFiltered = isUserRejection(approval.error) ? null : approval.error;
-    if (nftErrorFiltered) return 'error';
-    if (approval.isApproved || approval.isApprovalSuccess) return 'success';
-    if (approval.isWaitingForConfirmation) return 'confirming';
-    if (approval.isApproving) return 'waiting';
-    if (phase === 'nft-approval') return 'pending';
-    return 'pending';
-  }
-
-  function getMulticallOrdersStatus(mc: typeof multicallOrders, phase: typeof currentPhase): TxStatus {
-    const mcError = isUserRejection(mc.error) ? null : mc.error;
-    if (mcError) return 'error';
-    if (mc.isSuccess) return 'success';
-    if (mc.isWaitingForConfirmation) return 'confirming';
-    if (mc.isSubmitting) return 'waiting';
-    if (phase === 'automation') return 'pending';
-    return 'pending';
-  }
-
-  // Execute all transactions - approvals are handled by the hook components
-  const executeTransactions = useCallback(async () => {
-    if (!chainId || !walletAddress) return;
-
-    setActiveError(null);
-    setCurrentPhase('approvals');
-  }, [chainId, walletAddress]);
-
   // Track approval completion and move to next phase
   useEffect(() => {
     if (currentPhase !== 'approvals') return;
@@ -714,102 +699,24 @@ export function TransactionStep() {
     }
   }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.logs, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
 
-  // NFT approval phase
+  // NFT approval phase - skip to automation if already approved
   useEffect(() => {
     if (currentPhase !== 'nft-approval') return;
     if (!hasAutomation) return;
 
-    // Check if already approved
     if (nftApproval.isApproved) {
       setCurrentPhase('automation');
-      return;
     }
-
-    if (!nftApproval.isApproving && !nftApproval.isWaitingForConfirmation && !nftApproval.error) {
-      if (attemptedTxs.has(TX_IDS.APPROVE_NFT)) return;
-
-      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.APPROVE_NFT));
-      nftApproval.approve();
-    }
-  }, [currentPhase, hasAutomation, nftApproval, attemptedTxs]);
+  }, [currentPhase, hasAutomation, nftApproval.isApproved]);
 
   // Track NFT approval completion
   useEffect(() => {
     if (currentPhase !== 'nft-approval') return;
 
-    // Filter user rejection errors (silently ignored)
-    const nftErrorFiltered = isUserRejection(nftApproval.error) ? null : nftApproval.error;
-    if (nftErrorFiltered) {
-      setActiveError({ txId: TX_IDS.APPROVE_NFT, message: nftErrorFiltered.message });
-      return;
-    }
-
-    if (nftApproval.isApprovalSuccess || nftApproval.isApproved) {
+    if (nftApproval.isApprovalSuccess) {
       setCurrentPhase('automation');
     }
-  }, [currentPhase, nftApproval.isApprovalSuccess, nftApproval.isApproved, nftApproval.error]);
-
-  // Register SL/TP orders phase (single multicall transaction)
-  useEffect(() => {
-    if (currentPhase !== 'automation') return;
-    if (!mintedTokenId || !walletAddress || !autowalletAddress || !chainId) return;
-    if (multicallOrders.isSubmitting || multicallOrders.isWaitingForConfirmation || multicallOrders.isSuccess || multicallOrders.error) return;
-    if (attemptedTxs.has(TX_IDS.REGISTER_ORDERS)) return;
-    if (!multicallOrders.isReady) return;
-
-    const poolAddress = state.discoveredPool?.typedConfig.address as Address | undefined;
-    if (!poolAddress) return;
-
-    const calls: PositionCloserCall[] = [];
-
-    // Build SL registerOrder call
-    if (state.stopLossEnabled && state.stopLossTick !== null) {
-      calls.push({
-        functionName: 'registerOrder',
-        args: [{
-          nftId: mintedTokenId,
-          pool: poolAddress,
-          triggerMode: isToken0Quote ? 1 : 0, // SL: UPPER when isToken0Quote, LOWER otherwise
-          triggerTick: state.stopLossTick,
-          payout: walletAddress,
-          operator: autowalletAddress,
-          validUntil: 0n,
-          slippageBps: state.slSwapConfig.exitSlippageBps,
-          swapDirection: slSwapDirection,
-          swapSlippageBps: state.slSwapConfig.enabled ? state.slSwapConfig.slippageBps : 0,
-        }],
-      });
-    }
-
-    // Build TP registerOrder call
-    if (state.takeProfitEnabled && state.takeProfitTick !== null) {
-      calls.push({
-        functionName: 'registerOrder',
-        args: [{
-          nftId: mintedTokenId,
-          pool: poolAddress,
-          triggerMode: isToken0Quote ? 0 : 1, // TP: LOWER when isToken0Quote, UPPER otherwise
-          triggerTick: state.takeProfitTick,
-          payout: walletAddress,
-          operator: autowalletAddress,
-          validUntil: 0n,
-          slippageBps: state.tpSwapConfig.exitSlippageBps,
-          swapDirection: tpSwapDirection,
-          swapSlippageBps: state.tpSwapConfig.enabled ? state.tpSwapConfig.slippageBps : 0,
-        }],
-      });
-    }
-
-    if (calls.length > 0) {
-      setAttemptedTxs(prev => new Set(prev).add(TX_IDS.REGISTER_ORDERS));
-      multicallOrders.execute(calls);
-    }
-  }, [
-    currentPhase, mintedTokenId, walletAddress, autowalletAddress, chainId,
-    multicallOrders, attemptedTxs,
-    state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick,
-    state.slSwapConfig, state.tpSwapConfig, slSwapDirection, tpSwapDirection,
-  ]);
+  }, [currentPhase, nftApproval.isApprovalSuccess]);
 
   // Track SL/TP multicall completion
   useEffect(() => {
@@ -844,7 +751,6 @@ export function TransactionStep() {
 
   // Complete when all transactions done AND position added to portfolio
   const isComplete = currentPhase === 'done' && createPositionAPI.isSuccess;
-  const visibleTxs = transactions.filter((tx) => !tx.hidden);
 
   // Render price adjustment item (special handling for pool price confirmation)
   const renderPriceAdjustmentItem = () => {
@@ -994,136 +900,6 @@ export function TransactionStep() {
     );
   };
 
-  // Render transaction item (for non-approval transactions)
-  const renderTransactionItem = (tx: TransactionItem) => {
-    if (tx.hidden) return null;
-
-    const isActive = tx.status === 'waiting' || tx.status === 'confirming';
-    const isError = tx.status === 'error';
-
-    // Determine if this transaction is ready to be executed based on the current phase
-    // Each transaction should only be actionable when it's that step's turn
-    const isReadyForAction = (() => {
-      if (tx.id === TX_IDS.MINT_POSITION) {
-        // Mint is ready when we're in mint phase (approvals are done)
-        return currentPhase === 'mint';
-      }
-      if (tx.id === TX_IDS.APPROVE_NFT) {
-        // NFT approval is ready when we're in nft-approval phase (mint is done)
-        return currentPhase === 'nft-approval';
-      }
-      if (tx.id === TX_IDS.REGISTER_ORDERS) {
-        // Order registration is ready when we're in automation phase (NFT approval is done)
-        return currentPhase === 'automation';
-      }
-      return false;
-    })();
-
-    const showActionButtons = !activeError && tx.status === 'pending' && isReadyForAction;
-
-    // Handler for non-approval transaction retry
-    const handleRetry = () => {
-      setActiveError(null);
-      setAttemptedTxs(prev => {
-        const next = new Set(prev);
-        next.delete(tx.id);
-        return next;
-      });
-      if (tx.id === TX_IDS.MINT_POSITION) {
-        mint.reset();
-        mint.mint();
-      } else if (tx.id === TX_IDS.APPROVE_NFT) {
-        nftApproval.reset();
-        nftApproval.approve();
-      } else if (tx.id === TX_IDS.REGISTER_ORDERS) {
-        multicallOrders.reset();
-      }
-    };
-
-    // Show buttons when pending and ready OR when there's an error (for retry) and it's the current phase
-    const showButtons = (showActionButtons || (isError && isReadyForAction)) && !isActive;
-
-    return (
-      <div
-        key={tx.id}
-        className={`py-3 px-4 rounded-lg transition-colors ${
-          isError
-            ? 'bg-red-500/10 border border-red-500/30'
-            : tx.status === 'success'
-            ? 'bg-green-500/10 border border-green-500/20'
-            : isActive
-            ? 'bg-blue-500/10 border border-blue-500/20'
-            : 'bg-slate-700/30 border border-slate-600/20'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {/* Status Icon */}
-            {tx.status === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
-            {tx.status === 'waiting' && <Circle className="w-5 h-5 text-blue-400" />}
-            {tx.status === 'confirming' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
-            {tx.status === 'success' && <Check className="w-5 h-5 text-green-400" />}
-            {tx.status === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
-            {tx.status === 'skipped' && <Check className="w-5 h-5 text-slate-500" />}
-
-            {/* Label */}
-            <span
-              className={
-                tx.status === 'success'
-                  ? 'text-slate-400'
-                  : tx.status === 'skipped'
-                  ? 'text-slate-500'
-                  : tx.status === 'error'
-                  ? 'text-red-300'
-                  : 'text-white'
-              }
-            >
-              {tx.label}
-            </span>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2">
-            {tx.txHash && chainId && (
-              <a
-                href={buildTxUrl(chainId, tx.txHash)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-              >
-                {truncateTxHash(tx.txHash)}
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
-            {showButtons && (
-              <button
-                onClick={isError ? handleRetry : executeTransactions}
-                className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
-              >
-                {isError ? 'Retry' : 'Start'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Error message */}
-        {isError && tx.error && (
-          <div className="mt-2 pl-8 flex gap-2">
-            <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
-              {tx.error}
-            </div>
-            <button
-              onClick={() => navigator.clipboard.writeText(tx.error || '')}
-              className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
-              title="Copy error to clipboard"
-            >
-              <Copy className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   const renderInteractive = () => {
     if (!walletAddress) {
@@ -1186,10 +962,11 @@ export function TransactionStep() {
             />
           )}
 
-          {/* Other transactions (NFT approval, SL/TP registration) */}
-          {visibleTxs
-            .filter((tx) => tx.id !== TX_IDS.MINT_POSITION && tx.id !== TX_IDS.PRICE_ADJUST)
-            .map((tx) => renderTransactionItem(tx))}
+          {/* NFT approval - rendered by hook */}
+          {hasAutomation && nftApprovalPrompt.element}
+
+          {/* Order registration - rendered by hook */}
+          {(state.stopLossEnabled || state.takeProfitEnabled) && registerOrdersPrompt.element}
         </div>
       </div>
     );
