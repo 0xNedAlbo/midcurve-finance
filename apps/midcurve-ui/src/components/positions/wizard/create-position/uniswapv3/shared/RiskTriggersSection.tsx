@@ -19,9 +19,19 @@ export interface RiskTriggersSectionProps {
   takeProfitPrice: bigint | null;
 
   /**
+   * Expected PnL at SL trigger price (value relative to cost basis)
+   */
+  slPnlAtTrigger?: { pnlValue: bigint; pnlPercent?: number } | null;
+
+  /**
    * Stop Loss drawdown info (PnL value and optional percent at SL trigger)
    */
   slDrawdown?: { pnlValue: bigint; pnlPercent?: number } | null;
+
+  /**
+   * Expected PnL at TP trigger price (value relative to cost basis)
+   */
+  tpPnlAtTrigger?: { pnlValue: bigint; pnlPercent?: number } | null;
 
   /**
    * Take Profit runup info (PnL value and optional percent at TP trigger)
@@ -45,7 +55,9 @@ export interface RiskTriggersSectionProps {
 export function RiskTriggersSection({
   stopLossPrice,
   takeProfitPrice,
+  slPnlAtTrigger,
   slDrawdown,
+  tpPnlAtTrigger,
   tpRunup,
   quoteTokenDecimals,
 }: RiskTriggersSectionProps) {
@@ -64,6 +76,15 @@ export function RiskTriggersSection({
               <span className="text-slate-500">None</span>
             )}
           </div>
+          {slPnlAtTrigger && (
+            <div className="flex justify-between items-center text-sm pl-3 mt-0.5">
+              <span className="text-slate-400">Expected PnL</span>
+              <span className={`font-medium ${slPnlAtTrigger.pnlValue >= 0n ? 'text-green-400' : 'text-red-400'}`}>
+                {slPnlAtTrigger.pnlValue >= 0n ? '+' : ''}
+                {formatCompactValue(slPnlAtTrigger.pnlValue, quoteTokenDecimals)}
+              </span>
+            </div>
+          )}
           {slDrawdown && (
             <div className="flex justify-between items-center text-sm pl-3 mt-0.5">
               <span className="text-slate-400">Max Drawdown</span>
@@ -86,6 +107,15 @@ export function RiskTriggersSection({
               <span className="text-slate-500">None</span>
             )}
           </div>
+          {tpPnlAtTrigger && (
+            <div className="flex justify-between items-center text-sm pl-3 mt-0.5">
+              <span className="text-slate-400">Expected PnL</span>
+              <span className={`font-medium ${tpPnlAtTrigger.pnlValue >= 0n ? 'text-green-400' : 'text-red-400'}`}>
+                {tpPnlAtTrigger.pnlValue >= 0n ? '+' : ''}
+                {formatCompactValue(tpPnlAtTrigger.pnlValue, quoteTokenDecimals)}
+              </span>
+            </div>
+          )}
           {tpRunup && (
             <div className="flex justify-between items-center text-sm pl-3 mt-0.5">
               <span className="text-slate-400">Max Runup</span>

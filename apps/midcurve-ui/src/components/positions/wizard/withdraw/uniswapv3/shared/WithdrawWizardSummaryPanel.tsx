@@ -33,7 +33,9 @@ interface WithdrawWizardSummaryPanelProps {
     upperPnlPercent: number;
   } | null;
   /** PnL at SL/TP trigger points */
+  slPnlAtTrigger?: { pnlValue: bigint } | null;
   slDrawdown?: { pnlValue: bigint } | null;
+  tpPnlAtTrigger?: { pnlValue: bigint } | null;
   tpRunup?: { pnlValue: bigint } | null;
   stopLossPrice?: bigint | null;
   takeProfitPrice?: bigint | null;
@@ -46,7 +48,9 @@ export function WithdrawWizardSummaryPanel({
   showFinish,
   onFinish,
   rangePnl,
+  slPnlAtTrigger,
   slDrawdown,
+  tpPnlAtTrigger,
   tpRunup,
   stopLossPrice,
   takeProfitPrice,
@@ -443,7 +447,9 @@ export function WithdrawWizardSummaryPanel({
         <RiskTriggersSection
           stopLossPrice={stopLossPrice ?? null}
           takeProfitPrice={takeProfitPrice ?? null}
+          slPnlAtTrigger={slPnlAtTrigger}
           slDrawdown={slDrawdown}
+          tpPnlAtTrigger={tpPnlAtTrigger}
           tpRunup={tpRunup}
           quoteTokenDecimals={quoteDecimals}
         />

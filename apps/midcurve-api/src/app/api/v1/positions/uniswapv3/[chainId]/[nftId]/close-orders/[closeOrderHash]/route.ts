@@ -23,7 +23,7 @@ import {
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
-  getCloseOrderService,
+  getUniswapV3CloseOrderService,
   getUniswapV3PositionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
@@ -120,7 +120,7 @@ export async function GET(
       );
 
       // 3. Find close order by position + hash
-      const order = await getCloseOrderService().findByPositionAndHash(
+      const order = await getUniswapV3CloseOrderService().findByPositionAndHash(
         position.id,
         closeOrderHash
       );

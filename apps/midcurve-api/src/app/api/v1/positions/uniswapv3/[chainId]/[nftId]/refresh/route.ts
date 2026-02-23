@@ -24,7 +24,7 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
-  getCloseOrderService,
+  getUniswapV3CloseOrderService,
 } from '@/lib/services';
 import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
 
@@ -119,7 +119,7 @@ export async function POST(
         );
 
         // 3c. Fetch active close orders for this position
-        const activeCloseOrders = await getCloseOrderService().findByPositionId(
+        const activeCloseOrders = await getUniswapV3CloseOrderService().findByPositionId(
           dbPosition.id,
           { automationState: ['monitoring', 'executing', 'retrying'] },
           tx

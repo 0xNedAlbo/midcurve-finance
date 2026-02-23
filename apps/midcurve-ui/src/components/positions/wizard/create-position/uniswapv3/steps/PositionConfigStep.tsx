@@ -692,6 +692,23 @@ export function PositionConfigStep() {
     setTakeProfitPrice(null);
   }, []);
 
+  // Expected PnL at trigger prices
+  const slPnlAtTrigger = useMemo(() => {
+    if (!simulationPosition || !stopLossPrice) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(stopLossPrice);
+      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
+    } catch { return null; }
+  }, [simulationPosition, stopLossPrice]);
+
+  const tpPnlAtTrigger = useMemo(() => {
+    if (!simulationPosition || !takeProfitPrice) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(takeProfitPrice);
+      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
+    } catch { return null; }
+  }, [simulationPosition, takeProfitPrice]);
+
   // Max drawdown across the full combined PnL curve (accounts for triggers + swap configs)
   const slDrawdown = useMemo(() => {
     if (!simulationPosition) return null;
@@ -1080,7 +1097,9 @@ export function PositionConfigStep() {
       <RiskTriggersSection
         stopLossPrice={stopLossPrice}
         takeProfitPrice={takeProfitPrice}
+        slPnlAtTrigger={slPnlAtTrigger}
         slDrawdown={slDrawdown}
+        tpPnlAtTrigger={tpPnlAtTrigger}
         tpRunup={tpRunup}
         quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
         quoteSymbol={state.quoteToken?.symbol || 'Quote'}

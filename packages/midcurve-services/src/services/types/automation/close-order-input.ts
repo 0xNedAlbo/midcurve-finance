@@ -1,7 +1,7 @@
 /**
  * Close Order Input Types
  *
- * Input types for CloseOrderService.
+ * Input types for UniswapV3CloseOrderService.
  * These types are specific to the service layer — not shared with UI/API.
  *
  * All protocol-specific data flows through generic `config` and `state` JSON fields.

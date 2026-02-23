@@ -723,7 +723,9 @@ export function SwapStep() {
         <RiskTriggersSection
           stopLossPrice={slTpPrices.stopLossPrice}
           takeProfitPrice={slTpPrices.takeProfitPrice}
+          slPnlAtTrigger={slDrawdown}
           slDrawdown={slDrawdown}
+          tpPnlAtTrigger={tpRunup}
           tpRunup={tpRunup}
           quoteTokenDecimals={state.quoteToken?.decimals ?? 18}
         />

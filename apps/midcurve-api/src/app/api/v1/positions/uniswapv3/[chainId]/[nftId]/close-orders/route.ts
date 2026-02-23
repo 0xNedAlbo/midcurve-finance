@@ -17,7 +17,7 @@ import {
 } from '@midcurve/api-shared';
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getCloseOrderService, getUniswapV3PositionService } from '@/lib/services';
+import { getUniswapV3CloseOrderService, getUniswapV3PositionService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -150,7 +150,7 @@ export async function GET(
 
       // 4. Fetch close orders for position
       const filterOptions = automationState ? { automationState } : {};
-      let orders = await getCloseOrderService().findByPositionId(
+      let orders = await getUniswapV3CloseOrderService().findByPositionId(
         position.id,
         filterOptions
       );

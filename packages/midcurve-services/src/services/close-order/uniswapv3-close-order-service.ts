@@ -1,15 +1,15 @@
 /**
- * Close Order Service
+ * UniswapV3 Close Order Service
  *
- * Provides CRUD operations and lifecycle management for close orders.
- * Platform-independent: all protocol-specific data lives in JSON config/state columns.
+ * Provides CRUD operations, lifecycle management, and on-chain integration
+ * for UniswapV3 close orders.
  *
  * Key concepts:
- * - protocol: discriminator ('uniswapv3', future: 'aave', 'hyperliquid', etc.)
+ * - protocol: 'uniswapv3'
  * - config: immutable identity data (JSON) — chainId, nftId, contractAddress, etc.
  * - state: mutable on-chain state (JSON) — triggerTick, pool, slippage, etc.
  * - orderIdentityHash: unique identifier, e.g. "uniswapv3/{chainId}/{nftId}/{triggerMode}"
- * - automationState: single lifecycle field (monitoring|executing|retrying|failed|executed)
+ * - automationState: single lifecycle field (monitoring|executing|retrying|failed)
  * - executionAttempts: retry counter, resets when price moves away from trigger
  *
  * DB lifecycle driven by on-chain events:
@@ -21,9 +21,14 @@
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { CloseOrder, Prisma } from '@midcurve/database';
+import { ContractTriggerMode, OnChainOrderStatus } from '@midcurve/shared';
+import type { ContractSwapDirection } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
+import { EvmConfig } from '../../config/evm.js';
+import { deriveCloseOrderHashFromTick } from '../../utils/automation/close-order-hash.js';
+import { SharedContractService } from '../automation/shared-contract-service.js';
 import type {
   CreateCloseOrderInput,
   SyncFromChainInput,
@@ -31,14 +36,69 @@ import type {
 } from '../types/automation/index.js';
 
 // ============================================================================
+// ABI (minimal — only getOrder)
+// ============================================================================
+
+const POSITION_CLOSER_GET_ORDER_ABI = [
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'nftId', type: 'uint256' },
+      { internalType: 'uint8', name: 'triggerMode', type: 'uint8' },
+    ],
+    name: 'getOrder',
+    outputs: [
+      {
+        internalType: 'struct CloseOrder',
+        name: 'order',
+        type: 'tuple',
+        components: [
+          { internalType: 'enum OrderStatus', name: 'status', type: 'uint8' },
+          { internalType: 'uint256', name: 'nftId', type: 'uint256' },
+          { internalType: 'address', name: 'owner', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
+          { internalType: 'int24', name: 'triggerTick', type: 'int24' },
+          { internalType: 'address', name: 'payout', type: 'address' },
+          { internalType: 'address', name: 'operator', type: 'address' },
+          { internalType: 'uint256', name: 'validUntil', type: 'uint256' },
+          { internalType: 'uint16', name: 'slippageBps', type: 'uint16' },
+          { internalType: 'enum SwapDirection', name: 'swapDirection', type: 'uint8' },
+          { internalType: 'uint16', name: 'swapSlippageBps', type: 'uint16' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+// ============================================================================
 // Types
 // ============================================================================
 
 /**
- * Dependencies for CloseOrderService
+ * On-chain order data returned by getOrder().
+ * Only populated when status !== NONE.
  */
-export interface CloseOrderServiceDependencies {
+interface OnChainOrder {
+  status: number;
+  nftId: bigint;
+  owner: string;
+  pool: string;
+  triggerTick: number;
+  payout: string;
+  operator: string;
+  validUntil: bigint;
+  slippageBps: number;
+  swapDirection: ContractSwapDirection;
+  swapSlippageBps: number;
+}
+
+/**
+ * Dependencies for UniswapV3CloseOrderService
+ */
+export interface UniswapV3CloseOrderServiceDependencies {
   prisma?: PrismaClient;
+  sharedContractService?: SharedContractService;
 }
 
 /**
@@ -55,17 +115,174 @@ export interface CloseOrderWithPosition extends CloseOrder {
   };
 }
 
+/**
+ * Result of discover() — returns discovered orders and counts.
+ */
+export interface DiscoverCloseOrdersResult {
+  /** All close orders for the position (existing + newly discovered) */
+  orders: CloseOrder[];
+  /** Number of new orders discovered from on-chain */
+  discovered: number;
+  /** Number of orders already tracked in DB */
+  existing: number;
+}
+
+/**
+ * Result of refresh() — the updated order, or null if it was deleted
+ * (e.g. cancelled on-chain).
+ */
+export type RefreshCloseOrderResult = CloseOrder | null;
+
 // ============================================================================
 // Service
 // ============================================================================
 
-export class CloseOrderService {
+export class UniswapV3CloseOrderService {
   private readonly prisma: PrismaClient;
+  private readonly sharedContractService: SharedContractService;
   private readonly logger: ServiceLogger;
 
-  constructor(dependencies: CloseOrderServiceDependencies = {}) {
+  readonly protocol = 'uniswapv3' as const;
+
+  constructor(dependencies: UniswapV3CloseOrderServiceDependencies = {}) {
     this.prisma = dependencies.prisma ?? prismaClient;
-    this.logger = createServiceLogger('CloseOrderService');
+    this.sharedContractService = dependencies.sharedContractService ?? new SharedContractService();
+    this.logger = createServiceLogger('UniswapV3CloseOrderService');
+  }
+
+  // ==========================================================================
+  // DISCOVERY & REFRESH (to be implemented)
+  // ==========================================================================
+
+  /**
+   * Discover close orders for a position from on-chain data.
+   *
+   * Reads the PositionCloser contract for both trigger modes (LOWER, UPPER),
+   * creates DB records for any ACTIVE orders not already tracked, and returns all.
+   */
+  async discover(
+    positionId: string,
+    tx?: PrismaTransactionClient,
+  ): Promise<DiscoverCloseOrdersResult> {
+    log.methodEntry(this.logger, 'discover', { positionId });
+
+    try {
+      const db = tx ?? this.prisma;
+
+      // 1. Fetch position to get chainId and nftId
+      const position = await db.position.findUnique({ where: { id: positionId } });
+      if (!position) {
+        throw new Error(`Position not found: ${positionId}`);
+      }
+      const posConfig = position.config as Record<string, unknown>;
+      const chainId = posConfig.chainId as number;
+      const nftId = String(posConfig.nftId);
+
+      // 2. Find the PositionCloser contract for this chain
+      const sharedContract = await this.sharedContractService.findLatestByChainAndName(
+        chainId,
+        'UniswapV3PositionCloser',
+      );
+      if (!sharedContract) {
+        throw new Error(
+          `No UniswapV3PositionCloser contract found for chain ${chainId}`,
+        );
+      }
+      const contractAddress = sharedContract.config.address;
+
+      // 3. Read on-chain orders for both trigger modes
+      const orders: CloseOrder[] = [];
+      let discovered = 0;
+      let existing = 0;
+
+      const triggerModes = [ContractTriggerMode.LOWER, ContractTriggerMode.UPPER] as const;
+
+      for (const triggerMode of triggerModes) {
+        const onChain = await this.readOnChainOrder(
+          chainId,
+          contractAddress,
+          BigInt(nftId),
+          triggerMode,
+        );
+
+        // Skip non-active slots
+        if (!onChain || onChain.status !== OnChainOrderStatus.ACTIVE) {
+          continue;
+        }
+
+        // 4. Check if already tracked in DB
+        const orderIdentityHash = `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
+        const existingOrder = await this.findByOrderIdentityHash(orderIdentityHash, tx);
+
+        if (existingOrder) {
+          orders.push(existingOrder);
+          existing++;
+        } else {
+          // 5. Create new order from on-chain data
+          const closeOrderHash = deriveCloseOrderHashFromTick(
+            triggerMode,
+            onChain.triggerTick,
+          );
+
+          const newOrder = await this.create(
+            {
+              protocol: this.protocol,
+              positionId,
+              sharedContractId: sharedContract.id,
+              orderIdentityHash,
+              closeOrderHash,
+              config: {
+                chainId,
+                nftId,
+                triggerMode,
+                contractAddress,
+              },
+              state: {
+                triggerTick: onChain.triggerTick,
+                slippageBps: onChain.slippageBps,
+                payoutAddress: onChain.payout,
+                operatorAddress: onChain.operator,
+                owner: onChain.owner,
+                pool: onChain.pool,
+                validUntil: new Date(Number(onChain.validUntil) * 1000).toISOString(),
+                swapDirection: onChain.swapDirection,
+                swapSlippageBps: onChain.swapSlippageBps,
+                discoveredAt: new Date().toISOString(),
+              },
+            },
+            tx,
+          );
+
+          orders.push(newOrder);
+          discovered++;
+        }
+      }
+
+      this.logger.info(
+        { positionId, discovered, existing },
+        'Close order discovery complete',
+      );
+      log.methodExit(this.logger, 'discover', { discovered, existing });
+      return { orders, discovered, existing };
+    } catch (error) {
+      log.methodError(this.logger, 'discover', error as Error, { positionId });
+      throw error;
+    }
+  }
+
+  /**
+   * Refresh a close order's state from on-chain data.
+   *
+   * Reads the current on-chain state via getOrder(nftId, triggerMode)
+   * and updates the DB record. May delete if cancelled on-chain.
+   */
+  async refresh(
+    _id: string,
+    _tx?: PrismaTransactionClient,
+  ): Promise<RefreshCloseOrderResult> {
+    throw new Error(
+      'UniswapV3CloseOrderService.refresh() is not yet implemented.',
+    );
   }
 
   // ==========================================================================
@@ -602,6 +819,44 @@ export class CloseOrderService {
   // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================
+
+  /**
+   * Reads a single on-chain order via getOrder(nftId, triggerMode).
+   * Returns the full order struct, or null if status is NONE.
+   */
+  private async readOnChainOrder(
+    chainId: number,
+    contractAddress: string,
+    nftId: bigint,
+    triggerMode: ContractTriggerMode,
+  ): Promise<OnChainOrder | null> {
+    const client = EvmConfig.getInstance().getPublicClient(chainId);
+
+    const result = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      abi: POSITION_CLOSER_GET_ORDER_ABI,
+      functionName: 'getOrder',
+      args: [nftId, triggerMode],
+    });
+
+    if (result.status === OnChainOrderStatus.NONE) {
+      return null;
+    }
+
+    return {
+      status: result.status,
+      nftId: result.nftId,
+      owner: result.owner,
+      pool: result.pool,
+      triggerTick: result.triggerTick,
+      payout: result.payout,
+      operator: result.operator,
+      validUntil: result.validUntil,
+      slippageBps: result.slippageBps,
+      swapDirection: result.swapDirection as ContractSwapDirection,
+      swapSlippageBps: result.swapSlippageBps,
+    };
+  }
 
   private buildWhereClause(
     options: FindCloseOrderOptions & { positionId?: string },

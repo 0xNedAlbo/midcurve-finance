@@ -37,7 +37,9 @@ interface IncreaseWizardSummaryPanelProps {
     upperPnlPercent: number;
   } | null;
   /** PnL at SL/TP trigger points (optional) */
+  slPnlAtTrigger?: { pnlValue: bigint } | null;
   slDrawdown?: { pnlValue: bigint } | null;
+  tpPnlAtTrigger?: { pnlValue: bigint } | null;
   tpRunup?: { pnlValue: bigint } | null;
   /** Stop loss trigger price (bigint in quote units) */
   stopLossPrice?: bigint | null;
@@ -56,7 +58,9 @@ export function IncreaseWizardSummaryPanel({
   showFinish,
   onFinish,
   rangePnl,
+  slPnlAtTrigger,
   slDrawdown,
+  tpPnlAtTrigger,
   tpRunup,
   stopLossPrice,
   takeProfitPrice,
@@ -370,7 +374,9 @@ export function IncreaseWizardSummaryPanel({
         <RiskTriggersSection
           stopLossPrice={stopLossPrice ?? null}
           takeProfitPrice={takeProfitPrice ?? null}
+          slPnlAtTrigger={slPnlAtTrigger}
           slDrawdown={slDrawdown}
+          tpPnlAtTrigger={tpPnlAtTrigger}
           tpRunup={tpRunup}
           quoteTokenDecimals={quoteDecimals}
         />

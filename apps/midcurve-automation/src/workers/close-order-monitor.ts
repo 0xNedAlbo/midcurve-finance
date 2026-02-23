@@ -16,7 +16,7 @@
  */
 
 import type { CloseOrder } from '@midcurve/database';
-import { getCloseOrderService, getAutomationSubscriptionService } from '../lib/services';
+import { getUniswapV3CloseOrderService, getAutomationSubscriptionService } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
 import { readPoolPrice, type SupportedChainId } from '../lib/evm';
 import { getRabbitMQConnection } from '../mq/connection-manager';
@@ -222,10 +222,10 @@ export class CloseOrderMonitor {
   }
 
   /**
-   * Sync order subscriptions using CloseOrderService
+   * Sync order subscriptions using UniswapV3CloseOrderService
    */
   private async syncOrderSubscriptions(): Promise<void> {
-    const closeOrderService = getCloseOrderService();
+    const closeOrderService = getUniswapV3CloseOrderService();
 
     // Get all monitoring orders with position→pool relations
     const monitoringOrders = await closeOrderService.findMonitoringOrders();
@@ -323,7 +323,7 @@ export class CloseOrderMonitor {
           order.poolAddress as `0x${string}`
         );
 
-        const closeOrderService = getCloseOrderService();
+        const closeOrderService = getUniswapV3CloseOrderService();
         const freshOrder = await closeOrderService.findById(order.id);
         if (freshOrder && freshOrder.automationState === 'monitoring') {
           const triggered = await this.checkOrderTrigger(
@@ -358,7 +358,7 @@ export class CloseOrderMonitor {
 
     try {
       // Get fresh order data (may have been modified)
-      const closeOrderService = getCloseOrderService();
+      const closeOrderService = getUniswapV3CloseOrderService();
       const order = await closeOrderService.findById(orderId);
 
       if (!order) {
@@ -450,7 +450,7 @@ export class CloseOrderMonitor {
     }
 
     // Verify order is still monitoring before publishing (race safety)
-    const closeOrderService = getCloseOrderService();
+    const closeOrderService = getUniswapV3CloseOrderService();
     const freshOrder = await closeOrderService.findById(order.id);
     if (!freshOrder || freshOrder.automationState !== 'monitoring') {
       log.debug(

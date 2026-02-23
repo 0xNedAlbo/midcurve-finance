@@ -30,7 +30,7 @@ import {
 } from '../formatters/index.js';
 import type { WebhookConfigService } from '../webhook-config-service.js';
 import type { UniswapV3PositionService } from '../../position/uniswapv3-position-service.js';
-import type { CloseOrderService } from '../../automation/close-order-service.js';
+import type { UniswapV3CloseOrderService } from '../../close-order/uniswapv3-close-order-service.js';
 
 // =============================================================================
 // TYPES
@@ -47,7 +47,7 @@ export interface WebhookDeliveryResult {
 export interface WebhookNotificationAdapterDependencies {
   webhookConfigService: WebhookConfigService;
   positionService: UniswapV3PositionService;
-  closeOrderService: CloseOrderService;
+  closeOrderService: UniswapV3CloseOrderService;
   /** Timeout for webhook HTTP requests in milliseconds (default: 10000) */
   timeoutMs?: number;
 }
@@ -61,7 +61,7 @@ export class WebhookNotificationAdapter implements NotificationAdapter {
   private readonly logger: ServiceLogger;
   private readonly webhookConfigService: WebhookConfigService;
   private readonly positionService: UniswapV3PositionService;
-  private readonly closeOrderService: CloseOrderService;
+  private readonly closeOrderService: UniswapV3CloseOrderService;
   private readonly timeoutMs: number;
 
   constructor(deps: WebhookNotificationAdapterDependencies) {

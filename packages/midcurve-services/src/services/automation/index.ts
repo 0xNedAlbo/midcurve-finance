@@ -10,12 +10,14 @@
  * - Automation logs (user-facing event logs)
  */
 
-// Close order service
-export { CloseOrderService } from './close-order-service.js';
+// Close order service (re-exported from canonical location)
+export {
+  UniswapV3CloseOrderService,
+} from '../close-order/uniswapv3-close-order-service.js';
 export type {
-  CloseOrderServiceDependencies,
+  UniswapV3CloseOrderServiceDependencies,
   CloseOrderWithPosition,
-} from './close-order-service.js';
+} from '../close-order/uniswapv3-close-order-service.js';
 
 export { SharedContractService } from './shared-contract-service.js';
 export type {

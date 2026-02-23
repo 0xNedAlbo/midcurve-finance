@@ -531,7 +531,9 @@ export function ConfigureStep() {
     <IncreaseWizardSummaryPanel
       nextDisabled={!calculations.isValid}
       rangePnl={rangeBoundaryInfo}
+      slPnlAtTrigger={slDrawdown}
       slDrawdown={slDrawdown}
+      tpPnlAtTrigger={tpRunup}
       tpRunup={tpRunup}
       stopLossPrice={closeOrderPrices.stopLossPrice}
       takeProfitPrice={closeOrderPrices.takeProfitPrice}

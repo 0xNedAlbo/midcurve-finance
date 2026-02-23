@@ -604,7 +604,9 @@ export function ConfigureStep() {
     <WithdrawWizardSummaryPanel
       nextDisabled={state.withdrawPercent === 0 || !isConnected || isWrongNetwork || isWrongAccount}
       rangePnl={rangeBoundaryInfo}
+      slPnlAtTrigger={slDrawdown}
       slDrawdown={slDrawdown}
+      tpPnlAtTrigger={tpRunup}
       tpRunup={tpRunup}
       stopLossPrice={closeOrderPrices.stopLossPrice}
       takeProfitPrice={closeOrderPrices.takeProfitPrice}

@@ -4,7 +4,7 @@
  * RabbitMQ consumer that processes triggered orders.
  * Uses competing consumers pattern for parallel execution.
  *
- * Execution lifecycle tracked via CloseOrderService (single automationState field):
+ * Execution lifecycle tracked via UniswapV3CloseOrderService (single automationState field):
  * - First attempt: atomicTransitionToExecuting (monitoring|retrying → executing, attempts++)
  * - Success: markExecuted (executing → executed)
  * - Failure: transitionToRetrying (executing → retrying), then setTimeout:
@@ -15,7 +15,7 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
-import { getCloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
+import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -150,7 +150,7 @@ export class CloseOrderExecutor {
    */
   private async recoverRetryingOrders(): Promise<void> {
     try {
-      const closeOrderService = getCloseOrderService();
+      const closeOrderService = getUniswapV3CloseOrderService();
       const retryingOrders = await closeOrderService.findRetryingOrders();
 
       if (retryingOrders.length === 0) return;
@@ -207,7 +207,7 @@ export class CloseOrderExecutor {
       triggerSide,
     });
 
-    const closeOrderService = getCloseOrderService();
+    const closeOrderService = getUniswapV3CloseOrderService();
 
     try {
       // Atomic CAS: monitoring|retrying → executing (increments executionAttempts)
@@ -375,7 +375,7 @@ export class CloseOrderExecutor {
 
     setTimeout(async () => {
       try {
-        const closeOrderService = getCloseOrderService();
+        const closeOrderService = getUniswapV3CloseOrderService();
 
         // Re-fetch order to get latest state
         const order = await closeOrderService.findById(orderId);
@@ -467,7 +467,7 @@ export class CloseOrderExecutor {
     triggerPrice: string,
     triggerSide: 'lower' | 'upper'
   ): Promise<void> {
-    const closeOrderService = getCloseOrderService();
+    const closeOrderService = getUniswapV3CloseOrderService();
     const automationSubscriptionService = getAutomationSubscriptionService();
     const signerClient = getSignerClient();
     const feeConfig = getFeeConfig();

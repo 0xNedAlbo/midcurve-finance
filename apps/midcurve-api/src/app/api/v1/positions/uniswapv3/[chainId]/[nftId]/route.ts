@@ -41,7 +41,7 @@ import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3PoolService,
-  getCloseOrderService,
+  getUniswapV3CloseOrderService,
 } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
@@ -141,7 +141,7 @@ export async function GET(
         });
 
         // 3b. Fetch active close orders for this position
-        const activeCloseOrders = await getCloseOrderService().findByPositionId(
+        const activeCloseOrders = await getUniswapV3CloseOrderService().findByPositionId(
           position.id,
           { automationState: ['monitoring', 'executing', 'retrying'] },
           tx

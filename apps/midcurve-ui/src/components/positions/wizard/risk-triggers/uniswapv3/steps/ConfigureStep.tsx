@@ -313,6 +313,23 @@ export function ConfigureStep() {
     [setTakeProfitPrice, clearTakeProfit]
   );
 
+  // Expected PnL at trigger prices
+  const slPnlAtTrigger = useMemo(() => {
+    if (!simulationPosition || !state.stopLoss.priceBigint) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(state.stopLoss.priceBigint);
+      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
+    } catch { return null; }
+  }, [simulationPosition, state.stopLoss.priceBigint]);
+
+  const tpPnlAtTrigger = useMemo(() => {
+    if (!simulationPosition || !state.takeProfit.priceBigint) return null;
+    try {
+      const result = simulationPosition.simulatePnLAtPrice(state.takeProfit.priceBigint);
+      return { pnlValue: result.pnlValue, pnlPercent: result.pnlPercent };
+    } catch { return null; }
+  }, [simulationPosition, state.takeProfit.priceBigint]);
+
   // Risk metrics computed by overlay
   const slDrawdown = useMemo(() => {
     if (!simulationPosition) return null;
@@ -668,7 +685,9 @@ export function ConfigureStep() {
           <RiskTriggersSection
             stopLossPrice={state.stopLoss.enabled ? state.stopLoss.priceBigint : null}
             takeProfitPrice={state.takeProfit.enabled ? state.takeProfit.priceBigint : null}
+            slPnlAtTrigger={slPnlAtTrigger}
             slDrawdown={slDrawdown}
+            tpPnlAtTrigger={tpPnlAtTrigger}
             tpRunup={tpRunup}
             quoteTokenDecimals={quoteDecimals}
             quoteSymbol={quoteSymbol}

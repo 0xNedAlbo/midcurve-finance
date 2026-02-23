@@ -23,7 +23,7 @@ import type { ConsumeMessage } from 'amqplib';
 import { prisma, type PrismaClient } from '@midcurve/database';
 import type { CloseOrder } from '@midcurve/database';
 import {
-  CloseOrderService,
+  UniswapV3CloseOrderService,
   AutomationSubscriptionService,
   AutomationLogService,
   UniswapV3PositionService,
@@ -110,14 +110,14 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     'Processes close order lifecycle events from on-chain data (registration, cancellation, execution, config updates)';
 
   private consumerTag: string | null = null;
-  private orderService: CloseOrderService;
+  private orderService: UniswapV3CloseOrderService;
   private automationSubscriptionService: AutomationSubscriptionService;
   private automationLogService: AutomationLogService;
   private positionService: UniswapV3PositionService;
 
   constructor() {
     super();
-    this.orderService = new CloseOrderService({ prisma });
+    this.orderService = new UniswapV3CloseOrderService({ prisma });
     this.automationSubscriptionService = new AutomationSubscriptionService({ prisma });
     this.automationLogService = new AutomationLogService({ prisma });
     this.positionService = new UniswapV3PositionService({ prisma });
