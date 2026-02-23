@@ -69,6 +69,7 @@ import {
 } from "../../utils/uniswapv3/nfpm-enumerator.js";
 import { SupportedChainId } from "../../config/evm.js";
 import { CacheService } from "../cache/cache-service.js";
+import { UniswapV3CloseOrderService } from "../close-order/uniswapv3-close-order-service.js";
 
 /**
  * Fee state for a position
@@ -283,6 +284,12 @@ export interface UniswapV3PositionServiceDependencies {
      * If not provided, the singleton CacheService instance will be used
      */
     cacheService?: CacheService;
+
+    /**
+     * Close order service for discovering on-chain close orders during position import
+     * If not provided, a new UniswapV3CloseOrderService instance will be created
+     */
+    closeOrderService?: UniswapV3CloseOrderService;
 }
 
 /**
@@ -303,6 +310,7 @@ export class UniswapV3PositionService {
     private readonly _evmBlockService: EvmBlockService;
     private readonly _poolPriceService: UniswapV3PoolPriceService;
     private readonly _cacheService: CacheService;
+    private readonly _closeOrderService: UniswapV3CloseOrderService;
 
     /**
      * Creates a new UniswapV3PositionService instance
@@ -340,6 +348,8 @@ export class UniswapV3PositionService {
             new UniswapV3PoolPriceService({ prisma: this._prisma });
         this._cacheService =
             dependencies.cacheService ?? CacheService.getInstance();
+        this._closeOrderService =
+            dependencies.closeOrderService ?? new UniswapV3CloseOrderService();
     }
 
     /**
@@ -827,6 +837,22 @@ export class UniswapV3PositionService {
                 this._poolPriceService,
                 dbTx,
             );
+
+            // g2) Discover close orders (best-effort)
+            try {
+                const closeOrderResult = await this._closeOrderService.discover(position.id, dbTx);
+                if (closeOrderResult.discovered > 0) {
+                    this.logger.info(
+                        { positionId: position.id, discovered: closeOrderResult.discovered },
+                        "Close orders discovered during position import",
+                    );
+                }
+            } catch (closeOrderError) {
+                this.logger.warn(
+                    { positionId: position.id, error: (closeOrderError as Error).message },
+                    "Close order discovery failed (non-fatal)",
+                );
+            }
 
             // h) Call refresh()
             const refreshedPosition = await this.refresh(position.id, "latest", dbTx);
