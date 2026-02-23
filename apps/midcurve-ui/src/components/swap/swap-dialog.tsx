@@ -117,28 +117,30 @@ export function SwapDialog({ isOpen, onClose, prefill, chainId: propChainId }: S
             </button>
           </div>
 
-          {/* Network Selector */}
-          <div className="px-6 pt-4 pb-2">
-            <div className="flex flex-wrap gap-2">
-              {PARASWAP_SUPPORTED_CHAIN_IDS.map((cid) => {
-                const meta = getChainMetadataByChainId(cid);
-                const isSelected = cid === selectedChainId;
-                return (
-                  <button
-                    key={cid}
-                    onClick={() => setSelectedChainId(cid)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                        : 'bg-slate-700/40 text-slate-400 border border-slate-600/40 hover:bg-slate-700/60 hover:text-slate-300'
-                    }`}
-                  >
-                    {meta?.shortName ?? `Chain ${cid}`}
-                  </button>
-                );
-              })}
+          {/* Network Selector — hidden when chain is prefilled */}
+          {!propChainId && (
+            <div className="px-6 pt-4 pb-2">
+              <div className="flex flex-wrap gap-2">
+                {PARASWAP_SUPPORTED_CHAIN_IDS.map((cid) => {
+                  const meta = getChainMetadataByChainId(cid);
+                  const isSelected = cid === selectedChainId;
+                  return (
+                    <button
+                      key={cid}
+                      onClick={() => setSelectedChainId(cid)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                          : 'bg-slate-700/40 text-slate-400 border border-slate-600/40 hover:bg-slate-700/60 hover:text-slate-300'
+                      }`}
+                    >
+                      {meta?.shortName ?? `Chain ${cid}`}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Content */}
           <div className="p-6 pt-2 overflow-y-auto max-h-[calc(90vh-160px)]">
