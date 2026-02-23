@@ -2,13 +2,13 @@
  * SwapStep Component
  *
  * Wizard step for acquiring required token amounts before opening a position.
- * Compares user's wallet balance against required amounts and provides links
- * to Cow Swap to acquire missing tokens.
+ * Compares user's wallet balance against required amounts and opens the
+ * in-app SwapDialog (Paraswap) to acquire missing tokens.
  *
  * Features:
  * - Real-time balance tracking via WebSocket-backed subscriptions
  * - Token balance comparison table (Wallet | Required | Status)
- * - External Cow Swap links for acquiring missing tokens
+ * - Inline SwapDialog with pre-filled tokens and BUY amount
  * - Wallet connection and network switching prompts
  * - Skip option for manual balance management
  */
@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { Check, Loader2, ArrowRight, Coins, PlusCircle, MinusCircle } from 'lucide-react';
 import { useAccount, useChainId } from 'wagmi';
-import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
+import type { PoolSearchTokenInfo, SwapToken } from '@midcurve/api-shared';
 import type { SwapConfig, PnLScenario, Erc20Token } from '@midcurve/shared';
 import {
   formatCompactValue,
@@ -39,6 +39,8 @@ import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkProm
 import { getChainSlugByChainId } from '@/config/chains';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
 import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-tabs';
+import { SwapDialog } from '@/components/swap';
+import type { SwapPrefill } from '@/components/swap';
 
 /**
  * Small token logo with fallback
@@ -71,8 +73,7 @@ interface TokenBalanceRowProps {
   missingAmount: bigint;
   isLoading: boolean;
   logoUrl?: string | null;
-  chainId: number;
-  otherTokenSymbol: string;
+  onSwapClick: () => void;
 }
 
 function TokenBalanceRow({
@@ -82,18 +83,9 @@ function TokenBalanceRow({
   missingAmount,
   isLoading,
   logoUrl,
-  chainId,
-  otherTokenSymbol,
+  onSwapClick,
 }: TokenBalanceRowProps) {
   const isSufficient = missingAmount === 0n;
-
-  // Build Cow Swap URL: https://swap.cow.fi/#/{chainId}/swap/{sellToken}/{buyToken}?buyAmount={amount}
-  const cowSwapUrl = useMemo(() => {
-    if (isSufficient || missingAmount === 0n) return null;
-    // Convert missing amount to decimal string (without decimals for the URL)
-    const buyAmountDecimal = Number(missingAmount) / (10 ** token.decimals);
-    return `https://swap.cow.fi/#/${chainId}/swap/${otherTokenSymbol}/${token.symbol}?buyAmount=${buyAmountDecimal}`;
-  }, [chainId, otherTokenSymbol, token.symbol, token.decimals, missingAmount, isSufficient]);
 
   return (
     <tr className="border-b border-slate-700/50 last:border-b-0">
@@ -135,19 +127,28 @@ function TokenBalanceRow({
             <span className="text-sm">OK</span>
           </span>
         ) : (
-          <a
-            href={cowSwapUrl ?? '#'}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={onSwapClick}
             className="text-blue-400 hover:text-blue-300 text-sm font-medium cursor-pointer flex items-center gap-1 justify-end"
           >
             Swap
             <ArrowRight className="w-3 h-3" />
-          </a>
+          </button>
         )}
       </td>
     </tr>
   );
+}
+
+/** Convert wizard PoolSearchTokenInfo to SwapToken for the swap dialog */
+function toSwapToken(token: PoolSearchTokenInfo, logoUrl?: string | null): SwapToken {
+  return {
+    address: token.address,
+    symbol: token.symbol,
+    name: token.symbol,
+    decimals: token.decimals,
+    logoUrl: logoUrl ?? undefined,
+  };
 }
 
 // Zoom constants (consistent with PositionConfigStep)
@@ -160,6 +161,7 @@ export function SwapStep() {
   const { address: walletAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
   const [scenario, setScenario] = useState<PnLScenario>('combined');
+  const [swapPrefill, setSwapPrefill] = useState<SwapPrefill | null>(null);
 
   // Zoom handlers using context state
   const handleZoomIn = useCallback(() => {
@@ -604,8 +606,12 @@ export function SwapStep() {
                   missingAmount={missingBaseAmount}
                   isLoading={isBaseBalanceLoading}
                   logoUrl={actualBaseLogoUrl}
-                  chainId={poolChainId}
-                  otherTokenSymbol={state.quoteToken.symbol}
+                  onSwapClick={() => setSwapPrefill({
+                    sourceToken: toSwapToken(state.quoteToken!, actualQuoteLogoUrl),
+                    destToken: toSwapToken(state.baseToken!, actualBaseLogoUrl),
+                    amount: missingBaseAmount.toString(),
+                    side: 'BUY',
+                  })}
                 />
               )}
               {state.quoteToken && state.baseToken && (
@@ -616,13 +622,24 @@ export function SwapStep() {
                   missingAmount={missingQuoteAmount}
                   isLoading={isQuoteBalanceLoading}
                   logoUrl={actualQuoteLogoUrl}
-                  chainId={poolChainId}
-                  otherTokenSymbol={state.baseToken.symbol}
+                  onSwapClick={() => setSwapPrefill({
+                    sourceToken: toSwapToken(state.baseToken!, actualBaseLogoUrl),
+                    destToken: toSwapToken(state.quoteToken!, actualQuoteLogoUrl),
+                    amount: missingQuoteAmount.toString(),
+                    side: 'BUY',
+                  })}
                 />
               )}
             </tbody>
           </table>
         </div>
+
+        <SwapDialog
+          isOpen={swapPrefill !== null}
+          onClose={() => setSwapPrefill(null)}
+          chainId={poolChainId}
+          prefill={swapPrefill ?? undefined}
+        />
       </div>
     );
   };

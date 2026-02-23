@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { Check, Loader2, ArrowRight, Coins, PlusCircle, MinusCircle } from 'lucide-react';
 import { useAccount, useChainId } from 'wagmi';
-import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
+import type { PoolSearchTokenInfo, SwapToken } from '@midcurve/api-shared';
 import type { SwapConfig } from '@midcurve/shared';
 import {
   formatCompactValue,
@@ -19,6 +19,8 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { getChainSlugByChainId } from '@/config/chains';
 import { InteractivePnLCurve } from '@/components/positions/pnl-curve/uniswapv3';
+import { SwapDialog } from '@/components/swap';
+import type { SwapPrefill } from '@/components/swap';
 
 // Zoom constants
 const ZOOM_MIN = 0.75;
@@ -53,8 +55,7 @@ interface TokenBalanceRowProps {
   missingAmount: bigint;
   isLoading: boolean;
   logoUrl?: string | null;
-  chainId: number;
-  otherTokenSymbol: string;
+  onSwapClick: () => void;
 }
 
 function TokenBalanceRow({
@@ -64,16 +65,9 @@ function TokenBalanceRow({
   missingAmount,
   isLoading,
   logoUrl,
-  chainId,
-  otherTokenSymbol,
+  onSwapClick,
 }: TokenBalanceRowProps) {
   const isSufficient = missingAmount === 0n;
-
-  const cowSwapUrl = useMemo(() => {
-    if (isSufficient || missingAmount === 0n) return null;
-    const buyAmountDecimal = Number(missingAmount) / (10 ** token.decimals);
-    return `https://swap.cow.fi/#/${chainId}/swap/${otherTokenSymbol}/${token.symbol}?buyAmount=${buyAmountDecimal}`;
-  }, [chainId, otherTokenSymbol, token.symbol, token.decimals, missingAmount, isSufficient]);
 
   return (
     <tr className="border-b border-slate-700/50 last:border-b-0">
@@ -108,25 +102,35 @@ function TokenBalanceRow({
             <span className="text-sm">OK</span>
           </span>
         ) : (
-          <a
-            href={cowSwapUrl ?? '#'}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={onSwapClick}
             className="text-blue-400 hover:text-blue-300 text-sm font-medium cursor-pointer flex items-center gap-1 justify-end"
           >
             Swap
             <ArrowRight className="w-3 h-3" />
-          </a>
+          </button>
         )}
       </td>
     </tr>
   );
 }
 
+/** Convert wizard PoolSearchTokenInfo to SwapToken for the swap dialog */
+function toSwapToken(token: PoolSearchTokenInfo, logoUrl?: string | null): SwapToken {
+  return {
+    address: token.address,
+    symbol: token.symbol,
+    name: token.symbol,
+    decimals: token.decimals,
+    logoUrl: logoUrl ?? undefined,
+  };
+}
+
 export function SwapStep() {
   const { state, setStepValid, goNext, setInteractiveZoom } = useIncreaseDepositWizard();
   const { address: walletAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
+  const [swapPrefill, setSwapPrefill] = useState<SwapPrefill | null>(null);
 
   // Extract position data
   const position = state.position;
@@ -474,8 +478,12 @@ export function SwapStep() {
                   missingAmount={missingBaseAmount}
                   isLoading={isBaseBalanceLoading}
                   logoUrl={baseLogoUrl}
-                  chainId={poolChainId}
-                  otherTokenSymbol={quoteToken.symbol}
+                  onSwapClick={() => setSwapPrefill({
+                    sourceToken: toSwapToken(quoteToken!, quoteLogoUrl),
+                    destToken: toSwapToken(baseToken!, baseLogoUrl),
+                    amount: missingBaseAmount.toString(),
+                    side: 'BUY',
+                  })}
                 />
               )}
               {quoteToken && baseToken && (
@@ -486,13 +494,24 @@ export function SwapStep() {
                   missingAmount={missingQuoteAmount}
                   isLoading={isQuoteBalanceLoading}
                   logoUrl={quoteLogoUrl}
-                  chainId={poolChainId}
-                  otherTokenSymbol={baseToken.symbol}
+                  onSwapClick={() => setSwapPrefill({
+                    sourceToken: toSwapToken(baseToken!, baseLogoUrl),
+                    destToken: toSwapToken(quoteToken!, quoteLogoUrl),
+                    amount: missingQuoteAmount.toString(),
+                    side: 'BUY',
+                  })}
                 />
               )}
             </tbody>
           </table>
         </div>
+
+        <SwapDialog
+          isOpen={swapPrefill !== null}
+          onClose={() => setSwapPrefill(null)}
+          chainId={poolChainId}
+          prefill={swapPrefill ?? undefined}
+        />
       </div>
     );
   };
