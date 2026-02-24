@@ -16,6 +16,13 @@ import type { Address, Hex } from 'viem';
 const PARASWAP_API_BASE = 'https://api.paraswap.io';
 const PARTNER_NAME = 'midcurve';
 
+/**
+ * Augustus version to request from the Paraswap API.
+ * The API defaults to V5 if omitted. Our on-chain ParaswapAdapter is deployed
+ * with V6.2 Augustus addresses, so we must request V6.2 calldata.
+ */
+const PARASWAP_AUGUSTUS_VERSION = '6.2';
+
 /** Default quote validity in seconds (5 minutes) */
 const DEFAULT_QUOTE_VALIDITY_SECONDS = 300;
 
@@ -148,6 +155,7 @@ export async function getParaswapQuote(
     network: chainId.toString(),
     partner: PARTNER_NAME,
     userAddress,
+    version: PARASWAP_AUGUSTUS_VERSION,
   });
 
   const url = `${PARASWAP_API_BASE}/prices?${params}`;
@@ -248,7 +256,7 @@ export async function buildParaswapTransaction(
     ignoreGasEstimate: true,
   };
 
-  const url = `${PARASWAP_API_BASE}/transactions/${chainId}`;
+  const url = `${PARASWAP_API_BASE}/transactions/${chainId}?version=${PARASWAP_AUGUSTUS_VERSION}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

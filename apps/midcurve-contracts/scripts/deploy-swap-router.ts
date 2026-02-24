@@ -67,13 +67,15 @@ const AUGUSTUS: Record<string, string> = {
   base: '0x6A000F20005980200259B80c5102003040001068',
 };
 
-// Paraswap TokenTransferProxy (same across all EVM chains)
+// Paraswap TokenTransferProxy for Augustus V6.2
+// V6.2 uses Augustus itself as the TokenTransferProxy (same address).
+// The adapter approves this address so Augustus can pull tokens via transferFrom.
 const TOKEN_TRANSFER_PROXY: Record<string, string> = {
-  mainnet: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
-  arbitrum: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
-  optimism: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
-  polygon: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
-  base: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
+  mainnet: '0x6A000F20005980200259B80c5102003040001068',
+  arbitrum: '0x6A000F20005980200259B80c5102003040001068',
+  optimism: '0x6A000F20005980200259B80c5102003040001068',
+  polygon: '0x6A000F20005980200259B80c5102003040001068',
+  base: '0x6A000F20005980200259B80c5102003040001068',
 };
 
 // ============================================================================

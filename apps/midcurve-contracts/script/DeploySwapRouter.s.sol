@@ -26,7 +26,7 @@ import {ParaswapAdapter} from "../contracts/swap-router/adapters/ParaswapAdapter
  *   Base:      0x2626664c2603336E57B271c5C0b26F421741e481
  *
  * Paraswap Augustus V6.2 (all chains): 0x6A000F20005980200259B80c5102003040001068
- * Paraswap TokenTransferProxy (all chains): 0x216B4B4Ba9F3e719726886d34a177484278Bfcae
+ * Paraswap TokenTransferProxy for V6.2: same as Augustus (V6.2 is its own proxy)
  */
 contract DeploySwapRouterScript is Script {
     function run(
