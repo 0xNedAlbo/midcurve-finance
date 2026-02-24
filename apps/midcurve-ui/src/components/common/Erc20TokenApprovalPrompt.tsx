@@ -15,11 +15,12 @@
 
 import { useCallback, useMemo } from 'react';
 import { Circle, Check, Loader2, AlertCircle, ExternalLink, Copy } from 'lucide-react';
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useWriteContract } from 'wagmi';
 import type { Address } from 'viem';
 import { formatUnits, getAddress } from 'viem';
 import { ERC20_ABI } from '@/config/tokens/erc20-abi';
 import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import { useWatchErc20TokenApproval } from '@/hooks/tokens/erc20/useWatchErc20TokenApproval';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 
@@ -175,10 +176,14 @@ export function useErc20TokenApprovalPrompt({
     reset: resetExactApproval,
   } = useWriteContract();
 
-  const { isLoading: isExactWaiting, error: exactReceiptError } = useWaitForTransactionReceipt({
-    hash: exactApprovalTxHash,
-    chainId,
+  const exactTxWatch = useWatchTransactionStatus({
+    txHash: exactApprovalTxHash ?? null,
+    chainId: chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!exactApprovalTxHash,
   });
+  const isExactWaiting = !!exactApprovalTxHash && exactTxWatch.status !== 'success' && exactTxWatch.status !== 'reverted' && !exactTxWatch.error;
+  const exactReceiptError = exactTxWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Combined approval status - prioritize watch hook (on-chain state) over local state
   // Local approval.isApproved is only used as fallback when watch hasn't loaded yet

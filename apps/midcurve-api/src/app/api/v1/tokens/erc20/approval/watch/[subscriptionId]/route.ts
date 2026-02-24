@@ -28,7 +28,8 @@ import {
   hasApproval,
 } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { prisma } from '@midcurve/database';
+import { getErc20ApprovalService } from '@/lib/services';
+import { prisma, Prisma } from '@midcurve/database';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,8 +110,41 @@ export async function GET(
         });
       }
 
+      // 3b. Catch-up: If no WebSocket event received yet, check on-chain state.
+      // Handles the race condition where the Approval tx confirms before the
+      // WebSocket subscription is established by the worker.
+      let currentAllowance = state.approvalAmount;
+
+      if (state.lastEventBlock === null) {
+        const approvalService = getErc20ApprovalService();
+        const onChainApproval = await approvalService.getAllowance(
+          config.tokenAddress,
+          config.walletAddress,
+          config.spenderAddress,
+          config.chainId
+        );
+
+        const onChainAllowanceStr = onChainApproval.allowance.toString();
+
+        if (onChainAllowanceStr !== state.approvalAmount) {
+          const updatedState: Erc20ApprovalSubscriptionState = {
+            ...state,
+            approvalAmount: onChainAllowanceStr,
+            lastUpdatedAt: now.toISOString(),
+          };
+
+          await prisma.onchainDataSubscribers.update({
+            where: { id: subscription.id },
+            data: {
+              state: updatedState as unknown as Prisma.InputJsonValue,
+            },
+          });
+
+          currentAllowance = onChainAllowanceStr;
+        }
+      }
+
       // 4. Build response
-      const currentAllowance = state.approvalAmount;
       const pollUrl = `/api/v1/tokens/erc20/approval/watch/${subscriptionId}`;
 
       const responseData: Erc20ApprovalSubscriptionPollResponseData = {
