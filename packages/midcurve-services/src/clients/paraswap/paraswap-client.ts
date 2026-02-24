@@ -256,7 +256,7 @@ export async function buildParaswapTransaction(
     ignoreGasEstimate: true,
   };
 
-  const url = `${PARASWAP_API_BASE}/transactions/${chainId}?version=${PARASWAP_AUGUSTUS_VERSION}`;
+  const url = `${PARASWAP_API_BASE}/transactions/${chainId}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
