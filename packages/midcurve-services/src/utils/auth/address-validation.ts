@@ -9,8 +9,10 @@ import { normalizeAddress, isValidAddress } from '@midcurve/shared';
 
 /**
  * Supported EVM chain IDs
+ *
+ * Local chain (31337) is only available in non-production environments.
  */
-export const SUPPORTED_CHAIN_IDS = [
+const PRODUCTION_CHAIN_IDS = [
   1, // Ethereum
   42161, // Arbitrum
   8453, // Base
@@ -19,7 +21,14 @@ export const SUPPORTED_CHAIN_IDS = [
   10, // Optimism
 ] as const;
 
-export type SupportedChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
+const LOCAL_CHAIN_IDS = [31337] as const;
+
+export const SUPPORTED_CHAIN_IDS =
+  process.env.NODE_ENV === 'production'
+    ? PRODUCTION_CHAIN_IDS
+    : ([...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const);
+
+export type SupportedChainId = (typeof PRODUCTION_CHAIN_IDS)[number] | (typeof LOCAL_CHAIN_IDS)[number];
 
 /**
  * Chain names for error messages
@@ -31,6 +40,7 @@ export const CHAIN_NAMES: Record<SupportedChainId, string> = {
   56: 'BSC',
   137: 'Polygon',
   10: 'Optimism',
+  31337: 'Local',
 };
 
 /**
@@ -67,7 +77,7 @@ export function validateAndNormalizeAddress(address: string): string {
  * ```
  */
 export function validateChainId(chainId: number): asserts chainId is SupportedChainId {
-  if (!SUPPORTED_CHAIN_IDS.includes(chainId as SupportedChainId)) {
+  if (!(SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId)) {
     throw new Error(
       `Unsupported chain ID: ${chainId}. Supported chains: ${SUPPORTED_CHAIN_IDS.map((id) => `${id} (${CHAIN_NAMES[id]})`).join(', ')}`
     );
@@ -81,7 +91,7 @@ export function validateChainId(chainId: number): asserts chainId is SupportedCh
  * @returns true if supported, false otherwise
  */
 export function isSupportedChainId(chainId: number): chainId is SupportedChainId {
-  return SUPPORTED_CHAIN_IDS.includes(chainId as SupportedChainId);
+  return (SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId);
 }
 
 /**
@@ -95,6 +105,7 @@ const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
   56: 'WS_RPC_URL_BSC',
   137: 'WS_RPC_URL_POLYGON',
   10: 'WS_RPC_URL_OPTIMISM',
+  31337: 'WS_RPC_URL_LOCAL',
 };
 
 /**
