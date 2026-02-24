@@ -8,8 +8,6 @@ import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePosi
 import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {TickMath} from "../libraries/TickMath.sol";
-import {LiquidityAmounts} from "../libraries/LiquidityAmounts.sol";
 
 /// @title ExecutionFacet
 /// @notice Facet for executing close orders when trigger conditions are met
@@ -22,6 +20,7 @@ contract ExecutionFacet is Modifiers {
     // ========================================
 
     uint16 internal constant MAX_FEE_BPS = 100; // 1% max fee
+    bytes32 internal constant UNISWAP_V3_VENUE_ID = keccak256("UniswapV3");
 
     // ========================================
     // STRUCTS
@@ -79,18 +78,20 @@ contract ExecutionFacet is Modifiers {
     // ========================================
 
     /// @notice Execute a close order when trigger condition is met
-    /// @dev Only the registered operator can execute
+    /// @dev Only the registered operator can execute.
+    ///      Withdrawal mins are computed off-chain to avoid sqrtPriceX96 race conditions.
+    ///      Swap uses two-phase logic: guaranteed portion through Paraswap, surplus through position's own pool.
     /// @param nftId The position NFT ID
     /// @param triggerMode The trigger mode to execute
-    /// @param feeRecipient Recipient of operator fee (address(0) = no fee)
-    /// @param feeBps Fee in basis points (capped by maxFeeBps)
-    /// @param swapParams Swap parameters (required if swap was configured)
+    /// @param withdrawParams Withdrawal slippage params (amount0Min, amount1Min) computed off-chain
+    /// @param swapParams Two-phase swap parameters (required if swap was configured)
+    /// @param feeParams Operator fee parameters
     function executeOrder(
         uint256 nftId,
         TriggerMode triggerMode,
-        address feeRecipient,
-        uint16 feeBps,
-        IUniswapV3PositionCloserV1.SwapParams calldata swapParams
+        IUniswapV3PositionCloserV1.WithdrawParams calldata withdrawParams,
+        IUniswapV3PositionCloserV1.SwapParams calldata swapParams,
+        IUniswapV3PositionCloserV1.FeeParams calldata feeParams
     )
         external
         whenInitialized
@@ -115,10 +116,10 @@ contract ExecutionFacet is Modifiers {
         }
 
         // 4) Validate fee
-        if (feeBps > s.maxFeeBps) revert FeeBpsTooHigh(feeBps, s.maxFeeBps);
+        if (feeParams.feeBps > s.maxFeeBps) revert FeeBpsTooHigh(feeParams.feeBps, s.maxFeeBps);
 
         // 5) Check trigger condition (tick-based)
-        (uint160 sqrtPriceX96, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(order.pool).slot0();
+        (, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(order.pool).slot0();
         if (!_triggerConditionMet(currentTick, order.triggerTick, triggerMode)) {
             revert TriggerConditionNotMet(currentTick, order.triggerTick, triggerMode);
         }
@@ -133,21 +134,22 @@ contract ExecutionFacet is Modifiers {
             nftId
         );
 
-        // 8) Withdraw liquidity and collect tokens
-        CloseContext memory ctx = _withdrawAndCollect(s, nftId, order.slippageBps, sqrtPriceX96);
+        // 8) Withdraw liquidity and collect tokens (off-chain computed mins)
+        CloseContext memory ctx = _withdrawAndCollect(s, nftId, withdrawParams);
 
         // 9) Apply optional operator fee
         (uint256 payout0, uint256 payout1) = _applyFees(
-            nftId, triggerMode, ctx, feeRecipient, feeBps
+            nftId, triggerMode, ctx, feeParams.feeRecipient, feeParams.feeBps
         );
 
-        // 11) Execute optional swap if configured
+        // 10) Execute optional two-phase swap if configured
         if (order.swapDirection != SwapDirection.NONE) {
             (payout0, payout1) = _executeSwap(
                 s,
                 nftId,
                 triggerMode,
                 order.swapDirection,
+                order.pool,
                 ctx.token0,
                 ctx.token1,
                 payout0,
@@ -156,7 +158,7 @@ contract ExecutionFacet is Modifiers {
             );
         }
 
-        // 12) Payout remainder to configured address
+        // 11) Payout remainder to configured address
         if (payout0 > 0) IERC20(ctx.token0).safeTransfer(order.payout, payout0);
         if (payout1 > 0) IERC20(ctx.token1).safeTransfer(order.payout, payout1);
 
@@ -170,19 +172,19 @@ contract ExecutionFacet is Modifiers {
             ctx.amount1Out
         );
 
-        // 13) Return empty NFT to owner
+        // 12) Return empty NFT to owner
         INonfungiblePositionManagerMinimal(s.positionManager).transferFrom(
             address(this),
             order.owner,
             nftId
         );
 
-        // 14) Cancel counterpart order on full close
+        // 13) Cancel counterpart order on full close
         // Since we always decrease ALL liquidity, every execution is a full close.
         // The opposite trigger mode's order (if active) is now stale and must be cancelled.
         _cancelCounterpartOrder(s, nftId, triggerMode, order.owner);
 
-        // 15) Clean up executed order storage (gas refund)
+        // 14) Clean up executed order storage (gas refund)
         // All reads from `order` are complete — safe to delete.
         delete s.orders[key];
         s.orderExists[nftId][triggerMode] = false;
@@ -253,11 +255,11 @@ contract ExecutionFacet is Modifiers {
     }
 
     /// @dev Withdraw liquidity and collect tokens from position
+    /// @notice Uses off-chain computed amount0Min/amount1Min to eliminate the sqrtPriceX96 race condition
     function _withdrawAndCollect(
         AppStorage storage s,
         uint256 nftId,
-        uint16 slippageBps,
-        uint160 currentSqrtPriceX96
+        IUniswapV3PositionCloserV1.WithdrawParams calldata withdrawParams
     ) internal returns (CloseContext memory ctx) {
         INonfungiblePositionManagerMinimal nftManager = INonfungiblePositionManagerMinimal(s.positionManager);
 
@@ -268,8 +270,8 @@ contract ExecutionFacet is Modifiers {
             address token0,
             address token1,
             ,
-            int24 tickLower,
-            int24 tickUpper,
+            ,
+            ,
             uint128 liquidity,
             ,
             ,
@@ -281,22 +283,13 @@ contract ExecutionFacet is Modifiers {
         ctx.token1 = token1;
         ctx.liquidity = liquidity;
 
-        uint160 sqrtPriceAX96 = TickMath.getSqrtRatioAtTick(tickLower);
-        uint160 sqrtPriceBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
-
-        (uint256 amount0Expected, uint256 amount1Expected) =
-            LiquidityAmounts.getAmountsForLiquidity(currentSqrtPriceX96, sqrtPriceAX96, sqrtPriceBX96, liquidity);
-
-        uint256 amount0Min = (amount0Expected * (10_000 - uint256(slippageBps))) / 10_000;
-        uint256 amount1Min = (amount1Expected * (10_000 - uint256(slippageBps))) / 10_000;
-
-        // Decrease ALL liquidity
+        // Decrease ALL liquidity using off-chain computed mins
         nftManager.decreaseLiquidity(
             INonfungiblePositionManagerMinimal.DecreaseLiquidityParams({
                 tokenId: nftId,
                 liquidity: liquidity,
-                amount0Min: amount0Min,
-                amount1Min: amount1Min,
+                amount0Min: withdrawParams.amount0Min,
+                amount1Min: withdrawParams.amount1Min,
                 deadline: block.timestamp
             })
         );
@@ -337,14 +330,15 @@ contract ExecutionFacet is Modifiers {
         }
     }
 
-    /// @dev Execute post-close swap via MidcurveSwapRouter
-    /// @notice The swap route (hops) is determined off-chain and passed in by the operator.
-    ///         The contract delegates the swap entirely to the MidcurveSwapRouter.
+    /// @dev Execute two-phase post-close swap via MidcurveSwapRouter
+    /// @notice Phase 1: guaranteed amount through Paraswap hops with minAmountOut protection.
+    ///         Phase 2: surplus through the position's own pool (built on-chain, no minAmountOut).
     function _executeSwap(
         AppStorage storage s,
         uint256 nftId,
         TriggerMode triggerMode,
         SwapDirection direction,
+        address pool,
         address token0,
         address token1,
         uint256 amount0,
@@ -370,48 +364,61 @@ contract ExecutionFacet is Modifiers {
             return (amount0, amount1);
         }
 
-        // Approve SwapRouter to pull tokenIn
-        IERC20(tokenIn).forceApprove(s.swapRouter, amountIn);
+        // Phase 1: Guaranteed swap (Paraswap route with slippage protection)
+        if (params.guaranteedAmountIn > 0 && params.hops.length > 0) {
+            if (amountIn < params.guaranteedAmountIn) {
+                revert InsufficientAmountForGuaranteed(amountIn, params.guaranteedAmountIn);
+            }
 
-        // Record output balance before swap
-        uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
+            uint256 outBefore = IERC20(tokenOut).balanceOf(address(this));
 
-        // Execute swap via MidcurveSwapRouter
-        IMidcurveSwapRouter(s.swapRouter).sell(
-            tokenIn,
-            tokenOut,
-            amountIn,
-            params.minAmountOut,
-            address(this),
-            params.deadline,
-            params.hops
-        );
+            IERC20(tokenIn).forceApprove(s.swapRouter, params.guaranteedAmountIn);
+            IMidcurveSwapRouter(s.swapRouter).sell(
+                tokenIn,
+                tokenOut,
+                params.guaranteedAmountIn,
+                params.minAmountOut,
+                address(this),
+                params.deadline,
+                params.hops
+            );
+            IERC20(tokenIn).forceApprove(s.swapRouter, 0);
 
-        // Reset approval (security best practice)
-        IERC20(tokenIn).forceApprove(s.swapRouter, 0);
-
-        // Verify output via balance diff
-        uint256 balanceAfter = IERC20(tokenOut).balanceOf(address(this));
-        uint256 amountOut = balanceAfter - balanceBefore;
-
-        if (amountOut == 0) {
-            revert SwapOutputZero();
+            uint256 phase1Out = IERC20(tokenOut).balanceOf(address(this)) - outBefore;
+            emit SwapExecuted(nftId, triggerMode, tokenIn, tokenOut, params.guaranteedAmountIn, phase1Out);
         }
 
-        // Defense-in-depth: minAmountOut already enforced by router
-        if (amountOut < params.minAmountOut) {
-            revert SlippageExceeded(params.minAmountOut, amountOut);
+        // Phase 2: Surplus swap through position's own pool (built on-chain)
+        uint256 surplus = amountIn - params.guaranteedAmountIn;
+        if (surplus > 0) {
+            IMidcurveSwapRouter.Hop[] memory surplusPath = new IMidcurveSwapRouter.Hop[](1);
+            surplusPath[0] = IMidcurveSwapRouter.Hop({
+                venueId: UNISWAP_V3_VENUE_ID,
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                venueData: abi.encode(IUniswapV3PoolMinimal(pool).fee())
+            });
+
+            uint256 outBefore = IERC20(tokenOut).balanceOf(address(this));
+
+            IERC20(tokenIn).forceApprove(s.swapRouter, surplus);
+            IMidcurveSwapRouter(s.swapRouter).sell(
+                tokenIn,
+                tokenOut,
+                surplus,
+                0, // No minAmountOut for surplus (unpredictable amount)
+                address(this),
+                params.deadline,
+                surplusPath
+            );
+            IERC20(tokenIn).forceApprove(s.swapRouter, 0);
+
+            uint256 phase2Out = IERC20(tokenOut).balanceOf(address(this)) - outBefore;
+            emit SwapExecuted(nftId, triggerMode, tokenIn, tokenOut, surplus, phase2Out);
         }
 
-        emit SwapExecuted(nftId, triggerMode, tokenIn, tokenOut, amountIn, amountOut);
-
-        // Compute final amounts
-        if (tokenIn == token0) {
-            finalAmount0 = 0;
-            finalAmount1 = amount1 + amountOut;
-        } else {
-            finalAmount0 = amount0 + amountOut;
-            finalAmount1 = 0;
-        }
+        // Compute final amounts from actual balances
+        finalAmount0 = IERC20(token0).balanceOf(address(this));
+        finalAmount1 = IERC20(token1).balanceOf(address(this));
     }
 }

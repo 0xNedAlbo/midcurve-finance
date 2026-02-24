@@ -177,22 +177,23 @@ abstract contract Modifiers {
 
     // ============ Errors ============
 
-    error NotOwner();
-    error NotOperator();
-    error ZeroAddress();
-    error SlippageBpsOutOfRange(uint16 slippageBps);
-    error InvalidTriggerTick(int24 tick, TriggerMode triggerMode);
-    error OrderAlreadyExists(uint256 nftId, TriggerMode triggerMode);
-    error OrderNotFound(uint256 nftId, TriggerMode triggerMode);
-    error WrongOrderStatus(OrderStatus expected, OrderStatus actual);
-    error OrderExpired(uint256 validUntil, uint256 nowTs);
-    error TriggerConditionNotMet(int24 currentTick, int24 triggerTick, TriggerMode triggerMode);
-    error NftNotOwnedByRecordedOwner(address expectedOwner, address actualOwner);
-    error NftNotApproved(address owner, uint256 nftId);
-    error FeeBpsTooHigh(uint16 feeBps, uint16 maxFeeBps);
-    error TransferFailed();
-    error SwapFailed();
-    error SwapOutputZero();
-    error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);
-    error SlippageExceeded(uint256 minExpected, uint256 actual);
+    error NotOwner();                                                                       // 0x30cd7471
+    error NotOperator();                                                                    // 0x7c214f04
+    error ZeroAddress();                                                                    // 0xd92e233d
+    error SlippageBpsOutOfRange(uint16 slippageBps);                                        // 0x49c26c64
+    error InvalidTriggerTick(int24 tick, TriggerMode triggerMode);                          // 0xdef2a009
+    error OrderAlreadyExists(uint256 nftId, TriggerMode triggerMode);                       // 0x04b81aa3
+    error OrderNotFound(uint256 nftId, TriggerMode triggerMode);                            // 0xa8de380f
+    error WrongOrderStatus(OrderStatus expected, OrderStatus actual);                       // 0x010aa335
+    error OrderExpired(uint256 validUntil, uint256 nowTs);                                  // 0x4b2d84db
+    error TriggerConditionNotMet(int24 currentTick, int24 triggerTick, TriggerMode triggerMode); // 0xc8c8fafb
+    error NftNotOwnedByRecordedOwner(address expectedOwner, address actualOwner);           // 0x9d6db1ad
+    error NftNotApproved(address owner, uint256 nftId);                                     // 0xa38f26fd
+    error FeeBpsTooHigh(uint16 feeBps, uint16 maxFeeBps);                                   // 0x84c6b9b5
+    error TransferFailed();                                                                 // 0x90b8ec18
+    error SwapFailed();                                                                     // 0x81ceff30
+    error SwapOutputZero();                                                                 // 0x5273e2e8
+    error SwapSlippageBpsOutOfRange(uint16 swapSlippageBps);                                // 0x22fecc1f
+    error SlippageExceeded(uint256 minExpected, uint256 actual);                            // 0x71c4efed
+    error InsufficientAmountForGuaranteed(uint256 available, uint256 required);             // 0xb4eca305
 }

@@ -55,28 +55,45 @@ interface IUniswapV3PositionCloserV1 {
     // EXECUTION
     // ========================================
 
-    /// @notice Parameters for swap execution via MidcurveSwapRouter
-    /// @dev The swap route (hops) is determined off-chain and passed in by the operator.
-    ///      An empty hops array means no swap (used when swapDirection is NONE).
+    /// @notice Parameters for withdrawal slippage (computed off-chain)
+    /// @dev Replaces on-chain slippageBps computation to eliminate the race condition
+    ///      where sqrtPriceX96 changes between off-chain param building and on-chain execution
+    struct WithdrawParams {
+        uint256 amount0Min;    // Minimum amount of token0 from decreaseLiquidity
+        uint256 amount1Min;    // Minimum amount of token1 from decreaseLiquidity
+    }
+
+    /// @notice Parameters for two-phase swap execution via MidcurveSwapRouter
+    /// @dev Phase 1 (Guaranteed): guaranteedAmountIn routed through hops (Paraswap) with minAmountOut protection.
+    ///      Phase 2 (Surplus): any excess beyond guaranteedAmountIn routed through the position's own pool (built on-chain).
     struct SwapParams {
-        uint256 minAmountOut;               // Minimum output amount (slippage protection)
-        uint256 deadline;                   // Swap deadline (0 = no deadline)
-        IMidcurveSwapRouter.Hop[] hops;     // Swap route through MidcurveSwapRouter
+        uint256 guaranteedAmountIn;            // Guaranteed min from withdrawal (after fees), sent through Paraswap hops
+        uint256 minAmountOut;                  // Minimum output from Paraswap quote for guaranteedAmountIn
+        uint256 deadline;                      // Swap deadline (0 = no deadline, applies to both phases)
+        IMidcurveSwapRouter.Hop[] hops;        // Paraswap adapter hop(s) for guaranteed portion
+    }
+
+    /// @notice Parameters for operator fee application
+    struct FeeParams {
+        address feeRecipient;  // Recipient of operator fee (address(0) = no fee)
+        uint16 feeBps;         // Fee in basis points (capped by maxFeeBps)
     }
 
     /// @notice Execute a close order when trigger condition is met
-    /// @dev Only the registered operator can execute
+    /// @dev Only the registered operator can execute.
+    ///      Withdrawal mins are computed off-chain to avoid sqrtPriceX96 race conditions.
+    ///      Swap uses two-phase logic: guaranteed portion through Paraswap, surplus through position's own pool.
     /// @param nftId The position NFT ID
     /// @param triggerMode The trigger mode to execute
-    /// @param feeRecipient Recipient of operator fee (address(0) = no fee)
-    /// @param feeBps Fee in basis points (capped by maxFeeBps)
-    /// @param swapParams Swap parameters (required if swap was configured)
+    /// @param withdrawParams Withdrawal slippage params (amount0Min, amount1Min) computed off-chain
+    /// @param swapParams Two-phase swap parameters (required if swap was configured)
+    /// @param feeParams Operator fee parameters
     function executeOrder(
         uint256 nftId,
         TriggerMode triggerMode,
-        address feeRecipient,
-        uint16 feeBps,
-        SwapParams calldata swapParams
+        WithdrawParams calldata withdrawParams,
+        SwapParams calldata swapParams,
+        FeeParams calldata feeParams
     ) external;
 
     // ========================================
