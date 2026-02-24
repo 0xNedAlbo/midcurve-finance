@@ -58,6 +58,24 @@ const USDC: Record<string, string> = {
   base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
 };
 
+// Paraswap Augustus V6.2 (same across all EVM chains)
+const AUGUSTUS: Record<string, string> = {
+  mainnet: '0x6A000F20005980200259B80c5102003040001068',
+  arbitrum: '0x6A000F20005980200259B80c5102003040001068',
+  optimism: '0x6A000F20005980200259B80c5102003040001068',
+  polygon: '0x6A000F20005980200259B80c5102003040001068',
+  base: '0x6A000F20005980200259B80c5102003040001068',
+};
+
+// Paraswap TokenTransferProxy (same across all EVM chains)
+const TOKEN_TRANSFER_PROXY: Record<string, string> = {
+  mainnet: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
+  arbitrum: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
+  optimism: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
+  polygon: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
+  base: '0x216B4B4Ba9F3e719726886d34a177484278Bfcae',
+};
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -160,8 +178,10 @@ async function main(): Promise<void> {
   const swapRouterAddr = UNISWAP_V3_SWAP_ROUTER[chain];
   const wethAddr = WETH[chain];
   const usdcAddr = USDC[chain];
+  const augustusAddr = AUGUSTUS[chain];
+  const tokenTransferProxyAddr = TOKEN_TRANSFER_PROXY[chain];
 
-  if (!swapRouterAddr || !wethAddr || !usdcAddr) {
+  if (!swapRouterAddr || !wethAddr || !usdcAddr || !augustusAddr || !tokenTransferProxyAddr) {
     console.error(`Missing address configuration for chain "${chain}".`);
     process.exit(1);
   }
@@ -170,23 +190,27 @@ async function main(): Promise<void> {
   const extraArgs = process.argv.slice(2).filter((arg) => arg !== '--');
 
   console.log('=== Deploy MidcurveSwapRouter ===');
-  console.log('  Chain:             ', chain, `(${chainId})`);
-  console.log('  Uniswap SwapRouter:', swapRouterAddr);
-  console.log('  WETH:              ', wethAddr);
-  console.log('  USDC:              ', usdcAddr);
-  console.log('  Manager:           ', owner);
-  console.log('  Extra flags:       ', extraArgs.length > 0 ? extraArgs.join(' ') : '(dry-run)');
+  console.log('  Chain:                  ', chain, `(${chainId})`);
+  console.log('  Uniswap SwapRouter:     ', swapRouterAddr);
+  console.log('  WETH:                   ', wethAddr);
+  console.log('  USDC:                   ', usdcAddr);
+  console.log('  Manager:                ', owner);
+  console.log('  Paraswap Augustus:      ', augustusAddr);
+  console.log('  Paraswap TransferProxy: ', tokenTransferProxyAddr);
+  console.log('  Extra flags:            ', extraArgs.length > 0 ? extraArgs.join(' ') : '(dry-run)');
   console.log('');
 
   const forgeArgs = [
     'script',
     'script/DeploySwapRouter.s.sol',
     '--sig',
-    'run(address,address,address,address)',
+    'run(address,address,address,address,address,address)',
     swapRouterAddr,
     wethAddr,
     usdcAddr,
     owner,
+    augustusAddr,
+    tokenTransferProxyAddr,
     '--rpc-url',
     chain,
     '-vvvv',
@@ -197,7 +221,8 @@ async function main(): Promise<void> {
 
   // Extract deployed addresses from forge output
   const routerMatch = output.match(/MidcurveSwapRouter deployed at:\s*(0x[0-9a-fA-F]{40})/);
-  const adapterMatch = output.match(/UniswapV3Adapter deployed at:\s*(0x[0-9a-fA-F]{40})/);
+  const uniswapAdapterMatch = output.match(/UniswapV3Adapter deployed at:\s*(0x[0-9a-fA-F]{40})/);
+  const paraswapAdapterMatch = output.match(/ParaswapAdapter deployed at:\s*(0x[0-9a-fA-F]{40})/);
 
   console.log('');
   console.log('='.repeat(60));
@@ -207,8 +232,11 @@ async function main(): Promise<void> {
     console.log('');
     console.log('Deployed Addresses:');
     console.log(`  MidcurveSwapRouter: ${routerAddress}`);
-    if (adapterMatch) {
-      console.log(`  UniswapV3Adapter:   ${adapterMatch[1]}`);
+    if (uniswapAdapterMatch) {
+      console.log(`  UniswapV3Adapter:   ${uniswapAdapterMatch[1]}`);
+    }
+    if (paraswapAdapterMatch) {
+      console.log(`  ParaswapAdapter:    ${paraswapAdapterMatch[1]}`);
     }
     console.log('');
     console.log('To register in database, run:');
