@@ -14,7 +14,7 @@
  */
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
-import { SwapRouterService, type PostCloseSwapResult } from '@midcurve/services';
+import { ParaswapSwapService } from '@midcurve/services';
 import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
@@ -27,9 +27,13 @@ import {
   getOnChainOrder,
   readPoolPrice,
   readSwapRouterAddress,
+  readParaswapAdapterAddress,
+  computeWithdrawMinAmounts,
+  EMPTY_SWAP_PARAMS,
   type SupportedChainId,
   type PreflightValidation,
   type SimulationSwapParams,
+  type SimulationFeeParams,
 } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -40,7 +44,8 @@ import {
   serializeMessage,
   type OrderTriggerMessage,
 } from '../mq/messages';
-import { getSignerClient, type SwapParamsInput } from '../clients/signer-client';
+import { getSignerClient } from '../clients/signer-client';
+import type { WithdrawParamsInput, SwapParamsInput, FeeParamsInput } from '../clients/signer-client';
 
 const log = automationLogger.child({ component: 'CloseOrderExecutor' });
 
@@ -649,9 +654,43 @@ export class CloseOrderExecutor {
     }
 
     // =========================================================================
-    // SWAP PARAMS: Compute optimal swap path via SwapRouterService
+    // WITHDRAW PARAMS: Compute off-chain withdrawal mins (amount0Min, amount1Min)
     // =========================================================================
-    let swapParams: SwapParamsInput | undefined;
+    if (!preflight?.positionData) {
+      throw new Error(
+        `Cannot compute withdraw params: preflight position data unavailable for order ${orderId}`
+      );
+    }
+
+    const withdrawParams = await computeWithdrawMinAmounts(
+      chainId as SupportedChainId,
+      poolAddress as `0x${string}`,
+      preflight.positionData.liquidity,
+      preflight.positionData.tickLower,
+      preflight.positionData.tickUpper,
+      onChainOrder.slippageBps
+    );
+
+    log.info({
+      orderId,
+      positionId,
+      amount0Min: withdrawParams.amount0Min.toString(),
+      amount1Min: withdrawParams.amount1Min.toString(),
+      slippageBps: onChainOrder.slippageBps,
+      msg: 'Computed WithdrawParams',
+    });
+
+    // =========================================================================
+    // SWAP PARAMS: Get Paraswap quote for guaranteed swap portion
+    // =========================================================================
+    let swapParamsInput: SwapParamsInput = {
+      guaranteedAmountIn: '0',
+      minAmountOut: '0',
+      deadline: 0,
+      hops: [],
+    };
+
+    let simulationSwapParams: SimulationSwapParams = { ...EMPTY_SWAP_PARAMS };
 
     if (swapEnabled) {
       log.info({
@@ -659,97 +698,121 @@ export class CloseOrderExecutor {
         positionId,
         swapDirection,
         swapSlippageBps,
-        msg: 'Computing swap params via SwapRouterService',
+        msg: 'Computing Paraswap swap params',
       });
 
-      const swapRouterAddress = await readSwapRouterAddress(
-        chainId as SupportedChainId,
-        contractAddress as `0x${string}`
-      );
+      // Determine which token amount is the swap input (based on direction)
+      // TOKEN0_TO_1 = swap token0 → token1, so guaranteed = amount0Min after fees
+      // TOKEN1_TO_0 = swap token1 → token0, so guaranteed = amount1Min after fees
+      const swapTokenMin = onChainOrder.swapDirection === 1
+        ? withdrawParams.amount0Min
+        : withdrawParams.amount1Min;
 
-      const { sqrtPriceX96: freshPoolPrice } = await readPoolPrice(
-        chainId as SupportedChainId,
-        poolAddress as `0x${string}`
-      );
-
-      if (!preflight?.positionData) {
-        throw new Error(
-          `Cannot calculate swap amount: preflight position data unavailable for order ${orderId}`
-        );
-      }
-
-      const swapRouterService = new SwapRouterService();
-      const swapResult: PostCloseSwapResult = await swapRouterService.computePostCloseSwapParams({
-        chainId,
-        nftId,
-        swapRouterAddress,
-        swapDirection: swapDirection as 'TOKEN0_TO_1' | 'TOKEN1_TO_0',
-        maxDeviationBps: swapSlippageBps,
-        positionData: {
-          token0: preflight.positionData.token0 as `0x${string}`,
-          token1: preflight.positionData.token1 as `0x${string}`,
-          fee: preflight.positionData.fee,
-          tickLower: preflight.positionData.tickLower,
-          tickUpper: preflight.positionData.tickUpper,
-          liquidity: preflight.positionData.liquidity,
-          tokensOwed0: preflight.positionData.tokensOwed0,
-          tokensOwed1: preflight.positionData.tokensOwed1,
-        },
-        currentSqrtPriceX96: freshPoolPrice,
-      });
-
-      if (swapResult.kind === 'do_not_execute') {
-        throw new Error(
-          `SwapRouterService: swap not executable — ${swapResult.reason}`
-        );
-      }
-
-      swapParams = {
-        minAmountOut: swapResult.minAmountOut.toString(),
-        deadline: Number(swapResult.deadline),
-        hops: swapResult.hops.map((hop) => ({
-          venueId: hop.venueId,
-          tokenIn: hop.tokenIn,
-          tokenOut: hop.tokenOut,
-          venueData: hop.venueData,
-        })),
-      };
+      // Deduct fee to get guaranteed amount (contract deducts fees before swapping)
+      const guaranteedAmountIn = (swapTokenMin * BigInt(10000 - feeConfig.bps)) / 10000n;
 
       log.info({
         orderId,
-        positionId,
-        tokenIn: swapResult.tokenIn,
-        tokenOut: swapResult.tokenOut,
-        estimatedAmountIn: swapResult.estimatedAmountIn.toString(),
-        minAmountOut: swapResult.minAmountOut.toString(),
-        hopsCount: swapResult.hops.length,
-        diagnostics: {
-          pathsEnumerated: swapResult.diagnostics.pathsEnumerated,
-          pathsQuoted: swapResult.diagnostics.pathsQuoted,
-          bestEstimatedAmountOut: swapResult.diagnostics.bestEstimatedAmountOut.toString(),
-          fairValuePrice: swapResult.diagnostics.fairValuePrice,
-          absoluteFloorAmountOut: swapResult.diagnostics.absoluteFloorAmountOut.toString(),
-          poolsDiscovered: swapResult.diagnostics.poolsDiscovered,
-          backbonePoolsCacheHit: swapResult.diagnostics.backbonePoolsCacheHit,
-          swapTokensCacheHit: swapResult.diagnostics.swapTokensCacheHit,
-        },
-        msg: 'SwapRouterService computed optimal swap params',
+        swapTokenMin: swapTokenMin.toString(),
+        feeBps: feeConfig.bps,
+        guaranteedAmountIn: guaranteedAmountIn.toString(),
+        msg: 'Computed guaranteedAmountIn (after fee deduction)',
       });
-    }
 
-    // Build simulation swap params
-    const simulationSwapParams: SimulationSwapParams | undefined = swapParams
-      ? {
-          minAmountOut: BigInt(swapParams.minAmountOut),
-          deadline: BigInt(swapParams.deadline),
-          hops: swapParams.hops.map((hop) => ({
+      if (guaranteedAmountIn > 0n) {
+        const swapRouterAddress = await readSwapRouterAddress(
+          chainId as SupportedChainId,
+          contractAddress as `0x${string}`
+        );
+
+        const paraswapAdapterAddress = await readParaswapAdapterAddress(
+          chainId as SupportedChainId,
+          swapRouterAddress
+        );
+
+        // Determine tokenIn/tokenOut from swap direction
+        const tokenIn = onChainOrder.swapDirection === 1
+          ? preflight.positionData.token0
+          : preflight.positionData.token1;
+        const tokenOut = onChainOrder.swapDirection === 1
+          ? preflight.positionData.token1
+          : preflight.positionData.token0;
+
+        // Get token decimals from the pool tokens
+        const tokenInDecimals = onChainOrder.swapDirection === 1
+          ? position.pool.token0.decimals
+          : position.pool.token1.decimals;
+        const tokenOutDecimals = onChainOrder.swapDirection === 1
+          ? position.pool.token1.decimals
+          : position.pool.token0.decimals;
+
+        const paraswapService = new ParaswapSwapService();
+        const swapResult = await paraswapService.computeParaswapSwapParams({
+          chainId,
+          tokenIn: tokenIn as `0x${string}`,
+          tokenOut: tokenOut as `0x${string}`,
+          tokenInDecimals,
+          tokenOutDecimals,
+          guaranteedAmountIn,
+          swapSlippageBps,
+          paraswapAdapterAddress,
+        });
+
+        if (swapResult.kind === 'do_not_execute') {
+          throw new Error(
+            `Paraswap swap price protection: ${swapResult.reason}`
+          );
+        }
+
+        swapParamsInput = {
+          guaranteedAmountIn: guaranteedAmountIn.toString(),
+          minAmountOut: swapResult.minAmountOut.toString(),
+          deadline: Number(swapResult.deadline),
+          hops: swapResult.hops.map((hop) => ({
+            venueId: hop.venueId,
+            tokenIn: hop.tokenIn,
+            tokenOut: hop.tokenOut,
+            venueData: hop.venueData,
+          })),
+        };
+
+        simulationSwapParams = {
+          guaranteedAmountIn,
+          minAmountOut: swapResult.minAmountOut,
+          deadline: swapResult.deadline,
+          hops: swapResult.hops.map((hop) => ({
             venueId: hop.venueId as `0x${string}`,
             tokenIn: hop.tokenIn as `0x${string}`,
             tokenOut: hop.tokenOut as `0x${string}`,
             venueData: hop.venueData as `0x${string}`,
           })),
-        }
-      : undefined;
+        };
+
+        log.info({
+          orderId,
+          positionId,
+          tokenIn,
+          tokenOut,
+          guaranteedAmountIn: guaranteedAmountIn.toString(),
+          minAmountOut: swapResult.minAmountOut.toString(),
+          hopsCount: swapResult.hops.length,
+          msg: 'Paraswap swap params computed',
+        });
+      }
+    }
+
+    // =========================================================================
+    // FEE PARAMS
+    // =========================================================================
+    const feeParamsInput: FeeParamsInput = {
+      feeRecipient: feeConfig.recipient,
+      feeBps: feeConfig.bps,
+    };
+
+    const simulationFeeParams: SimulationFeeParams = {
+      feeRecipient: feeConfig.recipient as `0x${string}`,
+      feeBps: feeConfig.bps,
+    };
 
     // =========================================================================
     // SIMULATION: Simulate transaction before signing to catch errors early
@@ -769,10 +832,10 @@ export class CloseOrderExecutor {
       contractAddress as `0x${string}`,
       nftId,
       triggerMode,
-      feeConfig.recipient as `0x${string}`,
-      feeConfig.bps,
-      operatorAddress as `0x${string}`,
-      simulationSwapParams
+      withdrawParams,
+      simulationSwapParams,
+      simulationFeeParams,
+      operatorAddress as `0x${string}`
     );
 
     if (!simulation.success) {
@@ -862,8 +925,13 @@ export class CloseOrderExecutor {
       poolAddress,
       triggerPrice,
       operatorAddress,
-      hasSwap: !!swapParams,
+      hasSwap: swapParamsInput.hops.length > 0,
     });
+
+    const withdrawParamsInput: WithdrawParamsInput = {
+      amount0Min: withdrawParams.amount0Min.toString(),
+      amount1Min: withdrawParams.amount1Min.toString(),
+    };
 
     const signedTx = await signerClient.signExecuteOrder({
       userId,
@@ -871,11 +939,11 @@ export class CloseOrderExecutor {
       contractAddress,
       nftId,
       triggerMode,
-      feeRecipient: feeConfig.recipient,
-      feeBps: feeConfig.bps,
       operatorAddress,
       nonce,
-      swapParams,
+      withdrawParams: withdrawParamsInput,
+      swapParams: swapParamsInput,
+      feeParams: feeParamsInput,
     });
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {

@@ -79,12 +79,29 @@ const HopSchema = z.object({
 });
 
 /**
- * Swap params schema for executeOrder with post-close swap via MidcurveSwapRouter
+ * WithdrawParams schema (off-chain computed withdrawal mins)
+ */
+const WithdrawParamsSchema = z.object({
+  amount0Min: z.string().regex(/^\d+$/, 'amount0Min must be numeric string'),
+  amount1Min: z.string().regex(/^\d+$/, 'amount1Min must be numeric string'),
+});
+
+/**
+ * SwapParams schema for two-phase swap via MidcurveSwapRouter
  */
 const SwapParamsSchema = z.object({
+  guaranteedAmountIn: z.string().regex(/^\d+$/, 'guaranteedAmountIn must be numeric string'),
   minAmountOut: z.string().regex(/^\d+$/, 'minAmountOut must be numeric string'),
   deadline: z.number().int().nonnegative('deadline must be non-negative'),
-  hops: z.array(HopSchema).min(1, 'At least one hop is required'),
+  hops: z.array(HopSchema), // empty array allowed (no swap case)
+});
+
+/**
+ * FeeParams schema for operator fee
+ */
+const FeeParamsSchema = z.object({
+  feeRecipient: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid fee recipient address'),
+  feeBps: z.number().int().min(0).max(100, 'feeBps must be 0-100 (max 1%)'),
 });
 
 /**
@@ -99,15 +116,15 @@ const SignExecuteOrderSchema = z.object({
   contractAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid contract address'),
   nftId: z.string().regex(/^\d+$/, 'nftId must be a numeric string').transform((val) => BigInt(val)),
   triggerMode: z.number().int().min(0).max(1, 'triggerMode must be 0 (LOWER) or 1 (UPPER)'),
-  feeRecipient: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid fee recipient address'),
-  feeBps: z.number().int().min(0).max(100, 'feeBps must be 0-100 (max 1%)'),
   // Gas parameters from caller (signer does not access RPC)
   gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
   // Nonce is required - caller fetches from chain (signer is stateless)
   nonce: z.number().int().nonnegative('nonce is required'),
-  // Optional swap params for post-close swap via MidcurveSwapRouter
-  swapParams: SwapParamsSchema.optional(),
+  // Structured execution params
+  withdrawParams: WithdrawParamsSchema,
+  swapParams: SwapParamsSchema,
+  feeParams: FeeParamsSchema,
 });
 
 type SignExecuteOrderRequest = z.infer<typeof SignExecuteOrderSchema>;
@@ -150,7 +167,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, nftId, triggerMode, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = validation.data;
+  const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = validation.data;
 
   logger.info({
     requestId,
@@ -159,11 +176,11 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     contractAddress,
     nftId: nftId.toString(),
     triggerMode,
-    feeBps,
+    feeBps: feeParams.feeBps,
     gasLimit: gasLimit.toString(),
     gasPrice: gasPrice.toString(),
     explicitNonce: nonce,
-    hasSwap: !!swapParams,
+    hasSwap: swapParams.hops.length > 0,
     msg: 'Processing execute-order signing request',
   });
 
@@ -175,23 +192,28 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       contractAddress: contractAddress as Address,
       nftId,
       triggerMode,
-      feeRecipient: feeRecipient as Address,
-      feeBps,
       gasLimit,
       gasPrice,
       nonce,
-      swapParams: swapParams
-        ? {
-            minAmountOut: swapParams.minAmountOut,
-            deadline: swapParams.deadline,
-            hops: swapParams.hops.map((hop) => ({
-              venueId: hop.venueId,
-              tokenIn: hop.tokenIn as Address,
-              tokenOut: hop.tokenOut as Address,
-              venueData: hop.venueData as `0x${string}`,
-            })),
-          }
-        : undefined,
+      withdrawParams: {
+        amount0Min: withdrawParams.amount0Min,
+        amount1Min: withdrawParams.amount1Min,
+      },
+      swapParams: {
+        guaranteedAmountIn: swapParams.guaranteedAmountIn,
+        minAmountOut: swapParams.minAmountOut,
+        deadline: swapParams.deadline,
+        hops: swapParams.hops.map((hop) => ({
+          venueId: hop.venueId,
+          tokenIn: hop.tokenIn as Address,
+          tokenOut: hop.tokenOut as Address,
+          venueData: hop.venueData as `0x${string}`,
+        })),
+      },
+      feeParams: {
+        feeRecipient: feeParams.feeRecipient as Address,
+        feeBps: feeParams.feeBps,
+      },
     });
 
     logger.info({

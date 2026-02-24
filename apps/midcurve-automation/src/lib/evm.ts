@@ -641,19 +641,29 @@ export async function checkContractTokenBalances(
 
 /**
  * PositionCloser ABI for executeOrder simulation and order reading
+ *
+ * executeOrder(uint256 nftId, uint8 triggerMode, WithdrawParams, SwapParams, FeeParams)
  */
 const POSITION_CLOSER_ABI = [
   {
     inputs: [
       { internalType: 'uint256', name: 'nftId', type: 'uint256' },
       { internalType: 'uint8', name: 'triggerMode', type: 'uint8' },
-      { internalType: 'address', name: 'feeRecipient', type: 'address' },
-      { internalType: 'uint16', name: 'feeBps', type: 'uint16' },
+      {
+        internalType: 'struct IUniswapV3PositionCloserV1.WithdrawParams',
+        name: 'withdrawParams',
+        type: 'tuple',
+        components: [
+          { internalType: 'uint256', name: 'amount0Min', type: 'uint256' },
+          { internalType: 'uint256', name: 'amount1Min', type: 'uint256' },
+        ],
+      },
       {
         internalType: 'struct IUniswapV3PositionCloserV1.SwapParams',
         name: 'swapParams',
         type: 'tuple',
         components: [
+          { internalType: 'uint256', name: 'guaranteedAmountIn', type: 'uint256' },
           { internalType: 'uint256', name: 'minAmountOut', type: 'uint256' },
           { internalType: 'uint256', name: 'deadline', type: 'uint256' },
           {
@@ -667,6 +677,15 @@ const POSITION_CLOSER_ABI = [
               { internalType: 'bytes', name: 'venueData', type: 'bytes' },
             ],
           },
+        ],
+      },
+      {
+        internalType: 'struct IUniswapV3PositionCloserV1.FeeParams',
+        name: 'feeParams',
+        type: 'tuple',
+        components: [
+          { internalType: 'address', name: 'feeRecipient', type: 'address' },
+          { internalType: 'uint16', name: 'feeBps', type: 'uint16' },
         ],
       },
     ],
@@ -720,15 +739,6 @@ const UNISWAP_V3_POOL_FEE_ABI = [
 ] as const;
 
 /**
- * Empty swap params for no-swap execution
- */
-const EMPTY_SWAP_PARAMS: SimulationSwapParams = {
-  minAmountOut: 0n,
-  deadline: 0n,
-  hops: [],
-};
-
-/**
  * Hop type for simulation swap params
  */
 export interface SimulationHop {
@@ -739,13 +749,56 @@ export interface SimulationHop {
 }
 
 /**
- * Swap params type for simulation
+ * WithdrawParams for executeOrder (off-chain computed mins)
+ */
+export interface SimulationWithdrawParams {
+  amount0Min: bigint;
+  amount1Min: bigint;
+}
+
+/**
+ * SwapParams for executeOrder (two-phase: guaranteed + surplus)
  */
 export interface SimulationSwapParams {
+  guaranteedAmountIn: bigint;
   minAmountOut: bigint;
   deadline: bigint;
   hops: SimulationHop[];
 }
+
+/**
+ * FeeParams for executeOrder
+ */
+export interface SimulationFeeParams {
+  feeRecipient: `0x${string}`;
+  feeBps: number;
+}
+
+/**
+ * Empty withdraw params (no slippage protection)
+ */
+export const EMPTY_WITHDRAW_PARAMS: SimulationWithdrawParams = {
+  amount0Min: 0n,
+  amount1Min: 0n,
+};
+
+/**
+ * Empty swap params for no-swap execution
+ */
+export const EMPTY_SWAP_PARAMS: SimulationSwapParams = {
+  guaranteedAmountIn: 0n,
+  minAmountOut: 0n,
+  deadline: 0n,
+  hops: [],
+};
+
+/**
+ * Empty fee params (no fee)
+ */
+export const EMPTY_FEE_PARAMS: SimulationFeeParams = {
+  feeRecipient: '0x0000000000000000000000000000000000000000',
+  feeBps: 0,
+};
 
 /**
  * Simulate executeOrder transaction to catch errors before broadcasting
@@ -754,10 +807,10 @@ export interface SimulationSwapParams {
  * @param contractAddress - PositionCloser contract address
  * @param nftId - Position NFT ID
  * @param triggerMode - Trigger mode (0=LOWER, 1=UPPER)
- * @param feeRecipient - Fee recipient address
- * @param feeBps - Fee in basis points
+ * @param withdrawParams - Withdrawal slippage params (amount0Min, amount1Min)
+ * @param swapParams - Two-phase swap parameters
+ * @param feeParams - Operator fee parameters
  * @param operatorAddress - Operator address (caller)
- * @param swapParams - Optional swap parameters (defaults to empty/no-swap)
  * @returns Simulation result
  */
 export async function simulateExecuteOrder(
@@ -765,23 +818,20 @@ export async function simulateExecuteOrder(
   contractAddress: `0x${string}`,
   nftId: bigint,
   triggerMode: number,
-  feeRecipient: `0x${string}`,
-  feeBps: number,
-  operatorAddress: `0x${string}`,
-  swapParams?: SimulationSwapParams
+  withdrawParams: SimulationWithdrawParams,
+  swapParams: SimulationSwapParams,
+  feeParams: SimulationFeeParams,
+  operatorAddress: `0x${string}`
 ): Promise<{ success: boolean; error?: string; decodedError?: string }> {
   const { decodeRevertReason } = await import('./error-decoder');
   const client = getPublicClient(chainId);
-
-  // Use empty swap params if not provided
-  const swapParamsTuple = swapParams || EMPTY_SWAP_PARAMS;
 
   try {
     await client.simulateContract({
       address: contractAddress,
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeOrder',
-      args: [nftId, triggerMode, feeRecipient, feeBps, swapParamsTuple] as any,
+      args: [nftId, triggerMode, withdrawParams, swapParams, feeParams] as any,
       account: operatorAddress,
     });
 
@@ -892,33 +942,35 @@ export function calculatePoolSwapMinAmountOut(
 }
 
 /**
- * On-chain close order data (relevant swap fields)
+ * On-chain close order configuration (swap + slippage fields)
  */
-export interface CloseOrderSwapInfo {
+export interface OnChainOrderConfig {
+  /** Decrease liquidity slippage in basis points */
+  slippageBps: number;
   /** SwapDirection enum: 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0 */
   swapDirection: number;
-  /** Swap slippage in basis points */
+  /** Swap slippage in basis points (fair value price protection) */
   swapSlippageBps: number;
 }
 
 /**
- * Read on-chain order to get swap configuration
+ * Read on-chain order to get execution configuration
  *
- * This is used to determine if a swap is needed at execution time,
- * regardless of what's stored in the database.
+ * This is used to determine slippage and swap config at execution time,
+ * regardless of what's stored in the database (could be stale).
  *
  * @param chainId - Chain ID
  * @param contractAddress - PositionCloser contract address
  * @param nftId - Position NFT ID
  * @param triggerMode - Trigger mode (0=LOWER, 1=UPPER)
- * @returns Swap configuration from on-chain order
+ * @returns Order configuration from on-chain
  */
 export async function getOnChainOrder(
   chainId: SupportedChainId,
   contractAddress: `0x${string}`,
   nftId: bigint,
   triggerMode: number
-): Promise<CloseOrderSwapInfo> {
+): Promise<OnChainOrderConfig> {
   const client = getPublicClient(chainId);
 
   const result = await client.readContract({
@@ -929,6 +981,7 @@ export async function getOnChainOrder(
   });
 
   return {
+    slippageBps: Number(result.slippageBps),
     swapDirection: Number(result.swapDirection),
     swapSlippageBps: Number(result.swapSlippageBps),
   };
@@ -958,4 +1011,81 @@ export async function readSwapRouterAddress(
     abi: VIEW_FACET_SWAP_ROUTER_ABI,
     functionName: 'swapRouter',
   });
+}
+
+/**
+ * MidcurveSwapRouter ABI for reading adapter addresses
+ */
+const SWAP_ROUTER_GET_ADAPTER_ABI = [
+  {
+    type: 'function',
+    name: 'getAdapter',
+    stateMutability: 'view',
+    inputs: [{ name: 'venueId', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const;
+
+/**
+ * Read the ParaswapAdapter address from the MidcurveSwapRouter
+ *
+ * @param chainId - Chain ID
+ * @param swapRouterAddress - MidcurveSwapRouter address
+ * @returns ParaswapAdapter deployed address
+ */
+export async function readParaswapAdapterAddress(
+  chainId: SupportedChainId,
+  swapRouterAddress: `0x${string}`
+): Promise<`0x${string}`> {
+  const { keccak256, encodePacked } = await import('viem');
+  const client = getPublicClient(chainId);
+
+  const paraswapVenueId = keccak256(encodePacked(['string'], ['Paraswap']));
+
+  return client.readContract({
+    address: swapRouterAddress,
+    abi: SWAP_ROUTER_GET_ADAPTER_ABI,
+    functionName: 'getAdapter',
+    args: [paraswapVenueId],
+  });
+}
+
+/**
+ * Compute WithdrawParams (amount0Min, amount1Min) off-chain
+ *
+ * Reads the current pool sqrtPriceX96, computes expected token amounts from
+ * liquidity, and applies slippageBps to get minimum acceptable amounts.
+ *
+ * @param chainId - Chain ID
+ * @param poolAddress - Uniswap V3 pool address
+ * @param liquidity - Position liquidity
+ * @param tickLower - Position lower tick
+ * @param tickUpper - Position upper tick
+ * @param slippageBps - Slippage tolerance in basis points
+ * @returns WithdrawParams for executeOrder
+ */
+export async function computeWithdrawMinAmounts(
+  chainId: SupportedChainId,
+  poolAddress: `0x${string}`,
+  liquidity: bigint,
+  tickLower: number,
+  tickUpper: number,
+  slippageBps: number
+): Promise<SimulationWithdrawParams> {
+  const { getTokenAmountsFromLiquidity } = await import('@midcurve/shared');
+
+  const { sqrtPriceX96 } = await readPoolPrice(chainId, poolAddress);
+
+  const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
+    liquidity,
+    sqrtPriceX96,
+    tickLower,
+    tickUpper
+  );
+
+  const slippageMultiplier = BigInt(10000 - slippageBps);
+  const amount0Min = (token0Amount * slippageMultiplier) / 10000n;
+  const amount1Min = (token1Amount * slippageMultiplier) / 10000n;
+
+  return { amount0Min, amount1Min };
 }

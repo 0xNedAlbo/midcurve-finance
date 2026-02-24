@@ -52,19 +52,36 @@ export interface HopParams {
 }
 
 /**
- * Swap params for executeOrder with post-close swap via MidcurveSwapRouter
+ * WithdrawParams for executeOrder (off-chain computed withdrawal mins)
+ */
+export interface WithdrawParams {
+  amount0Min: string;
+  amount1Min: string;
+}
+
+/**
+ * SwapParams for executeOrder with two-phase swap via MidcurveSwapRouter
  */
 export interface SwapParams {
-  minAmountOut: string; // Minimum output amount (slippage protection)
+  guaranteedAmountIn: string;
+  minAmountOut: string;
   deadline: number;
   hops: HopParams[];
+}
+
+/**
+ * FeeParams for executeOrder
+ */
+export interface FeeParams {
+  feeRecipient: Address;
+  feeBps: number;
 }
 
 /**
  * Input for signing an executeOrder transaction
  *
  * Based on contract function:
- * executeOrder(uint256 nftId, TriggerMode triggerMode, address feeRecipient, uint16 feeBps, SwapParams calldata swapParams)
+ * executeOrder(uint256 nftId, TriggerMode triggerMode, WithdrawParams, SwapParams, FeeParams)
  */
 export interface SignExecuteOrderInput {
   userId: string;
@@ -72,15 +89,15 @@ export interface SignExecuteOrderInput {
   contractAddress: Address;
   nftId: bigint;
   triggerMode: number; // 0=LOWER, 1=UPPER
-  feeRecipient: Address;
-  feeBps: number;
   // Gas parameters from caller (signer does not access RPC)
   gasLimit: bigint;
   gasPrice: bigint;
   // Nonce is required - caller fetches from chain (signer is stateless)
   nonce: number;
-  // Optional swap params for post-close swap via MidcurveSwapRouter
-  swapParams?: SwapParams;
+  // Structured execution params
+  withdrawParams: WithdrawParams;
+  swapParams: SwapParams;
+  feeParams: FeeParams;
 }
 
 /**
@@ -123,12 +140,19 @@ const POSITION_CLOSER_ABI = [
     inputs: [
       { name: 'nftId', type: 'uint256' },
       { name: 'triggerMode', type: 'uint8' },
-      { name: 'feeRecipient', type: 'address' },
-      { name: 'feeBps', type: 'uint16' },
+      {
+        name: 'withdrawParams',
+        type: 'tuple',
+        components: [
+          { name: 'amount0Min', type: 'uint256' },
+          { name: 'amount1Min', type: 'uint256' },
+        ],
+      },
       {
         name: 'swapParams',
         type: 'tuple',
         components: [
+          { name: 'guaranteedAmountIn', type: 'uint256' },
           { name: 'minAmountOut', type: 'uint256' },
           { name: 'deadline', type: 'uint256' },
           {
@@ -143,18 +167,19 @@ const POSITION_CLOSER_ABI = [
           },
         ],
       },
+      {
+        name: 'feeParams',
+        type: 'tuple',
+        components: [
+          { name: 'feeRecipient', type: 'address' },
+          { name: 'feeBps', type: 'uint16' },
+        ],
+      },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
   },
 ] as const;
-
-// Empty swap params (no swap)
-const EMPTY_SWAP_PARAMS = {
-  minAmountOut: 0n,
-  deadline: 0n,
-  hops: [],
-} as const;
 
 // =============================================================================
 // Service
@@ -170,8 +195,8 @@ class AutomationSigningServiceImpl {
    * @returns Signed transaction
    */
   async signExecuteOrder(input: SignExecuteOrderInput): Promise<SignTransactionResult> {
-    const { userId, chainId, contractAddress, nftId, triggerMode, feeRecipient, feeBps, gasLimit, gasPrice, nonce, swapParams } = input;
-    signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, nonce, hasSwap: !!swapParams });
+    const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = input;
+    signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, nonce, hasSwap: swapParams.hops.length > 0 });
 
     // 1. Get wallet
     const wallet = await automationWalletService.getWalletByUserId(userId);
@@ -183,25 +208,34 @@ class AutomationSigningServiceImpl {
       );
     }
 
-    // 2. Build swap params tuple (use empty params if no swap)
-    const swapParamsTuple = swapParams
-      ? {
-          minAmountOut: BigInt(swapParams.minAmountOut),
-          deadline: BigInt(swapParams.deadline),
-          hops: swapParams.hops.map((hop) => ({
-            venueId: hop.venueId as `0x${string}`,
-            tokenIn: hop.tokenIn,
-            tokenOut: hop.tokenOut,
-            venueData: hop.venueData,
-          })),
-        }
-      : EMPTY_SWAP_PARAMS;
+    // 2. Build param tuples
+    const withdrawParamsTuple = {
+      amount0Min: BigInt(withdrawParams.amount0Min),
+      amount1Min: BigInt(withdrawParams.amount1Min),
+    };
+
+    const swapParamsTuple = {
+      guaranteedAmountIn: BigInt(swapParams.guaranteedAmountIn),
+      minAmountOut: BigInt(swapParams.minAmountOut),
+      deadline: BigInt(swapParams.deadline),
+      hops: swapParams.hops.map((hop) => ({
+        venueId: hop.venueId as `0x${string}`,
+        tokenIn: hop.tokenIn,
+        tokenOut: hop.tokenOut,
+        venueData: hop.venueData,
+      })),
+    };
+
+    const feeParamsTuple = {
+      feeRecipient: feeParams.feeRecipient,
+      feeBps: feeParams.feeBps,
+    };
 
     // 3. Encode function call
     const callData = encodeFunctionData({
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeOrder',
-      args: [nftId, triggerMode, feeRecipient, feeBps, swapParamsTuple],
+      args: [nftId, triggerMode, withdrawParamsTuple, swapParamsTuple, feeParamsTuple],
     });
 
     // 4. Sign and return (gas params and nonce provided by caller)

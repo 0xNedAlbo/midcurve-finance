@@ -1,6 +1,15 @@
 export { SwapRouterService } from './swap-router-service.js';
 export type { SwapRouterServiceDependencies } from './swap-router-service.js';
 
+export { ParaswapSwapService, PARASWAP_VENUE_ID } from './paraswap-swap-service.js';
+export type {
+  ParaswapSwapServiceDependencies,
+  ParaswapSwapInput,
+  ParaswapSwapResult,
+  ParaswapSwapExecute,
+  ParaswapSwapDoNotExecute,
+} from './paraswap-swap-service.js';
+
 export type {
   PostCloseSwapInput,
   PostCloseSwapResult,
