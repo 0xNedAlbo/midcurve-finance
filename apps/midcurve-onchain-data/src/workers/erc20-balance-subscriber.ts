@@ -17,6 +17,7 @@ import {
   getWssUrl,
   getWorkerConfig,
   isSupportedChain,
+  CHAIN_NAMES,
   type SupportedChainId,
 } from '../lib/config.js';
 import {
@@ -216,6 +217,11 @@ export class Erc20BalanceSubscriber {
         continue;
       }
 
+      if (!getWssUrl(config.chainId as SupportedChainId)) {
+        log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'No WSS URL configured for chain, skipping subscription' });
+        continue;
+      }
+
       const chainId = config.chainId as SupportedChainId;
       const normalizedToken = config.tokenAddress.toLowerCase();
       const normalizedWallet = config.walletAddress.toLowerCase();
@@ -268,8 +274,7 @@ export class Erc20BalanceSubscriber {
   ): Promise<void> {
     // Validate chain
     if (!isSupportedChain(chainId)) {
-      log.warn({ chainId, subscriptionId, msg: 'Unsupported chain ID, cannot add balance' });
-      return;
+      throw new Error(`Unsupported chain ID: ${chainId}`);
     }
 
     const supportedChainId = chainId as SupportedChainId;
@@ -283,8 +288,9 @@ export class Erc20BalanceSubscriber {
     // Get WSS URL
     const wssUrl = getWssUrl(supportedChainId);
     if (!wssUrl) {
-      log.warn({ chainId, subscriptionId, msg: 'No WSS URL configured for chain' });
-      return;
+      throw new Error(
+        `No WSS URL configured for chain ${supportedChainId} (${CHAIN_NAMES[supportedChainId]}). Set WS_RPC_URL_${CHAIN_NAMES[supportedChainId].toUpperCase()} env var.`
+      );
     }
 
     const balanceInfo: BalanceInfo = {
@@ -453,6 +459,11 @@ export class Erc20BalanceSubscriber {
 
       if (!isSupportedChain(config.chainId)) {
         log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'Unsupported chain ID, skipping' });
+        continue;
+      }
+
+      if (!getWssUrl(config.chainId as SupportedChainId)) {
+        log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'No WSS URL configured for chain, skipping subscription' });
         continue;
       }
 

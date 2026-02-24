@@ -83,3 +83,28 @@ export function validateChainId(chainId: number): asserts chainId is SupportedCh
 export function isSupportedChainId(chainId: number): chainId is SupportedChainId {
   return SUPPORTED_CHAIN_IDS.includes(chainId as SupportedChainId);
 }
+
+/**
+ * Environment variable names for WebSocket RPC URLs per chain.
+ * Used to check if a chain has WebSocket monitoring configured.
+ */
+const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
+  1: 'WS_RPC_URL_ETHEREUM',
+  42161: 'WS_RPC_URL_ARBITRUM',
+  8453: 'WS_RPC_URL_BASE',
+  56: 'WS_RPC_URL_BSC',
+  137: 'WS_RPC_URL_POLYGON',
+  10: 'WS_RPC_URL_OPTIMISM',
+};
+
+/**
+ * Check if a chain has WebSocket RPC configured via environment variable.
+ * Required for onchain event subscriptions (balance watching, price feeds, etc.).
+ *
+ * @param chainId - Supported chain ID to check
+ * @returns true if WS_RPC_URL_* env var is set for this chain
+ */
+export function isChainWssConfigured(chainId: SupportedChainId): boolean {
+  const envVar = WS_RPC_URL_ENV_VARS[chainId];
+  return !!process.env[envVar];
+}

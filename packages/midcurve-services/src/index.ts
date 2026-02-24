@@ -64,6 +64,7 @@ export {
   validateAndNormalizeAddress,
   validateChainId,
   isSupportedChainId,
+  isChainWssConfigured,
   CHAIN_NAMES,
 } from './utils/auth/index.js';
 
