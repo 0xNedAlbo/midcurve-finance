@@ -837,7 +837,7 @@ export async function simulateExecuteOrder(
 
     return { success: true };
   } catch (error) {
-    const err = error as Error & { data?: unknown; cause?: { data?: unknown } };
+    const err = error as Error & { data?: unknown; cause?: { data?: unknown; cause?: { data?: unknown } } };
 
     // First, try to extract the reason from viem's error message
     // viem formats it as: "reverted with the following reason:\n<REASON>\n"
@@ -852,9 +852,28 @@ export async function simulateExecuteOrder(
 
     // If viem didn't decode it, try to extract raw revert data
     if (!decodedError) {
-      let revertData: unknown = err.data || err.cause?.data;
+      // Walk the viem error cause chain to find raw revert data hex.
+      // viem nests: ContractFunctionExecutionError → ContractFunctionRevertedError → RpcError
+      // Each level may have a .data property with the raw revert bytes.
+      let revertData: unknown;
+      let cursor: any = err;
+      while (cursor && !revertData) {
+        // viem's ContractFunctionRevertedError stores raw hex in .raw
+        if (typeof cursor.raw === 'string' && cursor.raw.startsWith('0x') && cursor.raw.length >= 10) {
+          revertData = cursor.raw;
+          break;
+        }
+        // Some error types store it in .data as a hex string
+        if (typeof cursor.data === 'string' && cursor.data.startsWith('0x') && cursor.data.length >= 10) {
+          revertData = cursor.data;
+          break;
+        }
+        cursor = cursor.cause;
+      }
 
-      // Try to extract hex data from error message if no direct data
+      // Fallback: extract hex from the error message that appears after "data:" or similar context.
+      // IMPORTANT: take the FIRST match only — the error message also contains calldata args as
+      // large hex strings which are NOT revert data.
       if (!revertData && err.message) {
         const match = err.message.match(/0x[a-fA-F0-9]+/);
         if (match && match[0].length >= 10) {

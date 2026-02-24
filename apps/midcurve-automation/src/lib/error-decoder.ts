@@ -14,23 +14,38 @@ const log = automationLogger.child({ component: 'ErrorDecoder' });
 /**
  * Known error selectors for UniswapV3PositionCloser and common EVM errors.
  * Maps 4-byte selectors to human-readable descriptions.
+ *
+ * Selectors from AppStorage.sol (current contract):
+ * @see apps/midcurve-contracts/contracts/position-closer/storage/AppStorage.sol
  */
 const ERROR_DESCRIPTIONS: Record<string, string> = {
-  // UniswapV3PositionCloser errors
+  // UniswapV3PositionCloser errors (from AppStorage.sol Modifiers)
   '0x30cd7471': 'NotOwner: Caller is not the order owner',
   '0x7c214f04': 'NotOperator: Caller is not the designated operator',
   '0xd92e233d': 'ZeroAddress: Zero address provided where non-zero required',
   '0x49c26c64': 'SlippageBpsOutOfRange: Slippage exceeds maximum allowed (10000 bps)',
-  '0xa8834357': 'InvalidBounds: Invalid price trigger bounds configuration',
-  '0xe064752b': 'WrongStatus: Order is in wrong status for this operation',
-  '0xa12436aa': 'CloseExpired: Close order has expired (validUntil passed)',
-  '0xbbaee1a8': 'PriceConditionNotMet: Price trigger condition not satisfied',
+  '0xdef2a009': 'InvalidTriggerTick: Tick value invalid for the trigger mode',
+  '0x04b81aa3': 'OrderAlreadyExists: Order already registered for this nftId + triggerMode',
+  '0xa8de380f': 'OrderNotFound: No order exists for this nftId + triggerMode',
+  '0x010aa335': 'WrongOrderStatus: Order is in wrong status for this operation',
+  '0x4b2d84db': 'OrderExpired: Close order has expired (validUntil passed)',
+  '0xc8c8fafb': 'TriggerConditionNotMet: Price trigger condition not satisfied',
   '0x9d6db1ad': 'NftNotOwnedByRecordedOwner: NFT ownership changed since registration',
   '0xa38f26fd': 'NftNotApproved: NFT not approved for the contract',
   '0x84c6b9b5': 'FeeBpsTooHigh: Operator fee exceeds cap (100 bps / 1%)',
   '0x90b8ec18': 'TransferFailed: ERC20 token transfer failed',
-  '0x350c20f1': 'ExternalCallFailed: External contract call failed',
-  '0xc7e13a01': 'TickOutOfRange: Tick value out of valid range',
+  '0x81ceff30': 'SwapFailed: Post-close swap failed',
+  '0x5273e2e8': 'SwapOutputZero: Swap produced zero output',
+  '0x22fecc1f': 'SwapSlippageBpsOutOfRange: Swap slippage bps out of range',
+  '0x71c4efed': 'SlippageExceeded: Output below minimum slippage threshold',
+  '0xb4eca305': 'InsufficientAmountForGuaranteed: Not enough tokens for guaranteed swap portion',
+
+  // ParaswapAdapter errors
+  '0x43a7c638': 'AugustusCallFailed: Paraswap Augustus swap reverted', // decoded with nested reason below
+
+  // MidcurveSwapRouter errors
+  '0x1ab7da6b': 'DeadlineExpired: Swap deadline has passed',
+  '0x1f2a2005': 'ZeroAmount: Swap amount is zero',
 
   // Standard EVM errors
   '0x08c379a0': 'Error(string)', // Will be decoded further
@@ -141,6 +156,31 @@ export function decodeRevertReason(revertData: Hex | string | unknown): string {
     }
   }
 
+  // Handle AugustusCallFailed(bytes) — decode the nested Augustus revert reason
+  if (selector === '0x43a7c638') {
+    try {
+      const decoded = decodeErrorResult({
+        abi: [
+          {
+            type: 'error',
+            name: 'AugustusCallFailed',
+            inputs: [{ type: 'bytes', name: 'reason' }],
+          },
+        ],
+        data,
+      });
+      const nestedData = decoded.args[0] as Hex;
+      if (nestedData && nestedData !== '0x' && nestedData.length >= 10) {
+        const nestedReason = decodeRevertReason(nestedData);
+        return `AugustusCallFailed: Paraswap Augustus reverted → ${nestedReason}`;
+      }
+      return 'AugustusCallFailed: Paraswap Augustus reverted (no reason data)';
+    } catch (e) {
+      log.debug({ selector, error: e }, 'Failed to decode AugustusCallFailed nested reason');
+      return 'AugustusCallFailed: Paraswap Augustus reverted (failed to decode nested reason)';
+    }
+  }
+
   // Try to decode using the PositionCloser ABI
   try {
     const decoded = decodeErrorResult({ abi: UniswapV3PositionCloserV100Abi as Abi, data });
@@ -169,7 +209,7 @@ export function decodeRevertReason(revertData: Hex | string | unknown): string {
     return knownDescription;
   }
 
-  return `Unknown error (selector: ${selector}, data length: ${data.length} bytes)`;
+  return `Unknown error (selector: ${selector}, data length: ${data.length} chars)`;
 }
 
 /**
