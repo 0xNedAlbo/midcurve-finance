@@ -22,6 +22,8 @@ export interface TriggerState {
   priceBigint: bigint | null;
   triggerTick: number | null;
   closeOrderHash: string | null;
+  /** True when a failed order still occupies the on-chain slot (needs cancel before re-register) */
+  hasFailedOnChainOrder: boolean;
 }
 
 export interface SwapConfigState {
@@ -106,6 +108,7 @@ const EMPTY_TRIGGER: TriggerState = {
   priceBigint: null,
   triggerTick: null,
   closeOrderHash: null,
+  hasFailedOnChainOrder: false,
 };
 
 const DEFAULT_SWAP_CONFIG: SwapConfigState = {
@@ -192,12 +195,14 @@ function wizardReducer(
           priceBigint: action.sl.priceBigint,
           triggerTick: action.sl.triggerTick,
           closeOrderHash: action.sl.closeOrderHash,
+          hasFailedOnChainOrder: action.sl.hasFailedOnChainOrder,
         },
         takeProfit: {
           enabled: action.tp.enabled,
           priceBigint: action.tp.priceBigint,
           triggerTick: action.tp.triggerTick,
           closeOrderHash: action.tp.closeOrderHash,
+          hasFailedOnChainOrder: action.tp.hasFailedOnChainOrder,
         },
         slSwapConfig: { ...action.slSwap },
         tpSwapConfig: { ...action.tpSwap },
@@ -378,11 +383,21 @@ export function convertOrdersToTriggerState(
     );
   });
 
+  // Detect failed orders that still occupy the on-chain slot (ACTIVE on-chain, failed off-chain).
+  // These need a cancelOrder call before a new registerOrder can succeed.
+  const hasFailedSlOrder = !slOrder && orders.some((o) =>
+    o.triggerMode === slConfigTriggerMode && o.automationState === 'failed'
+  );
+  const hasFailedTpOrder = !tpOrder && orders.some((o) =>
+    o.triggerMode === tpConfigTriggerMode && o.automationState === 'failed'
+  );
+
   const extractTriggerState = (
     order: SerializedCloseOrder | undefined,
+    hasFailedOnChainOrder: boolean,
   ): TriggerState => {
     if (!order || !order.closeOrderHash) {
-      return { ...EMPTY_TRIGGER };
+      return { ...EMPTY_TRIGGER, hasFailedOnChainOrder };
     }
 
     // Extract tick from closeOrderHash format: "sl@{tick}" or "tp@{tick}"
@@ -409,11 +424,12 @@ export function convertOrdersToTriggerState(
       priceBigint,
       triggerTick: tick,
       closeOrderHash: order.closeOrderHash,
+      hasFailedOnChainOrder: false,
     };
   };
 
-  const sl = extractTriggerState(slOrder);
-  const tp = extractTriggerState(tpOrder);
+  const sl = extractTriggerState(slOrder, hasFailedSlOrder);
+  const tp = extractTriggerState(tpOrder, hasFailedTpOrder);
 
   // Extract swap config per order
   const extractSwapConfig = (order: SerializedCloseOrder | undefined): SwapConfigState => {

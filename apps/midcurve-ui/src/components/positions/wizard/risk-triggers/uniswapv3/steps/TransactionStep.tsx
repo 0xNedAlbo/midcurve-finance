@@ -205,6 +205,14 @@ export function TransactionStep() {
       ops.push({ id: 'update_tp_swap', label: 'Update Take Profit swap config' });
     }
 
+    // Ghost-order cancels (failed orders still active on-chain)
+    if (slOperation === 'CREATE' && state.initialStopLoss.hasFailedOnChainOrder) {
+      ops.push({ id: 'cancel_ghost_sl', label: 'Cancel failed Stop Loss (on-chain cleanup)' });
+    }
+    if (tpOperation === 'CREATE' && state.initialTakeProfit.hasFailedOnChainOrder) {
+      ops.push({ id: 'cancel_ghost_tp', label: 'Cancel failed Take Profit (on-chain cleanup)' });
+    }
+
     // Creates
     if (slOperation === 'CREATE') {
       const priceLabel = state.stopLoss.priceBigint
@@ -224,6 +232,8 @@ export function TransactionStep() {
     slOperation, tpOperation, slSwapChanged, tpSwapChanged,
     state.stopLoss.enabled, state.stopLoss.priceBigint,
     state.takeProfit.enabled, state.takeProfit.priceBigint,
+    state.initialStopLoss.hasFailedOnChainOrder,
+    state.initialTakeProfit.hasFailedOnChainOrder,
     tokenInfo,
   ]);
 
@@ -257,6 +267,20 @@ export function TransactionStep() {
       });
     }
     if (tpOperation === 'CANCEL') {
+      calls.push({
+        functionName: 'cancelOrder',
+        args: [nftIdBigInt, tpContractMode],
+      });
+    }
+
+    // Ghost-order cancels: failed orders still active on-chain need cancel before re-register
+    if (slOperation === 'CREATE' && state.initialStopLoss.hasFailedOnChainOrder) {
+      calls.push({
+        functionName: 'cancelOrder',
+        args: [nftIdBigInt, slContractMode],
+      });
+    }
+    if (tpOperation === 'CREATE' && state.initialTakeProfit.hasFailedOnChainOrder) {
       calls.push({
         functionName: 'cancelOrder',
         args: [nftIdBigInt, tpContractMode],
@@ -378,6 +402,7 @@ export function TransactionStep() {
     nftId, tokenInfo, autowalletData, slOperation, tpOperation,
     slSwapChanged, tpSwapChanged, currentSlTick, currentTpTick,
     state.stopLoss, state.takeProfit, state.slSwapConfig, state.tpSwapConfig,
+    state.initialStopLoss.hasFailedOnChainOrder, state.initialTakeProfit.hasFailedOnChainOrder,
     poolAddress, connectedAddress,
   ]);
 
