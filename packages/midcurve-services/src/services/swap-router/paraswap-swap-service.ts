@@ -35,6 +35,18 @@ export const PARASWAP_VENUE_ID = keccak256(
 /** Swap deadline offset (5 minutes) */
 const DEADLINE_OFFSET_SECONDS = 300;
 
+/**
+ * Slippage buffer for Paraswap calldata (bps).
+ *
+ * Augustus V6's simpleSwap enforces its own minDestAmount internally.
+ * Setting this to 0 causes Augustus to revert on even tiny price movements
+ * (AugustusCallFailed) before our on-chain minAmountOut check fires.
+ *
+ * We pass a generous buffer here; the real slippage protection is our
+ * MidcurveSwapRouter minAmountOut (derived from the CoinGecko fair-value floor).
+ */
+const PARASWAP_INTERNAL_SLIPPAGE_BPS = 200;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -191,7 +203,9 @@ export class ParaswapSwapService {
     }
 
     // Step 4: Build Paraswap transaction
-    // slippageBps=0 because we enforce our own minAmountOut on-chain via absoluteFloor
+    // Augustus enforces its own internal minDestAmount. A buffer here prevents
+    // AugustusCallFailed reverts on small price movements. Our MidcurveSwapRouter
+    // minAmountOut (from the fair-value floor) is the real slippage protection.
     const txResult = await buildParaswapTransaction({
       chainId: paraswapChainId,
       srcToken: tokenIn,
@@ -200,7 +214,7 @@ export class ParaswapSwapService {
       destAmount: quote.destAmount,
       priceRoute: quote.priceRoute,
       userAddress: paraswapAdapterAddress,
-      slippageBps: 0,
+      slippageBps: PARASWAP_INTERNAL_SLIPPAGE_BPS,
     });
 
     // Step 5: Build the Paraswap hop
