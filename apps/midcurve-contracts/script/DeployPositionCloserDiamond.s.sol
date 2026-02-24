@@ -29,9 +29,6 @@ contract DeployPositionCloserDiamond is Script {
     // CONSTANTS
     // ========================================
 
-    // Mainnet NFPM address (available in fork)
-    address constant NFPM = 0xC36442b4a4522E871399CD717aBDD847Ab11FE88;
-
     // Interface version: 100 = v1.0
     uint32 constant INTERFACE_VERSION = 100;
 
@@ -45,11 +42,13 @@ contract DeployPositionCloserDiamond is Script {
     /// @notice Deploy the PositionCloser Diamond
     /// @param swapRouter The MidcurveSwapRouter address
     /// @param owner The diamond owner address
+    /// @param nfpm The Uniswap V3 NonfungiblePositionManager address for the target chain
     /// @return diamond The deployed diamond address
-    function run(address swapRouter, address owner) public returns (address diamond) {
+    function run(address swapRouter, address owner, address nfpm) public returns (address diamond) {
         console.log("=== Deploying PositionCloser Diamond ===");
         console.log("SwapRouter:", swapRouter);
         console.log("Owner:", owner);
+        console.log("NFPM:", nfpm);
         console.log("Interface Version:", INTERFACE_VERSION);
         console.log("");
 
@@ -163,7 +162,7 @@ contract DeployPositionCloserDiamond is Script {
         // 4. Build init calldata
         bytes memory initCalldata = abi.encodeWithSelector(
             DiamondInit.init.selector,
-            NFPM,
+            nfpm,
             swapRouter,
             INTERFACE_VERSION,
             MAX_FEE_BPS

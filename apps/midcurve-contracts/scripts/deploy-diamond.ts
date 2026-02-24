@@ -28,6 +28,15 @@ const CHAIN_IDS: Record<string, number> = {
   base: 8453,
 };
 
+// Uniswap V3 NonfungiblePositionManager addresses
+const NFPM: Record<string, string> = {
+  mainnet: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  arbitrum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  optimism: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  polygon: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
+  base: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+};
+
 function loadEnv(): void {
   const envPath = resolve(process.cwd(), '.env');
   if (!existsSync(envPath)) {
@@ -120,6 +129,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const nfpmAddr = NFPM[chain];
+  if (!nfpmAddr) {
+    console.error(`Missing NFPM address for chain "${chain}".`);
+    process.exit(1);
+  }
+
   // Extra flags passed after -- (e.g., --broadcast --verify)
   const extraArgs = process.argv.slice(2).filter((arg) => arg !== '--');
 
@@ -127,6 +142,7 @@ async function main(): Promise<void> {
   console.log('  Chain:       ', chain, `(${chainId})`);
   console.log('  Swap Router: ', swapRouter);
   console.log('  Owner:       ', owner);
+  console.log('  NFPM:        ', nfpmAddr);
   console.log('  Extra flags: ', extraArgs.length > 0 ? extraArgs.join(' ') : '(dry-run)');
   console.log('');
 
@@ -134,9 +150,10 @@ async function main(): Promise<void> {
     'script',
     'script/DeployPositionCloserDiamond.s.sol',
     '--sig',
-    'run(address,address)',
+    'run(address,address,address)',
     swapRouter,
     owner,
+    nfpmAddr,
     '--rpc-url',
     chain,
     '-vvvv',
