@@ -18,7 +18,7 @@ import { PnLScenarioTabs } from '@/components/positions/pnl-curve/pnl-scenario-t
 import { useIncreaseDepositWizard } from '../context/IncreaseDepositWizardContext';
 import { IncreaseWizardSummaryPanel } from '../shared/IncreaseWizardSummaryPanel';
 import { useCapitalCalculations } from '@/components/positions/wizard/create-position/uniswapv3/hooks/useCapitalCalculations';
-import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
+import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 
 // Zoom constants
 const ZOOM_MIN = 0.75;
@@ -69,14 +69,14 @@ export function ConfigureStep() {
   const tickUpper = config?.tickUpper ?? 0;
 
   // Get token balances
-  const { balanceBigInt: baseBalance, isLoading: isBaseBalanceLoading } = useErc20TokenBalance({
+  const { balanceBigInt: baseBalance, isLoading: isBaseBalanceLoading } = useWatchErc20TokenBalance({
     walletAddress: walletAddress ?? null,
     tokenAddress: baseToken?.address ?? null,
     chainId,
     enabled: isConnected && !!baseToken?.address,
   });
 
-  const { balanceBigInt: quoteBalance, isLoading: isQuoteBalanceLoading } = useErc20TokenBalance({
+  const { balanceBigInt: quoteBalance, isLoading: isQuoteBalanceLoading } = useWatchErc20TokenBalance({
     walletAddress: walletAddress ?? null,
     tokenAddress: quoteToken?.address ?? null,
     chainId,
