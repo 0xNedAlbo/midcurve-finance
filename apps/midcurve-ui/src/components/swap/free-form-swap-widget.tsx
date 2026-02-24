@@ -18,7 +18,7 @@ import { ArrowDownUp } from 'lucide-react';
 import type { ParaswapSide } from '@/lib/paraswap-client';
 
 import { useParaswapQuote, useSwapApproval, useParaswapExecuteSwap } from '@/hooks/swap';
-import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
+import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 import { getChainSlugByChainId } from '@/config/chains';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { SourceTokenSelector } from './source-token-selector';
@@ -147,7 +147,7 @@ export function FreeFormSwapWidget({
   const {
     balanceBigInt: sourceTokenBalance,
     isLoading: isLoadingSourceBalance,
-  } = useErc20TokenBalance({
+  } = useWatchErc20TokenBalance({
     chainId,
     tokenAddress: sourceToken?.address ?? null,
     walletAddress: userAddress ?? null,
@@ -158,7 +158,7 @@ export function FreeFormSwapWidget({
   const {
     balanceBigInt: destTokenBalance,
     isLoading: isLoadingDestBalance,
-  } = useErc20TokenBalance({
+  } = useWatchErc20TokenBalance({
     chainId,
     tokenAddress: destToken?.address ?? null,
     walletAddress: userAddress ?? null,
