@@ -29,7 +29,7 @@ import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
 import { PositionRangeSection } from '../shared/PositionRangeSection';
 import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { PostCloseSwapSection } from '../shared/PostCloseSwapSection';
-import { useErc20TokenBalance } from '@/hooks/tokens/erc20/useErc20TokenBalance';
+import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 
 // Configuration section tabs
 const CONFIG_TABS: { id: ConfigurationTab; label: string; description: string; icon: typeof Banknote }[] = [
@@ -79,14 +79,14 @@ export function PositionConfigStep() {
 
   // Get token balances for MAX buttons
   // Balance fetching uses backend RPC, so it works regardless of connected network
-  const { balanceBigInt: baseBalance, isLoading: isBaseBalanceLoading } = useErc20TokenBalance({
+  const { balanceBigInt: baseBalance, isLoading: isBaseBalanceLoading } = useWatchErc20TokenBalance({
     walletAddress: walletAddress ?? null,
     tokenAddress: state.baseToken?.address ?? null,
     chainId: state.selectedPool?.chainId ?? 1,
     enabled: isConnected && !!state.baseToken?.address,
   });
 
-  const { balanceBigInt: quoteBalance, isLoading: isQuoteBalanceLoading } = useErc20TokenBalance({
+  const { balanceBigInt: quoteBalance, isLoading: isQuoteBalanceLoading } = useWatchErc20TokenBalance({
     walletAddress: walletAddress ?? null,
     tokenAddress: state.quoteToken?.address ?? null,
     chainId: state.selectedPool?.chainId ?? 1,
