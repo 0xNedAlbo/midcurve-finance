@@ -2,6 +2,7 @@ export { SwapRouterService } from './swap-router-service.js';
 export type { SwapRouterServiceDependencies } from './swap-router-service.js';
 
 export { ParaswapSwapService, PARASWAP_VENUE_ID } from './paraswap-swap-service.js';
+export { isParaswapSupportedChain } from '../../clients/paraswap/index.js';
 export type {
   ParaswapSwapServiceDependencies,
   ParaswapSwapInput,

@@ -14,7 +14,7 @@
  */
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
-import { ParaswapSwapService } from '@midcurve/services';
+import { ParaswapSwapService, isParaswapSupportedChain } from '@midcurve/services';
 import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
@@ -720,84 +720,96 @@ export class CloseOrderExecutor {
       });
 
       if (guaranteedAmountIn > 0n) {
-        const swapRouterAddress = await readSwapRouterAddress(
-          chainId as SupportedChainId,
-          contractAddress as `0x${string}`
-        );
-
-        const paraswapAdapterAddress = await readParaswapAdapterAddress(
-          chainId as SupportedChainId,
-          swapRouterAddress
-        );
-
-        // Determine tokenIn/tokenOut from swap direction
-        const tokenIn = onChainOrder.swapDirection === 1
-          ? preflight.positionData.token0
-          : preflight.positionData.token1;
-        const tokenOut = onChainOrder.swapDirection === 1
-          ? preflight.positionData.token1
-          : preflight.positionData.token0;
-
-        // Get token decimals from the pool tokens
-        const tokenInDecimals = onChainOrder.swapDirection === 1
-          ? position.pool.token0.decimals
-          : position.pool.token1.decimals;
-        const tokenOutDecimals = onChainOrder.swapDirection === 1
-          ? position.pool.token1.decimals
-          : position.pool.token0.decimals;
-
-        const paraswapService = new ParaswapSwapService();
-        const swapResult = await paraswapService.computeParaswapSwapParams({
-          chainId,
-          tokenIn: tokenIn as `0x${string}`,
-          tokenOut: tokenOut as `0x${string}`,
-          tokenInDecimals,
-          tokenOutDecimals,
-          guaranteedAmountIn,
-          swapSlippageBps,
-          paraswapAdapterAddress,
-        });
-
-        if (swapResult.kind === 'do_not_execute') {
-          throw new Error(
-            `Paraswap swap price protection: ${swapResult.reason}`
+        if (!isParaswapSupportedChain(chainId)) {
+          // Unsupported chain (local fork, BSC, Polygon, etc.) — skip Paraswap.
+          // Empty swap params → contract routes 100% through Phase 2
+          // (surplus path: direct UniswapV3 swap through position's own pool).
+          log.info({
+            orderId,
+            chainId,
+            guaranteedAmountIn: guaranteedAmountIn.toString(),
+            msg: 'Chain not supported by Paraswap — skipping Phase 1, full amount via pool surplus swap',
+          });
+        } else {
+          const swapRouterAddress = await readSwapRouterAddress(
+            chainId as SupportedChainId,
+            contractAddress as `0x${string}`
           );
+
+          const paraswapAdapterAddress = await readParaswapAdapterAddress(
+            chainId as SupportedChainId,
+            swapRouterAddress
+          );
+
+          // Determine tokenIn/tokenOut from swap direction
+          const tokenIn = onChainOrder.swapDirection === 1
+            ? preflight.positionData.token0
+            : preflight.positionData.token1;
+          const tokenOut = onChainOrder.swapDirection === 1
+            ? preflight.positionData.token1
+            : preflight.positionData.token0;
+
+          // Get token decimals from the pool tokens
+          const tokenInDecimals = onChainOrder.swapDirection === 1
+            ? position.pool.token0.decimals
+            : position.pool.token1.decimals;
+          const tokenOutDecimals = onChainOrder.swapDirection === 1
+            ? position.pool.token1.decimals
+            : position.pool.token0.decimals;
+
+          const paraswapService = new ParaswapSwapService();
+          const swapResult = await paraswapService.computeParaswapSwapParams({
+            chainId,
+            tokenIn: tokenIn as `0x${string}`,
+            tokenOut: tokenOut as `0x${string}`,
+            tokenInDecimals,
+            tokenOutDecimals,
+            guaranteedAmountIn,
+            swapSlippageBps,
+            paraswapAdapterAddress,
+          });
+
+          if (swapResult.kind === 'do_not_execute') {
+            throw new Error(
+              `Paraswap swap price protection: ${swapResult.reason}`
+            );
+          }
+
+          swapParamsInput = {
+            guaranteedAmountIn: guaranteedAmountIn.toString(),
+            minAmountOut: swapResult.minAmountOut.toString(),
+            deadline: Number(swapResult.deadline),
+            hops: swapResult.hops.map((hop) => ({
+              venueId: hop.venueId,
+              tokenIn: hop.tokenIn,
+              tokenOut: hop.tokenOut,
+              venueData: hop.venueData,
+            })),
+          };
+
+          simulationSwapParams = {
+            guaranteedAmountIn,
+            minAmountOut: swapResult.minAmountOut,
+            deadline: swapResult.deadline,
+            hops: swapResult.hops.map((hop) => ({
+              venueId: hop.venueId as `0x${string}`,
+              tokenIn: hop.tokenIn as `0x${string}`,
+              tokenOut: hop.tokenOut as `0x${string}`,
+              venueData: hop.venueData as `0x${string}`,
+            })),
+          };
+
+          log.info({
+            orderId,
+            positionId,
+            tokenIn,
+            tokenOut,
+            guaranteedAmountIn: guaranteedAmountIn.toString(),
+            minAmountOut: swapResult.minAmountOut.toString(),
+            hopsCount: swapResult.hops.length,
+            msg: 'Paraswap swap params computed',
+          });
         }
-
-        swapParamsInput = {
-          guaranteedAmountIn: guaranteedAmountIn.toString(),
-          minAmountOut: swapResult.minAmountOut.toString(),
-          deadline: Number(swapResult.deadline),
-          hops: swapResult.hops.map((hop) => ({
-            venueId: hop.venueId,
-            tokenIn: hop.tokenIn,
-            tokenOut: hop.tokenOut,
-            venueData: hop.venueData,
-          })),
-        };
-
-        simulationSwapParams = {
-          guaranteedAmountIn,
-          minAmountOut: swapResult.minAmountOut,
-          deadline: swapResult.deadline,
-          hops: swapResult.hops.map((hop) => ({
-            venueId: hop.venueId as `0x${string}`,
-            tokenIn: hop.tokenIn as `0x${string}`,
-            tokenOut: hop.tokenOut as `0x${string}`,
-            venueData: hop.venueData as `0x${string}`,
-          })),
-        };
-
-        log.info({
-          orderId,
-          positionId,
-          tokenIn,
-          tokenOut,
-          guaranteedAmountIn: guaranteedAmountIn.toString(),
-          minAmountOut: swapResult.minAmountOut.toString(),
-          hopsCount: swapResult.hops.length,
-          msg: 'Paraswap swap params computed',
-        });
       }
     }
 
