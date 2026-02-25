@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Dark background -->
+  <rect width="64" height="64" rx="10" ry="10" fill="#161b2e"/>
+
+  <!-- Red area (loss): area between zero-line and curve, where curve is below zero -->
+  <path d="M6,28 L6,56 Q16,44 26,34 L26,28 Z" fill="#d63865" opacity="0.85"/>
+
+  <!-- Green area (profit): area between curve and zero-line, where curve is above zero -->
+  <path d="M26,28 Q36,22 46,17 Q52,14 58,12 L58,28 Z" fill="#28a96c" opacity="0.85"/>
+
+  <!-- Zero/breakeven horizontal line -->
+  <line x1="4" y1="28" x2="60" y2="28" stroke="#ffffff" stroke-width="0.7" opacity="0.25"/>
+
+  <!-- The PnL curve -->
+  <path d="M6,56 Q16,44 26,34 Q27,33 28,31 Q30,28 32,26 Q38,20 46,17 Q52,14 58,12"
+        fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Current price dot at zero crossing -->
+  <circle cx="30" cy="28" r="3" fill="#5ba3f5"/>
+</svg>
