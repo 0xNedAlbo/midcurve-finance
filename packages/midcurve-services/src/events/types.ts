@@ -21,6 +21,7 @@ export type PositionEventType =
   | 'position.deleted'
   | 'position.liquidity.increased'
   | 'position.liquidity.decreased'
+  | 'position.liquidity.reverted'
   | 'position.fees.collected'
   | 'position.state.refreshed';
 
@@ -147,6 +148,7 @@ export type PositionDeletedPayload = PositionJSON;
  */
 export interface PositionLiquidityIncreasedPayload {
   positionId: string;
+  positionHash: string;
   poolId: string;
   chainId: number;
   nftId: string;
@@ -167,6 +169,7 @@ export interface PositionLiquidityIncreasedPayload {
  */
 export interface PositionLiquidityDecreasedPayload {
   positionId: string;
+  positionHash: string;
   poolId: string;
   chainId: number;
   nftId: string;
@@ -187,6 +190,7 @@ export interface PositionLiquidityDecreasedPayload {
  */
 export interface PositionFeesCollectedPayload {
   positionId: string;
+  positionHash: string;
   poolId: string;
   chainId: number;
   nftId: string;
@@ -198,6 +202,23 @@ export interface PositionFeesCollectedPayload {
   feesValueInQuote: string;
   /** Block timestamp of the collection */
   eventTimestamp: string;
+}
+
+/**
+ * Payload for position.liquidity.reverted event
+ * Emitted when a chain reorg causes ledger events to be removed from a position
+ */
+export interface PositionLiquidityRevertedPayload {
+  positionId: string;
+  positionHash: string;
+  chainId: number;
+  nftId: string;
+  /** Block hash of the reverted block */
+  blockHash: string;
+  /** Number of ledger events removed */
+  deletedCount: number;
+  /** ISO 8601 timestamp when the revert was detected */
+  revertedAt: string;
 }
 
 /**
@@ -356,6 +377,11 @@ export type PositionLiquidityDecreasedEvent = DomainEvent<PositionLiquidityDecre
  * Position fees collected event with typed payload
  */
 export type PositionFeesCollectedEvent = DomainEvent<PositionFeesCollectedPayload>;
+
+/**
+ * Position liquidity reverted event with typed payload
+ */
+export type PositionLiquidityRevertedEvent = DomainEvent<PositionLiquidityRevertedPayload>;
 
 /**
  * Close order cancelled event with typed payload

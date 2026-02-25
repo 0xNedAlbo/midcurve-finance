@@ -17,6 +17,8 @@ export {
   type DecodedLogData,
   // Import result types
   type LedgerAggregates,
+  type SingleLogResult,
+  type ImportLogsResult,
 } from './uniswapv3-ledger-service.js';
 
 // Re-export APR types for backward compatibility

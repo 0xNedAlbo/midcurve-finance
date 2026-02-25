@@ -141,8 +141,19 @@ export interface LedgerAggregates {
  * Does not include aggregates - those are calculated once at the end of the batch.
  */
 export type SingleLogResult =
-    | { action: "inserted"; inputHash: string }
-    | { action: "removed"; inputHash: string; deletedCount: number }
+    | {
+          action: "inserted";
+          inputHash: string;
+          eventDetail: {
+              validEventType: ValidEventType;
+              amount0: bigint;
+              amount1: bigint;
+              liquidityDelta: bigint;
+              tokenValue: bigint;
+              blockTimestamp: Date;
+          };
+      }
+    | { action: "removed"; inputHash: string; deletedCount: number; blockHash: string }
     | { action: "skipped"; reason: "already_exists" | "invalid_event" };
 
 /**
@@ -153,6 +164,8 @@ export type SingleLogResult =
 export interface ImportLogsResult {
     /** Results for each input log */
     results: SingleLogResult[];
+    /** Aggregates before any logs in this batch were imported */
+    preImportAggregates: LedgerAggregates;
     /** Final aggregates after recalculating all events in correct order */
     aggregates: LedgerAggregates;
 }
@@ -1404,6 +1417,12 @@ export class UniswapV3LedgerService {
         poolPriceService: UniswapV3PoolPriceService,
         tx?: PrismaTransactionClient,
     ): Promise<ImportLogsResult> {
+        // Snapshot aggregates before import for delta calculations
+        const preImportAggregates = await this.recalculateAggregates(
+            position.isToken0Quote,
+            tx,
+        );
+
         const results: SingleLogResult[] = [];
 
         for (const log of logs) {
@@ -1424,7 +1443,7 @@ export class UniswapV3LedgerService {
             tx,
         );
 
-        return { results, aggregates };
+        return { results, preImportAggregates, aggregates };
     }
 
     /**
@@ -1502,7 +1521,7 @@ export class UniswapV3LedgerService {
                     "Events removed due to reorg",
                 );
             }
-            return { action: "removed", inputHash, deletedCount };
+            return { action: "removed", inputHash, deletedCount, blockHash: log.blockHash };
         }
 
         // Check if event already exists
@@ -1653,7 +1672,18 @@ export class UniswapV3LedgerService {
             "Ledger event created (aggregates pending recalculation)",
         );
 
-        return { action: "inserted", inputHash };
+        return {
+            action: "inserted",
+            inputHash,
+            eventDetail: {
+                validEventType: validation.eventType,
+                amount0: decoded.amount0,
+                amount1: decoded.amount1,
+                liquidityDelta: decoded.liquidity ?? 0n,
+                tokenValue,
+                blockTimestamp,
+            },
+        };
     }
 
 }

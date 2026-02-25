@@ -22,7 +22,13 @@ import {
   UniswapV3LedgerService,
   UniswapV3PoolPriceService,
   validateRawEvent,
+  getDomainEventPublisher,
   type RawLogInput,
+  type PositionLiquidityIncreasedPayload,
+  type PositionLiquidityDecreasedPayload,
+  type PositionFeesCollectedPayload,
+  type PositionLiquidityRevertedPayload,
+  type DomainEventType,
 } from '@midcurve/services';
 import { BusinessRule } from '../base';
 
@@ -38,6 +44,13 @@ const QUEUE_NAME = 'business-logic.update-position-on-liquidity-event';
 
 /** Routing pattern to subscribe to all UniswapV3 position events */
 const ROUTING_PATTERN = 'uniswapv3.#';
+
+/** Map from on-chain event type to domain event type */
+const VALID_EVENT_TO_DOMAIN_EVENT: Record<string, DomainEventType> = {
+  INCREASE_LIQUIDITY: 'position.liquidity.increased',
+  DECREASE_LIQUIDITY: 'position.liquidity.decreased',
+  COLLECT: 'position.fees.collected',
+};
 
 // =============================================================================
 // Types
@@ -99,6 +112,9 @@ export class UpdatePositionOnLiquidityEventRule extends BusinessRule {
 
   protected async onStartup(): Promise<void> {
     if (!this.channel) throw new Error('No channel available');
+
+    // Initialize domain event publisher for outbox-based event emission
+    getDomainEventPublisher().setChannel(this.channel);
 
     // Assert queue and bind to position liquidity events exchange
     await this.channel.assertQueue(QUEUE_NAME, {
@@ -266,20 +282,84 @@ export class UpdatePositionOnLiquidityEventRule extends BusinessRule {
       return;
     }
 
-    // 3. Atomic transaction: import log + refresh
+    // 3. Atomic transaction: import log + refresh + emit domain events
+    const publisher = getDomainEventPublisher();
     await prisma.$transaction(async (tx) => {
       // Import the log event
       const ledgerService = new UniswapV3LedgerService(
         { positionId: position.id },
         { prisma: tx as unknown as PrismaClient }
       );
-      await ledgerService.importLogsForPosition(
+      const importResult = await ledgerService.importLogsForPosition(
         position,
         chainId,
         [rawLog],
         this.poolPriceService,
         tx
       );
+
+      // Emit domain events for newly inserted or reverted ledger events
+      for (const result of importResult.results) {
+        if (result.action === 'inserted') {
+          const { eventDetail } = result;
+          const domainEventType = VALID_EVENT_TO_DOMAIN_EVENT[eventDetail.validEventType];
+
+          let payload: PositionLiquidityIncreasedPayload | PositionLiquidityDecreasedPayload | PositionFeesCollectedPayload;
+          if (eventDetail.validEventType === 'COLLECT') {
+            const feeDelta = importResult.aggregates.collectedFeesAfter - importResult.preImportAggregates.collectedFeesAfter;
+            payload = {
+              positionId: position.id,
+              positionHash: position.positionHash,
+              poolId: position.pool.id,
+              chainId,
+              nftId,
+              fees0: eventDetail.amount0.toString(),
+              fees1: eventDetail.amount1.toString(),
+              feesValueInQuote: feeDelta.toString(),
+              eventTimestamp: eventDetail.blockTimestamp.toISOString(),
+            } satisfies PositionFeesCollectedPayload;
+          } else {
+            payload = {
+              positionId: position.id,
+              positionHash: position.positionHash,
+              poolId: position.pool.id,
+              chainId,
+              nftId,
+              liquidityDelta: eventDetail.liquidityDelta.toString(),
+              liquidityAfter: importResult.aggregates.liquidityAfter.toString(),
+              token0Amount: eventDetail.amount0.toString(),
+              token1Amount: eventDetail.amount1.toString(),
+              eventTimestamp: eventDetail.blockTimestamp.toISOString(),
+            } satisfies PositionLiquidityIncreasedPayload;
+          }
+
+          await publisher.createAndPublish({
+            type: domainEventType,
+            entityId: position.id,
+            entityType: 'position',
+            userId: position.userId,
+            payload,
+            source: 'business-logic',
+          }, tx);
+        } else if (result.action === 'removed' && result.deletedCount > 0) {
+          await publisher.createAndPublish<PositionLiquidityRevertedPayload>({
+            type: 'position.liquidity.reverted',
+            entityId: position.id,
+            entityType: 'position',
+            userId: position.userId,
+            payload: {
+              positionId: position.id,
+              positionHash: position.positionHash,
+              chainId,
+              nftId,
+              blockHash: result.blockHash,
+              deletedCount: result.deletedCount,
+              revertedAt: new Date().toISOString(),
+            },
+            source: 'business-logic',
+          }, tx);
+        }
+      }
 
       // Refresh position state at event's block number
       await this.positionService.refresh(position.id, blockNumber, tx);
