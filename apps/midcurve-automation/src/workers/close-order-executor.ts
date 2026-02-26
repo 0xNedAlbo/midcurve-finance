@@ -1055,12 +1055,12 @@ export class CloseOrderExecutor {
     // Order will be deleted from DB by the event handler when OrderExecuted event arrives.
     // No need to update automationState here — the event handler handles cleanup.
 
-    // Remove pool subscription if no more monitoring orders
+    // Remove per-order DB subscription (trivial — no "remaining orders?" check needed)
     try {
-      await automationSubscriptionService.removePoolSubscriptionIfUnused(position.pool.id);
-      log.info({ orderId, poolId: position.pool.id, msg: 'Checked pool subscription usage after execution' });
+      await automationSubscriptionService.removeOrderSubscription(orderId);
+      log.info({ orderId, msg: 'Removed close-order subscription' });
     } catch (err) {
-      log.warn({ orderId, poolId: position.pool.id, error: err, msg: 'Failed to check pool subscription usage' });
+      log.warn({ orderId, error: err, msg: 'Failed to remove close-order subscription' });
     }
 
     const orderTagCompleted = triggerSide === 'upper' ? 'TP' : 'SL';

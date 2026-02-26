@@ -529,11 +529,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       };
     });
 
-    // Ensure pool subscription outside transaction
+    // Ensure per-order subscription outside transaction
     if (result) {
       const poolAddress = result.poolAddress ?? payload.pool;
       if (poolAddress) {
-        await this.automationSubscriptionService.ensurePoolSubscription(chainId, poolAddress);
+        await this.automationSubscriptionService.ensureOrderSubscription(result.orderId, chainId, poolAddress);
       }
     }
 
@@ -568,12 +568,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       // Build order tag before delete (order still has data)
       const orderTag = await this.buildOrderTag(order, tx);
 
-      // Look up position poolId for post-tx subscription update
-      const position = await tx.position.findUnique({
-        where: { id: order.positionId },
-        select: { poolId: true },
-      });
-
       // Log ORDER_CANCELLED before deleting (needs order.id reference)
       if (orderTag) {
         await this.automationLogService.logOrderCancelled(
@@ -600,13 +594,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         orderId: order.id,
         positionId: order.positionId,
         previousState,
-        poolId: position?.poolId ?? null,
       };
     });
 
-    // Remove pool subscription if no more monitoring orders
-    if (cancelResult?.poolId) {
-      await this.automationSubscriptionService.removePoolSubscriptionIfUnused(cancelResult.poolId);
+    // Remove per-order DB subscription (trivial — no "remaining orders?" check needed)
+    if (cancelResult) {
+      await this.automationSubscriptionService.removeOrderSubscription(cancelResult.orderId);
     }
 
     // Publish close-order.cancelled domain event (direct, best-effort)
@@ -654,12 +647,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      // Look up position poolId for post-tx subscription update
-      const position = await tx.position.findUnique({
-        where: { id: order.positionId },
-        select: { poolId: true },
-      });
-
       // DELETE the order from DB (execution history preserved in AutomationLog)
       await this.orderService.delete(order.id, tx);
 
@@ -675,13 +662,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return {
         orderId: order.id,
         positionId: order.positionId,
-        poolId: position?.poolId ?? null,
       };
     });
 
-    // Remove pool subscription if no more monitoring orders
-    if (result?.poolId) {
-      await this.automationSubscriptionService.removePoolSubscriptionIfUnused(result.poolId);
+    // Remove per-order DB subscription (trivial — no "remaining orders?" check needed)
+    if (result) {
+      await this.automationSubscriptionService.removeOrderSubscription(result.orderId);
     }
 
     // Publish close-order.executed domain event (direct, best-effort)

@@ -15,6 +15,7 @@
  * - UPPER (triggerMode=1): triggered when currentTick >= triggerTick
  */
 
+import { prisma } from '@midcurve/database';
 import type { CloseOrder } from '@midcurve/database';
 import { getUniswapV3CloseOrderService, getAutomationSubscriptionService } from '../lib/services';
 import { automationLogger, autoLog } from '../lib/logger';
@@ -121,6 +122,9 @@ export class CloseOrderMonitor {
     this.status = 'running';
 
     try {
+      // Clean up orphaned DB subscriptions from previous runs
+      await this.cleanupOrphanedSubscriptions();
+
       // Subscribe to order domain events for immediate sync on new registrations
       await this.subscribeToOrderEvents();
 
@@ -234,6 +238,7 @@ export class CloseOrderMonitor {
     const activeOrderIds = new Set(monitoringOrders.map((o) => o.id));
 
     // Remove subscribers for orders that are no longer monitoring
+    const automationSubscriptionService = getAutomationSubscriptionService();
     for (const [orderId, subscriber] of this.orderSubscribers.entries()) {
       if (!activeOrderIds.has(orderId)) {
         log.debug({ orderId }, 'Removing subscriber for inactive order');
@@ -241,6 +246,9 @@ export class CloseOrderMonitor {
           log.warn({ error: err, orderId, msg: 'Error shutting down order subscriber' });
         });
         this.orderSubscribers.delete(orderId);
+
+        // Remove per-order DB subscription
+        await automationSubscriptionService.removeOrderSubscription(orderId);
       }
     }
 
@@ -287,9 +295,9 @@ export class CloseOrderMonitor {
     chainId: number;
   }): Promise<void> {
     try {
-      // Ensure onchain-data worker is monitoring this pool (persistent subscription)
+      // Ensure onchain-data worker is monitoring this pool (per-order persistent subscription)
       const automationSubscriptionService = getAutomationSubscriptionService();
-      await automationSubscriptionService.ensurePoolSubscription(order.chainId, order.poolAddress);
+      await automationSubscriptionService.ensureOrderSubscription(order.id, order.chainId, order.poolAddress);
 
       const subscriber = createPoolPriceSubscriber({
         subscriberId: `order-trigger-${order.id}`,
@@ -518,6 +526,61 @@ export class CloseOrderMonitor {
       intervalMs: SUBSCRIPTION_SYNC_INTERVAL_MS,
       msg: 'Scheduled periodic subscription sync',
     });
+  }
+
+  /**
+   * Clean up orphaned close-order subscriptions in the DB.
+   *
+   * On startup, there may be active per-order subscriptions left over from
+   * a previous run where the order is no longer monitoring. Also cleans up
+   * legacy shared-format subscriptions (auto:close-order:uniswapv3-pool-price:*).
+   */
+  private async cleanupOrphanedSubscriptions(): Promise<void> {
+    autoLog.methodEntry(log, 'cleanupOrphanedSubscriptions');
+
+    const candidates = await prisma.onchainDataSubscribers.findMany({
+      where: {
+        OR: [
+          { subscriptionId: { startsWith: 'auto:close-order:' } },
+        ],
+        status: 'active',
+      },
+      select: { subscriptionId: true },
+    });
+
+    let cleaned = 0;
+    for (const sub of candidates) {
+      const { subscriptionId } = sub;
+
+      if (subscriptionId.startsWith('auto:close-order:uniswapv3-pool-price:')) {
+        // Legacy per-pool format — always orphaned now
+      } else if (subscriptionId.startsWith('auto:close-order:')) {
+        // Per-order format: auto:close-order:{orderId}
+        const orderId = subscriptionId.replace('auto:close-order:', '');
+        const order = await prisma.closeOrder.findUnique({
+          where: { id: orderId },
+          select: { automationState: true },
+        });
+
+        if (order?.automationState === 'monitoring') continue; // Still monitoring — keep
+      }
+
+      // Legacy format, missing order, or non-monitoring order — mark as deleted
+      await prisma.onchainDataSubscribers.updateMany({
+        where: { subscriptionId, status: 'active' },
+        data: { status: 'deleted', pausedAt: new Date() },
+      });
+      log.info({ subscriptionId }, 'Cleaned up orphaned close-order subscription');
+      cleaned++;
+    }
+
+    log.info({
+      totalChecked: candidates.length,
+      cleaned,
+      msg: 'Orphaned close-order subscription cleanup complete',
+    });
+
+    autoLog.methodExit(log, 'cleanupOrphanedSubscriptions');
   }
 
   /**
