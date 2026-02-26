@@ -25,7 +25,6 @@ import {
 } from '@midcurve/api-shared';
 import {
   type UniswapV3PoolPriceSubscriptionConfig,
-  type UniswapV3PoolPriceSubscriptionState,
   emptyUniswapV3PoolPriceState,
 } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
@@ -86,128 +85,77 @@ export async function POST(
       const chainIdNum = parseInt(validation.data.chainId, 10);
       const normalizedPool = getAddress(validation.data.address);
 
-      // 2. Check for existing subscription
-      const allSubscriptions = await prisma.onchainDataSubscribers.findMany({
-        where: {
-          subscriptionType: 'uniswapv3-pool-price',
-          status: { in: ['active', 'paused'] },
-        },
-      });
-
-      const existing = allSubscriptions.find((sub) => {
-        const config = sub.config as unknown as UniswapV3PoolPriceSubscriptionConfig;
-        return (
-          config.chainId === chainIdNum &&
-          config.poolAddress.toLowerCase() === normalizedPool.toLowerCase()
-        );
-      });
-
-      let subscriptionId: string;
-      let createdAt: Date;
+      // 2. Fetch current price from chain
       let currentSqrtPriceX96: string;
       let currentTick: number;
-      let status: 'active' | 'paused';
 
-      if (existing) {
-        // Use existing subscription
-        subscriptionId = existing.subscriptionId;
-        createdAt = existing.createdAt;
-        const state = existing.state as unknown as UniswapV3PoolPriceSubscriptionState;
-        currentSqrtPriceX96 = state.sqrtPriceX96;
-        currentTick = state.tick;
-        status = existing.status as 'active' | 'paused';
-
-        // If paused, reactivate
-        if (existing.status === 'paused') {
-          await prisma.onchainDataSubscribers.update({
-            where: { id: existing.id },
-            data: {
-              status: 'active',
-              pausedAt: null,
-              lastPolledAt: new Date(),
-            },
-          });
-          status = 'active';
-        } else {
-          // Update lastPolledAt
-          await prisma.onchainDataSubscribers.update({
-            where: { id: existing.id },
-            data: { lastPolledAt: new Date() },
-          });
-        }
-      } else {
-        // Fetch current price from chain
-        try {
-          const priceData = await getUniswapV3PoolService().fetchPoolPrice(
-            chainIdNum,
-            normalizedPool
-          );
-          currentSqrtPriceX96 = priceData.sqrtPriceX96.toString();
-          currentTick = priceData.currentTick;
-        } catch (error) {
-          // Handle specific error cases
-          if (error instanceof Error) {
-            if (error.message.includes('not configured') || error.message.includes('not supported')) {
-              const errorResponse = createErrorResponse(ApiErrorCode.BAD_REQUEST, error.message);
-              apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-              return NextResponse.json(errorResponse, {
-                status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_REQUEST],
-              });
-            }
-
-            if (error.message.includes('Failed to read') || error.message.includes('readContract')) {
-              const errorResponse = createErrorResponse(
-                ApiErrorCode.BAD_GATEWAY,
-                'Failed to read pool price from blockchain',
-                error.message
-              );
-              apiLog.requestEnd(apiLogger, requestId, 502, Date.now() - startTime);
-              return NextResponse.json(errorResponse, {
-                status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_GATEWAY],
-              });
-            }
+      try {
+        const priceData = await getUniswapV3PoolService().fetchPoolPrice(
+          chainIdNum,
+          normalizedPool
+        );
+        currentSqrtPriceX96 = priceData.sqrtPriceX96.toString();
+        currentTick = priceData.currentTick;
+      } catch (error) {
+        // Handle specific error cases
+        if (error instanceof Error) {
+          if (error.message.includes('not configured') || error.message.includes('not supported')) {
+            const errorResponse = createErrorResponse(ApiErrorCode.BAD_REQUEST, error.message);
+            apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+            return NextResponse.json(errorResponse, {
+              status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_REQUEST],
+            });
           }
 
-          // Log error and use defaults
-          apiLog.methodError(
-            apiLogger,
-            'POST /api/v1/pools/uniswapv3/[chainId]/[address]/pool-price/watch - fetchPoolPrice',
-            error,
-            { poolAddress: normalizedPool, chainId: chainIdNum, requestId }
-          );
-          currentSqrtPriceX96 = '0';
-          currentTick = 0;
+          if (error.message.includes('Failed to read') || error.message.includes('readContract')) {
+            const errorResponse = createErrorResponse(
+              ApiErrorCode.BAD_GATEWAY,
+              'Failed to read pool price from blockchain',
+              error.message
+            );
+            apiLog.requestEnd(apiLogger, requestId, 502, Date.now() - startTime);
+            return NextResponse.json(errorResponse, {
+              status: ErrorCodeToHttpStatus[ApiErrorCode.BAD_GATEWAY],
+            });
+          }
         }
 
-        // Create new subscription
-        subscriptionId = nanoid();
-        createdAt = new Date();
-        status = 'active';
-
-        const config: UniswapV3PoolPriceSubscriptionConfig = {
-          chainId: chainIdNum,
-          poolAddress: normalizedPool,
-          startedAt: createdAt.toISOString(),
-        };
-
-        const state: UniswapV3PoolPriceSubscriptionState = {
-          ...emptyUniswapV3PoolPriceState(),
-          sqrtPriceX96: currentSqrtPriceX96,
-          tick: currentTick,
-        };
-
-        await prisma.onchainDataSubscribers.create({
-          data: {
-            subscriptionType: 'uniswapv3-pool-price',
-            subscriptionId,
-            status: 'active',
-            expiresAfterMs: 60_000,
-            lastPolledAt: createdAt,
-            config: config as unknown as Prisma.InputJsonValue,
-            state: state as unknown as Prisma.InputJsonValue,
-          },
-        });
+        // Log error and use defaults
+        apiLog.methodError(
+          apiLogger,
+          'POST /api/v1/pools/uniswapv3/[chainId]/[address]/pool-price/watch - fetchPoolPrice',
+          error,
+          { poolAddress: normalizedPool, chainId: chainIdNum, requestId }
+        );
+        currentSqrtPriceX96 = '0';
+        currentTick = 0;
       }
+
+      // 3. Create new subscription (1 per polling process)
+      const subscriptionId = `ui:pool-price:${nanoid()}`;
+      const createdAt = new Date();
+
+      const config: UniswapV3PoolPriceSubscriptionConfig = {
+        chainId: chainIdNum,
+        poolAddress: normalizedPool,
+        startedAt: createdAt.toISOString(),
+      };
+
+      await prisma.onchainDataSubscribers.create({
+        data: {
+          subscriptionType: 'uniswapv3-pool-price',
+          subscriptionId,
+          status: 'active',
+          expiresAfterMs: 60_000,
+          lastPolledAt: createdAt,
+          config: config as unknown as Prisma.InputJsonValue,
+          state: {
+            ...emptyUniswapV3PoolPriceState(),
+            sqrtPriceX96: currentSqrtPriceX96,
+            tick: currentTick,
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
 
       const pollUrl = `/api/v1/pools/uniswapv3/${chainIdNum}/${normalizedPool}/pool-price/watch/${subscriptionId}`;
 
@@ -218,11 +166,11 @@ export async function POST(
         chainId: chainIdNum,
         currentSqrtPriceX96,
         currentTick,
-        status,
+        status: 'active',
         createdAt: createdAt.toISOString(),
       };
 
-      // 3. Return response
+      // 4. Return response
       const responseData: UniswapV3PoolPriceWatchResponseData = {
         subscription,
       };

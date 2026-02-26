@@ -25,7 +25,6 @@ import {
 } from '@midcurve/api-shared';
 import {
   type Erc20BalanceSubscriptionConfig,
-  type Erc20BalanceSubscriptionState,
   emptyErc20BalanceState,
 } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
@@ -125,104 +124,51 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const normalizedToken = getAddress(tokenAddress);
 
-        // Fetch all active/paused subscriptions and filter by config fields in memory
-        // (JSON fields require raw queries or memory filtering in Prisma)
-        const allSubscriptions = await prisma.onchainDataSubscribers.findMany({
-          where: {
+        // Fetch current balance from chain
+        let currentBalance: bigint;
+        try {
+          const balanceResult = await balanceService.getBalance(
+            normalizedWallet,
+            normalizedToken,
+            chainId
+          );
+          currentBalance = balanceResult.balance;
+        } catch (error) {
+          // If we can't fetch, default to 0
+          apiLog.methodError(
+            apiLogger,
+            'POST /api/v1/tokens/erc20/balance/watch - getBalance',
+            error,
+            { tokenAddress: normalizedToken, chainId, requestId }
+          );
+          currentBalance = 0n;
+        }
+
+        // Create new subscription (1 per polling process)
+        const subscriptionId = `ui:erc20-balance:${nanoid()}`;
+        const createdAt = new Date();
+
+        const config: Erc20BalanceSubscriptionConfig = {
+          chainId,
+          tokenAddress: normalizedToken,
+          walletAddress: normalizedWallet,
+          startedAt: createdAt.toISOString(),
+        };
+
+        await prisma.onchainDataSubscribers.create({
+          data: {
             subscriptionType: 'erc20-balance',
-            status: { in: ['active', 'paused'] },
+            subscriptionId,
+            status: 'active',
+            expiresAfterMs: 60_000,
+            lastPolledAt: createdAt,
+            config: config as unknown as Prisma.InputJsonValue,
+            state: {
+              ...emptyErc20BalanceState(),
+              balance: currentBalance.toString(),
+            } as unknown as Prisma.InputJsonValue,
           },
         });
-
-        const existing = allSubscriptions.find((sub) => {
-          const config = sub.config as unknown as Erc20BalanceSubscriptionConfig;
-          return (
-            config.chainId === chainId &&
-            config.tokenAddress.toLowerCase() === normalizedToken.toLowerCase() &&
-            config.walletAddress.toLowerCase() === normalizedWallet.toLowerCase()
-          );
-        });
-
-        let subscriptionId: string;
-        let createdAt: Date;
-        let currentBalance: bigint;
-        let status: 'active' | 'paused';
-
-        if (existing) {
-          // Use existing subscription
-          subscriptionId = existing.subscriptionId;
-          createdAt = existing.createdAt;
-          const state = existing.state as unknown as Erc20BalanceSubscriptionState;
-          currentBalance = BigInt(state.balance);
-          status = existing.status as 'active' | 'paused';
-
-          // If paused, reactivate
-          if (existing.status === 'paused') {
-            await prisma.onchainDataSubscribers.update({
-              where: { id: existing.id },
-              data: {
-                status: 'active',
-                pausedAt: null,
-                lastPolledAt: new Date(),
-              },
-            });
-            status = 'active';
-          } else {
-            // Update lastPolledAt
-            await prisma.onchainDataSubscribers.update({
-              where: { id: existing.id },
-              data: { lastPolledAt: new Date() },
-            });
-          }
-        } else {
-          // Fetch current balance from chain
-          try {
-            const balanceResult = await balanceService.getBalance(
-              normalizedWallet,
-              normalizedToken,
-              chainId
-            );
-            currentBalance = balanceResult.balance;
-          } catch (error) {
-            // If we can't fetch, default to 0
-            apiLog.methodError(
-              apiLogger,
-              'POST /api/v1/tokens/erc20/balance/watch - getBalance',
-              error,
-              { tokenAddress: normalizedToken, chainId, requestId }
-            );
-            currentBalance = 0n;
-          }
-
-          // Create new subscription
-          subscriptionId = nanoid();
-          createdAt = new Date();
-          status = 'active';
-
-          const config: Erc20BalanceSubscriptionConfig = {
-            chainId,
-            tokenAddress: normalizedToken,
-            walletAddress: normalizedWallet,
-            startedAt: createdAt.toISOString(),
-          };
-
-          const state: Erc20BalanceSubscriptionState = {
-            ...emptyErc20BalanceState(),
-            balance: currentBalance.toString(),
-          };
-
-          await prisma.onchainDataSubscribers.create({
-            data: {
-              subscriptionType: 'erc20-balance',
-              subscriptionId,
-              status: 'active',
-              expiresAfterMs: 60_000,
-              lastPolledAt: createdAt,
-              config: config as unknown as Prisma.InputJsonValue,
-              state: state as unknown as Prisma.InputJsonValue,
-            },
-          });
-        }
 
         const pollUrl = `/api/v1/tokens/erc20/balance/watch/${subscriptionId}`;
 
@@ -233,7 +179,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           chainId,
           walletAddress: normalizedWallet,
           currentBalance: currentBalance.toString(),
-          status,
+          status: 'active',
           createdAt: createdAt.toISOString(),
         });
       }

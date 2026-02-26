@@ -90,115 +90,65 @@ export async function POST(request: NextRequest): Promise<Response> {
       const { txHash, chainId, targetConfirmations } = validation.data;
       const normalizedTxHash = txHash.toLowerCase();
 
-      // 2. Check if there's an existing active/paused subscription for this tx
-      const allSubscriptions = await prisma.onchainDataSubscribers.findMany({
-        where: {
+      // 2. Fetch current transaction status from chain
+      let currentState: EvmTxStatusSubscriptionState;
+      try {
+        const txStatus = await getEvmTransactionStatusService().getStatus(txHash, chainId);
+        currentState = {
+          status: txStatus.status,
+          blockNumber: txStatus.blockNumber != null ? Number(txStatus.blockNumber) : null,
+          blockHash: txStatus.blockHash ?? null,
+          confirmations: txStatus.confirmations ?? 0,
+          gasUsed: txStatus.gasUsed?.toString() ?? null,
+          effectiveGasPrice: txStatus.effectiveGasPrice?.toString() ?? null,
+          logsCount: txStatus.logsCount ?? null,
+          logs: txStatus.logs ?? null,
+          contractAddress: txStatus.contractAddress ?? null,
+          lastCheckedAt: txStatus.timestamp.toISOString(),
+          isComplete:
+            txStatus.status !== 'pending' &&
+            txStatus.status !== 'not_found' &&
+            (txStatus.confirmations ?? 0) >= targetConfirmations,
+          completedAt:
+            txStatus.status !== 'pending' &&
+            txStatus.status !== 'not_found' &&
+            (txStatus.confirmations ?? 0) >= targetConfirmations
+              ? txStatus.timestamp.toISOString()
+              : null,
+        };
+      } catch (error) {
+        // If we can't fetch, use pending state
+        apiLog.methodError(
+          apiLogger,
+          'POST /api/v1/transactions/evm/status/watch - getStatus',
+          error,
+          { txHash, chainId, requestId }
+        );
+        currentState = emptyEvmTxStatusState();
+      }
+
+      // 3. Create new subscription (1 per polling process)
+      const subscriptionId = `ui:evm-tx-status:${nanoid()}`;
+      const createdAt = new Date();
+
+      const config: EvmTxStatusSubscriptionConfig = {
+        chainId,
+        txHash: normalizedTxHash,
+        targetConfirmations,
+        startedAt: createdAt.toISOString(),
+      };
+
+      await prisma.onchainDataSubscribers.create({
+        data: {
           subscriptionType: 'evm-tx-status',
-          status: { in: ['active', 'paused'] },
+          subscriptionId,
+          status: 'active',
+          expiresAfterMs: 60_000,
+          lastPolledAt: createdAt,
+          config: config as unknown as Prisma.InputJsonValue,
+          state: currentState as unknown as Prisma.InputJsonValue,
         },
       });
-
-      const existing = allSubscriptions.find((sub) => {
-        const config = sub.config as unknown as EvmTxStatusSubscriptionConfig;
-        return (
-          config.chainId === chainId &&
-          config.txHash.toLowerCase() === normalizedTxHash
-        );
-      });
-
-      let subscriptionId: string;
-      let createdAt: Date;
-      let currentState: EvmTxStatusSubscriptionState;
-      let subscriptionStatus: 'active' | 'paused';
-
-      if (existing) {
-        // Use existing subscription
-        subscriptionId = existing.subscriptionId;
-        createdAt = existing.createdAt;
-        currentState = existing.state as unknown as EvmTxStatusSubscriptionState;
-        subscriptionStatus = existing.status as 'active' | 'paused';
-
-        // If paused, reactivate
-        if (existing.status === 'paused') {
-          await prisma.onchainDataSubscribers.update({
-            where: { id: existing.id },
-            data: {
-              status: 'active',
-              pausedAt: null,
-              lastPolledAt: new Date(),
-            },
-          });
-          subscriptionStatus = 'active';
-        } else {
-          // Update lastPolledAt
-          await prisma.onchainDataSubscribers.update({
-            where: { id: existing.id },
-            data: { lastPolledAt: new Date() },
-          });
-        }
-      } else {
-        // Fetch current transaction status from chain
-        let initialStatus: EvmTxStatusSubscriptionState;
-        try {
-          const txStatus = await getEvmTransactionStatusService().getStatus(txHash, chainId);
-          initialStatus = {
-            status: txStatus.status,
-            blockNumber: txStatus.blockNumber != null ? Number(txStatus.blockNumber) : null,
-            blockHash: txStatus.blockHash ?? null,
-            confirmations: txStatus.confirmations ?? 0,
-            gasUsed: txStatus.gasUsed?.toString() ?? null,
-            effectiveGasPrice: txStatus.effectiveGasPrice?.toString() ?? null,
-            logsCount: txStatus.logsCount ?? null,
-            logs: txStatus.logs ?? null,
-            contractAddress: txStatus.contractAddress ?? null,
-            lastCheckedAt: txStatus.timestamp.toISOString(),
-            isComplete:
-              txStatus.status !== 'pending' &&
-              txStatus.status !== 'not_found' &&
-              (txStatus.confirmations ?? 0) >= targetConfirmations,
-            completedAt:
-              txStatus.status !== 'pending' &&
-              txStatus.status !== 'not_found' &&
-              (txStatus.confirmations ?? 0) >= targetConfirmations
-                ? txStatus.timestamp.toISOString()
-                : null,
-          };
-        } catch (error) {
-          // If we can't fetch, use pending state
-          apiLog.methodError(
-            apiLogger,
-            'POST /api/v1/transactions/evm/status/watch - getStatus',
-            error,
-            { txHash, chainId, requestId }
-          );
-          initialStatus = emptyEvmTxStatusState();
-        }
-
-        // Create new subscription
-        subscriptionId = nanoid();
-        createdAt = new Date();
-        subscriptionStatus = 'active';
-        currentState = initialStatus;
-
-        const config: EvmTxStatusSubscriptionConfig = {
-          chainId,
-          txHash: normalizedTxHash,
-          targetConfirmations,
-          startedAt: createdAt.toISOString(),
-        };
-
-        await prisma.onchainDataSubscribers.create({
-          data: {
-            subscriptionType: 'evm-tx-status',
-            subscriptionId,
-            status: 'active',
-            expiresAfterMs: 60_000,
-            lastPolledAt: createdAt,
-            config: config as unknown as Prisma.InputJsonValue,
-            state: currentState as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
 
       const pollUrl = `/api/v1/transactions/evm/status/watch/${subscriptionId}`;
 
@@ -211,11 +161,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         status: currentState.status,
         confirmations: currentState.confirmations,
         isComplete: currentState.isComplete,
-        subscriptionStatus,
+        subscriptionStatus: 'active',
         createdAt: createdAt.toISOString(),
       };
 
-      // 3. Return response
+      // 4. Return response
       const responseData: EvmTxStatusWatchResponseData = {
         subscription: subscriptionInfo,
       };
