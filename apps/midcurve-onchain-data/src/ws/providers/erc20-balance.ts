@@ -142,10 +142,10 @@ export class Erc20BalanceSubscriptionBatch {
     const tokenAddr = balance.tokenAddress.toLowerCase();
     const walletAddr = balance.walletAddress.toLowerCase();
 
-    // Check if this exact subscription already exists
+    // Guard against adding the exact same subscription ID twice
     const existing = this.balances.get(tokenAddr) || [];
     const alreadyExists = existing.some(
-      (b) => b.walletAddress.toLowerCase() === walletAddr
+      (b) => b.subscriptionId === balance.subscriptionId
     );
 
     if (alreadyExists) {

@@ -114,12 +114,10 @@ export class Erc20ApprovalSubscriptionBatch {
   async addApproval(approval: ApprovalInfo): Promise<void> {
     const tokenAddr = approval.tokenAddress.toLowerCase();
 
-    // Check if this exact subscription already exists
+    // Guard against adding the exact same subscription ID twice
     const existing = this.approvals.get(tokenAddr) || [];
     const alreadyExists = existing.some(
-      (a) =>
-        a.ownerAddress.toLowerCase() === approval.ownerAddress.toLowerCase() &&
-        a.spenderAddress.toLowerCase() === approval.spenderAddress.toLowerCase()
+      (a) => a.subscriptionId === approval.subscriptionId
     );
 
     if (alreadyExists) {
