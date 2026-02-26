@@ -2,8 +2,11 @@
  * Automation Subscription Service
  *
  * Manages persistent OnchainDataSubscribers records for the automation system.
- * Replaces PoolSubscriptionService's increment/decrement order count pattern
- * with a simpler ensure/remove pattern backed by the generic OnchainDataSubscribers table.
+ * Each consumer owns its own subscriptions and is responsible for its own lifecycle.
+ *
+ * SubscriptionId formats:
+ * - Per-position (range monitor): auto:range-monitor:{positionId}
+ * - Per-order (close order):      auto:close-order:{orderId}
  *
  * Key difference from UI subscriptions:
  * - Automation subscriptions use expiresAfterMs: null (persistent, never auto-paused)
@@ -32,16 +35,16 @@ export class AutomationSubscriptionService {
   }
 
   /**
-   * Ensure a persistent pool price subscription exists in OnchainDataSubscribers.
-   * Creates one if missing, reactivates if paused/deleted.
+   * Ensure a persistent pool price subscription exists for a specific position.
+   * Used by RangeMonitor — 1 subscription per position for trivial lifecycle management.
    *
-   * Idempotent — safe to call multiple times for the same pool.
+   * Idempotent — safe to call multiple times for the same position.
    */
-  async ensurePoolSubscription(chainId: number, poolAddress: string): Promise<void> {
-    log.methodEntry(this.logger, 'ensurePoolSubscription', { chainId, poolAddress });
+  async ensurePositionSubscription(positionId: string, chainId: number, poolAddress: string): Promise<void> {
+    log.methodEntry(this.logger, 'ensurePositionSubscription', { positionId, chainId, poolAddress });
 
     const normalizedAddress = poolAddress.toLowerCase();
-    const subscriptionId = this.buildSubscriptionId(chainId, normalizedAddress);
+    const subscriptionId = this.buildPositionSubscriptionId(positionId);
 
     try {
       const config: UniswapV3PoolPriceSubscriptionConfig = {
@@ -56,24 +59,25 @@ export class AutomationSubscriptionService {
           subscriptionType: 'uniswapv3-pool-price',
           subscriptionId,
           status: 'active',
-          expiresAfterMs: null, // persistent — never auto-paused
+          expiresAfterMs: null,
           config: config as unknown as Prisma.InputJsonValue,
           state: emptyUniswapV3PoolPriceState() as unknown as Prisma.InputJsonValue,
         },
         update: {
           status: 'active',
-          expiresAfterMs: null, // ensure persistent even if previously UI-created
+          expiresAfterMs: null,
           pausedAt: null,
         },
       });
 
       this.logger.info(
-        { chainId, poolAddress: normalizedAddress, subscriptionId },
-        'Pool subscription ensured',
+        { positionId, chainId, poolAddress: normalizedAddress, subscriptionId },
+        'Position subscription ensured',
       );
-      log.methodExit(this.logger, 'ensurePoolSubscription', { subscriptionId });
+      log.methodExit(this.logger, 'ensurePositionSubscription', { subscriptionId });
     } catch (error) {
-      log.methodError(this.logger, 'ensurePoolSubscription', error as Error, {
+      log.methodError(this.logger, 'ensurePositionSubscription', error as Error, {
+        positionId,
         chainId,
         poolAddress,
       });
@@ -82,62 +86,15 @@ export class AutomationSubscriptionService {
   }
 
   /**
-   * Remove a pool subscription if no more active close orders reference this pool.
-   *
-   * Checks for monitoring orders via the position→pool relation. If none remain,
-   * marks the subscription as 'deleted' for the onchain-data cleanup to prune.
+   * Remove a position's pool price subscription.
+   * No pool lookup needed — subscriptionId is deterministic from positionId.
    */
-  async removePoolSubscriptionIfUnused(poolId: string): Promise<void> {
-    log.methodEntry(this.logger, 'removePoolSubscriptionIfUnused', { poolId });
+  async removePositionSubscription(positionId: string): Promise<void> {
+    log.methodEntry(this.logger, 'removePositionSubscription', { positionId });
 
     try {
-      // Check if any active monitoring orders still reference this pool
-      const remainingOrders = await this.prisma.closeOrder.count({
-        where: {
-          position: { pool: { id: poolId } },
-          automationState: 'monitoring',
-        },
-      });
+      const subscriptionId = this.buildPositionSubscriptionId(positionId);
 
-      if (remainingOrders > 0) {
-        this.logger.debug(
-          { poolId, remainingOrders },
-          'Pool still has monitoring orders, keeping subscription active',
-        );
-        log.methodExit(this.logger, 'removePoolSubscriptionIfUnused', {
-          poolId,
-          removed: false,
-          remainingOrders,
-        });
-        return;
-      }
-
-      // Look up pool to get chainId and poolAddress from config JSON
-      const pool = await this.prisma.pool.findUnique({
-        where: { id: poolId },
-        select: { config: true },
-      });
-
-      if (!pool) {
-        this.logger.warn({ poolId }, 'Pool not found, cannot remove subscription');
-        return;
-      }
-
-      const poolConfig = pool.config as Record<string, unknown>;
-      const chainId = poolConfig.chainId as number | undefined;
-      const poolAddress = (poolConfig.address as string | undefined)?.toLowerCase();
-
-      if (!chainId || !poolAddress) {
-        this.logger.warn(
-          { poolId, chainId, poolAddress },
-          'Pool config missing chainId or address',
-        );
-        return;
-      }
-
-      const subscriptionId = this.buildSubscriptionId(chainId, poolAddress);
-
-      // Mark as deleted (onchain-data cleanup will prune it)
       const result = await this.prisma.onchainDataSubscribers.updateMany({
         where: {
           subscriptionId,
@@ -151,33 +108,127 @@ export class AutomationSubscriptionService {
 
       if (result.count > 0) {
         this.logger.info(
-          { poolId, subscriptionId },
-          'Pool subscription marked for deletion (no remaining orders)',
-        );
-      } else {
-        this.logger.debug(
-          { poolId, subscriptionId },
-          'No active subscription found to remove',
+          { positionId, subscriptionId },
+          'Position subscription marked for deletion',
         );
       }
 
-      log.methodExit(this.logger, 'removePoolSubscriptionIfUnused', {
-        poolId,
+      log.methodExit(this.logger, 'removePositionSubscription', {
+        positionId,
         removed: result.count > 0,
       });
     } catch (error) {
-      log.methodError(this.logger, 'removePoolSubscriptionIfUnused', error as Error, {
-        poolId,
+      log.methodError(this.logger, 'removePositionSubscription', error as Error, {
+        positionId,
       });
       throw error;
     }
   }
 
   /**
-   * Build deterministic subscriptionId for automation pool subscriptions.
-   * Format: auto:uniswapv3-pool-price:<chainId>:<poolAddress>
+   * Ensure a persistent pool price subscription exists for a specific close order.
+   * Used by CloseOrderMonitor — 1 subscription per order for trivial lifecycle management.
+   *
+   * Idempotent — safe to call multiple times for the same order.
    */
-  private buildSubscriptionId(chainId: number, poolAddress: string): string {
-    return `auto:uniswapv3-pool-price:${chainId}:${poolAddress}`;
+  async ensureOrderSubscription(orderId: string, chainId: number, poolAddress: string): Promise<void> {
+    log.methodEntry(this.logger, 'ensureOrderSubscription', { orderId, chainId, poolAddress });
+
+    const normalizedAddress = poolAddress.toLowerCase();
+    const subscriptionId = this.buildOrderSubscriptionId(orderId);
+
+    try {
+      const config: UniswapV3PoolPriceSubscriptionConfig = {
+        chainId,
+        poolAddress: normalizedAddress,
+        startedAt: new Date().toISOString(),
+      };
+
+      await this.prisma.onchainDataSubscribers.upsert({
+        where: { subscriptionId },
+        create: {
+          subscriptionType: 'uniswapv3-pool-price',
+          subscriptionId,
+          status: 'active',
+          expiresAfterMs: null,
+          config: config as unknown as Prisma.InputJsonValue,
+          state: emptyUniswapV3PoolPriceState() as unknown as Prisma.InputJsonValue,
+        },
+        update: {
+          status: 'active',
+          expiresAfterMs: null,
+          pausedAt: null,
+        },
+      });
+
+      this.logger.info(
+        { orderId, chainId, poolAddress: normalizedAddress, subscriptionId },
+        'Order subscription ensured',
+      );
+      log.methodExit(this.logger, 'ensureOrderSubscription', { subscriptionId });
+    } catch (error) {
+      log.methodError(this.logger, 'ensureOrderSubscription', error as Error, {
+        orderId,
+        chainId,
+        poolAddress,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a close order's pool price subscription.
+   * No pool lookup needed — subscriptionId is deterministic from orderId.
+   */
+  async removeOrderSubscription(orderId: string): Promise<void> {
+    log.methodEntry(this.logger, 'removeOrderSubscription', { orderId });
+
+    try {
+      const subscriptionId = this.buildOrderSubscriptionId(orderId);
+
+      const result = await this.prisma.onchainDataSubscribers.updateMany({
+        where: {
+          subscriptionId,
+          status: 'active',
+        },
+        data: {
+          status: 'deleted',
+          pausedAt: new Date(),
+        },
+      });
+
+      if (result.count > 0) {
+        this.logger.info(
+          { orderId, subscriptionId },
+          'Order subscription marked for deletion',
+        );
+      }
+
+      log.methodExit(this.logger, 'removeOrderSubscription', {
+        orderId,
+        removed: result.count > 0,
+      });
+    } catch (error) {
+      log.methodError(this.logger, 'removeOrderSubscription', error as Error, {
+        orderId,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Build deterministic subscriptionId for per-position subscriptions (range monitor).
+   * Format: auto:range-monitor:<positionId>
+   */
+  private buildPositionSubscriptionId(positionId: string): string {
+    return `auto:range-monitor:${positionId}`;
+  }
+
+  /**
+   * Build deterministic subscriptionId for per-order subscriptions (close order monitor).
+   * Format: auto:close-order:<orderId>
+   */
+  private buildOrderSubscriptionId(orderId: string): string {
+    return `auto:close-order:${orderId}`;
   }
 }

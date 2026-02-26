@@ -12,13 +12,14 @@
  * single-consumer use case.
  *
  * Key design:
- * - 1 PoolPriceSubscriber per pool (not per position)
- * - Multiple positions in the same pool share one subscriber
+ * - 1 PoolPriceSubscriber per pool (not per position) for RabbitMQ efficiency
+ * - Multiple positions in the same pool share one RabbitMQ subscriber
+ * - DB subscriptions are per-position for trivial lifecycle management
  * - Subscriber lifecycle tied to whether pool has active positions
  */
 
 import { prisma } from '@midcurve/database';
-import { getUniswapV3PoolService, getUserNotificationService, getAutomationSubscriptionService } from '../lib/services';
+import { getUserNotificationService, getAutomationSubscriptionService } from '../lib/services';
 import { isSupportedChain } from '../lib/config';
 import { automationLogger, autoLog } from '../lib/logger';
 import {
@@ -123,6 +124,8 @@ function isTickInRange(currentTick: number, tickLower: number, tickUpper: number
 export class RangeMonitor {
   private status: 'idle' | 'running' | 'stopping' | 'stopped' = 'idle';
   private poolSubscribers = new Map<string, PoolPriceSubscriber>();
+  /** Position IDs with active DB subscriptions, grouped by pool */
+  private poolPositionIds = new Map<string, Set<string>>();
   private positionsTracked = 0;
   private eventsProcessed = 0;
   private rangeChangesDetected = 0;
@@ -145,6 +148,9 @@ export class RangeMonitor {
     try {
       // Sync subscriptions on startup
       await this.syncSubscriptions();
+
+      // Clean up any orphaned DB subscriptions from previous runs
+      await this.cleanupOrphanedSubscriptions();
 
       // Schedule periodic subscription sync
       this.scheduleSyncTimer();
@@ -185,6 +191,7 @@ export class RangeMonitor {
 
     await Promise.all(shutdowns);
     this.poolSubscribers.clear();
+    this.poolPositionIds.clear();
 
     this.status = 'stopped';
     autoLog.workerLifecycle(log, 'RangeMonitor', 'stopped');
@@ -339,19 +346,22 @@ export class RangeMonitor {
   // ===========================================================================
 
   /**
-   * Sync subscriptions with active pools
+   * Sync subscriptions with active pools.
+   *
+   * RabbitMQ subscribers are per-pool (efficiency).
+   * DB subscriptions are per-position (trivial lifecycle).
    */
   private async syncSubscriptions(): Promise<void> {
     autoLog.methodEntry(log, 'syncSubscriptions');
 
     try {
-      const poolService = getUniswapV3PoolService();
+      const automationSubscriptionService = getAutomationSubscriptionService();
 
       // Get all unique pools with active positions
       const activePoolIds = await this.getActivePoolIds();
       const activePoolIdSet = new Set(activePoolIds);
 
-      // Remove subscribers for pools that no longer have active positions
+      // Remove RabbitMQ subscribers for pools that no longer have active positions
       for (const [poolId, subscriber] of this.poolSubscribers.entries()) {
         if (!activePoolIdSet.has(poolId)) {
           log.debug({ poolId }, 'Removing subscriber for pool with no active positions');
@@ -359,43 +369,61 @@ export class RangeMonitor {
             log.warn({ error: err, poolId, msg: 'Error shutting down pool subscriber' });
           });
           this.poolSubscribers.delete(poolId);
+
+          // Remove per-position DB subscriptions for this pool
+          const positionIds = this.poolPositionIds.get(poolId);
+          if (positionIds) {
+            for (const positionId of positionIds) {
+              await automationSubscriptionService.removePositionSubscription(positionId);
+            }
+            this.poolPositionIds.delete(poolId);
+          }
         }
       }
 
-      // Add subscribers for new active pools and count total positions
+      // Sync per-position subscriptions and RabbitMQ subscribers for active pools
       let totalPositions = 0;
       for (const poolId of activePoolIds) {
-        // Count positions for this pool
         const positions = await this.getPositionsForPool(poolId);
         totalPositions += positions.length;
 
-        if (this.poolSubscribers.has(poolId)) {
-          continue;
+        if (positions.length === 0) continue;
+
+        const chainId = positions[0].chainId;
+        const poolAddress = positions[0].poolAddress;
+
+        // Ensure per-position DB subscriptions
+        const currentPositionIds = new Set(positions.map((p) => p.positionId));
+        const previousPositionIds = this.poolPositionIds.get(poolId) ?? new Set();
+
+        // Add subscriptions for new positions
+        for (const position of positions) {
+          if (!previousPositionIds.has(position.positionId)) {
+            await automationSubscriptionService.ensurePositionSubscription(
+              position.positionId, chainId, poolAddress,
+            );
+          }
         }
 
-        // Get pool details
-        const pool = await poolService.findById(poolId);
-        if (!pool) {
-          log.warn({ poolId, msg: 'Pool not found' });
-          continue;
+        // Remove subscriptions for positions no longer active in this pool
+        for (const positionId of previousPositionIds) {
+          if (!currentPositionIds.has(positionId)) {
+            await automationSubscriptionService.removePositionSubscription(positionId);
+          }
         }
 
-        const poolConfig = pool.config as { chainId?: number; address?: string };
-        const chainId = poolConfig.chainId;
-        const poolAddress = poolConfig.address;
+        this.poolPositionIds.set(poolId, currentPositionIds);
 
-        if (!chainId || !poolAddress) {
-          log.warn({ poolId, msg: 'Pool missing chainId or address' });
-          continue;
+        // Create RabbitMQ subscriber if not already running for this pool
+        if (!this.poolSubscribers.has(poolId)) {
+          // Skip unsupported chains
+          if (!isSupportedChain(chainId)) {
+            log.debug({ poolId, chainId, msg: 'Skipping unsupported chain' });
+            continue;
+          }
+
+          await this.createPoolSubscriber(poolId, chainId, poolAddress);
         }
-
-        // Skip unsupported chains
-        if (!isSupportedChain(chainId)) {
-          log.debug({ poolId, chainId, msg: 'Skipping unsupported chain' });
-          continue;
-        }
-
-        await this.createPoolSubscriber(poolId, chainId, poolAddress);
       }
 
       this.positionsTracked = totalPositions;
@@ -415,7 +443,64 @@ export class RangeMonitor {
   }
 
   /**
-   * Create a subscriber for a pool
+   * Clean up orphaned range-monitor subscriptions in the DB.
+   *
+   * On startup, there may be active per-position subscriptions left over from
+   * a previous run where the position is no longer active. Also cleans up
+   * legacy shared-format subscriptions (auto:uniswapv3-pool-price:*).
+   */
+  private async cleanupOrphanedSubscriptions(): Promise<void> {
+    autoLog.methodEntry(log, 'cleanupOrphanedSubscriptions');
+
+    // Find per-position subscriptions and legacy shared-format subscriptions
+    const candidates = await prisma.onchainDataSubscribers.findMany({
+      where: {
+        OR: [
+          { subscriptionId: { startsWith: 'auto:range-monitor:' } },
+          // Legacy format (no consumer prefix) — always orphaned now
+          { subscriptionId: { startsWith: 'auto:uniswapv3-pool-price:' } },
+        ],
+        status: 'active',
+      },
+      select: { subscriptionId: true },
+    });
+
+    let cleaned = 0;
+    for (const sub of candidates) {
+      const { subscriptionId } = sub;
+
+      if (subscriptionId.startsWith('auto:range-monitor:')) {
+        // Per-position format: auto:range-monitor:{positionId}
+        const positionId = subscriptionId.replace('auto:range-monitor:', '');
+        const position = await prisma.position.findUnique({
+          where: { id: positionId },
+          select: { isActive: true },
+        });
+
+        if (position?.isActive) continue; // Still active — keep
+      }
+
+      // Legacy format or inactive position — mark as deleted
+      await prisma.onchainDataSubscribers.updateMany({
+        where: { subscriptionId, status: 'active' },
+        data: { status: 'deleted', pausedAt: new Date() },
+      });
+      log.info({ subscriptionId }, 'Cleaned up orphaned subscription');
+      cleaned++;
+    }
+
+    log.info({
+      totalChecked: candidates.length,
+      cleaned,
+      msg: 'Orphaned subscription cleanup complete',
+    });
+
+    autoLog.methodExit(log, 'cleanupOrphanedSubscriptions');
+  }
+
+  /**
+   * Create a RabbitMQ subscriber for a pool.
+   * DB subscriptions are managed per-position in syncSubscriptions().
    */
   private async createPoolSubscriber(
     poolId: string,
@@ -423,10 +508,6 @@ export class RangeMonitor {
     poolAddress: string
   ): Promise<void> {
     try {
-      // Ensure onchain-data worker is monitoring this pool (persistent subscription)
-      const automationSubscriptionService = getAutomationSubscriptionService();
-      await automationSubscriptionService.ensurePoolSubscription(chainId, poolAddress);
-
       const subscriber = createPoolPriceSubscriber({
         subscriberId: `range-monitor-${poolId}`,
         chainId,
