@@ -303,6 +303,7 @@ export class UpdatePositionOnLiquidityEventRule extends BusinessRule {
         if (result.action === 'inserted') {
           const { eventDetail } = result;
           const domainEventType = VALID_EVENT_TO_DOMAIN_EVENT[eventDetail.validEventType];
+          if (!domainEventType) continue;
 
           let payload: PositionLiquidityIncreasedPayload | PositionLiquidityDecreasedPayload | PositionFeesCollectedPayload;
           if (eventDetail.validEventType === 'COLLECT') {
