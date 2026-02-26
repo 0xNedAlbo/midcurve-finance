@@ -26,7 +26,11 @@ import {
   createPoolPriceSubscriber,
   type PoolPriceSubscriber,
   type RawSwapEventWrapper,
+  DOMAIN_EVENTS_EXCHANGE,
+  DOMAIN_EVENTS_DLX,
+  ROUTING_PATTERNS,
 } from '@midcurve/services';
+import { getRabbitMQConnection } from '../mq/connection-manager';
 
 const log = automationLogger.child({ component: 'RangeMonitor' });
 
@@ -34,8 +38,8 @@ const log = automationLogger.child({ component: 'RangeMonitor' });
 // Constants
 // =============================================================================
 
-/** Interval for syncing subscriptions (5 minutes) */
-const SUBSCRIPTION_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+/** Queue name for position domain event notifications */
+const POSITION_EVENTS_QUEUE = 'automation.range-monitor.position-events';
 
 // =============================================================================
 // Types
@@ -131,7 +135,7 @@ export class RangeMonitor {
   private rangeChangesDetected = 0;
   private lastEventAt: Date | null = null;
   private lastSyncAt: Date | null = null;
-  private syncTimer: NodeJS.Timeout | null = null;
+  private positionEventConsumerTag: string | null = null;
 
   /**
    * Start the range monitor
@@ -146,14 +150,14 @@ export class RangeMonitor {
     this.status = 'running';
 
     try {
-      // Sync subscriptions on startup
-      await this.syncSubscriptions();
-
       // Clean up any orphaned DB subscriptions from previous runs
       await this.cleanupOrphanedSubscriptions();
 
-      // Schedule periodic subscription sync
-      this.scheduleSyncTimer();
+      // Subscribe to position domain events for immediate sync
+      await this.subscribeToPositionEvents();
+
+      // Sync subscriptions on startup to catch up
+      await this.syncSubscriptions();
 
       autoLog.workerLifecycle(log, 'RangeMonitor', 'started', {
         poolSubscribers: this.poolSubscribers.size,
@@ -176,10 +180,13 @@ export class RangeMonitor {
     autoLog.workerLifecycle(log, 'RangeMonitor', 'stopping');
     this.status = 'stopping';
 
-    // Stop sync timer
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
+    // Cancel position event consumer
+    if (this.positionEventConsumerTag) {
+      const mq = getRabbitMQConnection();
+      await mq.cancelConsumer(this.positionEventConsumerTag).catch((err) => {
+        log.warn({ error: err, msg: 'Error cancelling position event consumer' });
+      });
+      this.positionEventConsumerTag = null;
     }
 
     // Shutdown all pool subscribers
@@ -247,7 +254,7 @@ export class RangeMonitor {
       };
       const poolConfig = position.pool.config as {
         chainId: number;
-        poolAddress: string;
+        address: string;
       };
 
       return {
@@ -257,7 +264,7 @@ export class RangeMonitor {
         tickLower: config.tickLower,
         tickUpper: config.tickUpper,
         chainId: poolConfig.chainId,
-        poolAddress: poolConfig.poolAddress,
+        poolAddress: poolConfig.address,
         currentRangeStatus: position.rangeStatus
           ? {
               isInRange: position.rangeStatus.isInRange,
@@ -589,20 +596,51 @@ export class RangeMonitor {
   }
 
   /**
-   * Schedule periodic subscription sync
+   * Subscribe to position domain events for immediate sync on position changes.
+   * Mirrors CloseOrderMonitor's subscribeToOrderEvents() pattern.
    */
-  private scheduleSyncTimer(): void {
-    this.syncTimer = setInterval(() => {
-      if (this.status === 'running') {
-        this.syncSubscriptions().catch((err) => {
-          autoLog.methodError(log, 'scheduledSync', err);
-        });
-      }
-    }, SUBSCRIPTION_SYNC_INTERVAL_MS);
+  private async subscribeToPositionEvents(): Promise<void> {
+    const mq = getRabbitMQConnection();
+    const channel = await mq.getChannel();
 
-    log.debug({
-      intervalMs: SUBSCRIPTION_SYNC_INTERVAL_MS,
-      msg: 'Scheduled periodic subscription sync',
+    // Ensure domain-events exchange exists (idempotent)
+    await channel.assertExchange(DOMAIN_EVENTS_EXCHANGE, 'topic', {
+      durable: true,
+      autoDelete: false,
+    });
+
+    // Create a durable queue bound to position events
+    await channel.assertQueue(POSITION_EVENTS_QUEUE, {
+      durable: true,
+      exclusive: false,
+      autoDelete: false,
+      arguments: {
+        'x-dead-letter-exchange': DOMAIN_EVENTS_DLX,
+      },
+    });
+    await channel.bindQueue(POSITION_EVENTS_QUEUE, DOMAIN_EVENTS_EXCHANGE, ROUTING_PATTERNS.ALL_POSITION_EVENTS);
+
+    const { consumerTag } = await channel.consume(
+      POSITION_EVENTS_QUEUE,
+      async (msg) => {
+        if (!msg) return;
+        try {
+          log.info({ msg: 'Received position domain event, triggering immediate sync' });
+          await this.syncSubscriptions();
+          channel.ack(msg);
+        } catch (err) {
+          log.warn({ error: err, msg: 'Error handling position domain event' });
+          channel.nack(msg, false, false);
+        }
+      },
+      { noAck: false }
+    );
+
+    this.positionEventConsumerTag = consumerTag;
+    log.info({
+      queue: POSITION_EVENTS_QUEUE,
+      pattern: ROUTING_PATTERNS.ALL_POSITION_EVENTS,
+      msg: 'Subscribed to position domain events',
     });
   }
 }
