@@ -11,6 +11,7 @@ import {
   AuthUserService,
   AuthNonceService,
   SessionService,
+  UserAllowListService,
   Erc20TokenService,
   CoingeckoTokenService,
   UserTokenBalanceService,
@@ -36,6 +37,7 @@ import {
 let _authUserService: AuthUserService | null = null;
 let _authNonceService: AuthNonceService | null = null;
 let _sessionService: SessionService | null = null;
+let _userAllowListService: UserAllowListService | null = null;
 let _erc20TokenService: Erc20TokenService | null = null;
 let _coingeckoTokenService: CoingeckoTokenService | null = null;
 let _userTokenBalanceService: UserTokenBalanceService | null = null;
@@ -81,6 +83,16 @@ export function getSessionService(): SessionService {
     _sessionService = new SessionService();
   }
   return _sessionService;
+}
+
+/**
+ * Get singleton instance of UserAllowListService
+ */
+export function getUserAllowListService(): UserAllowListService {
+  if (!_userAllowListService) {
+    _userAllowListService = new UserAllowListService();
+  }
+  return _userAllowListService;
 }
 
 /**

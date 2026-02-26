@@ -5,7 +5,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { SiweMessage } from "siwe";
 import { X } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiError } from "@/lib/api-client";
 
 export function AuthModal() {
   const navigate = useNavigate();
@@ -104,7 +104,9 @@ export function AuthModal() {
     } catch (err) {
       console.error("SIWE authentication error:", err);
 
-      if (err instanceof Error) {
+      if (err instanceof ApiError && err.statusCode === 403) {
+        setError(err.message);
+      } else if (err instanceof Error) {
         if (err.message.includes("getChainId is not a function")) {
           // Wallet is locked - disconnect and let user reconnect
           disconnect();

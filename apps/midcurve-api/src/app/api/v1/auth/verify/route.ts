@@ -37,7 +37,7 @@ import {
 } from '@midcurve/api-shared';
 import { getDomainEventPublisher } from '@midcurve/services';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getAuthNonceService, getAuthUserService, getSessionService } from '@/lib/services';
+import { getAuthNonceService, getAuthUserService, getSessionService, getUserAllowListService } from '@/lib/services';
 import { getCorsHeaders, createPreflightResponse } from '@/lib/cors';
 import { SESSION_COOKIE_NAME } from '@/middleware/with-session-auth';
 
@@ -134,9 +134,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // 4. Consume nonce (single use)
     await getAuthNonceService().consumeNonce(siweMessage.nonce);
 
-    // 5. Normalize address and find/create user (chain-agnostic)
+    // 5. Normalize address and check allowlist
     const address = normalizeAddress(siweMessage.address);
 
+    const isAllowed = await getUserAllowListService().isAllowed(address);
+    if (!isAllowed) {
+      apiLog.authFailure(apiLogger, requestId, 'Wallet not on allowlist', 'session');
+
+      const response = NextResponse.json(
+        createErrorResponse(ApiErrorCode.FORBIDDEN, 'This wallet is not authorized. Access is currently limited to allowlisted addresses.'),
+        { status: 403 }
+      );
+
+      Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+
+      return response;
+    }
+
+    // 6. Find/create user (chain-agnostic)
     let user = await getAuthUserService().findUserByWallet(address);
 
     if (!user) {

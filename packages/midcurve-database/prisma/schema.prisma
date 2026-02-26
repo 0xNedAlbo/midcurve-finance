@@ -87,6 +87,15 @@ model User {
   @@map("users")
 }
 
+model UserAllowListEntry {
+  id        String   @id @default(cuid())
+  address   String   @unique // EIP-55 checksummed wallet address
+  note      String?           // Optional admin note (e.g., "early access", "team")
+  createdAt DateTime @default(now())
+
+  @@map("user_allow_list_entries")
+}
+
 model Token {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
