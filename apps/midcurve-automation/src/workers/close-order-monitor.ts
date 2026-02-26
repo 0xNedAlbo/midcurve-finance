@@ -32,6 +32,7 @@ import {
   type RawSwapEventWrapper,
   DOMAIN_EVENTS_EXCHANGE,
   DOMAIN_EVENTS_DLX,
+  ROUTING_PATTERNS,
 } from '@midcurve/services';
 
 const log = automationLogger.child({ component: 'CloseOrderMonitor' });
@@ -39,9 +40,6 @@ const log = automationLogger.child({ component: 'CloseOrderMonitor' });
 // =============================================================================
 // Constants
 // =============================================================================
-
-/** Interval for syncing subscriptions (5 minutes) */
-const SUBSCRIPTION_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // =============================================================================
 // Types
@@ -96,8 +94,6 @@ function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number; bl
 /** Queue name for order domain event notifications */
 const ORDER_EVENTS_QUEUE = 'automation.close-order-monitor.order-events';
 
-/** Routing pattern to match all order domain events */
-const ORDER_EVENTS_ROUTING_PATTERN = 'order.#';
 
 export class CloseOrderMonitor {
   private status: 'idle' | 'running' | 'stopping' | 'stopped' = 'idle';
@@ -107,7 +103,6 @@ export class CloseOrderMonitor {
   private triggersPublished = 0;
   private lastProcessedAt: Date | null = null;
   private lastSyncAt: Date | null = null;
-  private syncTimer: NodeJS.Timeout | null = null;
 
   /**
    * Start the close order monitor
@@ -128,11 +123,8 @@ export class CloseOrderMonitor {
       // Subscribe to order domain events for immediate sync on new registrations
       await this.subscribeToOrderEvents();
 
-      // Sync subscriptions on startup
+      // Sync subscriptions on startup to catch up
       await this.syncSubscriptions();
-
-      // Schedule periodic subscription sync
-      this.scheduleSyncTimer();
 
       autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'started', {
         orderSubscribers: this.orderSubscribers.size,
@@ -154,12 +146,6 @@ export class CloseOrderMonitor {
 
     autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'stopping');
     this.status = 'stopping';
-
-    // Stop sync timer
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
 
     // Cancel order event consumer
     if (this.orderEventConsumerTag) {
@@ -511,24 +497,6 @@ export class CloseOrderMonitor {
   }
 
   /**
-   * Schedule periodic subscription sync
-   */
-  private scheduleSyncTimer(): void {
-    this.syncTimer = setInterval(() => {
-      if (this.status === 'running') {
-        this.syncSubscriptions().catch((err) => {
-          autoLog.methodError(log, 'scheduledSync', err);
-        });
-      }
-    }, SUBSCRIPTION_SYNC_INTERVAL_MS);
-
-    log.debug({
-      intervalMs: SUBSCRIPTION_SYNC_INTERVAL_MS,
-      msg: 'Scheduled periodic subscription sync',
-    });
-  }
-
-  /**
    * Clean up orphaned close-order subscriptions in the DB.
    *
    * On startup, there may be active per-order subscriptions left over from
@@ -609,7 +577,7 @@ export class CloseOrderMonitor {
           'x-dead-letter-exchange': DOMAIN_EVENTS_DLX,
         },
       });
-      await channel.bindQueue(ORDER_EVENTS_QUEUE, DOMAIN_EVENTS_EXCHANGE, ORDER_EVENTS_ROUTING_PATTERN);
+      await channel.bindQueue(ORDER_EVENTS_QUEUE, DOMAIN_EVENTS_EXCHANGE, ROUTING_PATTERNS.ALL_ORDER_EVENTS);
 
       const { consumerTag } = await channel.consume(
         ORDER_EVENTS_QUEUE,
@@ -631,7 +599,7 @@ export class CloseOrderMonitor {
       log.info({
         queue: ORDER_EVENTS_QUEUE,
         exchange: DOMAIN_EVENTS_EXCHANGE,
-        routingPattern: ORDER_EVENTS_ROUTING_PATTERN,
+        routingPattern: ROUTING_PATTERNS.ALL_ORDER_EVENTS,
         msg: 'Subscribed to order domain events',
       });
     } catch (err) {
