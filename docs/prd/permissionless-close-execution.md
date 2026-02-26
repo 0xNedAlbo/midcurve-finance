@@ -43,7 +43,7 @@ This upgrade eliminates these trust assumptions by validating all execution para
 2. **Permissionless**: Anyone can execute any triggered order. No operator restriction, no whitelisting.
 3. **Self-Sovereign Oracle Selection**: The user defines their own oracle adapter chain at registration time and signs over it (via `registerOrder` transaction). The protocol does not impose which oracles are "correct."
 4. **Graceful Degradation**: If no oracle returns a valid price, the transaction reverts. The user is never worse off — in the worst case, nothing happens.
-5. **Backward Compatible**: The upgrade is delivered via Diamond cut (new/replaced facets). Existing order storage is extended, not replaced. The MidcurveSwapRouter is unchanged.
+5. **Clean Slate**: No production data to preserve. The contract is redeployed with a clean struct layout. The MidcurveSwapRouter is unchanged.
 6. **Keeper-Incentivized**: Executors are compensated via the existing fee mechanism (up to `maxFeeBps`), creating a competitive keeper market.
 
 ---
@@ -64,9 +64,10 @@ The UniswapV3PositionCloser is an EIP-2535 Diamond proxy with these facets:
 | MulticallFacet | Batch calls |
 | VersionFacet | Version querying |
 
-### 4.2 Current CloseOrder Storage
+### 4.2 Current CloseOrder Storage (Being Replaced)
 
 ```solidity
+// CURRENT (V1) — will be replaced entirely
 struct CloseOrder {
     OrderStatus status;
     uint256 nftId;
@@ -74,21 +75,21 @@ struct CloseOrder {
     address pool;
     int24 triggerTick;
     address payout;
-    address operator;           // Only this address can execute (trust assumption)
+    address operator;           // ← REMOVED: trust assumption, no longer needed
     uint256 validUntil;
-    uint16 slippageBps;         // Withdrawal slippage tolerance
+    uint16 slippageBps;
     SwapDirection swapDirection;
-    uint16 swapSlippageBps;     // Swap slippage tolerance (becomes maxDeviationBps)
+    uint16 swapSlippageBps;
 }
 ```
 
-### 4.3 Current Execution Flow
+### 4.3 Current Execution Flow (Being Replaced)
 
 ```
 executeOrder(nftId, triggerMode, withdrawParams, swapParams, feeParams)
 
 1. Validate status = ACTIVE
-2. Validate msg.sender == order.operator        ← TRUST POINT (removed by this upgrade)
+2. Validate msg.sender == order.operator        ← REMOVED
 3. Check expiry
 4. Validate fee <= maxFeeBps
 5. Check trigger condition (tick-based)
@@ -131,9 +132,9 @@ User registers order with oracle adapter chain
 │           UniswapV3PositionCloser Diamond           │
 │                                                    │
 │  CloseOrder {                                      │
-│    ...existing fields...                           │
-│    oracleChain: OracleAdapterCall[]  ← NEW         │
-│  }                                                 │
+│    ...position, trigger, payout, slippage...       │
+│    oracleChain: OracleAdapterCall[]                │
+│  }  (no operator field)                                                 │
 │                                                    │
 │  ExecutionFacet.executeOrder():                     │
 │    1. Check trigger condition                       │
@@ -189,31 +190,29 @@ struct OracleAdapterCall {
 }
 ```
 
-#### 5.2.3 Extended CloseOrder (V2)
+#### 5.2.3 CloseOrder (New)
 
 ```solidity
 struct CloseOrder {
-    // --- Existing V1 fields (unchanged) ---
     OrderStatus status;
     uint256 nftId;
-    address owner;
-    address pool;
-    int24 triggerTick;
-    address payout;
-    address operator;           // Retained for backward compat (informational only)
-    uint256 validUntil;
-    uint16 slippageBps;
-    SwapDirection swapDirection;
-    uint16 swapSlippageBps;     // Now enforced on-chain as max deviation from oracle price
-
-    // --- New V2 fields ---
-    bytes oracleChainEncoded;   // ABI-encoded OracleAdapterCall[] (dynamic-length)
+    address owner;              // NFT owner at registration time
+    address pool;               // Uniswap V3 pool address
+    int24 triggerTick;          // Price threshold as tick value
+    address payout;             // Recipient of closed position tokens
+    uint256 validUntil;         // Expiration timestamp (0 = no expiry)
+    uint16 slippageBps;         // Withdrawal slippage tolerance (0-10000)
+    SwapDirection swapDirection;    // Post-close swap direction
+    uint16 swapSlippageBps;         // Max deviation from oracle price (0-10000)
+    OracleAdapterCall[] oracleChain;  // User-defined oracle fallback chain
 }
 ```
 
-**Storage note**: The oracle chain is stored as `bytes` (ABI-encoded `OracleAdapterCall[]`). Adding a `bytes` field at the end of `CloseOrder` is storage-safe: each order lives at its own derived storage location (`keccak256(key, mappingSlot)`), so new fields don't collide with other AppStorage variables. For existing V1 orders, the new slot is uninitialized (zero-length `bytes("")`), which causes oracle validation to revert with `NO_ORACLE_CHAIN` — they must be re-registered to become permissionlessly executable.
+**Changes from V1**:
+- `operator` field **removed** — execution is permissionless, no trusted operator
+- `oracleChain` field **added** — stored as a proper dynamic array (not ABI-encoded bytes)
 
-**Important**: The struct field order must be preserved exactly. The new `oracleChainEncoded` field must be appended **after** all existing V1 fields. Reordering existing fields would corrupt storage for all active orders.
+Since there is no production data to preserve, the contract is redeployed with a clean storage layout. No backward compatibility constraints.
 
 ### 5.3 Updated Execution Flow
 
@@ -240,8 +239,7 @@ executeOrder(nftId, triggerMode, withdrawParams, swapParams, feeParams)
 │     Require withdrawParams.amount1Min >= floor1
 │
 ├─ 7. Oracle-validated swap params (NEW, if swapDirection != NONE):
-│     Decode order.oracleChainEncoded → OracleAdapterCall[]
-│     Iterate oracle chain:
+│     Iterate order.oracleChain:
 │       (price, valid) = adapter.getPrice(tokenIn, tokenOut, params)
 │       if valid → use as referencePrice, break
 │     if no valid price → revert("NO_VALID_ORACLE")
@@ -256,7 +254,7 @@ executeOrder(nftId, triggerMode, withdrawParams, swapParams, feeParams)
 └─ 13. Cancel counterpart order (unchanged)
 ```
 
-**Key change**: The operator check (`msg.sender == order.operator`) is **removed**. Steps 6 and 7 replace it with on-chain validation that any executor must satisfy.
+**Key change**: There is no operator check — anyone can call `executeOrder`. Steps 6 and 7 provide trustless on-chain validation that any executor must satisfy.
 
 ---
 
@@ -382,18 +380,14 @@ function _validateSwapMinAmountOut(
     address tokenOut,
     uint256 guaranteedAmountIn
 ) internal view {
-    // Decode oracle chain from order
-    OracleAdapterCall[] memory chain = abi.decode(
-        order.oracleChainEncoded, (OracleAdapterCall[])
-    );
-    require(chain.length > 0, "NO_ORACLE_CHAIN");
+    require(order.oracleChain.length > 0, "NO_ORACLE_CHAIN");
 
     // Iterate to find first valid price
     uint256 referencePrice;
     bool found;
-    for (uint256 i = 0; i < chain.length; i++) {
-        (uint256 price, bool valid) = chain[i].adapter.getPrice(
-            tokenIn, tokenOut, chain[i].params
+    for (uint256 i = 0; i < order.oracleChain.length; i++) {
+        (uint256 price, bool valid) = order.oracleChain[i].adapter.getPrice(
+            tokenIn, tokenOut, order.oracleChain[i].params
         );
         if (valid) {
             referencePrice = price;
@@ -441,37 +435,37 @@ This ensures the executor cannot trivially bypass oracle validation by shifting 
 
 ## 9. Registration Changes
 
-### 9.1 Extended RegisterOrderParams
+### 9.1 RegisterOrderParams (New)
 
 ```solidity
 struct RegisterOrderParams {
-    // --- Existing V1 fields ---
-    uint256 nftId;
-    address pool;
-    TriggerMode triggerMode;
-    int24 triggerTick;
-    address payout;
-    address operator;           // Kept for informational/indexing purposes
-    uint256 validUntil;
-    uint16 slippageBps;
-    SwapDirection swapDirection;
-    uint16 swapSlippageBps;
-
-    // --- New V2 fields ---
+    uint256 nftId;              // Position NFT ID
+    address pool;               // Uniswap V3 pool address
+    TriggerMode triggerMode;    // LOWER or UPPER
+    int24 triggerTick;          // Price threshold as tick
+    address payout;             // Recipient of closed tokens
+    uint256 validUntil;         // Expiration timestamp (0 = no expiry)
+    uint16 slippageBps;         // Withdrawal slippage (0-10000)
+    SwapDirection swapDirection;    // NONE, TOKEN0_TO_1, or TOKEN1_TO_0
+    uint16 swapSlippageBps;         // Max deviation from oracle price (0-10000)
     OracleAdapterCall[] oracleChain;  // User-defined oracle fallback chain
 }
 ```
 
+**Changes from V1**: `operator` field removed. `oracleChain` field added.
+
 ### 9.2 Registration Validation
 
-The `registerOrder` function adds:
-- `oracleChain.length > 0` required if `swapDirection != NONE`
+The `registerOrder` function validates:
+- `oracleChain.length > 0` required if `swapDirection != NONE` (no oracle needed if no swap)
 - Each `adapter` address must be non-zero (but not validated further — user's responsibility)
-- Oracle chain is ABI-encoded and stored in `order.oracleChainEncoded`
+- All existing validations preserved (ownership, approval, slippage ranges, etc.)
 
-### 9.3 Owner Update: setOracleChain
+### 9.3 Owner Updates
 
-A new function in `OwnerUpdateFacet`:
+**Removed**: `setOperator()` — no operator field to update.
+
+**Added**: `setOracleChain()` — allows the order owner to update the oracle adapter chain:
 
 ```solidity
 function setOracleChain(
@@ -481,7 +475,7 @@ function setOracleChain(
 ) external;
 ```
 
-Allows the order owner to update the oracle adapter chain without re-registering.
+**Existing setters preserved**: `setPayout`, `setTriggerTick`, `setValidUntil`, `setSlippage`, `setSwapIntent`.
 
 ---
 
@@ -502,12 +496,12 @@ Allows the order owner to update the oracle adapter chain without re-registering
 
 | Contract | Change |
 |---|---|
-| `AppStorage.sol` | Add `oracleChainEncoded` field to `CloseOrder` struct |
+| `AppStorage.sol` | Replace `CloseOrder` struct: remove `operator`, add `OracleAdapterCall[] oracleChain` |
 | `ExecutionFacet.sol` | Remove operator check. Add withdrawal validation + oracle swap validation |
-| `RegistrationFacet.sol` | Accept and store `oracleChain` in `RegisterOrderParams` |
-| `OwnerUpdateFacet.sol` | Add `setOracleChain()` function |
-| `ViewFacet.sol` | Expose oracle chain data in `getOrder()` response |
-| `IUniswapV3PositionCloserV1.sol` | Extend to V2 interface with oracle params |
+| `RegistrationFacet.sol` | Remove `operator` from params. Accept and store `oracleChain` |
+| `OwnerUpdateFacet.sol` | Remove `setOperator()`. Add `setOracleChain()` |
+| `ViewFacet.sol` | Expose oracle chain data in `getOrder()` response. Remove operator from `canExecuteOrder()` |
+| `IUniswapV3PositionCloserV1.sol` | Replace with V2 interface: no operator, oracle params added |
 
 ### 10.3 Unchanged Contracts
 
@@ -625,6 +619,32 @@ WETH → CANONICAL_ASSETS["weth"] = "ETH" → ETH/USD feed
 → [TWAP(pool, 30min), Spot(pool)]   (Chainlink tier skipped)
 ```
 
+### 11.6 Test Environment Resolution
+
+The `buildOracleChain()` function must be environment-aware. On local test chains, Chainlink feeds don't exist and Uniswap V3 pools have no observation history for TWAP. The oracle chain is adjusted per environment:
+
+| Environment | Oracle Chain | Rationale |
+|---|---|---|
+| **Local fresh chain** (Hardhat, Anvil) | `[SpotAdapter(pool)]` | No Chainlink feeds deployed. No TWAP observation history. Spot reads `pool.slot0()` which always works. |
+| **Forked chain** (e.g., Anvil fork of Arbitrum) | `[Chainlink → TWAP → Spot]` | Fork inherits all mainnet state: Chainlink feeds, pool observation history. Full chain works identically to production. |
+| **Production** (Arbitrum, Base, Ethereum) | `[Chainlink → TWAP → Spot]` | Full resolution pipeline as described in Sections 11.1–11.5. |
+
+**Implementation**:
+
+```typescript
+function buildOracleChain(tokenIn, tokenOut, pool, chainId): OracleAdapterCall[] {
+  if (isLocalChain(chainId)) {
+    // Local/test: SpotAdapter only
+    return [spotAdapter(pool.config.address)];
+  }
+
+  // Production / forked chain: full Chainlink → TWAP → Spot chain
+  return buildProductionOracleChain(tokenIn, tokenOut, pool);
+}
+```
+
+On local chains, the SpotPriceAdapter provides the reference price from the pool's current `sqrtPriceX96`. The user's `swapSlippageBps` still enforces deviation limits, so the contract behavior is functionally identical — just with a simpler, single-source oracle. This is acceptable for testing because local chains are not subject to MEV or oracle manipulation attacks.
+
 ---
 
 ## 12. Keeper Economics
@@ -644,41 +664,38 @@ Multiple keepers can monitor triggered orders. The first to land a valid `execut
 
 ### 12.3 Midcurve's Keeper
 
-Midcurve's existing automation system (RabbitMQ monitor → executor → signer) continues to work. The `order.operator` field is retained for informational purposes and indexing, but no longer restricts execution. The automation wallet executes with the same oracle validation as any third party.
+Midcurve's existing automation system (RabbitMQ monitor → executor → signer) continues to work as one of potentially many keepers. The automation wallet executes with the same oracle validation as any third party. There is no privileged operator — all keepers compete equally.
 
 ---
 
-## 13. Migration Strategy
+## 13. Deployment
 
-### 13.1 V1 → V2 Order Compatibility
+Since there is no production data to preserve, the UniswapV3PositionCloser Diamond is deployed fresh with the new struct layout. No migration or backward compatibility needed.
 
-Existing V1 orders have `oracleChainEncoded = bytes("")` (zero-length). When executed:
-- Oracle validation will find an empty chain → revert with `NO_ORACLE_CHAIN`
-- This is intentional: V1 orders cannot be permissionlessly executed
-
-V1 orders must be **re-registered** with an oracle chain to become permissionlessly executable. The user cancels the V1 order and registers a new V2 order with `oracleChain`.
-
-### 13.2 Diamond Cut Deployment
+### 13.1 Contract Deployment
 
 1. Deploy oracle adapter contracts (Chainlink, CompositeChainlink, TWAP, Spot)
 2. Deploy `OracleLib` library
-3. Deploy new `ExecutionFacet` (V2) with oracle validation
-4. Deploy updated `RegistrationFacet` (V2) accepting oracle chain
-5. Deploy updated `OwnerUpdateFacet` (V2) with `setOracleChain`
-6. Execute Diamond cut: replace ExecutionFacet + RegistrationFacet + OwnerUpdateFacet selectors
+3. Deploy new Diamond with all facets (ExecutionFacet, RegistrationFacet, OwnerUpdateFacet, ViewFacet, etc.)
+4. Initialize via `DiamondInit` (positionManager, swapRouter, maxFeeBps, interfaceVersion)
+5. Register UniswapV3 venue adapter in MidcurveSwapRouter (if fresh router deploy)
 
-### 13.3 Backend Changes
+### 13.2 Backend Changes
 
-- Update `close-order-executor.ts` to include oracle adapter chain in registration calls
-- Update `signer-client.ts` to encode new `RegisterOrderParams`
-- The execution path is unchanged (executor still computes swap params off-chain, but the contract now also validates them)
+- Remove `operator` from close order registration calls and order state
+- Add `oracleChain` to registration flow (built via `buildOracleChain()`)
+- Update `close-order-executor.ts` to build oracle-aware registration params
+- Update `signer-client.ts` to encode new `RegisterOrderParams` (no operator field)
+- Execution path: executor still computes swap params off-chain, but the contract now validates them on-chain
+- Remove `operatorAddress` from close order state JSON and all related code
 - Update `ViewFacet` response parsing to include oracle chain data
 
-### 13.4 Frontend Changes
+### 13.3 Frontend Changes
 
 - `buildOracleChain()` implemented in `@midcurve/services` (or `@midcurve/shared`)
 - `CANONICAL_ASSETS` and `CHAINLINK_FEEDS` data files in `@midcurve/shared`
 - Registration UI includes oracle chain display (informational)
+- Remove operator-related UI elements
 - No new user inputs required — oracle chain is auto-resolved from token pair
 
 ---
@@ -712,7 +729,7 @@ The existing `nonReentrant` modifier on `executeOrder` is preserved. The executi
 
 ### 14.5 Storage Layout
 
-Adding `oracleChainEncoded` (bytes) to `CloseOrder` in a mapping does not affect existing storage slots because Solidity mappings store values at `keccak256(key, slot)` — each order's storage is independent. However, the `CloseOrder` struct size increases, so the new field must be appended at the end to maintain compatibility with existing orders.
+Fresh deployment with clean struct layout. No storage compatibility concerns. The `OracleAdapterCall[]` dynamic array in `CloseOrder` uses standard Solidity mapping storage derivation (`keccak256(key, mappingSlot)`) — each order's storage is independent.
 
 ### 14.6 Decimal Normalization
 
@@ -748,19 +765,19 @@ On L2 networks (Arbitrum, Base) where Midcurve primarily operates, the additiona
 - `OracleLib` (chain iteration, minAmountOut computation)
 - Unit tests with forked mainnet state (Foundry)
 
-### Phase 2: Diamond Facet Updates
-- Extend `AppStorage.CloseOrder` with `oracleChainEncoded`
-- New `ExecutionFacet` (V2): remove operator check, add withdrawal validation, add oracle swap validation
-- New `RegistrationFacet` (V2): accept and store oracle chain
-- New `OwnerUpdateFacet` (V2): add `setOracleChain()`
-- Updated `ViewFacet`: expose oracle chain
+### Phase 2: Diamond Facets
+- New `AppStorage.CloseOrder` with `OracleAdapterCall[] oracleChain` (no operator)
+- `ExecutionFacet`: permissionless with withdrawal validation + oracle swap validation
+- `RegistrationFacet`: accepts oracle chain, no operator param
+- `OwnerUpdateFacet`: `setOracleChain()` added, `setOperator()` removed
+- `ViewFacet`: exposes oracle chain data
 - Integration tests (register → trigger → permissionless execute)
 
 ### Phase 3: Frontend/SDK Integration
 - `CANONICAL_ASSETS` and `CHAINLINK_FEEDS` data files
 - `buildOracleChain()` in `@midcurve/services`
 - Registration UI updated to show oracle tier
-- Re-registration flow for V1 → V2 migration
+- Operator-related UI and backend code removed
 
 ### Phase 4: Keeper Infrastructure
 - Public documentation for third-party keepers (ABI, oracle adapter addresses, example execution scripts)
@@ -775,13 +792,11 @@ On L2 networks (Arbitrum, Base) where Midcurve primarily operates, the additiona
 
 2. **Oracle chain max length**: Should we cap the oracle chain length (e.g., max 5 adapters) to bound gas costs?
 
-3. **V1 order migration UX**: Should the frontend proactively prompt users with V1 orders to re-register with oracle chains, or wait until they interact with the order?
+3. **Cross-pool TWAP**: For the TWAP adapter, should we always use the position's own pool, or allow specifying a different (more liquid) pool for the same pair?
 
-4. **Cross-pool TWAP**: For the TWAP adapter, should we always use the position's own pool, or allow specifying a different (more liquid) pool for the same pair?
+4. **Partial fills**: The current system always closes 100% of liquidity. Should partial closes be considered in the permissionless model?
 
-5. **Partial fills**: The current system always closes 100% of liquidity. Should partial closes be considered in the permissionless model?
-
-6. **Spot adapter risk**: The Spot adapter always returns `valid = true`, making it a guaranteed fallback. Should there be an option to exclude it (accepting that execution may fail if Chainlink and TWAP are both unavailable)?
+5. **Spot adapter risk**: The Spot adapter always returns `valid = true`, making it a guaranteed fallback. Should there be an option to exclude it (accepting that execution may fail if Chainlink and TWAP are both unavailable)?
 
 ---
 
