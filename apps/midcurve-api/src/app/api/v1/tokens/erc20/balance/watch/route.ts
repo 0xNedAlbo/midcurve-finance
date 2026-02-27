@@ -7,7 +7,7 @@
  *
  * This endpoint creates database-backed subscriptions for watching
  * ERC-20 token balance changes. The midcurve-onchain-data worker
- * subscribes to Transfer events via WebSocket and updates the state.
+ * polls balances via multicall and updates the state.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -29,7 +29,7 @@ import {
 } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUserTokenBalanceService } from '@/lib/services';
-import { isSupportedChainId, isChainWssConfigured } from '@midcurve/services';
+import { isSupportedChainId } from '@midcurve/services';
 import { prisma, Prisma } from '@midcurve/database';
 import { getAddress } from 'viem';
 
@@ -99,22 +99,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       for (const token of tokens) {
         const { tokenAddress, chainId } = token;
 
-        // Validate chain is supported and has WebSocket monitoring configured
+        // Validate chain is supported
         if (!isSupportedChainId(chainId)) {
           const errorResponse = createErrorResponse(
             ApiErrorCode.CHAIN_NOT_SUPPORTED,
             `Chain ${chainId} is not supported`
-          );
-          apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
-          return NextResponse.json(errorResponse, {
-            status: ErrorCodeToHttpStatus[ApiErrorCode.CHAIN_NOT_SUPPORTED],
-          });
-        }
-
-        if (!isChainWssConfigured(chainId)) {
-          const errorResponse = createErrorResponse(
-            ApiErrorCode.CHAIN_NOT_SUPPORTED,
-            `Chain ${chainId} does not have WebSocket monitoring configured`
           );
           apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
           return NextResponse.json(errorResponse, {
