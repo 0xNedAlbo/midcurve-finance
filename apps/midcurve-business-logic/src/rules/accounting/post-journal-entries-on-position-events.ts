@@ -195,6 +195,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const { positionId, positionHash } = event.payload;
     const instrumentRef = positionHash;
 
+    // Skip pre-existing positions (no backfill)
+    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+
     // Find the corresponding ledger event to get deltaCostBasis
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'INCREASE_POSITION', event.payload.eventTimestamp);
     if (!ledgerEvent) {
@@ -241,6 +244,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     const { positionId, positionHash } = event.payload;
     const instrumentRef = positionHash;
+
+    // Skip pre-existing positions (no backfill)
+    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
 
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'DECREASE_POSITION', event.payload.eventTimestamp);
     if (!ledgerEvent) {
@@ -324,6 +330,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     const { positionId, positionHash, feesValueInQuote } = event.payload;
     const instrumentRef = positionHash;
+
+    // Skip pre-existing positions (no backfill)
+    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+
     const totalFees = BigInt(feesValueInQuote);
     if (totalFees <= 0n) return;
 
@@ -391,6 +401,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     if (!position?.positionHash) return;
 
     const instrumentRef = position.positionHash;
+
+    // Skip pre-existing positions (no backfill)
+    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+
     const userId = position.userId;
 
     // Sub-entry B: M2M unrealized P&L change
@@ -443,6 +457,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     const position = event.payload; // PositionJSON
     const instrumentRef = position.positionHash!;
+
+    // Skip pre-existing positions (no backfill)
+    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
 
     // Check remaining unrealized balance
     const unrealizedBalance = await this.journalService.getAccountBalance(

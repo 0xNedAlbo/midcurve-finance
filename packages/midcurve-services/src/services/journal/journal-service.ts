@@ -68,6 +68,18 @@ export class JournalService {
   // ---------------------------------------------------------------------------
 
   /**
+   * Returns true if any journal lines exist for the given instrument.
+   * Used as a guard to skip events for pre-existing positions (no backfill).
+   */
+  async hasEntriesForInstrument(instrumentRef: string): Promise<boolean> {
+    const line = await this.prisma.journalLine.findFirst({
+      where: { instrumentRef },
+      select: { id: true },
+    });
+    return line !== null;
+  }
+
+  /**
    * Returns true if a journal entry with the given domainEventId already exists.
    */
   async isProcessed(domainEventId: string): Promise<boolean> {
