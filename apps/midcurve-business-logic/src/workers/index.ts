@@ -20,6 +20,7 @@ import {
   UpdatePositionOnLiquidityEventRule,
   ProcessCloseOrderEventsRule,
   CreateAutomationWalletOnUserRegisteredRule,
+  PostJournalEntriesOnPositionEventsRule,
   type BusinessRuleStatus,
 } from '../rules';
 import { getSchedulerService, type SchedulerStatus } from '../scheduler';
@@ -72,6 +73,10 @@ export class RuleManager {
     // User lifecycle rules
     // Auto-create automation wallet when new user registers
     this.registry.register(new CreateAutomationWalletOnUserRegisteredRule());
+
+    // Accounting rules
+    // Double-entry journal entries from position domain events
+    this.registry.register(new PostJournalEntriesOnPositionEventsRule());
 
     log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
