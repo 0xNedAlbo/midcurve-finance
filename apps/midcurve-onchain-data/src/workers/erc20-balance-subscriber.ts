@@ -1,31 +1,33 @@
 /**
  * Erc20BalanceSubscriber Worker
  *
- * Manages WebSocket subscriptions for ERC-20 token balance (Transfer) events.
- * Polls the database for active subscriptions and manages their lifecycle:
- * - active: subscribed to WebSocket events
- * - paused: removed from WebSocket after 60s without polling
+ * Polls ERC-20 token balances using multicall for all active subscriptions.
+ * Replaces the previous WebSocket-based approach that subscribed to Transfer
+ * events. Multicall batches all balanceOf() reads into a single RPC call per
+ * chain, deduplicating identical wallet+token pairs.
+ *
+ * Lifecycle:
+ * - active: included in multicall polling
+ * - paused: removed from polling after expiry without client heartbeat
  * - deleted: cleaned up after 5min in paused state
  *
  * API endpoint handles reactivation when a paused subscription is polled.
  */
 
-import { prisma } from '@midcurve/database';
+import { prisma, Prisma } from '@midcurve/database';
 import { onchainDataLogger, priceLog } from '../lib/logger.js';
 import {
-  getConfiguredWssUrls,
-  getWssUrl,
-  getWorkerConfig,
   isSupportedChain,
   CHAIN_NAMES,
+  SUPPORTED_CHAIN_IDS,
   type SupportedChainId,
 } from '../lib/config.js';
-import {
-  Erc20BalanceSubscriptionBatch,
-  createBalanceSubscriptionBatches,
-  type BalanceInfo,
-} from '../ws/providers/erc20-balance.js';
-import type { Erc20BalanceSubscriptionConfig } from '@midcurve/shared';
+import type {
+  Erc20BalanceSubscriptionConfig,
+  Erc20BalanceSubscriptionState,
+} from '@midcurve/shared';
+import { getEvmConfig } from '@midcurve/services';
+import { type PublicClient, getAddress } from 'viem';
 
 const log = onchainDataLogger.child({ component: 'Erc20BalanceSubscriber' });
 
@@ -38,28 +40,66 @@ const PRUNE_THRESHOLD_MS = parseInt(process.env.BALANCE_PRUNE_THRESHOLD_MS || '3
 /** Interval for checking stale subscriptions (default: 30 seconds) */
 const CLEANUP_INTERVAL_MS = parseInt(process.env.BALANCE_CLEANUP_INTERVAL_MS || '30000', 10);
 
-/** Interval for polling new subscriptions (default: 5 seconds) */
-const POLL_INTERVAL_MS = parseInt(process.env.BALANCE_POLL_INTERVAL_MS || '5000', 10);
+/** Interval for polling DB for new subscriptions (default: 5 seconds) */
+const DB_POLL_INTERVAL_MS = parseInt(process.env.BALANCE_POLL_INTERVAL_MS || '5000', 10);
+
+/** Interval for polling balances via multicall (default: 5 seconds) */
+const BALANCE_POLL_INTERVAL_MS = parseInt(process.env.BALANCE_MULTICALL_INTERVAL_MS || '5000', 10);
+
+/** Maximum balanceOf calls per multicall request */
+const MULTICALL_BATCH_SIZE = parseInt(process.env.BALANCE_MULTICALL_BATCH_SIZE || '256', 10);
+
+/** ERC-20 balanceOf ABI */
+const balanceOfAbi = [
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
 
 /**
- * Erc20BalanceSubscriber manages WebSocket subscriptions for Transfer events.
+ * Balance subscription info for tracking.
+ */
+interface BalanceSubscriptionInfo {
+  /** Database row ID */
+  id: string;
+  /** Unique subscription ID for API polling */
+  subscriptionId: string;
+  /** Chain ID */
+  chainId: SupportedChainId;
+  /** ERC-20 token contract address (checksummed) */
+  tokenAddress: string;
+  /** Wallet address to track balance for (checksummed) */
+  walletAddress: string;
+}
+
+/**
+ * Erc20BalanceSubscriber polls ERC-20 balances via multicall.
  * Subscriptions are created via the API and managed by this worker.
  */
 export class Erc20BalanceSubscriber {
-  private batches: Erc20BalanceSubscriptionBatch[] = [];
-  private batchesByChain: Map<SupportedChainId, Erc20BalanceSubscriptionBatch[]> = new Map();
   private isRunning = false;
 
   // Track subscribed balances by subscriptionId
-  private subscribedBalances: Map<string, BalanceInfo & { chainId: SupportedChainId }> = new Map();
+  private subscribedBalances: Map<string, BalanceSubscriptionInfo> = new Map();
+
+  // In-memory cache of last known balance per subscriptionId (avoids unnecessary DB writes)
+  private lastKnownBalances: Map<string, string> = new Map();
+
+  // HTTP RPC clients per chain
+  private clients: Map<SupportedChainId, PublicClient> = new Map();
 
   // Timers
+  private balancePollTimer: NodeJS.Timeout | null = null;
+  private dbPollTimer: NodeJS.Timeout | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
-  private pollTimer: NodeJS.Timeout | null = null;
 
   /**
    * Start the subscriber.
-   * Loads active subscriptions and creates WebSocket batches.
+   * Initializes RPC clients, loads active subscriptions, and starts polling.
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -69,70 +109,38 @@ export class Erc20BalanceSubscriber {
 
     priceLog.workerLifecycle(log, 'Erc20BalanceSubscriber', 'starting');
 
-    try {
-      // Load active subscriptions from database
-      const balancesByChain = await this.loadActiveSubscriptions();
+    // Initialize HTTP clients for all configured chains
+    this.initializeClients();
 
-      // Get configured WSS URLs
-      const wssConfigs = getConfiguredWssUrls();
-
-      if (wssConfigs.length === 0) {
-        log.warn({
-          msg: 'No WS_RPC_URL_* environment variables configured, subscriber will not start. Set WS_RPC_URL_ETHEREUM, WS_RPC_URL_ARBITRUM, etc.',
-        });
-        return;
-      }
-
-      // Create subscription batches for each configured chain
-      for (const wssConfig of wssConfigs) {
-        const chainId = wssConfig.chainId as SupportedChainId;
-        const balances = balancesByChain.get(chainId);
-
-        if (!balances || balances.length === 0) {
-          log.info({ chainId, msg: 'No active balance subscriptions for chain, skipping' });
-          continue;
-        }
-
-        const chainBatches = createBalanceSubscriptionBatches(chainId, wssConfig.url, balances);
-        this.batches.push(...chainBatches);
-        this.batchesByChain.set(chainId, chainBatches);
-      }
-
-      this.isRunning = true;
-
-      if (this.batches.length === 0) {
-        log.info({ msg: 'No subscription batches created, subscriber will idle until new subscriptions are added' });
-      } else {
-        // Start all batches
-        await Promise.all(this.batches.map((batch) => batch.start()));
-      }
-
-      // Start cleanup timer (pause stale, prune deleted)
-      this.startCleanup();
-
-      // Start polling for new subscriptions
-      this.startPolling();
-
-      const totalBalances = this.batches.reduce(
-        (sum, batch) => sum + batch.getStatus().subscriptionCount,
-        0
-      );
-
-      priceLog.workerLifecycle(log, 'Erc20BalanceSubscriber', 'started', {
-        batchCount: this.batches.length,
-        totalBalances,
+    if (this.clients.size === 0) {
+      log.warn({
+        msg: 'No RPC clients configured, subscriber will not start. Set RPC_URL_ETHEREUM, RPC_URL_ARBITRUM, etc.',
       });
-    } catch (error) {
-      priceLog.workerLifecycle(log, 'Erc20BalanceSubscriber', 'error', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
+      return;
     }
+
+    // Load active subscriptions from database
+    await this.loadActiveSubscriptions();
+
+    this.isRunning = true;
+
+    // Start balance polling (multicall)
+    this.startBalancePolling();
+
+    // Start DB polling (discover new subscriptions)
+    this.startDbPolling();
+
+    // Start cleanup timer (pause stale, prune deleted)
+    this.startCleanup();
+
+    priceLog.workerLifecycle(log, 'Erc20BalanceSubscriber', 'started', {
+      subscriptionCount: this.subscribedBalances.size,
+      clientCount: this.clients.size,
+    });
   }
 
   /**
    * Stop the subscriber.
-   * Stops all WebSocket batches gracefully.
    */
   async stop(): Promise<void> {
     if (!this.isRunning) {
@@ -143,14 +151,14 @@ export class Erc20BalanceSubscriber {
     priceLog.workerLifecycle(log, 'Erc20BalanceSubscriber', 'stopping');
 
     // Stop timers
+    this.stopBalancePolling();
+    this.stopDbPolling();
     this.stopCleanup();
-    this.stopPolling();
 
-    // Stop all batches
-    await Promise.all(this.batches.map((batch) => batch.stop()));
-    this.batches = [];
-    this.batchesByChain.clear();
+    // Clear state
     this.subscribedBalances.clear();
+    this.lastKnownBalances.clear();
+    this.clients.clear();
     this.isRunning = false;
 
     priceLog.workerLifecycle(log, 'Erc20BalanceSubscriber', 'stopped');
@@ -161,32 +169,46 @@ export class Erc20BalanceSubscriber {
    */
   getStatus(): {
     isRunning: boolean;
-    batchCount: number;
-    totalSubscriptions: number;
-    batches: Array<{
-      chainId: number;
-      batchIndex: number;
-      tokenCount: number;
-      subscriptionCount: number;
-      isConnected: boolean;
-    }>;
+    subscriptionCount: number;
+    clientCount: number;
+    subscriptionsByChain: Record<number, number>;
   } {
+    const subscriptionsByChain: Record<number, number> = {};
+    for (const sub of this.subscribedBalances.values()) {
+      subscriptionsByChain[sub.chainId] = (subscriptionsByChain[sub.chainId] || 0) + 1;
+    }
+
     return {
       isRunning: this.isRunning,
-      batchCount: this.batches.length,
-      totalSubscriptions: this.subscribedBalances.size,
-      batches: this.batches.map((batch) => batch.getStatus()),
+      subscriptionCount: this.subscribedBalances.size,
+      clientCount: this.clients.size,
+      subscriptionsByChain,
     };
   }
 
   /**
-   * Load active subscriptions from database.
-   * Groups by chain ID for batch creation.
+   * Initialize HTTP clients for all supported chains.
    */
-  private async loadActiveSubscriptions(): Promise<Map<SupportedChainId, BalanceInfo[]>> {
+  private initializeClients(): void {
+    const evmConfig = getEvmConfig();
+
+    for (const chainId of SUPPORTED_CHAIN_IDS) {
+      try {
+        const client = evmConfig.getPublicClient(chainId);
+        this.clients.set(chainId, client);
+        log.info({ chainId, msg: 'Initialized RPC client' });
+      } catch {
+        log.debug({ chainId, msg: 'Chain not configured, skipping' });
+      }
+    }
+  }
+
+  /**
+   * Load active subscriptions from database.
+   */
+  private async loadActiveSubscriptions(): Promise<void> {
     priceLog.methodEntry(log, 'loadActiveSubscriptions');
 
-    // Query active erc20-balance subscriptions
     const subscriptions = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'erc20-balance',
@@ -196,13 +218,11 @@ export class Erc20BalanceSubscriber {
         id: true,
         subscriptionId: true,
         config: true,
+        state: true,
       },
     });
 
     log.info({ subscriptionCount: subscriptions.length, msg: 'Loaded active balance subscriptions' });
-
-    // Group by chain ID
-    const balancesByChain = new Map<SupportedChainId, BalanceInfo[]>();
 
     for (const sub of subscriptions) {
       const config = sub.config as unknown as Erc20BalanceSubscriptionConfig;
@@ -217,44 +237,196 @@ export class Erc20BalanceSubscriber {
         continue;
       }
 
-      if (!getWssUrl(config.chainId as SupportedChainId)) {
-        log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'No WSS URL configured for chain, skipping subscription' });
+      const chainId = config.chainId as SupportedChainId;
+
+      if (!this.clients.has(chainId)) {
+        log.warn({ chainId, subscriptionId: sub.subscriptionId, msg: 'No RPC client for chain, skipping subscription' });
         continue;
       }
 
-      const chainId = config.chainId as SupportedChainId;
-      const normalizedToken = config.tokenAddress.toLowerCase();
-      const normalizedWallet = config.walletAddress.toLowerCase();
-
-      const balanceInfo: BalanceInfo = {
+      this.subscribedBalances.set(sub.subscriptionId, {
         id: sub.id,
         subscriptionId: sub.subscriptionId,
-        tokenAddress: normalizedToken,
-        walletAddress: normalizedWallet,
-      };
-
-      // Track in internal state
-      this.subscribedBalances.set(sub.subscriptionId, {
-        ...balanceInfo,
         chainId,
+        tokenAddress: getAddress(config.tokenAddress),
+        walletAddress: getAddress(config.walletAddress),
       });
 
-      // Add to chain grouping
-      if (!balancesByChain.has(chainId)) {
-        balancesByChain.set(chainId, []);
+      // Initialize last known balance from DB state
+      const state = sub.state as unknown as Erc20BalanceSubscriptionState;
+      if (state.balance) {
+        this.lastKnownBalances.set(sub.subscriptionId, state.balance);
       }
-
-      balancesByChain.get(chainId)!.push(balanceInfo);
     }
 
-    // Log summary
-    for (const [chainId, chainBalances] of balancesByChain) {
-      log.info({ chainId, balanceCount: chainBalances.length, msg: 'Balances grouped by chain' });
+    // Log summary per chain
+    const byChain = new Map<SupportedChainId, number>();
+    for (const sub of this.subscribedBalances.values()) {
+      byChain.set(sub.chainId, (byChain.get(sub.chainId) || 0) + 1);
+    }
+    for (const [chainId, count] of byChain) {
+      log.info({ chainId, balanceCount: count, msg: 'Balances grouped by chain' });
     }
 
     priceLog.methodExit(log, 'loadActiveSubscriptions');
+  }
 
-    return balancesByChain;
+  // ===========================================================================
+  // Balance Polling (multicall)
+  // ===========================================================================
+
+  /**
+   * Start the balance polling timer.
+   */
+  private startBalancePolling(): void {
+    this.balancePollTimer = setInterval(() => {
+      this.pollBalances().catch((err) => {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Error polling balances',
+        });
+      });
+    }, BALANCE_POLL_INTERVAL_MS);
+
+    log.info({ intervalMs: BALANCE_POLL_INTERVAL_MS, msg: 'Started balance polling (multicall)' });
+  }
+
+  /**
+   * Stop the balance polling timer.
+   */
+  private stopBalancePolling(): void {
+    if (this.balancePollTimer) {
+      clearInterval(this.balancePollTimer);
+      this.balancePollTimer = null;
+      log.info({ msg: 'Stopped balance polling' });
+    }
+  }
+
+  /**
+   * Poll all active subscriptions via multicall.
+   * Deduplicates by (chainId, tokenAddress, walletAddress) so identical pairs
+   * produce only one RPC read, with results fanned out to all matching subscriptions.
+   */
+  private async pollBalances(): Promise<void> {
+    if (this.subscribedBalances.size === 0) {
+      return;
+    }
+
+    // Group subscriptions by chain
+    const byChain = new Map<SupportedChainId, BalanceSubscriptionInfo[]>();
+    for (const sub of this.subscribedBalances.values()) {
+      const chain = byChain.get(sub.chainId) || [];
+      chain.push(sub);
+      byChain.set(sub.chainId, chain);
+    }
+
+    for (const [chainId, subs] of byChain) {
+      const client = this.clients.get(chainId);
+      if (!client) {
+        log.warn({ chainId, msg: 'No client for chain, skipping balance poll' });
+        continue;
+      }
+
+      await this.pollChainBalances(client, chainId, subs);
+    }
+  }
+
+  /**
+   * Poll balances for a single chain using multicall.
+   * Deduplicates identical (tokenAddress, walletAddress) pairs.
+   */
+  private async pollChainBalances(
+    client: PublicClient,
+    chainId: SupportedChainId,
+    subs: BalanceSubscriptionInfo[]
+  ): Promise<void> {
+    // Deduplicate by (tokenAddress, walletAddress) — key is "token:wallet"
+    const uniqueKeys = new Map<string, { tokenAddress: string; walletAddress: string }>();
+    const keyToSubs = new Map<string, BalanceSubscriptionInfo[]>();
+
+    for (const sub of subs) {
+      const key = `${sub.tokenAddress}:${sub.walletAddress}`;
+      if (!uniqueKeys.has(key)) {
+        uniqueKeys.set(key, { tokenAddress: sub.tokenAddress, walletAddress: sub.walletAddress });
+        keyToSubs.set(key, []);
+      }
+      keyToSubs.get(key)!.push(sub);
+    }
+
+    const uniqueEntries = Array.from(uniqueKeys.entries());
+
+    // Process in chunks of MULTICALL_BATCH_SIZE
+    for (let i = 0; i < uniqueEntries.length; i += MULTICALL_BATCH_SIZE) {
+      const chunk = uniqueEntries.slice(i, i + MULTICALL_BATCH_SIZE);
+
+      const contracts = chunk.map(([, { tokenAddress, walletAddress }]) => ({
+        address: tokenAddress as `0x${string}`,
+        abi: balanceOfAbi,
+        functionName: 'balanceOf' as const,
+        args: [walletAddress as `0x${string}`],
+      }));
+
+      const results = await client.multicall({
+        contracts,
+        allowFailure: true,
+      });
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j]!;
+        const chunkEntry = chunk[j]!;
+        const key = chunkEntry[0];
+        const matchingSubs = keyToSubs.get(key)!;
+
+        if (result.status === 'failure') {
+          log.warn({
+            chainId,
+            key,
+            error: result.error?.message,
+            msg: 'Multicall balanceOf failed',
+          });
+          continue;
+        }
+
+        const newBalance = (result.result as bigint).toString();
+
+        // Fan out result to all subscriptions with this key
+        for (const sub of matchingSubs) {
+          const lastKnown = this.lastKnownBalances.get(sub.subscriptionId);
+
+          // Only update DB if balance changed
+          if (newBalance !== lastKnown) {
+            this.lastKnownBalances.set(sub.subscriptionId, newBalance);
+
+            const newState: Erc20BalanceSubscriptionState = {
+              balance: newBalance,
+              lastEventBlock: null,
+              lastEventTxHash: null,
+              lastUpdatedAt: nowIso,
+            };
+
+            await prisma.onchainDataSubscribers.update({
+              where: { id: sub.id },
+              data: {
+                state: newState as unknown as Prisma.InputJsonValue,
+                updatedAt: now,
+              },
+            });
+
+            log.info({
+              chainId,
+              subscriptionId: sub.subscriptionId,
+              tokenAddress: sub.tokenAddress,
+              walletAddress: sub.walletAddress,
+              balance: newBalance,
+              msg: 'Updated balance state',
+            });
+          }
+        }
+      }
+    }
   }
 
   // ===========================================================================
@@ -265,54 +437,42 @@ export class Erc20BalanceSubscriber {
    * Add a balance subscription to the worker.
    * Called when API creates a new subscription or reactivates a paused one.
    */
-  async addBalance(
+  addBalance(
     subscriptionId: string,
     id: string,
     chainId: number,
     tokenAddress: string,
     walletAddress: string
-  ): Promise<void> {
-    // Validate chain
+  ): void {
     if (!isSupportedChain(chainId)) {
       throw new Error(`Unsupported chain ID: ${chainId}`);
     }
 
     const supportedChainId = chainId as SupportedChainId;
 
-    // Check if already subscribed
     if (this.subscribedBalances.has(subscriptionId)) {
       log.debug({ subscriptionId, msg: 'Balance already subscribed' });
       return;
     }
 
-    // Get WSS URL
-    const wssUrl = getWssUrl(supportedChainId);
-    if (!wssUrl) {
+    if (!this.clients.has(supportedChainId)) {
       throw new Error(
-        `No WSS URL configured for chain ${supportedChainId} (${CHAIN_NAMES[supportedChainId]}). Set WS_RPC_URL_${CHAIN_NAMES[supportedChainId].toUpperCase()} env var.`
+        `No RPC client configured for chain ${supportedChainId} (${CHAIN_NAMES[supportedChainId]}). Set RPC_URL_${CHAIN_NAMES[supportedChainId].toUpperCase()} env var.`
       );
     }
 
-    const balanceInfo: BalanceInfo = {
+    this.subscribedBalances.set(subscriptionId, {
       id,
       subscriptionId,
-      tokenAddress: tokenAddress.toLowerCase(),
-      walletAddress: walletAddress.toLowerCase(),
-    };
-
-    // Track
-    this.subscribedBalances.set(subscriptionId, {
-      ...balanceInfo,
       chainId: supportedChainId,
+      tokenAddress: getAddress(tokenAddress),
+      walletAddress: getAddress(walletAddress),
     });
-
-    // Add to batch
-    await this.addBalanceToBatch(supportedChainId, wssUrl, balanceInfo);
 
     log.info({
       chainId,
       subscriptionId,
-      tokenAddress: balanceInfo.tokenAddress,
+      tokenAddress,
       msg: 'Added balance subscription',
     });
   }
@@ -321,26 +481,15 @@ export class Erc20BalanceSubscriber {
    * Remove a balance subscription from the worker.
    * Called when subscription is paused or deleted.
    */
-  async removeBalance(subscriptionId: string): Promise<void> {
+  removeBalance(subscriptionId: string): void {
     const balanceInfo = this.subscribedBalances.get(subscriptionId);
     if (!balanceInfo) {
       log.debug({ subscriptionId, msg: 'Balance not found in subscribed list' });
       return;
     }
 
-    // Remove from internal tracking
     this.subscribedBalances.delete(subscriptionId);
-
-    // Remove from batch
-    const chainBatches = this.batchesByChain.get(balanceInfo.chainId);
-    if (chainBatches) {
-      for (const batch of chainBatches) {
-        if (batch.hasBalance(subscriptionId)) {
-          await batch.removeBalance(subscriptionId);
-          break;
-        }
-      }
-    }
+    this.lastKnownBalances.delete(subscriptionId);
 
     log.info({
       chainId: balanceInfo.chainId,
@@ -349,81 +498,33 @@ export class Erc20BalanceSubscriber {
     });
   }
 
-  /**
-   * Add a balance to an existing batch or create a new batch if needed.
-   */
-  private async addBalanceToBatch(
-    chainId: SupportedChainId,
-    wssUrl: string,
-    balance: BalanceInfo
-  ): Promise<void> {
-    const config = getWorkerConfig();
-    let chainBatches = this.batchesByChain.get(chainId);
-
-    if (!chainBatches) {
-      chainBatches = [];
-      this.batchesByChain.set(chainId, chainBatches);
-    }
-
-    // Find a batch with room
-    let targetBatch = chainBatches.find(
-      (batch) => batch.getStatus().subscriptionCount < config.maxPoolsPerConnection
-    );
-
-    if (targetBatch) {
-      // Add to existing batch
-      await targetBatch.addBalance(balance);
-      log.info({
-        chainId,
-        subscriptionId: balance.subscriptionId,
-        batchIndex: targetBatch.getStatus().batchIndex,
-        msg: 'Added balance to existing batch',
-      });
-    } else {
-      // Create new batch
-      const batchIndex = chainBatches.length;
-      const newBatch = new Erc20BalanceSubscriptionBatch(chainId, wssUrl, batchIndex, [balance]);
-      chainBatches.push(newBatch);
-      this.batches.push(newBatch);
-
-      // Start the new batch
-      await newBatch.start();
-      log.info({
-        chainId,
-        subscriptionId: balance.subscriptionId,
-        batchIndex,
-        msg: 'Created new batch for balance',
-      });
-    }
-  }
-
   // ===========================================================================
-  // Polling (for new subscriptions and reactivations)
+  // DB Polling (for new subscriptions and reactivations)
   // ===========================================================================
 
   /**
    * Start polling for new subscriptions.
    */
-  private startPolling(): void {
-    this.pollTimer = setInterval(() => {
+  private startDbPolling(): void {
+    this.dbPollTimer = setInterval(() => {
       this.pollNewSubscriptions().catch((err) => {
         log.error({
           error: err instanceof Error ? err.message : String(err),
           msg: 'Error polling for new subscriptions',
         });
       });
-    }, POLL_INTERVAL_MS);
+    }, DB_POLL_INTERVAL_MS);
 
-    log.info({ intervalMs: POLL_INTERVAL_MS, msg: 'Started polling for new subscriptions' });
+    log.info({ intervalMs: DB_POLL_INTERVAL_MS, msg: 'Started polling for new subscriptions' });
   }
 
   /**
    * Stop polling.
    */
-  private stopPolling(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
+  private stopDbPolling(): void {
+    if (this.dbPollTimer) {
+      clearInterval(this.dbPollTimer);
+      this.dbPollTimer = null;
       log.info({ msg: 'Stopped polling for new subscriptions' });
     }
   }
@@ -432,7 +533,6 @@ export class Erc20BalanceSubscriber {
    * Poll database for new active subscriptions that aren't tracked yet.
    */
   private async pollNewSubscriptions(): Promise<void> {
-    // Get all active subscriptions we're NOT yet tracking
     const subscriptions = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'erc20-balance',
@@ -462,12 +562,12 @@ export class Erc20BalanceSubscriber {
         continue;
       }
 
-      if (!getWssUrl(config.chainId as SupportedChainId)) {
-        log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'No WSS URL configured for chain, skipping subscription' });
+      if (!this.clients.has(config.chainId as SupportedChainId)) {
+        log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'No RPC client for chain, skipping subscription' });
         continue;
       }
 
-      await this.addBalance(
+      this.addBalance(
         sub.subscriptionId,
         sub.id,
         config.chainId,
@@ -517,11 +617,10 @@ export class Erc20BalanceSubscriber {
   }
 
   /**
-   * Pause subscriptions that haven't been polled in PAUSE_THRESHOLD_MS.
-   * Removes them from WebSocket but keeps the DB record.
+   * Pause subscriptions that haven't been polled within their expiry window.
+   * Removes them from the polling loop but keeps the DB record.
    */
   private async pauseStaleSubscriptions(): Promise<void> {
-    // Find active subscriptions that have an expiry (persistent subscriptions with null expiresAfterMs are skipped)
     const candidates = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'erc20-balance',
@@ -551,7 +650,6 @@ export class Erc20BalanceSubscriber {
     const pausedAt = new Date();
 
     for (const sub of staleSubscriptions) {
-      // Update database status to paused
       await prisma.onchainDataSubscribers.update({
         where: { id: sub.id },
         data: {
@@ -560,8 +658,7 @@ export class Erc20BalanceSubscriber {
         },
       });
 
-      // Remove from WebSocket batch
-      await this.removeBalance(sub.subscriptionId);
+      this.removeBalance(sub.subscriptionId);
 
       log.info({ subscriptionId: sub.subscriptionId, msg: 'Paused stale subscription' });
     }
@@ -573,7 +670,6 @@ export class Erc20BalanceSubscriber {
   private async pruneDeletedSubscriptions(): Promise<void> {
     const cutoffTime = new Date(Date.now() - PRUNE_THRESHOLD_MS);
 
-    // Find paused subscriptions that have been paused for too long
     const toDelete = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'erc20-balance',
@@ -594,7 +690,6 @@ export class Erc20BalanceSubscriber {
 
     log.info({ count: toDelete.length, msg: 'Pruning old paused subscriptions' });
 
-    // Delete from database
     const subscriptionIds = toDelete.map((sub) => sub.subscriptionId);
 
     await prisma.onchainDataSubscribers.deleteMany({
