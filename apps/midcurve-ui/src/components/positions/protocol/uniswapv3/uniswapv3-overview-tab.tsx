@@ -51,8 +51,8 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
   // Get formatted display values
   const pnlDisplayValues = usePnLDisplayValues(pnlBreakdown, quoteTokenDecimals);
 
-  // Calculate position states for all three scenarios
-  const positionStates = calculatePositionStates(position, pnlBreakdown);
+  // Calculate position states for all three scenarios (with SL/TP trigger awareness)
+  const positionStates = calculatePositionStates(position, pnlBreakdown, position.activeCloseOrders);
 
   // Calculate break-even price (only for active positions)
   const breakEvenPrice = position.isActive
