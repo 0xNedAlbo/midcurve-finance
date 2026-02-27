@@ -919,7 +919,7 @@ model JournalEntry {
   // Traceability
   domainEventId   String? @unique // References DomainEvent.id for idempotency
   domainEventType String? // Event type discriminator (e.g., "position.liquidity.increased")
-  ledgerEventRef  String? // Loose string reference to originating ledger event ID (no FK)
+  ledgerEventRef  String? // Prefixed reference: "{table_prefix}:{id}" (e.g., "position_ledger:cm4abc...")
 
   // Business date
   entryDate DateTime // Block timestamp for on-chain events, snapshot date for M2M

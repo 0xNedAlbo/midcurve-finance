@@ -22,6 +22,7 @@ import {
   setupConsumerQueue,
   ROUTING_PATTERNS,
   ACCOUNT_CODES,
+  LEDGER_REF_PREFIX,
   JournalService,
   JournalLineBuilder,
   type DomainEvent,
@@ -219,7 +220,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         userId,
         domainEventId: event.id,
         domainEventType: event.type,
-        ledgerEventRef: ledgerEvent.id,
+        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
         entryDate: new Date(event.payload.eventTimestamp),
         description: `Liquidity increase: ${instrumentRef}`,
       },
@@ -309,7 +310,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         userId,
         domainEventId: event.id,
         domainEventType: event.type,
-        ledgerEventRef: ledgerEvent.id,
+        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
         entryDate: new Date(event.payload.eventTimestamp),
         description: `Liquidity decrease: ${instrumentRef}`,
       },
@@ -372,7 +373,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         userId,
         domainEventId: event.id,
         domainEventType: event.type,
-        ledgerEventRef: ledgerEvent?.id,
+        ledgerEventRef: ledgerEvent ? `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}` : undefined,
         entryDate: new Date(event.payload.eventTimestamp),
         description: `Fees collected: ${instrumentRef}`,
       },
@@ -518,18 +519,14 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     event: DomainEvent<PositionLiquidityRevertedPayload>
   ): Promise<void> {
     const { positionId, blockHash } = event.payload;
+    const prefix = `${LEDGER_REF_PREFIX.POSITION_LEDGER}:`;
 
-    // Find ledger event IDs that were in the reverted block.
-    // Since the ledger events are already deleted by the time we get this event,
-    // we look up journal entries by matching blockHash in the ledgerEventRef.
-    // However, ledgerEventRef stores the ledger event ID, not blockHash.
-    // We need to find journal entries via domainEventType + position context.
-    //
-    // Alternative: find all journal entries for this position that reference
-    // ledger events that no longer exist.
+    // Find journal entries for this position that reference position ledger events.
+    // Ledger events are already deleted by the time we get this event, so we
+    // find entries whose referenced ledger events no longer exist.
     const journalEntries = await prisma.journalEntry.findMany({
       where: {
-        ledgerEventRef: { not: null },
+        ledgerEventRef: { startsWith: prefix },
         lines: {
           some: {
             instrumentRef: event.payload.positionHash,
@@ -539,13 +536,20 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       select: { id: true, ledgerEventRef: true },
     });
 
+    if (journalEntries.length === 0) return;
+
+    // Strip prefix to get bare cuid for DB lookup
+    const refToId = new Map(
+      journalEntries.map((e) => [e.ledgerEventRef!, e.ledgerEventRef!.slice(prefix.length)])
+    );
+
     // Check which ledger events still exist
     const existingLedgerIds = new Set(
       (
         await prisma.positionLedgerEvent.findMany({
           where: {
             positionId,
-            id: { in: journalEntries.map((e) => e.ledgerEventRef!).filter(Boolean) },
+            id: { in: [...refToId.values()] },
           },
           select: { id: true },
         })
@@ -554,7 +558,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     // Delete journal entries whose ledger events no longer exist (were reverted)
     const orphanedRefs = journalEntries
-      .filter((e) => e.ledgerEventRef && !existingLedgerIds.has(e.ledgerEventRef))
+      .filter((e) => e.ledgerEventRef && !existingLedgerIds.has(refToId.get(e.ledgerEventRef!)!))
       .map((e) => e.ledgerEventRef!);
 
     if (orphanedRefs.length > 0) {

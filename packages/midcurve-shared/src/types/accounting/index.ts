@@ -35,6 +35,16 @@ export const ACCOUNT_CODES = {
 
 export type AccountCode = (typeof ACCOUNT_CODES)[keyof typeof ACCOUNT_CODES];
 
+/**
+ * Prefixes for the `ledgerEventRef` column in journal entries.
+ *
+ * Because different instrument types have their own ledger tables,
+ * the ref is stored as `{prefix}:{id}` to disambiguate the source table.
+ */
+export const LEDGER_REF_PREFIX = {
+  POSITION_LEDGER: 'position_ledger',
+} as const;
+
 // =============================================================================
 // Journal Entry / Line Input Types (for service layer)
 // =============================================================================
