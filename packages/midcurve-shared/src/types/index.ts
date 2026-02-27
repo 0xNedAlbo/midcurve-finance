@@ -6,6 +6,22 @@
 // User types
 export type { User } from './user.js';
 
+// ============================================================================
+// Accounting types (double-entry journal system)
+// ============================================================================
+
+export type {
+  AccountCategory,
+  JournalSide,
+  AccountCode,
+  JournalEntryInput,
+  JournalLineInput,
+  SnapshotType,
+  ValuationMethod,
+  PositionBreakdownItem,
+} from './accounting/index.js';
+export { ACCOUNT_CODES } from './accounting/index.js';
+
 // Authentication types
 export type { ApiKeyDisplay } from './api-key.js';
 

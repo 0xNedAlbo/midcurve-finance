@@ -46,6 +46,7 @@ export * from './services/automation/index.js';
 export * from './services/notifications/index.js';
 export * from './services/transaction/index.js';
 export * from './services/swap-router/index.js';
+export * from './services/journal/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';

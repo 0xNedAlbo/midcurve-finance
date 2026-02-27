@@ -10,6 +10,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["public", "accounting"]
 }
 
 // Models for concentrated liquidity positions
@@ -40,6 +41,7 @@ model Session {
   @@index([userId])
   @@index([expiresAt])
   @@map("sessions")
+  @@schema("public")
 }
 
 
@@ -57,6 +59,7 @@ model Cache {
   // Indexes for efficient queries
   @@index([expiresAt])
   @@map("cache")
+  @@schema("public")
 }
 
 model User {
@@ -70,6 +73,9 @@ model User {
   // Wallet address (EIP-55 checksummed, chain-agnostic)
   address String @unique
 
+  // Reporting currency for accounting (ISO 4217)
+  reportingCurrency String @default("USD")
+
   // Session relation (custom server-side sessions)
   sessions Session[]
 
@@ -82,9 +88,14 @@ model User {
   // Favorite pools
   favoritePools FavoritePool[]
 
+  // Accounting relations
+  journalEntries JournalEntry[]
+  navSnapshots   NAVSnapshot[]
+
   // Indexes for efficient queries
   @@index([name])
   @@map("users")
+  @@schema("public")
 }
 
 model UserAllowListEntry {
@@ -94,6 +105,7 @@ model UserAllowListEntry {
   createdAt DateTime @default(now())
 
   @@map("user_allow_list_entries")
+  @@schema("public")
 }
 
 model Token {
@@ -125,6 +137,7 @@ model Token {
   @@index([symbol])
   @@index([coingeckoId])
   @@map("tokens")
+  @@schema("public")
 }
 
 // CoingeckoToken - Lookup table mapping ERC-20 addresses to CoinGecko IDs
@@ -157,6 +170,7 @@ model CoingeckoToken {
   @@index([name])
   @@index([enrichedAt]) // For finding unenriched/stale tokens
   @@map("coingecko_tokens")
+  @@schema("public")
 }
 
 model Pool {
@@ -198,6 +212,7 @@ model Pool {
   @@index([token1Id])
   @@index([poolHash])
   @@map("pools")
+  @@schema("public")
 }
 
 model Position {
@@ -275,6 +290,7 @@ model Position {
   @@index([poolId])
   @@index([isActive])
   @@map("positions")
+  @@schema("public")
 }
 
 
@@ -308,6 +324,7 @@ model PoolPrice {
   @@index([timestamp])
   @@index([poolId, timestamp]) // Compound index for time-range queries on specific pool
   @@map("pool_prices")
+  @@schema("public")
 }
 
 model PositionLedgerEvent {
@@ -361,6 +378,7 @@ model PositionLedgerEvent {
   @@index([eventType]) // Filter by event type
   @@index([previousId]) // Event chain traversal
   @@map("position_ledger_events")
+  @@schema("public")
 }
 
 model PositionAprPeriod {
@@ -396,6 +414,7 @@ model PositionAprPeriod {
   @@index([positionId, endTimestamp]) // Time-range queries for position
   @@index([aprBps]) // Sort/filter by APR performance
   @@map("position_apr_periods")
+  @@schema("public")
 }
 
 // =============================================================================
@@ -446,6 +465,7 @@ model AutomationWallet {
   @@index([isActive])
   @@index([userId, walletHash]) // Fast user-specific lookups by hash
   @@map("automation_wallets")
+  @@schema("public")
 }
 
 // =============================================================================
@@ -493,6 +513,7 @@ model SharedContract {
   @@index([interfaceVersionMajor, interfaceVersionMinor])
   @@index([isActive])
   @@map("shared_contracts")
+  @@schema("public")
 }
 
 // =============================================================================
@@ -566,6 +587,7 @@ model CloseOrder {
   @@index([closeOrderHash])
   @@index([sharedContractId])
   @@map("close_orders")
+  @@schema("public")
 }
 
 // OnchainDataSubscribers - Generic table for onchain event subscriptions
@@ -612,6 +634,7 @@ model OnchainDataSubscribers {
   @@index([lastPolledAt])
   @@index([pausedAt])
   @@map("onchain_data_subscribers")
+  @@schema("public")
 }
 
 // AutomationLog - User-facing automation event logs
@@ -647,6 +670,7 @@ model AutomationLog {
   @@index([positionId, level, createdAt])
   @@index([closeOrderId])
   @@map("automation_logs")
+  @@schema("public")
 }
 
 // =============================================================================
@@ -679,6 +703,7 @@ model DomainEventOutbox {
   @@index([status, createdAt]) // Poll for pending events
   @@index([entityType, entityId]) // Query events by entity
   @@map("domain_event_outbox")
+  @@schema("public")
 }
 
 // DomainEvent - Permanent event store for audit trail and analytics
@@ -704,6 +729,7 @@ model DomainEvent {
   @@index([eventType, createdAt]) // Query events by type over time
   @@index([userId, createdAt]) // Query events by user over time
   @@map("domain_events")
+  @@schema("public")
 }
 
 // =============================================================================
@@ -718,6 +744,8 @@ enum NotificationEventType {
   STOP_LOSS_FAILED
   TAKE_PROFIT_EXECUTED
   TAKE_PROFIT_FAILED
+
+  @@schema("public")
 }
 
 // UserNotification - Stores notification records for users
@@ -754,6 +782,7 @@ model UserNotification {
   @@index([positionId])
   @@index([eventType])
   @@map("user_notifications")
+  @@schema("public")
 }
 
 // UserWebhookConfig - User's webhook delivery preferences
@@ -785,6 +814,7 @@ model UserWebhookConfig {
   lastDeliveryError  String?
 
   @@map("user_webhook_configs")
+  @@schema("public")
 }
 
 // PositionRangeStatus - Tracks current in-range/out-of-range status per position
@@ -808,6 +838,7 @@ model PositionRangeStatus {
 
   @@index([isInRange])
   @@map("position_range_statuses")
+  @@schema("public")
 }
 
 // =============================================================================
@@ -841,4 +872,146 @@ model FavoritePool {
   @@index([poolId])
   @@index([userId, createdAt]) // For listing user's favorites in order
   @@map("favorite_pools")
+  @@schema("public")
+}
+
+// =============================================================================
+// Double-Entry Accounting Models (accounting schema)
+// =============================================================================
+
+// AccountDefinition - Chart of Accounts
+// Seeded with Phase 1 accounts (11 accounts). Rarely changes after initial setup.
+model AccountDefinition {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Account identity
+  code Int    @unique // Account number (1000, 1001, 3000, etc.)
+  name String // Human-readable name (e.g., "LP Position at Cost")
+
+  // Classification
+  description String? // Longer explanation
+  category    String // "asset" | "liability" | "equity" | "revenue" | "expense"
+  normalSide  String // "debit" | "credit" — the side that increases this account
+
+  // Status
+  isActive Boolean @default(true)
+
+  // Relations
+  journalLines JournalLine[]
+
+  @@index([category])
+  @@map("account_definitions")
+  @@schema("accounting")
+}
+
+// JournalEntry - One entry per accounting event
+// Contains one or more balanced lines (total debits = total credits in amountQuote).
+model JournalEntry {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Owner
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Traceability
+  domainEventId   String? @unique // References DomainEvent.id for idempotency
+  domainEventType String? // Event type discriminator (e.g., "position.liquidity.increased")
+  ledgerEventRef  String? // Loose string reference to originating ledger event ID (no FK)
+
+  // Business date
+  entryDate DateTime // Block timestamp for on-chain events, snapshot date for M2M
+
+  // Description
+  description String // Human-readable (e.g., "Liquidity increase: uniswapv3/1/12345")
+  memo        String? // Optional additional context
+
+  // Relations
+  lines JournalLine[]
+
+  @@index([userId, entryDate])
+  @@index([ledgerEventRef])
+  @@map("journal_entries")
+  @@schema("accounting")
+}
+
+// JournalLine - Individual debit or credit line within a journal entry
+model JournalLine {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Parent entry
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  // Account
+  accountId String
+  account   AccountDefinition @relation(fields: [accountId], references: [id])
+
+  // Instrument (no FK — allows any instrument type)
+  instrumentRef String? // e.g., "uniswapv3/1/12345"
+
+  // Debit or credit
+  side String // "debit" | "credit"
+
+  // Amount in quote token raw units (bigint as string, same scale as Position.currentValue)
+  amountQuote String
+
+  // Amount in reporting currency (bigint as string, scaled by 10^8)
+  amountReporting   String? // e.g., $3,000.50 → "300050000000"
+  reportingCurrency String? // ISO 4217 (e.g., "USD", "EUR")
+  exchangeRate      String? // Quote token → reporting currency rate (bigint string, scaled 10^8)
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@index([instrumentRef])
+  @@index([accountId, instrumentRef])
+  @@map("journal_lines")
+  @@schema("accounting")
+}
+
+// NAVSnapshot - Daily portfolio-level snapshot
+// Foundation for period comparisons and Balance Sheet view.
+model NAVSnapshot {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Owner
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Snapshot identity
+  snapshotDate DateTime // Midnight UTC of the date this snapshot represents
+  snapshotType String // "daily" | "manual"
+
+  // Reporting currency and method
+  reportingCurrency String // ISO 4217 currency of all amounts below
+  valuationMethod   String // "pool_price" for Phase 1
+
+  // Balance sheet totals (bigint strings, scaled 10^8 in reporting currency)
+  totalAssets      String // Sum of all asset account balances
+  totalLiabilities String // Sum of all liability account balances (always "0" in Phase 1)
+  netAssetValue    String // totalAssets - totalLiabilities
+
+  // Equity breakdown (bigint strings, scaled 10^8 in reporting currency)
+  totalContributedCapital String // Cumulative balance of account 3000
+  totalCapitalReturned    String // Cumulative balance of account 3100
+  totalAccumulatedPnl     String // Net of all revenue minus expense account balances
+
+  // Period deltas (bigint strings, scaled 10^8 in reporting currency)
+  periodFeeIncome     String // Fee income since last snapshot
+  periodRealizedPnl   String // Net realized gain/loss since last snapshot
+  periodUnrealizedPnl String // Change in unrealized P&L since last snapshot
+  periodGasExpense    String // Gas expense since last snapshot
+
+  // Position summary
+  activePositionCount Int // Number of active positions at snapshot time
+  positionBreakdown   Json // Array of per-instrument data
+
+  @@unique([userId, snapshotDate, snapshotType])
+  @@index([userId, snapshotDate])
+  @@map("nav_snapshots")
+  @@schema("accounting")
 }
