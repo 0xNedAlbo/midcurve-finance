@@ -21,7 +21,6 @@ import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUnisw
 import {
   tickToPrice,
   tickToSqrtRatioX96,
-  calculatePositionValue,
   UniswapV3Pool,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
@@ -156,18 +155,13 @@ export function UniswapV3MiniPnLCurve({
   const simulationPosition = useMemo(() => {
     const posConfig = position.config as { tickLower: number; tickUpper: number };
     const posState = position.state as { liquidity: string };
-    const poolState = position.pool.state as { sqrtPriceX96: string };
 
     const liquidity = BigInt(posState.liquidity);
     if (liquidity <= 0n) return null;
 
     try {
       const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
-      const sqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
-      const costBasis = calculatePositionValue(
-        liquidity, sqrtPriceX96,
-        posConfig.tickLower, posConfig.tickUpper, isToken0Base
-      );
+      const costBasis = BigInt(position.currentCostBasis);
       if (costBasis === 0n) return null;
 
       const basePosition = UniswapV3Position.forSimulation({
@@ -189,7 +183,7 @@ export function UniswapV3MiniPnLCurve({
     } catch {
       return null;
     }
-  }, [position.pool, position.config, position.state, position.isToken0Quote, isToken0Base, closeOrderData]);
+  }, [position.pool, position.config, position.state, position.isToken0Quote, position.currentCostBasis, isToken0Base, closeOrderData]);
 
   // Generate PnL curve data locally
   const curveData = useMemo(() => {
