@@ -20,14 +20,12 @@ import { createPortal } from "react-dom";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import {
   tickToPrice,
-  tickToSqrtRatioX96,
-  calculatePositionValue,
   UniswapV3Pool,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
 import type { PoolJSON } from "@midcurve/shared";
-import type { SwapConfig } from "@midcurve/api-shared";
+import { extractCloseOrderData } from "@/lib/position-states";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3MiniPnLCurveProps {
@@ -72,102 +70,33 @@ export function UniswapV3MiniPnLCurve({
     : position.pool.token0;
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
-  const isToken0Base = !position.isToken0Quote;
 
   // Extract SL/TP prices and swap configs from active close orders
   const closeOrderData = useMemo(() => {
-    let stopLossPrice: bigint | null = null;
-    let takeProfitPrice: bigint | null = null;
-    let slSwapConfig: SwapConfig | null = null;
-    let tpSwapConfig: SwapConfig | null = null;
-
     if (!position.activeCloseOrders?.length) {
-      return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
+      return { stopLossPrice: null, takeProfitPrice: null, slSwapConfig: null, tpSwapConfig: null };
     }
 
-    const token0Decimals = position.pool.token0.decimals;
-    const token1Decimals = position.pool.token1.decimals;
-    const slMode = isToken0Base ? 'LOWER' : 'UPPER';
-    const tpMode = isToken0Base ? 'UPPER' : 'LOWER';
-
-    for (const order of position.activeCloseOrders) {
-      if (!order.triggerMode || order.triggerTick == null) continue;
-
-      try {
-        const sqrtPriceX96 = BigInt(tickToSqrtRatioX96(order.triggerTick).toString());
-        const Q96 = 2n ** 96n;
-        const Q192 = Q96 * Q96;
-        const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
-
-        // Build swap config from explicit fields
-        const hasSwap = order.swapDirection !== null;
-        const swapCfg: SwapConfig | null = hasSwap ? {
-          enabled: true,
-          direction: order.swapDirection!,
-          slippageBps: order.swapSlippageBps ?? 100,
-        } : null;
-
-        if (order.triggerMode === slMode) {
-          if (isToken0Base) {
-            const decimalDiff = token0Decimals - token1Decimals;
-            if (decimalDiff >= 0) {
-              stopLossPrice = (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / Q192;
-            } else {
-              stopLossPrice = (rawPriceNum * 10n ** BigInt(quoteToken.decimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
-            }
-          } else {
-            const decimalDiff = token1Decimals - token0Decimals;
-            if (decimalDiff >= 0) {
-              stopLossPrice = (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / rawPriceNum;
-            } else {
-              stopLossPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
-            }
-          }
-          if (swapCfg) slSwapConfig = swapCfg;
-        }
-
-        if (order.triggerMode === tpMode) {
-          if (isToken0Base) {
-            const decimalDiff = token0Decimals - token1Decimals;
-            if (decimalDiff >= 0) {
-              takeProfitPrice = (rawPriceNum * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / Q192;
-            } else {
-              takeProfitPrice = (rawPriceNum * 10n ** BigInt(quoteToken.decimals)) / (Q192 * 10n ** BigInt(-decimalDiff));
-            }
-          } else {
-            const decimalDiff = token1Decimals - token0Decimals;
-            if (decimalDiff >= 0) {
-              takeProfitPrice = (Q192 * 10n ** BigInt(decimalDiff) * 10n ** BigInt(quoteToken.decimals)) / rawPriceNum;
-            } else {
-              takeProfitPrice = (Q192 * 10n ** BigInt(quoteToken.decimals)) / (rawPriceNum * 10n ** BigInt(-decimalDiff));
-            }
-          }
-          if (swapCfg) tpSwapConfig = swapCfg;
-        }
-      } catch {
-        // Ignore conversion errors for individual orders
-      }
-    }
-
-    return { stopLossPrice, takeProfitPrice, slSwapConfig, tpSwapConfig };
-  }, [position.activeCloseOrders, position.pool.token0.decimals, position.pool.token1.decimals, isToken0Base, quoteToken.decimals]);
+    return extractCloseOrderData(
+      position.activeCloseOrders,
+      position.isToken0Quote,
+      position.pool.token0.decimals,
+      position.pool.token1.decimals,
+      quoteToken.decimals,
+    );
+  }, [position.activeCloseOrders, position.isToken0Quote, position.pool.token0.decimals, position.pool.token1.decimals, quoteToken.decimals]);
 
   // Create simulation position with SL/TP overlay
   const simulationPosition = useMemo(() => {
     const posConfig = position.config as { tickLower: number; tickUpper: number };
     const posState = position.state as { liquidity: string };
-    const poolState = position.pool.state as { sqrtPriceX96: string };
 
     const liquidity = BigInt(posState.liquidity);
     if (liquidity <= 0n) return null;
 
     try {
       const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
-      const sqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
-      const costBasis = calculatePositionValue(
-        liquidity, sqrtPriceX96,
-        posConfig.tickLower, posConfig.tickUpper, isToken0Base
-      );
+      const costBasis = BigInt(position.currentCostBasis);
       if (costBasis === 0n) return null;
 
       const basePosition = UniswapV3Position.forSimulation({
@@ -189,7 +118,7 @@ export function UniswapV3MiniPnLCurve({
     } catch {
       return null;
     }
-  }, [position.pool, position.config, position.state, position.isToken0Quote, isToken0Base, closeOrderData]);
+  }, [position.pool, position.config, position.state, position.isToken0Quote, position.currentCostBasis, closeOrderData]);
 
   // Generate PnL curve data locally
   const curveData = useMemo(() => {
