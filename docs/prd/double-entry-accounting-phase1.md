@@ -31,9 +31,10 @@ A **double-entry journal system** that runs as a parallel layer alongside the ex
 ### 1.3 Design Principles
 
 - **Parallel, not replacement.** The journal system does not modify the existing `PositionLedgerEvent` table or Position PnL fields. It reads domain events and produces its own data. The existing fields remain the source of truth for the UI dashboard in Phase 1.
-- **Append-only ledger.** Journal entries are never modified or deleted. Corrections are made via reversal entries.
+- **Mutable ledger.** Journal entries for a position are deleted when the position itself is deleted. Corrections (e.g., chain reorgs) are handled by deleting the affected entries. The journal serves user insight, not audit compliance.
 - **Double-entry bookkeeping.** Every entry produces balanced lines (total debits = total credits in quote token units).
 - **Position-scoped boundary.** The system tracks LP positions only, not wallet-level token holdings. Tokens entering a position are capital contributions; tokens leaving are capital returns.
+- **Instrument-agnostic.** The journal references instruments by their immutable hash identifier (`instrumentRef`, e.g., `"uniswapv3/1/12345"`), not by foreign key. This allows the journal to track any instrument type (LP positions, lending positions, perpetuals) without schema coupling to specific tables.
 - **Mark-to-Market.** Positions are valued at fair value at each daily snapshot, with changes flowing through the P&L.
 
 ### 1.4 Non-Goals
@@ -58,6 +59,7 @@ A **double-entry journal system** that runs as a parallel layer alongside the ex
 | Reporting currency | CoinGecko spot price fetch (quote token → reporting currency); dual-amount storage on journal lines |
 | API endpoints | Balance sheet, P&L breakdown, period comparison, user reporting currency preference |
 | Chart of Accounts | 11 accounts covering LP positions, fees, capital, realized/unrealized gains/losses, gas |
+| UI views | New "Summary" tab in the Dashboard alongside the existing "Positions" tab. Summary contains Balance Sheet, P&L breakdown, and Period Comparison. "Positions" remains the default tab. |
 
 ### 2.2 Out of Scope (Phase 2+)
 
@@ -68,7 +70,6 @@ A **double-entry journal system** that runs as a parallel layer alongside the ex
 | Position transfers | Requires transfer classification UI, new events (`position.transferred.out`), transfer-specific accounts (3400, 5600) |
 | Historical backfill | Generating journal entries from existing `PositionLedgerEvent` records for positions created before this feature ships. Flagged as open question. |
 | Multi-wallet aggregation | Consolidation across multiple imported wallets |
-| UI views | Frontend implementation of Balance Sheet, P&L, and Period Comparison screens |
 
 ---
 
@@ -173,7 +174,7 @@ Account numbers are internal. The user interface shows descriptive labels only.
 
 ### Sub-Ledger Granularity
 
-Each `JournalLine` carries a `positionId` reference. This means every account implicitly has per-position sub-ledgers without needing per-position account codes. Queries can aggregate at any level: position, pool (via position → pool relation), protocol, or portfolio.
+Each `JournalLine` carries an `instrumentRef` — the instrument's immutable hash identifier (e.g., `"uniswapv3/1/12345"`). This means every account implicitly has per-instrument sub-ledgers without needing per-instrument account codes. Queries can aggregate at any level: instrument, pool (via hash prefix or lookup), protocol (via hash protocol segment), or portfolio.
 
 ### Future Phase 2 Accounts (Not Implemented)
 
@@ -188,6 +189,8 @@ For reference, the following accounts are planned for Phase 2:
 ## 5. Data Models
 
 Four new entities are added to the database. Field descriptions use type conventions consistent with the existing schema: `String` for bigint values, `DateTime` for timestamps, `Json` for structured data.
+
+**Database schema:** All four accounting models (`AccountDefinition`, `JournalEntry`, `JournalLine`, `NAVSnapshot`) live in a dedicated PostgreSQL schema `accounting`, separate from the existing `public` schema. This requires enabling Prisma's `multiSchema` preview feature and annotating each model with `@@schema("accounting")`. The `User` model (which receives a new `reportingCurrency` field) remains in `public`.
 
 ### 5.1 AccountDefinition
 
@@ -216,15 +219,11 @@ One entry per accounting event. Contains one or more balanced lines.
 | userId | String (FK → User) | Owner of this entry |
 | domainEventId | String? | References `DomainEvent.id` for traceability |
 | domainEventType | String? | Event type discriminator (e.g., `"position.liquidity.increased"`) |
-| ledgerEventId | String? (FK → PositionLedgerEvent) | Links to the corresponding ledger event, if applicable |
+| ledgerEventRef | String? | Loose string reference to the originating ledger event ID (e.g., a PositionLedgerEvent ID). No FK constraint — allows future instrument types with their own ledger tables. |
 | entryDate | DateTime | Business date of the entry (block timestamp for on-chain events, snapshot date for M2M) |
 | description | String | Human-readable (e.g., `"Liquidity increase: uniswapv3/1/12345"`) |
 | memo | String? | Optional additional context |
-| reversedById | String? (FK → JournalEntry) | If this entry was reversed, points to the reversal entry |
-| reversesId | String? (FK → JournalEntry) | If this is a reversal, points to the original entry |
-| isReversal | Boolean | `true` if this entry is a reversal (default: false) |
-
-**Indexes:** `(userId, entryDate)`, `domainEventId` (for idempotency check), `ledgerEventId`, `reversesId`
+**Indexes:** `(userId, entryDate)`, `domainEventId` (for idempotency check), `ledgerEventRef`
 
 ### 5.3 JournalLine
 
@@ -235,14 +234,14 @@ Individual debit or credit line within a journal entry.
 | id | String (CUID) | Primary key |
 | journalEntryId | String (FK → JournalEntry) | Parent entry |
 | accountId | String (FK → AccountDefinition) | Which account this line affects |
-| positionId | String? (FK → Position) | Position this line relates to (most lines are position-scoped) |
+| instrumentRef | String? | Instrument hash identifier (e.g., `"uniswapv3/1/12345"`). No FK constraint — allows any instrument type. |
 | side | String | `"debit"` \| `"credit"` |
 | amountQuote | String | Amount in quote token raw units (bigint as string). Same scale as `Position.currentValue`. |
 | amountReporting | String? | Amount in reporting currency (bigint as string, scaled by 10^8 for precision). Example: $3,000.50 → `"300050000000"` |
 | reportingCurrency | String? | ISO 4217 code (e.g., `"USD"`, `"EUR"`) |
 | exchangeRate | String? | Quote token → reporting currency rate at entry time (bigint as string, scaled by 10^8) |
 
-**Indexes:** `journalEntryId`, `accountId`, `positionId`, `(accountId, positionId)`
+**Indexes:** `journalEntryId`, `accountId`, `instrumentRef`, `(accountId, instrumentRef)`
 
 **Invariant:** For every `JournalEntry`, the sum of `amountQuote` on debit lines must equal the sum of `amountQuote` on credit lines.
 
@@ -270,7 +269,7 @@ Daily portfolio-level snapshot. The foundation for period comparisons and the Ba
 | periodUnrealizedPnl | String | Change in unrealized P&L since last snapshot |
 | periodGasExpense | String | Gas expense since last snapshot |
 | activePositionCount | Int | Number of active positions at snapshot time |
-| positionBreakdown | Json | Array of per-position data: `{ positionId, positionHash, poolSymbol, currentValueReporting, costBasisReporting, unrealizedPnlReporting, accruedFeesReporting }` |
+| positionBreakdown | Json | Array of per-instrument data: `{ instrumentRef, poolSymbol, currentValueReporting, costBasisReporting, unrealizedPnlReporting, accruedFeesReporting }` |
 
 **Indexes:** `(userId, snapshotDate, snapshotType)` (unique), `(userId, snapshotDate)`
 
@@ -286,7 +285,7 @@ Add one field to the existing `User` model:
 
 ## 6. Domain Events → Journal Entries
 
-Each domain event maps to one or more balanced journal entries. The journal consumer looks up the corresponding `PositionLedgerEvent` (via `ledgerEventId` or by matching `positionId` + `eventTimestamp`) to obtain exact financial amounts.
+Each domain event maps to one or more balanced journal entries. The journal consumer looks up the corresponding `PositionLedgerEvent` (via `ledgerEventRef` or by matching `instrumentRef` + `eventTimestamp`) to obtain exact financial amounts.
 
 ### 6.1 position.created
 
@@ -438,50 +437,31 @@ If gas cost data is available from the event context:
 
 ### 6.8 position.deleted
 
-Application-level event: position is removed from the user's tracking view. **No journal entry.** Prerequisite: position must be closed/burned (balance = 0 across all accounts).
+Application-level event: position is removed from the user's tracking view. **All `JournalEntry` rows (and cascading `JournalLine` rows) for this position are deleted.** This cleans up the journal completely for removed positions, keeping it uncluttered.
 
 ### 6.9 position.liquidity.reverted (Chain Reorg)
 
-A chain reorg was detected and ledger events were removed. The journal creates reversal entries to maintain the append-only principle.
+A chain reorg was detected and ledger events were removed. The journal deletes the affected entries directly.
 
 **Process:**
 
-1. Query `JournalEntry` rows where `ledgerEventId` matches any ledger event that was in the reverted block.
-2. For each affected entry, create a new `JournalEntry` with:
-   - `reversesId` = original entry ID
-   - `isReversal` = true
-   - `description` = `"Reversal: chain reorg on block {blockHash}"`
-   - Lines are an exact mirror (debits become credits, credits become debits, same amounts)
-3. Update the original entry: `reversedById` = new reversal entry ID.
+1. Query `JournalEntry` rows where `ledgerEventRef` matches any ledger event that was in the reverted block.
+2. Delete those entries (cascade deletes `JournalLine` rows).
 
-**Identifying affected entries:** The `PositionLiquidityRevertedPayload` provides the `blockHash`. The journal consumer queries its own `JournalEntry` table for entries with `ledgerEventId` values that belonged to events in that block. Since the ledger events themselves are already deleted by the time the domain event arrives, the journal must maintain this mapping internally (via `ledgerEventId`).
+**Identifying affected entries:** The `PositionLiquidityRevertedPayload` provides the `blockHash`. The journal consumer queries its own `JournalEntry` table for entries with `ledgerEventRef` values that belonged to events in that block. Since the ledger events themselves are already deleted by the time the domain event arrives, the journal must maintain this mapping internally (via `ledgerEventRef`).
 
 ---
 
 ## 7. Reorg Handling
 
-The original draft PRD proposed a two-phase model (PENDING → CONFIRMED) with a finality check. This is **not adopted** because the existing system already handles reorgs at the ledger level:
+The existing system already handles reorgs at the ledger level:
 
 1. The `midcurve-onchain-data` service detects `removed: true` events.
 2. The `UniswapV3LedgerService.deleteAllByBlockHash()` removes the affected ledger events.
 3. A `position.liquidity.reverted` domain event is emitted.
 4. The position state is refreshed from the corrected ledger.
 
-The journal layer simply subscribes to step 3 and creates reversal entries (section 6.9). This approach:
-
-- **Respects the append-only principle:** Journal entries are never deleted.
-- **Avoids a separate pending queue:** No `PendingEvent` table, no finality polling.
-- **Reuses existing infrastructure:** The reorg detection and correction logic remains in the ledger service.
-
-### Journal Entry Status
-
-| Status | Meaning | In Balance Sheet? |
-|--------|---------|-------------------|
-| ACTIVE | Normal entry, currently effective | Yes |
-| REVERSED | Entry voided by a reversal entry | No (net zero with its reversal) |
-| REVERSAL | The correcting entry itself | Yes (offsets the original) |
-
-An entry transitions from ACTIVE to REVERSED when `reversedById` is populated. The `isReversal` flag distinguishes reversal entries from originals.
+The journal layer subscribes to step 3 and deletes the affected journal entries directly (section 6.9). No status column or reversal entries are needed — affected entries are simply removed, and the corrected on-chain events will produce new journal entries as they arrive.
 
 ---
 
@@ -578,7 +558,21 @@ Each `NAVSnapshot` stores a `valuationMethod` field (`"pool_price"` for Phase 1)
 
 ## 10. User-Facing Reports
 
-The accounting system produces three primary views. All views respect the user's chosen reporting currency. Account numbers and technical terminology are hidden — the user sees descriptive labels only.
+The Dashboard gains a new **"Summary"** tab alongside the existing **"Positions"** tab (extending the existing `DashboardTabs` component). "Positions" remains the default tab.
+
+### Layout — Stacked Sections
+
+The Summary tab uses a vertical stack of full-width cards, top to bottom:
+
+1. **NAV Headline** — Full-width card. Left side: "Net Asset Value" label with large formatted amount and period change percentage (green/red). Right side: reporting currency selector dropdown.
+
+2. **Balance Sheet** — Full-width card. Two sections separated by a horizontal divider: Assets (LP Positions, Accrued Fees, Total Assets) and Equity (Capital Invested, Capital Returned, Accumulated P&L, Total Equity). Label-value rows with right-aligned amounts.
+
+3. **Period Comparison** — Full-width card. Pill toggle at the top for period selection (Day | Week | Month | Quarter | Year). Table with columns: category, start value, end value, absolute change, percentage change.
+
+4. **P&L Breakdown** — Full-width card. Collapsible tree: Protocol → Pool → Position. Columns: Fee Income, Price P&L, Total. Summary footer row with Gross P&L, Operating Expenses, Net P&L.
+
+All cards use the existing card pattern (`bg-slate-800/50`, `border-slate-700/50`, `rounded-xl`). All views respect the user's reporting currency. Account numbers and technical terminology are hidden — the user sees descriptive labels only.
 
 ### 10.1 Balance Sheet (NAV Report)
 
@@ -643,7 +637,7 @@ Structured hierarchically: Protocol → Pool → Position → Component. Each le
 | Operating Expenses | -$82.50 |
 | **Net P&L (Period)** | **-$24,554.45** |
 
-**Data source:** `JournalLine` rows filtered by date range and grouped by `positionId` → `accountId`. Fee Income = account 4000. Price P&L = accounts 4100 + 4200 - 5000 - 5200. Gas = account 5100.
+**Data source:** `JournalLine` rows filtered by date range and grouped by `instrumentRef` → `accountId`. Fee Income = account 4000. Price P&L = accounts 4100 + 4200 - 5000 - 5200. Gas = account 5100.
 
 ---
 
@@ -656,7 +650,7 @@ Structured hierarchically: Protocol → Pool → Position → Component. Each le
 | 3 | **Journal consumer.** Create `PostJournalEntriesOnPositionEventsRule` in `midcurve-business-logic`. Subscribe to `position.*` domain events. Implement event-to-journal mapping for all 9 event types. | Step 2 |
 | 4 | **Daily M2M cron.** Create `DailyNavSnapshotRule` in `midcurve-business-logic`. Add CoinGecko spot price method. Implement batched multicall + snapshot creation. | Step 2 |
 | 5 | **API endpoints.** Add balance sheet, P&L breakdown, period comparison, and user preferences endpoints to `midcurve-api`. | Step 2 |
-| 6 | **UI views.** (Separate scope/PRD.) Balance Sheet, P&L breakdown, and Period Comparison pages in `midcurve-ui`. | Step 5 |
+| 6 | **UI views.** Add "Summary" tab to the Dashboard with Balance Sheet, P&L breakdown, and Period Comparison views. "Positions" tab remains the default. | Step 5 |
 
 ### Key Files to Create
 
@@ -671,7 +665,7 @@ Structured hierarchically: Protocol → Pool → Position → Component. Each le
 
 | File | Change |
 |------|--------|
-| `packages/midcurve-database/prisma/schema.prisma` | Add 4 new models + User field |
+| `packages/midcurve-database/prisma/schema.prisma` | Enable `multiSchema` preview feature, add `schemas = ["public", "accounting"]` to datasource, add 4 new models with `@@schema("accounting")`, add `reportingCurrency` to User |
 | `apps/midcurve-business-logic/src/workers/index.ts` | Register the 2 new business rules |
 | `packages/midcurve-services/src/clients/coingecko/coingecko-client.ts` | Add spot price fetch method |
 | `packages/midcurve-services/src/events/types.ts` | Add `unClaimedFees` to `PositionStateRefreshedPayload` (if decided) |
@@ -688,18 +682,18 @@ Structured hierarchically: Protocol → Pool → Position → Component. Each le
 
 ---
 
-## 12. Open Questions
+## 12. Design Decisions
 
-| # | Question | Recommendation |
-|---|----------|----------------|
-| 1 | **Historical backfill.** Should we generate journal entries from existing `PositionLedgerEvent` records for positions created before this feature ships? | Yes, as a one-time migration script. Iterate ledger events in chronological order per position and generate journal entries. Moderate complexity but valuable for complete history. |
-| 2 | **Gas cost tracking.** Domain events do not consistently include gas cost data. Should gas tracking be deferred? | Defer to Phase 2. Track gas opportunistically where data is available (e.g., close order execution logs in `AutomationLog`), but don't block Phase 1 on it. |
-| 3 | **Reporting currency precision.** Is 10^8 scaling sufficient for `amountReporting`? | Likely yes. 10^8 gives 8 decimal places in the reporting currency, more than sufficient for USD/EUR. Revisit if sub-cent precision is needed for exotic currencies. |
-| 4 | **`PositionStateRefreshedPayload` expansion.** The current payload lacks `unClaimedFees`. Should we add it? | Yes. Add `unClaimedFees: string` to the payload so the journal consumer can create fee accrual entries without a separate DB query. |
-| 5 | **Journal vs Position model as source of truth.** Should the journal's computed balances replace the existing Position PnL fields? | **Advisory in Phase 1.** The journal runs alongside, and the existing Position fields remain the dashboard source of truth. A reconciliation report can compare the two systems. Migration to journal-as-authority can happen in Phase 2 once confidence is established. |
-| 6 | **Multi-user snapshot batching.** The daily cron iterates all users. For scalability, should we batch by user? | Single pass is fine for Phase 1 (expected user count < 1000). Add per-user chunking if performance degrades. |
-| 7 | **Exchange rate for non-USD currencies.** Use CoinGecko's `vs_currencies` parameter directly, or apply USD/EUR forex rate on top? | Use CoinGecko's `vs_currencies` directly — simpler and avoids compounding two rate lookups. |
-| 8 | **Closed position retention.** How long should journal entries for closed positions be retained? | Indefinitely. Storage is cheap, audit trail is valuable. |
+| # | Question | Decision |
+|---|----------|----------|
+| 1 | **Historical backfill.** Generate journal entries from existing `PositionLedgerEvent` records? | **No.** Journal starts clean from deployment. No backfill migration. |
+| 2 | **Gas cost tracking.** Domain events lack consistent gas cost data. | **Deferred to Phase 2.** No gas tracking in Phase 1. |
+| 3 | **Reporting currency precision.** Is 10^8 scaling sufficient for `amountReporting`? | **Yes.** 10^8 (8 decimal places) is sufficient. |
+| 4 | **`PositionStateRefreshedPayload` expansion.** Add `unClaimedFees`? | **Yes.** Add `unClaimedFees: string` to the payload. |
+| 5 | **Journal vs Position model as source of truth.** | **Position model remains source of truth.** Journal is advisory only in Phase 1. |
+| 6 | **Multi-user snapshot batching.** | **Single pass for Phase 1.** Per-user chunking deferred to Phase 2. |
+| 7 | **Exchange rate for non-USD currencies.** | **Use CoinGecko's `vs_currencies` directly.** No intermediate USD conversion. |
+| 8 | **Position journal lifecycle.** | **Closed positions retain entries** (for P&L history). **Deleted positions have all entries removed.** |
 
 ---
 
