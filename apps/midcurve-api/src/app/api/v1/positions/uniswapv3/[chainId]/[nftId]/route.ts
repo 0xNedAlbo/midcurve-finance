@@ -42,6 +42,7 @@ import {
   getUniswapV3PositionService,
   getUniswapV3PoolService,
   getUniswapV3CloseOrderService,
+  getJournalService,
 } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
@@ -173,10 +174,14 @@ export async function GET(
         pool: `${position.pool.token0.symbol}/${position.pool.token1.symbol}`,
       });
 
-      // 4. Serialize bigints to strings for JSON
+      // 4. Check accounting tracking status
+      const isTrackedInAccounting = await getJournalService().isTracked(user.id, positionHash);
+
+      // 5. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
         activeCloseOrders: activeCloseOrders.map(serializeCloseOrder),
+        isTrackedInAccounting,
       };
 
       const response = createSuccessResponse(serializedPosition);

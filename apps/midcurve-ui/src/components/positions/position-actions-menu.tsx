@@ -16,24 +16,30 @@
 
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { MoreVertical, Trash2, RotateCcw, ArrowRightLeft } from "lucide-react";
+import { MoreVertical, Trash2, RotateCcw, ArrowRightLeft, BookOpen, BookX } from "lucide-react";
 
 interface PositionActionsMenuProps {
   onReloadHistory: () => void;
   onSwitchQuoteToken: () => void;
+  onToggleTracking: () => void;
   onDelete: () => void;
+  isTrackedInAccounting?: boolean;
   isDeleting?: boolean;
   isReloadingHistory?: boolean;
   isSwitchingQuoteToken?: boolean;
+  isTogglingTracking?: boolean;
 }
 
 export function PositionActionsMenu({
   onReloadHistory,
   onSwitchQuoteToken,
+  onToggleTracking,
   onDelete,
+  isTrackedInAccounting = true,
   isDeleting = false,
   isReloadingHistory = false,
   isSwitchingQuoteToken = false,
+  isTogglingTracking = false,
 }: PositionActionsMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
@@ -57,7 +63,7 @@ export function PositionActionsMenu({
   }, [isOpen]);
 
   // Disable menu if any action is in progress
-  const isActionInProgress = isDeleting || isReloadingHistory || isSwitchingQuoteToken;
+  const isActionInProgress = isDeleting || isReloadingHistory || isSwitchingQuoteToken || isTogglingTracking;
 
   // Close menu when clicking outside
   const handleBackdropClick = () => {
@@ -74,6 +80,12 @@ export function PositionActionsMenu({
   const handleSwitchQuoteToken = () => {
     setIsOpen(false);
     onSwitchQuoteToken();
+  };
+
+  // Handle toggle tracking action
+  const handleToggleTracking = () => {
+    setIsOpen(false);
+    onToggleTracking();
   };
 
   // Handle delete action
@@ -125,6 +137,23 @@ export function PositionActionsMenu({
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 Switch Quote Token
+              </button>
+              <button
+                onClick={handleToggleTracking}
+                disabled={isActionInProgress}
+                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isTrackedInAccounting ? (
+                  <>
+                    <BookX className="w-4 h-4" />
+                    Untrack from Accounting
+                  </>
+                ) : (
+                  <>
+                    <BookOpen className="w-4 h-4" />
+                    Track in Accounting
+                  </>
+                )}
               </button>
               <button
                 onClick={handleDelete}

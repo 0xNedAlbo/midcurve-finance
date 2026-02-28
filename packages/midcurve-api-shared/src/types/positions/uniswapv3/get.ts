@@ -30,6 +30,7 @@ export interface GetUniswapV3PositionParams {
  */
 export interface GetUniswapV3PositionResponse extends UniswapV3PositionResponse {
   activeCloseOrders: SerializedCloseOrder[];
+  isTrackedInAccounting: boolean;
 }
 
 // =============================================================================

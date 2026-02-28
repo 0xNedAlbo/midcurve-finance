@@ -30,6 +30,7 @@ import { useIsMutating } from "@tanstack/react-query";
 import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
 import { switchQuoteTokenMutationKey } from "@/hooks/positions/useSwitchQuoteToken";
+import { useToggleAccountingTracking, toggleAccountingTrackingMutationKey } from "@/hooks/positions/useToggleAccountingTracking";
 import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
 import { useUniswapV3AutoRefresh } from "@/hooks/positions/uniswapv3/useUniswapV3AutoRefresh";
 import { useUniswapV3Position } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
@@ -111,6 +112,8 @@ function UniswapV3PositionCardLoaded({
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
   const isSwitchingQuoteToken = useIsMutating({ mutationKey: switchQuoteTokenMutationKey(position.positionHash) }) > 0;
+  const isTogglingTracking = useIsMutating({ mutationKey: toggleAccountingTrackingMutationKey(position.positionHash) }) > 0;
+  const toggleTrackingMutation = useToggleAccountingTracking(position.positionHash, chainId, String(nftId));
   const refreshMutation = useUniswapV3RefreshPosition();
   const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
 
@@ -208,10 +211,13 @@ function UniswapV3PositionCardLoaded({
           <PositionActionsMenu
             onReloadHistory={() => setShowReloadHistoryModal(true)}
             onSwitchQuoteToken={() => setShowSwitchQuoteTokenModal(true)}
+            onToggleTracking={() => toggleTrackingMutation.mutate({ positionHash: position.positionHash })}
             onDelete={() => setShowDeleteModal(true)}
+            isTrackedInAccounting={position.isTrackedInAccounting}
             isDeleting={isDeleting}
             isReloadingHistory={isReloadingHistory}
             isSwitchingQuoteToken={isSwitchingQuoteToken}
+            isTogglingTracking={isTogglingTracking}
           />
         </div>
       </div>

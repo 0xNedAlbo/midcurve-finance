@@ -15,3 +15,9 @@ export type {
   SnapshotSummary,
   PeriodDelta,
 } from './period-comparison.js';
+
+export {
+  ToggleTrackingRequestSchema,
+  type ToggleTrackingRequest,
+  type ToggleTrackingResponse,
+} from './tracked-instruments.js';
