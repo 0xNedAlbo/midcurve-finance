@@ -21,6 +21,7 @@ import {
   ProcessCloseOrderEventsRule,
   CreateAutomationWalletOnUserRegisteredRule,
   PostJournalEntriesOnPositionEventsRule,
+  DailyNavSnapshotRule,
   type BusinessRuleStatus,
 } from '../rules';
 import { getSchedulerService, type SchedulerStatus } from '../scheduler';
@@ -77,6 +78,9 @@ export class RuleManager {
     // Accounting rules
     // Double-entry journal entries from position domain events
     this.registry.register(new PostJournalEntriesOnPositionEventsRule());
+
+    // Daily NAV snapshot and position refresh - runs at midnight UTC
+    this.registry.register(new DailyNavSnapshotRule());
 
     log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
