@@ -64,12 +64,49 @@ export class JournalService {
   }
 
   // ---------------------------------------------------------------------------
+  // Instrument Tracking
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Registers an instrument for journal tracking (idempotent via unique constraint).
+   * Called on position.created — ensures subsequent events are not skipped.
+   */
+  async trackInstrument(userId: string, instrumentRef: string): Promise<void> {
+    await this.prisma.trackedInstrument.upsert({
+      where: { userId_instrumentRef: { userId, instrumentRef } },
+      create: { userId, instrumentRef },
+      update: {},
+    });
+  }
+
+  /**
+   * Removes an instrument from tracking.
+   * Called on position.deleted.
+   */
+  async untrackInstrument(userId: string, instrumentRef: string): Promise<void> {
+    await this.prisma.trackedInstrument.deleteMany({
+      where: { userId, instrumentRef },
+    });
+  }
+
+  /**
+   * Returns true if the instrument is registered for tracking.
+   * Replaces the old hasEntriesForInstrument guard.
+   */
+  async isTracked(userId: string, instrumentRef: string): Promise<boolean> {
+    const record = await this.prisma.trackedInstrument.findUnique({
+      where: { userId_instrumentRef: { userId, instrumentRef } },
+      select: { id: true },
+    });
+    return record !== null;
+  }
+
+  // ---------------------------------------------------------------------------
   // Idempotency
   // ---------------------------------------------------------------------------
 
   /**
    * Returns true if any journal lines exist for the given instrument.
-   * Used as a guard to skip events for pre-existing positions (no backfill).
    */
   async hasEntriesForInstrument(instrumentRef: string): Promise<boolean> {
     const line = await this.prisma.journalLine.findFirst({
@@ -183,6 +220,33 @@ export class JournalService {
     // For debit-normal accounts: positive means net debit (good).
     // For credit-normal accounts: we still return debits - credits,
     // so the caller needs to know the account's normal side.
+    return debits - credits;
+  }
+
+  /**
+   * Same as getAccountBalance but aggregates amountReporting instead of amountQuote.
+   * Lines where amountReporting is NULL are skipped.
+   */
+  async getAccountBalanceReporting(accountCode: number, instrumentRef: string): Promise<bigint> {
+    const accountId = await this.resolveAccountId(accountCode);
+
+    const lines = await this.prisma.journalLine.findMany({
+      where: { accountId, instrumentRef, amountReporting: { not: null } },
+      select: { side: true, amountReporting: true },
+    });
+
+    let debits = 0n;
+    let credits = 0n;
+
+    for (const line of lines) {
+      const amount = BigInt(line.amountReporting!);
+      if (line.side === 'debit') {
+        debits += amount;
+      } else {
+        credits += amount;
+      }
+    }
+
     return debits - credits;
   }
 

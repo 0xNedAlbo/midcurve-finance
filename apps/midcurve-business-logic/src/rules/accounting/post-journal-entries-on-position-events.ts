@@ -25,6 +25,7 @@ import {
   LEDGER_REF_PREFIX,
   JournalService,
   JournalLineBuilder,
+  CoinGeckoClient,
   type DomainEvent,
   type PositionEventType,
   type PositionCreatedPayload,
@@ -44,6 +45,17 @@ import { BusinessRule } from '../base';
 
 const QUEUE_NAME = 'business-logic.post-journal-entries';
 const ROUTING_PATTERN = ROUTING_PATTERNS.ALL_POSITION_EVENTS;
+const FLOAT_TO_BIGINT_SCALE = 1e8;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+interface ReportingContext {
+  reportingCurrency: string;
+  exchangeRate: string;
+  quoteTokenDecimals: number;
+}
 
 // =============================================================================
 // Rule Implementation
@@ -152,21 +164,28 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * position.created → DR 1000 (LP Position at Cost) / CR 3000 (Contributed Capital)
+   * position.created → Track instrument + DR 1000 / CR 3000 (if cost basis available)
    *
-   * Records the initial capital contribution at cost basis.
+   * Always registers the instrument for tracking. Creates the foundation entry
+   * only if costBasis > 0 (which may not be the case for MINT-then-increase flows).
    */
   private async handlePositionCreated(
     event: DomainEvent<PositionCreatedPayload>
   ): Promise<void> {
+    const position = event.payload;
+    const instrumentRef = position.positionHash;
+
+    // Always track — even if costBasis is 0
+    await this.journalService.trackInstrument(position.userId, instrumentRef);
+
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const position = event.payload; // PositionJSON
     const costBasis = position.currentCostBasis;
-    if (!costBasis || costBasis === '0') return; // no cost basis yet
+    if (!costBasis || costBasis === '0') return;
 
-    const instrumentRef = position.positionHash!;
+    const ctx = await this.getReportingContext(position.id);
     const lines = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
       .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, instrumentRef)
       .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, costBasis, instrumentRef)
       .build();
@@ -187,17 +206,55 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * position.liquidity.increased → DR 1000 / CR 3000
    *
    * Records additional capital contribution at the delta cost basis.
+   * If the foundation entry was not created by handlePositionCreated (costBasis was 0),
+   * creates it here from the position's current costBasis.
    */
   private async handleLiquidityIncreased(
     event: DomainEvent<PositionLiquidityIncreasedPayload>
   ): Promise<void> {
-    if (await this.journalService.isProcessed(event.id)) return;
-
     const { positionId, positionHash } = event.payload;
     const instrumentRef = positionHash;
+    const userId = await this.getPositionUserId(positionId);
 
-    // Skip pre-existing positions (no backfill)
-    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+    if (!(await this.journalService.isTracked(userId, instrumentRef))) return;
+
+    // If tracked but no journal entries exist yet, the foundation entry was missed
+    // (costBasis was 0 at position.created time). Create it now.
+    const foundationEventId = `${event.id}:foundation`;
+    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) {
+      if (!(await this.journalService.isProcessed(foundationEventId))) {
+        const position = await prisma.position.findUnique({
+          where: { id: positionId },
+          select: { currentCostBasis: true },
+        });
+
+        const costBasis = position?.currentCostBasis ?? '0';
+        if (costBasis !== '0') {
+          const ctx = await this.getReportingContext(positionId);
+          const lines = new JournalLineBuilder()
+            .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
+            .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, instrumentRef)
+            .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, costBasis, instrumentRef)
+            .build();
+
+          await this.journalService.createEntry(
+            {
+              userId,
+              domainEventId: foundationEventId,
+              domainEventType: 'position.created',
+              entryDate: new Date(event.payload.eventTimestamp),
+              description: `Position created (deferred): ${instrumentRef}`,
+            },
+            lines
+          );
+        }
+      }
+      // Foundation was just created or costBasis is still 0 — skip the delta entry
+      // because the foundation already includes the full cost basis at this point
+      return;
+    }
+
+    if (await this.journalService.isProcessed(event.id)) return;
 
     // Find the corresponding ledger event to get deltaCostBasis
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'INCREASE_POSITION', event.payload.eventTimestamp);
@@ -209,8 +266,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const deltaCostBasis = ledgerEvent.deltaCostBasis;
     if (deltaCostBasis === '0') return;
 
-    const userId = await this.getPositionUserId(positionId);
+    const ctx = await this.getReportingContext(positionId);
     const lines = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
       .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, deltaCostBasis, instrumentRef)
       .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, deltaCostBasis, instrumentRef)
       .build();
@@ -245,22 +303,22 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     const { positionId, positionHash } = event.payload;
     const instrumentRef = positionHash;
+    const userId = await this.getPositionUserId(positionId);
 
-    // Skip pre-existing positions (no backfill)
-    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+    if (!(await this.journalService.isTracked(userId, instrumentRef))) return;
 
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'DECREASE_POSITION', event.payload.eventTimestamp);
     if (!ledgerEvent) {
       this.logger.warn({ positionId, eventId: event.id }, 'No ledger event found for liquidity decrease');
       return;
     }
-
-    const userId = await this.getPositionUserId(positionId);
     const absDeltaCostBasis = absBigint(ledgerEvent.deltaCostBasis);
     const tokenValue = ledgerEvent.tokenValue;
     const deltaPnl = BigInt(ledgerEvent.deltaPnl);
 
-    const builder = new JournalLineBuilder();
+    const ctx = await this.getReportingContext(positionId);
+    const builder = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
 
     // Line 1: Derecognize cost basis (credit 1000)
     builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absDeltaCostBasis, instrumentRef);
@@ -331,14 +389,12 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     const { positionId, positionHash, feesValueInQuote } = event.payload;
     const instrumentRef = positionHash;
+    const userId = await this.getPositionUserId(positionId);
 
-    // Skip pre-existing positions (no backfill)
-    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+    if (!(await this.journalService.isTracked(userId, instrumentRef))) return;
 
     const totalFees = BigInt(feesValueInQuote);
     if (totalFees <= 0n) return;
-
-    const userId = await this.getPositionUserId(positionId);
 
     // Find the corresponding COLLECT ledger event
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'COLLECT', event.payload.eventTimestamp);
@@ -349,7 +405,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       instrumentRef
     );
 
-    const builder = new JournalLineBuilder();
+    const ctx = await this.getReportingContext(positionId);
+    const builder = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
     builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, totalFees.toString(), instrumentRef);
 
     if (accruedBalance > 0n) {
@@ -393,11 +451,11 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   ): Promise<void> {
     const { positionId, positionHash, unrealizedPnl, unClaimedFees } = event.payload;
     const instrumentRef = positionHash;
-
-    // Skip pre-existing positions (no backfill)
-    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
-
     const userId = await this.getPositionUserId(positionId);
+
+    if (!(await this.journalService.isTracked(userId, instrumentRef))) return;
+
+    const ctx = await this.getReportingContext(positionId);
 
     // Sub-entry A: Fee accrual
     // Compare current unclaimed fees with what's already accrued in account 1002
@@ -412,7 +470,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       const feeDelta = newUnclaimedFees - currentAccrued;
 
       if (feeDelta > 0n) {
-        const feeBuilder = new JournalLineBuilder();
+        const feeBuilder = new JournalLineBuilder()
+          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
         const feeDeltaStr = feeDelta.toString();
         feeBuilder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, feeDeltaStr, instrumentRef);
         feeBuilder.credit(ACCOUNT_CODES.FEE_INCOME, feeDeltaStr, instrumentRef);
@@ -443,7 +502,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       const delta = newUnrealized - currentUnrealized;
 
       if (delta !== 0n) {
-        const builder = new JournalLineBuilder();
+        const builder = new JournalLineBuilder()
+          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
         const absDelta = absBigintValue(delta).toString();
 
         if (delta > 0n) {
@@ -481,11 +541,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   ): Promise<void> {
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const position = event.payload; // PositionJSON
-    const instrumentRef = position.positionHash!;
+    const position = event.payload;
+    const instrumentRef = position.positionHash;
 
-    // Skip pre-existing positions (no backfill)
-    if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
+    if (!(await this.journalService.isTracked(position.userId, instrumentRef))) return;
 
     // Check remaining unrealized balance
     const unrealizedBalance = await this.journalService.getAccountBalance(
@@ -495,7 +554,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     if (unrealizedBalance === 0n) return; // Nothing to reclassify
 
-    const builder = new JournalLineBuilder();
+    const ctx = await this.getReportingContext(position.id);
+    const builder = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
     const absAmount = absBigintValue(unrealizedBalance).toString();
 
     if (unrealizedBalance > 0n) {
@@ -521,7 +582,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   /**
-   * position.deleted → Delete all journal entries for this instrument
+   * position.deleted → Delete all journal entries and untrack instrument
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionDeletedPayload>
@@ -531,9 +592,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     if (!instrumentRef) return;
 
     const count = await this.journalService.deleteByInstrumentRef(instrumentRef);
+    await this.journalService.untrackInstrument(position.userId, instrumentRef);
     this.logger.info(
       { instrumentRef, deletedCount: count },
-      'Deleted journal entries for deleted position'
+      'Deleted journal entries and untracked instrument for deleted position'
     );
   }
 
@@ -640,6 +702,48 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     });
     if (!position) throw new Error(`Position not found: ${positionId}`);
     return position.userId;
+  }
+
+  /**
+   * Resolve reporting currency context for a position.
+   * Fetches the quote token's USD price from CoinGecko and computes the exchange rate.
+   */
+  private async getReportingContext(positionId: string): Promise<ReportingContext> {
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
+      select: {
+        isToken0Quote: true,
+        user: { select: { reportingCurrency: true } },
+        pool: {
+          select: {
+            token0: { select: { decimals: true, coingeckoId: true } },
+            token1: { select: { decimals: true, coingeckoId: true } },
+          },
+        },
+      },
+    });
+    if (!position) throw new Error(`Position not found: ${positionId}`);
+
+    const quoteToken = position.isToken0Quote ? position.pool.token0 : position.pool.token1;
+    const reportingCurrency = position.user.reportingCurrency;
+
+    // Phase 1: only USD supported. For non-USD, falls back to 1.0.
+    const reportingCurrencyUsdPrice = 1.0;
+
+    let quoteTokenUsdPrice = 1.0;
+    if (quoteToken.coingeckoId) {
+      const prices = await CoinGeckoClient.getInstance().getSimplePrices([quoteToken.coingeckoId]);
+      quoteTokenUsdPrice = prices[quoteToken.coingeckoId]?.usd ?? 1.0;
+    }
+
+    const rate = quoteTokenUsdPrice / reportingCurrencyUsdPrice;
+    const exchangeRate = BigInt(Math.round(rate * FLOAT_TO_BIGINT_SCALE));
+
+    return {
+      reportingCurrency,
+      exchangeRate: exchangeRate.toString(),
+      quoteTokenDecimals: quoteToken.decimals,
+    };
   }
 }
 

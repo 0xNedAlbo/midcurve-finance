@@ -636,13 +636,13 @@ export class DailyNavSnapshotRule extends BusinessRule {
       const ref = rp.position.positionHash;
 
       const [cc, cr, fi, rg, rl, ug, ul] = await Promise.all([
-        this.journalService.getAccountBalance(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, ref),
-        this.journalService.getAccountBalance(ACCOUNT_CODES.CAPITAL_RETURNED, ref),
-        this.journalService.getAccountBalance(ACCOUNT_CODES.FEE_INCOME, ref),
-        this.journalService.getAccountBalance(ACCOUNT_CODES.REALIZED_GAINS, ref),
-        this.journalService.getAccountBalance(ACCOUNT_CODES.REALIZED_LOSSES, ref),
-        this.journalService.getAccountBalance(ACCOUNT_CODES.UNREALIZED_GAINS, ref),
-        this.journalService.getAccountBalance(ACCOUNT_CODES.UNREALIZED_LOSSES, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, ref),
       ]);
 
       contributedCapital += cc;

@@ -10,24 +10,57 @@ import type { JournalLineInput, JournalSide } from '@midcurve/shared';
 export class JournalLineBuilder {
   private readonly lines: JournalLineInput[] = [];
 
+  /** Reporting currency context (set via withReporting) */
+  private reportingCtx: {
+    reportingCurrency: string;
+    exchangeRate: bigint;
+    quoteTokenDecimals: bigint;
+  } | null = null;
+
+  /**
+   * Sets reporting currency context for all subsequent lines.
+   * When set, amountReporting is auto-computed for each debit/credit call.
+   *
+   * @param reportingCurrency - ISO 4217 code (e.g., "USD")
+   * @param exchangeRate - Quote token → reporting currency rate as bigint string (scaled 10^8)
+   * @param quoteTokenDecimals - Decimals of the quote token (e.g., 6 for USDC)
+   */
+  withReporting(reportingCurrency: string, exchangeRate: string, quoteTokenDecimals: number): this {
+    this.reportingCtx = {
+      reportingCurrency,
+      exchangeRate: BigInt(exchangeRate),
+      quoteTokenDecimals: BigInt(quoteTokenDecimals),
+    };
+    return this;
+  }
+
   debit(accountCode: number, amountQuote: string, instrumentRef?: string): this {
-    this.lines.push({
-      accountCode,
-      instrumentRef,
-      side: 'debit' as JournalSide,
-      amountQuote,
-    });
+    this.lines.push(this.buildLine(accountCode, amountQuote, 'debit', instrumentRef));
     return this;
   }
 
   credit(accountCode: number, amountQuote: string, instrumentRef?: string): this {
-    this.lines.push({
-      accountCode,
-      instrumentRef,
-      side: 'credit' as JournalSide,
-      amountQuote,
-    });
+    this.lines.push(this.buildLine(accountCode, amountQuote, 'credit', instrumentRef));
     return this;
+  }
+
+  private buildLine(
+    accountCode: number,
+    amountQuote: string,
+    side: JournalSide,
+    instrumentRef?: string
+  ): JournalLineInput {
+    const line: JournalLineInput = { accountCode, instrumentRef, side, amountQuote };
+
+    if (this.reportingCtx) {
+      const { reportingCurrency, exchangeRate, quoteTokenDecimals } = this.reportingCtx;
+      const amountReporting = (BigInt(amountQuote) * exchangeRate) / (10n ** quoteTokenDecimals);
+      line.amountReporting = amountReporting.toString();
+      line.reportingCurrency = reportingCurrency;
+      line.exchangeRate = exchangeRate.toString();
+    }
+
+    return line;
   }
 
   /**

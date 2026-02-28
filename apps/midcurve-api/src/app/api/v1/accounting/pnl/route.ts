@@ -56,13 +56,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       const period = periodResult.data;
       const { startDate, endDate } = getPeriodDateRange(period);
 
-      // Query journal lines within date range for this user
+      // Query journal lines within date range for this user (only lines with reporting amounts)
       const journalLines = await prisma.journalLine.findMany({
         where: {
           journalEntry: {
             userId: user.id,
             entryDate: { gte: startDate, lte: endDate },
           },
+          amountReporting: { not: null },
         },
         include: {
           journalEntry: { select: { entryDate: true } },
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         },
       });
 
-      // Aggregate by instrumentRef and account code
+      // Aggregate by instrumentRef and account code (using reporting currency amounts)
       const instrumentMap = new Map<string, {
         feeIncome: bigint;
         realizedGains: bigint;
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       for (const line of journalLines) {
         if (!line.instrumentRef) continue;
         const code = line.account.code;
-        const amount = BigInt(line.amountQuote);
+        const amount = BigInt(line.amountReporting!);
         const signed = line.side === 'debit' ? amount : -amount;
 
         let agg = instrumentMap.get(line.instrumentRef);
