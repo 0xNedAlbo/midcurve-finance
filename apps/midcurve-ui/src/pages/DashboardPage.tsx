@@ -1,14 +1,22 @@
 import { useAuth } from '../providers/AuthProvider';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { UserDropdown } from '../components/auth/user-dropdown';
 import { NotificationBell } from '../components/notifications/notification-bell';
 import { CreatePositionDropdown } from '../components/positions/create-position-dropdown';
 import { PositionList } from '../components/positions/position-list';
+import { DashboardTabs, type DashboardTab } from '../components/common/dashboard-tabs';
+import { AccountingSummary } from '../components/accounting/accounting-summary';
 
 export function DashboardPage() {
   const { user, status } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get('tab') ?? 'positions') as DashboardTab;
+
+  const handleTabChange = (tab: DashboardTab) => {
+    setSearchParams(tab === 'positions' ? {} : { tab });
+  };
 
   // Handle authentication redirect
   useEffect(() => {
@@ -46,26 +54,33 @@ export function DashboardPage() {
           </div>
         </header>
 
-        {/* Main Content */}
-        <div className="space-y-8">
-          {/* Section Header */}
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-2xl font-bold text-white mb-2">
-                Your Positions
-              </h2>
-              <p className="text-slate-300">
-                Manage and analyze your Uniswap V3 liquidity positions
-              </p>
+        {/* Tab Navigation */}
+        <DashboardTabs activeTab={activeTab} onTabChange={handleTabChange} />
+
+        {/* Tab Content */}
+        {activeTab === 'positions' && (
+          <div className="space-y-8">
+            {/* Section Header */}
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold text-white mb-2">
+                  Your Positions
+                </h2>
+                <p className="text-slate-300">
+                  Manage and analyze your Uniswap V3 liquidity positions
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <CreatePositionDropdown />
+              </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <CreatePositionDropdown />
-            </div>
+            <PositionList />
           </div>
+        )}
 
-          <PositionList />
-        </div>
+        {activeTab === 'summary' && <AccountingSummary />}
       </div>
     </div>
   );

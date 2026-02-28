@@ -123,6 +123,8 @@ export async function GET(request: NextRequest): Promise<Response> {
               isToken0Quote: true,
               pool: {
                 select: {
+                  protocol: true,
+                  config: true,
                   token0: { select: { symbol: true } },
                   token1: { select: { symbol: true } },
                 },
@@ -131,12 +133,18 @@ export async function GET(request: NextRequest): Promise<Response> {
           })
         : [];
 
-      const symbolMap = new Map<string, string>();
+      const positionMetaMap = new Map<string, { symbol: string; protocol: string; chainId: number; feeTier: string }>();
       for (const p of positions) {
         if (!p.positionHash) continue;
         const base = p.isToken0Quote ? p.pool.token1.symbol : p.pool.token0.symbol;
         const quote = p.isToken0Quote ? p.pool.token0.symbol : p.pool.token1.symbol;
-        symbolMap.set(p.positionHash, `${base}/${quote}`);
+        const config = p.pool.config as Record<string, unknown>;
+        positionMetaMap.set(p.positionHash, {
+          symbol: `${base}/${quote}`,
+          protocol: p.pool.protocol,
+          chainId: (config.chainId as number) ?? 0,
+          feeTier: String((config.feeBps as number) ?? 0),
+        });
       }
 
       // Build response
@@ -154,9 +162,13 @@ export async function GET(request: NextRequest): Promise<Response> {
         totalRealizedPnl += realizedPnl;
         totalUnrealizedPnl += unrealizedPnl;
 
+        const meta = positionMetaMap.get(ref);
         instruments.push({
           instrumentRef: ref,
-          poolSymbol: symbolMap.get(ref) ?? ref,
+          poolSymbol: meta?.symbol ?? ref,
+          protocol: meta?.protocol ?? 'unknown',
+          chainId: meta?.chainId ?? 0,
+          feeTier: meta?.feeTier ?? '0',
           feeIncome: feeIncome.toString(),
           realizedPnl: realizedPnl.toString(),
           unrealizedPnl: unrealizedPnl.toString(),

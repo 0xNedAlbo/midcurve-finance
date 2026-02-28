@@ -226,6 +226,40 @@ export function formatUSDValue(usdString?: string): string {
 }
 
 /**
+ * Formats an accounting reporting amount (bigint string, scaled 10^8) to a human-readable
+ * currency string. Handles negative values for P&L display.
+ *
+ * @param value - Bigint string from accounting API (scaled by 10^8)
+ * @param reportingCurrency - ISO currency code (default "USD")
+ * @returns Formatted string like "$1,234.56", "-$89.12", or "$0.00"
+ *
+ * @example
+ * formatReportingAmount("10000000000")  // "$100.00"   (10^10 / 10^8 = 100)
+ * formatReportingAmount("-500000000")   // "-$5.00"
+ * formatReportingAmount("0")           // "$0.00"
+ */
+export function formatReportingAmount(value: string, reportingCurrency = 'USD'): string {
+  const REPORTING_SCALE = 100_000_000; // 10^8
+  const symbol = reportingCurrency === 'USD' ? '$' : reportingCurrency + ' ';
+
+  if (!value || value === '0') return `${symbol}0.00`;
+
+  const bigVal = BigInt(value);
+  const isNegative = bigVal < 0n;
+  const absVal = isNegative ? -bigVal : bigVal;
+
+  const whole = absVal / BigInt(REPORTING_SCALE);
+  const frac = absVal % BigInt(REPORTING_SCALE);
+  // Take first 2 decimal digits from the fractional part
+  const cents = Number((frac * 100n) / BigInt(REPORTING_SCALE));
+
+  const wholeStr = whole.toLocaleString('en-US');
+  const sign = isNegative ? '-' : '';
+
+  return `${sign}${symbol}${wholeStr}.${cents.toString().padStart(2, '0')}`;
+}
+
+/**
  * Formats protocol name for display
  * @param protocol - Protocol identifier (e.g., "uniswapv3", "orca")
  * @returns Human-readable protocol name (e.g., "Uniswap V3", "Orca")

@@ -10,6 +10,9 @@ export type PeriodQuery = z.infer<typeof PeriodQuerySchema>;
 export interface PnlInstrumentItem {
   instrumentRef: string;
   poolSymbol: string;
+  protocol: string;
+  chainId: number;
+  feeTier: string;
   feeIncome: string;
   realizedPnl: string;
   unrealizedPnl: string;

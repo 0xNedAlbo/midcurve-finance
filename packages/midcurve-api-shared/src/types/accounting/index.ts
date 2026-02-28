@@ -21,3 +21,8 @@ export {
   type ToggleTrackingRequest,
   type ToggleTrackingResponse,
 } from './tracked-instruments.js';
+
+export type {
+  NavTimelinePoint,
+  NavTimelineResponse,
+} from './nav-timeline.js';
