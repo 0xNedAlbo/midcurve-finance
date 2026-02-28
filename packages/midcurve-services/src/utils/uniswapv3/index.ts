@@ -7,6 +7,8 @@
 export { uniswapV3PoolAbi, type Slot0 } from './pool-abi.js';
 export {
   readPoolState,
+  readPoolSlot0Batch,
+  type PoolSlot0Result,
   PoolConfigError,
   PoolStateError,
 } from './pool-reader.js';

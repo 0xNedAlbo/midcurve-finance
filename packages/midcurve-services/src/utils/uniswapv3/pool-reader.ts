@@ -11,6 +11,18 @@ import type { PublicClient } from 'viem';
 import { uniswapV3PoolAbi } from './pool-abi.js';
 import { type UniswapV3PoolState } from '@midcurve/shared';
 
+// Batch size for multicall chunking (matches nfpm-enumerator.ts convention)
+const MULTICALL_BATCH_SIZE = 50;
+
+/**
+ * Result from a batch slot0 read
+ */
+export interface PoolSlot0Result {
+  address: string;
+  sqrtPriceX96: bigint;
+  currentTick: number;
+}
+
 /**
  * Error thrown when pool configuration cannot be read from contract
  */
@@ -203,4 +215,80 @@ export async function readPoolState(
       error
     );
   }
+}
+
+/**
+ * Batch-read slot0 from multiple Uniswap V3 pool contracts.
+ *
+ * Lighter than readPoolState() — only reads slot0 (1 call per pool instead of 4).
+ * Used by the daily M2M cron to get fresh sqrtPriceX96 for all active pools.
+ *
+ * @param client - Viem PublicClient configured for the correct chain
+ * @param poolAddresses - Array of pool contract addresses (must be checksummed)
+ * @param batchSize - Max pools per multicall (default 50)
+ * @returns Array of slot0 results (same order as input)
+ * @throws PoolStateError if any pool returns invalid data
+ */
+export async function readPoolSlot0Batch(
+  client: PublicClient,
+  poolAddresses: string[],
+  batchSize = MULTICALL_BATCH_SIZE
+): Promise<PoolSlot0Result[]> {
+  if (poolAddresses.length === 0) return [];
+
+  const results: PoolSlot0Result[] = [];
+
+  // Chunk into batches
+  for (let i = 0; i < poolAddresses.length; i += batchSize) {
+    const batch = poolAddresses.slice(i, i + batchSize);
+
+    const contracts = batch.map((address) => ({
+      address: address as `0x${string}`,
+      abi: uniswapV3PoolAbi,
+      functionName: 'slot0' as const,
+    }));
+
+    const batchResults = await client.multicall({
+      contracts,
+      allowFailure: false,
+    });
+
+    // Uniswap V3 constants for valid price range
+    const MIN_SQRT_RATIO = 4295128739n;
+    const MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342n;
+
+    for (let j = 0; j < batch.length; j++) {
+      const address = batch[j]!;
+      const slot0Result = batchResults[j];
+
+      if (!Array.isArray(slot0Result) || slot0Result.length < 2) {
+        throw new PoolStateError(`Pool contract returned invalid slot0 data`, address);
+      }
+
+      const [sqrtPriceX96, currentTick] = slot0Result;
+
+      if (typeof sqrtPriceX96 !== 'bigint') {
+        throw new PoolStateError(`Pool returned invalid sqrtPriceX96: ${sqrtPriceX96}`, address);
+      }
+
+      if (typeof currentTick !== 'number') {
+        throw new PoolStateError(`Pool returned invalid currentTick: ${currentTick}`, address);
+      }
+
+      if (sqrtPriceX96 === 0n) {
+        throw new PoolStateError(`Pool at ${address} has zero sqrtPriceX96`, address);
+      }
+
+      if (sqrtPriceX96 < MIN_SQRT_RATIO || sqrtPriceX96 > MAX_SQRT_RATIO) {
+        throw new PoolStateError(
+          `Pool at ${address} has invalid sqrtPriceX96 (${sqrtPriceX96})`,
+          address
+        );
+      }
+
+      results.push({ address, sqrtPriceX96, currentTick });
+    }
+  }
+
+  return results;
 }

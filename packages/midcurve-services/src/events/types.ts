@@ -226,6 +226,7 @@ export interface PositionLiquidityRevertedPayload {
  */
 export interface PositionStateRefreshedPayload {
   positionId: string;
+  positionHash: string;
   poolId: string;
   chainId: number;
   nftId: string;
@@ -235,6 +236,8 @@ export interface PositionStateRefreshedPayload {
   currentValue: string;
   /** Unrealized PnL (as string for bigint) */
   unrealizedPnl: string;
+  /** Unclaimed fees in quote token (as string for bigint) */
+  unClaimedFees: string;
 }
 
 // ============================================================

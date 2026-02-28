@@ -15,3 +15,6 @@ export * from './request-scheduler/index.js';
 
 // Re-export Uniswap V3 specific utilities (pool ABI, ledger calculations)
 export * from './uniswapv3/index.js';
+
+// Re-export accounting utilities (reporting currency conversion)
+export * from './accounting/index.js';
