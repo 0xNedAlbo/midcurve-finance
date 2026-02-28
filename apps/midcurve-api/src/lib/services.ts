@@ -31,6 +31,8 @@ import {
   UniswapV3LedgerService,
   UniswapV3AprService,
   SwapRouterService,
+  NavSnapshotService,
+  JournalService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -282,4 +284,18 @@ export function getSwapRouterService(): SwapRouterService {
  */
 export function getSubgraphClient(): UniswapV3SubgraphClient {
   return UniswapV3SubgraphClient.getInstance();
+}
+
+/**
+ * Get singleton instance of NavSnapshotService
+ */
+export function getNavSnapshotService(): NavSnapshotService {
+  return NavSnapshotService.getInstance();
+}
+
+/**
+ * Get singleton instance of JournalService
+ */
+export function getJournalService(): JournalService {
+  return JournalService.getInstance();
 }
