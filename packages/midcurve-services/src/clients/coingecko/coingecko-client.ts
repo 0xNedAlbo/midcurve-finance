@@ -84,6 +84,56 @@ export interface CoinGeckoSimplePrices {
 }
 
 /**
+ * Response from /coins/{id}/market_chart/range endpoint
+ */
+export interface CoinGeckoMarketChartData {
+  /** Array of [timestamp_ms, price_usd] */
+  prices: [number, number][];
+  /** Array of [timestamp_ms, market_cap_usd] */
+  market_caps: [number, number][];
+  /** Array of [timestamp_ms, volume_usd] */
+  total_volumes: [number, number][];
+}
+
+/**
+ * Find the closest price point to a target timestamp from a market chart dataset.
+ *
+ * Performs binary search on the sorted prices array to find the entry with
+ * minimum absolute time distance from the target.
+ *
+ * @param prices - Sorted array of [timestamp_ms, price_usd] from market chart
+ * @param targetTimestampMs - Target timestamp in milliseconds
+ * @returns USD price at the nearest data point
+ */
+export function findClosestPrice(
+  prices: [number, number][],
+  targetTimestampMs: number,
+): number {
+  if (prices.length === 0) return 0;
+  if (prices.length === 1) return prices[0]![1];
+
+  let lo = 0;
+  let hi = prices.length - 1;
+
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (prices[mid]![0] < targetTimestampMs) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+
+  // lo is the first index >= target. Compare with lo-1 if it exists.
+  if (lo === 0) return prices[0]![1];
+  const before = prices[lo - 1]!;
+  const after = prices[lo]!;
+  const diffBefore = targetTimestampMs - before[0];
+  const diffAfter = after[0] - targetTimestampMs;
+  return diffBefore <= diffAfter ? before[1] : after[1];
+}
+
+/**
  * Response from /coins/{id}/history endpoint
  */
 export interface CoinGeckoHistoricalData {
@@ -1018,6 +1068,111 @@ export class CoinGeckoClient {
       log.methodError(this.logger, 'getHistoricalPrice', wrappedError, {
         coinId,
         date: dateStr,
+      });
+      throw wrappedError;
+    }
+  }
+
+  /**
+   * Get historical price time series for a date range.
+   *
+   * Uses the /coins/{id}/market_chart/range endpoint which returns price data
+   * at varying auto-granularity based on the range:
+   *   - 1 day (past): hourly data
+   *   - 2–90 days: hourly data
+   *   - 90+ days: daily data (00:00 UTC)
+   *
+   * Results are cached for 30 days (immutable historical data).
+   *
+   * @param coinId - CoinGecko coin ID (e.g., 'ethereum')
+   * @param fromTimestamp - Start of range in Unix seconds
+   * @param toTimestamp - End of range in Unix seconds
+   * @returns Market chart data with prices, market_caps, total_volumes arrays
+   * @throws CoinGeckoApiError if API request fails
+   *
+   * @example
+   * ```typescript
+   * const client = CoinGeckoClient.getInstance();
+   * const chart = await client.getMarketChartRange('ethereum', 1700000000, 1702000000);
+   * // chart.prices = [[1700000000000, 2050.5], [1700003600000, 2052.1], ...]
+   * ```
+   */
+  async getMarketChartRange(
+    coinId: string,
+    fromTimestamp: number,
+    toTimestamp: number,
+  ): Promise<CoinGeckoMarketChartData> {
+    log.methodEntry(this.logger, 'getMarketChartRange', { coinId, fromTimestamp, toTimestamp });
+
+    const cacheKey = `coingecko:market-chart:${coinId}:${fromTimestamp}:${toTimestamp}`;
+
+    // Check distributed cache first
+    const cached = await this.cacheService.get<CoinGeckoMarketChartData>(cacheKey);
+    if (cached) {
+      log.cacheHit(this.logger, 'getMarketChartRange', cacheKey);
+      log.methodExit(this.logger, 'getMarketChartRange', {
+        coinId,
+        pricePoints: cached.prices.length,
+        fromCache: true,
+      });
+      return cached;
+    }
+
+    log.cacheMiss(this.logger, 'getMarketChartRange', cacheKey);
+
+    try {
+      log.externalApiCall(this.logger, 'CoinGecko', `/coins/${coinId}/market_chart/range`, {
+        fromTimestamp,
+        toTimestamp,
+      });
+
+      const response = await this.scheduledFetch(
+        `${this.baseUrl}/coins/${coinId}/market_chart/range?vs_currency=usd&from=${fromTimestamp}&to=${toTimestamp}`
+      );
+
+      if (!response.ok) {
+        const error = new CoinGeckoApiError(
+          `CoinGecko API error: ${response.status} ${response.statusText}`,
+          response.status
+        );
+        log.methodError(this.logger, 'getMarketChartRange', error, {
+          coinId,
+          fromTimestamp,
+          toTimestamp,
+          statusCode: response.status,
+        });
+        throw error;
+      }
+
+      const data = (await response.json()) as CoinGeckoMarketChartData;
+
+      this.logger.debug(
+        { coinId, pricePoints: data.prices.length, fromTimestamp, toTimestamp },
+        'Retrieved market chart range from CoinGecko API'
+      );
+
+      // Store in distributed cache (long TTL for historical data)
+      await this.cacheService.set(cacheKey, data, this.historicalCacheTimeout);
+
+      log.methodExit(this.logger, 'getMarketChartRange', {
+        coinId,
+        pricePoints: data.prices.length,
+        fromCache: false,
+      });
+
+      return data;
+    } catch (error) {
+      if (error instanceof CoinGeckoApiError) {
+        throw error;
+      }
+
+      const wrappedError = new CoinGeckoApiError(
+        `Failed to fetch market chart range for ${coinId}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      log.methodError(this.logger, 'getMarketChartRange', wrappedError, {
+        coinId,
+        fromTimestamp,
+        toTimestamp,
       });
       throw wrappedError;
     }

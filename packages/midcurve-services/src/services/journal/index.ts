@@ -7,3 +7,4 @@
 export { JournalService } from './journal-service.js';
 export type { JournalServiceDependencies } from './journal-service.js';
 export { JournalLineBuilder } from './journal-line-builder.js';
+export { JournalBackfillService } from './journal-backfill-service.js';

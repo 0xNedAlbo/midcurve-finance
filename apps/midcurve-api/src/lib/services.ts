@@ -33,6 +33,7 @@ import {
   SwapRouterService,
   NavSnapshotService,
   JournalService,
+  JournalBackfillService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -298,4 +299,11 @@ export function getNavSnapshotService(): NavSnapshotService {
  */
 export function getJournalService(): JournalService {
   return JournalService.getInstance();
+}
+
+/**
+ * Get singleton instance of JournalBackfillService
+ */
+export function getJournalBackfillService(): JournalBackfillService {
+  return JournalBackfillService.getInstance();
 }
