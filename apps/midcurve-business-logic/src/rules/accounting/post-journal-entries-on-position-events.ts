@@ -384,64 +384,89 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   /**
    * position.state.refreshed → Fee accrual + M2M value change
    *
-   * Two independent sub-entries:
+   * Two independent sub-entries (each with its own suffixed domainEventId):
    * A) Fee accrual: DR 1002 / CR 4000 (if unclaimed fees increased)
    * B) M2M: DR/CR 1001 vs 4200/5200 (unrealized gain/loss change)
    */
   private async handleStateRefreshed(
     event: DomainEvent<PositionStateRefreshedPayload>
   ): Promise<void> {
-    if (await this.journalService.isProcessed(event.id)) return;
-
-    const { positionId, unrealizedPnl } = event.payload;
-
-    const position = await prisma.position.findUnique({
-      where: { id: positionId },
-      select: { userId: true, positionHash: true },
-    });
-    if (!position?.positionHash) return;
-
-    const instrumentRef = position.positionHash;
+    const { positionId, positionHash, unrealizedPnl, unClaimedFees } = event.payload;
+    const instrumentRef = positionHash;
 
     // Skip pre-existing positions (no backfill)
     if (!(await this.journalService.hasEntriesForInstrument(instrumentRef))) return;
 
-    const userId = position.userId;
+    const userId = await this.getPositionUserId(positionId);
+
+    // Sub-entry A: Fee accrual
+    // Compare current unclaimed fees with what's already accrued in account 1002
+    const feeAccrualEventId = `${event.id}:fee-accrual`;
+    if (!(await this.journalService.isProcessed(feeAccrualEventId))) {
+      const currentAccrued = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.ACCRUED_FEE_INCOME,
+        instrumentRef
+      );
+
+      const newUnclaimedFees = BigInt(unClaimedFees);
+      const feeDelta = newUnclaimedFees - currentAccrued;
+
+      if (feeDelta > 0n) {
+        const feeBuilder = new JournalLineBuilder();
+        const feeDeltaStr = feeDelta.toString();
+        feeBuilder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, feeDeltaStr, instrumentRef);
+        feeBuilder.credit(ACCOUNT_CODES.FEE_INCOME, feeDeltaStr, instrumentRef);
+
+        await this.journalService.createEntry(
+          {
+            userId,
+            domainEventId: feeAccrualEventId,
+            domainEventType: event.type,
+            entryDate: new Date(event.timestamp),
+            description: `Fee accrual: ${instrumentRef}`,
+          },
+          feeBuilder.build()
+        );
+      }
+    }
 
     // Sub-entry B: M2M unrealized P&L change
     // Compare new unrealizedPnl with the current balance of 1001
-    const currentUnrealized = await this.journalService.getAccountBalance(
-      ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-      instrumentRef
-    );
-
-    const newUnrealized = BigInt(unrealizedPnl);
-    const delta = newUnrealized - currentUnrealized;
-
-    if (delta !== 0n) {
-      const builder = new JournalLineBuilder();
-      const absDelta = absBigintValue(delta).toString();
-
-      if (delta > 0n) {
-        // Value increased
-        builder.debit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absDelta, instrumentRef);
-        builder.credit(ACCOUNT_CODES.UNREALIZED_GAINS, absDelta, instrumentRef);
-      } else {
-        // Value decreased
-        builder.debit(ACCOUNT_CODES.UNREALIZED_LOSSES, absDelta, instrumentRef);
-        builder.credit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absDelta, instrumentRef);
-      }
-
-      await this.journalService.createEntry(
-        {
-          userId,
-          domainEventId: event.id,
-          domainEventType: event.type,
-          entryDate: new Date(event.timestamp),
-          description: `Mark-to-market: ${instrumentRef}`,
-        },
-        builder.build()
+    const m2mEventId = `${event.id}:m2m`;
+    if (!(await this.journalService.isProcessed(m2mEventId))) {
+      const currentUnrealized = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
+        instrumentRef
       );
+
+      const newUnrealized = BigInt(unrealizedPnl);
+      const delta = newUnrealized - currentUnrealized;
+
+      if (delta !== 0n) {
+        const builder = new JournalLineBuilder();
+        const absDelta = absBigintValue(delta).toString();
+
+        if (delta > 0n) {
+          // Value increased
+          builder.debit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absDelta, instrumentRef);
+          builder.credit(ACCOUNT_CODES.UNREALIZED_GAINS, absDelta, instrumentRef);
+        } else {
+          // Value decreased
+          builder.debit(ACCOUNT_CODES.UNREALIZED_LOSSES, absDelta, instrumentRef);
+          builder.credit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absDelta, instrumentRef);
+        }
+
+        await this.journalService.createEntry(
+          {
+            userId,
+            domainEventId: m2mEventId,
+            domainEventType: event.type,
+            entryDate: new Date(event.timestamp),
+            description: `Mark-to-market: ${instrumentRef}`,
+          },
+          builder.build()
+        );
+      }
     }
   }
 
