@@ -37,6 +37,7 @@ import {
   type PositionStateRefreshedPayload,
   type PositionLiquidityRevertedPayload,
 } from '@midcurve/services';
+import type { JournalLineInput } from '@midcurve/shared';
 import { BusinessRule } from '../base';
 
 // =============================================================================
@@ -604,29 +605,43 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     }
 
     // --- Part B: Cost basis remainder correction (Account 1000) ---
+    // The quote token balance may be 0 while the reporting currency balance is not,
+    // due to different exchange rates at deposit vs withdrawal time. Check both.
     const costBasisCorrectionEventId = `${event.id}:cost-basis-correction`;
     if (!(await this.journalService.isProcessed(costBasisCorrectionEventId))) {
-      const costBasisBalance = await this.journalService.getAccountBalance(
-        ACCOUNT_CODES.LP_POSITION_AT_COST,
-        positionRef
+      const costBasisQuote = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef
+      );
+      const costBasisReporting = await this.journalService.getAccountBalanceReporting(
+        ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef
       );
 
-      if (costBasisBalance !== 0n) {
+      if (costBasisQuote !== 0n || costBasisReporting !== 0n) {
         const ctx = await this.getReportingContext(position.id);
         const instrumentRef = ctx.poolHash;
-        const builder = new JournalLineBuilder()
-          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-        const absBalance = absBigintValue(costBasisBalance).toString();
+        const absQuote = absBigintValue(costBasisQuote).toString();
+        const absReporting = absBigintValue(costBasisReporting).toString();
+        // Determine direction from whichever balance is non-zero
+        // (if quote is 0, the sign comes from reporting; if both non-zero, they agree)
+        const isOverCredited = costBasisQuote < 0n || (costBasisQuote === 0n && costBasisReporting < 0n);
 
-        if (costBasisBalance > 0n) {
-          // Under-credited: cost basis left over → realized loss
-          builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
-          builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absBalance, positionRef, instrumentRef);
-        } else {
-          // Over-credited: more credited than debited → realized gain
-          builder.debit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
-          builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absBalance, positionRef, instrumentRef);
-        }
+        const lines: JournalLineInput[] = isOverCredited
+          ? [
+              { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+              { accountCode: ACCOUNT_CODES.REALIZED_GAINS, side: 'credit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+            ]
+          : [
+              { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+              { accountCode: ACCOUNT_CODES.REALIZED_LOSSES, side: 'debit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+            ];
 
         await this.journalService.createEntry(
           {
@@ -637,7 +652,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
             entryDate: new Date(event.timestamp),
             description: `Cost basis correction: ${positionRef}`,
           },
-          builder.build()
+          lines
         );
       }
     }
@@ -645,27 +660,37 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     // --- Part C: Accrued fee remainder correction (Account 1002) ---
     const feeAccrualCorrectionEventId = `${event.id}:fee-accrual-correction`;
     if (!(await this.journalService.isProcessed(feeAccrualCorrectionEventId))) {
-      const accruedFeeBalance = await this.journalService.getAccountBalance(
-        ACCOUNT_CODES.ACCRUED_FEE_INCOME,
-        positionRef
+      const feeQuote = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef
+      );
+      const feeReporting = await this.journalService.getAccountBalanceReporting(
+        ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef
       );
 
-      if (accruedFeeBalance !== 0n) {
+      if (feeQuote !== 0n || feeReporting !== 0n) {
         const ctx = await this.getReportingContext(position.id);
         const instrumentRef = ctx.poolHash;
-        const builder = new JournalLineBuilder()
-          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-        const absBalance = absBigintValue(accruedFeeBalance).toString();
+        const absQuote = absBigintValue(feeQuote).toString();
+        const absReporting = absBigintValue(feeReporting).toString();
+        const isPositive = feeQuote > 0n || (feeQuote === 0n && feeReporting > 0n);
 
-        if (accruedFeeBalance > 0n) {
-          // Accrued fees never collected → reverse the accrual
-          builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
-          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
-        } else {
-          // Over-collected → reverse
-          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
-          builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
-        }
+        const lines: JournalLineInput[] = isPositive
+          ? [
+              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'credit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'debit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+            ]
+          : [
+              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'debit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'credit', amountQuote: absQuote,
+                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
+            ];
 
         await this.journalService.createEntry(
           {
@@ -676,7 +701,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
             entryDate: new Date(event.timestamp),
             description: `Accrued fee correction: ${positionRef}`,
           },
-          builder.build()
+          lines
         );
       }
     }

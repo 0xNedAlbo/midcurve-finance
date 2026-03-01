@@ -15,7 +15,7 @@
  */
 
 import { prisma as prismaClient, type PrismaClient } from '@midcurve/database';
-import { ACCOUNT_CODES, LEDGER_REF_PREFIX } from '@midcurve/shared';
+import { ACCOUNT_CODES, LEDGER_REF_PREFIX, type JournalLineInput } from '@midcurve/shared';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { CoinGeckoClient, findClosestPrice } from '../../clients/coingecko/index.js';
@@ -285,25 +285,38 @@ export class JournalBackfillService {
         : { reportingCurrency, exchangeRate: '100000000', quoteTokenDecimals: quoteToken.decimals };
 
       // Cost basis remainder correction (Account 1000)
+      // Check both quote and reporting balances — the mismatch may only exist in reporting
       const costBasisCorrectionEventId = `backfill:${positionId}:cost-basis-correction`;
       if (!(await this.journalService.isProcessed(costBasisCorrectionEventId))) {
-        const costBasisBalance = await this.journalService.getAccountBalance(
-          ACCOUNT_CODES.LP_POSITION_AT_COST,
-          positionRef,
+        const costBasisQuote = await this.journalService.getAccountBalance(
+          ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef,
+        );
+        const costBasisReporting = await this.journalService.getAccountBalanceReporting(
+          ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef,
         );
 
-        if (costBasisBalance !== 0n) {
-          const builder = new JournalLineBuilder()
-            .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
-          const absBalance = absBigintValue(costBasisBalance).toString();
+        if (costBasisQuote !== 0n || costBasisReporting !== 0n) {
+          const absQuote = absBigintValue(costBasisQuote).toString();
+          const absReporting = absBigintValue(costBasisReporting).toString();
+          const isOverCredited = costBasisQuote < 0n || (costBasisQuote === 0n && costBasisReporting < 0n);
 
-          if (costBasisBalance > 0n) {
-            builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
-            builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absBalance, positionRef, instrumentRef);
-          } else {
-            builder.debit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
-            builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absBalance, positionRef, instrumentRef);
-          }
+          const lines: JournalLineInput[] = isOverCredited
+            ? [
+                { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+                { accountCode: ACCOUNT_CODES.REALIZED_GAINS, side: 'credit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+              ]
+            : [
+                { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+                { accountCode: ACCOUNT_CODES.REALIZED_LOSSES, side: 'debit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+              ];
 
           await this.journalService.createEntry(
             {
@@ -314,7 +327,7 @@ export class JournalBackfillService {
               entryDate: new Date(),
               description: `Cost basis correction (backfill): ${positionRef}`,
             },
-            builder.build(),
+            lines,
           );
           entriesCreated++;
         }
@@ -323,23 +336,35 @@ export class JournalBackfillService {
       // Accrued fee remainder correction (Account 1002)
       const feeAccrualCorrectionEventId = `backfill:${positionId}:fee-accrual-correction`;
       if (!(await this.journalService.isProcessed(feeAccrualCorrectionEventId))) {
-        const accruedFeeBalance = await this.journalService.getAccountBalance(
-          ACCOUNT_CODES.ACCRUED_FEE_INCOME,
-          positionRef,
+        const feeQuote = await this.journalService.getAccountBalance(
+          ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef,
+        );
+        const feeReporting = await this.journalService.getAccountBalanceReporting(
+          ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef,
         );
 
-        if (accruedFeeBalance !== 0n) {
-          const builder = new JournalLineBuilder()
-            .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
-          const absBalance = absBigintValue(accruedFeeBalance).toString();
+        if (feeQuote !== 0n || feeReporting !== 0n) {
+          const absQuote = absBigintValue(feeQuote).toString();
+          const absReporting = absBigintValue(feeReporting).toString();
+          const isPositive = feeQuote > 0n || (feeQuote === 0n && feeReporting > 0n);
 
-          if (accruedFeeBalance > 0n) {
-            builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
-            builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
-          } else {
-            builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
-            builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
-          }
+          const lines: JournalLineInput[] = isPositive
+            ? [
+                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'credit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'debit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+              ]
+            : [
+                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'debit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'credit', amountQuote: absQuote,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  positionRef, instrumentRef },
+              ];
 
           await this.journalService.createEntry(
             {
@@ -350,7 +375,7 @@ export class JournalBackfillService {
               entryDate: new Date(),
               description: `Accrued fee correction (backfill): ${positionRef}`,
             },
-            builder.build(),
+            lines,
           );
           entriesCreated++;
         }
