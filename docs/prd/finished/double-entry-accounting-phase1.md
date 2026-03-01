@@ -2,7 +2,7 @@
 ## Product Requirements Document · Midcurve Finance
 
 **Version 1.0 | February 2026**
-**Status: DRAFT | Classification: Internal**
+**Status: IMPLEMENTED | Classification: Internal**
 
 ---
 
@@ -707,3 +707,28 @@ For readers unfamiliar with double-entry bookkeeping:
 - **Assets = Liabilities + Equity** (the accounting equation). In Phase 1 with no liabilities: **Assets = Equity**.
 - **Mark-to-Market** means revaluing assets to current market prices at regular intervals, with the change recorded as unrealized gain or loss.
 - **Realized** means a gain or loss has been crystallized by an actual transaction (withdrawal, close). **Unrealized** means the gain or loss exists on paper only.
+
+---
+
+## Implementation Summary
+
+**Completed: February 2026**
+
+Phase 1 was implemented across 12 commits covering the full scope: database schema with multi-schema accounting tables, chart of accounts seeding, journal service, journal consumer for all position domain events, daily NAV snapshot cron with batched multicall and CoinGecko spot prices, reporting currency conversion at write time, tracked instruments with UI toggle, backfill of journal entries from ledger history on position tracking, accounting API endpoints, PATCH user/me for reporting currency, and a P&L summary tab on the dashboard.
+
+Design decision #1 (historical backfill) was reversed — backfill from existing `PositionLedgerEvent` records was implemented. Gas cost tracking (decision #2) remains deferred.
+
+### Commits
+
+- [`53fa051`](https://github.com/0xNedAlbo/midcurve-finance/commit/53fa051) feat: add double-entry accounting schema, types, and journal service
+- [`6cb29e9`](https://github.com/0xNedAlbo/midcurve-finance/commit/6cb29e9) feat: add journal consumer for position domain events
+- [`4df780e`](https://github.com/0xNedAlbo/midcurve-finance/commit/4df780e) fix: skip journal entries for pre-existing positions (no backfill)
+- [`3489f0e`](https://github.com/0xNedAlbo/midcurve-finance/commit/3489f0e) refactor: add discriminator prefix to ledgerEventRef
+- [`407ebb6`](https://github.com/0xNedAlbo/midcurve-finance/commit/407ebb6) feat: add Phase 1B foundations (payload, batch reader, NavSnapshotService, API types)
+- [`bfacb82`](https://github.com/0xNedAlbo/midcurve-finance/commit/bfacb82) feat: add DailyNavSnapshotRule for position refresh and NAV snapshots
+- [`b16a4e8`](https://github.com/0xNedAlbo/midcurve-finance/commit/b16a4e8) feat: add fee accrual sub-entry to handleStateRefreshed
+- [`b94ae70`](https://github.com/0xNedAlbo/midcurve-finance/commit/b94ae70) feat: add accounting API endpoints and PATCH user/me
+- [`a4491bf`](https://github.com/0xNedAlbo/midcurve-finance/commit/a4491bf) feat: add tracked instruments and write-time reporting currency conversion
+- [`b2200db`](https://github.com/0xNedAlbo/midcurve-finance/commit/b2200db) feat: add track/untrack position in accounting with UI toggle
+- [`04256f4`](https://github.com/0xNedAlbo/midcurve-finance/commit/04256f4) feat: backfill journal entries from ledger history on position tracking
+- [`97fa734`](https://github.com/0xNedAlbo/midcurve-finance/commit/97fa734) feat: add P&L summary tab to dashboard with accounting overview
