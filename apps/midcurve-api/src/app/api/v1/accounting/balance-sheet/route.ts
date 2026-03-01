@@ -87,14 +87,24 @@ export async function GET(request: NextRequest): Promise<Response> {
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, user.id),
       ]);
 
+      // Sign adjustment: getUserAccountBalanceReporting returns debits - credits.
+      // Credit-normal accounts need negation so positive balances show as positive.
+      // Capital Returned is debit-normal but negated for display (it reduces equity).
+      const adjContributedCapital = -contributedCapital;
+      const adjCapitalReturned = -capitalReturned;
+      const adjFeeIncome = -feeIncome;
+      const adjAccruedFeeIncome = -accruedFeeIncome;
+      const adjRealizedGains = -realizedGains;
+      const adjUnrealizedGains = -unrealizedGains;
+
       // Compute current values
       const curTotalAssets = depositedLiquidity + markToMarket + unclaimedFees;
-      const curRealizedWithdrawals = realizedGains - realizedLosses;
-      const curRealizedFees = feeIncome;
-      const curUnrealizedPrice = unrealizedGains - unrealizedLosses;
-      const curUnrealizedFees = accruedFeeIncome;
+      const curRealizedWithdrawals = adjRealizedGains - realizedLosses;
+      const curRealizedFees = adjFeeIncome;
+      const curUnrealizedPrice = adjUnrealizedGains - unrealizedLosses;
+      const curUnrealizedFees = adjAccruedFeeIncome;
       const curTotalRetainedEarnings = curRealizedWithdrawals + curRealizedFees + curUnrealizedPrice + curUnrealizedFees;
-      const curTotalEquity = contributedCapital - capitalReturned + curTotalRetainedEarnings;
+      const curTotalEquity = adjContributedCapital + adjCapitalReturned + curTotalRetainedEarnings;
 
       // Previous column: read from closest NAV snapshot
       const previousSnapshot = await navSnapshotService.getSnapshotAtBoundary(user.id, previousEnd);
@@ -125,8 +135,9 @@ export async function GET(request: NextRequest): Promise<Response> {
         prevRealizedFees = BigInt(previousSnapshot.retainedRealizedFees);
         prevUnrealizedPrice = BigInt(previousSnapshot.retainedUnrealizedPrice);
         prevUnrealizedFees = BigInt(previousSnapshot.retainedUnrealizedFees);
+        prevCapitalReturned = -prevCapitalReturned;
         prevTotalRetainedEarnings = prevRealizedWithdrawals + prevRealizedFees + prevUnrealizedPrice + prevUnrealizedFees;
-        prevTotalEquity = prevContributedCapital - prevCapitalReturned + prevTotalRetainedEarnings;
+        prevTotalEquity = prevContributedCapital + prevCapitalReturned + prevTotalRetainedEarnings;
       }
 
       const response: BalanceSheetResponse = {
@@ -144,8 +155,8 @@ export async function GET(request: NextRequest): Promise<Response> {
           totalLiabilities: buildLineItem(0n, 0n),
         },
         equity: {
-          contributedCapital: buildLineItem(contributedCapital, prevContributedCapital),
-          capitalReturned: buildLineItem(capitalReturned, prevCapitalReturned),
+          contributedCapital: buildLineItem(adjContributedCapital, prevContributedCapital),
+          capitalReturned: buildLineItem(adjCapitalReturned, prevCapitalReturned),
           retainedEarnings: {
             realizedFromWithdrawals: buildLineItem(curRealizedWithdrawals, prevRealizedWithdrawals),
             realizedFromCollectedFees: buildLineItem(curRealizedFees, prevRealizedFees),
