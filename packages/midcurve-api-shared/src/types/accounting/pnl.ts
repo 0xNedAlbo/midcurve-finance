@@ -9,6 +9,8 @@ import { z } from 'zod';
 export const PeriodQuerySchema = z.enum(['day', 'week', 'month', 'quarter', 'year']);
 export type PeriodQuery = z.infer<typeof PeriodQuerySchema>;
 
+export const OffsetQuerySchema = z.coerce.number().int().max(0).default(0);
+
 export interface PnlPositionItem {
   positionRef: string;
   nftId: string;

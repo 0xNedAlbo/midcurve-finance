@@ -5,6 +5,7 @@ export type {
 
 export {
   PeriodQuerySchema,
+  OffsetQuerySchema,
   type PeriodQuery,
   type PnlResponse,
   type PnlInstrumentItem,

@@ -17,6 +17,7 @@ import {
   ApiErrorCode,
   ErrorCodeToHttpStatus,
   PeriodQuerySchema,
+  OffsetQuerySchema,
   type PnlResponse,
   type PnlInstrumentItem,
   type PnlPositionItem,
@@ -55,7 +56,10 @@ export async function GET(request: NextRequest): Promise<Response> {
       }
 
       const period = periodResult.data;
-      const { currentStart: startDate, currentEnd: endDate } = getCalendarPeriodBoundaries(period);
+      const offsetParam = url.searchParams.get('offset') ?? '0';
+      const offsetResult = OffsetQuerySchema.safeParse(offsetParam);
+      const offset = offsetResult.success ? offsetResult.data : 0;
+      const { currentStart: startDate, currentEnd: endDate } = getCalendarPeriodBoundaries(period, new Date(), offset);
 
       // Query journal lines within date range for this user
       const journalLines = await prisma.journalLine.findMany({
