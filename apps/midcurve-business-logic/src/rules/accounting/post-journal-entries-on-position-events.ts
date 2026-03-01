@@ -549,56 +549,137 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
   /**
    * position.closed → Reclassify remaining unrealized → realized
+   *                  + zero out cost basis remainder
+   *                  + zero out accrued fee remainder
    *
    * The actual withdrawal was handled by decrease/collect events.
-   * This entry zeroes out any remaining unrealized P&L.
+   * This handler creates up to three corrective entries:
+   * A) Reclassify remaining unrealized P&L (Account 1001)
+   * B) Zero out cost basis remainder (Account 1000) — fixes exchange rate mismatch
+   * C) Zero out accrued fee remainder (Account 1002)
    */
   private async handlePositionClosed(
     event: DomainEvent<PositionClosedPayload>
   ): Promise<void> {
-    if (await this.journalService.isProcessed(event.id)) return;
-
     const position = event.payload;
     const positionRef = position.positionHash;
 
     const trackedPositionId = await this.journalService.getTrackedPositionId(position.userId, positionRef);
     if (!trackedPositionId) return;
 
-    // Check remaining unrealized balance
-    const unrealizedBalance = await this.journalService.getAccountBalance(
-      ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-      positionRef
-    );
+    // --- Part A: Reclassify remaining unrealized P&L (Account 1001) ---
+    if (!(await this.journalService.isProcessed(event.id))) {
+      const unrealizedBalance = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
+        positionRef
+      );
 
-    if (unrealizedBalance === 0n) return; // Nothing to reclassify
+      if (unrealizedBalance !== 0n) {
+        const ctx = await this.getReportingContext(position.id);
+        const instrumentRef = ctx.poolHash;
+        const builder = new JournalLineBuilder()
+          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        const absAmount = absBigintValue(unrealizedBalance).toString();
 
-    const ctx = await this.getReportingContext(position.id);
-    const instrumentRef = ctx.poolHash;
-    const builder = new JournalLineBuilder()
-      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-    const absAmount = absBigintValue(unrealizedBalance).toString();
+        if (unrealizedBalance > 0n) {
+          builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, absAmount, positionRef, instrumentRef);
+          builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absAmount, positionRef, instrumentRef);
+        } else {
+          builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, absAmount, positionRef, instrumentRef);
+          builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absAmount, positionRef, instrumentRef);
+        }
 
-    if (unrealizedBalance > 0n) {
-      // Unrealized gain → reclassify to realized gain
-      builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, absAmount, positionRef, instrumentRef);
-      builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absAmount, positionRef, instrumentRef);
-    } else {
-      // Unrealized loss → reclassify to realized loss
-      builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, absAmount, positionRef, instrumentRef);
-      builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absAmount, positionRef, instrumentRef);
+        await this.journalService.createEntry(
+          {
+            userId: position.userId,
+            trackedPositionId,
+            domainEventId: event.id,
+            domainEventType: event.type,
+            entryDate: new Date(event.timestamp),
+            description: `Position closed: ${positionRef}`,
+          },
+          builder.build()
+        );
+      }
     }
 
-    await this.journalService.createEntry(
-      {
-        userId: position.userId,
-        trackedPositionId,
-        domainEventId: event.id,
-        domainEventType: event.type,
-        entryDate: new Date(event.timestamp),
-        description: `Position closed: ${positionRef}`,
-      },
-      builder.build()
-    );
+    // --- Part B: Cost basis remainder correction (Account 1000) ---
+    const costBasisCorrectionEventId = `${event.id}:cost-basis-correction`;
+    if (!(await this.journalService.isProcessed(costBasisCorrectionEventId))) {
+      const costBasisBalance = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.LP_POSITION_AT_COST,
+        positionRef
+      );
+
+      if (costBasisBalance !== 0n) {
+        const ctx = await this.getReportingContext(position.id);
+        const instrumentRef = ctx.poolHash;
+        const builder = new JournalLineBuilder()
+          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        const absBalance = absBigintValue(costBasisBalance).toString();
+
+        if (costBasisBalance > 0n) {
+          // Under-credited: cost basis left over → realized loss
+          builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
+          builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absBalance, positionRef, instrumentRef);
+        } else {
+          // Over-credited: more credited than debited → realized gain
+          builder.debit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
+          builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absBalance, positionRef, instrumentRef);
+        }
+
+        await this.journalService.createEntry(
+          {
+            userId: position.userId,
+            trackedPositionId,
+            domainEventId: costBasisCorrectionEventId,
+            domainEventType: event.type,
+            entryDate: new Date(event.timestamp),
+            description: `Cost basis correction: ${positionRef}`,
+          },
+          builder.build()
+        );
+      }
+    }
+
+    // --- Part C: Accrued fee remainder correction (Account 1002) ---
+    const feeAccrualCorrectionEventId = `${event.id}:fee-accrual-correction`;
+    if (!(await this.journalService.isProcessed(feeAccrualCorrectionEventId))) {
+      const accruedFeeBalance = await this.journalService.getAccountBalance(
+        ACCOUNT_CODES.ACCRUED_FEE_INCOME,
+        positionRef
+      );
+
+      if (accruedFeeBalance !== 0n) {
+        const ctx = await this.getReportingContext(position.id);
+        const instrumentRef = ctx.poolHash;
+        const builder = new JournalLineBuilder()
+          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        const absBalance = absBigintValue(accruedFeeBalance).toString();
+
+        if (accruedFeeBalance > 0n) {
+          // Accrued fees never collected → reverse the accrual
+          builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
+          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
+        } else {
+          // Over-collected → reverse
+          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
+          builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
+        }
+
+        await this.journalService.createEntry(
+          {
+            userId: position.userId,
+            trackedPositionId,
+            domainEventId: feeAccrualCorrectionEventId,
+            domainEventType: event.type,
+            entryDate: new Date(event.timestamp),
+            description: `Accrued fee correction: ${positionRef}`,
+          },
+          builder.build()
+        );
+      }
+    }
   }
 
   /**

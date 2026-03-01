@@ -115,6 +115,7 @@ export class JournalBackfillService {
         unrealizedPnl: true,
         unClaimedFees: true,
         isActive: true,
+        state: true,
         user: { select: { reportingCurrency: true } },
         pool: {
           select: {
@@ -265,6 +266,89 @@ export class JournalBackfillService {
               domainEventType: 'backfill.m2m',
               entryDate: new Date(),
               description: `Mark-to-market (backfill): ${positionRef}`,
+            },
+            builder.build(),
+          );
+          entriesCreated++;
+        }
+      }
+    }
+
+    // Remainder corrections for closed positions
+    // Uses state.isClosed (not isActive — that's only set false on burn)
+    const positionState = position.state as Record<string, unknown>;
+    const isClosed = positionState.isClosed === true;
+
+    if (isClosed) {
+      const spotCtx = position.isActive
+        ? await this.getSpotReportingContext(reportingCurrency, quoteToken.decimals, quoteToken.coingeckoId)
+        : { reportingCurrency, exchangeRate: '100000000', quoteTokenDecimals: quoteToken.decimals };
+
+      // Cost basis remainder correction (Account 1000)
+      const costBasisCorrectionEventId = `backfill:${positionId}:cost-basis-correction`;
+      if (!(await this.journalService.isProcessed(costBasisCorrectionEventId))) {
+        const costBasisBalance = await this.journalService.getAccountBalance(
+          ACCOUNT_CODES.LP_POSITION_AT_COST,
+          positionRef,
+        );
+
+        if (costBasisBalance !== 0n) {
+          const builder = new JournalLineBuilder()
+            .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
+          const absBalance = absBigintValue(costBasisBalance).toString();
+
+          if (costBasisBalance > 0n) {
+            builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
+            builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absBalance, positionRef, instrumentRef);
+          } else {
+            builder.debit(ACCOUNT_CODES.LP_POSITION_AT_COST, absBalance, positionRef, instrumentRef);
+            builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absBalance, positionRef, instrumentRef);
+          }
+
+          await this.journalService.createEntry(
+            {
+              userId,
+              trackedPositionId,
+              domainEventId: costBasisCorrectionEventId,
+              domainEventType: 'position.closed',
+              entryDate: new Date(),
+              description: `Cost basis correction (backfill): ${positionRef}`,
+            },
+            builder.build(),
+          );
+          entriesCreated++;
+        }
+      }
+
+      // Accrued fee remainder correction (Account 1002)
+      const feeAccrualCorrectionEventId = `backfill:${positionId}:fee-accrual-correction`;
+      if (!(await this.journalService.isProcessed(feeAccrualCorrectionEventId))) {
+        const accruedFeeBalance = await this.journalService.getAccountBalance(
+          ACCOUNT_CODES.ACCRUED_FEE_INCOME,
+          positionRef,
+        );
+
+        if (accruedFeeBalance !== 0n) {
+          const builder = new JournalLineBuilder()
+            .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
+          const absBalance = absBigintValue(accruedFeeBalance).toString();
+
+          if (accruedFeeBalance > 0n) {
+            builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
+            builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
+          } else {
+            builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, absBalance, positionRef, instrumentRef);
+            builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, absBalance, positionRef, instrumentRef);
+          }
+
+          await this.journalService.createEntry(
+            {
+              userId,
+              trackedPositionId,
+              domainEventId: feeAccrualCorrectionEventId,
+              domainEventType: 'position.closed',
+              entryDate: new Date(),
+              description: `Accrued fee correction (backfill): ${positionRef}`,
             },
             builder.build(),
           );
