@@ -90,12 +90,14 @@ export class JournalBackfillService {
    * @param userId - Owner user ID
    * @param positionRef - Position hash (e.g., "uniswapv3/42161/5334690")
    * @param instrumentRef - Pool hash (e.g., "uniswapv3/42161/0x8ad5...")
+   * @param trackedPositionId - FK to TrackedPosition row
    */
   async backfillPosition(
     positionId: string,
     userId: string,
     positionRef: string,
     instrumentRef: string,
+    trackedPositionId: string,
   ): Promise<BackfillResult> {
     // Guard: if entries already exist, skip (already backfilled or live events created entries)
     if (await this.journalService.hasEntriesForPosition(positionRef)) {
@@ -189,15 +191,15 @@ export class JournalBackfillService {
       switch (event.eventType) {
         case 'INCREASE_POSITION':
           created = await this.backfillLiquidityIncreased(
-            event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent,
+            event, ctx, positionRef, instrumentRef, userId, trackedPositionId, isFirstFinancialEvent,
           );
           isFirstFinancialEvent = false;
           break;
         case 'DECREASE_POSITION':
-          created = await this.backfillLiquidityDecreased(event, ctx, positionRef, instrumentRef, userId);
+          created = await this.backfillLiquidityDecreased(event, ctx, positionRef, instrumentRef, userId, trackedPositionId);
           break;
         case 'COLLECT':
-          created = await this.backfillFeesCollected(event, ctx, positionRef, instrumentRef, userId);
+          created = await this.backfillFeesCollected(event, ctx, positionRef, instrumentRef, userId, trackedPositionId);
           break;
       }
 
@@ -226,6 +228,7 @@ export class JournalBackfillService {
           await this.journalService.createEntry(
             {
               userId,
+              trackedPositionId,
               domainEventId: feeEventId,
               domainEventType: 'backfill.fee-accrual',
               entryDate: new Date(),
@@ -257,6 +260,7 @@ export class JournalBackfillService {
           await this.journalService.createEntry(
             {
               userId,
+              trackedPositionId,
               domainEventId: m2mEventId,
               domainEventType: 'backfill.m2m',
               entryDate: new Date(),
@@ -293,6 +297,7 @@ export class JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
+    trackedPositionId: string,
     isFoundation: boolean,
   ): Promise<boolean> {
     const domainEventId = isFoundation
@@ -313,6 +318,7 @@ export class JournalBackfillService {
     await this.journalService.createEntry(
       {
         userId,
+        trackedPositionId,
         domainEventId,
         domainEventType: isFoundation ? 'position.created' : 'position.liquidity.increased',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
@@ -336,6 +342,7 @@ export class JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
+    trackedPositionId: string,
   ): Promise<boolean> {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
@@ -388,6 +395,7 @@ export class JournalBackfillService {
     await this.journalService.createEntry(
       {
         userId,
+        trackedPositionId,
         domainEventId,
         domainEventType: 'position.liquidity.decreased',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
@@ -412,6 +420,7 @@ export class JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
+    trackedPositionId: string,
   ): Promise<boolean> {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
@@ -428,6 +437,7 @@ export class JournalBackfillService {
     await this.journalService.createEntry(
       {
         userId,
+        trackedPositionId,
         domainEventId,
         domainEventType: 'position.fees.collected',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,

@@ -160,6 +160,7 @@ export const LEDGER_REF_PREFIX = {
 
 export interface JournalEntryInput {
   userId: string;
+  trackedPositionId: string;
   domainEventId?: string;
   domainEventType?: string;
   ledgerEventRef?: string;

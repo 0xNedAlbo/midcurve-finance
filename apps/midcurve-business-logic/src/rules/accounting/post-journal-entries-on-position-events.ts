@@ -177,7 +177,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = position.positionHash;
 
     // Always track — even if costBasis is 0
-    await this.journalService.trackPosition(position.userId, positionRef);
+    const trackedPositionId = await this.journalService.trackPosition(position.userId, positionRef);
 
     if (await this.journalService.isProcessed(event.id)) return;
 
@@ -195,6 +195,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId: position.userId,
+        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         entryDate: new Date(event.timestamp),
@@ -218,7 +219,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    if (!(await this.journalService.isTracked(userId, positionRef))) return;
+    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
+    if (!trackedPositionId) return;
 
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
@@ -244,6 +246,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
           await this.journalService.createEntry(
             {
               userId,
+              trackedPositionId,
               domainEventId: foundationEventId,
               domainEventType: 'position.created',
               entryDate: new Date(event.payload.eventTimestamp),
@@ -279,6 +282,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
+        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
@@ -308,7 +312,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    if (!(await this.journalService.isTracked(userId, positionRef))) return;
+    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
+    if (!trackedPositionId) return;
 
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'DECREASE_POSITION', event.payload.eventTimestamp);
     if (!ledgerEvent) {
@@ -370,6 +375,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
+        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
@@ -395,7 +401,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    if (!(await this.journalService.isTracked(userId, positionRef))) return;
+    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
+    if (!trackedPositionId) return;
 
     const totalFees = BigInt(feesValueInQuote);
     if (totalFees <= 0n) return;
@@ -434,6 +441,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
+        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         ledgerEventRef: ledgerEvent ? `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}` : undefined,
@@ -458,7 +466,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    if (!(await this.journalService.isTracked(userId, positionRef))) return;
+    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
+    if (!trackedPositionId) return;
 
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
@@ -485,6 +494,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         await this.journalService.createEntry(
           {
             userId,
+            trackedPositionId,
             domainEventId: feeAccrualEventId,
             domainEventType: event.type,
             entryDate: new Date(event.timestamp),
@@ -525,6 +535,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         await this.journalService.createEntry(
           {
             userId,
+            trackedPositionId,
             domainEventId: m2mEventId,
             domainEventType: event.type,
             entryDate: new Date(event.timestamp),
@@ -550,7 +561,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const position = event.payload;
     const positionRef = position.positionHash;
 
-    if (!(await this.journalService.isTracked(position.userId, positionRef))) return;
+    const trackedPositionId = await this.journalService.getTrackedPositionId(position.userId, positionRef);
+    if (!trackedPositionId) return;
 
     // Check remaining unrealized balance
     const unrealizedBalance = await this.journalService.getAccountBalance(
@@ -579,6 +591,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId: position.userId,
+        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         entryDate: new Date(event.timestamp),
@@ -589,7 +602,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   /**
-   * position.deleted → Delete all journal entries and untrack position
+   * position.deleted → Untrack position (cascade deletes all journal entries)
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionDeletedPayload>
@@ -598,11 +611,11 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = position.positionHash;
     if (!positionRef) return;
 
-    const count = await this.journalService.deleteByPositionRef(positionRef);
+    // Deleting the TrackedPosition cascades to all JournalEntries and JournalLines
     await this.journalService.untrackPosition(position.userId, positionRef);
     this.logger.info(
-      { positionRef, deletedCount: count },
-      'Deleted journal entries and untracked position for deleted position'
+      { positionRef },
+      'Untracked position (cascade deleted journal entries)'
     );
   }
 

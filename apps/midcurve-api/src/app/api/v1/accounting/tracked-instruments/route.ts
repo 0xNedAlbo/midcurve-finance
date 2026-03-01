@@ -89,13 +89,13 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Toggle tracking
     const journalService = getJournalService();
-    const currentlyTracked = await journalService.isTracked(user.id, positionHash);
+    const currentTrackedId = await journalService.getTrackedPositionId(user.id, positionHash);
 
-    if (currentlyTracked) {
+    if (currentTrackedId) {
+      // Deleting the TrackedPosition cascades to all JournalEntries and JournalLines
       await journalService.untrackPosition(user.id, positionHash);
-      await journalService.deleteByPositionRef(positionHash);
     } else {
-      await journalService.trackPosition(user.id, positionHash);
+      const trackedPositionId = await journalService.trackPosition(user.id, positionHash);
 
       // Backfill journal entries from position ledger history
       const backfillService = getJournalBackfillService();
@@ -104,6 +104,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         user.id,
         positionHash,
         instrumentRef,
+        trackedPositionId,
       );
 
       apiLog.businessOperation(apiLogger, requestId, 'backfill', 'journal', positionHash, {
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       });
     }
 
-    const tracked = !currentlyTracked;
+    const tracked = !currentTrackedId;
 
     apiLog.businessOperation(apiLogger, requestId, tracked ? 'track' : 'untrack', 'position', positionHash, {
       userId: user.id,

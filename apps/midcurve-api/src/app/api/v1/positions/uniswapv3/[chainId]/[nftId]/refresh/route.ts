@@ -155,7 +155,7 @@ export async function POST(
       });
 
       // 4. Check accounting tracking status
-      const isTrackedInAccounting = await getJournalService().isTracked(user.id, positionHash);
+      const isTrackedInAccounting = (await getJournalService().getTrackedPositionId(user.id, positionHash)) !== null;
 
       // 5. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {

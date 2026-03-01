@@ -106,13 +106,16 @@ export class JournalService {
 
   /**
    * Registers a position for journal tracking (idempotent via unique constraint).
+   * Returns the tracked position ID for use as FK in journal entries.
    */
-  async trackPosition(userId: string, positionRef: string): Promise<void> {
-    await this.prisma.trackedPosition.upsert({
+  async trackPosition(userId: string, positionRef: string): Promise<string> {
+    const result = await this.prisma.trackedPosition.upsert({
       where: { userId_positionRef: { userId, positionRef } },
       create: { userId, positionRef },
       update: {},
+      select: { id: true },
     });
+    return result.id;
   }
 
   /**
@@ -125,14 +128,15 @@ export class JournalService {
   }
 
   /**
-   * Returns true if the position is registered for tracking.
+   * Returns the tracked position ID if tracked, null otherwise.
+   * Used as both a tracking check and to obtain the FK for journal entries.
    */
-  async isTracked(userId: string, positionRef: string): Promise<boolean> {
+  async getTrackedPositionId(userId: string, positionRef: string): Promise<string | null> {
     const record = await this.prisma.trackedPosition.findUnique({
       where: { userId_positionRef: { userId, positionRef } },
       select: { id: true },
     });
-    return record !== null;
+    return record?.id ?? null;
   }
 
   // ---------------------------------------------------------------------------
@@ -196,6 +200,7 @@ export class JournalService {
       const created = await client.journalEntry.create({
         data: {
           userId: entry.userId,
+          trackedPositionId: entry.trackedPositionId,
           domainEventId: entry.domainEventId,
           domainEventType: entry.domainEventType,
           ledgerEventRef: entry.ledgerEventRef,
@@ -353,29 +358,6 @@ export class JournalService {
   // ---------------------------------------------------------------------------
   // Deletion
   // ---------------------------------------------------------------------------
-
-  /**
-   * Deletes all journal entries (and cascading lines) that reference the given position.
-   * Used when a position is deleted from the system.
-   */
-  async deleteByPositionRef(positionRef: string): Promise<number> {
-    // Find all entry IDs that have at least one line with this positionRef
-    const entries = await this.prisma.journalLine.findMany({
-      where: { positionRef },
-      select: { journalEntryId: true },
-      distinct: ['journalEntryId'],
-    });
-
-    const entryIds = entries.map((e) => e.journalEntryId);
-    if (entryIds.length === 0) return 0;
-
-    const result = await this.prisma.journalEntry.deleteMany({
-      where: { id: { in: entryIds } },
-    });
-
-    this.logger.info(`Deleted ${result.count} journal entries for position ${positionRef}`);
-    return result.count;
-  }
 
   /**
    * Deletes journal entries that reference the given ledger event refs.
