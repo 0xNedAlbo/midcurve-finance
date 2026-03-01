@@ -2,7 +2,7 @@
 ## Product Requirements Document · Midcurve Finance
 
 **Version 1.0 | March 2026**
-**Status: DRAFT | Classification: Internal**
+**Status: IMPLEMENTED | Classification: Internal**
 **Depends on: [Double-Entry Accounting Phase 1](double-entry-accounting-phase1.md)**
 
 ---
@@ -797,3 +797,18 @@ Each retained earnings sub-category maps directly to an account code query — n
 - If `MIN(updatedAt)` across all tracked positions is less than 60s ago, endpoint returns 429 with `{ skipped: true, retryAfter }` — no positions are refreshed
 - With no tracked positions: returns `{ refreshedCount: 0 }` (no error)
 - UI refresh button triggers the endpoint, shows loading state, and disables on 429 with `retryAfter` countdown
+
+---
+
+## 11. Implementation Summary
+
+All phases (A–F) implemented across 3 commits:
+
+- **`92a045d`** — `feat: rewrite balance sheet and P&L with period comparison and hierarchical views`
+  Schema refactor (`instrumentRef`/`positionRef` split, account 4001, `TrackedPosition` rename), calendar periods, NAV snapshot extension, balance sheet with period comparison, hierarchical P&L with 4 sub-categories, bulk position refresh endpoint, UI overhaul (balance sheet table, expandable P&L statement, refresh button), cleanup of deprecated components/hooks.
+
+- **`17f63bf`** — `feat: seed chart of accounts on business logic worker startup`
+  `CHART_OF_ACCOUNTS` single source of truth in `@midcurve/shared`, `JournalService.ensureChartOfAccounts()` called at worker startup, seed script rewritten as thin wrapper.
+
+- **`18bd7ae`** — `fix: negate credit-normal and contra-equity accounts for balance sheet presentation`
+  Sign convention fix: negate credit-normal accounts (3000, 4000, 4001, 4100, 4200) and contra-equity account (3100) in both the balance sheet API route and daily NAV snapshot builder so the balance sheet balances correctly.
