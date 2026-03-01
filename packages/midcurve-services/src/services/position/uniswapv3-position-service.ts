@@ -37,6 +37,7 @@ import type {
     DomainEventPublisher,
     PositionClosedPayload,
     PositionBurnedPayload,
+    PositionDeletedPayload,
 } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
@@ -3470,54 +3471,37 @@ export class UniswapV3PositionService {
     async delete(id: string): Promise<void> {
         log.methodEntry(this.logger, "delete", { id });
 
-        try {
-            // Check if position exists and verify protocol type
-            log.dbOperation(this.logger, "findUnique", "Position", { id });
+        // Fetch full position (with pool+tokens) before deletion for event payload
+        const existing = await this.findById(id);
 
-            const existing = await this.prisma.position.findUnique({
-                where: { id },
-            });
-
-            if (!existing) {
-                this.logger.debug(
-                    { id },
-                    "Position not found, delete operation is no-op",
-                );
-                log.methodExit(this.logger, "delete", { id, deleted: false });
-                return;
-            }
-
-            // Verify protocol type
-            if (existing.protocol !== "uniswapv3") {
-                const error = new Error(
-                    `Cannot delete position ${id}: expected protocol 'uniswapv3', got '${existing.protocol}'`,
-                );
-                log.methodError(this.logger, "delete", error, {
-                    id,
-                    protocol: existing.protocol,
-                });
-                throw error;
-            }
-
-            // Delete the position
-            log.dbOperation(this.logger, "delete", "Position", { id });
-            await this.prisma.position.delete({
-                where: { id },
-            });
-
-            log.methodExit(this.logger, "delete", { id, deleted: true });
-        } catch (error) {
-            // Only log if not already logged
-            if (
-                !(
-                    error instanceof Error &&
-                    error.message.includes("Cannot delete")
-                )
-            ) {
-                log.methodError(this.logger, "delete", error as Error, { id });
-            }
-            throw error;
+        if (!existing) {
+            this.logger.debug(
+                { id },
+                "Position not found, delete operation is no-op",
+            );
+            log.methodExit(this.logger, "delete", { id, deleted: false });
+            return;
         }
+
+        // Delete the position (cascades ledger events, APR periods, close orders, etc.)
+        log.dbOperation(this.logger, "delete", "Position", { id });
+        await this.prisma.position.delete({
+            where: { id },
+        });
+
+        // Publish position.deleted domain event for accounting cleanup
+        await this.eventPublisher.createAndPublish<PositionDeletedPayload>(
+            {
+                type: "position.deleted",
+                entityType: "position",
+                entityId: existing.id,
+                userId: existing.userId,
+                payload: existing.toJSON(),
+                source: "api",
+            },
+        );
+
+        log.methodExit(this.logger, "delete", { id, deleted: true });
     }
 
     // ============================================================================
