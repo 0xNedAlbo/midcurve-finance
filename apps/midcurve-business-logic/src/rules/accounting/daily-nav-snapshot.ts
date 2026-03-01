@@ -570,25 +570,16 @@ export class DailyNavSnapshotRule extends BusinessRule {
     }
 
     // Compute cumulative journal balances for the user
-    const [
-      contributedCapital,
-      capitalReturned,
-      feeIncome,
-      realizedGains,
-      realizedLosses,
-      unrealizedGains,
-      unrealizedLosses,
-    ] = await this.getUserAccountBalances(positions);
-
-    // Period deltas: compare with previous snapshot
-    const previousSnapshot = await this.navSnapshotService.getLatestSnapshot(userId);
+    const accountBalances = await this.getUserAccountBalances(positions);
 
     const totalLiabilities = '0'; // Phase 1: no liabilities
     const netAssetValue = totalAssets.toString();
 
-    const totalAccumulatedPnl = (
-      feeIncome + realizedGains - realizedLosses + unrealizedGains - unrealizedLosses
-    ).toString();
+    // Retained earnings sub-categories
+    const retainedRealizedWithdrawals = accountBalances.realizedGains - accountBalances.realizedLosses;
+    const retainedRealizedFees = accountBalances.feeIncome;
+    const retainedUnrealizedPrice = accountBalances.unrealizedGains - accountBalances.unrealizedLosses;
+    const retainedUnrealizedFees = accountBalances.accruedFeeIncome;
 
     await this.navSnapshotService.createSnapshot({
       userId,
@@ -599,62 +590,71 @@ export class DailyNavSnapshotRule extends BusinessRule {
       totalAssets: totalAssets.toString(),
       totalLiabilities,
       netAssetValue,
-      totalContributedCapital: contributedCapital.toString(),
-      totalCapitalReturned: capitalReturned.toString(),
-      totalAccumulatedPnl,
-      periodFeeIncome: previousSnapshot
-        ? (feeIncome - BigInt(previousSnapshot.periodFeeIncome)).toString()
-        : feeIncome.toString(),
-      periodRealizedPnl: previousSnapshot
-        ? ((realizedGains - realizedLosses) - BigInt(previousSnapshot.periodRealizedPnl)).toString()
-        : (realizedGains - realizedLosses).toString(),
-      periodUnrealizedPnl: previousSnapshot
-        ? ((unrealizedGains - unrealizedLosses) - BigInt(previousSnapshot.periodUnrealizedPnl)).toString()
-        : (unrealizedGains - unrealizedLosses).toString(),
-      periodGasExpense: '0', // Phase 1: no gas tracking
+      depositedLiquidityAtCost: accountBalances.depositedLiquidity.toString(),
+      markToMarketAdjustment: accountBalances.markToMarket.toString(),
+      unclaimedFees: accountBalances.unclaimedFeesAsset.toString(),
+      contributedCapital: accountBalances.contributedCapital.toString(),
+      capitalReturned: accountBalances.capitalReturned.toString(),
+      retainedRealizedWithdrawals: retainedRealizedWithdrawals.toString(),
+      retainedRealizedFees: retainedRealizedFees.toString(),
+      retainedUnrealizedPrice: retainedUnrealizedPrice.toString(),
+      retainedUnrealizedFees: retainedUnrealizedFees.toString(),
       activePositionCount: positions.length,
       positionBreakdown,
     });
   }
 
   /**
-   * Compute cumulative account balances for a user across all their positions.
-   * Returns: [contributedCapital, capitalReturned, feeIncome, realizedGains, realizedLosses, unrealizedGains, unrealizedLosses]
+   * Compute cumulative account balances for a user across all their tracked positions.
    */
   private async getUserAccountBalances(
     positions: RefreshedPositionData[]
-  ): Promise<[bigint, bigint, bigint, bigint, bigint, bigint, bigint]> {
-    let contributedCapital = 0n;
-    let capitalReturned = 0n;
-    let feeIncome = 0n;
-    let realizedGains = 0n;
-    let realizedLosses = 0n;
-    let unrealizedGains = 0n;
-    let unrealizedLosses = 0n;
+  ): Promise<AccountBalances> {
+    const totals: AccountBalances = {
+      depositedLiquidity: 0n,
+      markToMarket: 0n,
+      unclaimedFeesAsset: 0n,
+      contributedCapital: 0n,
+      capitalReturned: 0n,
+      feeIncome: 0n,
+      accruedFeeIncome: 0n,
+      realizedGains: 0n,
+      realizedLosses: 0n,
+      unrealizedGains: 0n,
+      unrealizedLosses: 0n,
+    };
 
     for (const rp of positions) {
       const ref = rp.position.positionHash;
 
-      const [cc, cr, fi, rg, rl, ug, ul] = await Promise.all([
+      const [dl, m2m, uf, cc, cr, fi, afi, rg, rl, ug, ul] = await Promise.all([
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, ref),
+        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, ref),
         this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, ref),
       ]);
 
-      contributedCapital += cc;
-      capitalReturned += cr;
-      feeIncome += fi;
-      realizedGains += rg;
-      realizedLosses += rl;
-      unrealizedGains += ug;
-      unrealizedLosses += ul;
+      totals.depositedLiquidity += dl;
+      totals.markToMarket += m2m;
+      totals.unclaimedFeesAsset += uf;
+      totals.contributedCapital += cc;
+      totals.capitalReturned += cr;
+      totals.feeIncome += fi;
+      totals.accruedFeeIncome += afi;
+      totals.realizedGains += rg;
+      totals.realizedLosses += rl;
+      totals.unrealizedGains += ug;
+      totals.unrealizedLosses += ul;
     }
 
-    return [contributedCapital, capitalReturned, feeIncome, realizedGains, realizedLosses, unrealizedGains, unrealizedLosses];
+    return totals;
   }
 
   /**
@@ -676,6 +676,20 @@ export class DailyNavSnapshotRule extends BusinessRule {
 // =============================================================================
 // Types (internal)
 // =============================================================================
+
+interface AccountBalances {
+  depositedLiquidity: bigint;
+  markToMarket: bigint;
+  unclaimedFeesAsset: bigint;
+  contributedCapital: bigint;
+  capitalReturned: bigint;
+  feeIncome: bigint;
+  accruedFeeIncome: bigint;
+  realizedGains: bigint;
+  realizedLosses: bigint;
+  unrealizedGains: bigint;
+  unrealizedLosses: bigint;
+}
 
 interface NfpmPositionResult {
   liquidity: bigint;

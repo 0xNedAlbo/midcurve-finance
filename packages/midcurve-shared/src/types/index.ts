@@ -20,7 +20,7 @@ export type {
   ValuationMethod,
   PositionBreakdownItem,
 } from './accounting/index.js';
-export { ACCOUNT_CODES, LEDGER_REF_PREFIX } from './accounting/index.js';
+export { ACCOUNT_CODES, LEDGER_REF_PREFIX, CHART_OF_ACCOUNTS } from './accounting/index.js';
 
 // Authentication types
 export type { ApiKeyDisplay } from './api-key.js';

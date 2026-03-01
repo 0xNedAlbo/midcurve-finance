@@ -1,5 +1,5 @@
 /**
- * Tracked Instruments Endpoint
+ * Tracked Positions Endpoint
  *
  * POST /api/v1/accounting/tracked-instruments
  *
@@ -65,10 +65,13 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const { positionHash } = validation.data;
 
-    // Verify ownership
+    // Verify ownership and get pool hash for instrumentRef
     const position = await prisma.position.findFirst({
       where: { positionHash, userId: user.id },
-      select: { id: true },
+      select: {
+        id: true,
+        pool: { select: { poolHash: true } },
+      },
     });
 
     if (!position) {
@@ -82,15 +85,17 @@ export async function POST(request: NextRequest): Promise<Response> {
       });
     }
 
+    const instrumentRef = position.pool.poolHash ?? '';
+
     // Toggle tracking
     const journalService = getJournalService();
     const currentlyTracked = await journalService.isTracked(user.id, positionHash);
 
     if (currentlyTracked) {
-      await journalService.untrackInstrument(user.id, positionHash);
-      await journalService.deleteByInstrumentRef(positionHash);
+      await journalService.untrackPosition(user.id, positionHash);
+      await journalService.deleteByPositionRef(positionHash);
     } else {
-      await journalService.trackInstrument(user.id, positionHash);
+      await journalService.trackPosition(user.id, positionHash);
 
       // Backfill journal entries from position ledger history
       const backfillService = getJournalBackfillService();
@@ -98,6 +103,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         position.id,
         user.id,
         positionHash,
+        instrumentRef,
       );
 
       apiLog.businessOperation(apiLogger, requestId, 'backfill', 'journal', positionHash, {
@@ -108,7 +114,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const tracked = !currentlyTracked;
 
-    apiLog.businessOperation(apiLogger, requestId, tracked ? 'track' : 'untrack', 'instrument', positionHash, {
+    apiLog.businessOperation(apiLogger, requestId, tracked ? 'track' : 'untrack', 'position', positionHash, {
       userId: user.id,
     });
 

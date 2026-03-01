@@ -22,3 +22,6 @@ export * from './position-helpers.js';
 
 // Position hash parsing
 export * from './position-hash.js';
+
+// Period utilities
+export * from './period/index.js';

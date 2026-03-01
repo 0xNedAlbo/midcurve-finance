@@ -1,6 +1,6 @@
 export type {
   BalanceSheetResponse,
-  BalanceSheetPositionItem,
+  BalanceSheetLineItem,
 } from './balance-sheet.js';
 
 export {
@@ -8,21 +8,11 @@ export {
   type PeriodQuery,
   type PnlResponse,
   type PnlInstrumentItem,
+  type PnlPositionItem,
 } from './pnl.js';
-
-export type {
-  PeriodComparisonResponse,
-  SnapshotSummary,
-  PeriodDelta,
-} from './period-comparison.js';
 
 export {
   ToggleTrackingRequestSchema,
   type ToggleTrackingRequest,
   type ToggleTrackingResponse,
 } from './tracked-instruments.js';
-
-export type {
-  NavTimelinePoint,
-  NavTimelineResponse,
-} from './nav-timeline.js';

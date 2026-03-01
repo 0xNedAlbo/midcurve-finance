@@ -1,31 +1,47 @@
 /**
- * Balance Sheet (NAV Report) API types
+ * Balance Sheet API types
+ *
+ * Structured balance sheet with period-over-period comparison.
  */
 
-export interface BalanceSheetPositionItem {
-  instrumentRef: string;
-  poolSymbol: string;
-  currentValueReporting: string;
-  costBasisReporting: string;
-  unrealizedPnlReporting: string;
-  accruedFeesReporting: string;
+import type { PeriodQuery } from './pnl.js';
+
+export interface BalanceSheetLineItem {
+  current: string;
+  previous: string | null;
+  deltaAbs: string | null;
+  deltaPct: string | null;
 }
 
 export interface BalanceSheetResponse {
-  snapshotDate: string;
+  period: PeriodQuery;
+  currentDate: string;
+  previousDate: string | null;
   reportingCurrency: string;
-  valuationMethod: string;
-  /** Total assets = LP positions (at cost + unrealized adjustment) + accrued fees */
-  totalAssets: string;
-  /** Total liabilities (always "0" in Phase 1) */
-  totalLiabilities: string;
-  /** NAV = totalAssets - totalLiabilities */
-  netAssetValue: string;
-  equity: {
-    contributedCapital: string;
-    capitalReturned: string;
-    accumulatedPnl: string;
+
+  assets: {
+    depositedLiquidityAtCost: BalanceSheetLineItem;
+    markToMarketAdjustment: BalanceSheetLineItem;
+    unclaimedFees: BalanceSheetLineItem;
+    totalAssets: BalanceSheetLineItem;
   };
-  positions: BalanceSheetPositionItem[];
+
+  liabilities: {
+    totalLiabilities: BalanceSheetLineItem;
+  };
+
+  equity: {
+    contributedCapital: BalanceSheetLineItem;
+    capitalReturned: BalanceSheetLineItem;
+    retainedEarnings: {
+      realizedFromWithdrawals: BalanceSheetLineItem;
+      realizedFromCollectedFees: BalanceSheetLineItem;
+      unrealizedFromPriceChanges: BalanceSheetLineItem;
+      unrealizedFromUnclaimedFees: BalanceSheetLineItem;
+      totalRetainedEarnings: BalanceSheetLineItem;
+    };
+    totalEquity: BalanceSheetLineItem;
+  };
+
   activePositionCount: number;
 }

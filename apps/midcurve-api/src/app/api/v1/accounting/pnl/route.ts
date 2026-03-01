@@ -1,9 +1,10 @@
 /**
- * P&L Breakdown Endpoint
+ * P&L Statement Endpoint
  *
- * GET /api/v1/accounting/pnl?period=month
+ * GET /api/v1/accounting/pnl?period=week
  *
- * Returns period P&L breakdown per instrument from journal entries.
+ * Returns hierarchical P&L: Portfolio → Instrument → Position
+ * with 4 sub-categories.
  *
  * Authentication: Required (session only)
  */
@@ -18,9 +19,10 @@ import {
   PeriodQuerySchema,
   type PnlResponse,
   type PnlInstrumentItem,
+  type PnlPositionItem,
 } from '@midcurve/api-shared';
 import { prisma } from '@midcurve/database';
-import { ACCOUNT_CODES } from '@midcurve/services';
+import { ACCOUNT_CODES, getCalendarPeriodBoundaries } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -36,9 +38,8 @@ export async function GET(request: NextRequest): Promise<Response> {
     const startTime = Date.now();
 
     try {
-      // Validate period query param
       const url = new URL(request.url);
-      const periodParam = url.searchParams.get('period') ?? 'month';
+      const periodParam = url.searchParams.get('period') ?? 'week';
       const periodResult = PeriodQuerySchema.safeParse(periodParam);
 
       if (!periodResult.success) {
@@ -54,9 +55,9 @@ export async function GET(request: NextRequest): Promise<Response> {
       }
 
       const period = periodResult.data;
-      const { startDate, endDate } = getPeriodDateRange(period);
+      const { currentStart: startDate, currentEnd: endDate } = getCalendarPeriodBoundaries(period);
 
-      // Query journal lines within date range for this user (only lines with reporting amounts)
+      // Query journal lines within date range for this user
       const journalLines = await prisma.journalLine.findMany({
         where: {
           journalEntry: {
@@ -66,134 +67,167 @@ export async function GET(request: NextRequest): Promise<Response> {
           amountReporting: { not: null },
         },
         include: {
-          journalEntry: { select: { entryDate: true } },
           account: { select: { code: true } },
         },
       });
 
-      // Aggregate by instrumentRef and account code (using reporting currency amounts)
+      // Aggregate by instrumentRef → positionRef → account code
+      interface PnlBuckets {
+        realizedFromWithdrawals: bigint;
+        realizedFromCollectedFees: bigint;
+        unrealizedFromPriceChanges: bigint;
+        unrealizedFromUnclaimedFees: bigint;
+      }
+
       const instrumentMap = new Map<string, {
-        feeIncome: bigint;
-        realizedGains: bigint;
-        realizedLosses: bigint;
-        unrealizedGains: bigint;
-        unrealizedLosses: bigint;
+        positions: Map<string, PnlBuckets>;
+        totals: PnlBuckets;
       }>();
 
       for (const line of journalLines) {
-        if (!line.instrumentRef) continue;
+        const instrRef = line.instrumentRef ?? 'unknown';
+        const posRef = line.positionRef ?? 'unknown';
         const code = line.account.code;
         const amount = BigInt(line.amountReporting!);
         const signed = line.side === 'debit' ? amount : -amount;
 
-        let agg = instrumentMap.get(line.instrumentRef);
-        if (!agg) {
-          agg = { feeIncome: 0n, realizedGains: 0n, realizedLosses: 0n, unrealizedGains: 0n, unrealizedLosses: 0n };
-          instrumentMap.set(line.instrumentRef, agg);
+        let instrument = instrumentMap.get(instrRef);
+        if (!instrument) {
+          instrument = {
+            positions: new Map(),
+            totals: { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n, unrealizedFromPriceChanges: 0n, unrealizedFromUnclaimedFees: 0n },
+          };
+          instrumentMap.set(instrRef, instrument);
         }
 
-        // Revenue accounts: credits increase balance (negate signed)
-        // Expense accounts: debits increase balance (use signed)
+        let position = instrument.positions.get(posRef);
+        if (!position) {
+          position = { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n, unrealizedFromPriceChanges: 0n, unrealizedFromUnclaimedFees: 0n };
+          instrument.positions.set(posRef, position);
+        }
+
+        // Revenue (credit-normal): negate signed to get positive for credits
+        // Expense (debit-normal): use signed directly for debits
         switch (code) {
-          case ACCOUNT_CODES.FEE_INCOME:
-            agg.feeIncome += -signed; // credits increase revenue
-            break;
           case ACCOUNT_CODES.REALIZED_GAINS:
-            agg.realizedGains += -signed;
+            position.realizedFromWithdrawals += -signed;
+            instrument.totals.realizedFromWithdrawals += -signed;
             break;
           case ACCOUNT_CODES.REALIZED_LOSSES:
-            agg.realizedLosses += signed; // debits increase expense
+            position.realizedFromWithdrawals -= signed;
+            instrument.totals.realizedFromWithdrawals -= signed;
+            break;
+          case ACCOUNT_CODES.FEE_INCOME:
+            position.realizedFromCollectedFees += -signed;
+            instrument.totals.realizedFromCollectedFees += -signed;
             break;
           case ACCOUNT_CODES.UNREALIZED_GAINS:
-            agg.unrealizedGains += -signed;
+            position.unrealizedFromPriceChanges += -signed;
+            instrument.totals.unrealizedFromPriceChanges += -signed;
             break;
           case ACCOUNT_CODES.UNREALIZED_LOSSES:
-            agg.unrealizedLosses += signed;
+            position.unrealizedFromPriceChanges -= signed;
+            instrument.totals.unrealizedFromPriceChanges -= signed;
+            break;
+          case ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE:
+            position.unrealizedFromUnclaimedFees += -signed;
+            instrument.totals.unrealizedFromUnclaimedFees += -signed;
             break;
         }
       }
 
-      // Look up pool symbols for each instrumentRef
-      const instrumentRefs = [...instrumentMap.keys()];
-      const positions = instrumentRefs.length > 0
-        ? await prisma.position.findMany({
-            where: { positionHash: { in: instrumentRefs } },
+      // Look up pool metadata for each instrumentRef (pool hash)
+      const instrumentRefs = [...instrumentMap.keys()].filter((r) => r !== 'unknown');
+      const pools = instrumentRefs.length > 0
+        ? await prisma.pool.findMany({
+            where: { poolHash: { in: instrumentRefs } },
             select: {
-              positionHash: true,
-              isToken0Quote: true,
-              pool: {
-                select: {
-                  protocol: true,
-                  config: true,
-                  token0: { select: { symbol: true } },
-                  token1: { select: { symbol: true } },
-                },
-              },
+              poolHash: true,
+              protocol: true,
+              config: true,
+              token0: { select: { symbol: true } },
+              token1: { select: { symbol: true } },
             },
           })
         : [];
 
-      const positionMetaMap = new Map<string, { symbol: string; protocol: string; chainId: number; feeTier: string }>();
-      for (const p of positions) {
-        if (!p.positionHash) continue;
-        const base = p.isToken0Quote ? p.pool.token1.symbol : p.pool.token0.symbol;
-        const quote = p.isToken0Quote ? p.pool.token0.symbol : p.pool.token1.symbol;
-        const config = p.pool.config as Record<string, unknown>;
-        positionMetaMap.set(p.positionHash, {
-          symbol: `${base}/${quote}`,
-          protocol: p.pool.protocol,
+      const poolMetaMap = new Map<string, { symbol: string; protocol: string; chainId: number; feeTier: string }>();
+      for (const p of pools) {
+        if (!p.poolHash) continue;
+        const config = p.config as Record<string, unknown>;
+        poolMetaMap.set(p.poolHash, {
+          symbol: `${p.token0.symbol}/${p.token1.symbol}`,
+          protocol: p.protocol,
           chainId: (config.chainId as number) ?? 0,
           feeTier: String((config.feeBps as number) ?? 0),
         });
       }
 
       // Build response
-      let totalFeeIncome = 0n;
-      let totalRealizedPnl = 0n;
-      let totalUnrealizedPnl = 0n;
+      let totalRealizedWithdrawals = 0n;
+      let totalRealizedFees = 0n;
+      let totalUnrealizedPrice = 0n;
+      let totalUnrealizedFees = 0n;
       const instruments: PnlInstrumentItem[] = [];
 
-      for (const [ref, agg] of instrumentMap.entries()) {
-        const feeIncome = agg.feeIncome;
-        const realizedPnl = agg.realizedGains - agg.realizedLosses;
-        const unrealizedPnl = agg.unrealizedGains - agg.unrealizedLosses;
+      for (const [instrRef, instrument] of instrumentMap.entries()) {
+        totalRealizedWithdrawals += instrument.totals.realizedFromWithdrawals;
+        totalRealizedFees += instrument.totals.realizedFromCollectedFees;
+        totalUnrealizedPrice += instrument.totals.unrealizedFromPriceChanges;
+        totalUnrealizedFees += instrument.totals.unrealizedFromUnclaimedFees;
 
-        totalFeeIncome += feeIncome;
-        totalRealizedPnl += realizedPnl;
-        totalUnrealizedPnl += unrealizedPnl;
+        const meta = poolMetaMap.get(instrRef);
+        const instrNetPnl = instrument.totals.realizedFromWithdrawals
+          + instrument.totals.realizedFromCollectedFees
+          + instrument.totals.unrealizedFromPriceChanges
+          + instrument.totals.unrealizedFromUnclaimedFees;
 
-        const meta = positionMetaMap.get(ref);
+        const positions: PnlPositionItem[] = [];
+        for (const [posRef, buckets] of instrument.positions.entries()) {
+          const posNetPnl = buckets.realizedFromWithdrawals
+            + buckets.realizedFromCollectedFees
+            + buckets.unrealizedFromPriceChanges
+            + buckets.unrealizedFromUnclaimedFees;
+
+          const parts = posRef.split('/');
+          positions.push({
+            positionRef: posRef,
+            nftId: parts[parts.length - 1] ?? posRef,
+            realizedFromWithdrawals: buckets.realizedFromWithdrawals.toString(),
+            realizedFromCollectedFees: buckets.realizedFromCollectedFees.toString(),
+            unrealizedFromPriceChanges: buckets.unrealizedFromPriceChanges.toString(),
+            unrealizedFromUnclaimedFees: buckets.unrealizedFromUnclaimedFees.toString(),
+            netPnl: posNetPnl.toString(),
+          });
+        }
+
         instruments.push({
-          instrumentRef: ref,
-          poolSymbol: meta?.symbol ?? ref,
+          instrumentRef: instrRef,
+          poolSymbol: meta?.symbol ?? instrRef,
           protocol: meta?.protocol ?? 'unknown',
           chainId: meta?.chainId ?? 0,
           feeTier: meta?.feeTier ?? '0',
-          feeIncome: feeIncome.toString(),
-          realizedPnl: realizedPnl.toString(),
-          unrealizedPnl: unrealizedPnl.toString(),
+          realizedFromWithdrawals: instrument.totals.realizedFromWithdrawals.toString(),
+          realizedFromCollectedFees: instrument.totals.realizedFromCollectedFees.toString(),
+          unrealizedFromPriceChanges: instrument.totals.unrealizedFromPriceChanges.toString(),
+          unrealizedFromUnclaimedFees: instrument.totals.unrealizedFromUnclaimedFees.toString(),
+          netPnl: instrNetPnl.toString(),
+          positions,
         });
       }
 
-      const gasExpense = '0'; // Phase 1: no gas tracking
-      const netPnl = (totalFeeIncome + totalRealizedPnl + totalUnrealizedPnl).toString();
-
-      // Get reporting currency from user
-      const userData = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { reportingCurrency: true },
-      });
+      const totalNetPnl = totalRealizedWithdrawals + totalRealizedFees + totalUnrealizedPrice + totalUnrealizedFees;
 
       const response: PnlResponse = {
         period,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
-        reportingCurrency: userData?.reportingCurrency ?? 'USD',
-        feeIncome: totalFeeIncome.toString(),
-        realizedPnl: totalRealizedPnl.toString(),
-        unrealizedPnl: totalUnrealizedPnl.toString(),
-        gasExpense,
-        netPnl,
+        reportingCurrency: 'USD',
+        realizedFromWithdrawals: totalRealizedWithdrawals.toString(),
+        realizedFromCollectedFees: totalRealizedFees.toString(),
+        unrealizedFromPriceChanges: totalUnrealizedPrice.toString(),
+        unrealizedFromUnclaimedFees: totalUnrealizedFees.toString(),
+        netPnl: totalNetPnl.toString(),
         instruments,
       };
 
@@ -222,33 +256,4 @@ export async function GET(request: NextRequest): Promise<Response> {
       });
     }
   });
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function getPeriodDateRange(period: string): { startDate: Date; endDate: Date } {
-  const endDate = new Date();
-  const startDate = new Date(endDate);
-
-  switch (period) {
-    case 'day':
-      startDate.setUTCDate(startDate.getUTCDate() - 1);
-      break;
-    case 'week':
-      startDate.setUTCDate(startDate.getUTCDate() - 7);
-      break;
-    case 'month':
-      startDate.setUTCDate(startDate.getUTCDate() - 30);
-      break;
-    case 'quarter':
-      startDate.setUTCDate(startDate.getUTCDate() - 90);
-      break;
-    case 'year':
-      startDate.setUTCDate(startDate.getUTCDate() - 365);
-      break;
-  }
-
-  return { startDate, endDate };
 }

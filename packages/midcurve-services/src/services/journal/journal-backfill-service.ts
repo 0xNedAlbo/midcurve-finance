@@ -85,15 +85,21 @@ export class JournalBackfillService {
    * Called when user tracks a position in accounting.
    * Replays ledger events chronologically, creating journal entries with historic prices.
    * Finishes with a single M2M + fee accrual adjustment entry reflecting current state.
+   *
+   * @param positionId - Database ID of the position
+   * @param userId - Owner user ID
+   * @param positionRef - Position hash (e.g., "uniswapv3/42161/5334690")
+   * @param instrumentRef - Pool hash (e.g., "uniswapv3/42161/0x8ad5...")
    */
   async backfillPosition(
     positionId: string,
     userId: string,
+    positionRef: string,
     instrumentRef: string,
   ): Promise<BackfillResult> {
     // Guard: if entries already exist, skip (already backfilled or live events created entries)
-    if (await this.journalService.hasEntriesForInstrument(instrumentRef)) {
-      this.logger.info({ instrumentRef }, 'Skipping backfill — entries already exist');
+    if (await this.journalService.hasEntriesForPosition(positionRef)) {
+      this.logger.info({ positionRef }, 'Skipping backfill — entries already exist');
       return { entriesCreated: 0, eventsProcessed: 0 };
     }
 
@@ -142,7 +148,7 @@ export class JournalBackfillService {
     );
 
     if (financialEvents.length === 0) {
-      this.logger.info({ instrumentRef }, 'No financial ledger events to backfill');
+      this.logger.info({ positionRef }, 'No financial ledger events to backfill');
       return { entriesCreated: 0, eventsProcessed: 0 };
     }
 
@@ -183,15 +189,15 @@ export class JournalBackfillService {
       switch (event.eventType) {
         case 'INCREASE_POSITION':
           created = await this.backfillLiquidityIncreased(
-            event, ctx, instrumentRef, userId, isFirstFinancialEvent,
+            event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent,
           );
           isFirstFinancialEvent = false;
           break;
         case 'DECREASE_POSITION':
-          created = await this.backfillLiquidityDecreased(event, ctx, instrumentRef, userId);
+          created = await this.backfillLiquidityDecreased(event, ctx, positionRef, instrumentRef, userId);
           break;
         case 'COLLECT':
-          created = await this.backfillFeesCollected(event, ctx, instrumentRef, userId);
+          created = await this.backfillFeesCollected(event, ctx, positionRef, instrumentRef, userId);
           break;
       }
 
@@ -214,8 +220,8 @@ export class JournalBackfillService {
           const builder = new JournalLineBuilder()
             .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
           const feesStr = unClaimedFees.toString();
-          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, feesStr, instrumentRef);
-          builder.credit(ACCOUNT_CODES.FEE_INCOME, feesStr, instrumentRef);
+          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, feesStr, positionRef, instrumentRef);
+          builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, feesStr, positionRef, instrumentRef);
 
           await this.journalService.createEntry(
             {
@@ -223,7 +229,7 @@ export class JournalBackfillService {
               domainEventId: feeEventId,
               domainEventType: 'backfill.fee-accrual',
               entryDate: new Date(),
-              description: `Fee accrual (backfill): ${instrumentRef}`,
+              description: `Fee accrual (backfill): ${positionRef}`,
             },
             builder.build(),
           );
@@ -241,11 +247,11 @@ export class JournalBackfillService {
           const absUnrealized = (unrealizedPnl < 0n ? -unrealizedPnl : unrealizedPnl).toString();
 
           if (unrealizedPnl > 0n) {
-            builder.debit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absUnrealized, instrumentRef);
-            builder.credit(ACCOUNT_CODES.UNREALIZED_GAINS, absUnrealized, instrumentRef);
+            builder.debit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absUnrealized, positionRef, instrumentRef);
+            builder.credit(ACCOUNT_CODES.UNREALIZED_GAINS, absUnrealized, positionRef, instrumentRef);
           } else {
-            builder.debit(ACCOUNT_CODES.UNREALIZED_LOSSES, absUnrealized, instrumentRef);
-            builder.credit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absUnrealized, instrumentRef);
+            builder.debit(ACCOUNT_CODES.UNREALIZED_LOSSES, absUnrealized, positionRef, instrumentRef);
+            builder.credit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absUnrealized, positionRef, instrumentRef);
           }
 
           await this.journalService.createEntry(
@@ -254,7 +260,7 @@ export class JournalBackfillService {
               domainEventId: m2mEventId,
               domainEventType: 'backfill.m2m',
               entryDate: new Date(),
-              description: `Mark-to-market (backfill): ${instrumentRef}`,
+              description: `Mark-to-market (backfill): ${positionRef}`,
             },
             builder.build(),
           );
@@ -264,7 +270,7 @@ export class JournalBackfillService {
     }
 
     this.logger.info(
-      { instrumentRef, entriesCreated, eventsProcessed: financialEvents.length },
+      { positionRef, entriesCreated, eventsProcessed: financialEvents.length },
       'Backfill complete',
     );
 
@@ -284,6 +290,7 @@ export class JournalBackfillService {
   private async backfillLiquidityIncreased(
     event: LedgerEventRow,
     ctx: ReportingContext,
+    positionRef: string,
     instrumentRef: string,
     userId: string,
     isFoundation: boolean,
@@ -299,8 +306,8 @@ export class JournalBackfillService {
 
     const lines = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
-      .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, instrumentRef)
-      .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, costBasis, instrumentRef)
+      .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, positionRef, instrumentRef)
+      .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, costBasis, positionRef, instrumentRef)
       .build();
 
     await this.journalService.createEntry(
@@ -311,8 +318,8 @@ export class JournalBackfillService {
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
         entryDate: event.timestamp,
         description: isFoundation
-          ? `Position created (backfill): ${instrumentRef}`
-          : `Liquidity increase (backfill): ${instrumentRef}`,
+          ? `Position created (backfill): ${positionRef}`
+          : `Liquidity increase (backfill): ${positionRef}`,
       },
       lines,
     );
@@ -326,6 +333,7 @@ export class JournalBackfillService {
   private async backfillLiquidityDecreased(
     event: LedgerEventRow,
     ctx: ReportingContext,
+    positionRef: string,
     instrumentRef: string,
     userId: string,
   ): Promise<boolean> {
@@ -340,22 +348,22 @@ export class JournalBackfillService {
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
 
     // Line 1: Derecognize cost basis (credit 1000)
-    builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absDeltaCostBasis, instrumentRef);
+    builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absDeltaCostBasis, positionRef, instrumentRef);
 
     // Line 2: Capital returned (debit 3100)
-    builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, tokenValue, instrumentRef);
+    builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, tokenValue, positionRef, instrumentRef);
 
     // Line 3: Realized gain or loss
     if (deltaPnl > 0n) {
-      builder.credit(ACCOUNT_CODES.REALIZED_GAINS, deltaPnl.toString(), instrumentRef);
+      builder.credit(ACCOUNT_CODES.REALIZED_GAINS, deltaPnl.toString(), positionRef, instrumentRef);
     } else if (deltaPnl < 0n) {
-      builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), instrumentRef);
+      builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
     }
 
     // Line 4: Reclassify proportional unrealized P&L (if any M2M entries exist)
     const unrealizedBalance = await this.journalService.getAccountBalance(
       ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-      instrumentRef,
+      positionRef,
     );
 
     if (unrealizedBalance !== 0n) {
@@ -367,11 +375,11 @@ export class JournalBackfillService {
         if (reclassAmount > 0n) {
           const reclassStr = reclassAmount.toString();
           if (unrealizedBalance > 0n) {
-            builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, reclassStr, instrumentRef);
-            builder.credit(ACCOUNT_CODES.REALIZED_GAINS, reclassStr, instrumentRef);
+            builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, reclassStr, positionRef, instrumentRef);
+            builder.credit(ACCOUNT_CODES.REALIZED_GAINS, reclassStr, positionRef, instrumentRef);
           } else {
-            builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, reclassStr, instrumentRef);
-            builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, reclassStr, instrumentRef);
+            builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, reclassStr, positionRef, instrumentRef);
+            builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, reclassStr, positionRef, instrumentRef);
           }
         }
       }
@@ -384,7 +392,7 @@ export class JournalBackfillService {
         domainEventType: 'position.liquidity.decreased',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
         entryDate: event.timestamp,
-        description: `Liquidity decrease (backfill): ${instrumentRef}`,
+        description: `Liquidity decrease (backfill): ${positionRef}`,
       },
       builder.build(),
     );
@@ -401,6 +409,7 @@ export class JournalBackfillService {
   private async backfillFeesCollected(
     event: LedgerEventRow,
     ctx: ReportingContext,
+    positionRef: string,
     instrumentRef: string,
     userId: string,
   ): Promise<boolean> {
@@ -412,8 +421,8 @@ export class JournalBackfillService {
 
     const lines = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
-      .debit(ACCOUNT_CODES.CAPITAL_RETURNED, totalFees.toString(), instrumentRef)
-      .credit(ACCOUNT_CODES.FEE_INCOME, totalFees.toString(), instrumentRef)
+      .debit(ACCOUNT_CODES.CAPITAL_RETURNED, totalFees.toString(), positionRef, instrumentRef)
+      .credit(ACCOUNT_CODES.FEE_INCOME, totalFees.toString(), positionRef, instrumentRef)
       .build();
 
     await this.journalService.createEntry(
@@ -423,7 +432,7 @@ export class JournalBackfillService {
         domainEventType: 'position.fees.collected',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
         entryDate: event.timestamp,
-        description: `Fees collected (backfill): ${instrumentRef}`,
+        description: `Fees collected (backfill): ${positionRef}`,
       },
       lines,
     );

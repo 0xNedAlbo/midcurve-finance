@@ -34,13 +34,13 @@ export class JournalLineBuilder {
     return this;
   }
 
-  debit(accountCode: number, amountQuote: string, instrumentRef?: string): this {
-    this.lines.push(this.buildLine(accountCode, amountQuote, 'debit', instrumentRef));
+  debit(accountCode: number, amountQuote: string, positionRef?: string, instrumentRef?: string): this {
+    this.lines.push(this.buildLine(accountCode, amountQuote, 'debit', positionRef, instrumentRef));
     return this;
   }
 
-  credit(accountCode: number, amountQuote: string, instrumentRef?: string): this {
-    this.lines.push(this.buildLine(accountCode, amountQuote, 'credit', instrumentRef));
+  credit(accountCode: number, amountQuote: string, positionRef?: string, instrumentRef?: string): this {
+    this.lines.push(this.buildLine(accountCode, amountQuote, 'credit', positionRef, instrumentRef));
     return this;
   }
 
@@ -48,9 +48,10 @@ export class JournalLineBuilder {
     accountCode: number,
     amountQuote: string,
     side: JournalSide,
+    positionRef?: string,
     instrumentRef?: string
   ): JournalLineInput {
-    const line: JournalLineInput = { accountCode, instrumentRef, side, amountQuote };
+    const line: JournalLineInput = { accountCode, positionRef, instrumentRef, side, amountQuote };
 
     if (this.reportingCtx) {
       const { reportingCurrency, exchangeRate, quoteTokenDecimals } = this.reportingCtx;

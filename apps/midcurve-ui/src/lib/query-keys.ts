@@ -146,12 +146,8 @@ export const queryKeys = {
   // ============================================
   accounting: {
     all: ['accounting'] as const,
-    balanceSheet: () => [...queryKeys.accounting.all, 'balance-sheet'] as const,
+    balanceSheet: (period: string) => [...queryKeys.accounting.all, 'balance-sheet', period] as const,
     pnl: (period: string) => [...queryKeys.accounting.all, 'pnl', period] as const,
-    periodComparison: (period: string) =>
-      [...queryKeys.accounting.all, 'period-comparison', period] as const,
-    navTimeline: (days: number) =>
-      [...queryKeys.accounting.all, 'nav-timeline', days] as const,
   },
 
   // ============================================

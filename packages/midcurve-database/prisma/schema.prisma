@@ -91,7 +91,7 @@ model User {
   // Accounting relations
   journalEntries     JournalEntry[]
   navSnapshots       NAVSnapshot[]
-  trackedInstruments TrackedInstrument[]
+  trackedPositions TrackedPosition[]
 
   // Indexes for efficient queries
   @@index([name])
@@ -951,8 +951,10 @@ model JournalLine {
   accountId String
   account   AccountDefinition @relation(fields: [accountId], references: [id])
 
-  // Instrument (no FK — allows any instrument type)
-  instrumentRef String? // e.g., "uniswapv3/1/12345"
+  // Position reference (no FK — allows any position type)
+  positionRef   String? // e.g., "uniswapv3/42161/5334690" (position hash)
+  // Instrument reference (denormalized pool hash for fast GROUP BY)
+  instrumentRef String? // e.g., "uniswapv3/42161/0x8ad5..." (pool hash)
 
   // Debit or credit
   side String // "debit" | "credit"
@@ -967,6 +969,8 @@ model JournalLine {
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([positionRef])
+  @@index([accountId, positionRef])
   @@index([instrumentRef])
   @@index([accountId, instrumentRef])
   @@map("journal_lines")
@@ -996,16 +1000,20 @@ model NAVSnapshot {
   totalLiabilities String // Sum of all liability account balances (always "0" in Phase 1)
   netAssetValue    String // totalAssets - totalLiabilities
 
-  // Equity breakdown (bigint strings, scaled 10^8 in reporting currency)
-  totalContributedCapital String // Cumulative balance of account 3000
-  totalCapitalReturned    String // Cumulative balance of account 3100
-  totalAccumulatedPnl     String // Net of all revenue minus expense account balances
+  // Asset breakdown (bigint strings, scaled 10^8 in reporting currency)
+  depositedLiquidityAtCost String // Account 1000 cumulative balance
+  markToMarketAdjustment   String // Account 1001 cumulative balance
+  unclaimedFees            String // Account 1002 cumulative balance
 
-  // Period deltas (bigint strings, scaled 10^8 in reporting currency)
-  periodFeeIncome     String // Fee income since last snapshot
-  periodRealizedPnl   String // Net realized gain/loss since last snapshot
-  periodUnrealizedPnl String // Change in unrealized P&L since last snapshot
-  periodGasExpense    String // Gas expense since last snapshot
+  // Equity breakdown (bigint strings, scaled 10^8 in reporting currency)
+  contributedCapital String // Account 3000 cumulative balance
+  capitalReturned    String // Account 3100 cumulative balance
+
+  // Retained earnings sub-categories (bigint strings, scaled 10^8 in reporting currency)
+  retainedRealizedWithdrawals String // Accounts 4100 - 5000 net
+  retainedRealizedFees        String // Account 4000 balance
+  retainedUnrealizedPrice     String // Accounts 4200 - 5200 net
+  retainedUnrealizedFees      String // Account 4001 balance
 
   // Position summary
   activePositionCount Int // Number of active positions at snapshot time
@@ -1017,20 +1025,19 @@ model NAVSnapshot {
   @@schema("accounting")
 }
 
-// TrackedInstrument - Explicit registry of instruments that should have journal entries.
-// Created when a position.created event fires, deleted on position.deleted.
-// Replaces the implicit hasEntriesForInstrument guard.
-model TrackedInstrument {
+// TrackedPosition - Explicit registry of positions that should have journal entries.
+// Created when user enables accounting tracking, deleted on untrack or position.deleted.
+model TrackedPosition {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  instrumentRef String // e.g., "uniswapv3/1/12345"
+  positionRef String // e.g., "uniswapv3/42161/5334690" (position hash)
 
-  @@unique([userId, instrumentRef])
+  @@unique([userId, positionRef])
   @@index([userId])
-  @@map("tracked_instruments")
+  @@map("tracked_positions")
   @@schema("accounting")
 }

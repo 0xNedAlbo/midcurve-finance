@@ -7,6 +7,8 @@
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { PositionBreakdownItem } from '@midcurve/shared';
+import { getCalendarPeriodBoundaries } from '@midcurve/shared';
+import type { CalendarPeriod } from '@midcurve/shared';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -27,18 +29,18 @@ export interface CreateNavSnapshotInput {
   totalAssets: string;
   totalLiabilities: string;
   netAssetValue: string;
-  totalContributedCapital: string;
-  totalCapitalReturned: string;
-  totalAccumulatedPnl: string;
-  periodFeeIncome: string;
-  periodRealizedPnl: string;
-  periodUnrealizedPnl: string;
-  periodGasExpense: string;
+  depositedLiquidityAtCost: string;
+  markToMarketAdjustment: string;
+  unclaimedFees: string;
+  contributedCapital: string;
+  capitalReturned: string;
+  retainedRealizedWithdrawals: string;
+  retainedRealizedFees: string;
+  retainedUnrealizedPrice: string;
+  retainedUnrealizedFees: string;
   activePositionCount: number;
   positionBreakdown: PositionBreakdownItem[];
 }
-
-export type ComparisonPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
 // =============================================================================
 // Service
@@ -88,13 +90,15 @@ export class NavSnapshotService {
         totalAssets: input.totalAssets,
         totalLiabilities: input.totalLiabilities,
         netAssetValue: input.netAssetValue,
-        totalContributedCapital: input.totalContributedCapital,
-        totalCapitalReturned: input.totalCapitalReturned,
-        totalAccumulatedPnl: input.totalAccumulatedPnl,
-        periodFeeIncome: input.periodFeeIncome,
-        periodRealizedPnl: input.periodRealizedPnl,
-        periodUnrealizedPnl: input.periodUnrealizedPnl,
-        periodGasExpense: input.periodGasExpense,
+        depositedLiquidityAtCost: input.depositedLiquidityAtCost,
+        markToMarketAdjustment: input.markToMarketAdjustment,
+        unclaimedFees: input.unclaimedFees,
+        contributedCapital: input.contributedCapital,
+        capitalReturned: input.capitalReturned,
+        retainedRealizedWithdrawals: input.retainedRealizedWithdrawals,
+        retainedRealizedFees: input.retainedRealizedFees,
+        retainedUnrealizedPrice: input.retainedUnrealizedPrice,
+        retainedUnrealizedFees: input.retainedUnrealizedFees,
         activePositionCount: input.activePositionCount,
         positionBreakdown: input.positionBreakdown as unknown as object[],
       },
@@ -104,13 +108,15 @@ export class NavSnapshotService {
         totalAssets: input.totalAssets,
         totalLiabilities: input.totalLiabilities,
         netAssetValue: input.netAssetValue,
-        totalContributedCapital: input.totalContributedCapital,
-        totalCapitalReturned: input.totalCapitalReturned,
-        totalAccumulatedPnl: input.totalAccumulatedPnl,
-        periodFeeIncome: input.periodFeeIncome,
-        periodRealizedPnl: input.periodRealizedPnl,
-        periodUnrealizedPnl: input.periodUnrealizedPnl,
-        periodGasExpense: input.periodGasExpense,
+        depositedLiquidityAtCost: input.depositedLiquidityAtCost,
+        markToMarketAdjustment: input.markToMarketAdjustment,
+        unclaimedFees: input.unclaimedFees,
+        contributedCapital: input.contributedCapital,
+        capitalReturned: input.capitalReturned,
+        retainedRealizedWithdrawals: input.retainedRealizedWithdrawals,
+        retainedRealizedFees: input.retainedRealizedFees,
+        retainedUnrealizedPrice: input.retainedUnrealizedPrice,
+        retainedUnrealizedFees: input.retainedUnrealizedFees,
         activePositionCount: input.activePositionCount,
         positionBreakdown: input.positionBreakdown as unknown as object[],
       },
@@ -164,42 +170,30 @@ export class NavSnapshotService {
   }
 
   /**
-   * Returns the current (latest) and previous snapshot for period comparison.
-   * The "previous" date is calculated by subtracting the period duration.
+   * Returns the closest snapshot on or before the given date.
+   * Used by the balance sheet endpoint to get the previous period snapshot.
    */
-  async getComparisonSnapshots(userId: string, period: ComparisonPeriod) {
+  async getSnapshotAtBoundary(userId: string, date: Date) {
+    return this.prisma.nAVSnapshot.findFirst({
+      where: {
+        userId,
+        snapshotDate: { lte: date },
+      },
+      orderBy: { snapshotDate: 'desc' },
+    });
+  }
+
+  /**
+   * Returns the current (latest) and previous snapshot for period comparison.
+   * Uses calendar-based period boundaries.
+   */
+  async getComparisonSnapshots(userId: string, period: CalendarPeriod) {
     const current = await this.getLatestSnapshot(userId);
     if (!current) return { current: null, previous: null };
 
-    const previousDate = subtractPeriod(current.snapshotDate, period);
-    const previous = await this.getSnapshotByDate(userId, previousDate);
+    const { previousEnd } = getCalendarPeriodBoundaries(period);
+    const previous = await this.getSnapshotAtBoundary(userId, previousEnd);
 
     return { current, previous };
   }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function subtractPeriod(date: Date, period: ComparisonPeriod): Date {
-  const result = new Date(date);
-  switch (period) {
-    case 'day':
-      result.setUTCDate(result.getUTCDate() - 1);
-      break;
-    case 'week':
-      result.setUTCDate(result.getUTCDate() - 7);
-      break;
-    case 'month':
-      result.setUTCDate(result.getUTCDate() - 30);
-      break;
-    case 'quarter':
-      result.setUTCDate(result.getUTCDate() - 90);
-      break;
-    case 'year':
-      result.setUTCDate(result.getUTCDate() - 365);
-      break;
-  }
-  return result;
 }

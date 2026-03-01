@@ -7,6 +7,7 @@
 
 import { prisma as prismaClient, PrismaClient, Prisma } from '@midcurve/database';
 import type { JournalEntryInput, JournalLineInput } from '@midcurve/shared';
+import { CHART_OF_ACCOUNTS } from '@midcurve/shared';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -33,6 +34,42 @@ export class JournalService {
       JournalService.instance = new JournalService(deps);
     }
     return JournalService.instance;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chart of Accounts Seeding
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Upserts all accounts from CHART_OF_ACCOUNTS into the database.
+   * Idempotent — safe to call on every startup.
+   * Invalidates the cached account code map afterward.
+   */
+  async ensureChartOfAccounts(): Promise<number> {
+    for (const account of CHART_OF_ACCOUNTS) {
+      await this.prisma.accountDefinition.upsert({
+        where: { code: account.code },
+        update: {
+          name: account.name,
+          description: account.description,
+          category: account.category,
+          normalSide: account.normalSide,
+        },
+        create: {
+          code: account.code,
+          name: account.name,
+          description: account.description,
+          category: account.category,
+          normalSide: account.normalSide,
+        },
+      });
+    }
+
+    // Invalidate cached map so it picks up any new accounts
+    this.accountCodeToId = null;
+
+    this.logger.info(`Ensured ${CHART_OF_ACCOUNTS.length} account definitions`);
+    return CHART_OF_ACCOUNTS.length;
   }
 
   // ---------------------------------------------------------------------------
@@ -64,38 +101,35 @@ export class JournalService {
   }
 
   // ---------------------------------------------------------------------------
-  // Instrument Tracking
+  // Position Tracking
   // ---------------------------------------------------------------------------
 
   /**
-   * Registers an instrument for journal tracking (idempotent via unique constraint).
-   * Called on position.created — ensures subsequent events are not skipped.
+   * Registers a position for journal tracking (idempotent via unique constraint).
    */
-  async trackInstrument(userId: string, instrumentRef: string): Promise<void> {
-    await this.prisma.trackedInstrument.upsert({
-      where: { userId_instrumentRef: { userId, instrumentRef } },
-      create: { userId, instrumentRef },
+  async trackPosition(userId: string, positionRef: string): Promise<void> {
+    await this.prisma.trackedPosition.upsert({
+      where: { userId_positionRef: { userId, positionRef } },
+      create: { userId, positionRef },
       update: {},
     });
   }
 
   /**
-   * Removes an instrument from tracking.
-   * Called on position.deleted.
+   * Removes a position from tracking.
    */
-  async untrackInstrument(userId: string, instrumentRef: string): Promise<void> {
-    await this.prisma.trackedInstrument.deleteMany({
-      where: { userId, instrumentRef },
+  async untrackPosition(userId: string, positionRef: string): Promise<void> {
+    await this.prisma.trackedPosition.deleteMany({
+      where: { userId, positionRef },
     });
   }
 
   /**
-   * Returns true if the instrument is registered for tracking.
-   * Replaces the old hasEntriesForInstrument guard.
+   * Returns true if the position is registered for tracking.
    */
-  async isTracked(userId: string, instrumentRef: string): Promise<boolean> {
-    const record = await this.prisma.trackedInstrument.findUnique({
-      where: { userId_instrumentRef: { userId, instrumentRef } },
+  async isTracked(userId: string, positionRef: string): Promise<boolean> {
+    const record = await this.prisma.trackedPosition.findUnique({
+      where: { userId_positionRef: { userId, positionRef } },
       select: { id: true },
     });
     return record !== null;
@@ -106,11 +140,11 @@ export class JournalService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Returns true if any journal lines exist for the given instrument.
+   * Returns true if any journal lines exist for the given position.
    */
-  async hasEntriesForInstrument(instrumentRef: string): Promise<boolean> {
+  async hasEntriesForPosition(positionRef: string): Promise<boolean> {
     const line = await this.prisma.journalLine.findFirst({
-      where: { instrumentRef },
+      where: { positionRef },
       select: { id: true },
     });
     return line !== null;
@@ -148,6 +182,7 @@ export class JournalService {
     const resolvedLines = await Promise.all(
       lines.map(async (line) => ({
         accountId: await this.resolveAccountId(line.accountCode),
+        positionRef: line.positionRef,
         instrumentRef: line.instrumentRef,
         side: line.side,
         amountQuote: line.amountQuote,
@@ -188,7 +223,7 @@ export class JournalService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Computes the net balance for a specific account + instrument combination.
+   * Computes the net balance for a specific account + position combination.
    *
    * For debit-normal accounts (assets, expenses): balance = sum(debits) - sum(credits)
    * For credit-normal accounts (equity, revenue, liabilities): balance = sum(credits) - sum(debits)
@@ -196,11 +231,11 @@ export class JournalService {
    * Returns the raw signed balance (positive = in the direction of normal side).
    * The caller interprets the sign based on the account's normal side.
    */
-  async getAccountBalance(accountCode: number, instrumentRef: string): Promise<bigint> {
+  async getAccountBalance(accountCode: number, positionRef: string): Promise<bigint> {
     const accountId = await this.resolveAccountId(accountCode);
 
     const lines = await this.prisma.journalLine.findMany({
-      where: { accountId, instrumentRef },
+      where: { accountId, positionRef },
       select: { side: true, amountQuote: true },
     });
 
@@ -216,10 +251,6 @@ export class JournalService {
       }
     }
 
-    // Return net balance in the direction that increases this account.
-    // For debit-normal accounts: positive means net debit (good).
-    // For credit-normal accounts: we still return debits - credits,
-    // so the caller needs to know the account's normal side.
     return debits - credits;
   }
 
@@ -227,11 +258,11 @@ export class JournalService {
    * Same as getAccountBalance but aggregates amountReporting instead of amountQuote.
    * Lines where amountReporting is NULL are skipped.
    */
-  async getAccountBalanceReporting(accountCode: number, instrumentRef: string): Promise<bigint> {
+  async getAccountBalanceReporting(accountCode: number, positionRef: string): Promise<bigint> {
     const accountId = await this.resolveAccountId(accountCode);
 
     const lines = await this.prisma.journalLine.findMany({
-      where: { accountId, instrumentRef, amountReporting: { not: null } },
+      where: { accountId, positionRef, amountReporting: { not: null } },
       select: { side: true, amountReporting: true },
     });
 
@@ -251,12 +282,12 @@ export class JournalService {
   }
 
   /**
-   * Computes the net balance for a specific account + instrument,
+   * Computes the net balance for a specific account + position,
    * scoped to a specific user (via journal entries).
    */
   async getAccountBalanceForUser(
     accountCode: number,
-    instrumentRef: string,
+    positionRef: string,
     userId: string
   ): Promise<bigint> {
     const accountId = await this.resolveAccountId(accountCode);
@@ -264,7 +295,7 @@ export class JournalService {
     const lines = await this.prisma.journalLine.findMany({
       where: {
         accountId,
-        instrumentRef,
+        positionRef,
         journalEntry: { userId },
       },
       select: { side: true, amountQuote: true },
@@ -285,18 +316,52 @@ export class JournalService {
     return debits - credits;
   }
 
+  /**
+   * Computes the net reporting-currency balance for a specific account across
+   * all positions belonging to a user. Used by the balance sheet endpoint.
+   */
+  async getUserAccountBalanceReporting(
+    accountCode: number,
+    userId: string
+  ): Promise<bigint> {
+    const accountId = await this.resolveAccountId(accountCode);
+
+    const lines = await this.prisma.journalLine.findMany({
+      where: {
+        accountId,
+        amountReporting: { not: null },
+        journalEntry: { userId },
+      },
+      select: { side: true, amountReporting: true },
+    });
+
+    let debits = 0n;
+    let credits = 0n;
+
+    for (const line of lines) {
+      const amount = BigInt(line.amountReporting!);
+      if (line.side === 'debit') {
+        debits += amount;
+      } else {
+        credits += amount;
+      }
+    }
+
+    return debits - credits;
+  }
+
   // ---------------------------------------------------------------------------
   // Deletion
   // ---------------------------------------------------------------------------
 
   /**
-   * Deletes all journal entries (and cascading lines) that reference the given instrument.
+   * Deletes all journal entries (and cascading lines) that reference the given position.
    * Used when a position is deleted from the system.
    */
-  async deleteByInstrumentRef(instrumentRef: string): Promise<number> {
-    // Find all entry IDs that have at least one line with this instrumentRef
+  async deleteByPositionRef(positionRef: string): Promise<number> {
+    // Find all entry IDs that have at least one line with this positionRef
     const entries = await this.prisma.journalLine.findMany({
-      where: { instrumentRef },
+      where: { positionRef },
       select: { journalEntryId: true },
       distinct: ['journalEntryId'],
     });
@@ -308,7 +373,7 @@ export class JournalService {
       where: { id: { in: entryIds } },
     });
 
-    this.logger.info(`Deleted ${result.count} journal entries for instrument ${instrumentRef}`);
+    this.logger.info(`Deleted ${result.count} journal entries for position ${positionRef}`);
     return result.count;
   }
 
@@ -332,13 +397,13 @@ export class JournalService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Returns all journal entries for a given instrument, ordered by entry date.
+   * Returns all journal entries for a given position, ordered by entry date.
    * Used for debugging and validation.
    */
-  async getEntriesByInstrument(instrumentRef: string) {
-    // Find entry IDs that reference this instrument
+  async getEntriesByPosition(positionRef: string) {
+    // Find entry IDs that reference this position
     const entryIds = await this.prisma.journalLine.findMany({
-      where: { instrumentRef },
+      where: { positionRef },
       select: { journalEntryId: true },
       distinct: ['journalEntryId'],
     });
