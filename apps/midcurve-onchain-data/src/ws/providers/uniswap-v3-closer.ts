@@ -20,7 +20,6 @@ import {
   type WatchEventReturnType,
 } from 'viem';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
-import { wsMetrics } from '../../lib/ws-metrics';
 import { getRabbitMQConnection } from '../../mq/connection-manager';
 import { buildCloseOrderRoutingKey } from '../../mq/topology';
 import {
@@ -287,8 +286,6 @@ export class UniswapV3CloserSubscriptionBatch {
    * Handle incoming log events from WebSocket.
    */
   private handleLogs(logs: unknown[]): void {
-    wsMetrics.recordEvents(this.chainId, 'closer-lifecycle', logs.length);
-
     for (const rawLog of logs) {
       const logData = rawLog as RawEventLog;
 
@@ -357,8 +354,6 @@ export class UniswapV3CloserSubscriptionBatch {
    */
   private scheduleReconnect(): void {
     if (!this.isRunning) return;
-    wsMetrics.recordReconnect(this.chainId, 'closer-lifecycle');
-
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       log.error({
         chainId: this.chainId,

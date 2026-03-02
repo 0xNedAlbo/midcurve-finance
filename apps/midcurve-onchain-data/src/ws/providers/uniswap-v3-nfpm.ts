@@ -18,7 +18,6 @@ import {
   type Address,
 } from 'viem';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
-import { wsMetrics } from '../../lib/ws-metrics';
 import { getRabbitMQConnection } from '../../mq/connection-manager';
 import { buildPositionLiquidityRoutingKey } from '../../mq/topology';
 import {
@@ -426,8 +425,6 @@ export class UniswapV3NfpmSubscriptionBatch {
    * Reconnect the WebSocket with updated position list.
    */
   private async reconnect(): Promise<void> {
-    wsMetrics.recordReconnect(this.chainId, 'nfpm-liquidity');
-
     // Stop current subscriptions
     this.stopWatchers();
     this.client = null;
@@ -583,8 +580,6 @@ export class UniswapV3NfpmSubscriptionBatch {
    * Handle incoming log events.
    */
   private handleLogs(logs: unknown[], eventType: PositionEventType): void {
-    wsMetrics.recordEvents(this.chainId, 'nfpm-liquidity', logs.length);
-
     for (const rawLog of logs) {
       // Extract tokenId from the log args
       const logData = rawLog as {

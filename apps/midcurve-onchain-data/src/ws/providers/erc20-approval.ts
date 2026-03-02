@@ -17,7 +17,6 @@ import {
   toHex,
 } from 'viem';
 import { onchainDataLogger, priceLog } from '../../lib/logger.js';
-import { wsMetrics } from '../../lib/ws-metrics.js';
 import { prisma, Prisma } from '@midcurve/database';
 import type { SupportedChainId } from '../../lib/config.js';
 import type { Erc20ApprovalSubscriptionState } from '@midcurve/shared';
@@ -239,8 +238,6 @@ export class Erc20ApprovalSubscriptionBatch {
    * Reconnect the WebSocket with updated token list.
    */
   private async reconnect(): Promise<void> {
-    wsMetrics.recordReconnect(this.chainId, 'erc20-approval');
-
     // Stop current subscription
     if (this.unwatch) {
       this.unwatch();
@@ -376,8 +373,6 @@ export class Erc20ApprovalSubscriptionBatch {
    * Handle incoming log events.
    */
   private handleLogs(logs: unknown[]): void {
-    wsMetrics.recordEvents(this.chainId, 'erc20-approval', logs.length);
-
     for (const rawLog of logs) {
       // Extract data from the log
       const logData = rawLog as {

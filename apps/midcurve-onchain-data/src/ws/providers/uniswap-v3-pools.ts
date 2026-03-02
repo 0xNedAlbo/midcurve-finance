@@ -10,7 +10,6 @@
 
 import { createPublicClient, webSocket, type PublicClient, type WatchEventReturnType, keccak256, toHex } from 'viem';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
-import { wsMetrics } from '../../lib/ws-metrics';
 import { getRabbitMQConnection } from '../../mq/connection-manager';
 import { buildUniswapV3RoutingKey } from '../../mq/topology';
 import { createRawSwapEvent, serializeRawSwapEvent } from '../../mq/messages';
@@ -173,8 +172,6 @@ export class UniswapV3PoolSubscriptionBatch {
    * Reconnect the WebSocket with updated pool list.
    */
   private async reconnect(): Promise<void> {
-    wsMetrics.recordReconnect(this.chainId, 'pool-swap');
-
     // Stop current subscription
     if (this.unwatch) {
       this.unwatch();
@@ -305,8 +302,6 @@ export class UniswapV3PoolSubscriptionBatch {
    * Handle incoming log events.
    */
   private handleLogs(logs: unknown[]): void {
-    wsMetrics.recordEvents(this.chainId, 'pool-swap', logs.length);
-
     for (const rawLog of logs) {
       // Extract address from the log if available
       const logData = rawLog as { address?: string; blockNumber?: bigint; removed?: boolean };
