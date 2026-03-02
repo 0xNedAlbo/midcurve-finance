@@ -20,6 +20,7 @@ import {
   toHex,
 } from 'viem';
 import { onchainDataLogger, priceLog } from '../../lib/logger.js';
+import { wsMetrics } from '../../lib/ws-metrics.js';
 import { prisma, Prisma } from '@midcurve/database';
 import type { SupportedChainId } from '../../lib/config.js';
 import type { UniswapV3PoolPriceSubscriptionState } from '@midcurve/shared';
@@ -287,6 +288,8 @@ export class UniswapV3PoolPriceSubscriptionBatch {
    * Reconnect the WebSocket with updated pool list.
    */
   private async reconnect(): Promise<void> {
+    wsMetrics.recordReconnect(this.chainId, 'pool-price');
+
     // Stop current subscription
     if (this.unwatch) {
       this.unwatch();
@@ -418,6 +421,8 @@ export class UniswapV3PoolPriceSubscriptionBatch {
    * Updates ALL subscriptions for the pool that received the event.
    */
   private handleLogs(logs: unknown[]): void {
+    wsMetrics.recordEvents(this.chainId, 'pool-price', logs.length);
+
     for (const rawLog of logs) {
       // Extract data from the log
       const logData = rawLog as {

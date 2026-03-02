@@ -23,6 +23,7 @@ import {
   type Address,
 } from 'viem';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
+import { wsMetrics } from '../../lib/ws-metrics';
 import { getRabbitMQConnection } from '../../mq/connection-manager';
 import { buildNfpmTransferRoutingKey, type NfpmTransferEventType } from '../../mq/topology';
 import {
@@ -232,6 +233,7 @@ export class UniswapV3NfpmTransferSubscriptionBatch {
    * Reconnect the WebSocket with updated wallet list.
    */
   private async reconnect(): Promise<void> {
+    wsMetrics.recordReconnect(this.chainId, 'nfpm-transfer');
     this.stopWatchers();
     this.client = null;
     await this.connect();
@@ -318,6 +320,8 @@ export class UniswapV3NfpmTransferSubscriptionBatch {
    * Handle incoming Transfer log events.
    */
   private handleLogs(logs: unknown[]): void {
+    wsMetrics.recordEvents(this.chainId, 'nfpm-transfer', logs.length);
+
     for (const rawLog of logs) {
       const logData = rawLog as {
         args?: { from?: string; to?: string; tokenId?: bigint };

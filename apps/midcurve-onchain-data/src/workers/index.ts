@@ -18,6 +18,7 @@
  */
 
 import { onchainDataLogger, priceLog } from '../lib/logger';
+import { wsMetrics } from '../lib/ws-metrics';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PositionEventHandler } from '../events';
 import { PoolPriceSubscriber } from './pool-price-subscriber';
@@ -101,6 +102,8 @@ export class WorkerManager {
         this.nfpmTransferSubscriber.start(),
       ]);
 
+      wsMetrics.start();
+
       this.isRunning = true;
       priceLog.workerLifecycle(log, 'WorkerManager', 'started');
     } catch (error) {
@@ -124,6 +127,8 @@ export class WorkerManager {
     priceLog.workerLifecycle(log, 'WorkerManager', 'stopping');
 
     try {
+      wsMetrics.stop();
+
       // Stop event consumer first
       log.info({ msg: 'Stopping domain event consumer...' });
       await this.positionEventHandler.stop();
@@ -169,6 +174,7 @@ export class WorkerManager {
     uniswapV3PoolPriceSubscriber: ReturnType<UniswapV3PoolPriceSubscriber['getStatus']>;
     closeOrderSubscriber: ReturnType<CloseOrderSubscriber['getStatus']>;
     nfpmTransferSubscriber: ReturnType<NfpmTransferSubscriber['getStatus']>;
+    wsMetrics: ReturnType<typeof wsMetrics.getSnapshot>;
     eventConsumer: {
       positionEvents: { isRunning: boolean };
     };
@@ -188,6 +194,7 @@ export class WorkerManager {
       uniswapV3PoolPriceSubscriber: this.uniswapV3PoolPriceSubscriber.getStatus(),
       closeOrderSubscriber: this.closeOrderSubscriber.getStatus(),
       nfpmTransferSubscriber: this.nfpmTransferSubscriber.getStatus(),
+      wsMetrics: wsMetrics.getSnapshot(),
       eventConsumer: {
         positionEvents: { isRunning: this.positionEventHandler.isRunning() },
       },
