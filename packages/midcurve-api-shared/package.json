@@ -53,7 +53,7 @@
     "build:docker": "tsup src/index.ts --format esm,cjs --out-dir dist",
     "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --watch",
     "clean": "rm -rf dist",
-    "type-check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "yalc:link": "yalc link @midcurve/shared && npm install",
     "yalc:update": "yalc update @midcurve/shared",
     "yalc:unlink": "yalc remove @midcurve/shared && npm install",
