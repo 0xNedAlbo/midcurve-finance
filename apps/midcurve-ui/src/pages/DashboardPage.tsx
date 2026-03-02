@@ -45,8 +45,7 @@ export function DashboardPage() {
         {/* Header */}
         <header className="flex justify-between items-center mb-12">
           <div>
-            <h1 className="text-4xl font-bold text-white mb-2">Midcurve</h1>
-            <p className="text-lg text-slate-300">Dashboard</p>
+            <h1 className="text-4xl font-bold text-white mb-2">Midcurve Finance</h1>
           </div>
           <div className="flex items-center gap-3">
             <NotificationBell />
