@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import type { PnlResponse, PnlInstrumentItem, PnlPositionItem } from '@midcurve/api-shared';
-import { formatReportingAmount } from '@midcurve/shared';
+import { formatReportingAmount, formatFeeTier } from '@midcurve/shared';
 
 interface PnlStatementProps {
   data: PnlResponse | undefined;
@@ -81,7 +81,7 @@ function InstrumentRow({ instrument }: { instrument: PnlInstrumentItem }) {
             {instrument.poolSymbol}
           </span>
           <span className="text-slate-500 text-xs">
-            {instrument.protocol} · {instrument.feeTier !== '0' ? `${Number(instrument.feeTier) / 100}%` : ''}
+            {instrument.protocol} · {instrument.feeTier !== '0' ? formatFeeTier(Number(instrument.feeTier)) : ''}
           </span>
         </div>
         <span className={`font-semibold ${pnlColor(instrument.netPnl)}`}>
