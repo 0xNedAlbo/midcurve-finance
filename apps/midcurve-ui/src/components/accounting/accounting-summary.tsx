@@ -2,14 +2,13 @@
  * AccountingSummary - Main container for the Summary tab.
  *
  * Two sub-tabs: Balance Sheet | P&L Statement
- * Shared period selector + refresh button.
+ * Shared period selector.
  */
 
 import { useState } from 'react';
 import type { PeriodQuery } from '@midcurve/api-shared';
 import { useBalanceSheet } from '@/hooks/accounting/useBalanceSheet';
 import { usePnl } from '@/hooks/accounting/usePnl';
-import { useRefreshAllPositions } from '@/hooks/accounting/useRefreshAllPositions';
 import { AccountingPeriodSelector } from './accounting-period-selector';
 import { BalanceSheetTable } from './balance-sheet-table';
 import { PnlStatement } from './pnl-statement';
@@ -28,8 +27,6 @@ export function AccountingSummary() {
 
   const { data: balanceSheet } = useBalanceSheet(period);
   const { data: pnl } = usePnl(period, offset);
-  const { refresh, isRefreshing, isRateLimited, retryAfter } = useRefreshAllPositions();
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -47,24 +44,7 @@ export function AccountingSummary() {
           />
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => refresh()}
-            disabled={isRefreshing || isRateLimited}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
-              isRefreshing || isRateLimited
-                ? 'text-slate-500 border-slate-700/30 cursor-not-allowed'
-                : 'text-slate-300 border-slate-600 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            {isRefreshing
-              ? 'Refreshing...'
-              : isRateLimited
-                ? `Refresh (${retryAfter}s)`
-                : 'Refresh'}
-          </button>
-          <AccountingPeriodSelector activePeriod={period} onPeriodChange={handlePeriodChange} />
-        </div>
+        <AccountingPeriodSelector activePeriod={period} onPeriodChange={handlePeriodChange} />
       </div>
 
       {/* Date range with period navigation */}
