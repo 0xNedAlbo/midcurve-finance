@@ -451,28 +451,39 @@ export class NavSnapshotService {
       const batchResults = await Promise.all(
         batch.map(async (position) => {
           const ownerAddress = position.state.ownerAddress as Address;
-          const result = await client.simulateContract({
-            address: nfpmAddress,
-            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
-            functionName: 'collect',
-            args: [{
-              tokenId: BigInt(position.config.nftId),
-              recipient: ownerAddress,
-              amount0Max: MAX_UINT128,
-              amount1Max: MAX_UINT128,
-            }],
-            blockNumber,
-            account: ownerAddress,
-          });
-          return {
-            positionId: position.id,
-            tokensOwed0: result.result[0],
-            tokensOwed1: result.result[1],
-          };
+          try {
+            const result = await client.simulateContract({
+              address: nfpmAddress,
+              abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+              functionName: 'collect',
+              args: [{
+                tokenId: BigInt(position.config.nftId),
+                recipient: ownerAddress,
+                amount0Max: MAX_UINT128,
+                amount1Max: MAX_UINT128,
+              }],
+              blockNumber,
+              account: ownerAddress,
+            });
+            return {
+              positionId: position.id,
+              tokensOwed0: result.result[0],
+              tokensOwed1: result.result[1],
+            };
+          } catch (error) {
+            // Position may not exist at this block (minted later, or already burned)
+            this.logger.warn(
+              { positionId: position.id, nftId: position.config.nftId, blockNumber: blockNumber.toString(),
+                error: error instanceof Error ? error.message : String(error) },
+              'collect() staticcall reverted, position likely did not exist at snapshot block'
+            );
+            return null;
+          }
         })
       );
 
       for (const r of batchResults) {
+        if (!r) continue;
         results.set(r.positionId, {
           tokensOwed0: r.tokensOwed0,
           tokensOwed1: r.tokensOwed1,
