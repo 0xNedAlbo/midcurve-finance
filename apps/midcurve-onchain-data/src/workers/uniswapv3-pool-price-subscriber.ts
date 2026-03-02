@@ -1,36 +1,42 @@
 /**
  * UniswapV3PoolPriceSubscriber Worker
  *
- * Manages WebSocket subscriptions for Uniswap V3 pool price (Swap) events.
- * Polls the database for active subscriptions and manages their lifecycle:
- * - active: subscribed to WebSocket events
- * - paused: removed from WebSocket after 60s without polling
+ * Consumes Swap events from the pool-prices RabbitMQ exchange (published by
+ * PoolPriceSubscriber) and updates the onchainDataSubscribers table with
+ * the latest sqrtPriceX96 and tick for each tracked pool.
+ *
+ * This eliminates a duplicate WebSocket subscription — previously both this
+ * worker and PoolPriceSubscriber maintained separate eth_subscribe calls for
+ * the same Swap events.
+ *
+ * Subscription lifecycle:
+ * - active: receiving price updates from RabbitMQ
+ * - paused: removed from tracking after expiresAfterMs without polling
  * - deleted: cleaned up after 5min in paused state
  *
  * API endpoint handles reactivation when a paused subscription is polled.
  */
 
+import type { Channel, ConsumeMessage } from 'amqplib';
 import { prisma, Prisma } from '@midcurve/database';
 import { getEvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger.js';
 import {
-  getConfiguredWssUrls,
-  getWssUrl,
-  getWorkerConfig,
   isSupportedChain,
   type SupportedChainId,
 } from '../lib/config.js';
-import {
-  UniswapV3PoolPriceSubscriptionBatch,
-  createPoolPriceSubscriptionBatches,
-  type PoolPriceInfo,
-} from '../ws/providers/uniswapv3-pool-price.js';
+import { getRabbitMQConnection } from '../mq/connection-manager.js';
+import { EXCHANGE_POOL_PRICES } from '../mq/topology.js';
+import type { RawSwapEventWrapper } from '../mq/messages.js';
 import type {
   UniswapV3PoolPriceSubscriptionConfig,
   UniswapV3PoolPriceSubscriptionState,
 } from '@midcurve/shared';
 
 const log = onchainDataLogger.child({ component: 'UniswapV3PoolPriceSubscriber' });
+
+/** Queue name for consuming pool price events */
+const QUEUE_NAME = 'onchain-data.pool-price-updates';
 
 /** Threshold for pausing subscriptions (default: 60 seconds) */
 const PAUSE_THRESHOLD_MS = parseInt(process.env.POOL_PRICE_STALE_THRESHOLD_MS || '60000', 10);
@@ -44,17 +50,26 @@ const CLEANUP_INTERVAL_MS = parseInt(process.env.POOL_PRICE_CLEANUP_INTERVAL_MS 
 /** Interval for polling new subscriptions (default: 5 seconds) */
 const POLL_INTERVAL_MS = parseInt(process.env.POOL_PRICE_POLL_INTERVAL_MS || '5000', 10);
 
+interface TrackedPool {
+  id: string;
+  subscriptionId: string;
+  poolAddress: string;
+  chainId: SupportedChainId;
+}
+
 /**
- * UniswapV3PoolPriceSubscriber manages WebSocket subscriptions for Swap events.
- * Subscriptions are created via the API and managed by this worker.
+ * UniswapV3PoolPriceSubscriber consumes Swap events from RabbitMQ and
+ * updates subscription state in the database.
  */
 export class UniswapV3PoolPriceSubscriber {
-  private batches: UniswapV3PoolPriceSubscriptionBatch[] = [];
-  private batchesByChain: Map<SupportedChainId, UniswapV3PoolPriceSubscriptionBatch[]> = new Map();
   private isRunning = false;
 
   // Track subscribed pools by subscriptionId
-  private subscribedPools: Map<string, PoolPriceInfo & { chainId: SupportedChainId }> = new Map();
+  private subscribedPools: Map<string, TrackedPool> = new Map();
+
+  // RabbitMQ consumer
+  private consumerTag: string | null = null;
+  private channel: Channel | null = null;
 
   // Timers
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -62,7 +77,7 @@ export class UniswapV3PoolPriceSubscriber {
 
   /**
    * Start the subscriber.
-   * Loads active subscriptions and creates WebSocket batches.
+   * Loads active subscriptions and starts consuming from RabbitMQ.
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -72,95 +87,68 @@ export class UniswapV3PoolPriceSubscriber {
 
     priceLog.workerLifecycle(log, 'UniswapV3PoolPriceSubscriber', 'starting');
 
-    try {
-      // Load active subscriptions from database
-      const poolsByChain = await this.loadActiveSubscriptions();
+    // Load active subscriptions from database
+    await this.loadActiveSubscriptions();
 
-      // Get configured WSS URLs
-      const wssConfigs = getConfiguredWssUrls();
+    // Set up RabbitMQ consumer
+    const mq = getRabbitMQConnection();
+    this.channel = await mq.getChannel();
 
-      if (wssConfigs.length === 0) {
-        log.warn({
-          msg: 'No WS_RPC_URL_* environment variables configured, subscriber will not start. Set WS_RPC_URL_ETHEREUM, WS_RPC_URL_ARBITRUM, etc.',
-        });
-        return;
-      }
+    await this.channel.assertQueue(QUEUE_NAME, {
+      durable: true,
+      autoDelete: false,
+    });
 
-      // Create subscription batches for each configured chain
-      for (const wssConfig of wssConfigs) {
-        const chainId = wssConfig.chainId as SupportedChainId;
-        const pools = poolsByChain.get(chainId);
+    await this.channel.bindQueue(QUEUE_NAME, EXCHANGE_POOL_PRICES, 'uniswapv3.#');
 
-        if (!pools || pools.length === 0) {
-          log.info({ chainId, msg: 'No active pool price subscriptions for chain, skipping' });
-          continue;
-        }
+    const { consumerTag } = await this.channel.consume(
+      QUEUE_NAME,
+      (msg) => {
+        if (msg) this.handleSwapMessage(msg);
+      },
+      { noAck: true },
+    );
 
-        const chainBatches = createPoolPriceSubscriptionBatches(chainId, wssConfig.url, pools);
-        this.batches.push(...chainBatches);
-        this.batchesByChain.set(chainId, chainBatches);
-      }
+    this.consumerTag = consumerTag;
 
-      this.isRunning = true;
+    this.isRunning = true;
 
-      if (this.batches.length === 0) {
-        log.info({
-          msg: 'No subscription batches created, subscriber will idle until new subscriptions are added',
-        });
+    // Read initial prices for all subscribed pools via slot0()
+    // Group by (chainId, poolAddress) to avoid redundant reads
+    const poolGroups = new Map<string, { chainId: SupportedChainId; poolAddress: string; dbIds: string[] }>();
+    for (const [, poolInfo] of this.subscribedPools) {
+      const key = `${poolInfo.chainId}:${poolInfo.poolAddress}`;
+      const group = poolGroups.get(key);
+      if (group) {
+        group.dbIds.push(poolInfo.id);
       } else {
-        // Start all batches
-        await Promise.all(this.batches.map((batch) => batch.start()));
+        poolGroups.set(key, {
+          chainId: poolInfo.chainId,
+          poolAddress: poolInfo.poolAddress,
+          dbIds: [poolInfo.id],
+        });
       }
-
-      // Read initial prices for all subscribed pools via slot0()
-      // Group by (chainId, poolAddress) to avoid redundant reads
-      const poolGroups = new Map<string, { chainId: SupportedChainId; poolAddress: string; dbIds: string[] }>();
-      for (const [, poolInfo] of this.subscribedPools) {
-        const key = `${poolInfo.chainId}:${poolInfo.poolAddress}`;
-        const group = poolGroups.get(key);
-        if (group) {
-          group.dbIds.push(poolInfo.id);
-        } else {
-          poolGroups.set(key, {
-            chainId: poolInfo.chainId,
-            poolAddress: poolInfo.poolAddress,
-            dbIds: [poolInfo.id],
-          });
-        }
-      }
-
-      for (const group of poolGroups.values()) {
-        // Fire and forget — don't block startup
-        this.readInitialPrice(group.chainId, group.poolAddress, group.dbIds)
-          .catch(() => {}); // Error already logged inside readInitialPrice
-      }
-
-      // Start cleanup timer (pause stale, prune deleted)
-      this.startCleanup();
-
-      // Start polling for new subscriptions
-      this.startPolling();
-
-      const totalPools = this.batches.reduce(
-        (sum, batch) => sum + batch.getStatus().poolCount,
-        0
-      );
-
-      priceLog.workerLifecycle(log, 'UniswapV3PoolPriceSubscriber', 'started', {
-        batchCount: this.batches.length,
-        totalPools,
-      });
-    } catch (error) {
-      priceLog.workerLifecycle(log, 'UniswapV3PoolPriceSubscriber', 'error', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
     }
+
+    for (const group of poolGroups.values()) {
+      // Fire and forget — don't block startup
+      this.readInitialPrice(group.chainId, group.poolAddress, group.dbIds)
+        .catch(() => {}); // Error already logged inside readInitialPrice
+    }
+
+    // Start cleanup timer (pause stale, prune deleted)
+    this.startCleanup();
+
+    // Start polling for new subscriptions
+    this.startPolling();
+
+    priceLog.workerLifecycle(log, 'UniswapV3PoolPriceSubscriber', 'started', {
+      totalSubscriptions: this.subscribedPools.size,
+    });
   }
 
   /**
    * Stop the subscriber.
-   * Stops all WebSocket batches gracefully.
    */
   async stop(): Promise<void> {
     if (!this.isRunning) {
@@ -174,10 +162,13 @@ export class UniswapV3PoolPriceSubscriber {
     this.stopCleanup();
     this.stopPolling();
 
-    // Stop all batches
-    await Promise.all(this.batches.map((batch) => batch.stop()));
-    this.batches = [];
-    this.batchesByChain.clear();
+    // Cancel RabbitMQ consumer
+    if (this.consumerTag && this.channel) {
+      await this.channel.cancel(this.consumerTag);
+      this.consumerTag = null;
+    }
+    this.channel = null;
+
     this.subscribedPools.clear();
     this.isRunning = false;
 
@@ -189,31 +180,118 @@ export class UniswapV3PoolPriceSubscriber {
    */
   getStatus(): {
     isRunning: boolean;
-    batchCount: number;
     totalSubscriptions: number;
-    batches: Array<{
-      chainId: number;
-      batchIndex: number;
-      poolCount: number;
-      isConnected: boolean;
-    }>;
   } {
     return {
       isRunning: this.isRunning,
-      batchCount: this.batches.length,
       totalSubscriptions: this.subscribedPools.size,
-      batches: this.batches.map((batch) => batch.getStatus()),
     };
   }
 
+  // ===========================================================================
+  // RabbitMQ Message Handling
+  // ===========================================================================
+
+  /**
+   * Handle a Swap event message from the pool-prices exchange.
+   * Parses the raw event and updates matching subscriptions in the database.
+   */
+  private handleSwapMessage(msg: ConsumeMessage): void {
+    const event = JSON.parse(msg.content.toString()) as RawSwapEventWrapper;
+    const poolAddress = event.poolAddress;
+    const chainId = event.chainId;
+
+    // Find matching subscriptions for this pool
+    const matchingIds: string[] = [];
+    for (const [, info] of this.subscribedPools) {
+      if (info.chainId === chainId && info.poolAddress === poolAddress) {
+        matchingIds.push(info.id);
+      }
+    }
+
+    if (matchingIds.length === 0) return;
+
+    // Parse the raw swap event (bigints are serialized as strings by bigIntReplacer)
+    const raw = event.raw as {
+      args?: { sqrtPriceX96?: string; tick?: number };
+      blockNumber?: string;
+      transactionHash?: string;
+      removed?: boolean;
+    };
+
+    if (raw.removed) return;
+    if (!raw.args?.sqrtPriceX96 || raw.args?.tick === undefined) return;
+
+    const sqrtPriceX96 = raw.args.sqrtPriceX96;
+    const tick = raw.args.tick;
+    const blockNumber = raw.blockNumber ? Number(raw.blockNumber) : null;
+    const txHash = raw.transactionHash || null;
+
+    this.updateSubscriptions(poolAddress, matchingIds, sqrtPriceX96, tick, blockNumber, txHash)
+      .catch((err) => {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          chainId,
+          poolAddress,
+          subscriptionCount: matchingIds.length,
+          msg: 'Failed to update pool price state',
+        });
+      });
+  }
+
+  /**
+   * Update pool price state for matching subscriptions.
+   */
+  private async updateSubscriptions(
+    poolAddress: string,
+    subscriptionDbIds: string[],
+    sqrtPriceX96: string,
+    tick: number,
+    blockNumber: number | null,
+    txHash: string | null,
+  ): Promise<void> {
+    const now = new Date();
+
+    const newState: UniswapV3PoolPriceSubscriptionState = {
+      sqrtPriceX96,
+      tick,
+      lastEventBlock: blockNumber,
+      lastEventTxHash: txHash,
+      lastUpdatedAt: now.toISOString(),
+    };
+
+    const result = await prisma.onchainDataSubscribers.updateMany({
+      where: {
+        id: { in: subscriptionDbIds },
+        status: { not: 'deleted' },
+      },
+      data: {
+        state: newState as unknown as Prisma.InputJsonValue,
+        updatedAt: now,
+      },
+    });
+
+    log.info({
+      poolAddress,
+      sqrtPriceX96,
+      tick,
+      blockNumber,
+      subscriptionsUpdated: result.count,
+      totalSubscriptions: subscriptionDbIds.length,
+      msg: 'Updated pool price state for all subscriptions',
+    });
+  }
+
+  // ===========================================================================
+  // Subscription Loading & Tracking
+  // ===========================================================================
+
   /**
    * Load active subscriptions from database.
-   * Groups by chain ID for batch creation.
    */
-  private async loadActiveSubscriptions(): Promise<Map<SupportedChainId, PoolPriceInfo[]>> {
+  private async loadActiveSubscriptions(): Promise<void> {
     priceLog.methodEntry(log, 'loadActiveSubscriptions');
 
-    // Query active uniswapv3-pool-price subscriptions
     const subscriptions = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'uniswapv3-pool-price',
@@ -230,9 +308,6 @@ export class UniswapV3PoolPriceSubscriber {
       subscriptionCount: subscriptions.length,
       msg: 'Loaded active pool price subscriptions',
     });
-
-    // Group by chain ID
-    const poolsByChain = new Map<SupportedChainId, PoolPriceInfo[]>();
 
     for (const sub of subscriptions) {
       const config = sub.config as unknown as UniswapV3PoolPriceSubscriptionConfig;
@@ -254,37 +329,15 @@ export class UniswapV3PoolPriceSubscriber {
         continue;
       }
 
-      const chainId = config.chainId as SupportedChainId;
-      const normalizedPool = config.poolAddress.toLowerCase();
-
-      const poolInfo: PoolPriceInfo = {
+      this.subscribedPools.set(sub.subscriptionId, {
         id: sub.id,
         subscriptionId: sub.subscriptionId,
-        poolAddress: normalizedPool,
-      };
-
-      // Track in internal state
-      this.subscribedPools.set(sub.subscriptionId, {
-        ...poolInfo,
-        chainId,
+        poolAddress: config.poolAddress.toLowerCase(),
+        chainId: config.chainId as SupportedChainId,
       });
-
-      // Add to chain grouping
-      if (!poolsByChain.has(chainId)) {
-        poolsByChain.set(chainId, []);
-      }
-
-      poolsByChain.get(chainId)!.push(poolInfo);
-    }
-
-    // Log summary
-    for (const [chainId, chainPools] of poolsByChain) {
-      log.info({ chainId, poolCount: chainPools.length, msg: 'Pools grouped by chain' });
     }
 
     priceLog.methodExit(log, 'loadActiveSubscriptions');
-
-    return poolsByChain;
   }
 
   // ===========================================================================
@@ -293,7 +346,7 @@ export class UniswapV3PoolPriceSubscriber {
 
   /**
    * Add a pool subscription to the worker.
-   * Called when API creates a new subscription or reactivates a paused one.
+   * Called when a new subscription is found during polling.
    */
   async addPool(
     subscriptionId: string,
@@ -301,7 +354,6 @@ export class UniswapV3PoolPriceSubscriber {
     chainId: number,
     poolAddress: string
   ): Promise<void> {
-    // Validate chain
     if (!isSupportedChain(chainId)) {
       log.warn({ chainId, subscriptionId, msg: 'Unsupported chain ID, cannot add pool' });
       return;
@@ -309,41 +361,25 @@ export class UniswapV3PoolPriceSubscriber {
 
     const supportedChainId = chainId as SupportedChainId;
 
-    // Check if already subscribed
     if (this.subscribedPools.has(subscriptionId)) {
       log.debug({ subscriptionId, msg: 'Pool already subscribed' });
       return;
     }
 
-    // Get WSS URL
-    const wssUrl = getWssUrl(supportedChainId);
-    if (!wssUrl) {
-      log.warn({ chainId, subscriptionId, msg: 'No WSS URL configured for chain' });
-      return;
-    }
-
-    const poolInfo: PoolPriceInfo = {
+    this.subscribedPools.set(subscriptionId, {
       id,
       subscriptionId,
       poolAddress: poolAddress.toLowerCase(),
-    };
-
-    // Track
-    this.subscribedPools.set(subscriptionId, {
-      ...poolInfo,
       chainId: supportedChainId,
     });
 
-    // Add to batch
-    await this.addPoolToBatch(supportedChainId, wssUrl, poolInfo);
-
     // Read initial price from slot0() so the subscription has a valid price immediately
-    await this.readInitialPrice(supportedChainId, poolInfo.poolAddress, [poolInfo.id]);
+    await this.readInitialPrice(supportedChainId, poolAddress.toLowerCase(), [id]);
 
     log.info({
       chainId,
       subscriptionId,
-      poolAddress: poolInfo.poolAddress,
+      poolAddress: poolAddress.toLowerCase(),
       msg: 'Added pool subscription',
     });
   }
@@ -351,30 +387,15 @@ export class UniswapV3PoolPriceSubscriber {
   /**
    * Remove a pool subscription from the worker.
    * Called when subscription is paused or deleted.
-   *
-   * The batch handles multiple subscriptions per pool internally - it will only
-   * remove the pool from the WebSocket filter when no subscriptions remain.
    */
-  async removePool(subscriptionId: string): Promise<void> {
+  removePool(subscriptionId: string): void {
     const poolInfo = this.subscribedPools.get(subscriptionId);
     if (!poolInfo) {
       log.debug({ subscriptionId, msg: 'Pool not found in subscribed list' });
       return;
     }
 
-    // Remove from internal tracking
     this.subscribedPools.delete(subscriptionId);
-
-    // Remove from batch (batch handles multi-subscription logic internally)
-    const chainBatches = this.batchesByChain.get(poolInfo.chainId);
-    if (chainBatches) {
-      for (const batch of chainBatches) {
-        if (batch.hasPool(subscriptionId)) {
-          await batch.removeSubscription(subscriptionId);
-          break;
-        }
-      }
-    }
 
     log.info({
       chainId: poolInfo.chainId,
@@ -382,54 +403,6 @@ export class UniswapV3PoolPriceSubscriber {
       poolAddress: poolInfo.poolAddress,
       msg: 'Removed pool subscription',
     });
-  }
-
-  /**
-   * Add a pool to an existing batch or create a new batch if needed.
-   */
-  private async addPoolToBatch(
-    chainId: SupportedChainId,
-    wssUrl: string,
-    pool: PoolPriceInfo
-  ): Promise<void> {
-    const config = getWorkerConfig();
-    let chainBatches = this.batchesByChain.get(chainId);
-
-    if (!chainBatches) {
-      chainBatches = [];
-      this.batchesByChain.set(chainId, chainBatches);
-    }
-
-    // Find a batch with room
-    let targetBatch = chainBatches.find(
-      (batch) => batch.getStatus().poolCount < config.maxPoolsPerConnection
-    );
-
-    if (targetBatch) {
-      // Add to existing batch
-      await targetBatch.addPool(pool);
-      log.info({
-        chainId,
-        subscriptionId: pool.subscriptionId,
-        batchIndex: targetBatch.getStatus().batchIndex,
-        msg: 'Added pool to existing batch',
-      });
-    } else {
-      // Create new batch
-      const batchIndex = chainBatches.length;
-      const newBatch = new UniswapV3PoolPriceSubscriptionBatch(chainId, wssUrl, batchIndex, [pool]);
-      chainBatches.push(newBatch);
-      this.batches.push(newBatch);
-
-      // Start the new batch
-      await newBatch.start();
-      log.info({
-        chainId,
-        subscriptionId: pool.subscriptionId,
-        batchIndex,
-        msg: 'Created new batch for pool',
-      });
-    }
   }
 
   /**
@@ -507,9 +480,6 @@ export class UniswapV3PoolPriceSubscriber {
   // Polling (for new subscriptions and reactivations)
   // ===========================================================================
 
-  /**
-   * Start polling for new subscriptions.
-   */
   private startPolling(): void {
     this.pollTimer = setInterval(() => {
       this.pollNewSubscriptions().catch((err) => {
@@ -523,9 +493,6 @@ export class UniswapV3PoolPriceSubscriber {
     log.info({ intervalMs: POLL_INTERVAL_MS, msg: 'Started polling for new subscriptions' });
   }
 
-  /**
-   * Stop polling.
-   */
   private stopPolling(): void {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
@@ -534,11 +501,7 @@ export class UniswapV3PoolPriceSubscriber {
     }
   }
 
-  /**
-   * Poll database for new active subscriptions that aren't tracked yet.
-   */
   private async pollNewSubscriptions(): Promise<void> {
-    // Get all active subscriptions we're NOT yet tracking
     const subscriptions = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'uniswapv3-pool-price',
@@ -580,15 +543,12 @@ export class UniswapV3PoolPriceSubscriber {
   // Cleanup (pause stale, prune deleted)
   // ===========================================================================
 
-  /**
-   * Start the cleanup timer.
-   */
   private startCleanup(): void {
     this.cleanupTimer = setInterval(() => {
       Promise.all([
         this.pauseStaleSubscriptions(),
         this.pruneDeletedSubscriptions(),
-        this.removeDeletedFromBatches(),
+        this.removeDeletedFromTracking(),
       ]).catch((err) => {
         log.error({
           error: err instanceof Error ? err.message : String(err),
@@ -605,9 +565,6 @@ export class UniswapV3PoolPriceSubscriber {
     });
   }
 
-  /**
-   * Stop the cleanup timer.
-   */
   private stopCleanup(): void {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
@@ -617,11 +574,9 @@ export class UniswapV3PoolPriceSubscriber {
   }
 
   /**
-   * Pause subscriptions that haven't been polled in PAUSE_THRESHOLD_MS.
-   * Removes them from WebSocket but keeps the DB record.
+   * Pause subscriptions that haven't been polled within their expiresAfterMs window.
    */
   private async pauseStaleSubscriptions(): Promise<void> {
-    // Find active subscriptions that have an expiry (persistent subscriptions with null expiresAfterMs are skipped)
     const candidates = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'uniswapv3-pool-price',
@@ -651,7 +606,6 @@ export class UniswapV3PoolPriceSubscriber {
     const pausedAt = new Date();
 
     for (const sub of staleSubscriptions) {
-      // Update database status to paused
       await prisma.onchainDataSubscribers.update({
         where: { id: sub.id },
         data: {
@@ -660,8 +614,7 @@ export class UniswapV3PoolPriceSubscriber {
         },
       });
 
-      // Remove from WebSocket batch
-      await this.removePool(sub.subscriptionId);
+      this.removePool(sub.subscriptionId);
 
       log.info({ subscriptionId: sub.subscriptionId, msg: 'Paused stale subscription' });
     }
@@ -673,7 +626,6 @@ export class UniswapV3PoolPriceSubscriber {
   private async pruneDeletedSubscriptions(): Promise<void> {
     const cutoffTime = new Date(Date.now() - PRUNE_THRESHOLD_MS);
 
-    // Find paused subscriptions that have been paused for too long
     const toDelete = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'uniswapv3-pool-price',
@@ -694,7 +646,6 @@ export class UniswapV3PoolPriceSubscriber {
 
     log.info({ count: toDelete.length, msg: 'Pruning old paused subscriptions' });
 
-    // Delete from database
     const subscriptionIds = toDelete.map((sub) => sub.subscriptionId);
 
     await prisma.onchainDataSubscribers.deleteMany({
@@ -707,19 +658,15 @@ export class UniswapV3PoolPriceSubscriber {
   }
 
   /**
-   * Remove subscriptions from WebSocket batches that were marked as 'deleted' via API.
-   * This handles the case where the API DELETE endpoint marks a subscription as deleted
-   * but the worker still has it in its subscribedPools map.
+   * Remove subscriptions from tracking that were marked as 'deleted' via API.
    */
-  private async removeDeletedFromBatches(): Promise<void> {
+  private async removeDeletedFromTracking(): Promise<void> {
     if (this.subscribedPools.size === 0) {
       return;
     }
 
-    // Get subscription IDs that we're currently tracking
     const trackedIds = Array.from(this.subscribedPools.keys());
 
-    // Find which of these have been marked as 'deleted' in the database
     const deletedSubscriptions = await prisma.onchainDataSubscribers.findMany({
       where: {
         subscriptionType: 'uniswapv3-pool-price',
@@ -737,15 +684,11 @@ export class UniswapV3PoolPriceSubscriber {
 
     log.info({
       count: deletedSubscriptions.length,
-      msg: 'Removing deleted subscriptions from WebSocket batches',
+      msg: 'Removing deleted subscriptions from tracking',
     });
 
     for (const sub of deletedSubscriptions) {
-      await this.removePool(sub.subscriptionId);
-      log.info({
-        subscriptionId: sub.subscriptionId,
-        msg: 'Removed deleted subscription from WebSocket batch',
-      });
+      this.removePool(sub.subscriptionId);
     }
   }
 }
