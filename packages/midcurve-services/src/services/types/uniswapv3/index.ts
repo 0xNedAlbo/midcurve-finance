@@ -11,6 +11,9 @@ export type {
   UniswapV3IncreaseLiquidityEventDB,
   UniswapV3DecreaseLiquidityEventDB,
   UniswapV3CollectEventDB,
+  UniswapV3MintEventDB,
+  UniswapV3BurnEventDB,
+  UniswapV3TransferEventDB,
   UniswapV3LedgerEventStateDB,
 } from './position-ledger-event-db.js';
 export {

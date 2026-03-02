@@ -85,12 +85,6 @@ export type {
   UniswapV3QuoteTokenInput,
 } from './quote-token/index.js';
 
-// Pool Discovery input types
-export type {
-  PoolDiscoveryInput,
-  UniswapV3PoolDiscoveryInput,
-} from './pool-discovery/index.js';
-
 // Pool Search input types
 export type {
   UniswapV3PoolSearchInput,
@@ -99,14 +93,9 @@ export type {
 
 // Automation input types
 export type {
-  RegisterCloseOrderInput,
-  UpdateCloseOrderInput,
+  CreateCloseOrderInput,
+  SyncFromChainInput,
   FindCloseOrderOptions,
-  MarkOrderRegisteredInput,
-  MarkOrderTriggeredInput,
-  MarkOrderExecutedInput,
-  UpdatePoolSubscriptionInput,
-  FindPoolSubscriptionOptions,
   AutomationPlatform,
   BaseLogContext,
   EvmLogContext,

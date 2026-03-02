@@ -9,12 +9,9 @@
  * - Conversion functions (to/from DB format)
  */
 
-import type { UniswapV3LedgerEventConfig } from '@midcurve/shared';
 import type {
+  UniswapV3LedgerEventConfig,
   UniswapV3LedgerEventState,
-  UniswapV3IncreaseLiquidityEvent,
-  UniswapV3DecreaseLiquidityEvent,
-  UniswapV3CollectEvent,
 } from '@midcurve/shared';
 
 // ============================================================================
@@ -57,6 +54,11 @@ export interface UniswapV3LedgerEventConfigDB {
    * Transaction hash (no conversion needed)
    */
   txHash: string;
+
+  /**
+   * Block hash (no conversion needed)
+   */
+  blockHash: string;
 
   /**
    * Change in liquidity (as string)
@@ -112,6 +114,7 @@ export function toEventConfig(
     txIndex: configDB.txIndex,
     logIndex: configDB.logIndex,
     txHash: configDB.txHash,
+    blockHash: configDB.blockHash,
     deltaL: BigInt(configDB.deltaL),
     liquidityAfter: BigInt(configDB.liquidityAfter),
     feesCollected0: BigInt(configDB.feesCollected0),
@@ -140,6 +143,7 @@ export function toEventConfigDB(
     txIndex: config.txIndex,
     logIndex: config.logIndex,
     txHash: config.txHash,
+    blockHash: config.blockHash,
     deltaL: config.deltaL.toString(),
     liquidityAfter: config.liquidityAfter.toString(),
     feesCollected0: config.feesCollected0.toString(),
@@ -191,15 +195,49 @@ export interface UniswapV3CollectEventDB {
 }
 
 /**
+ * Uniswap V3 Mint Event (Database Format)
+ * All bigint values as strings
+ */
+export interface UniswapV3MintEventDB {
+  eventType: 'MINT';
+  tokenId: string;
+  to: string;
+}
+
+/**
+ * Uniswap V3 Burn Event (Database Format)
+ * All bigint values as strings
+ */
+export interface UniswapV3BurnEventDB {
+  eventType: 'BURN';
+  tokenId: string;
+  from: string;
+}
+
+/**
+ * Uniswap V3 Transfer Event (Database Format)
+ * All bigint values as strings
+ */
+export interface UniswapV3TransferEventDB {
+  eventType: 'TRANSFER';
+  tokenId: string;
+  from: string;
+  to: string;
+}
+
+/**
  * Uniswap V3 Position Ledger Event State (Database Format)
  *
- * Union type representing any of the three event types.
+ * Union type representing any of the event types.
  * All bigint values are serialized as strings.
  */
 export type UniswapV3LedgerEventStateDB =
   | UniswapV3IncreaseLiquidityEventDB
   | UniswapV3DecreaseLiquidityEventDB
-  | UniswapV3CollectEventDB;
+  | UniswapV3CollectEventDB
+  | UniswapV3MintEventDB
+  | UniswapV3BurnEventDB
+  | UniswapV3TransferEventDB;
 
 /**
  * Convert database state to application state
@@ -213,33 +251,50 @@ export type UniswapV3LedgerEventStateDB =
 export function toEventState(
   stateDB: UniswapV3LedgerEventStateDB
 ): UniswapV3LedgerEventState {
-  if (stateDB.eventType === 'INCREASE_LIQUIDITY') {
-    const result: UniswapV3IncreaseLiquidityEvent = {
-      eventType: 'INCREASE_LIQUIDITY',
-      tokenId: BigInt(stateDB.tokenId),
-      liquidity: BigInt(stateDB.liquidity),
-      amount0: BigInt(stateDB.amount0),
-      amount1: BigInt(stateDB.amount1),
-    };
-    return result;
-  } else if (stateDB.eventType === 'DECREASE_LIQUIDITY') {
-    const result: UniswapV3DecreaseLiquidityEvent = {
-      eventType: 'DECREASE_LIQUIDITY',
-      tokenId: BigInt(stateDB.tokenId),
-      liquidity: BigInt(stateDB.liquidity),
-      amount0: BigInt(stateDB.amount0),
-      amount1: BigInt(stateDB.amount1),
-    };
-    return result;
-  } else {
-    const result: UniswapV3CollectEvent = {
-      eventType: 'COLLECT',
-      tokenId: BigInt(stateDB.tokenId),
-      recipient: stateDB.recipient,
-      amount0: BigInt(stateDB.amount0),
-      amount1: BigInt(stateDB.amount1),
-    };
-    return result;
+  switch (stateDB.eventType) {
+    case 'INCREASE_LIQUIDITY':
+      return {
+        eventType: 'INCREASE_LIQUIDITY',
+        tokenId: BigInt(stateDB.tokenId),
+        liquidity: BigInt(stateDB.liquidity),
+        amount0: BigInt(stateDB.amount0),
+        amount1: BigInt(stateDB.amount1),
+      };
+    case 'DECREASE_LIQUIDITY':
+      return {
+        eventType: 'DECREASE_LIQUIDITY',
+        tokenId: BigInt(stateDB.tokenId),
+        liquidity: BigInt(stateDB.liquidity),
+        amount0: BigInt(stateDB.amount0),
+        amount1: BigInt(stateDB.amount1),
+      };
+    case 'COLLECT':
+      return {
+        eventType: 'COLLECT',
+        tokenId: BigInt(stateDB.tokenId),
+        recipient: stateDB.recipient,
+        amount0: BigInt(stateDB.amount0),
+        amount1: BigInt(stateDB.amount1),
+      };
+    case 'MINT':
+      return {
+        eventType: 'MINT',
+        tokenId: BigInt(stateDB.tokenId),
+        to: stateDB.to,
+      };
+    case 'BURN':
+      return {
+        eventType: 'BURN',
+        tokenId: BigInt(stateDB.tokenId),
+        from: stateDB.from,
+      };
+    case 'TRANSFER':
+      return {
+        eventType: 'TRANSFER',
+        tokenId: BigInt(stateDB.tokenId),
+        from: stateDB.from,
+        to: stateDB.to,
+      };
   }
 }
 
@@ -255,32 +310,49 @@ export function toEventState(
 export function toEventStateDB(
   state: UniswapV3LedgerEventState
 ): UniswapV3LedgerEventStateDB {
-  if (state.eventType === 'INCREASE_LIQUIDITY') {
-    const result: UniswapV3IncreaseLiquidityEventDB = {
-      eventType: 'INCREASE_LIQUIDITY',
-      tokenId: state.tokenId.toString(),
-      liquidity: state.liquidity.toString(),
-      amount0: state.amount0.toString(),
-      amount1: state.amount1.toString(),
-    };
-    return result;
-  } else if (state.eventType === 'DECREASE_LIQUIDITY') {
-    const result: UniswapV3DecreaseLiquidityEventDB = {
-      eventType: 'DECREASE_LIQUIDITY',
-      tokenId: state.tokenId.toString(),
-      liquidity: state.liquidity.toString(),
-      amount0: state.amount0.toString(),
-      amount1: state.amount1.toString(),
-    };
-    return result;
-  } else {
-    const result: UniswapV3CollectEventDB = {
-      eventType: 'COLLECT',
-      tokenId: state.tokenId.toString(),
-      recipient: state.recipient,
-      amount0: state.amount0.toString(),
-      amount1: state.amount1.toString(),
-    };
-    return result;
+  switch (state.eventType) {
+    case 'INCREASE_LIQUIDITY':
+      return {
+        eventType: 'INCREASE_LIQUIDITY',
+        tokenId: state.tokenId.toString(),
+        liquidity: state.liquidity.toString(),
+        amount0: state.amount0.toString(),
+        amount1: state.amount1.toString(),
+      };
+    case 'DECREASE_LIQUIDITY':
+      return {
+        eventType: 'DECREASE_LIQUIDITY',
+        tokenId: state.tokenId.toString(),
+        liquidity: state.liquidity.toString(),
+        amount0: state.amount0.toString(),
+        amount1: state.amount1.toString(),
+      };
+    case 'COLLECT':
+      return {
+        eventType: 'COLLECT',
+        tokenId: state.tokenId.toString(),
+        recipient: state.recipient,
+        amount0: state.amount0.toString(),
+        amount1: state.amount1.toString(),
+      };
+    case 'MINT':
+      return {
+        eventType: 'MINT',
+        tokenId: state.tokenId.toString(),
+        to: state.to,
+      };
+    case 'BURN':
+      return {
+        eventType: 'BURN',
+        tokenId: state.tokenId.toString(),
+        from: state.from,
+      };
+    case 'TRANSFER':
+      return {
+        eventType: 'TRANSFER',
+        tokenId: state.tokenId.toString(),
+        from: state.from,
+        to: state.to,
+      };
   }
 }
