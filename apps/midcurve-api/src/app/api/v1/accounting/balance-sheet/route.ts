@@ -129,13 +129,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         prevMarkToMarket = BigInt(previousSnapshot.markToMarketAdjustment);
         prevUnclaimedFees = BigInt(previousSnapshot.unclaimedFees);
         prevTotalAssets = BigInt(previousSnapshot.totalAssets);
-        prevContributedCapital = BigInt(previousSnapshot.contributedCapital);
-        prevCapitalReturned = BigInt(previousSnapshot.capitalReturned);
-        prevRealizedWithdrawals = BigInt(previousSnapshot.retainedRealizedWithdrawals);
-        prevRealizedFees = BigInt(previousSnapshot.retainedRealizedFees);
-        prevUnrealizedPrice = BigInt(previousSnapshot.retainedUnrealizedPrice);
-        prevUnrealizedFees = BigInt(previousSnapshot.retainedUnrealizedFees);
-        prevCapitalReturned = -prevCapitalReturned;
+        // Equity & retained earnings: negate raw journal values for display
+        // (same sign adjustment as current period above)
+        prevContributedCapital = -BigInt(previousSnapshot.contributedCapital);
+        prevCapitalReturned = -BigInt(previousSnapshot.capitalReturned);
+        prevRealizedWithdrawals = -BigInt(previousSnapshot.retainedRealizedWithdrawals);
+        prevRealizedFees = -BigInt(previousSnapshot.retainedRealizedFees);
+        prevUnrealizedPrice = -BigInt(previousSnapshot.retainedUnrealizedPrice);
+        prevUnrealizedFees = -BigInt(previousSnapshot.retainedUnrealizedFees);
         prevTotalRetainedEarnings = prevRealizedWithdrawals + prevRealizedFees + prevUnrealizedPrice + prevUnrealizedFees;
         prevTotalEquity = prevContributedCapital + prevCapitalReturned + prevTotalRetainedEarnings;
       }

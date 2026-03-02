@@ -575,22 +575,8 @@ export class DailyNavSnapshotRule extends BusinessRule {
     const totalLiabilities = '0'; // Phase 1: no liabilities
     const netAssetValue = totalAssets.toString();
 
-    // Sign adjustment: getAccountBalanceReporting returns debits - credits.
-    // Credit-normal accounts need negation so positive balances show as positive.
-    // Capital Returned is debit-normal but negated for display (it reduces equity).
-    const adjContributedCapital = -accountBalances.contributedCapital;
-    const adjCapitalReturned = -accountBalances.capitalReturned;
-    const adjRealizedGains = -accountBalances.realizedGains;
-    const adjFeeIncome = -accountBalances.feeIncome;
-    const adjUnrealizedGains = -accountBalances.unrealizedGains;
-    const adjAccruedFeeIncome = -accountBalances.accruedFeeIncome;
-
-    // Retained earnings sub-categories
-    const retainedRealizedWithdrawals = adjRealizedGains - accountBalances.realizedLosses;
-    const retainedRealizedFees = adjFeeIncome;
-    const retainedUnrealizedPrice = adjUnrealizedGains - accountBalances.unrealizedLosses;
-    const retainedUnrealizedFees = adjAccruedFeeIncome;
-
+    // Store raw journal balances (debits - credits) without sign adjustments.
+    // Sign adjustments for display happen in the balance sheet endpoint only.
     await this.navSnapshotService.createSnapshot({
       userId,
       snapshotDate,
@@ -603,12 +589,12 @@ export class DailyNavSnapshotRule extends BusinessRule {
       depositedLiquidityAtCost: accountBalances.depositedLiquidity.toString(),
       markToMarketAdjustment: accountBalances.markToMarket.toString(),
       unclaimedFees: accountBalances.unclaimedFeesAsset.toString(),
-      contributedCapital: adjContributedCapital.toString(),
-      capitalReturned: adjCapitalReturned.toString(),
-      retainedRealizedWithdrawals: retainedRealizedWithdrawals.toString(),
-      retainedRealizedFees: retainedRealizedFees.toString(),
-      retainedUnrealizedPrice: retainedUnrealizedPrice.toString(),
-      retainedUnrealizedFees: retainedUnrealizedFees.toString(),
+      contributedCapital: accountBalances.contributedCapital.toString(),
+      capitalReturned: accountBalances.capitalReturned.toString(),
+      retainedRealizedWithdrawals: (accountBalances.realizedGains + accountBalances.realizedLosses).toString(),
+      retainedRealizedFees: accountBalances.feeIncome.toString(),
+      retainedUnrealizedPrice: (accountBalances.unrealizedGains + accountBalances.unrealizedLosses).toString(),
+      retainedUnrealizedFees: accountBalances.accruedFeeIncome.toString(),
       activePositionCount: positions.length,
       positionBreakdown,
     });
