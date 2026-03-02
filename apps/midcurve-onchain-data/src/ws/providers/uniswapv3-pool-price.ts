@@ -366,18 +366,20 @@ export class UniswapV3PoolPriceSubscriptionBatch {
 
     try {
       // Create viem client with WebSocket transport
-      this.wsClient = createPublicClient({
+      const client = createPublicClient({
         transport: webSocket(this.wssUrl, {
           retryCount: 3,
           retryDelay: 1000,
         }),
       });
+      this.wsClient = client;
 
       // Get pool addresses for the filter
       const poolAddresses = Array.from(this.pools.keys()) as `0x${string}`[];
 
       // Subscribe to Swap events for all pools in this batch
-      this.unwatch = this.wsClient.watchEvent({
+      this.unwatch = client.watchEvent({
+        poll: false,
         address: poolAddresses,
         event: {
           type: 'event',

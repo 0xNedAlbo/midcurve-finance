@@ -322,19 +322,21 @@ export class Erc20ApprovalSubscriptionBatch {
 
     try {
       // Create viem client with WebSocket transport
-      this.client = createPublicClient({
+      const client = createPublicClient({
         transport: webSocket(this.wssUrl, {
           retryCount: 3,
           retryDelay: 1000,
         }),
       });
+      this.client = client;
 
       // Get token addresses for the filter
       const tokenAddresses = Array.from(this.approvals.keys()) as `0x${string}`[];
 
       // Subscribe to Approval events for all tokens in this batch
       // Note: We filter by token address at WebSocket level, and by owner/spender in handleLogs
-      this.unwatch = this.client.watchEvent({
+      this.unwatch = client.watchEvent({
+        poll: false,
         address: tokenAddresses,
         event: {
           type: 'event',

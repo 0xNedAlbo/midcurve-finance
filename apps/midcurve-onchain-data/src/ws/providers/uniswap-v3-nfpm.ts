@@ -515,18 +515,20 @@ export class UniswapV3NfpmSubscriptionBatch {
 
     try {
       // Create viem client with WebSocket transport
-      this.client = createPublicClient({
+      const client = createPublicClient({
         transport: webSocket(this.wssUrl, {
           retryCount: 3,
           retryDelay: 1000,
         }),
       });
+      this.client = client;
 
       // Get nftIds for the filter (as bigint array)
       const tokenIds = Array.from(this.positions.keys()).map((id) => BigInt(id));
 
       // Subscribe to IncreaseLiquidity events
-      this.unwatchIncrease = this.client.watchEvent({
+      this.unwatchIncrease = client.watchEvent({
+        poll: false,
         address: this.nfpmAddress,
         event: INCREASE_LIQUIDITY_EVENT,
         args: { tokenId: tokenIds },
@@ -535,7 +537,8 @@ export class UniswapV3NfpmSubscriptionBatch {
       });
 
       // Subscribe to DecreaseLiquidity events
-      this.unwatchDecrease = this.client.watchEvent({
+      this.unwatchDecrease = client.watchEvent({
+        poll: false,
         address: this.nfpmAddress,
         event: DECREASE_LIQUIDITY_EVENT,
         args: { tokenId: tokenIds },
@@ -544,7 +547,8 @@ export class UniswapV3NfpmSubscriptionBatch {
       });
 
       // Subscribe to Collect events
-      this.unwatchCollect = this.client.watchEvent({
+      this.unwatchCollect = client.watchEvent({
+        poll: false,
         address: this.nfpmAddress,
         event: COLLECT_EVENT,
         args: { tokenId: tokenIds },

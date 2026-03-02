@@ -264,18 +264,20 @@ export class UniswapV3NfpmTransferSubscriptionBatch {
     });
 
     try {
-      this.client = createPublicClient({
+      const client = createPublicClient({
         transport: webSocket(this.wssUrl, {
           retryCount: 3,
           retryDelay: 1000,
         }),
       });
+      this.client = client;
 
       const walletArray = Array.from(this.walletAddresses) as Address[];
 
       // Subscription 1: Outgoing transfers (from = tracked wallets)
       // Catches: burns (to=0x0) + outgoing transfers
-      this.unwatchOutgoing = this.client.watchEvent({
+      this.unwatchOutgoing = client.watchEvent({
+        poll: false,
         address: this.nfpmAddress,
         event: TRANSFER_EVENT,
         args: { from: walletArray },
@@ -285,7 +287,8 @@ export class UniswapV3NfpmTransferSubscriptionBatch {
 
       // Subscription 2: Incoming transfers (to = tracked wallets)
       // Catches: mints (from=0x0) + incoming transfers
-      this.unwatchIncoming = this.client.watchEvent({
+      this.unwatchIncoming = client.watchEvent({
+        poll: false,
         address: this.nfpmAddress,
         event: TRANSFER_EVENT,
         args: { to: walletArray },

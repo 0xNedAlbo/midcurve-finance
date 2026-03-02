@@ -241,17 +241,19 @@ export class UniswapV3CloserSubscriptionBatch {
     });
 
     try {
-      this.client = createPublicClient({
+      const client = createPublicClient({
         transport: webSocket(this.wssUrl, {
           retryCount: 3,
           retryDelay: 1000,
         }),
       });
+      this.client = client;
 
       const contractAddresses = Array.from(this.contracts.keys()) as `0x${string}`[];
 
       // Subscribe to all 8 lifecycle events from the closer contracts
-      this.unwatch = this.client.watchEvent({
+      this.unwatch = client.watchEvent({
+        poll: false,
         address: contractAddresses,
         events: CLOSER_LIFECYCLE_EVENT_ABIS,
         onLogs: (logs) => this.handleLogs(logs),
