@@ -8,7 +8,7 @@
  *
  * Phase A — Refresh positions:
  *   1. Load active positions with pool + token relations
- *   2. Group by chainId, resolve midnight block via Etherscan
+ *   2. Group by chainId, resolve midnight block via subgraph positionSnapshots
  *   3. Batch-query subgraph for pool sqrtPriceX96 and tick
  *   4. Batch-query subgraph for position liquidity
  *   5. Batch collect() staticcall at midnight block for unclaimed fees
@@ -51,7 +51,6 @@ import {
   getPositionManagerAddress,
   UNISWAP_V3_POSITION_MANAGER_ABI,
 } from '../../config/uniswapv3.js';
-import { EtherscanClient } from '../../clients/etherscan/index.js';
 import { UniswapV3SubgraphClient } from '../../clients/subgraph/uniswapv3/index.js';
 import { CoinGeckoClient } from '../../clients/coingecko/index.js';
 import { getDomainEventPublisher } from '../../events/publisher.js';
@@ -189,14 +188,12 @@ export class NavSnapshotService {
   private readonly logger: ServiceLogger;
   private readonly journalService: JournalService;
   private readonly subgraphClient: UniswapV3SubgraphClient;
-  private readonly etherscanClient: EtherscanClient;
 
   constructor(deps?: NavSnapshotServiceDependencies) {
     this.prisma = (deps?.prisma ?? prismaClient) as PrismaClient;
     this.logger = createServiceLogger('NavSnapshotService');
     this.journalService = JournalService.getInstance();
     this.subgraphClient = UniswapV3SubgraphClient.getInstance();
-    this.etherscanClient = EtherscanClient.getInstance();
   }
 
   static getInstance(deps?: NavSnapshotServiceDependencies): NavSnapshotService {
@@ -329,10 +326,10 @@ export class NavSnapshotService {
     positions: PositionWithRelations[],
     snapshotDate: Date
   ): Promise<RefreshedPositionData[]> {
-    // Step 1: Resolve midnight block number
+    // Step 1: Resolve midnight block number via subgraph (no Etherscan dependency)
     const midnightTimestamp = Math.floor(snapshotDate.getTime() / 1000);
-    const blockNumberStr = await this.etherscanClient.getBlockNumberForTimestamp(
-      chainId, midnightTimestamp, 'before'
+    const blockNumberStr = await this.subgraphClient.getBlockForTimestamp(
+      chainId, midnightTimestamp
     );
     const midnightBlock = BigInt(blockNumberStr);
     const midnightBlockNumber = parseInt(blockNumberStr, 10);

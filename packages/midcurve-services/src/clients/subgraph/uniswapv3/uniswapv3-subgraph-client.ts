@@ -45,6 +45,7 @@ import {
   POOLS_BATCH_WITH_METRICS_QUERY,
   POOLS_BATCH_SLOT0_QUERY,
   POSITIONS_BATCH_QUERY,
+  POSITION_SNAPSHOT_BLOCK_QUERY,
   FACTORY_QUERY,
 } from './queries.js';
 import { getFactoryAddress } from '../../../config/uniswapv3.js';
@@ -753,6 +754,63 @@ export class UniswapV3SubgraphClient {
   // ============================================================================
   // NAV SNAPSHOT METHODS
   // ============================================================================
+
+  /**
+   * Resolve a block number for a given timestamp using the positionSnapshots entity.
+   *
+   * Finds the first positionSnapshot at or after the target timestamp,
+   * returning its block number. Replaces the Etherscan getBlockNumberForTimestamp
+   * call — works on any chain with a Uniswap V3 subgraph deployment.
+   *
+   * @param chainId - Chain ID
+   * @param timestamp - Unix timestamp in seconds (e.g. midnight UTC)
+   * @returns Block number as a string
+   * @throws Error if no positionSnapshot exists at or after the timestamp
+   */
+  async getBlockForTimestamp(
+    chainId: number,
+    timestamp: number
+  ): Promise<string> {
+    log.methodEntry(this.logger, 'getBlockForTimestamp', { chainId, timestamp });
+
+    log.externalApiCall(
+      this.logger,
+      'UniswapV3Subgraph',
+      'POSITION_SNAPSHOT_BLOCK_QUERY',
+      { chainId, timestamp }
+    );
+
+    const response = await this.query<{
+      positionSnapshots: Array<{ timestamp: string; blockNumber: string }>;
+    }>(chainId, POSITION_SNAPSHOT_BLOCK_QUERY, { timestamp: timestamp.toString() });
+
+    if (response.errors && response.errors.length > 0) {
+      const error = new Error(
+        `Subgraph positionSnapshot query failed for chain ${chainId}: ${JSON.stringify(response.errors)}`
+      );
+      error.name = 'UniswapV3SubgraphApiError';
+      throw error;
+    }
+
+    const snapshots = response.data?.positionSnapshots;
+    if (!snapshots || snapshots.length === 0) {
+      throw new Error(
+        `No positionSnapshot found at or after timestamp ${timestamp} on chain ${chainId}. ` +
+        `The subgraph may not have indexed any position activity near this date.`
+      );
+    }
+
+    const match = snapshots[0]!;
+    const blockNumber = match.blockNumber;
+
+    this.logger.info(
+      { chainId, timestamp, blockNumber, snapshotTimestamp: match.timestamp },
+      'Resolved block number from subgraph positionSnapshot'
+    );
+
+    log.methodExit(this.logger, 'getBlockForTimestamp', { blockNumber });
+    return blockNumber;
+  }
 
   /**
    * Get pool sqrtPriceX96 and tick for a batch of pools

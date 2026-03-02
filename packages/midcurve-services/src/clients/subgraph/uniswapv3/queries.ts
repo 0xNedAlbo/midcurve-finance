@@ -344,6 +344,34 @@ export const POOLS_BY_TOKEN_SETS_QUERY = `
 // ============================================================================
 
 /**
+ * Get the first positionSnapshot at or after a given timestamp
+ *
+ * Used to resolve a midnight block number from the subgraph instead of Etherscan.
+ * Returns the earliest positionSnapshot whose timestamp >= the target,
+ * giving both the block number and actual timestamp.
+ *
+ * Variables:
+ * - $timestamp: Unix timestamp (seconds) — e.g. midnight UTC of the snapshot date
+ *
+ * Returns:
+ * - blockNumber: Block number of the snapshot
+ * - timestamp: Actual timestamp of the snapshot
+ */
+export const POSITION_SNAPSHOT_BLOCK_QUERY = `
+  query GetBlockForTimestamp($timestamp: BigInt!) {
+    positionSnapshots(
+      where: { timestamp_gte: $timestamp }
+      orderBy: timestamp
+      orderDirection: asc
+      first: 1
+    ) {
+      timestamp
+      blockNumber
+    }
+  }
+`;
+
+/**
  * Get pool sqrtPrice and tick for a batch of pools
  *
  * Lightweight query for NAV snapshot position valuation.
