@@ -79,7 +79,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       const curDepositedLiquidity = BigInt(currentSnapshot.depositedLiquidityAtCost);
       const curMarkToMarket = BigInt(currentSnapshot.markToMarketAdjustment);
       const curUnclaimedFees = BigInt(currentSnapshot.unclaimedFees);
-      const curTotalAssets = BigInt(currentSnapshot.totalAssets);
+      const curTotalAssets = curDepositedLiquidity + curMarkToMarket + curUnclaimedFees;
 
       // Equity & retained earnings: negate raw journal values for display
       // (snapshot stores debits - credits; credit-normal accounts need negation)
@@ -114,7 +114,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         prevDepositedLiquidity = BigInt(previousSnapshot.depositedLiquidityAtCost);
         prevMarkToMarket = BigInt(previousSnapshot.markToMarketAdjustment);
         prevUnclaimedFees = BigInt(previousSnapshot.unclaimedFees);
-        prevTotalAssets = BigInt(previousSnapshot.totalAssets);
+        prevTotalAssets = prevDepositedLiquidity + prevMarkToMarket + prevUnclaimedFees;
         prevContributedCapital = -BigInt(previousSnapshot.contributedCapital);
         prevCapitalReturned = -BigInt(previousSnapshot.capitalReturned);
         prevRealizedWithdrawals = -BigInt(previousSnapshot.retainedRealizedWithdrawals);
