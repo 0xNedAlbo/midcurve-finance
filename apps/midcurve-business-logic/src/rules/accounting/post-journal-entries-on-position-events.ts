@@ -26,6 +26,8 @@ import {
   JournalService,
   JournalLineBuilder,
   CoinGeckoClient,
+  NavSnapshotService,
+  getMidnightUTC,
   type DomainEvent,
   type PositionEventType,
   type PositionCreatedPayload,
@@ -70,10 +72,12 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
   private consumerTag: string | null = null;
   private readonly journalService: JournalService;
+  private readonly navSnapshotService: NavSnapshotService;
 
   constructor() {
     super();
     this.journalService = JournalService.getInstance();
+    this.navSnapshotService = NavSnapshotService.getInstance();
   }
 
   // ===========================================================================
@@ -204,6 +208,17 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       },
       lines
     );
+
+    // Trigger an initial snapshot so the user has Balance Sheet data immediately.
+    // This is a one-time cost on position creation; subsequent updates come from the daily cron.
+    this.navSnapshotService
+      .generateSnapshot({ userId: position.userId, snapshotDate: getMidnightUTC() })
+      .catch((error) => {
+        this.logger.warn(
+          { error: error instanceof Error ? error.message : String(error), userId: position.userId },
+          'Initial snapshot generation failed (non-blocking)'
+        );
+      });
   }
 
   /**
@@ -709,6 +724,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
   /**
    * position.deleted → Untrack position (cascade deletes all journal entries)
+   *                   → Recompute all stale NAV snapshots for the user
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionDeletedPayload>
@@ -723,6 +739,16 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       { positionRef },
       'Untracked position (cascade deleted journal entries)'
     );
+
+    // Recompute stale snapshots: the journal hash changed because a position was removed.
+    // Each stale snapshot is recomputed from its cached on-chain state + current journal balances.
+    const recomputedCount = await this.navSnapshotService.recomputeStaleSnapshots(position.userId);
+    if (recomputedCount > 0) {
+      this.logger.info(
+        { positionRef, userId: position.userId, recomputedCount },
+        'Recomputed stale NAV snapshots after position deletion'
+      );
+    }
   }
 
   /**

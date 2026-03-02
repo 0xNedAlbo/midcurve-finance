@@ -2,6 +2,7 @@
  * NavSnapshotService
  *
  * CRUD operations and generation logic for daily NAV (Net Asset Value) snapshots.
+ * Snapshots are the single source of truth for all Balance Sheet reporting.
  *
  * Generation flow (generateSnapshot):
  *
@@ -22,9 +23,18 @@
  * Phase C — NAV snapshots:
  *  11. Group positions by userId
  *  12. Convert position values to reporting currency
- *  13. Aggregate totals and create NAVSnapshot per user
+ *  13. Query user-scoped journal balances (11 accounts per user)
+ *  14. Compute journalHash and create NAVSnapshot + SnapshotStateCache per user
+ *
+ * Recomputation flow (recomputeSnapshot):
+ *  - Reads cached on-chain state from SnapshotStateCache
+ *  - Filters out positions no longer tracked
+ *  - Recomputes totalAssets + positionBreakdown from cache
+ *  - Queries current user-scoped journal balances
+ *  - Updates NAVSnapshot in place with new journalHash
  */
 
+import { createHash } from 'node:crypto';
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
   getTokenAmountsFromLiquidity,
@@ -72,7 +82,8 @@ export interface NavSnapshotServiceDependencies {
 export interface CreateNavSnapshotInput {
   userId: string;
   snapshotDate: Date;
-  snapshotType: 'daily' | 'manual';
+  snapshotType: string;
+  journalHash: string;
   reportingCurrency: string;
   valuationMethod: string;
   totalAssets: string;
@@ -121,6 +132,7 @@ interface PositionWithRelations {
 /** Computed values for a position after subgraph + RPC refresh */
 interface RefreshedPositionData {
   position: PositionWithRelations;
+  midnightBlock: string;
   sqrtPriceX96: bigint;
   liquidity: bigint;
   currentValue: bigint;
@@ -128,6 +140,8 @@ interface RefreshedPositionData {
   unClaimedFees: bigint;
   tokensOwed0: bigint;
   tokensOwed1: bigint;
+  uncollectedPrincipal0: bigint;
+  uncollectedPrincipal1: bigint;
 }
 
 interface AccountBalances {
@@ -142,6 +156,26 @@ interface AccountBalances {
   realizedLosses: bigint;
   unrealizedGains: bigint;
   unrealizedLosses: bigint;
+}
+
+/** Per-position on-chain state stored in SnapshotStateCache.positionStates JSON */
+export interface CachedPositionState {
+  positionRef: string;
+  poolAddress: string;
+  sqrtPriceX96: string;
+  liquidity: string;
+  tokensOwed0: string;
+  tokensOwed1: string;
+  uncollectedPrincipal0: string;
+  uncollectedPrincipal1: string;
+  tickLower: number;
+  tickUpper: number;
+  token0Decimals: number;
+  token1Decimals: number;
+  isToken0Quote: boolean;
+  currentCostBasis: string;
+  quoteTokenCoingeckoId: string | null;
+  poolSymbol: string;
 }
 
 // =============================================================================
@@ -170,6 +204,25 @@ export class NavSnapshotService {
       NavSnapshotService.instance = new NavSnapshotService(deps);
     }
     return NavSnapshotService.instance;
+  }
+
+  // ===========================================================================
+  // Journal Hash
+  // ===========================================================================
+
+  /**
+   * Computes a deterministic hash over the set of tracked positions for a user.
+   * Used for staleness detection: if the hash changes, affected snapshots need recomputation.
+   */
+  async computeJournalHash(userId: string): Promise<string> {
+    const trackedPositions = await this.prisma.trackedPosition.findMany({
+      where: { userId },
+      select: { positionRef: true },
+      orderBy: { positionRef: 'asc' },
+    });
+
+    const payload = trackedPositions.map((tp) => tp.positionRef).join('|');
+    return createHash('sha256').update(payload).digest('hex');
   }
 
   // ===========================================================================
@@ -233,7 +286,7 @@ export class NavSnapshotService {
     // Phase B: Fetch historical CoinGecko rates for the snapshot date
     const usdPrices = await this.fetchCoinGeckoPrices(positions, snapshotDate);
 
-    // Phase C: Create NAV snapshots per user
+    // Phase C: Create NAV snapshots + state cache per user
     await this.persistSnapshots(refreshedPositions, usdPrices, snapshotDate);
 
     const durationMs = Date.now() - startTime;
@@ -419,6 +472,7 @@ export class NavSnapshotService {
 
       results.push({
         position,
+        midnightBlock: blockNumberStr,
         sqrtPriceX96,
         liquidity,
         currentValue,
@@ -426,6 +480,8 @@ export class NavSnapshotService {
         unClaimedFees,
         tokensOwed0: collectResult.tokensOwed0,
         tokensOwed1: collectResult.tokensOwed1,
+        uncollectedPrincipal0,
+        uncollectedPrincipal1,
       });
     }
 
@@ -533,7 +589,7 @@ export class NavSnapshotService {
   }
 
   // ===========================================================================
-  // Phase C: Persist NAV snapshots per user
+  // Phase C: Persist NAV snapshots + state cache per user
   // ===========================================================================
 
   private async persistSnapshots(
@@ -580,7 +636,15 @@ export class NavSnapshotService {
     let totalAssets = 0n;
     const positionBreakdown: PositionBreakdownItem[] = [];
 
+    // Build per-chain cache data alongside position value computation
+    const cacheByChain = new Map<number, {
+      midnightBlock: string;
+      positionStates: CachedPositionState[];
+      quoteTokenPrices: Record<string, number>;
+    }>();
+
     for (const rp of positions) {
+      const chainId = rp.position.config.chainId;
       const quoteToken = rp.position.isToken0Quote
         ? rp.position.pool.token0
         : rp.position.pool.token1;
@@ -636,17 +700,55 @@ export class NavSnapshotService {
         unrealizedPnlReporting: unrealizedReporting,
         accruedFeesReporting: feesConversion.amountReporting,
       });
+
+      // Accumulate cache data per chain
+      let chainCache = cacheByChain.get(chainId);
+      if (!chainCache) {
+        chainCache = {
+          midnightBlock: rp.midnightBlock,
+          positionStates: [],
+          quoteTokenPrices: {},
+        };
+        cacheByChain.set(chainId, chainCache);
+      }
+
+      chainCache.positionStates.push({
+        positionRef: rp.position.positionHash,
+        poolAddress: rp.position.pool.config.address,
+        sqrtPriceX96: rp.sqrtPriceX96.toString(),
+        liquidity: rp.liquidity.toString(),
+        tokensOwed0: rp.tokensOwed0.toString(),
+        tokensOwed1: rp.tokensOwed1.toString(),
+        uncollectedPrincipal0: rp.uncollectedPrincipal0.toString(),
+        uncollectedPrincipal1: rp.uncollectedPrincipal1.toString(),
+        tickLower: rp.position.config.tickLower,
+        tickUpper: rp.position.config.tickUpper,
+        token0Decimals: rp.position.pool.token0.decimals,
+        token1Decimals: rp.position.pool.token1.decimals,
+        isToken0Quote: rp.position.isToken0Quote,
+        currentCostBasis: rp.position.currentCostBasis,
+        quoteTokenCoingeckoId: quoteToken.coingeckoId,
+        poolSymbol,
+      });
+
+      if (quoteToken.coingeckoId) {
+        chainCache.quoteTokenPrices[quoteToken.coingeckoId] = quoteTokenUsdPrice;
+      }
     }
 
-    const accountBalances = await this.getUserAccountBalances(positions);
+    // User-scoped journal balances (replaces old per-position iteration)
+    const accountBalances = await this.getUserAccountBalancesForUser(userId);
+
+    const journalHash = await this.computeJournalHash(userId);
 
     const totalLiabilities = '0';
     const netAssetValue = totalAssets.toString();
 
-    await this.createSnapshot({
+    const snapshotId = await this.createSnapshot({
       userId,
       snapshotDate,
       snapshotType: 'daily',
+      journalHash,
       reportingCurrency,
       valuationMethod: 'pool_price',
       totalAssets: totalAssets.toString(),
@@ -664,56 +766,59 @@ export class NavSnapshotService {
       activePositionCount: positions.length,
       positionBreakdown,
     });
+
+    // Persist on-chain state cache per chain
+    for (const [chainId, chainCache] of cacheByChain.entries()) {
+      await this.prisma.snapshotStateCache.upsert({
+        where: { snapshotId_chainId: { snapshotId, chainId } },
+        create: {
+          snapshotId,
+          chainId,
+          midnightBlock: chainCache.midnightBlock,
+          positionStates: chainCache.positionStates as unknown as object[],
+          quoteTokenPrices: chainCache.quoteTokenPrices,
+        },
+        update: {
+          midnightBlock: chainCache.midnightBlock,
+          positionStates: chainCache.positionStates as unknown as object[],
+          quoteTokenPrices: chainCache.quoteTokenPrices,
+        },
+      });
+    }
   }
 
-  private async getUserAccountBalances(
-    positions: RefreshedPositionData[]
-  ): Promise<AccountBalances> {
-    const totals: AccountBalances = {
-      depositedLiquidity: 0n,
-      markToMarket: 0n,
-      unclaimedFeesAsset: 0n,
-      contributedCapital: 0n,
-      capitalReturned: 0n,
-      feeIncome: 0n,
-      accruedFeeIncome: 0n,
-      realizedGains: 0n,
-      realizedLosses: 0n,
-      unrealizedGains: 0n,
-      unrealizedLosses: 0n,
+  /**
+   * Queries user-scoped journal balances for all 11 accounts.
+   * Single query per account aggregating across all tracked positions.
+   */
+  private async getUserAccountBalancesForUser(userId: string): Promise<AccountBalances> {
+    const [dl, m2m, uf, cc, cr, fi, afi, rg, rl, ug, ul] = await Promise.all([
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, userId),
+    ]);
+
+    return {
+      depositedLiquidity: dl,
+      markToMarket: m2m,
+      unclaimedFeesAsset: uf,
+      contributedCapital: cc,
+      capitalReturned: cr,
+      feeIncome: fi,
+      accruedFeeIncome: afi,
+      realizedGains: rg,
+      realizedLosses: rl,
+      unrealizedGains: ug,
+      unrealizedLosses: ul,
     };
-
-    for (const rp of positions) {
-      const ref = rp.position.positionHash;
-
-      const [dl, m2m, uf, cc, cr, fi, afi, rg, rl, ug, ul] = await Promise.all([
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, ref),
-        this.journalService.getAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, ref),
-      ]);
-
-      totals.depositedLiquidity += dl;
-      totals.markToMarket += m2m;
-      totals.unclaimedFeesAsset += uf;
-      totals.contributedCapital += cc;
-      totals.capitalReturned += cr;
-      totals.feeIncome += fi;
-      totals.accruedFeeIncome += afi;
-      totals.realizedGains += rg;
-      totals.realizedLosses += rl;
-      totals.unrealizedGains += ug;
-      totals.unrealizedLosses += ul;
-    }
-
-    return totals;
   }
 
   private getReportingCurrencyUsdPrice(reportingCurrency: string): number {
@@ -722,6 +827,205 @@ export class NavSnapshotService {
       'Non-USD reporting currency requested; falling back to USD (Phase 1 limitation)'
     );
     return 1.0;
+  }
+
+  // ===========================================================================
+  // Snapshot Recomputation
+  // ===========================================================================
+
+  /**
+   * Recomputes a single snapshot from its cached on-chain state and current journal balances.
+   * Called when the journal state changes (e.g., position deleted) and snapshots become stale.
+   * No external API calls — pure local computation.
+   */
+  async recomputeSnapshot(snapshotId: string): Promise<void> {
+    const snapshot = await this.prisma.nAVSnapshot.findUnique({
+      where: { id: snapshotId },
+      include: { stateCache: true },
+    });
+    if (!snapshot) {
+      this.logger.warn({ snapshotId }, 'Snapshot not found for recomputation');
+      return;
+    }
+
+    // Get current set of tracked positions for this user
+    const trackedPositions = await this.prisma.trackedPosition.findMany({
+      where: { userId: snapshot.userId },
+      select: { positionRef: true },
+    });
+    const trackedRefs = new Set(trackedPositions.map((tp) => tp.positionRef));
+
+    // Reporting currency setup
+    const user = await this.prisma.user.findUnique({
+      where: { id: snapshot.userId },
+      select: { reportingCurrency: true },
+    });
+    const reportingCurrency = user?.reportingCurrency ?? 'USD';
+    const reportingCurrencyUsdPrice = reportingCurrency === 'USD'
+      ? 1.0
+      : this.getReportingCurrencyUsdPrice(reportingCurrency);
+
+    let totalAssets = 0n;
+    let activePositionCount = 0;
+    const positionBreakdown: PositionBreakdownItem[] = [];
+
+    for (const cache of snapshot.stateCache) {
+      const positionStates = cache.positionStates as unknown as CachedPositionState[];
+      const quoteTokenPrices = cache.quoteTokenPrices as Record<string, number>;
+
+      for (const ps of positionStates) {
+        // Skip positions that are no longer tracked
+        if (!trackedRefs.has(ps.positionRef)) continue;
+
+        activePositionCount++;
+
+        const sqrtPriceX96 = BigInt(ps.sqrtPriceX96);
+        const liquidity = BigInt(ps.liquidity);
+
+        const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
+          liquidity,
+          sqrtPriceX96,
+          ps.tickLower,
+          ps.tickUpper,
+          false
+        );
+
+        const currentValue = calculateTokenValueInQuote(
+          token0Amount,
+          token1Amount,
+          sqrtPriceX96,
+          ps.isToken0Quote,
+          ps.token0Decimals,
+          ps.token1Decimals
+        );
+
+        const tokensOwed0 = BigInt(ps.tokensOwed0);
+        const tokensOwed1 = BigInt(ps.tokensOwed1);
+        const uncollectedPrincipal0 = BigInt(ps.uncollectedPrincipal0);
+        const uncollectedPrincipal1 = BigInt(ps.uncollectedPrincipal1);
+        const pureFee0 = tokensOwed0 - uncollectedPrincipal0;
+        const pureFee1 = tokensOwed1 - uncollectedPrincipal1;
+
+        const unClaimedFees = calculateTokenValueInQuote(
+          pureFee0,
+          pureFee1,
+          sqrtPriceX96,
+          ps.isToken0Quote,
+          ps.token0Decimals,
+          ps.token1Decimals
+        );
+
+        const quoteTokenUsdPrice = ps.quoteTokenCoingeckoId
+          ? (quoteTokenPrices[ps.quoteTokenCoingeckoId] ?? 1.0)
+          : 1.0;
+        const quoteTokenDecimals = ps.isToken0Quote ? ps.token0Decimals : ps.token1Decimals;
+
+        const valueConversion = convertToReportingCurrency(
+          currentValue.toString(),
+          quoteTokenUsdPrice,
+          reportingCurrencyUsdPrice,
+          quoteTokenDecimals
+        );
+
+        const costBasis = BigInt(ps.currentCostBasis);
+        const unrealizedPnl = currentValue - costBasis;
+
+        const costConversion = convertToReportingCurrency(
+          ps.currentCostBasis,
+          quoteTokenUsdPrice,
+          reportingCurrencyUsdPrice,
+          quoteTokenDecimals
+        );
+
+        const unrealizedConversion = convertToReportingCurrency(
+          absBigint(unrealizedPnl).toString(),
+          quoteTokenUsdPrice,
+          reportingCurrencyUsdPrice,
+          quoteTokenDecimals
+        );
+
+        const feesConversion = convertToReportingCurrency(
+          unClaimedFees.toString(),
+          quoteTokenUsdPrice,
+          reportingCurrencyUsdPrice,
+          quoteTokenDecimals
+        );
+
+        totalAssets += BigInt(valueConversion.amountReporting);
+
+        const unrealizedReporting = unrealizedPnl < 0n
+          ? `-${unrealizedConversion.amountReporting}`
+          : unrealizedConversion.amountReporting;
+
+        positionBreakdown.push({
+          positionRef: ps.positionRef,
+          instrumentRef: ps.positionRef,
+          poolSymbol: ps.poolSymbol,
+          currentValueReporting: valueConversion.amountReporting,
+          costBasisReporting: costConversion.amountReporting,
+          unrealizedPnlReporting: unrealizedReporting,
+          accruedFeesReporting: feesConversion.amountReporting,
+        });
+      }
+    }
+
+    // User-scoped journal balances (current state, after deletions)
+    const accountBalances = await this.getUserAccountBalancesForUser(snapshot.userId);
+    const newHash = await this.computeJournalHash(snapshot.userId);
+
+    await this.prisma.nAVSnapshot.update({
+      where: { id: snapshotId },
+      data: {
+        journalHash: newHash,
+        totalAssets: totalAssets.toString(),
+        netAssetValue: totalAssets.toString(),
+        depositedLiquidityAtCost: accountBalances.depositedLiquidity.toString(),
+        markToMarketAdjustment: accountBalances.markToMarket.toString(),
+        unclaimedFees: accountBalances.unclaimedFeesAsset.toString(),
+        contributedCapital: accountBalances.contributedCapital.toString(),
+        capitalReturned: accountBalances.capitalReturned.toString(),
+        retainedRealizedWithdrawals: (accountBalances.realizedGains + accountBalances.realizedLosses).toString(),
+        retainedRealizedFees: accountBalances.feeIncome.toString(),
+        retainedUnrealizedPrice: (accountBalances.unrealizedGains + accountBalances.unrealizedLosses).toString(),
+        retainedUnrealizedFees: accountBalances.accruedFeeIncome.toString(),
+        activePositionCount: activePositionCount,
+        positionBreakdown: positionBreakdown as unknown as object[],
+      },
+    });
+
+    this.logger.info(
+      { snapshotId, userId: snapshot.userId, activePositionCount },
+      'Recomputed snapshot from cached state'
+    );
+  }
+
+  /**
+   * Finds and recomputes all stale snapshots for a user.
+   * A snapshot is stale when its journalHash differs from the current hash.
+   */
+  async recomputeStaleSnapshots(userId: string): Promise<number> {
+    const currentHash = await this.computeJournalHash(userId);
+
+    const staleSnapshots = await this.prisma.nAVSnapshot.findMany({
+      where: {
+        userId,
+        journalHash: { not: currentHash },
+      },
+      select: { id: true },
+    });
+
+    if (staleSnapshots.length === 0) return 0;
+
+    this.logger.info(
+      { userId, staleCount: staleSnapshots.length },
+      'Recomputing stale snapshots'
+    );
+
+    for (const snapshot of staleSnapshots) {
+      await this.recomputeSnapshot(snapshot.id);
+    }
+
+    return staleSnapshots.length;
   }
 
   // ---------------------------------------------------------------------------
@@ -745,6 +1049,7 @@ export class NavSnapshotService {
         userId: input.userId,
         snapshotDate: input.snapshotDate,
         snapshotType: input.snapshotType,
+        journalHash: input.journalHash,
         reportingCurrency: input.reportingCurrency,
         valuationMethod: input.valuationMethod,
         totalAssets: input.totalAssets,
@@ -763,6 +1068,7 @@ export class NavSnapshotService {
         positionBreakdown: input.positionBreakdown as unknown as object[],
       },
       update: {
+        journalHash: input.journalHash,
         reportingCurrency: input.reportingCurrency,
         valuationMethod: input.valuationMethod,
         totalAssets: input.totalAssets,
@@ -845,7 +1151,7 @@ export class NavSnapshotService {
 // Utility Functions
 // =============================================================================
 
-function getMidnightUTC(): Date {
+export function getMidnightUTC(): Date {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }

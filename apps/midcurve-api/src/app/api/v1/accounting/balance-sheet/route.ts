@@ -4,8 +4,8 @@
  * GET /api/v1/accounting/balance-sheet?period=week
  *
  * Returns a structured balance sheet with period-over-period comparison.
- * Current column computed on-demand from journal balances.
- * Previous column read from closest NAV snapshot at period boundary.
+ * Both current and previous columns read exclusively from NAV snapshots
+ * (snapshot-only reporting — single calculation path).
  *
  * Authentication: Required (session only)
  */
@@ -21,9 +21,9 @@ import {
   type BalanceSheetResponse,
   type BalanceSheetLineItem,
 } from '@midcurve/api-shared';
-import { ACCOUNT_CODES, getCalendarPeriodBoundaries } from '@midcurve/shared';
+import { getCalendarPeriodBoundaries } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getJournalService, getNavSnapshotService } from '@/lib/services';
+import { getNavSnapshotService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -57,56 +57,42 @@ export async function GET(request: NextRequest): Promise<Response> {
       const period = periodResult.data;
       const { previousEnd } = getCalendarPeriodBoundaries(period);
 
-      const journalService = getJournalService();
       const navSnapshotService = getNavSnapshotService();
 
-      // Current column: compute from journal balances (always current)
-      const [
-        depositedLiquidity,
-        markToMarket,
-        unclaimedFees,
-        contributedCapital,
-        capitalReturned,
-        feeIncome,
-        accruedFeeIncome,
-        realizedGains,
-        realizedLosses,
-        unrealizedGains,
-        unrealizedLosses,
-      ] = await Promise.all([
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, user.id),
-        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, user.id),
-      ]);
+      // Current column: read from latest snapshot
+      const currentSnapshot = await navSnapshotService.getLatestSnapshot(user.id);
 
-      // Sign adjustment: getUserAccountBalanceReporting returns debits - credits.
-      // Credit-normal accounts need negation so positive balances show as positive.
-      // Capital Returned is debit-normal but negated for display (it reduces equity).
-      const adjContributedCapital = -contributedCapital;
-      const adjCapitalReturned = -capitalReturned;
-      const adjFeeIncome = -feeIncome;
-      const adjAccruedFeeIncome = -accruedFeeIncome;
-      const adjRealizedGains = -realizedGains;
-      const adjUnrealizedGains = -unrealizedGains;
+      if (!currentSnapshot) {
+        // Cold-start: no snapshot exists yet for this user
+        const noDataResponse: BalanceSheetResponse = {
+          noData: true,
+          message: 'Reporting data will be available after the next daily snapshot at 01:00 UTC.',
+        };
+        apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
+        return NextResponse.json(createSuccessResponse(noDataResponse), {
+          status: 200,
+          headers: { 'Cache-Control': 'private, no-cache' },
+        });
+      }
 
-      // Compute current values
-      const curTotalAssets = depositedLiquidity + markToMarket + unclaimedFees;
-      const curRealizedWithdrawals = adjRealizedGains - realizedLosses;
-      const curRealizedFees = adjFeeIncome;
-      const curUnrealizedPrice = adjUnrealizedGains - unrealizedLosses;
-      const curUnrealizedFees = adjAccruedFeeIncome;
+      // Extract current values from snapshot (same sign adjustments as before)
+      const curDepositedLiquidity = BigInt(currentSnapshot.depositedLiquidityAtCost);
+      const curMarkToMarket = BigInt(currentSnapshot.markToMarketAdjustment);
+      const curUnclaimedFees = BigInt(currentSnapshot.unclaimedFees);
+      const curTotalAssets = BigInt(currentSnapshot.totalAssets);
+
+      // Equity & retained earnings: negate raw journal values for display
+      // (snapshot stores debits - credits; credit-normal accounts need negation)
+      const curContributedCapital = -BigInt(currentSnapshot.contributedCapital);
+      const curCapitalReturned = -BigInt(currentSnapshot.capitalReturned);
+      const curRealizedWithdrawals = -BigInt(currentSnapshot.retainedRealizedWithdrawals);
+      const curRealizedFees = -BigInt(currentSnapshot.retainedRealizedFees);
+      const curUnrealizedPrice = -BigInt(currentSnapshot.retainedUnrealizedPrice);
+      const curUnrealizedFees = -BigInt(currentSnapshot.retainedUnrealizedFees);
       const curTotalRetainedEarnings = curRealizedWithdrawals + curRealizedFees + curUnrealizedPrice + curUnrealizedFees;
-      const curTotalEquity = adjContributedCapital + adjCapitalReturned + curTotalRetainedEarnings;
+      const curTotalEquity = curContributedCapital + curCapitalReturned + curTotalRetainedEarnings;
 
-      // Previous column: read from closest NAV snapshot
+      // Previous column: read from closest NAV snapshot at period boundary
       const previousSnapshot = await navSnapshotService.getSnapshotAtBoundary(user.id, previousEnd);
 
       let previousDate: string | null = null;
@@ -129,8 +115,6 @@ export async function GET(request: NextRequest): Promise<Response> {
         prevMarkToMarket = BigInt(previousSnapshot.markToMarketAdjustment);
         prevUnclaimedFees = BigInt(previousSnapshot.unclaimedFees);
         prevTotalAssets = BigInt(previousSnapshot.totalAssets);
-        // Equity & retained earnings: negate raw journal values for display
-        // (same sign adjustment as current period above)
         prevContributedCapital = -BigInt(previousSnapshot.contributedCapital);
         prevCapitalReturned = -BigInt(previousSnapshot.capitalReturned);
         prevRealizedWithdrawals = -BigInt(previousSnapshot.retainedRealizedWithdrawals);
@@ -143,21 +127,21 @@ export async function GET(request: NextRequest): Promise<Response> {
 
       const response: BalanceSheetResponse = {
         period,
-        currentDate: new Date().toISOString(),
+        currentDate: currentSnapshot.snapshotDate.toISOString(),
         previousDate,
-        reportingCurrency: 'USD',
+        reportingCurrency: currentSnapshot.reportingCurrency,
         assets: {
-          depositedLiquidityAtCost: buildLineItem(depositedLiquidity, prevDepositedLiquidity),
-          markToMarketAdjustment: buildLineItem(markToMarket, prevMarkToMarket),
-          unclaimedFees: buildLineItem(unclaimedFees, prevUnclaimedFees),
+          depositedLiquidityAtCost: buildLineItem(curDepositedLiquidity, prevDepositedLiquidity),
+          markToMarketAdjustment: buildLineItem(curMarkToMarket, prevMarkToMarket),
+          unclaimedFees: buildLineItem(curUnclaimedFees, prevUnclaimedFees),
           totalAssets: buildLineItem(curTotalAssets, prevTotalAssets),
         },
         liabilities: {
           totalLiabilities: buildLineItem(0n, 0n),
         },
         equity: {
-          contributedCapital: buildLineItem(adjContributedCapital, prevContributedCapital),
-          capitalReturned: buildLineItem(adjCapitalReturned, prevCapitalReturned),
+          contributedCapital: buildLineItem(curContributedCapital, prevContributedCapital),
+          capitalReturned: buildLineItem(curCapitalReturned, prevCapitalReturned),
           retainedEarnings: {
             realizedFromWithdrawals: buildLineItem(curRealizedWithdrawals, prevRealizedWithdrawals),
             realizedFromCollectedFees: buildLineItem(curRealizedFees, prevRealizedFees),
@@ -167,7 +151,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           totalEquity: buildLineItem(curTotalEquity, prevTotalEquity),
         },
-        activePositionCount: 0, // Could count tracked positions, but not critical
+        activePositionCount: currentSnapshot.activePositionCount,
       };
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

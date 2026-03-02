@@ -56,3 +56,4 @@ export * from './uniswapv3';
 // Accounting rules (double-entry journal system)
 export { PostJournalEntriesOnPositionEventsRule } from './accounting/post-journal-entries-on-position-events';
 export { DailyNavSnapshotRule } from './accounting/daily-nav-snapshot';
+export { SnapshotRetentionRule } from './accounting/snapshot-retention';

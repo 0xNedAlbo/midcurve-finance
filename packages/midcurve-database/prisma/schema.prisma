@@ -984,6 +984,7 @@ model JournalLine {
 
 // NAVSnapshot - Daily portfolio-level snapshot
 // Foundation for period comparisons and Balance Sheet view.
+// Serves as the single source of truth for all reporting (snapshot-only reporting).
 model NAVSnapshot {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -994,7 +995,11 @@ model NAVSnapshot {
 
   // Snapshot identity
   snapshotDate DateTime // Midnight UTC of the date this snapshot represents
-  snapshotType String // "daily" | "manual"
+  snapshotType String // "daily" | "weekly" | "monthly" | "quarterly" | "yearly"
+
+  // Journal hash — SHA-256 of sorted tracked position refs at snapshot time.
+  // Used for staleness detection: if the current hash differs, snapshot needs recomputation.
+  journalHash String
 
   // Reporting currency and method
   reportingCurrency String // ISO 4217 currency of all amounts below
@@ -1024,9 +1029,41 @@ model NAVSnapshot {
   activePositionCount Int // Number of active positions at snapshot time
   positionBreakdown   Json // Array of per-instrument data
 
+  // On-chain state cache — one entry per chain, cascade-deleted with snapshot
+  stateCache SnapshotStateCache[]
+
   @@unique([userId, snapshotDate, snapshotType])
   @@index([userId, snapshotDate])
+  @@index([userId, journalHash])
   @@map("nav_snapshots")
+  @@schema("accounting")
+}
+
+// SnapshotStateCache - Immutable on-chain state cached per snapshot per chain.
+// Enables snapshot recomputation without RPC calls when positions are removed.
+// Owned by NAVSnapshot — cascade-deleted when the snapshot is pruned or deleted.
+model SnapshotStateCache {
+  id         String      @id @default(cuid())
+  snapshotId String
+  snapshot   NAVSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  // Per-chain data
+  chainId       Int
+  midnightBlock String // bigint-as-string
+
+  // Cached state per position (JSON array)
+  // Each entry: { positionRef, poolAddress, sqrtPriceX96, liquidity,
+  //               tokensOwed0, tokensOwed1, uncollectedPrincipal0, uncollectedPrincipal1,
+  //               tickLower, tickUpper, token0Decimals, token1Decimals,
+  //               isToken0Quote, currentCostBasis, quoteTokenCoingeckoId }
+  positionStates Json
+
+  // CoinGecko USD prices at snapshot date (JSON object: { coingeckoId: usdPrice })
+  quoteTokenPrices Json
+
+  @@unique([snapshotId, chainId])
+  @@index([snapshotId])
+  @@map("snapshot_state_cache")
   @@schema("accounting")
 }
 

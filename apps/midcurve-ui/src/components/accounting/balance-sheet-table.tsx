@@ -5,7 +5,7 @@
  * Three sections: Assets, Liabilities, Equity with retained earnings sub-items.
  */
 
-import type { BalanceSheetResponse, BalanceSheetLineItem } from '@midcurve/api-shared';
+import type { BalanceSheetResponse, BalanceSheetNoData, BalanceSheetLineItem } from '@midcurve/api-shared';
 import { formatReportingAmount } from '@midcurve/shared';
 
 interface BalanceSheetTableProps {
@@ -17,6 +17,14 @@ export function BalanceSheetTable({ data }: BalanceSheetTableProps) {
     return (
       <div className="text-center py-12 text-slate-400">
         No balance sheet data available. Track positions to get started.
+      </div>
+    );
+  }
+
+  if ('noData' in data) {
+    return (
+      <div className="text-center py-12 text-slate-400">
+        {(data as BalanceSheetNoData).message}
       </div>
     );
   }

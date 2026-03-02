@@ -13,7 +13,7 @@ export interface BalanceSheetLineItem {
   deltaPct: string | null;
 }
 
-export interface BalanceSheetResponse {
+export interface BalanceSheetData {
   period: PeriodQuery;
   currentDate: string;
   previousDate: string | null;
@@ -45,3 +45,10 @@ export interface BalanceSheetResponse {
 
   activePositionCount: number;
 }
+
+export interface BalanceSheetNoData {
+  noData: true;
+  message: string;
+}
+
+export type BalanceSheetResponse = BalanceSheetData | BalanceSheetNoData;
