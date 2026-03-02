@@ -14,6 +14,8 @@ export type {
   PoolMetrics,
   PoolFeeData,
   RawPoolData,
+  RawPoolSlot0Data,
+  RawSubgraphPosition,
   RawPoolSearchData,
   PoolSearchSubgraphResult,
 } from './types.js';
@@ -30,6 +32,8 @@ export {
   POOL_METRICS_QUERY,
   POOL_FEE_DATA_QUERY,
   POOLS_BATCH_QUERY,
+  POOLS_BATCH_SLOT0_QUERY,
+  POSITIONS_BATCH_QUERY,
   POOL_HISTORICAL_DATA_QUERY,
   POOL_CREATION_QUERY,
   POOLS_BY_TOKEN_SETS_QUERY,

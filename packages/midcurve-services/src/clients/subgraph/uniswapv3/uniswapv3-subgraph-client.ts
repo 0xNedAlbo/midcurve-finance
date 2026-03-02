@@ -43,6 +43,8 @@ import {
   POOL_FEE_DATA_QUERY,
   POOLS_BY_TOKEN_SETS_QUERY,
   POOLS_BATCH_WITH_METRICS_QUERY,
+  POOLS_BATCH_SLOT0_QUERY,
+  POSITIONS_BATCH_QUERY,
   FACTORY_QUERY,
 } from './queries.js';
 import { getFactoryAddress } from '../../../config/uniswapv3.js';
@@ -54,6 +56,8 @@ import type {
   PoolMetrics,
   PoolFeeData,
   RawPoolData,
+  RawPoolSlot0Data,
+  RawSubgraphPosition,
   RawPoolSearchData,
   PoolSearchSubgraphResult,
   UniswapV3SubgraphApiError,
@@ -744,6 +748,134 @@ export class UniswapV3SubgraphClient {
       log.methodError(this.logger, 'getPoolsMetricsBatch', error as Error, { chainId });
       return new Map();
     }
+  }
+
+  // ============================================================================
+  // NAV SNAPSHOT METHODS
+  // ============================================================================
+
+  /**
+   * Get pool sqrtPriceX96 and tick for a batch of pools
+   *
+   * Lightweight query returning only the slot0-equivalent data needed
+   * for position valuation in the daily NAV snapshot.
+   *
+   * @param chainId - Chain ID
+   * @param poolAddresses - Array of pool addresses (any case)
+   * @returns Map of lowercase poolAddress -> { sqrtPriceX96, tick }
+   */
+  async getPoolsSlot0Batch(
+    chainId: number,
+    poolAddresses: string[]
+  ): Promise<Map<string, { sqrtPriceX96: bigint; tick: number }>> {
+    log.methodEntry(this.logger, 'getPoolsSlot0Batch', {
+      chainId,
+      poolCount: poolAddresses.length,
+    });
+
+    if (poolAddresses.length === 0) {
+      log.methodExit(this.logger, 'getPoolsSlot0Batch', { count: 0 });
+      return new Map();
+    }
+
+    const poolIds = poolAddresses.map((addr) => addr.toLowerCase());
+
+    log.externalApiCall(
+      this.logger,
+      'UniswapV3Subgraph',
+      'POOLS_BATCH_SLOT0_QUERY',
+      { chainId, poolCount: poolIds.length }
+    );
+
+    const response = await this.query<{ pools: RawPoolSlot0Data[] }>(
+      chainId,
+      POOLS_BATCH_SLOT0_QUERY,
+      { poolIds }
+    );
+
+    if (response.errors && response.errors.length > 0) {
+      this.logger.error({ errors: response.errors }, 'Subgraph slot0 query failed');
+      return new Map();
+    }
+
+    if (!response.data?.pools || response.data.pools.length === 0) {
+      this.logger.warn({ chainId }, 'No pools found in subgraph for slot0 batch');
+      log.methodExit(this.logger, 'getPoolsSlot0Batch', { found: 0 });
+      return new Map();
+    }
+
+    const results = new Map<string, { sqrtPriceX96: bigint; tick: number }>();
+    for (const pool of response.data.pools) {
+      results.set(pool.id, {
+        sqrtPriceX96: BigInt(pool.sqrtPrice),
+        tick: parseInt(pool.tick),
+      });
+    }
+
+    this.logger.debug({ chainId, found: results.size }, 'Pool slot0 batch fetched');
+    log.methodExit(this.logger, 'getPoolsSlot0Batch', { found: results.size });
+    return results;
+  }
+
+  /**
+   * Get position liquidity for a batch of NFT IDs
+   *
+   * Queries The Graph for current liquidity of each position.
+   * Used by the daily NAV snapshot to compute token amounts.
+   *
+   * @param chainId - Chain ID
+   * @param nftIds - Array of position NFT IDs as strings
+   * @returns Map of nftId -> { liquidity, poolAddress }
+   */
+  async getPositionsLiquidityBatch(
+    chainId: number,
+    nftIds: string[]
+  ): Promise<Map<string, { liquidity: bigint; poolAddress: string }>> {
+    log.methodEntry(this.logger, 'getPositionsLiquidityBatch', {
+      chainId,
+      positionCount: nftIds.length,
+    });
+
+    if (nftIds.length === 0) {
+      log.methodExit(this.logger, 'getPositionsLiquidityBatch', { count: 0 });
+      return new Map();
+    }
+
+    log.externalApiCall(
+      this.logger,
+      'UniswapV3Subgraph',
+      'POSITIONS_BATCH_QUERY',
+      { chainId, positionCount: nftIds.length }
+    );
+
+    const response = await this.query<{ positions: RawSubgraphPosition[] }>(
+      chainId,
+      POSITIONS_BATCH_QUERY,
+      { positionIds: nftIds }
+    );
+
+    if (response.errors && response.errors.length > 0) {
+      this.logger.error({ errors: response.errors }, 'Subgraph positions query failed');
+      return new Map();
+    }
+
+    if (!response.data?.positions || response.data.positions.length === 0) {
+      this.logger.warn({ chainId }, 'No positions found in subgraph');
+      log.methodExit(this.logger, 'getPositionsLiquidityBatch', { found: 0 });
+      return new Map();
+    }
+
+    const results = new Map<string, { liquidity: bigint; poolAddress: string }>();
+    for (const pos of response.data.positions) {
+      results.set(pos.id, {
+        liquidity: BigInt(pos.liquidity),
+        poolAddress: pos.pool.id,
+      });
+    }
+
+    this.logger.debug({ chainId, found: results.size }, 'Position liquidity batch fetched');
+    log.methodExit(this.logger, 'getPositionsLiquidityBatch', { found: results.size });
+    return results;
   }
 
   /**

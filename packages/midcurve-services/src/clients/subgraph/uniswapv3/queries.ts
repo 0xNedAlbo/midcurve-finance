@@ -340,6 +340,60 @@ export const POOLS_BY_TOKEN_SETS_QUERY = `
 `;
 
 // ============================================================================
+// NAV SNAPSHOT QUERIES
+// ============================================================================
+
+/**
+ * Get pool sqrtPrice and tick for a batch of pools
+ *
+ * Lightweight query for NAV snapshot position valuation.
+ * Returns only the fields needed to compute token amounts and values.
+ *
+ * Variables:
+ * - $poolIds: Array of pool addresses (lowercase)
+ *
+ * Returns:
+ * - sqrtPrice: Current sqrtPriceX96 as decimal string
+ * - tick: Current tick as string
+ */
+export const POOLS_BATCH_SLOT0_QUERY = `
+  query GetPoolsBatchSlot0($poolIds: [ID!]!) {
+    pools(where: {id_in: $poolIds}) {
+      id
+      sqrtPrice
+      tick
+    }
+  }
+`;
+
+/**
+ * Get position liquidity for a batch of NFT IDs
+ *
+ * Returns current liquidity for each position, used by the daily NAV snapshot
+ * to compute token amounts via getTokenAmountsFromLiquidity().
+ *
+ * The Position entity's `id` in the subgraph is the NFT tokenId as a string.
+ *
+ * Variables:
+ * - $positionIds: Array of position NFT IDs as strings
+ *
+ * Returns:
+ * - liquidity: Current in-range liquidity as decimal string
+ * - pool.id: Pool address (lowercase) for cross-referencing with slot0 data
+ */
+export const POSITIONS_BATCH_QUERY = `
+  query GetPositionsBatch($positionIds: [ID!]!) {
+    positions(where: {id_in: $positionIds}) {
+      id
+      liquidity
+      pool {
+        id
+      }
+    }
+  }
+`;
+
+// ============================================================================
 // FACTORY VALIDATION
 // ============================================================================
 

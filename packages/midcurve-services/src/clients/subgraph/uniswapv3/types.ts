@@ -319,6 +319,42 @@ export class PoolNotFoundInSubgraphError extends Error {
 }
 
 // ============================================================================
+// NAV SNAPSHOT TYPES
+// ============================================================================
+
+/**
+ * Raw pool slot0 data from subgraph batch query
+ *
+ * Minimal pool state for NAV snapshot valuation.
+ */
+export interface RawPoolSlot0Data {
+  /** Pool address (lowercase from subgraph) */
+  id: string;
+  /** Current sqrtPriceX96 as decimal string */
+  sqrtPrice: string;
+  /** Current tick as string */
+  tick: string;
+}
+
+/**
+ * Raw position data from subgraph batch query
+ *
+ * Position liquidity for NAV snapshot token amount computation.
+ * The Position entity's `id` is the NFT tokenId as a string.
+ */
+export interface RawSubgraphPosition {
+  /** Position NFT ID (same as NFPM tokenId) */
+  id: string;
+  /** Current liquidity as decimal string */
+  liquidity: string;
+  /** Pool entity reference */
+  pool: {
+    /** Pool address (lowercase) */
+    id: string;
+  };
+}
+
+// ============================================================================
 // POOL SEARCH TYPES
 // ============================================================================
 
