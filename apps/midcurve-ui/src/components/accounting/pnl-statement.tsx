@@ -10,6 +10,16 @@ import { useState } from 'react';
 import type { PnlResponse, PnlInstrumentItem, PnlPositionItem } from '@midcurve/api-shared';
 import { formatReportingAmount, formatFeeTier } from '@midcurve/shared';
 
+const CHAIN_NAMES: Record<number, string> = {
+  1: 'Ethereum',
+  42161: 'Arbitrum',
+  8453: 'Base',
+  56: 'BSC',
+  137: 'Polygon',
+  10: 'Optimism',
+  31337: 'Local',
+};
+
 interface PnlStatementProps {
   data: PnlResponse | undefined;
 }
@@ -81,7 +91,7 @@ function InstrumentRow({ instrument }: { instrument: PnlInstrumentItem }) {
             {instrument.poolSymbol}
           </span>
           <span className="text-slate-500 text-xs">
-            {instrument.protocol} · {instrument.feeTier !== '0' ? formatFeeTier(Number(instrument.feeTier)) : ''}
+            {instrument.protocol} · {CHAIN_NAMES[instrument.chainId] ?? `Chain ${instrument.chainId}`} · {instrument.feeTier !== '0' ? formatFeeTier(Number(instrument.feeTier)) : ''}
           </span>
         </div>
         <span className={`font-semibold ${pnlColor(instrument.netPnl)}`}>
