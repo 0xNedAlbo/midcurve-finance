@@ -7,16 +7,19 @@
  * What belongs here: chain IDs, names, slugs, explorer URLs,
  * CoinGecko platform IDs, env var suffixes, native currency info.
  *
- * What does NOT belong here: viem Chain objects, NFPM addresses,
- * factory addresses, quote tokens, subgraph URLs, finality config,
- * or anything that reads process.env / import.meta.env at import time.
+ * What does NOT belong here: viem Chain objects, quote tokens,
+ * subgraph URLs, finality config, or anything that reads
+ * process.env / import.meta.env at import time.
+ *
+ * Protocol-specific config (contract addresses, deployment blocks)
+ * lives in config/protocols/ (e.g. protocols/uniswapv3.ts).
  */
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type ChainSlug = 'ethereum' | 'arbitrum' | 'base' | 'local';
+export type ChainSlug = 'ethereum' | 'arbitrum' | 'base' | 'sepolia' | 'local';
 
 export interface ChainRegistryEntry {
   /** Numeric chain ID (e.g. 1, 42161, 8453, 31337) */
@@ -76,6 +79,17 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     nativeCurrency: { symbol: 'ETH', decimals: 18 },
     envVarSuffix: 'BASE',
     isProduction: true,
+  },
+  11155111: {
+    id: 11155111,
+    name: 'Ethereum Sepolia',
+    shortName: 'Sepolia',
+    slug: 'sepolia',
+    explorer: { name: 'Etherscan', baseUrl: 'https://sepolia.etherscan.io' },
+    coingeckoPlatformId: null,
+    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    envVarSuffix: 'SEPOLIA',
+    isProduction: false,
   },
   31337: {
     id: 31337,

@@ -27,6 +27,7 @@ import {
   mainnet,
   arbitrum,
   base,
+  sepolia,
   type Chain,
 } from 'viem/chains';
 import { getChainEntry, getRpcEnvVarName } from '@midcurve/shared';
@@ -85,6 +86,8 @@ export enum SupportedChainId {
   ETHEREUM = 1,
   ARBITRUM = 42161,
   BASE = 8453,
+  /** Sepolia testnet - only available in development */
+  SEPOLIA = 11155111,
   /** Local Anvil chain - only available in development */
   LOCAL = 31337,
 }
@@ -183,6 +186,7 @@ export class EvmConfig {
       [SupportedChainId.ETHEREUM]: mainnet,
       [SupportedChainId.ARBITRUM]: arbitrum,
       [SupportedChainId.BASE]: base,
+      [SupportedChainId.SEPOLIA]: sepolia,
       [SupportedChainId.LOCAL]: localAnvil,
     };
 
@@ -200,19 +204,23 @@ export class EvmConfig {
       });
     }
 
-    // Local Anvil Fork (development only)
-    // Only available when NODE_ENV !== 'production' and RPC_URL_LOCAL is set
-    const localRpcEnvVar = getRpcEnvVarName(SupportedChainId.LOCAL);
-    if (env['NODE_ENV'] !== 'production' && env[localRpcEnvVar]) {
-      const localEntry = getChainEntry(SupportedChainId.LOCAL);
-      this.chains.set(SupportedChainId.LOCAL, {
-        chainId: SupportedChainId.LOCAL,
-        name: localEntry.name,
-        rpcUrl: env[localRpcEnvVar]!,
-        blockExplorer: undefined,
-        viemChain: localAnvil,
-        finality: { type: 'blockTag' },
-      });
+    // Development-only chains (Sepolia, Local Anvil)
+    // Only available when NODE_ENV !== 'production' and RPC URL is set
+    if (env['NODE_ENV'] !== 'production') {
+      for (const chainId of [SupportedChainId.SEPOLIA, SupportedChainId.LOCAL]) {
+        const rpcEnvVar = getRpcEnvVarName(chainId);
+        if (env[rpcEnvVar]) {
+          const entry = getChainEntry(chainId);
+          this.chains.set(chainId, {
+            chainId,
+            name: entry.shortName,
+            rpcUrl: env[rpcEnvVar]!,
+            blockExplorer: entry.explorer?.baseUrl,
+            viemChain: viemChains[chainId]!,
+            finality: { type: 'blockTag' },
+          });
+        }
+      }
     }
   }
 

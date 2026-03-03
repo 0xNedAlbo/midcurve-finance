@@ -12,9 +12,9 @@
  * chain registry in @midcurve/shared. This file adds UI-specific metadata
  * (descriptions, logos) on top.
  *
- * Local Development Chain:
- * When VITE_ENABLE_LOCAL_CHAIN=true, a local Anvil fork chain (31337) is available
- * for testing the automation flow without external service dependencies.
+ * Development Chains:
+ * When VITE_ENABLE_DEV_CHAINS=true, development chains (Sepolia, local Anvil)
+ * are available for testing without external service dependencies.
  */
 
 import {
@@ -48,6 +48,7 @@ const CHAIN_DESCRIPTIONS: Partial<Record<number, string>> = {
   1: 'High liquidity, established ecosystem, higher gas costs',
   42161: 'Low fees, fast transactions, Ethereum security',
   8453: 'Coinbase L2, low fees, growing ecosystem',
+  11155111: 'Ethereum testnet for development and staging',
   31337: 'Local Anvil fork for development testing',
 };
 
@@ -71,37 +72,42 @@ function buildChainMetadata(chainId: number): ChainMetadata {
  * Production chain metadata (always available)
  * Built from chain registry.
  */
-const PRODUCTION_CHAINS: Record<Exclude<EvmChainSlug, 'local'>, ChainMetadata> = {
+const PRODUCTION_CHAINS: Record<Exclude<EvmChainSlug, 'sepolia' | 'local'>, ChainMetadata> = {
   ethereum: buildChainMetadata(1),
   arbitrum: buildChainMetadata(42161),
   base: buildChainMetadata(8453),
 };
 
 /**
- * Local chain metadata (development only)
+ * Development chain metadata (Sepolia + local Anvil)
  * Built from chain registry.
  */
-const LOCAL_CHAIN_METADATA: ChainMetadata = buildChainMetadata(31337);
+const DEV_CHAINS: Record<'sepolia' | 'local', ChainMetadata> = {
+  sepolia: buildChainMetadata(11155111),
+  local: buildChainMetadata(31337),
+};
 
 /**
- * Check if local chain is enabled via environment variable
+ * Check if development chains are enabled via environment variable
+ * Supports both new VITE_ENABLE_DEV_CHAINS and legacy VITE_ENABLE_LOCAL_CHAIN
  */
-export const isLocalChainEnabled =
+export const isDevChainsEnabled =
+  import.meta.env.VITE_ENABLE_DEV_CHAINS === 'true' ||
   import.meta.env.VITE_ENABLE_LOCAL_CHAIN === 'true';
 
 /**
  * Metadata for all supported EVM chains
- * Includes local chain only when VITE_ENABLE_LOCAL_CHAIN=true
+ * Includes dev chains only when VITE_ENABLE_DEV_CHAINS=true
  */
 export const CHAIN_METADATA: Partial<Record<EvmChainSlug, ChainMetadata>> =
-  isLocalChainEnabled
-    ? { ...PRODUCTION_CHAINS, local: LOCAL_CHAIN_METADATA }
+  isDevChainsEnabled
+    ? { ...PRODUCTION_CHAINS, ...DEV_CHAINS }
     : PRODUCTION_CHAINS;
 
 /**
  * Production EVM chain slugs (always available)
  */
-const PRODUCTION_CHAIN_SLUGS: Exclude<EvmChainSlug, 'local'>[] = [
+const PRODUCTION_CHAIN_SLUGS: Exclude<EvmChainSlug, 'sepolia' | 'local'>[] = [
   'ethereum',
   'arbitrum',
   'base',
@@ -109,10 +115,10 @@ const PRODUCTION_CHAIN_SLUGS: Exclude<EvmChainSlug, 'local'>[] = [
 
 /**
  * All supported EVM chain slugs
- * Includes 'local' only when VITE_ENABLE_LOCAL_CHAIN=true
+ * Includes dev chains only when VITE_ENABLE_DEV_CHAINS=true
  */
-export const ALL_EVM_CHAINS: EvmChainSlug[] = isLocalChainEnabled
-  ? [...PRODUCTION_CHAIN_SLUGS, 'local']
+export const ALL_EVM_CHAINS: EvmChainSlug[] = isDevChainsEnabled
+  ? [...PRODUCTION_CHAIN_SLUGS, 'sepolia', 'local']
   : PRODUCTION_CHAIN_SLUGS;
 
 /**

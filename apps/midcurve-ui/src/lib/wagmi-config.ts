@@ -10,6 +10,7 @@ import {
   mainnet,
   arbitrum,
   base,
+  sepolia,
   type Chain,
 } from 'wagmi/chains';
 import { createConfig, createStorage, http, noopStorage } from 'wagmi';
@@ -22,8 +23,9 @@ if (!projectId) {
   console.warn('VITE_WALLETCONNECT_PROJECT_ID is not set');
 }
 
-// Check if local chain is enabled
-const isLocalChainEnabled =
+// Check if development chains are enabled
+const isDevChainsEnabled =
+  import.meta.env.VITE_ENABLE_DEV_CHAINS === 'true' ||
   import.meta.env.VITE_ENABLE_LOCAL_CHAIN === 'true';
 
 // Local Anvil chain definition for development testing
@@ -52,9 +54,9 @@ const productionChains = [
   base,
 ] as const;
 
-// Define supported chains (include local only in development)
-const chains: readonly [Chain, ...Chain[]] = isLocalChainEnabled
-  ? ([...productionChains, localAnvil] as unknown as readonly [
+// Define supported chains (include dev chains only in development)
+const chains: readonly [Chain, ...Chain[]] = isDevChainsEnabled
+  ? ([...productionChains, sepolia, localAnvil] as unknown as readonly [
       Chain,
       ...Chain[],
     ])
@@ -91,10 +93,11 @@ const productionTransports = {
   [base.id]: http(),
 };
 
-// Add local chain transport if enabled
-const transports = isLocalChainEnabled
+// Add dev chain transports if enabled
+const transports = isDevChainsEnabled
   ? {
       ...productionTransports,
+      [sepolia.id]: http(),
       [localAnvil.id]: http(
         import.meta.env.VITE_RPC_URL_LOCAL || 'http://localhost:8545'
       ),

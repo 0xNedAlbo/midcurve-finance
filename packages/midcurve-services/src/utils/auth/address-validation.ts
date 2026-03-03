@@ -25,7 +25,7 @@ export const SUPPORTED_CHAIN_IDS =
     ? REGISTRY_PRODUCTION_CHAIN_IDS
     : ALL_CHAIN_IDS;
 
-export type SupportedChainId = 1 | 42161 | 8453 | 31337;
+export type SupportedChainId = 1 | 42161 | 8453 | 11155111 | 31337;
 
 /**
  * Validate and normalize Ethereum address

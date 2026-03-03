@@ -5,7 +5,7 @@
  */
 
 import { createPublicClient, http, type PublicClient, type Chain } from 'viem';
-import { mainnet, arbitrum, base, localhost } from 'viem/chains';
+import { mainnet, arbitrum, base, sepolia, localhost } from 'viem/chains';
 import { getRpcEnvVarName } from '@midcurve/shared';
 import type { SupportedChainId } from './config';
 
@@ -19,6 +19,7 @@ const VIEM_CHAINS: Record<number, Chain> = {
   1: mainnet,
   42161: arbitrum,
   8453: base,
+  11155111: sepolia,
   31337: { ...localhost, id: 31337 },
 };
 
@@ -33,20 +34,21 @@ const PRODUCTION_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string
 };
 
 /**
- * Local chain configuration (dev/test only)
+ * Development chain configurations (dev/test only)
  */
-const LOCAL_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
+const DEV_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
+  11155111: { chain: VIEM_CHAINS[11155111]!, rpcEnvVar: getRpcEnvVarName(11155111) },
   31337: { chain: VIEM_CHAINS[31337]!, rpcEnvVar: getRpcEnvVarName(31337) },
 };
 
 /**
  * Chain configurations with RPC URLs from environment
- * Local chain is only included in non-production environments.
+ * Dev chains are only included in non-production environments.
  */
 const CHAIN_CONFIGS: Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }> =
   process.env.NODE_ENV === 'production'
     ? (PRODUCTION_CHAIN_CONFIGS as Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }>)
-    : ({ ...PRODUCTION_CHAIN_CONFIGS, ...LOCAL_CHAIN_CONFIGS } as Record<
+    : ({ ...PRODUCTION_CHAIN_CONFIGS, ...DEV_CHAIN_CONFIGS } as Record<
         SupportedChainId,
         { chain: Chain; rpcEnvVar: string }
       >);

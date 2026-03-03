@@ -6,7 +6,7 @@
  */
 
 import { createPublicClient, webSocket, type PublicClient, type Chain } from 'viem';
-import { mainnet, arbitrum, base, localhost } from 'viem/chains';
+import { mainnet, arbitrum, base, sepolia, localhost } from 'viem/chains';
 import { getWsRpcEnvVarName } from '@midcurve/shared';
 import type { SupportedChainId } from './config';
 import { automationLogger } from './logger';
@@ -24,20 +24,21 @@ const PRODUCTION_WS_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }>
 };
 
 /**
- * Local chain configuration (dev/test only)
+ * Development chain configurations (dev/test only)
  */
-const LOCAL_WS_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
+const DEV_WS_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
+  11155111: { chain: sepolia, rpcEnvVar: getWsRpcEnvVarName(11155111) },
   31337: { chain: { ...localhost, id: 31337 }, rpcEnvVar: getWsRpcEnvVarName(31337) },
 };
 
 /**
  * WebSocket chain configurations
- * Local chain is only included in non-production environments.
+ * Dev chains are only included in non-production environments.
  */
 const WS_CHAIN_CONFIGS: Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }> =
   process.env.NODE_ENV === 'production'
     ? (PRODUCTION_WS_CONFIGS as Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }>)
-    : ({ ...PRODUCTION_WS_CONFIGS, ...LOCAL_WS_CONFIGS } as Record<
+    : ({ ...PRODUCTION_WS_CONFIGS, ...DEV_WS_CONFIGS } as Record<
         SupportedChainId,
         { chain: Chain; rpcEnvVar: string }
       >);
