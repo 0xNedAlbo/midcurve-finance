@@ -3,64 +3,48 @@
  *
  * Provides functions for building block explorer URLs for different chains
  * and formatting transaction/block identifiers for display.
+ *
+ * Explorer URLs and URL builders are delegated to the centralized chain registry
+ * in @midcurve/shared. This file re-exports them and adds display formatting.
  */
 
-/**
- * Mapping of chain IDs to their block explorer base URLs
- */
-export const CHAIN_EXPLORERS: Record<number, string> = {
-  1: 'https://etherscan.io',
-  42161: 'https://arbiscan.io',
-  8453: 'https://basescan.org',
-};
+import {
+  getExplorerBaseUrl,
+  buildTxUrl as registryBuildTxUrl,
+  buildBlockUrl as registryBuildBlockUrl,
+  buildAddressUrl as registryBuildAddressUrl,
+} from '@midcurve/shared';
 
 /**
  * Get the block explorer base URL for a given chain ID
- *
- * @param chainId - The EVM chain ID
- * @returns The explorer base URL or undefined if chain is not supported
+ * Delegates to centralized chain registry.
  */
 export function getExplorerUrl(chainId: number): string | undefined {
-  return CHAIN_EXPLORERS[chainId];
+  return getExplorerBaseUrl(chainId);
 }
 
 /**
  * Build a transaction URL for a given chain and transaction hash
- *
- * @param chainId - The EVM chain ID
- * @param txHash - The transaction hash (0x...)
- * @returns The full URL to the transaction on the block explorer, or '#' if chain is unsupported
+ * Delegates to centralized chain registry.
  */
 export function buildTxUrl(chainId: number, txHash: string): string {
-  const explorer = getExplorerUrl(chainId);
-  if (!explorer) return '#';
-  return `${explorer}/tx/${txHash}`;
+  return registryBuildTxUrl(chainId, txHash);
 }
 
 /**
  * Build a block URL for a given chain and block number
- *
- * @param chainId - The EVM chain ID
- * @param blockNumber - The block number (can be string or number)
- * @returns The full URL to the block on the block explorer, or '#' if chain is unsupported
+ * Delegates to centralized chain registry.
  */
 export function buildBlockUrl(chainId: number, blockNumber: string | number): string {
-  const explorer = getExplorerUrl(chainId);
-  if (!explorer) return '#';
-  return `${explorer}/block/${blockNumber}`;
+  return registryBuildBlockUrl(chainId, blockNumber);
 }
 
 /**
  * Build an address URL for a given chain and address
- *
- * @param chainId - The EVM chain ID
- * @param address - The address (0x...)
- * @returns The full URL to the address on the block explorer, or '#' if chain is unsupported
+ * Delegates to centralized chain registry.
  */
 export function buildAddressUrl(chainId: number, address: string): string {
-  const explorer = getExplorerUrl(chainId);
-  if (!explorer) return '#';
-  return `${explorer}/address/${address}`;
+  return registryBuildAddressUrl(chainId, address);
 }
 
 /**

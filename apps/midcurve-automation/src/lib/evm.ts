@@ -6,25 +6,37 @@
 
 import { createPublicClient, http, type PublicClient, type Chain } from 'viem';
 import { mainnet, arbitrum, base, localhost } from 'viem/chains';
+import { getRpcEnvVarName } from '@midcurve/shared';
 import type { SupportedChainId } from './config';
 
 // Re-export for convenience
 export type { SupportedChainId } from './config';
 
 /**
+ * Viem chain objects per chain ID (runtime-specific, can't live in registry)
+ */
+const VIEM_CHAINS: Record<number, Chain> = {
+  1: mainnet,
+  42161: arbitrum,
+  8453: base,
+  31337: { ...localhost, id: 31337 },
+};
+
+/**
  * Production chain configurations
+ * RPC env var names derived from chain registry.
  */
 const PRODUCTION_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  1: { chain: mainnet, rpcEnvVar: 'RPC_URL_ETHEREUM' },
-  42161: { chain: arbitrum, rpcEnvVar: 'RPC_URL_ARBITRUM' },
-  8453: { chain: base, rpcEnvVar: 'RPC_URL_BASE' },
+  1: { chain: VIEM_CHAINS[1]!, rpcEnvVar: getRpcEnvVarName(1) },
+  42161: { chain: VIEM_CHAINS[42161]!, rpcEnvVar: getRpcEnvVarName(42161) },
+  8453: { chain: VIEM_CHAINS[8453]!, rpcEnvVar: getRpcEnvVarName(8453) },
 };
 
 /**
  * Local chain configuration (dev/test only)
  */
 const LOCAL_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  31337: { chain: { ...localhost, id: 31337 }, rpcEnvVar: 'RPC_URL_LOCAL' },
+  31337: { chain: VIEM_CHAINS[31337]!, rpcEnvVar: getRpcEnvVarName(31337) },
 };
 
 /**

@@ -25,6 +25,7 @@ import {
   RefundAutowalletRequestSchema,
   type RefundAutowalletResponse,
 } from '@midcurve/api-shared';
+import { getRpcEnvVarName } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse } from '@/lib/cors';
 import { storeRefundOperation } from '@/lib/refund-store';
@@ -38,12 +39,12 @@ const SIGNER_URL = process.env.SIGNER_URL || 'http://localhost:3003';
 const SIGNER_INTERNAL_API_KEY = process.env.SIGNER_INTERNAL_API_KEY || '';
 
 /**
- * Chain configurations with RPC URLs
+ * Chain configurations with viem Chain objects
  */
-const CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  1: { chain: mainnet, rpcEnvVar: 'RPC_URL_ETHEREUM' },
-  42161: { chain: arbitrum, rpcEnvVar: 'RPC_URL_ARBITRUM' },
-  8453: { chain: base, rpcEnvVar: 'RPC_URL_BASE' },
+const CHAIN_CONFIGS: Record<number, { chain: Chain }> = {
+  1: { chain: mainnet },
+  42161: { chain: arbitrum },
+  8453: { chain: base },
 };
 
 /**
@@ -113,9 +114,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(errorResponse, { status: 400 });
       }
 
-      const rpcUrl = process.env[chainConfig.rpcEnvVar];
+      const rpcEnvVar = getRpcEnvVarName(chainId);
+      const rpcUrl = process.env[rpcEnvVar];
       if (!rpcUrl) {
-        apiLogger.error({ chainId, rpcEnvVar: chainConfig.rpcEnvVar }, 'RPC URL not configured');
+        apiLogger.error({ chainId, rpcEnvVar }, 'RPC URL not configured');
         const errorResponse = createErrorResponse(
           ApiErrorCode.INTERNAL_SERVER_ERROR,
           `RPC not configured for chain ${chainId}`

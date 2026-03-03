@@ -7,6 +7,7 @@
 
 import { createPublicClient, webSocket, type PublicClient, type Chain } from 'viem';
 import { mainnet, arbitrum, base, localhost } from 'viem/chains';
+import { getWsRpcEnvVarName } from '@midcurve/shared';
 import type { SupportedChainId } from './config';
 import { automationLogger } from './logger';
 
@@ -14,18 +15,19 @@ const log = automationLogger.child({ component: 'evm-websocket' });
 
 /**
  * Production chain configurations with WebSocket RPC environment variables
+ * WS env var names derived from chain registry.
  */
 const PRODUCTION_WS_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  1: { chain: mainnet, rpcEnvVar: 'WS_RPC_URL_ETHEREUM' },
-  42161: { chain: arbitrum, rpcEnvVar: 'WS_RPC_URL_ARBITRUM' },
-  8453: { chain: base, rpcEnvVar: 'WS_RPC_URL_BASE' },
+  1: { chain: mainnet, rpcEnvVar: getWsRpcEnvVarName(1) },
+  42161: { chain: arbitrum, rpcEnvVar: getWsRpcEnvVarName(42161) },
+  8453: { chain: base, rpcEnvVar: getWsRpcEnvVarName(8453) },
 };
 
 /**
  * Local chain configuration (dev/test only)
  */
 const LOCAL_WS_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  31337: { chain: { ...localhost, id: 31337 }, rpcEnvVar: 'WS_RPC_URL_LOCAL' },
+  31337: { chain: { ...localhost, id: 31337 }, rpcEnvVar: getWsRpcEnvVarName(31337) },
 };
 
 /**

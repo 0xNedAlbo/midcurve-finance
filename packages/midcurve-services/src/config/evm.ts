@@ -29,6 +29,7 @@ import {
   base,
   type Chain,
 } from 'viem/chains';
+import { getChainEntry, getRpcEnvVarName } from '@midcurve/shared';
 
 /**
  * Local Anvil chain definition for development testing
@@ -177,47 +178,39 @@ export class EvmConfig {
   private initializeChains(): void {
     const env = process.env;
 
-    // Ethereum
-    this.chains.set(SupportedChainId.ETHEREUM, {
-      chainId: SupportedChainId.ETHEREUM,
-      name: 'Ethereum',
-      rpcUrl: env['RPC_URL_ETHEREUM'] ?? INVALID_RPC_SENTINEL,
-      blockExplorer: 'https://etherscan.io',
-      viemChain: mainnet,
-      finality: { type: 'blockTag' },
-    });
+    // Viem chain objects per chain ID (runtime-specific, can't live in registry)
+    const viemChains: Record<number, Chain> = {
+      [SupportedChainId.ETHEREUM]: mainnet,
+      [SupportedChainId.ARBITRUM]: arbitrum,
+      [SupportedChainId.BASE]: base,
+      [SupportedChainId.LOCAL]: localAnvil,
+    };
 
-    // Arbitrum
-    this.chains.set(SupportedChainId.ARBITRUM, {
-      chainId: SupportedChainId.ARBITRUM,
-      name: 'Arbitrum One',
-      rpcUrl: env['RPC_URL_ARBITRUM'] ?? INVALID_RPC_SENTINEL,
-      blockExplorer: 'https://arbiscan.io',
-      viemChain: arbitrum,
-      finality: { type: 'blockTag' },
-    });
-
-    // Base
-    this.chains.set(SupportedChainId.BASE, {
-      chainId: SupportedChainId.BASE,
-      name: 'Base',
-      rpcUrl: env['RPC_URL_BASE'] ?? INVALID_RPC_SENTINEL,
-      blockExplorer: 'https://basescan.org',
-      viemChain: base,
-      finality: { type: 'blockTag' },
-    });
+    // Production chains
+    for (const chainId of [SupportedChainId.ETHEREUM, SupportedChainId.ARBITRUM, SupportedChainId.BASE]) {
+      const entry = getChainEntry(chainId);
+      const envVarName = getRpcEnvVarName(chainId);
+      this.chains.set(chainId, {
+        chainId,
+        name: entry.shortName,
+        rpcUrl: env[envVarName] ?? INVALID_RPC_SENTINEL,
+        blockExplorer: entry.explorer?.baseUrl,
+        viemChain: viemChains[chainId]!,
+        finality: { type: 'blockTag' },
+      });
+    }
 
     // Local Anvil Fork (development only)
     // Only available when NODE_ENV !== 'production' and RPC_URL_LOCAL is set
-    if (env['NODE_ENV'] !== 'production' && env['RPC_URL_LOCAL']) {
+    const localRpcEnvVar = getRpcEnvVarName(SupportedChainId.LOCAL);
+    if (env['NODE_ENV'] !== 'production' && env[localRpcEnvVar]) {
+      const localEntry = getChainEntry(SupportedChainId.LOCAL);
       this.chains.set(SupportedChainId.LOCAL, {
         chainId: SupportedChainId.LOCAL,
-        name: 'Local Anvil Fork',
-        rpcUrl: env['RPC_URL_LOCAL'],
-        blockExplorer: undefined, // No explorer for local chain
+        name: localEntry.name,
+        rpcUrl: env[localRpcEnvVar]!,
+        blockExplorer: undefined,
         viemChain: localAnvil,
-        // Local chains don't have finalization - blocks are mined instantly
-        // We use 'blockTag' but finalization checks are skipped via isLocalChain()
         finality: { type: 'blockTag' },
       });
     }
@@ -230,14 +223,7 @@ export class EvmConfig {
    * @returns Environment variable name (e.g., 'RPC_URL_ETHEREUM')
    */
   private getEnvVarNameForChain(chainId: number): string {
-    const envVarMap: Record<number, string> = {
-      [SupportedChainId.ETHEREUM]: 'RPC_URL_ETHEREUM',
-      [SupportedChainId.ARBITRUM]: 'RPC_URL_ARBITRUM',
-      [SupportedChainId.BASE]: 'RPC_URL_BASE',
-      [SupportedChainId.LOCAL]: 'RPC_URL_LOCAL',
-    };
-
-    return envVarMap[chainId] ?? `RPC_URL_UNKNOWN_${chainId}`;
+    return getRpcEnvVarName(chainId);
   }
 
   /**

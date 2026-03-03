@@ -67,7 +67,6 @@ export {
   validateChainId,
   isSupportedChainId,
   isChainWssConfigured,
-  CHAIN_NAMES,
 } from './utils/auth/index.js';
 
 export const version = '0.1.0';

@@ -14,7 +14,6 @@ import {
   getWorkerConfig,
   isSupportedChain,
   SUPPORTED_CHAIN_IDS,
-  type SupportedChainId,
 } from '../lib/config';
 import {
   UniswapV3PoolSubscriptionBatch,
@@ -47,7 +46,7 @@ interface PositionConfig {
 interface SubscribedPool {
   poolId: string;
   poolAddress: string;
-  chainId: SupportedChainId;
+  chainId: number;
 }
 
 /**
@@ -57,7 +56,7 @@ interface SubscribedPool {
  */
 export class PoolPriceSubscriber {
   private batches: UniswapV3PoolSubscriptionBatch[] = [];
-  private batchesByChain: Map<SupportedChainId, UniswapV3PoolSubscriptionBatch[]> = new Map();
+  private batchesByChain: Map<number, UniswapV3PoolSubscriptionBatch[]> = new Map();
   private isRunning = false;
 
   // Track subscribed pools by address (lowercase)
@@ -84,7 +83,7 @@ export class PoolPriceSubscriber {
 
       // Discover which chains have HTTP RPC configured
       const evmConfig = getEvmConfig();
-      const configuredChains: SupportedChainId[] = [];
+      const configuredChains: number[] = [];
       for (const chainId of SUPPORTED_CHAIN_IDS) {
         try {
           evmConfig.getPublicClient(chainId);
@@ -191,7 +190,7 @@ export class PoolPriceSubscriber {
    * Load pools that have at least one active UniswapV3 position.
    * Groups by chain ID for batch creation.
    */
-  private async loadActiveSubscriptions(): Promise<Map<SupportedChainId, PoolInfo[]>> {
+  private async loadActiveSubscriptions(): Promise<Map<number, PoolInfo[]>> {
     priceLog.methodEntry(log, 'loadActiveSubscriptions');
 
     // Query pools that have at least one active UniswapV3 position
@@ -214,7 +213,7 @@ export class PoolPriceSubscriber {
     log.info({ poolCount: pools.length, msg: 'Loaded pools with active positions' });
 
     // Group pools by chain ID
-    const poolsByChain = new Map<SupportedChainId, PoolInfo[]>();
+    const poolsByChain = new Map<number, PoolInfo[]>();
 
     for (const pool of pools) {
       const config = pool.config as unknown as PoolConfig;
@@ -229,7 +228,7 @@ export class PoolPriceSubscriber {
         continue;
       }
 
-      const chainId = config.chainId as SupportedChainId;
+      const chainId = config.chainId;
       const normalizedAddress = config.address.toLowerCase();
 
       // Track in internal state
@@ -290,7 +289,7 @@ export class PoolPriceSubscriber {
       return;
     }
 
-    const chainId = config.chainId as SupportedChainId;
+    const chainId = config.chainId;
     const normalizedAddress = config.poolAddress.toLowerCase();
 
     // 4. Skip if pool already subscribed (idempotency)
@@ -446,7 +445,7 @@ export class PoolPriceSubscriber {
   /**
    * Add a pool to an existing batch or create a new batch if needed.
    */
-  private async addPoolToBatch(chainId: SupportedChainId, pool: PoolInfo): Promise<void> {
+  private async addPoolToBatch(chainId: number, pool: PoolInfo): Promise<void> {
     const config = getWorkerConfig();
     let chainBatches = this.batchesByChain.get(chainId);
 

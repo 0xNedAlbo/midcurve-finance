@@ -4,6 +4,12 @@
  * Environment-based configuration for the automation service.
  */
 
+import {
+  PRODUCTION_CHAIN_IDS as REGISTRY_PRODUCTION_CHAIN_IDS,
+  ALL_CHAIN_IDS as REGISTRY_ALL_CHAIN_IDS,
+  isSupportedChainId as registryIsSupportedChainId,
+} from '@midcurve/shared';
+
 /**
  * RabbitMQ configuration
  */
@@ -129,28 +135,18 @@ export function getAutomationConfig(): AutomationConfig {
  *
  * Production chains are always available.
  * Local chain (31337) is only available in non-production environments.
+ * Derived from centralized chain registry in @midcurve/shared.
  */
-const PRODUCTION_CHAIN_IDS = [1, 42161, 8453] as const;
-const LOCAL_CHAIN_IDS = [31337] as const;
-
-// Include local chain only in non-production
 export const SUPPORTED_CHAIN_IDS =
   process.env.NODE_ENV === 'production'
-    ? PRODUCTION_CHAIN_IDS
-    : ([...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const);
+    ? REGISTRY_PRODUCTION_CHAIN_IDS
+    : REGISTRY_ALL_CHAIN_IDS;
 
-export type SupportedChainId =
-  | (typeof PRODUCTION_CHAIN_IDS)[number]
-  | (typeof LOCAL_CHAIN_IDS)[number];
-
-/**
- * All possible chain IDs (for type checking)
- */
-const ALL_CHAIN_IDS = [...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const;
+export type SupportedChainId = 1 | 42161 | 8453 | 31337;
 
 /**
  * Check if a chain ID is supported
  */
 export function isSupportedChain(chainId: number): chainId is SupportedChainId {
-  return (ALL_CHAIN_IDS as readonly number[]).includes(chainId);
+  return registryIsSupportedChainId(chainId);
 }

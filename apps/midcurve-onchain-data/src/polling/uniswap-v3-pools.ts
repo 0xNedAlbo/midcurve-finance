@@ -15,7 +15,7 @@ import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { buildUniswapV3RoutingKey } from '../mq/topology';
 import { createRawSwapEvent, serializeRawSwapEvent } from '../mq/messages';
-import type { SupportedChainId } from '../lib/config';
+
 
 const log = onchainDataLogger.child({ component: 'UniswapV3PoolProvider' });
 
@@ -67,7 +67,7 @@ export interface PoolInfo {
  * Reads slot0() via multicall and publishes price changes to RabbitMQ.
  */
 export class UniswapV3PoolSubscriptionBatch {
-  private readonly chainId: SupportedChainId;
+  private readonly chainId: number;
   private readonly batchIndex: number;
   private pools: Map<string, PoolInfo>; // address -> PoolInfo
   private isRunning = false;
@@ -77,7 +77,7 @@ export class UniswapV3PoolSubscriptionBatch {
   private lastKnownTicks: Map<string, number> = new Map();
 
   constructor(
-    chainId: SupportedChainId,
+    chainId: number,
     batchIndex: number,
     pools: PoolInfo[]
   ) {
@@ -341,7 +341,7 @@ export class UniswapV3PoolSubscriptionBatch {
  * Splits pools into batches of MAX_POOLS_PER_SUBSCRIPTION.
  */
 export function createSubscriptionBatches(
-  chainId: SupportedChainId,
+  chainId: number,
   pools: PoolInfo[]
 ): UniswapV3PoolSubscriptionBatch[] {
   const batches: UniswapV3PoolSubscriptionBatch[] = [];

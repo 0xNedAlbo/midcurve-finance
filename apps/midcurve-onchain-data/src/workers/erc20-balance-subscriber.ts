@@ -18,9 +18,8 @@ import { prisma, Prisma } from '@midcurve/database';
 import { onchainDataLogger, priceLog } from '../lib/logger.js';
 import {
   isSupportedChain,
-  CHAIN_NAMES,
+  getChainName,
   SUPPORTED_CHAIN_IDS,
-  type SupportedChainId,
 } from '../lib/config.js';
 import type {
   Erc20BalanceSubscriptionConfig,
@@ -69,7 +68,7 @@ interface BalanceSubscriptionInfo {
   /** Unique subscription ID for API polling */
   subscriptionId: string;
   /** Chain ID */
-  chainId: SupportedChainId;
+  chainId: number;
   /** ERC-20 token contract address (checksummed) */
   tokenAddress: string;
   /** Wallet address to track balance for (checksummed) */
@@ -90,7 +89,7 @@ export class Erc20BalanceSubscriber {
   private lastKnownBalances: Map<string, string> = new Map();
 
   // HTTP RPC clients per chain
-  private clients: Map<SupportedChainId, PublicClient> = new Map();
+  private clients: Map<number, PublicClient> = new Map();
 
   // Timers
   private balancePollTimer: NodeJS.Timeout | null = null;
@@ -237,7 +236,7 @@ export class Erc20BalanceSubscriber {
         continue;
       }
 
-      const chainId = config.chainId as SupportedChainId;
+      const chainId = config.chainId;
 
       if (!this.clients.has(chainId)) {
         log.warn({ chainId, subscriptionId: sub.subscriptionId, msg: 'No RPC client for chain, skipping subscription' });
@@ -260,7 +259,7 @@ export class Erc20BalanceSubscriber {
     }
 
     // Log summary per chain
-    const byChain = new Map<SupportedChainId, number>();
+    const byChain = new Map<number, number>();
     for (const sub of this.subscribedBalances.values()) {
       byChain.set(sub.chainId, (byChain.get(sub.chainId) || 0) + 1);
     }
@@ -313,7 +312,7 @@ export class Erc20BalanceSubscriber {
     }
 
     // Group subscriptions by chain
-    const byChain = new Map<SupportedChainId, BalanceSubscriptionInfo[]>();
+    const byChain = new Map<number, BalanceSubscriptionInfo[]>();
     for (const sub of this.subscribedBalances.values()) {
       const chain = byChain.get(sub.chainId) || [];
       chain.push(sub);
@@ -337,7 +336,7 @@ export class Erc20BalanceSubscriber {
    */
   private async pollChainBalances(
     client: PublicClient,
-    chainId: SupportedChainId,
+    chainId: number,
     subs: BalanceSubscriptionInfo[]
   ): Promise<void> {
     // Deduplicate by (tokenAddress, walletAddress) — key is "token:wallet"
@@ -448,23 +447,21 @@ export class Erc20BalanceSubscriber {
       throw new Error(`Unsupported chain ID: ${chainId}`);
     }
 
-    const supportedChainId = chainId as SupportedChainId;
-
     if (this.subscribedBalances.has(subscriptionId)) {
       log.debug({ subscriptionId, msg: 'Balance already subscribed' });
       return;
     }
 
-    if (!this.clients.has(supportedChainId)) {
+    if (!this.clients.has(chainId)) {
       throw new Error(
-        `No RPC client configured for chain ${supportedChainId} (${CHAIN_NAMES[supportedChainId]}). Set RPC_URL_${CHAIN_NAMES[supportedChainId].toUpperCase()} env var.`
+        `No RPC client configured for chain ${chainId} (${getChainName(chainId)}). Set RPC_URL_${getChainName(chainId).toUpperCase()} env var.`
       );
     }
 
     this.subscribedBalances.set(subscriptionId, {
       id,
       subscriptionId,
-      chainId: supportedChainId,
+      chainId,
       tokenAddress: getAddress(tokenAddress),
       walletAddress: getAddress(walletAddress),
     });
@@ -562,7 +559,7 @@ export class Erc20BalanceSubscriber {
         continue;
       }
 
-      if (!this.clients.has(config.chainId as SupportedChainId)) {
+      if (!this.clients.has(config.chainId)) {
         log.warn({ chainId: config.chainId, subscriptionId: sub.subscriptionId, msg: 'No RPC client for chain, skipping subscription' });
         continue;
       }

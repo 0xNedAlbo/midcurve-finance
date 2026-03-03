@@ -18,7 +18,7 @@ import {
   ChevronRight,
   ExternalLink,
 } from 'lucide-react';
-import { formatRelativeTime } from '@midcurve/shared';
+import { formatRelativeTime, buildTxUrl } from '@midcurve/shared';
 import type {
   AutomationLogData,
   AutomationLogLevel,
@@ -57,23 +57,13 @@ const LOG_TYPE_ICONS: Partial<Record<AutomationLogType, typeof CheckCircle>> = {
 };
 
 /**
- * Block explorer URLs by chain ID
- */
-const BLOCK_EXPLORERS: Record<number, string> = {
-  1: 'https://etherscan.io/tx/',
-  42161: 'https://arbiscan.io/tx/',
-  8453: 'https://basescan.org/tx/',
-  31337: '', // Local chain - no explorer
-};
-
-/**
  * Get block explorer URL for a transaction hash
+ * Uses centralized chain registry from @midcurve/shared.
  */
 function getExplorerUrl(chainId: number | undefined, txHash: string): string | null {
-  if (!chainId || chainId === 31337) return null; // No explorer for local chain
-  const baseUrl = BLOCK_EXPLORERS[chainId];
-  if (!baseUrl) return null;
-  return `${baseUrl}${txHash}`;
+  if (!chainId) return null;
+  const url = buildTxUrl(chainId, txHash);
+  return url === '#' ? null : url;
 }
 
 /**

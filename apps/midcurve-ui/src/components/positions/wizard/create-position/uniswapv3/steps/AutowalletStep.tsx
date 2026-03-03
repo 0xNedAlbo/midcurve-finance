@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Wallet, Loader2, Check, ExternalLink, AlertCircle } from 'lucide-react';
+import { buildTxUrl } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 
@@ -183,7 +184,7 @@ export function AutowalletStep() {
               </p>
               {txHash && (
                 <a
-                  href={`https://etherscan.io/tx/${txHash}`}
+                  href={buildTxUrl(1, txHash)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1 mt-1"

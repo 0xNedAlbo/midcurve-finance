@@ -11,6 +11,7 @@
  * - Address-based token lookup
  */
 
+import { CHAIN_TO_COINGECKO_PLATFORM } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { CacheService } from '../../services/cache/index.js';
@@ -231,13 +232,9 @@ export class CoinGeckoClient {
 
   /**
    * Map chain IDs to CoinGecko platform IDs
-   * See: https://api.coingecko.com/api/v3/asset_platforms
+   * Derived from centralized chain registry in @midcurve/shared
    */
-  private readonly chainIdToPlatformId: Record<number, string> = {
-    1: 'ethereum', // Ethereum
-    42161: 'arbitrum-one', // Arbitrum One
-    8453: 'base', // Base
-  };
+  private readonly chainIdToPlatformId: Record<number, string> = CHAIN_TO_COINGECKO_PLATFORM;
 
   constructor(dependencies: CoinGeckoClientDependencies = {}) {
     this.logger = createServiceLogger('CoinGeckoClient');

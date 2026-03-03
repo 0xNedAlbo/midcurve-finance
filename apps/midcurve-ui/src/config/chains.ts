@@ -8,10 +8,19 @@
  * This is a GENERAL config for all EVM chains supported by the platform.
  * For protocol-specific chain support, see config/protocols/*.ts
  *
+ * Core chain data (IDs, names, slugs, explorer URLs) comes from the centralized
+ * chain registry in @midcurve/shared. This file adds UI-specific metadata
+ * (descriptions, logos) on top.
+ *
  * Local Development Chain:
  * When VITE_ENABLE_LOCAL_CHAIN=true, a local Anvil fork chain (31337) is available
  * for testing the automation flow without external service dependencies.
  */
+
+import {
+  CHAIN_REGISTRY,
+  type ChainSlug,
+} from '@midcurve/shared';
 
 export interface ChainMetadata {
   chainId: number;
@@ -28,56 +37,51 @@ export interface ChainMetadata {
 
 /**
  * Supported EVM chain slugs across all protocols
+ * Re-exported from the centralized chain registry.
  */
-export type EvmChainSlug =
-  | 'ethereum'
-  | 'arbitrum'
-  | 'base'
-  | 'local';
+export type EvmChainSlug = ChainSlug;
+
+/**
+ * UI-specific descriptions per chain (not in the registry)
+ */
+const CHAIN_DESCRIPTIONS: Partial<Record<number, string>> = {
+  1: 'High liquidity, established ecosystem, higher gas costs',
+  42161: 'Low fees, fast transactions, Ethereum security',
+  8453: 'Coinbase L2, low fees, growing ecosystem',
+  31337: 'Local Anvil fork for development testing',
+};
+
+/**
+ * Build ChainMetadata from registry entry + UI-specific description
+ */
+function buildChainMetadata(chainId: number): ChainMetadata {
+  const entry = CHAIN_REGISTRY[chainId]!;
+  return {
+    chainId: entry.id,
+    name: entry.name,
+    shortName: entry.shortName,
+    slug: entry.slug,
+    explorer: entry.explorer?.baseUrl ?? null,
+    description: CHAIN_DESCRIPTIONS[chainId],
+    isLocal: !entry.isProduction,
+  };
+}
 
 /**
  * Production chain metadata (always available)
+ * Built from chain registry.
  */
-const PRODUCTION_CHAINS: Record<Exclude<EvmChainSlug, 'local'>, ChainMetadata> =
-  {
-    ethereum: {
-      chainId: 1,
-      name: 'Ethereum Mainnet',
-      shortName: 'Ethereum',
-      slug: 'ethereum',
-      explorer: 'https://etherscan.io',
-      description: 'High liquidity, established ecosystem, higher gas costs',
-    },
-    arbitrum: {
-      chainId: 42161,
-      name: 'Arbitrum One',
-      shortName: 'Arbitrum',
-      slug: 'arbitrum',
-      explorer: 'https://arbiscan.io',
-      description: 'Low fees, fast transactions, Ethereum security',
-    },
-    base: {
-      chainId: 8453,
-      name: 'Base',
-      shortName: 'Base',
-      slug: 'base',
-      explorer: 'https://basescan.org',
-      description: 'Coinbase L2, low fees, growing ecosystem',
-    },
-  };
+const PRODUCTION_CHAINS: Record<Exclude<EvmChainSlug, 'local'>, ChainMetadata> = {
+  ethereum: buildChainMetadata(1),
+  arbitrum: buildChainMetadata(42161),
+  base: buildChainMetadata(8453),
+};
 
 /**
  * Local chain metadata (development only)
+ * Built from chain registry.
  */
-const LOCAL_CHAIN_METADATA: ChainMetadata = {
-  chainId: 31337,
-  name: 'Local Testnet',
-  shortName: 'Local',
-  slug: 'local',
-  explorer: null, // No block explorer for local chain
-  description: 'Local Anvil fork for development testing',
-  isLocal: true,
-};
+const LOCAL_CHAIN_METADATA: ChainMetadata = buildChainMetadata(31337);
 
 /**
  * Check if local chain is enabled via environment variable

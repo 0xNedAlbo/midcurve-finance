@@ -8,14 +8,8 @@
 
 import { useState } from "react";
 import { Copy } from "lucide-react";
+import { getExplorerBaseUrl, getExplorerName } from "@midcurve/shared";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
-
-// Chain ID to block explorer mapping
-const BLOCK_EXPLORERS: Record<number, { name: string; url: string }> = {
-  1: { name: "Etherscan", url: "https://etherscan.io" },
-  42161: { name: "Arbiscan", url: "https://arbiscan.io" },
-  8453: { name: "Basescan", url: "https://basescan.org" },
-};
 
 // Uniswap V3 NonfungiblePositionManager addresses (same on all chains)
 const NFTPM_ADDRESS = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
@@ -42,9 +36,10 @@ export function UniswapV3Identifier({ position }: UniswapV3IdentifierProps) {
     }
   };
 
-  const explorer = BLOCK_EXPLORERS[config.chainId];
-  const explorerUrl = explorer
-    ? `${explorer.url}/token/${NFTPM_ADDRESS}?a=${config.nftId}`
+  const explorerBaseUrl = getExplorerBaseUrl(config.chainId);
+  const explorerDisplayName = getExplorerName(config.chainId);
+  const explorerUrl = explorerBaseUrl
+    ? `${explorerBaseUrl}/token/${NFTPM_ADDRESS}?a=${config.nftId}`
     : undefined;
 
   return (
@@ -56,7 +51,7 @@ export function UniswapV3Identifier({ position }: UniswapV3IdentifierProps) {
           target="_blank"
           rel="noopener noreferrer"
           className="text-blue-400 hover:text-blue-300 underline cursor-pointer text-[10px] md:text-xs"
-          title={`View on ${explorer?.name || "block explorer"}`}
+          title={`View on ${explorerDisplayName || "block explorer"}`}
         >
           #{config.nftId}
         </a>

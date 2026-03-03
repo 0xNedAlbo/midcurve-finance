@@ -4,6 +4,13 @@
  * Environment-based configuration for the onchain data service.
  */
 
+import {
+  PRODUCTION_CHAIN_IDS as REGISTRY_PRODUCTION_CHAIN_IDS,
+  ALL_CHAIN_IDS as REGISTRY_ALL_CHAIN_IDS,
+  getChainShortName,
+  getWsRpcEnvVarName,
+} from '@midcurve/shared';
+
 /**
  * RabbitMQ configuration
  */
@@ -106,46 +113,29 @@ export const getPoolPricesConfig = getOnchainDataConfig;
  *
  * Production chains are always available.
  * Local chain (31337) is only available in non-production environments.
+ * Derived from centralized chain registry in @midcurve/shared.
  */
-const PRODUCTION_CHAIN_IDS = [1, 42161, 8453] as const;
-const LOCAL_CHAIN_IDS = [31337] as const;
-
-// Include local chain only in non-production
 export const SUPPORTED_CHAIN_IDS =
   process.env.NODE_ENV === 'production'
-    ? PRODUCTION_CHAIN_IDS
-    : ([...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const);
+    ? REGISTRY_PRODUCTION_CHAIN_IDS
+    : REGISTRY_ALL_CHAIN_IDS;
 
-export type SupportedChainId =
-  | (typeof PRODUCTION_CHAIN_IDS)[number]
-  | (typeof LOCAL_CHAIN_IDS)[number];
+export type SupportedChainId = 1 | 42161 | 8453 | 31337;
 
 /**
- * Chain ID to name mapping
+ * Get chain name (lowercase slug) for a chain ID
+ * Delegates to chain registry.
  */
-export const CHAIN_NAMES: Record<SupportedChainId, string> = {
-  1: 'ethereum',
-  42161: 'arbitrum',
-  8453: 'base',
-  31337: 'local',
-};
-
-/**
- * Environment variable names for WebSocket RPC URLs per chain
- */
-const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
-  1: 'WS_RPC_URL_ETHEREUM',
-  42161: 'WS_RPC_URL_ARBITRUM',
-  8453: 'WS_RPC_URL_BASE',
-  31337: 'WS_RPC_URL_LOCAL',
-};
+export function getChainName(chainId: SupportedChainId): string {
+  return getChainShortName(chainId).toLowerCase();
+}
 
 /**
  * Get WebSocket RPC URL for a specific chain
  * Returns undefined if not configured
  */
-export function getWssUrl(chainId: SupportedChainId): string | undefined {
-  const envVar = WS_RPC_URL_ENV_VARS[chainId];
+export function getWssUrl(chainId: number): string | undefined {
+  const envVar = getWsRpcEnvVarName(chainId);
   return process.env[envVar];
 }
 

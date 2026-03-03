@@ -13,3 +13,6 @@ export * from './utils/index.js';
 
 // Export contract ABIs
 export * from './abis/index.js';
+
+// Export chain configuration
+export * from './config/index.js';

@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ExternalLink, Check, TrendingDown, TrendingUp, Copy } from 'lucide-react';
+import { buildTxUrl } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 
@@ -117,7 +118,7 @@ export function SummaryStep() {
                   <Copy className="w-3 h-3" />
                 </button>
                 <a
-                  href={`https://etherscan.io/tx/${tx.hash}`}
+                  href={buildTxUrl(state.selectedPool?.chainId ?? 1, tx.hash)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-400 hover:text-blue-300 flex items-center gap-1 text-sm"

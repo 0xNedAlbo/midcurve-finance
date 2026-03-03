@@ -21,6 +21,8 @@ import {
   CoingeckoToken,
   CoingeckoTokenConfig,
   type CoingeckoTokenRow,
+  CHAIN_TO_COINGECKO_PLATFORM,
+  PRODUCTION_CHAIN_IDS,
 } from '@midcurve/shared';
 import type { TokenSymbolResult } from '@midcurve/api-shared';
 import { CoinGeckoClient } from '../../clients/coingecko/index.js';
@@ -29,16 +31,8 @@ import type { ServiceLogger } from '../../logging/index.js';
 import { isAddress, getAddress } from 'viem';
 import { getForkSourceChainId } from '../../config/evm.js';
 
-// Supported chain IDs (same as CoinGeckoClient)
-const SUPPORTED_CHAIN_IDS = [1, 42161, 8453] as const;
-type SupportedChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
-
-// Chain ID to CoinGecko platform ID mapping
-const CHAIN_TO_PLATFORM: Record<SupportedChainId, string> = {
-  1: 'ethereum',
-  42161: 'arbitrum-one',
-  8453: 'base',
-};
+// Supported chain IDs derived from chain registry
+const SUPPORTED_CHAIN_IDS = PRODUCTION_CHAIN_IDS;
 
 /**
  * Token mapping from CoinGecko API
@@ -93,7 +87,8 @@ export class CoingeckoTokenService {
 
     for (const token of tokens) {
       for (const chainId of SUPPORTED_CHAIN_IDS) {
-        const platformId = CHAIN_TO_PLATFORM[chainId];
+        const platformId = CHAIN_TO_COINGECKO_PLATFORM[chainId];
+        if (!platformId) continue;
         const address = token.platforms[platformId];
 
         if (address && address.trim() !== '' && isAddress(address)) {

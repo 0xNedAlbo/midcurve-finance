@@ -5,37 +5,27 @@
  * and checking supported chain IDs.
  */
 
-import { normalizeAddress, isValidAddress } from '@midcurve/shared';
+import {
+  normalizeAddress,
+  isValidAddress,
+  PRODUCTION_CHAIN_IDS as REGISTRY_PRODUCTION_CHAIN_IDS,
+  ALL_CHAIN_IDS,
+  getChainShortName,
+  getWsRpcEnvVarName,
+} from '@midcurve/shared';
 
 /**
  * Supported EVM chain IDs
  *
  * Local chain (31337) is only available in non-production environments.
+ * Derived from centralized chain registry in @midcurve/shared.
  */
-const PRODUCTION_CHAIN_IDS = [
-  1, // Ethereum
-  42161, // Arbitrum
-  8453, // Base
-] as const;
-
-const LOCAL_CHAIN_IDS = [31337] as const;
-
 export const SUPPORTED_CHAIN_IDS =
   process.env.NODE_ENV === 'production'
-    ? PRODUCTION_CHAIN_IDS
-    : ([...PRODUCTION_CHAIN_IDS, ...LOCAL_CHAIN_IDS] as const);
+    ? REGISTRY_PRODUCTION_CHAIN_IDS
+    : ALL_CHAIN_IDS;
 
-export type SupportedChainId = (typeof PRODUCTION_CHAIN_IDS)[number] | (typeof LOCAL_CHAIN_IDS)[number];
-
-/**
- * Chain names for error messages
- */
-export const CHAIN_NAMES: Record<SupportedChainId, string> = {
-  1: 'Ethereum',
-  42161: 'Arbitrum',
-  8453: 'Base',
-  31337: 'Local',
-};
+export type SupportedChainId = 1 | 42161 | 8453 | 31337;
 
 /**
  * Validate and normalize Ethereum address
@@ -71,9 +61,9 @@ export function validateAndNormalizeAddress(address: string): string {
  * ```
  */
 export function validateChainId(chainId: number): asserts chainId is SupportedChainId {
-  if (!(SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId)) {
+  if (!SUPPORTED_CHAIN_IDS.includes(chainId)) {
     throw new Error(
-      `Unsupported chain ID: ${chainId}. Supported chains: ${SUPPORTED_CHAIN_IDS.map((id) => `${id} (${CHAIN_NAMES[id]})`).join(', ')}`
+      `Unsupported chain ID: ${chainId}. Supported chains: ${SUPPORTED_CHAIN_IDS.map((id) => `${id} (${getChainShortName(id)})`).join(', ')}`
     );
   }
 }
@@ -85,19 +75,8 @@ export function validateChainId(chainId: number): asserts chainId is SupportedCh
  * @returns true if supported, false otherwise
  */
 export function isSupportedChainId(chainId: number): chainId is SupportedChainId {
-  return (SUPPORTED_CHAIN_IDS as readonly number[]).includes(chainId);
+  return SUPPORTED_CHAIN_IDS.includes(chainId);
 }
-
-/**
- * Environment variable names for WebSocket RPC URLs per chain.
- * Used to check if a chain has WebSocket monitoring configured.
- */
-const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
-  1: 'WS_RPC_URL_ETHEREUM',
-  42161: 'WS_RPC_URL_ARBITRUM',
-  8453: 'WS_RPC_URL_BASE',
-  31337: 'WS_RPC_URL_LOCAL',
-};
 
 /**
  * Check if a chain has WebSocket RPC configured via environment variable.
@@ -107,6 +86,6 @@ const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
  * @returns true if WS_RPC_URL_* env var is set for this chain
  */
 export function isChainWssConfigured(chainId: SupportedChainId): boolean {
-  const envVar = WS_RPC_URL_ENV_VARS[chainId];
+  const envVar = getWsRpcEnvVarName(chainId);
   return !!process.env[envVar];
 }

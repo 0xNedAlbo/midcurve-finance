@@ -11,6 +11,7 @@ import {
     Erc20TokenConfig,
     isValidAddress,
     normalizeAddress,
+    CHAIN_TO_COINGECKO_PLATFORM,
 } from '@midcurve/shared';
 import type { Erc20TokenConfigData } from '@midcurve/shared';
 import type {
@@ -1433,12 +1434,7 @@ export class Erc20TokenService extends TokenService {
      * @returns CoinGecko platform ID or null if not supported
      */
     private getPlatformId(chainId: number): string | null {
-        const mapping: Record<number, string> = {
-            1: "ethereum", // Ethereum
-            42161: "arbitrum-one", // Arbitrum One
-            8453: "base", // Base
-        };
-        return mapping[chainId] || null;
+        return CHAIN_TO_COINGECKO_PLATFORM[chainId] ?? null;
     }
 
     // ============================================================================

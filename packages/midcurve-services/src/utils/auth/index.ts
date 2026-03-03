@@ -8,6 +8,5 @@ export {
   isSupportedChainId,
   isChainWssConfigured,
   SUPPORTED_CHAIN_IDS,
-  CHAIN_NAMES,
   type SupportedChainId,
 } from './address-validation.js';
