@@ -372,6 +372,36 @@ export const POSITION_SNAPSHOT_BLOCK_QUERY = `
 `;
 
 /**
+ * Fallback query to resolve a block number from the first swap at or after a timestamp.
+ *
+ * Used when the subgraph doesn't expose positionSnapshots (e.g. the official
+ * Uniswap V3 Arbitrum subgraph). The swaps entity is universal across all
+ * Uniswap V3 subgraph deployments.
+ *
+ * Variables:
+ * - $timestamp: Unix timestamp (seconds)
+ *
+ * Returns:
+ * - transaction.blockNumber: Block number of the swap
+ * - timestamp: Actual timestamp of the swap
+ */
+export const SWAP_BLOCK_QUERY = `
+  query GetBlockForTimestampViaSwaps($timestamp: BigInt!) {
+    swaps(
+      where: { timestamp_gte: $timestamp }
+      orderBy: timestamp
+      orderDirection: asc
+      first: 1
+    ) {
+      timestamp
+      transaction {
+        blockNumber
+      }
+    }
+  }
+`;
+
+/**
  * Get pool sqrtPrice and tick for a batch of pools
  *
  * Lightweight query for NAV snapshot position valuation.

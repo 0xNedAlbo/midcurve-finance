@@ -46,6 +46,7 @@ import {
   POOLS_BATCH_SLOT0_QUERY,
   POSITIONS_BATCH_QUERY,
   POSITION_SNAPSHOT_BLOCK_QUERY,
+  SWAP_BLOCK_QUERY,
   FACTORY_QUERY,
 } from './queries.js';
 import { getFactoryAddress } from '../../../config/uniswapv3.js';
@@ -756,16 +757,15 @@ export class UniswapV3SubgraphClient {
   // ============================================================================
 
   /**
-   * Resolve a block number for a given timestamp using the positionSnapshots entity.
+   * Resolve a block number for a given timestamp.
    *
    * Finds the first positionSnapshot at or after the target timestamp,
-   * returning its block number. Replaces the Etherscan getBlockNumberForTimestamp
-   * call — works on any chain with a Uniswap V3 subgraph deployment.
+   * returning its block number. Falls back to the swaps entity if the
+   * subgraph doesn't expose positionSnapshots (e.g. official Arbitrum).
    *
    * @param chainId - Chain ID
    * @param timestamp - Unix timestamp in seconds (e.g. midnight UTC)
    * @returns Block number as a string
-   * @throws Error if no positionSnapshot exists at or after the timestamp
    */
   async getBlockForTimestamp(
     chainId: number,
@@ -773,6 +773,9 @@ export class UniswapV3SubgraphClient {
   ): Promise<string> {
     log.methodEntry(this.logger, 'getBlockForTimestamp', { chainId, timestamp });
 
+    const timestampStr = timestamp.toString();
+
+    // Primary: positionSnapshots entity
     log.externalApiCall(
       this.logger,
       'UniswapV3Subgraph',
@@ -782,7 +785,19 @@ export class UniswapV3SubgraphClient {
 
     const response = await this.query<{
       positionSnapshots: Array<{ timestamp: string; blockNumber: string }>;
-    }>(chainId, POSITION_SNAPSHOT_BLOCK_QUERY, { timestamp: timestamp.toString() });
+    }>(chainId, POSITION_SNAPSHOT_BLOCK_QUERY, { timestamp: timestampStr });
+
+    const hasSchemaError = response.errors?.some(
+      (e) => typeof e.message === 'string' && e.message.includes('has no field')
+    );
+
+    if (hasSchemaError) {
+      this.logger.info(
+        { chainId },
+        'positionSnapshots not available on this subgraph, falling back to swaps query'
+      );
+      return this.getBlockForTimestampViaSwaps(chainId, timestampStr);
+    }
 
     if (response.errors && response.errors.length > 0) {
       const error = new Error(
@@ -809,6 +824,48 @@ export class UniswapV3SubgraphClient {
     );
 
     log.methodExit(this.logger, 'getBlockForTimestamp', { blockNumber });
+    return blockNumber;
+  }
+
+  private async getBlockForTimestampViaSwaps(
+    chainId: number,
+    timestamp: string
+  ): Promise<string> {
+    log.externalApiCall(
+      this.logger,
+      'UniswapV3Subgraph',
+      'SWAP_BLOCK_QUERY',
+      { chainId, timestamp }
+    );
+
+    const response = await this.query<{
+      swaps: Array<{ timestamp: string; transaction: { blockNumber: string } }>;
+    }>(chainId, SWAP_BLOCK_QUERY, { timestamp });
+
+    if (response.errors && response.errors.length > 0) {
+      const error = new Error(
+        `Subgraph swap block query failed for chain ${chainId}: ${JSON.stringify(response.errors)}`
+      );
+      error.name = 'UniswapV3SubgraphApiError';
+      throw error;
+    }
+
+    const swaps = response.data?.swaps;
+    if (!swaps || swaps.length === 0) {
+      throw new Error(
+        `No swap found at or after timestamp ${timestamp} on chain ${chainId}. ` +
+        `The subgraph may not have indexed any swap activity near this date.`
+      );
+    }
+
+    const match = swaps[0]!;
+    const blockNumber = match.transaction.blockNumber;
+
+    this.logger.info(
+      { chainId, timestamp, blockNumber, swapTimestamp: match.timestamp },
+      'Resolved block number from subgraph swap'
+    );
+
     return blockNumber;
   }
 
