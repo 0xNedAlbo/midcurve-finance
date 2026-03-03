@@ -50,6 +50,7 @@ export {
 export {
   CloseOrderSimulationOverlay,
   INFINITE_RUNUP,
+  resolveExposure,
   type PnLScenario,
   type CloseOrderSimulationOverlayParams,
   type PostTriggerExposure,

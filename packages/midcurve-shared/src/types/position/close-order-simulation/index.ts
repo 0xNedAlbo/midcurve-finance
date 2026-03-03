@@ -12,3 +12,5 @@ export {
   type CloseOrderSimulationOverlayParams,
   type PostTriggerExposure,
 } from './close-order-simulation-overlay.js';
+
+export { resolveExposure } from './resolve-exposure.js';

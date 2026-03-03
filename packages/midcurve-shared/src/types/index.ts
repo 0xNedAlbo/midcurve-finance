@@ -115,6 +115,7 @@ export {
   positionStateFromJSON,
   CloseOrderSimulationOverlay,
   INFINITE_RUNUP,
+  resolveExposure,
 } from './position/index.js';
 export type {
   PnLScenario,
@@ -123,6 +124,28 @@ export type {
   UniswapV3SimulationParams,
   PnLSimulationResult,
 } from './position/index.js';
+
+// ============================================================================
+// Simulation Engine (portfolio simulation with path memory)
+// ============================================================================
+
+export {
+  SimulationEngine,
+  SpotComponent,
+  ClosePositionInstrument,
+  UniswapV3LPComponent,
+  createUniswapV3SimulationEngine,
+} from './simulation/index.js';
+export type {
+  SimulationComponent,
+  SimulationInstrument,
+  TriggerDirection,
+  SimulationState,
+  TriggeredEvent,
+  SimulationResult,
+  CurvePoint,
+  CreateSimulationEngineParams,
+} from './simulation/index.js';
 
 // ============================================================================
 // PoolPrice types (OOP inheritance pattern)
