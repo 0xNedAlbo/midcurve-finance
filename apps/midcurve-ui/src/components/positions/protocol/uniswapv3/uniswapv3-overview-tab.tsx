@@ -20,7 +20,7 @@ import {
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import { UniswapV3RangeStatusLine } from "./uniswapv3-range-status-line";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
-import { UniswapV3PositionSimulator } from "./uniswapv3-position-simulator";
+import { PortfolioSimulator } from "../../portfolio-simulator";
 
 interface UniswapV3OverviewTabProps {
   position: UniswapV3PositionData;
@@ -247,7 +247,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
         </div>
 
         {isSimulating ? (
-          <UniswapV3PositionSimulator position={position} />
+          <PortfolioSimulator position={position} />
         ) : (
         <div className="space-y-6">
           {/* Current Position State */}
