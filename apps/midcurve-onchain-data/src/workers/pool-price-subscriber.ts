@@ -1,26 +1,26 @@
 /**
  * PoolPriceSubscriber Worker
  *
- * Subscribes to Swap events for pools that have active positions.
+ * Monitors pool prices for pools that have active positions.
  * Dynamically adds/removes pools based on position lifecycle events.
- * Publishes incoming Swap events to RabbitMQ.
+ * Publishes price changes to RabbitMQ via slot0() polling.
  */
 
 import { prisma } from '@midcurve/database';
 import type { PositionJSON } from '@midcurve/shared';
+import { getEvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import {
-  getConfiguredWssUrls,
-  getWssUrl,
   getWorkerConfig,
   isSupportedChain,
+  SUPPORTED_CHAIN_IDS,
   type SupportedChainId,
 } from '../lib/config';
 import {
   UniswapV3PoolSubscriptionBatch,
   createSubscriptionBatches,
   type PoolInfo,
-} from '../ws/providers/uniswap-v3-pools';
+} from '../polling/uniswap-v3-pools';
 
 const log = onchainDataLogger.child({ component: 'PoolPriceSubscriber' });
 
@@ -51,8 +51,8 @@ interface SubscribedPool {
 }
 
 /**
- * PoolPriceSubscriber manages WebSocket subscriptions for pool prices.
- * Subscriptions are derived from active positions - pools are subscribed
+ * PoolPriceSubscriber manages pool price polling batches.
+ * Subscriptions are derived from active positions - pools are polled
  * when they have at least one active position.
  */
 export class PoolPriceSubscriber {
@@ -68,7 +68,7 @@ export class PoolPriceSubscriber {
 
   /**
    * Start the subscriber.
-   * Loads pools with active positions and creates WebSocket batches.
+   * Loads pools with active positions and creates polling batches.
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -82,17 +82,25 @@ export class PoolPriceSubscriber {
       // Load pools with active positions from database
       const poolsByChain = await this.loadActiveSubscriptions();
 
-      // Get configured WSS URLs
-      const wssConfigs = getConfiguredWssUrls();
+      // Discover which chains have HTTP RPC configured
+      const evmConfig = getEvmConfig();
+      const configuredChains: SupportedChainId[] = [];
+      for (const chainId of SUPPORTED_CHAIN_IDS) {
+        try {
+          evmConfig.getPublicClient(chainId);
+          configuredChains.push(chainId);
+        } catch {
+          log.debug({ chainId, msg: 'Chain not configured, skipping' });
+        }
+      }
 
-      if (wssConfigs.length === 0) {
-        log.warn({ msg: 'No WS_RPC_URL_* environment variables configured, subscriber will not start. Set WS_RPC_URL_ETHEREUM, WS_RPC_URL_ARBITRUM, etc.' });
+      if (configuredChains.length === 0) {
+        log.warn({ msg: 'No RPC_URL_* environment variables configured, subscriber will not start' });
         return;
       }
 
-      // Create subscription batches for each configured chain
-      for (const wssConfig of wssConfigs) {
-        const chainId = wssConfig.chainId as SupportedChainId;
+      // Create polling batches for each configured chain
+      for (const chainId of configuredChains) {
         const pools = poolsByChain.get(chainId);
 
         if (!pools || pools.length === 0) {
@@ -100,7 +108,7 @@ export class PoolPriceSubscriber {
           continue;
         }
 
-        const chainBatches = createSubscriptionBatches(chainId, wssConfig.url, pools);
+        const chainBatches = createSubscriptionBatches(chainId, pools);
         this.batches.push(...chainBatches);
         this.batchesByChain.set(chainId, chainBatches);
       }
@@ -136,7 +144,7 @@ export class PoolPriceSubscriber {
 
   /**
    * Stop the subscriber.
-   * Stops all WebSocket batches gracefully.
+   * Stops all polling batches gracefully.
    */
   async stop(): Promise<void> {
     if (!this.isRunning) {
@@ -258,7 +266,7 @@ export class PoolPriceSubscriber {
 
   /**
    * Handle position.created domain event.
-   * Adds the pool to WebSocket subscriptions if not already subscribed.
+   * Adds the pool to polling if not already subscribed.
    *
    * @param payload - Position data from the domain event
    */
@@ -291,14 +299,7 @@ export class PoolPriceSubscriber {
       return;
     }
 
-    // 5. Get WSS URL for chain
-    const wssUrl = getWssUrl(chainId);
-    if (!wssUrl) {
-      log.warn({ chainId, positionId: payload.id }, 'No WSS URL configured for chain');
-      return;
-    }
-
-    // 6. Look up pool ID from database (position.poolId or find by address)
+    // 5. Look up pool ID from database (position.poolId or find by address)
     const position = await prisma.position.findUnique({
       where: { id: payload.id },
       select: { poolId: true },
@@ -306,7 +307,7 @@ export class PoolPriceSubscriber {
 
     const poolId = position?.poolId ?? `pool-${chainId}-${normalizedAddress}`;
 
-    // 7. Track and add to subscription
+    // 6. Track and add to polling batch
     this.subscribedPools.set(normalizedAddress, {
       poolId,
       poolAddress: normalizedAddress,
@@ -319,7 +320,7 @@ export class PoolPriceSubscriber {
     };
 
     log.info({ chainId, poolAddress: normalizedAddress, positionId: payload.id }, 'Adding pool from position.created event');
-    await this.addPoolToBatch(chainId, wssUrl, poolInfo);
+    await this.addPoolToBatch(chainId, poolInfo);
   }
 
   /**
@@ -424,7 +425,7 @@ export class PoolPriceSubscriber {
     const poolSub = this.subscribedPools.get(poolAddress);
     this.subscribedPools.delete(poolAddress);
 
-    // 7. Remove from WebSocket batch
+    // 7. Remove from polling batch
     if (poolSub) {
       const chainBatches = this.batchesByChain.get(poolSub.chainId);
       if (chainBatches) {
@@ -445,7 +446,7 @@ export class PoolPriceSubscriber {
   /**
    * Add a pool to an existing batch or create a new batch if needed.
    */
-  private async addPoolToBatch(chainId: SupportedChainId, wssUrl: string, pool: PoolInfo): Promise<void> {
+  private async addPoolToBatch(chainId: SupportedChainId, pool: PoolInfo): Promise<void> {
     const config = getWorkerConfig();
     let chainBatches = this.batchesByChain.get(chainId);
 
@@ -466,7 +467,7 @@ export class PoolPriceSubscriber {
     } else {
       // Create new batch
       const batchIndex = chainBatches.length;
-      const newBatch = new UniswapV3PoolSubscriptionBatch(chainId, wssUrl, batchIndex, [pool]);
+      const newBatch = new UniswapV3PoolSubscriptionBatch(chainId, batchIndex, [pool]);
       chainBatches.push(newBatch);
       this.batches.push(newBatch);
 
@@ -552,7 +553,7 @@ export class PoolPriceSubscriber {
     for (const poolSub of orphanedPools) {
       this.subscribedPools.delete(poolSub.poolAddress);
 
-      // Remove from WebSocket batch
+      // Remove from polling batch
       const chainBatches = this.batchesByChain.get(poolSub.chainId);
       if (chainBatches) {
         for (const batch of chainBatches) {
