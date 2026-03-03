@@ -2,8 +2,10 @@
 ## Product Requirements Document · Midcurve Finance
 
 **Version 1.0 | March 2026**
-**Status: DRAFT | Classification: Internal**
-**Depends on: [Double-Entry Accounting Phase 1](finished/double-entry-accounting-phase1.md), [Portfolio Balance Sheet & P&L](finished/portfolio-balance-sheet-pnl.md)**
+**Status: IMPLEMENTED | Classification: Internal**
+**Depends on: [Double-Entry Accounting Phase 1](double-entry-accounting-phase1.md), [Portfolio Balance Sheet & P&L](portfolio-balance-sheet-pnl.md)**
+
+**Implemented:** Phases 1-5 (user-scoped journal queries, journal hash, on-chain state cache, snapshot recomputation, retention policy, snapshot-only reporting). Etherscan block resolution replaced with subgraph positionSnapshots. Commits: `ae8d725`, `42c63fb`, `dabee4b`.
 
 ---
 
