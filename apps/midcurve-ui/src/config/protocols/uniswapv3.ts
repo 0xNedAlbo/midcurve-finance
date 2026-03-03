@@ -1,23 +1,31 @@
 /**
- * Uniswap V3 Protocol Configuration
+ * Uniswap V3 Protocol Configuration (Frontend)
  *
- * This file defines which EVM chains support Uniswap V3 and protocol-specific
- * contract addresses. Each protocol (PancakeSwap, Aerodrome, etc.) will have
- * its own config file defining its supported chains.
+ * UI-specific helpers (chain dropdowns, popular tokens for wizard).
+ * Contract addresses and deployment metadata live in @midcurve/shared.
  */
 
 import type { EvmChainSlug, ChainMetadata } from '../chains';
-import { CHAIN_METADATA, isLocalChainEnabled } from '../chains';
+import { CHAIN_METADATA } from '../chains';
+import {
+  UNISWAPV3_CHAIN_IDS,
+  CHAIN_ID_TO_SLUG,
+  type ChainSlug,
+} from '@midcurve/shared';
 
 /**
- * Chains where Uniswap V3 is deployed and supported
- *
- * Note: BSC is NOT included (PancakeSwap V3 is the alternative on BSC)
- * Local chain (31337) is conditionally included for development environments
+ * Chains where Uniswap V3 is deployed and supported (as slugs).
+ * Derived from the shared UNISWAPV3_CHAIN_IDS via CHAIN_ID_TO_SLUG.
+ * Dev chains are filtered out unless VITE_ENABLE_DEV_CHAINS=true
+ * (CHAIN_METADATA only includes dev chains when enabled).
  */
-export const UNISWAPV3_SUPPORTED_CHAINS: readonly EvmChainSlug[] = isLocalChainEnabled
-  ? (['ethereum', 'arbitrum', 'base', 'local'] as const)
-  : (['ethereum', 'arbitrum', 'base'] as const);
+export const UNISWAPV3_SUPPORTED_CHAINS: readonly EvmChainSlug[] =
+  UNISWAPV3_CHAIN_IDS
+    .reduce<EvmChainSlug[]>((acc, id) => {
+      const slug = CHAIN_ID_TO_SLUG[id] as ChainSlug | undefined;
+      if (slug && CHAIN_METADATA[slug]) acc.push(slug);
+      return acc;
+    }, []);
 
 /**
  * Type for UniswapV3-supported chains only
@@ -52,54 +60,6 @@ export function getAllUniswapV3Chains(): ChainMetadata[] {
   return UNISWAPV3_SUPPORTED_CHAINS.map((slug) => CHAIN_METADATA[slug]).filter(
     (chain): chain is ChainMetadata => chain !== undefined
   );
-}
-
-/**
- * UniswapV3 Factory Contract Addresses
- *
- * Used for pool discovery and validation
- */
-export const UNISWAPV3_FACTORY_ADDRESSES: Partial<
-  Record<EvmChainSlug, string>
-> = {
-  ethereum: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-  arbitrum: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-  base: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
-  // Local fork uses mainnet addresses (Anvil forks Ethereum mainnet)
-  ...(isLocalChainEnabled && { local: '0x1F98431c8aD98523631AE4a59f267346ea31F984' }),
-};
-
-/**
- * UniswapV3 NonfungiblePositionManager Contract Addresses
- *
- * Used for transaction execution (minting, increasing liquidity, etc.)
- */
-export const UNISWAPV3_POSITION_MANAGER_ADDRESSES: Partial<
-  Record<EvmChainSlug, string>
-> = {
-  ethereum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  arbitrum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  base: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
-  // Local fork uses mainnet addresses (Anvil forks Ethereum mainnet)
-  ...(isLocalChainEnabled && { local: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' }),
-};
-
-/**
- * Get UniswapV3 factory address for a specific chain
- */
-export function getUniswapV3FactoryAddress(
-  slug: UniswapV3ChainSlug
-): string | undefined {
-  return UNISWAPV3_FACTORY_ADDRESSES[slug];
-}
-
-/**
- * Get UniswapV3 position manager address for a specific chain
- */
-export function getUniswapV3PositionManagerAddress(
-  slug: UniswapV3ChainSlug
-): string | undefined {
-  return UNISWAPV3_POSITION_MANAGER_ADDRESSES[slug];
 }
 
 /**

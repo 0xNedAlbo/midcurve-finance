@@ -26,7 +26,7 @@ import {
   type PositionEventType,
 } from '../../mq/position-messages';
 import type { SupportedChainId } from '../../lib/config';
-import { UNISWAP_V3_POSITION_MANAGER_ADDRESSES } from '@midcurve/services';
+import { getPositionManagerAddress } from '@midcurve/services';
 
 const log = onchainDataLogger.child({ component: 'NfpmProvider' });
 
@@ -139,7 +139,7 @@ export class UniswapV3NfpmSubscriptionBatch {
     this.chainId = chainId;
     this.wssUrl = wssUrl;
     this.batchIndex = batchIndex;
-    this.nfpmAddress = UNISWAP_V3_POSITION_MANAGER_ADDRESSES[chainId];
+    this.nfpmAddress = getPositionManagerAddress(chainId);
     this.positions = new Map(positions.map((p) => [p.nftId, p]));
 
     if (positions.length > MAX_POSITIONS_PER_SUBSCRIPTION) {

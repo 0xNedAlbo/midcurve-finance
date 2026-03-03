@@ -1,37 +1,24 @@
 /**
  * UniswapV3 Protocol Configuration
  *
- * Contains contract addresses, ABIs, and configuration for UniswapV3 protocol
- * across all supported EVM chains.
+ * ABIs and type definitions for UniswapV3 protocol.
+ * Contract addresses and deployment metadata are imported from @midcurve/shared.
  *
  * Official documentation: https://docs.uniswap.org/contracts/v3/reference/deployments/
  */
 
 import type { Abi, Address } from 'viem';
-import { SupportedChainId } from './evm';
 
-/**
- * NonfungiblePositionManager contract addresses by chain ID
- *
- * These addresses are the official UniswapV3 NFT Position Manager deployments.
- * The Position Manager is an ERC-721 contract that wraps UniswapV3 positions.
- *
- * Source: https://docs.uniswap.org/contracts/v3/reference/deployments/
- */
-export const UNISWAP_V3_POSITION_MANAGER_ADDRESSES: Record<
-  SupportedChainId,
-  Address
-> = {
-  // Most chains use the same address
-  [SupportedChainId.ETHEREUM]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  [SupportedChainId.ARBITRUM]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-
-  // Base uses a different address
-  [SupportedChainId.BASE]: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
-
-  // Local Anvil fork uses mainnet addresses (since it forks mainnet)
-  [SupportedChainId.LOCAL]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-};
+// Re-export contract addresses and lookup functions from shared package.
+// Aliased to preserve existing import names across 7+ consumer files.
+export {
+  UNISWAPV3_NFPM_ADDRESSES as UNISWAP_V3_POSITION_MANAGER_ADDRESSES,
+  UNISWAPV3_FACTORY_ADDRESSES as UNISWAP_V3_FACTORY_ADDRESSES,
+  UNISWAPV3_NFPM_DEPLOYMENT_BLOCKS as NFPM_DEPLOYMENT_BLOCKS,
+  getUniswapV3NfpmAddress as getPositionManagerAddress,
+  getUniswapV3FactoryAddress as getFactoryAddress,
+  getUniswapV3NfpmDeploymentBlock as getNfpmDeploymentBlock,
+} from '@midcurve/shared';
 
 /**
  * NonfungiblePositionManager ABI
@@ -152,26 +139,6 @@ export interface UniswapV3PositionData {
 }
 
 /**
- * UniswapV3 Factory contract addresses by chain ID
- *
- * The Factory contract is used to query pool addresses for token pairs.
- *
- * Source: https://docs.uniswap.org/contracts/v3/reference/deployments/
- */
-export const UNISWAP_V3_FACTORY_ADDRESSES: Record<SupportedChainId, Address> =
-  {
-    // Most chains use the same address
-    [SupportedChainId.ETHEREUM]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-    [SupportedChainId.ARBITRUM]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-
-    // Base uses a different address
-    [SupportedChainId.BASE]: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
-
-    // Local Anvil fork uses mainnet addresses (since it forks mainnet)
-    [SupportedChainId.LOCAL]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-  };
-
-/**
  * UniswapV3 Factory ABI
  *
  * Contains only the getPool() function for querying pool addresses.
@@ -190,83 +157,3 @@ export const UNISWAP_V3_FACTORY_ABI = [
   },
 ] as const satisfies Abi;
 
-/**
- * Get the NonfungiblePositionManager contract address for a given chain
- *
- * @param chainId - The chain ID to get the address for
- * @returns The contract address
- * @throws Error if chain is not supported
- */
-export function getPositionManagerAddress(chainId: number): Address {
-  const address =
-    UNISWAP_V3_POSITION_MANAGER_ADDRESSES[chainId as SupportedChainId];
-
-  if (!address) {
-    throw new Error(
-      `UniswapV3 NonfungiblePositionManager not deployed on chain ${chainId}. ` +
-        `Supported chains: ${Object.keys(UNISWAP_V3_POSITION_MANAGER_ADDRESSES).join(', ')}`
-    );
-  }
-
-  return address;
-}
-
-/**
- * Get the UniswapV3 Factory contract address for a given chain
- *
- * @param chainId - The chain ID to get the address for
- * @returns The factory contract address
- * @throws Error if chain is not supported
- */
-export function getFactoryAddress(chainId: number): Address {
-  const address = UNISWAP_V3_FACTORY_ADDRESSES[chainId as SupportedChainId];
-
-  if (!address) {
-    throw new Error(
-      `UniswapV3 Factory not deployed on chain ${chainId}. ` +
-        `Supported chains: ${Object.keys(UNISWAP_V3_FACTORY_ADDRESSES).join(', ')}`
-    );
-  }
-
-  return address;
-}
-
-/**
- * NonfungiblePositionManager contract deployment block numbers by chain ID
- *
- * These block numbers represent when the NFPM contract was deployed on each chain.
- * Used for incremental event syncing to avoid querying events before contract existed.
- *
- * Sources:
- * - Ethereum: https://etherscan.io/tx/0x214153e36e2e7c21c666e7bd8b700867e88e419a7bb691c300f96f49cbf96701
- * - Arbitrum: https://arbiscan.io/tx/0x7f6b1d42c10f2d4b6b8c5b5e7c4f5e8d9a3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a
- * - Base: https://basescan.org/tx/0x9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e
- */
-export const NFPM_DEPLOYMENT_BLOCKS: Record<SupportedChainId, bigint> = {
-  [SupportedChainId.ETHEREUM]: 12369621n,
-  [SupportedChainId.ARBITRUM]: 165n,
-  [SupportedChainId.BASE]: 1371680n,
-
-  // Local Anvil fork uses mainnet addresses (since it forks mainnet)
-  [SupportedChainId.LOCAL]: 12369621n,
-};
-
-/**
- * Get the deployment block number for the NonfungiblePositionManager on a given chain
- *
- * @param chainId - The chain ID to get the deployment block for
- * @returns The block number when NFPM was deployed
- * @throws Error if chain is not supported
- */
-export function getNfpmDeploymentBlock(chainId: number): bigint {
-  const block = NFPM_DEPLOYMENT_BLOCKS[chainId as SupportedChainId];
-
-  if (block === undefined) {
-    throw new Error(
-      `UniswapV3 NonfungiblePositionManager deployment block unknown for chain ${chainId}. ` +
-        `Supported chains: ${Object.keys(NFPM_DEPLOYMENT_BLOCKS).join(', ')}`
-    );
-  }
-
-  return block;
-}

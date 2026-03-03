@@ -30,7 +30,7 @@ import {
   serializeNfpmTransferEvent,
 } from '../../mq/transfer-messages';
 import type { SupportedChainId } from '../../lib/config';
-import { UNISWAP_V3_POSITION_MANAGER_ADDRESSES } from '@midcurve/services';
+import { getPositionManagerAddress } from '@midcurve/services';
 
 const log = onchainDataLogger.child({ component: 'NfpmTransferProvider' });
 
@@ -89,7 +89,7 @@ export class UniswapV3NfpmTransferSubscriptionBatch {
     this.chainId = chainId;
     this.wssUrl = wssUrl;
     this.batchIndex = batchIndex;
-    this.nfpmAddress = UNISWAP_V3_POSITION_MANAGER_ADDRESSES[chainId];
+    this.nfpmAddress = getPositionManagerAddress(chainId);
     this.walletAddresses = new Set(walletAddresses.map((a) => a.toLowerCase()));
 
     if (walletAddresses.length > MAX_WALLETS_PER_SUBSCRIPTION) {
