@@ -3,9 +3,6 @@ import {
   mainnet,
   arbitrum,
   base,
-  bsc,
-  polygon,
-  optimism,
 } from 'wagmi/chains';
 import { createStorage, noopStorage } from 'wagmi';
 
@@ -19,7 +16,7 @@ if (!projectId) {
 export const config = getDefaultConfig({
   appName: 'Midcurve Finance',
   projectId,
-  chains: [mainnet, arbitrum, base, bsc, polygon, optimism],
+  chains: [mainnet, arbitrum, base],
   ssr: true, // Enable server-side rendering support
   storage: createStorage({
     storage: typeof window !== 'undefined' ? window.localStorage : noopStorage,

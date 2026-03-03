@@ -8,9 +8,6 @@
  * - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM
  * - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM
  * - UNISWAP_V3_SUBGRAPH_ID_BASE
- * - UNISWAP_V3_SUBGRAPH_ID_OPTIMISM
- * - UNISWAP_V3_SUBGRAPH_ID_POLYGON
- * - UNISWAP_V3_SUBGRAPH_ID_BSC
  *
  * Find deployment IDs at: https://thegraph.com/explorer
  * Official documentation: https://docs.uniswap.org/api/subgraph/overview
@@ -25,9 +22,6 @@ const SUBGRAPH_ENV_VARS: Partial<Record<SupportedChainId, string>> = {
     [SupportedChainId.ETHEREUM]: "UNISWAP_V3_SUBGRAPH_ID_ETHEREUM",
     [SupportedChainId.ARBITRUM]: "UNISWAP_V3_SUBGRAPH_ID_ARBITRUM",
     [SupportedChainId.BASE]: "UNISWAP_V3_SUBGRAPH_ID_BASE",
-    [SupportedChainId.OPTIMISM]: "UNISWAP_V3_SUBGRAPH_ID_OPTIMISM",
-    [SupportedChainId.POLYGON]: "UNISWAP_V3_SUBGRAPH_ID_POLYGON",
-    [SupportedChainId.BSC]: "UNISWAP_V3_SUBGRAPH_ID_BSC",
 };
 
 /**

@@ -10,9 +10,6 @@ import {
   mainnet,
   arbitrum,
   base,
-  bsc,
-  polygon,
-  optimism,
   type Chain,
 } from 'wagmi/chains';
 import { createConfig, createStorage, http, noopStorage } from 'wagmi';
@@ -53,9 +50,6 @@ const productionChains = [
   mainnet,
   arbitrum,
   base,
-  bsc,
-  polygon,
-  optimism,
 ] as const;
 
 // Define supported chains (include local only in development)
@@ -95,9 +89,6 @@ const productionTransports = {
   [mainnet.id]: http(),
   [arbitrum.id]: http(),
   [base.id]: http(),
-  [bsc.id]: http(),
-  [polygon.id]: http(),
-  [optimism.id]: http(),
 };
 
 // Add local chain transport if enabled

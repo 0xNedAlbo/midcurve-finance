@@ -236,9 +236,6 @@ const FINALITY_SAFETY_MARGINS: Record<number, bigint> = {
   1: 64n,      // Ethereum: ~13 minutes (64 blocks × 12s)
   42161: 64n,  // Arbitrum: conservative margin
   8453: 64n,   // Base
-  56: 64n,     // BSC
-  137: 128n,   // Polygon: longer due to reorg history
-  10: 64n,     // Optimism
 };
 
 /**

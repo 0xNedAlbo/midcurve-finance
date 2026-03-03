@@ -25,7 +25,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { type Address, serializeTransaction, keccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { mainnet, arbitrum, base, bsc, polygon, optimism, type Chain } from 'viem/chains';
+import { mainnet, arbitrum, base, type Chain } from 'viem/chains';
 import { PrismaClient } from '@midcurve/database';
 import {
   withInternalAuth,
@@ -62,9 +62,6 @@ const CHAIN_CONFIGS: Record<number, Chain> = {
   1: mainnet,
   42161: arbitrum,
   8453: base,
-  56: bsc,
-  137: polygon,
-  10: optimism,
 };
 
 /**

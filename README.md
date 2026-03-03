@@ -14,7 +14,7 @@ Midcurve Finance enables liquidity providers to monitor, analyze, and optimize t
 - **PnL Analytics** - Quote-token-denominated profit/loss tracking with fee income analysis
 - **Risk Management** - Visual PnL curves and range status indicators
 - **Multi-Protocol Support** - Uniswap V3 with more protocols coming soon
-- **Multi-Chain** - Ethereum, Arbitrum, Base, BSC, Polygon, Optimism
+- **Multi-Chain** - Ethereum, Arbitrum, Base
 - **SIWE Authentication** - Sign-in with Ethereum (EIP-4361)
 
 ## Architecture
@@ -283,13 +283,10 @@ Caddy automatically handles SSL certificate provisioning via Let's Encrypt. Ensu
 - **Ethereum** (Mainnet)
 - **Arbitrum One**
 - **Base**
-- **BNB Smart Chain**
-- **Polygon**
-- **Optimism**
 
 ### DEX Protocols
 
-- **Uniswap V3** (Ethereum, Arbitrum, Base, Polygon, Optimism)
+- **Uniswap V3** (Ethereum, Arbitrum, Base)
 - More protocols coming soon
 
 ## Tech Stack

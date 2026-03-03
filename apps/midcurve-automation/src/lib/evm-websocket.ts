@@ -6,7 +6,7 @@
  */
 
 import { createPublicClient, webSocket, type PublicClient, type Chain } from 'viem';
-import { mainnet, arbitrum, base, bsc, polygon, optimism, localhost } from 'viem/chains';
+import { mainnet, arbitrum, base, localhost } from 'viem/chains';
 import type { SupportedChainId } from './config';
 import { automationLogger } from './logger';
 
@@ -19,9 +19,6 @@ const PRODUCTION_WS_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }>
   1: { chain: mainnet, rpcEnvVar: 'WS_RPC_URL_ETHEREUM' },
   42161: { chain: arbitrum, rpcEnvVar: 'WS_RPC_URL_ARBITRUM' },
   8453: { chain: base, rpcEnvVar: 'WS_RPC_URL_BASE' },
-  56: { chain: bsc, rpcEnvVar: 'WS_RPC_URL_BSC' },
-  137: { chain: polygon, rpcEnvVar: 'WS_RPC_URL_POLYGON' },
-  10: { chain: optimism, rpcEnvVar: 'WS_RPC_URL_OPTIMISM' },
 };
 
 /**

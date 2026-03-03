@@ -30,7 +30,7 @@ import { isAddress, getAddress } from 'viem';
 import { getForkSourceChainId } from '../../config/evm.js';
 
 // Supported chain IDs (same as CoinGeckoClient)
-const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 56, 137, 10] as const;
+const SUPPORTED_CHAIN_IDS = [1, 42161, 8453] as const;
 type SupportedChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
 
 // Chain ID to CoinGecko platform ID mapping
@@ -38,9 +38,6 @@ const CHAIN_TO_PLATFORM: Record<SupportedChainId, string> = {
   1: 'ethereum',
   42161: 'arbitrum-one',
   8453: 'base',
-  56: 'binance-smart-chain',
-  137: 'polygon-pos',
-  10: 'optimistic-ethereum',
 };
 
 /**

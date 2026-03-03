@@ -175,8 +175,6 @@ export function getChainName(chainId: number): string {
     1: 'Ethereum',
     42161: 'Arbitrum',
     8453: 'Base',
-    137: 'Polygon',
-    10: 'Optimism',
   };
   return chains[chainId] ?? `Chain ${chainId}`;
 }

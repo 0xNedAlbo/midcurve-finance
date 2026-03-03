@@ -237,9 +237,6 @@ export class CoinGeckoClient {
     1: 'ethereum', // Ethereum
     42161: 'arbitrum-one', // Arbitrum One
     8453: 'base', // Base
-    56: 'binance-smart-chain', // BNB Smart Chain
-    137: 'polygon-pos', // Polygon
-    10: 'optimistic-ethereum', // Optimism
   };
 
   constructor(dependencies: CoinGeckoClientDependencies = {}) {

@@ -16,7 +16,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { mainnet, arbitrum, base, bsc, polygon, optimism, type Chain } from 'viem/chains';
+import { mainnet, arbitrum, base, type Chain } from 'viem/chains';
 import { withSessionAuth } from '@/middleware/with-session-auth';
 import {
   createSuccessResponse,
@@ -44,9 +44,6 @@ const CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
   1: { chain: mainnet, rpcEnvVar: 'RPC_URL_ETHEREUM' },
   42161: { chain: arbitrum, rpcEnvVar: 'RPC_URL_ARBITRUM' },
   8453: { chain: base, rpcEnvVar: 'RPC_URL_BASE' },
-  56: { chain: bsc, rpcEnvVar: 'RPC_URL_BSC' },
-  137: { chain: polygon, rpcEnvVar: 'RPC_URL_POLYGON' },
-  10: { chain: optimism, rpcEnvVar: 'RPC_URL_OPTIMISM' },
 };
 
 /**

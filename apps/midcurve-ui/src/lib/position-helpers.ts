@@ -137,9 +137,6 @@ export function formatChainName(chainId: number): string {
     1: 'Ethereum',
     42161: 'Arbitrum',
     8453: 'Base',
-    56: 'BNB Chain',
-    137: 'Polygon',
-    10: 'Optimism',
   };
   return chains[chainId] || `Chain ${chainId}`;
 }

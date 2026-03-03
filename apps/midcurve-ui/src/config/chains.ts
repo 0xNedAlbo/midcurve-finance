@@ -33,9 +33,6 @@ export type EvmChainSlug =
   | 'ethereum'
   | 'arbitrum'
   | 'base'
-  | 'bsc'
-  | 'polygon'
-  | 'optimism'
   | 'local';
 
 /**
@@ -66,30 +63,6 @@ const PRODUCTION_CHAINS: Record<Exclude<EvmChainSlug, 'local'>, ChainMetadata> =
       slug: 'base',
       explorer: 'https://basescan.org',
       description: 'Coinbase L2, low fees, growing ecosystem',
-    },
-    bsc: {
-      chainId: 56,
-      name: 'BNB Smart Chain',
-      shortName: 'BSC',
-      slug: 'bsc',
-      explorer: 'https://bscscan.com',
-      description: 'Binance L1, low fees, high throughput',
-    },
-    polygon: {
-      chainId: 137,
-      name: 'Polygon',
-      shortName: 'Polygon',
-      slug: 'polygon',
-      explorer: 'https://polygonscan.com',
-      description: 'Ethereum sidechain, low fees, fast finality',
-    },
-    optimism: {
-      chainId: 10,
-      name: 'Optimism',
-      shortName: 'Optimism',
-      slug: 'optimism',
-      explorer: 'https://optimistic.etherscan.io',
-      description: 'Optimistic rollup, low fees, Ethereum security',
     },
   };
 
@@ -128,9 +101,6 @@ const PRODUCTION_CHAIN_SLUGS: Exclude<EvmChainSlug, 'local'>[] = [
   'ethereum',
   'arbitrum',
   'base',
-  'bsc',
-  'polygon',
-  'optimism',
 ];
 
 /**

@@ -16,9 +16,6 @@ const PRODUCTION_CHAIN_IDS = [
   1, // Ethereum
   42161, // Arbitrum
   8453, // Base
-  56, // BSC
-  137, // Polygon
-  10, // Optimism
 ] as const;
 
 const LOCAL_CHAIN_IDS = [31337] as const;
@@ -37,9 +34,6 @@ export const CHAIN_NAMES: Record<SupportedChainId, string> = {
   1: 'Ethereum',
   42161: 'Arbitrum',
   8453: 'Base',
-  56: 'BSC',
-  137: 'Polygon',
-  10: 'Optimism',
   31337: 'Local',
 };
 
@@ -102,9 +96,6 @@ const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
   1: 'WS_RPC_URL_ETHEREUM',
   42161: 'WS_RPC_URL_ARBITRUM',
   8453: 'WS_RPC_URL_BASE',
-  56: 'WS_RPC_URL_BSC',
-  137: 'WS_RPC_URL_POLYGON',
-  10: 'WS_RPC_URL_OPTIMISM',
   31337: 'WS_RPC_URL_LOCAL',
 };
 

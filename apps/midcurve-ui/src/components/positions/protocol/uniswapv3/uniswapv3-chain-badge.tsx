@@ -10,9 +10,6 @@ const CHAIN_NAMES: Record<number, string> = {
   1: "Ethereum",
   42161: "Arbitrum",
   8453: "Base",
-  56: "BSC",
-  137: "Polygon",
-  10: "Optimism",
   31337: "Local",
 };
 

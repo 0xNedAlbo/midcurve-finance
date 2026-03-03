@@ -5,7 +5,7 @@
  */
 
 import { createPublicClient, http, type PublicClient, type Chain } from 'viem';
-import { mainnet, arbitrum, base, bsc, polygon, optimism, localhost } from 'viem/chains';
+import { mainnet, arbitrum, base, localhost } from 'viem/chains';
 import type { SupportedChainId } from './config';
 
 // Re-export for convenience
@@ -18,9 +18,6 @@ const PRODUCTION_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string
   1: { chain: mainnet, rpcEnvVar: 'RPC_URL_ETHEREUM' },
   42161: { chain: arbitrum, rpcEnvVar: 'RPC_URL_ARBITRUM' },
   8453: { chain: base, rpcEnvVar: 'RPC_URL_BASE' },
-  56: { chain: bsc, rpcEnvVar: 'RPC_URL_BSC' },
-  137: { chain: polygon, rpcEnvVar: 'RPC_URL_POLYGON' },
-  10: { chain: optimism, rpcEnvVar: 'RPC_URL_OPTIMISM' },
 };
 
 /**
@@ -355,10 +352,7 @@ const ERC20_ABI = [
 const NFPM_ADDRESSES: Record<number, `0x${string}`> = {
   1: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   42161: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  10: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  137: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   8453: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
-  56: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
   31337: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
 };
 

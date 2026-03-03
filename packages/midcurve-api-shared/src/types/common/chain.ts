@@ -49,9 +49,6 @@ export type ChainId = z.infer<typeof ChainIdSchema>;
  */
 export const COMMON_CHAIN_IDS = {
   ETHEREUM: 1,
-  OPTIMISM: 10,
-  BSC: 56,
-  POLYGON: 137,
   ARBITRUM: 42161,
   BASE: 8453,
 } as const;

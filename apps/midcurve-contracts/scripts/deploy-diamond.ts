@@ -13,7 +13,7 @@
  * Environment variables:
  *   SWAP_ROUTER  - MidcurveSwapRouter address (required)
  *   OWNER        - Diamond owner address (required)
- *   CHAIN        - RPC endpoint name from foundry.toml: arbitrum, base, mainnet, optimism, polygon (required)
+ *   CHAIN        - RPC endpoint name from foundry.toml: arbitrum, base, mainnet (required)
  */
 
 import { spawn } from 'child_process';
@@ -22,8 +22,6 @@ import { resolve } from 'path';
 
 const CHAIN_IDS: Record<string, number> = {
   mainnet: 1,
-  optimism: 10,
-  polygon: 137,
   arbitrum: 42161,
   base: 8453,
 };
@@ -32,8 +30,6 @@ const CHAIN_IDS: Record<string, number> = {
 const NFPM: Record<string, string> = {
   mainnet: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   arbitrum: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  optimism: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  polygon: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   base: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
 };
 

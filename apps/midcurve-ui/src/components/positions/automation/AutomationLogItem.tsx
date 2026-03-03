@@ -63,9 +63,6 @@ const BLOCK_EXPLORERS: Record<number, string> = {
   1: 'https://etherscan.io/tx/',
   42161: 'https://arbiscan.io/tx/',
   8453: 'https://basescan.org/tx/',
-  137: 'https://polygonscan.com/tx/',
-  10: 'https://optimistic.etherscan.io/tx/',
-  56: 'https://bscscan.com/tx/',
   31337: '', // Local chain - no explorer
 };
 

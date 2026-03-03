@@ -28,8 +28,6 @@ const SEARCH_CHAINS: { slug: EvmChainSlug; name: string; chainId: number }[] = [
   { slug: 'ethereum', name: 'Ethereum', chainId: 1 },
   { slug: 'arbitrum', name: 'Arbitrum', chainId: 42161 },
   { slug: 'base', name: 'Base', chainId: 8453 },
-  { slug: 'polygon', name: 'Polygon', chainId: 137 },
-  { slug: 'optimism', name: 'Optimism', chainId: 10 },
 ];
 
 export function PoolSelectionStep() {

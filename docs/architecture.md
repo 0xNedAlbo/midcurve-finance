@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Midcurve Finance** is a comprehensive risk management platform for concentrated liquidity (CL) provisioning across multiple blockchain ecosystems, including Ethereum, BSC, and Solana.
+**Midcurve Finance** is a comprehensive risk management platform for concentrated liquidity (CL) provisioning across multiple blockchain ecosystems, including Ethereum and Solana.
 
 The platform enables liquidity providers to:
 - **Monitor** concentrated liquidity positions in real-time
@@ -190,7 +190,7 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 **Key Characteristics:**
 - Distributed caching via PostgreSQL (no Redis required)
 - Address normalization for EVM chains (EIP-55 checksumming)
-- Multi-chain support (Ethereum, Arbitrum, Base, BSC, Polygon, Optimism)
+- Multi-chain support (Ethereum, Arbitrum, Base)
 
 **Documentation:** See [packages/midcurve-services/CLAUDE.md](../packages/midcurve-services/CLAUDE.md)
 
@@ -740,7 +740,7 @@ All internal packages use the `workspace:*` protocol in their `package.json`:
 ### 4. Abstraction Strategy for Multi-Platform Support
 
 **Problem:** Different blockchains have fundamentally different architectures:
-- **EVM chains** (Ethereum, BSC): Contract addresses, ERC-20 tokens, gas fees
+- **EVM chains** (Ethereum, Arbitrum, Base): Contract addresses, ERC-20 tokens, gas fees
 - **Solana**: Program IDs, SPL tokens, accounts, rent-exempt balances
 
 **Solution:** Abstract interface pattern with platform-specific `config` fields
@@ -762,7 +762,7 @@ interface Token<TConfig> {
 // Platform-specific configs
 interface Erc20TokenConfig {
   address: string;         // 0x... (EIP-55 checksummed)
-  chainId: number;         // 1 (Ethereum), 56 (BSC), etc.
+  chainId: number;         // 1 (Ethereum), 42161 (Arbitrum), etc.
 }
 
 // Type aliases for convenience
@@ -877,13 +877,9 @@ Currently supported chains:
 | **Ethereum** | 1 | `RPC_URL_ETHEREUM` | etherscan.io |
 | **Arbitrum One** | 42161 | `RPC_URL_ARBITRUM` | arbiscan.io |
 | **Base** | 8453 | `RPC_URL_BASE` | basescan.org |
-| **BNB Smart Chain** | 56 | `RPC_URL_BSC` | bscscan.com |
-| **Polygon** | 137 | `RPC_URL_POLYGON` | polygonscan.com |
-| **Optimism** | 10 | `RPC_URL_OPTIMISM` | optimistic.etherscan.io |
 
 **Supported DEX Protocols:**
-- Uniswap V3 (Ethereum, Arbitrum, Base, Polygon, Optimism)
-- PancakeSwap V3 (BSC)
+- Uniswap V3 (Ethereum, Arbitrum, Base)
 
 ### Solana (Future)
 

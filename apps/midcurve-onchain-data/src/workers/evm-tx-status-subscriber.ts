@@ -165,7 +165,7 @@ export class EvmTxStatusSubscriber {
    */
   private initializeClients(): void {
     const evmConfig = getEvmConfig();
-    const supportedChains: SupportedChainId[] = [1, 42161, 8453, 56, 137, 10, 31337];
+    const supportedChains: SupportedChainId[] = [1, 42161, 8453, 31337];
 
     for (const chainId of supportedChains) {
       try {

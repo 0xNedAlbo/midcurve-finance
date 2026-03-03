@@ -33,7 +33,7 @@ export function FundAutowalletModal({
   const queryClient = useQueryClient();
 
   const chainMetadata = getChainMetadataByChainId(chainId);
-  const symbol = chainId === 56 ? 'BNB' : chainId === 137 ? 'MATIC' : 'ETH';
+  const symbol = 'ETH';
   const { chainId: connectedChainId } = useAccount();
   const chainSlug = getChainSlugByChainId(chainId);
   const isWrongNetwork = connectedChainId !== chainId;

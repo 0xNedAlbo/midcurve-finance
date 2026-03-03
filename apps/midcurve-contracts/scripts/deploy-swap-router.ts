@@ -12,7 +12,7 @@
  *
  * Environment variables:
  *   OWNER  - Initial manager address (required)
- *   CHAIN  - RPC endpoint name from foundry.toml: arbitrum, base, mainnet, optimism, polygon (required)
+ *   CHAIN  - RPC endpoint name from foundry.toml: arbitrum, base, mainnet (required)
  */
 
 import { spawn } from 'child_process';
@@ -25,8 +25,6 @@ import { resolve } from 'path';
 
 const CHAIN_IDS: Record<string, number> = {
   mainnet: 1,
-  optimism: 10,
-  polygon: 137,
   arbitrum: 42161,
   base: 8453,
 };
@@ -35,8 +33,6 @@ const CHAIN_IDS: Record<string, number> = {
 const UNISWAP_V3_SWAP_ROUTER: Record<string, string> = {
   mainnet: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
   arbitrum: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
-  optimism: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
-  polygon: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
   base: '0x2626664c2603336E57B271c5C0b26F421741e481',
 };
 
@@ -44,8 +40,6 @@ const UNISWAP_V3_SWAP_ROUTER: Record<string, string> = {
 const WETH: Record<string, string> = {
   mainnet: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   arbitrum: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-  optimism: '0x4200000000000000000000000000000000000006',
-  polygon: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WMATIC
   base: '0x4200000000000000000000000000000000000006',
 };
 
@@ -53,8 +47,6 @@ const WETH: Record<string, string> = {
 const USDC: Record<string, string> = {
   mainnet: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
   arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-  optimism: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
-  polygon: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
   base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
 };
 
@@ -62,8 +54,6 @@ const USDC: Record<string, string> = {
 const AUGUSTUS: Record<string, string> = {
   mainnet: '0x6A000F20005980200259B80c5102003040001068',
   arbitrum: '0x6A000F20005980200259B80c5102003040001068',
-  optimism: '0x6A000F20005980200259B80c5102003040001068',
-  polygon: '0x6A000F20005980200259B80c5102003040001068',
   base: '0x6A000F20005980200259B80c5102003040001068',
 };
 
@@ -73,8 +63,6 @@ const AUGUSTUS: Record<string, string> = {
 const TOKEN_TRANSFER_PROXY: Record<string, string> = {
   mainnet: '0x6A000F20005980200259B80c5102003040001068',
   arbitrum: '0x6A000F20005980200259B80c5102003040001068',
-  optimism: '0x6A000F20005980200259B80c5102003040001068',
-  polygon: '0x6A000F20005980200259B80c5102003040001068',
   base: '0x6A000F20005980200259B80c5102003040001068',
 };
 

@@ -4,7 +4,7 @@
  * Contract addresses and ABI for the NonfungiblePositionManager contract
  * across all supported EVM chains.
  *
- * Note: BSC uses PancakeSwap V3, which has a different contract address.
+ * Note: Addresses vary by chain; Base uses a different deployment than Ethereum/Arbitrum.
  */
 
 import type { Address } from 'viem';
@@ -16,9 +16,6 @@ export const NONFUNGIBLE_POSITION_MANAGER_ADDRESSES: Record<number, Address> = {
   1: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Ethereum
   42161: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Arbitrum
   8453: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', // Base
-  137: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Polygon
-  10: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Optimism
-  56: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613', // BSC (PancakeSwap V3)
   31337: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Local Anvil fork (uses mainnet)
 };
 

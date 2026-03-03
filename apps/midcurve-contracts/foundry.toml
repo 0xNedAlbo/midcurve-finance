@@ -33,14 +33,10 @@ exclude_lints = ["screaming-snake-case-const", "screaming-snake-case-immutable",
 arbitrum = { key = "${ETHERSCAN_API_KEY}" }
 base = { key = "${ETHERSCAN_API_KEY}" }
 mainnet = { key = "${ETHERSCAN_API_KEY}" }
-optimism = { key = "${ETHERSCAN_API_KEY}" }
-polygon = { key = "${ETHERSCAN_API_KEY}" }
 
 [rpc_endpoints]
 arbitrum = "${RPC_URL_ARBITRUM}"
 base = "${RPC_URL_BASE}"
 mainnet = "${RPC_URL_ETHEREUM}"
-optimism = "${RPC_URL_OPTIMISM}"
-polygon = "${RPC_URL_POLYGON}"
 # Local Anvil fork (default port 8545 - wallet clients expect chain 31337 here)
 local = "http://localhost:8545"

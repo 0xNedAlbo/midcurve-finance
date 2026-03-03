@@ -15,9 +15,6 @@ const BLOCK_EXPLORERS: Record<number, { name: string; url: string }> = {
   1: { name: "Etherscan", url: "https://etherscan.io" },
   42161: { name: "Arbiscan", url: "https://arbiscan.io" },
   8453: { name: "Basescan", url: "https://basescan.org" },
-  56: { name: "BscScan", url: "https://bscscan.com" },
-  137: { name: "Polygonscan", url: "https://polygonscan.com" },
-  10: { name: "Optimistic Etherscan", url: "https://optimistic.etherscan.io" },
 };
 
 // Uniswap V3 NonfungiblePositionManager addresses (same on all chains)

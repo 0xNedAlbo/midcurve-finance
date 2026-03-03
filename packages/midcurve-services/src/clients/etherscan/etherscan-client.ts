@@ -53,15 +53,13 @@ export const NFT_POSITION_MANAGER_ADDRESSES: Record<number, string> = {
   1: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Ethereum
   42161: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Arbitrum
   8453: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', // Base (deployed at block 1371714)
-  10: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Optimism
-  137: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Polygon
   31337: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Local Anvil fork (mainnet NFPM)
 };
 
 /**
  * Supported chain IDs for Etherscan v2 API
  */
-export const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 10, 137] as const;
+export const SUPPORTED_CHAIN_IDS = [1, 42161, 8453] as const;
 
 /**
  * Error thrown when Etherscan API request fails

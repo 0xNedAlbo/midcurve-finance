@@ -9,7 +9,7 @@ import { Info, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import type { CloseOrderFormData, SwapDirection } from '../CloseOrderModal';
 
 // Chains supported for post-close swap
-const SWAP_PRODUCTION_CHAINS = [1, 42161, 8453, 10] as const; // Ethereum, Arbitrum, Base, Optimism
+const SWAP_PRODUCTION_CHAINS = [1, 42161, 8453] as const; // Ethereum, Arbitrum, Base
 
 // In development, also support local test chain
 const SWAP_SUPPORTED_CHAINS = import.meta.env.DEV

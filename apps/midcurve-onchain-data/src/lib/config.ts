@@ -107,7 +107,7 @@ export const getPoolPricesConfig = getOnchainDataConfig;
  * Production chains are always available.
  * Local chain (31337) is only available in non-production environments.
  */
-const PRODUCTION_CHAIN_IDS = [1, 42161, 8453, 56, 137, 10] as const;
+const PRODUCTION_CHAIN_IDS = [1, 42161, 8453] as const;
 const LOCAL_CHAIN_IDS = [31337] as const;
 
 // Include local chain only in non-production
@@ -127,9 +127,6 @@ export const CHAIN_NAMES: Record<SupportedChainId, string> = {
   1: 'ethereum',
   42161: 'arbitrum',
   8453: 'base',
-  56: 'bsc',
-  137: 'polygon',
-  10: 'optimism',
   31337: 'local',
 };
 
@@ -140,9 +137,6 @@ const WS_RPC_URL_ENV_VARS: Record<SupportedChainId, string> = {
   1: 'WS_RPC_URL_ETHEREUM',
   42161: 'WS_RPC_URL_ARBITRUM',
   8453: 'WS_RPC_URL_BASE',
-  56: 'WS_RPC_URL_BSC',
-  137: 'WS_RPC_URL_POLYGON',
-  10: 'WS_RPC_URL_OPTIMISM',
   31337: 'WS_RPC_URL_LOCAL',
 };
 

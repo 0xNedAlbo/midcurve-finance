@@ -130,7 +130,7 @@ export function getAutomationConfig(): AutomationConfig {
  * Production chains are always available.
  * Local chain (31337) is only available in non-production environments.
  */
-const PRODUCTION_CHAIN_IDS = [1, 42161, 8453, 56, 137, 10] as const;
+const PRODUCTION_CHAIN_IDS = [1, 42161, 8453] as const;
 const LOCAL_CHAIN_IDS = [31337] as const;
 
 // Include local chain only in non-production

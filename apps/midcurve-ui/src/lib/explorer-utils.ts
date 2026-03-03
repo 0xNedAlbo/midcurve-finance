@@ -12,9 +12,6 @@ export const CHAIN_EXPLORERS: Record<number, string> = {
   1: 'https://etherscan.io',
   42161: 'https://arbiscan.io',
   8453: 'https://basescan.org',
-  56: 'https://bscscan.com',
-  137: 'https://polygonscan.com',
-  10: 'https://optimistic.etherscan.io',
 };
 
 /**

@@ -116,8 +116,6 @@ RPC_URL_ETHEREUM="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
 # Production RPC endpoints
 RPC_URL_ARBITRUM="https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"
 RPC_URL_BASE="https://base-mainnet.g.alchemy.com/v2/YOUR_KEY"
-RPC_URL_OPTIMISM="https://opt-mainnet.g.alchemy.com/v2/YOUR_KEY"
-RPC_URL_POLYGON="https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY"
 
 # RabbitMQ (for workers)
 RABBITMQ_URL="amqp://guest:guest@localhost:5672"
@@ -177,12 +175,6 @@ pnpm forge:deploy:base
 
 # Ethereum mainnet
 pnpm forge:deploy:ethereum
-
-# Optimism
-pnpm forge:deploy:optimism
-
-# Polygon
-pnpm forge:deploy:polygon
 ```
 
 ## Test Account

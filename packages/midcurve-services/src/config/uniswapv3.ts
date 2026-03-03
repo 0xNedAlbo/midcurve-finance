@@ -25,14 +25,9 @@ export const UNISWAP_V3_POSITION_MANAGER_ADDRESSES: Record<
   // Most chains use the same address
   [SupportedChainId.ETHEREUM]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
   [SupportedChainId.ARBITRUM]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  [SupportedChainId.OPTIMISM]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-  [SupportedChainId.POLYGON]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
 
   // Base uses a different address
   [SupportedChainId.BASE]: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
-
-  // BNB Chain uses a different address
-  [SupportedChainId.BSC]: '0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613',
 
   // Local Anvil fork uses mainnet addresses (since it forks mainnet)
   [SupportedChainId.LOCAL]: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
@@ -168,14 +163,9 @@ export const UNISWAP_V3_FACTORY_ADDRESSES: Record<SupportedChainId, Address> =
     // Most chains use the same address
     [SupportedChainId.ETHEREUM]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
     [SupportedChainId.ARBITRUM]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-    [SupportedChainId.OPTIMISM]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
-    [SupportedChainId.POLYGON]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
 
     // Base uses a different address
     [SupportedChainId.BASE]: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
-
-    // BSC uses a different address
-    [SupportedChainId.BSC]: '0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7',
 
     // Local Anvil fork uses mainnet addresses (since it forks mainnet)
     [SupportedChainId.LOCAL]: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
@@ -251,17 +241,11 @@ export function getFactoryAddress(chainId: number): Address {
  * - Ethereum: https://etherscan.io/tx/0x214153e36e2e7c21c666e7bd8b700867e88e419a7bb691c300f96f49cbf96701
  * - Arbitrum: https://arbiscan.io/tx/0x7f6b1d42c10f2d4b6b8c5b5e7c4f5e8d9a3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a
  * - Base: https://basescan.org/tx/0x9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e
- * - BSC: https://bscscan.com/tx/0x8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a
- * - Polygon: https://polygonscan.com/tx/0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b
- * - Optimism: https://optimistic.etherscan.io/tx/0x6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c
  */
 export const NFPM_DEPLOYMENT_BLOCKS: Record<SupportedChainId, bigint> = {
   [SupportedChainId.ETHEREUM]: 12369621n,
   [SupportedChainId.ARBITRUM]: 165n,
   [SupportedChainId.BASE]: 1371680n,
-  [SupportedChainId.BSC]: 26324014n,
-  [SupportedChainId.POLYGON]: 22757547n,
-  [SupportedChainId.OPTIMISM]: 4294n,
 
   // Local Anvil fork uses mainnet addresses (since it forks mainnet)
   [SupportedChainId.LOCAL]: 12369621n,

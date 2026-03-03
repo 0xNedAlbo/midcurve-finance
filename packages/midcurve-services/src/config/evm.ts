@@ -8,9 +8,6 @@
  * - RPC_URL_ETHEREUM    - Ethereum mainnet RPC
  * - RPC_URL_ARBITRUM    - Arbitrum One RPC
  * - RPC_URL_BASE        - Base RPC
- * - RPC_URL_BSC         - BNB Smart Chain RPC
- * - RPC_URL_POLYGON     - Polygon RPC
- * - RPC_URL_OPTIMISM    - Optimism RPC
  *
  * Environment Variables (OPTIONAL for development):
  * - RPC_URL_LOCAL       - Local Anvil fork RPC (e.g., http://localhost:8545)
@@ -30,9 +27,6 @@ import {
   mainnet,
   arbitrum,
   base,
-  bsc,
-  polygon,
-  optimism,
   type Chain,
 } from 'viem/chains';
 
@@ -90,9 +84,6 @@ export enum SupportedChainId {
   ETHEREUM = 1,
   ARBITRUM = 42161,
   BASE = 8453,
-  BSC = 56,
-  POLYGON = 137,
-  OPTIMISM = 10,
   /** Local Anvil chain - only available in development */
   LOCAL = 31337,
 }
@@ -216,36 +207,6 @@ export class EvmConfig {
       finality: { type: 'blockTag' },
     });
 
-    // BNB Smart Chain
-    this.chains.set(SupportedChainId.BSC, {
-      chainId: SupportedChainId.BSC,
-      name: 'BNB Smart Chain',
-      rpcUrl: env['RPC_URL_BSC'] ?? INVALID_RPC_SENTINEL,
-      blockExplorer: 'https://bscscan.com',
-      viemChain: bsc,
-      finality: { type: 'blockTag' },
-    });
-
-    // Polygon
-    this.chains.set(SupportedChainId.POLYGON, {
-      chainId: SupportedChainId.POLYGON,
-      name: 'Polygon',
-      rpcUrl: env['RPC_URL_POLYGON'] ?? INVALID_RPC_SENTINEL,
-      blockExplorer: 'https://polygonscan.com',
-      viemChain: polygon,
-      finality: { type: 'blockTag' },
-    });
-
-    // Optimism
-    this.chains.set(SupportedChainId.OPTIMISM, {
-      chainId: SupportedChainId.OPTIMISM,
-      name: 'Optimism',
-      rpcUrl: env['RPC_URL_OPTIMISM'] ?? INVALID_RPC_SENTINEL,
-      blockExplorer: 'https://optimistic.etherscan.io',
-      viemChain: optimism,
-      finality: { type: 'blockTag' },
-    });
-
     // Local Anvil Fork (development only)
     // Only available when NODE_ENV !== 'production' and RPC_URL_LOCAL is set
     if (env['NODE_ENV'] !== 'production' && env['RPC_URL_LOCAL']) {
@@ -273,9 +234,6 @@ export class EvmConfig {
       [SupportedChainId.ETHEREUM]: 'RPC_URL_ETHEREUM',
       [SupportedChainId.ARBITRUM]: 'RPC_URL_ARBITRUM',
       [SupportedChainId.BASE]: 'RPC_URL_BASE',
-      [SupportedChainId.BSC]: 'RPC_URL_BSC',
-      [SupportedChainId.POLYGON]: 'RPC_URL_POLYGON',
-      [SupportedChainId.OPTIMISM]: 'RPC_URL_OPTIMISM',
       [SupportedChainId.LOCAL]: 'RPC_URL_LOCAL',
     };
 
