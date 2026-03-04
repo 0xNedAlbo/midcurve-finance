@@ -5,11 +5,12 @@
  * Consumed by both frontend and backend packages.
  *
  * What belongs here: chain IDs, names, slugs, explorer URLs,
- * CoinGecko platform IDs, env var suffixes, native currency info.
+ * CoinGecko platform IDs, env var suffixes, native currency info,
+ * and finality config (static per-chain strategy, no env deps).
  *
  * What does NOT belong here: viem Chain objects, quote tokens,
- * subgraph URLs, finality config, or anything that reads
- * process.env / import.meta.env at import time.
+ * subgraph URLs, or anything that reads process.env /
+ * import.meta.env at import time.
  *
  * Protocol-specific config (contract addresses, deployment blocks)
  * lives in config/protocols/ (e.g. protocols/uniswapv3.ts).
@@ -20,6 +21,17 @@
 // ============================================================================
 
 export type ChainSlug = 'ethereum' | 'arbitrum' | 'base' | 'sepolia' | 'local';
+
+/**
+ * Finality configuration for a chain.
+ *
+ * Determines how to check if a block is finalized:
+ * - `blockTag`: chain supports the native "finalized" block tag via RPC
+ * - `blockHeight`: fallback — subtract `minBlockHeight` from the latest block
+ */
+export type FinalityConfig =
+  | { type: 'blockTag' }
+  | { type: 'blockHeight'; minBlockHeight: number };
 
 export interface ChainRegistryEntry {
   /** Numeric chain ID (e.g. 1, 42161, 8453, 31337) */
@@ -40,6 +52,8 @@ export interface ChainRegistryEntry {
   envVarSuffix: string;
   /** Whether this is a production (non-dev) chain */
   isProduction: boolean;
+  /** How to determine the finalized block on this chain */
+  finality: FinalityConfig;
 }
 
 // ============================================================================
@@ -57,6 +71,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     nativeCurrency: { symbol: 'ETH', decimals: 18 },
     envVarSuffix: 'ETHEREUM',
     isProduction: true,
+    finality: { type: 'blockTag' },
   },
   42161: {
     id: 42161,
@@ -68,6 +83,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     nativeCurrency: { symbol: 'ETH', decimals: 18 },
     envVarSuffix: 'ARBITRUM',
     isProduction: true,
+    finality: { type: 'blockTag' },
   },
   8453: {
     id: 8453,
@@ -79,6 +95,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     nativeCurrency: { symbol: 'ETH', decimals: 18 },
     envVarSuffix: 'BASE',
     isProduction: true,
+    finality: { type: 'blockTag' },
   },
   11155111: {
     id: 11155111,
@@ -90,6 +107,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     nativeCurrency: { symbol: 'ETH', decimals: 18 },
     envVarSuffix: 'SEPOLIA',
     isProduction: false,
+    finality: { type: 'blockTag' },
   },
   31337: {
     id: 31337,
@@ -101,6 +119,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     nativeCurrency: { symbol: 'ETH', decimals: 18 },
     envVarSuffix: 'LOCAL',
     isProduction: false,
+    finality: { type: 'blockTag' },
   },
 };
 

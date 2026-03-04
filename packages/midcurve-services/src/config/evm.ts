@@ -30,7 +30,7 @@ import {
   sepolia,
   type Chain,
 } from 'viem/chains';
-import { getChainEntry, getRpcEnvVarName } from '@midcurve/shared';
+import { type FinalityConfig, getChainEntry, getRpcEnvVarName } from '@midcurve/shared';
 
 /**
  * Local Anvil chain definition for development testing
@@ -51,15 +51,6 @@ const localAnvil = defineChain({
     },
   },
 });
-
-/**
- * Finality configuration for a chain
- *
- * Determines how to check if a block is finalized.
- */
-export type FinalityConfig =
-  | { type: 'blockTag' } // Chain supports native "finalized" block tag
-  | { type: 'blockHeight'; minBlockHeight: number }; // Fallback: block confirmations
 
 /**
  * Configuration for a single EVM chain
@@ -200,7 +191,7 @@ export class EvmConfig {
         rpcUrl: env[envVarName] ?? INVALID_RPC_SENTINEL,
         blockExplorer: entry.explorer?.baseUrl,
         viemChain: viemChains[chainId]!,
-        finality: { type: 'blockTag' },
+        finality: entry.finality,
       });
     }
 
@@ -217,7 +208,7 @@ export class EvmConfig {
             rpcUrl: env[rpcEnvVar]!,
             blockExplorer: entry.explorer?.baseUrl,
             viemChain: viemChains[chainId]!,
-            finality: { type: 'blockTag' },
+            finality: entry.finality,
           });
         }
       }
