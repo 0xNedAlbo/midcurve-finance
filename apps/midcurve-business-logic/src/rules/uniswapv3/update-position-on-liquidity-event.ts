@@ -342,7 +342,7 @@ export class UpdatePositionOnLiquidityEventRule extends BusinessRule {
             payload,
             source: 'business-logic',
           }, tx);
-        } else if (result.action === 'removed' && result.deletedCount > 0) {
+        } else if (result.action === 'removed' && result.deletedEvents.length > 0) {
           await publisher.createAndPublish<PositionLiquidityRevertedPayload>({
             type: 'position.liquidity.reverted',
             entityId: position.id,
@@ -354,7 +354,7 @@ export class UpdatePositionOnLiquidityEventRule extends BusinessRule {
               chainId,
               nftId,
               blockHash: result.blockHash,
-              deletedCount: result.deletedCount,
+              deletedCount: result.deletedEvents.length,
               revertedAt: new Date().toISOString(),
             },
             source: 'business-logic',

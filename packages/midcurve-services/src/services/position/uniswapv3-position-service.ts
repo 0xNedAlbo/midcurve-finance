@@ -38,6 +38,10 @@ import type {
     PositionClosedPayload,
     PositionBurnedPayload,
     PositionDeletedPayload,
+    PositionLiquidityIncreasedPayload,
+    PositionLiquidityDecreasedPayload,
+    PositionFeesCollectedPayload,
+    PositionLiquidityRevertedPayload,
 } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
@@ -57,6 +61,7 @@ import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-se
 import {
     UniswapV3LedgerService,
     type RawLogInput,
+    type ImportLogsResult,
 } from "../position-ledger/uniswapv3-ledger-service.js";
 import { UniswapV3AprService } from "../position-apr/uniswapv3-apr-service.js";
 import { type Address, type PublicClient, parseAbiItem } from "viem";
@@ -1171,11 +1176,27 @@ export class UniswapV3PositionService {
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "refresh", { id, blockNumber });
+        await this.refreshAllPositionLogs(id, blockNumber, dbTx);
+        return this.refreshOnChainState(id, blockNumber, dbTx);
+    }
 
+    /**
+     * Refresh position state from on-chain data.
+     *
+     * Updates owner, liquidity, fee state, and metrics from the NFPM contract.
+     * Detects burned and closed positions. Does NOT sync ledger events — use
+     * refresh() for the full on-demand sync that includes log fetching.
+     *
+     * @param id - Position ID
+     * @param blockNumber - Block to read state from
+     * @param dbTx - Optional Prisma transaction client
+     */
+    private async refreshOnChainState(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        dbTx?: PrismaTransactionClient,
+    ): Promise<UniswapV3Position> {
         try {
-            // Refresh all position state by calling individual refresh methods in order
-            // Each method reads fresh on-chain data and persists it to the database
-
             // 0. Get position to determine pool ID
             const position = await this.findById(id, dbTx);
             if (!position) {
@@ -1451,7 +1472,7 @@ export class UniswapV3PositionService {
                 "Refreshing position state from on-chain data",
             );
 
-            const refreshedPosition = await this.refresh(id, "latest", dbTx);
+            const refreshedPosition = await this.refreshOnChainState(id, "latest", dbTx);
 
             this.logger.info(
                 {
@@ -1479,6 +1500,174 @@ export class UniswapV3PositionService {
             }
             throw error;
         }
+    }
+
+    /**
+     * Sync ledger events from on-chain data without wiping existing events.
+     *
+     * Fetches all IncreaseLiquidity, DecreaseLiquidity, and Collect events
+     * from the position's mint block up to `blockNumber`. Already-imported
+     * events are skipped (idempotent). Catch-up reorgs are detected and
+     * handled: orphaned events are deleted before new canonical events are
+     * inserted. Domain events are emitted in order — all reverts first,
+     * then inserts.
+     *
+     * @param id - Position ID (database CUID)
+     * @param blockNumber - Upper bound block ("latest" or specific block number)
+     * @param dbTx - Optional Prisma transaction client
+     * @returns The import result with per-log outcomes and final aggregates
+     * @throws Error if position not found
+     * @throws Error if mint block cannot be found on-chain
+     */
+    async refreshAllPositionLogs(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        dbTx?: PrismaTransactionClient,
+    ): Promise<ImportLogsResult> {
+        log.methodEntry(this.logger, "refreshAllPositionLogs", { id, blockNumber });
+
+        const position = await this.findById(id);
+        if (!position) {
+            throw new Error(`Position not found: ${id}`);
+        }
+
+        const chainId = position.chainId;
+        const nftId = BigInt(position.nftId);
+        const nfpmAddress = getPositionManagerAddress(chainId);
+        const deploymentBlock = getNfpmDeploymentBlock(chainId);
+        const client = this.evmConfig.getPublicClient(chainId);
+        const toBlock: bigint | "latest" =
+            blockNumber === "latest" ? "latest" : BigInt(blockNumber);
+
+        const mintBlock = await findNftMintBlock(
+            client,
+            nfpmAddress,
+            nftId,
+            deploymentBlock,
+        );
+        if (!mintBlock) {
+            throw new Error(
+                `Mint block not found for NFT ${nftId} on chain ${chainId}`,
+            );
+        }
+
+        const logs = await this.fetchAllPositionLogs(
+            client,
+            nfpmAddress,
+            nftId,
+            mintBlock,
+            toBlock,
+        );
+
+        const ledgerService = new UniswapV3LedgerService(
+            { positionId: id },
+            { prisma: this._prisma },
+        );
+
+        const importResult = await ledgerService.importLogsForPosition(
+            position,
+            chainId,
+            logs,
+            this.poolPriceService,
+            dbTx,
+        );
+
+        const publisher = getDomainEventPublisher();
+
+        // Emit revert events first (grouped by blockHash)
+        const blockHashGroups = new Map<string, number>();
+        for (const event of importResult.deletedEvents) {
+            const bh = event.typedConfig.blockHash;
+            blockHashGroups.set(bh, (blockHashGroups.get(bh) ?? 0) + 1);
+        }
+        for (const [blockHash, deletedCount] of blockHashGroups) {
+            await publisher.createAndPublish<PositionLiquidityRevertedPayload>(
+                {
+                    type: "position.liquidity.reverted",
+                    entityId: position.id,
+                    entityType: "position",
+                    userId: position.userId,
+                    payload: {
+                        positionId: position.id,
+                        positionHash: position.positionHash,
+                        chainId,
+                        nftId: nftId.toString(),
+                        blockHash,
+                        deletedCount,
+                        revertedAt: new Date().toISOString(),
+                    },
+                    source: "business-logic",
+                },
+                dbTx,
+            );
+        }
+
+        // Emit insert events after all reverts
+        for (const result of importResult.results) {
+            if (result.action !== "inserted") continue;
+            const { validEventType, amount0, amount1, liquidityDelta, blockTimestamp } =
+                result.eventDetail;
+
+            if (validEventType === "COLLECT") {
+                const feeDelta =
+                    importResult.aggregates.collectedFeesAfter -
+                    importResult.preImportAggregates.collectedFeesAfter;
+                await publisher.createAndPublish<PositionFeesCollectedPayload>(
+                    {
+                        type: "position.fees.collected",
+                        entityId: position.id,
+                        entityType: "position",
+                        userId: position.userId,
+                        payload: {
+                            positionId: position.id,
+                            positionHash: position.positionHash,
+                            poolId: position.pool.id,
+                            chainId,
+                            nftId: nftId.toString(),
+                            fees0: amount0.toString(),
+                            fees1: amount1.toString(),
+                            feesValueInQuote: feeDelta.toString(),
+                            eventTimestamp: blockTimestamp.toISOString(),
+                        },
+                        source: "business-logic",
+                    },
+                    dbTx,
+                );
+            } else {
+                const type =
+                    validEventType === "INCREASE_LIQUIDITY"
+                        ? ("position.liquidity.increased" as const)
+                        : ("position.liquidity.decreased" as const);
+                await publisher.createAndPublish<
+                    PositionLiquidityIncreasedPayload | PositionLiquidityDecreasedPayload
+                >(
+                    {
+                        type,
+                        entityId: position.id,
+                        entityType: "position",
+                        userId: position.userId,
+                        payload: {
+                            positionId: position.id,
+                            positionHash: position.positionHash,
+                            poolId: position.pool.id,
+                            chainId,
+                            nftId: nftId.toString(),
+                            liquidityDelta: liquidityDelta.toString(),
+                            liquidityAfter:
+                                importResult.aggregates.liquidityAfter.toString(),
+                            token0Amount: amount0.toString(),
+                            token1Amount: amount1.toString(),
+                            eventTimestamp: blockTimestamp.toISOString(),
+                        },
+                        source: "business-logic",
+                    },
+                    dbTx,
+                );
+            }
+        }
+
+        log.methodExit(this.logger, "refreshAllPositionLogs", { id });
+        return importResult;
     }
 
     /**
@@ -2192,6 +2381,7 @@ export class UniswapV3PositionService {
         nfpmAddress: Address,
         nftId: bigint,
         fromBlock: bigint,
+        toBlock: bigint | "latest" = "latest",
     ): Promise<RawLogInput[]> {
         // All three NFPM events have `uint256 indexed tokenId` as topic[1].
         // The RPC node resolves each query via its topic index in a single call
@@ -2210,7 +2400,7 @@ export class UniswapV3PositionService {
             address: nfpmAddress,
             args: { tokenId: nftId },
             fromBlock,
-            toBlock: "latest" as const,
+            toBlock,
         };
 
         // 3 parallel calls instead of thousands of sequential batches

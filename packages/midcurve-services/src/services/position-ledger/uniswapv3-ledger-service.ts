@@ -152,8 +152,10 @@ export type SingleLogResult =
               tokenValue: bigint;
               blockTimestamp: Date;
           };
+          /** Events deleted due to a catch-up reorg detected during this insert */
+          reorgDeletedEvents?: UniswapV3PositionLedgerEvent[];
       }
-    | { action: "removed"; inputHash: string; deletedCount: number; blockHash: string }
+    | { action: "removed"; inputHash: string; deletedEvents: UniswapV3PositionLedgerEvent[]; blockHash: string }
     | { action: "skipped"; reason: "already_exists" | "invalid_event" };
 
 /**
@@ -164,6 +166,8 @@ export type SingleLogResult =
 export interface ImportLogsResult {
     /** Results for each input log */
     results: SingleLogResult[];
+    /** All events deleted during this import (reorgs and catch-up reorgs), aggregated across all logs */
+    deletedEvents: UniswapV3PositionLedgerEvent[];
     /** Aggregates before any logs in this batch were imported */
     preImportAggregates: LedgerAggregates;
     /** Final aggregates after recalculating all events in correct order */
@@ -827,23 +831,27 @@ export class UniswapV3LedgerService {
      *
      * @param blockHash - Block hash to match (0x-prefixed hex string)
      * @param tx - Optional transaction client
-     * @returns Number of events deleted
+     * @returns The deleted events
      */
     async deleteAllByBlockHash(
         blockHash: string,
         tx?: PrismaTransactionClient,
-    ): Promise<number> {
+    ): Promise<UniswapV3PositionLedgerEvent[]> {
         const db = tx ?? this.prisma;
-        const result = await db.positionLedgerEvent.deleteMany({
-            where: {
-                positionId: this.positionId,
-                config: {
-                    path: ["blockHash"],
-                    equals: blockHash,
-                },
+        const where = {
+            positionId: this.positionId,
+            config: {
+                path: ["blockHash"],
+                equals: blockHash,
             },
-        });
-        return result.count;
+        };
+        const rows = await db.positionLedgerEvent.findMany({ where });
+        await db.positionLedgerEvent.deleteMany({ where });
+        return rows.map((row) =>
+            UniswapV3PositionLedgerEvent.fromDB(
+                row as unknown as UniswapV3PositionLedgerEventRow,
+            ),
+        );
     }
 
     /**
@@ -1424,6 +1432,7 @@ export class UniswapV3LedgerService {
         );
 
         const results: SingleLogResult[] = [];
+        const deletedEvents: UniswapV3PositionLedgerEvent[] = [];
 
         for (const log of logs) {
             const result = await this.processSingleLog(
@@ -1434,6 +1443,11 @@ export class UniswapV3LedgerService {
                 tx,
             );
             results.push(result);
+            if (result.action === "removed") {
+                deletedEvents.push(...result.deletedEvents);
+            } else if (result.action === "inserted" && result.reorgDeletedEvents) {
+                deletedEvents.push(...result.reorgDeletedEvents);
+            }
         }
 
         // Recalculate all aggregates to ensure correct running totals
@@ -1443,7 +1457,7 @@ export class UniswapV3LedgerService {
             tx,
         );
 
-        return { results, preImportAggregates, aggregates };
+        return { results, deletedEvents, preImportAggregates, aggregates };
     }
 
     /**
@@ -1511,17 +1525,17 @@ export class UniswapV3LedgerService {
 
         // Handle reorg case: remove all events from this block
         if (log.removed) {
-            const deletedCount = await this.deleteAllByBlockHash(
+            const deletedEvents = await this.deleteAllByBlockHash(
                 log.blockHash,
                 tx,
             );
-            if (deletedCount > 0) {
+            if (deletedEvents.length > 0) {
                 this.logger.info(
-                    { blockHash: log.blockHash, deletedCount },
+                    { blockHash: log.blockHash, deletedCount: deletedEvents.length },
                     "Events removed due to reorg",
                 );
             }
-            return { action: "removed", inputHash, deletedCount, blockHash: log.blockHash };
+            return { action: "removed", inputHash, deletedEvents, blockHash: log.blockHash };
         }
 
         // Check if event already exists
@@ -1536,6 +1550,7 @@ export class UniswapV3LedgerService {
             log.transactionHash,
             tx,
         );
+        let reorgDeletedEvents: UniswapV3PositionLedgerEvent[] | undefined;
         for (const existingEvent of eventsWithSameTxHash) {
             const existingBlockHash = existingEvent.typedConfig.blockHash;
             if (existingBlockHash !== log.blockHash) {
@@ -1547,7 +1562,7 @@ export class UniswapV3LedgerService {
                     },
                     "Catch-up reorg detected: removing events from orphaned fork",
                 );
-                await this.deleteAllByBlockHash(existingBlockHash, tx);
+                reorgDeletedEvents = await this.deleteAllByBlockHash(existingBlockHash, tx);
                 break;
             }
         }
@@ -1683,6 +1698,7 @@ export class UniswapV3LedgerService {
                 tokenValue,
                 blockTimestamp,
             },
+            ...(reorgDeletedEvents !== undefined && { reorgDeletedEvents }),
         };
     }
 
