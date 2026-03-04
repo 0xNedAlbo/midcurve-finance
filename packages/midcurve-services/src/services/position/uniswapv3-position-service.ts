@@ -54,7 +54,6 @@ import {
 import { normalizeAddress } from "@midcurve/shared";
 import { UniswapV3PoolService } from "../pool/uniswapv3-pool-service.js";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
-import { EtherscanClient } from "../../clients/etherscan/index.js";
 import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token-service.js";
 import { EvmBlockService } from "../block/evm-block-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
@@ -262,12 +261,6 @@ export interface UniswapV3PositionServiceDependencies {
     poolService?: UniswapV3PoolService;
 
     /**
-     * Etherscan client for fetching position events (needed for burned positions)
-     * If not provided, the singleton EtherscanClient instance will be used
-     */
-    etherscanClient?: EtherscanClient;
-
-    /**
      * Uniswap V3 quote token service for automatic quote token determination
      * If not provided, a new UniswapV3QuoteTokenService instance will be created
      */
@@ -311,7 +304,6 @@ export class UniswapV3PositionService {
     protected readonly eventPublisher: DomainEventPublisher;
     private readonly _evmConfig: EvmConfig;
     private readonly _poolService: UniswapV3PoolService;
-    private readonly _etherscanClient: EtherscanClient;
     private readonly _quoteTokenService: UniswapV3QuoteTokenService;
     private readonly _evmBlockService: EvmBlockService;
     private readonly _poolPriceService: UniswapV3PoolPriceService;
@@ -326,7 +318,6 @@ export class UniswapV3PositionService {
      * @param dependencies.eventPublisher - Domain event publisher (uses singleton if not provided)
      * @param dependencies.evmConfig - EVM configuration instance (uses singleton if not provided)
      * @param dependencies.poolService - UniswapV3 pool service (creates default if not provided)
-     * @param dependencies.etherscanClient - Etherscan client instance (uses singleton if not provided)
      * @param dependencies.quoteTokenService - UniswapV3 quote token service (creates default if not provided)
      */
     constructor(dependencies: UniswapV3PositionServiceDependencies = {}) {
@@ -341,8 +332,6 @@ export class UniswapV3PositionService {
         this._poolService =
             dependencies.poolService ??
             new UniswapV3PoolService({ prisma: this._prisma });
-        this._etherscanClient =
-            dependencies.etherscanClient ?? EtherscanClient.getInstance();
         this._quoteTokenService =
             dependencies.quoteTokenService ??
             new UniswapV3QuoteTokenService();
@@ -377,13 +366,6 @@ export class UniswapV3PositionService {
      */
     protected get poolService(): UniswapV3PoolService {
         return this._poolService;
-    }
-
-    /**
-     * Get the Etherscan client instance
-     */
-    protected get etherscanClient(): EtherscanClient {
-        return this._etherscanClient;
     }
 
     /**
