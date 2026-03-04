@@ -25,7 +25,7 @@ export function AccountingSummary() {
     setOffset(0);
   };
 
-  const { data: balanceSheet } = useBalanceSheet(period);
+  const { data: balanceSheet } = useBalanceSheet(period, offset);
   const { data: pnl } = usePnl(period, offset);
   return (
     <div className="space-y-6">

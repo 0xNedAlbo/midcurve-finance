@@ -146,7 +146,7 @@ export const queryKeys = {
   // ============================================
   accounting: {
     all: ['accounting'] as const,
-    balanceSheet: (period: string) => [...queryKeys.accounting.all, 'balance-sheet', period] as const,
+    balanceSheet: (period: string, offset: number = 0) => [...queryKeys.accounting.all, 'balance-sheet', period, offset] as const,
     pnl: (period: string, offset: number = 0) => [...queryKeys.accounting.all, 'pnl', period, offset] as const,
   },
 

@@ -55,12 +55,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       }
 
       const period = periodResult.data;
-      const { previousEnd } = getCalendarPeriodBoundaries(period);
+      const offsetParam = parseInt(url.searchParams.get('offset') ?? '0', 10);
+      const offset = isNaN(offsetParam) ? 0 : Math.min(0, offsetParam);
+      const { currentEnd, previousEnd } = getCalendarPeriodBoundaries(period, new Date(), offset);
 
       const navSnapshotService = getNavSnapshotService();
 
-      // Current column: read from latest snapshot
-      const currentSnapshot = await navSnapshotService.getLatestSnapshot(user.id);
+      // Current column: latest snapshot at or before the period's current end
+      const currentSnapshot = await navSnapshotService.getSnapshotAtBoundary(user.id, currentEnd);
 
       if (!currentSnapshot) {
         // Cold-start: no snapshot exists yet for this user
