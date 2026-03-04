@@ -1521,29 +1521,52 @@ export class UniswapV3PositionService {
         const toBlock: bigint | "latest" =
             blockNumber === "latest" ? "latest" : BigInt(blockNumber);
 
-        const mintBlock = await findNftMintBlock(
-            client,
-            nfpmAddress,
-            nftId,
-            deploymentBlock,
+        const ledgerService = new UniswapV3LedgerService(
+            { positionId: id },
+            { prisma: this._prisma },
         );
-        if (!mintBlock) {
-            throw new Error(
-                `Mint block not found for NFT ${nftId} on chain ${chainId}`,
+
+        const lastEvent = await ledgerService.findLast(dbTx);
+
+        let fromBlock: bigint;
+        if (!lastEvent) {
+            const mintBlock = await findNftMintBlock(
+                client,
+                nfpmAddress,
+                nftId,
+                deploymentBlock,
             );
+            if (!mintBlock) {
+                throw new Error(
+                    `Mint block not found for NFT ${nftId} on chain ${chainId}`,
+                );
+            }
+            fromBlock = mintBlock;
+        } else {
+            const finalityConfig = this.evmConfig.getFinalityConfig(chainId);
+            let finalizedBlockNumber: bigint;
+            if (finalityConfig.type === "blockTag") {
+                const finalizedBlock = await client.getBlock({
+                    blockTag: "finalized",
+                });
+                finalizedBlockNumber = finalizedBlock.number;
+            } else {
+                const currentBlock = await client.getBlockNumber();
+                finalizedBlockNumber =
+                    currentBlock - BigInt(finalityConfig.minBlockHeight);
+            }
+            fromBlock =
+                finalizedBlockNumber < lastEvent.typedConfig.blockNumber
+                    ? finalizedBlockNumber
+                    : lastEvent.typedConfig.blockNumber;
         }
 
         const logs = await this.fetchAllPositionLogs(
             client,
             nfpmAddress,
             nftId,
-            mintBlock,
+            fromBlock,
             toBlock,
-        );
-
-        const ledgerService = new UniswapV3LedgerService(
-            { positionId: id },
-            { prisma: this._prisma },
         );
 
         const importResult = await ledgerService.importLogsForPosition(
