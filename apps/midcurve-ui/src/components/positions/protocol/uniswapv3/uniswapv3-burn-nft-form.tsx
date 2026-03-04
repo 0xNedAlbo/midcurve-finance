@@ -1,16 +1,17 @@
 'use client';
 
 import { useEffect } from 'react';
-import { AlertCircle } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useBurnPosition } from '@/hooks/positions/uniswapv3/useBurnPosition';
+import { useUniswapV3RefreshPosition } from '@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition';
+import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
-import { TransactionStep } from '@/components/positions/TransactionStep';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
+import { AddToPortfolioSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/AddToPortfolioSection';
 import { InfoRow } from '../../info-row';
 import { formatChainName } from '@/lib/position-helpers';
 
@@ -44,21 +45,43 @@ export function UniswapV3BurnNftForm({
   const chain = getChainSlugFromChainId(config.chainId);
   const chainConfig = chain ? CHAIN_METADATA[chain] : null;
 
+  const isWrongNetwork = !!(isConnected && chainConfig && connectedChainId !== chainConfig.chainId);
+  const isWrongAccount = !!(
+    isConnected &&
+    walletAddress &&
+    state.ownerAddress &&
+    walletAddress.toLowerCase() !== state.ownerAddress.toLowerCase()
+  );
+  const canBurn = isConnected && !isWrongNetwork && !isWrongAccount;
+
+  // All hooks must be called before any early returns
   const burnPosition = useBurnPosition({
     tokenId: BigInt(config.nftId),
     chainId: config.chainId,
   });
 
-  useEffect(() => {
-    burnPosition.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const refreshPosition = useUniswapV3RefreshPosition();
 
   useEffect(() => {
-    if (burnPosition.burnSuccess) {
+    if (burnPosition.burnSuccess && !refreshPosition.isPending && !refreshPosition.isSuccess) {
       onBurnSuccess?.();
+      refreshPosition.mutate({ chainId: config.chainId, nftId: config.nftId.toString() });
     }
-  }, [burnPosition.burnSuccess, onBurnSuccess]);
+  }, [burnPosition.burnSuccess, onBurnSuccess, config.chainId, config.nftId, refreshPosition]);
+
+  const burnTx = useEvmTransactionPrompt({
+    label: 'Burn NFT',
+    buttonLabel: 'Burn',
+    chainId: config.chainId,
+    enabled: canBurn,
+    txHash: burnPosition.burnTxHash,
+    isSubmitting: burnPosition.isBurning,
+    isWaitingForConfirmation: burnPosition.isWaitingForBurn,
+    isSuccess: burnPosition.burnSuccess,
+    error: burnPosition.burnError,
+    onExecute: () => burnPosition.burn(),
+    onReset: () => burnPosition.reset(),
+  });
 
   if (!chain || !chainConfig) {
     return (
@@ -69,20 +92,6 @@ export function UniswapV3BurnNftForm({
       </div>
     );
   }
-
-  const isWrongNetwork = !!(
-    isConnected &&
-    connectedChainId !== chainConfig.chainId
-  );
-
-  const isWrongAccount = !!(
-    isConnected &&
-    walletAddress &&
-    state.ownerAddress &&
-    walletAddress.toLowerCase() !== state.ownerAddress.toLowerCase()
-  );
-
-  const canBurn = isConnected && !isWrongNetwork && !isWrongAccount;
 
   return (
     <div className="space-y-3">
@@ -128,46 +137,22 @@ export function UniswapV3BurnNftForm({
 
       {/* Transaction */}
       {isConnected && !isWrongAccount && (
-        <div className="bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-white mb-4">Transaction</h3>
-          <div className="space-y-3">
-            <TransactionStep
-              title="Burn NFT"
-              description="Destroy the position NFT on-chain"
-              isLoading={burnPosition.isBurning || burnPosition.isWaitingForBurn}
-              isComplete={burnPosition.burnSuccess}
-              isDisabled={
-                !canBurn ||
-                burnPosition.isBurning ||
-                burnPosition.isWaitingForBurn ||
-                burnPosition.burnSuccess
-              }
-              onExecute={() => burnPosition.burn()}
-              showExecute={!burnPosition.burnSuccess}
-              transactionHash={burnPosition.burnTxHash}
-              chain={chain}
+        <div className="space-y-3">
+          {burnTx.element}
+          {burnTx.isSuccess && (
+            <AddToPortfolioSection
+              isPending={refreshPosition.isPending}
+              isSuccess={refreshPosition.isSuccess}
+              isError={refreshPosition.isError}
+              error={refreshPosition.error instanceof Error ? refreshPosition.error : null}
+              label="Updating the position in your portfolio"
             />
-          </div>
-
-          {/* Error Display */}
-          {burnPosition.burnError && (
-            <div className="mt-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-              <div className="flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                <div>
-                  <h5 className="text-red-400 font-medium">Transaction Error</h5>
-                  <p className="text-red-200/80 text-sm mt-1">
-                    {burnPosition.burnError.message}
-                  </p>
-                </div>
-              </div>
-            </div>
           )}
         </div>
       )}
 
       {/* Finish Button */}
-      {burnPosition.burnSuccess && (
+      {burnTx.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { normalizeAddress } from '@midcurve/shared';
@@ -9,10 +9,12 @@ import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUnisw
 import type { EvmChainSlug } from '@/config/chains';
 import { CHAIN_METADATA } from '@/config/chains';
 import { useCollectFees } from '@/hooks/positions/uniswapv3/useCollectFees';
+import { useUniswapV3RefreshPosition } from '@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
+import { AddToPortfolioSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/AddToPortfolioSection';
 
 interface UniswapV3CollectFeesFormProps {
   position: UniswapV3PositionData;
@@ -88,6 +90,14 @@ export function UniswapV3CollectFeesForm({
 
   // Collect fees hook (MUST be called before any returns)
   const collectFees = useCollectFees(collectParams);
+
+  const refreshPosition = useUniswapV3RefreshPosition();
+
+  useEffect(() => {
+    if (collectFees.isSuccess && !refreshPosition.isPending && !refreshPosition.isSuccess) {
+      refreshPosition.mutate({ chainId: config.chainId, nftId: config.nftId.toString() });
+    }
+  }, [collectFees.isSuccess, config.chainId, config.nftId, refreshPosition]);
 
   // Validate chain configuration (needed before canCollect)
   const isWrongNetwork = !!(
@@ -222,7 +232,20 @@ export function UniswapV3CollectFeesForm({
       )}
 
       {/* Collect Fees Transaction */}
-      {isConnected && !isWrongAccount && collectFeesTx.element}
+      {isConnected && !isWrongAccount && (
+        <div className="space-y-3">
+          {collectFeesTx.element}
+          {collectFeesTx.isSuccess && (
+            <AddToPortfolioSection
+              isPending={refreshPosition.isPending}
+              isSuccess={refreshPosition.isSuccess}
+              isError={refreshPosition.isError}
+              error={refreshPosition.error instanceof Error ? refreshPosition.error : null}
+              label="Updating the position in your portfolio"
+            />
+          )}
+        </div>
+      )}
 
       {/* Finish Button - Small green button at bottom right, only shown after collection completes */}
       {collectFeesTx.isSuccess && (
