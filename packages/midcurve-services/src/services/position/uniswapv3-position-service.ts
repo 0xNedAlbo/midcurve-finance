@@ -1378,77 +1378,60 @@ export class UniswapV3PositionService {
                 "Starting position reset - rebuilding ledger from RPC",
             );
 
-            // 2. Get NFPM address and deployment block for this chain
-            const nfpmAddress = getPositionManagerAddress(chainId);
-            const deploymentBlock = getNfpmDeploymentBlock(chainId);
-
-            // 3. Get viem public client for RPC calls
-            const client = this.evmConfig.getPublicClient(chainId);
-
-            // 4. Create ledger event service for this position
+            // 2. Create ledger event service for this position
             const ledgerEventService = new UniswapV3LedgerService(
                 { positionId: id },
                 { prisma: this._prisma },
             );
 
-            // 5. Delete all existing ledger events
+            // 3. Capture existing events before deletion so we can emit revert domain events
+            const existingEvents = await ledgerEventService.findAll(dbTx);
+
+            // 4. Delete all existing ledger events
             const deletedCount = await ledgerEventService.deleteAll(dbTx);
             this.logger.info(
                 { positionId: id, deletedCount },
                 "Deleted all existing ledger events",
             );
 
-            // 6. Fetch all events from NFPM deployment block to latest via eth_getLogs
-            const logs = await this.fetchAllPositionLogs(
-                client,
-                nfpmAddress,
-                nftId,
-                deploymentBlock,
-            );
-
-            this.logger.info(
-                { positionId: id, logCount: logs.length },
-                "Fetched position logs via RPC",
-            );
-
-            // 7. Import logs (handles out-of-order, calculates aggregates)
-            if (logs.length > 0) {
-                const importResult =
-                    await ledgerEventService.importLogsForPosition(
-                        existingPosition,
-                        chainId,
-                        logs,
-                        this.poolPriceService,
+            // 5. Emit position.liquidity.reverted for each block that had events,
+            //    so downstream consumers (e.g. accounting) can clean up derived state
+            if (existingEvents.length > 0) {
+                const publisher = getDomainEventPublisher();
+                const blockHashGroups = new Map<string, number>();
+                for (const event of existingEvents) {
+                    const bh = event.typedConfig.blockHash;
+                    blockHashGroups.set(bh, (blockHashGroups.get(bh) ?? 0) + 1);
+                }
+                for (const [blockHash, count] of blockHashGroups) {
+                    await publisher.createAndPublish<PositionLiquidityRevertedPayload>(
+                        {
+                            type: "position.liquidity.reverted",
+                            entityId: existingPosition.id,
+                            entityType: "position",
+                            userId: existingPosition.userId,
+                            payload: {
+                                positionId: existingPosition.id,
+                                positionHash: existingPosition.positionHash,
+                                chainId,
+                                nftId: nftId.toString(),
+                                blockHash,
+                                deletedCount: count,
+                                revertedAt: new Date().toISOString(),
+                            },
+                            source: "business-logic",
+                        },
                         dbTx,
                     );
-
-                const insertedCount = importResult.results.filter(
-                    (r) => r.action === "inserted",
-                ).length;
-                const skippedCount = importResult.results.filter(
-                    (r) => r.action === "skipped",
-                ).length;
-
-                this.logger.info(
-                    {
-                        positionId: id,
-                        inserted: insertedCount,
-                        skipped: skippedCount,
-                        aggregates: {
-                            liquidityAfter:
-                                importResult.aggregates.liquidityAfter.toString(),
-                            costBasisAfter:
-                                importResult.aggregates.costBasisAfter.toString(),
-                            realizedPnlAfter:
-                                importResult.aggregates.realizedPnlAfter.toString(),
-                        },
-                    },
-                    "Imported ledger events from logs",
-                );
-                // APR periods are persisted internally by the ledger service
+                }
             }
 
-            // 8. Refresh position state from on-chain data
+            // 6. Reimport all events from on-chain and emit insert domain events.
+            //    refreshAllPositionLogs() uses mintBlock as fromBlock since there are
+            //    no ledger events after the deletion above.
+            await this.refreshAllPositionLogs(id, "latest", dbTx);
+
+            // 7. Refresh position state from on-chain data
             this.logger.info(
                 { positionId: id },
                 "Refreshing position state from on-chain data",
