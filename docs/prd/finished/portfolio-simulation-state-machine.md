@@ -3,7 +3,9 @@
 ## Product Requirements Document · Midcurve Finance
 
 **Version 1.0 | March 2026**
-**Status: DRAFT | Classification: Internal**
+**Status: IMPLEMENTED | Classification: Internal**
+
+**Implemented:** Full engine + UI replacement (`@midcurve/shared` simulation module + `PortfolioSimulator` component). Commits: `9562a52`, `0348315`.
 
 ---
 
@@ -628,3 +630,23 @@ New files in `packages/midcurve-shared/src/types/simulation/`:
 2. **Engine reactivity.** When the pool price updates in real-time (via WebSocket subscription), should the engine automatically update its `startPrice`? Or should the engine be constructed once and only reset on user action?
 
 3. **Curve generation starting point.** Should `generateCurvePoints()` show the curve relative to a "what-if from current pool price" perspective (radiating outward from pool price) or simply evaluate current state at each price? The current design uses the simpler approach (evaluate state at each price), which matches the PRD intent. The radial approach could be a future enhancement.
+
+---
+
+## 11. Implementation Notes
+
+Implemented in full per the PRD. Phase 3 (tests) was deferred.
+
+**Engine (`9562a52`)** — 17 files added/modified in `@midcurve/shared`:
+- All types from Sections 3–5 implemented exactly as specified
+- `resolveExposure()` extracted from `CloseOrderSimulationOverlay` into [resolve-exposure.ts](packages/midcurve-shared/src/types/position/close-order-simulation/resolve-exposure.ts) and re-exported; the overlay delegates to it
+- `SimulationEngine` uses deep-clone of initial state for reset fidelity
+- All exports added to `packages/midcurve-shared/src/types/index.ts`
+
+**UI (`0348315`)** — `UniswapV3PositionSimulator` replaced by `PortfolioSimulator`:
+- New [SimulationPnLCurve](apps/midcurve-ui/src/components/positions/pnl-curve/simulation-pnl-curve.tsx) — full-size Visx chart with zoom (x/y axis drag), pan (chart area drag), tooltip hover, trigger lines with fired/unfired state
+- Price slider integrated below the chart x-axis, aligned to the chart area width
+- Three summary cards above the chart: simulated price + current price, PnL, asset composition
+- `simulatedPrice` is the source of truth (state); `sliderValue` (0–100) is derived — so zooming/panning repositions the thumb without changing the simulated price
+- Curve points regenerated on zoom to cover the visible x-axis range
+- `Reset Simulation` button always visible in the header
