@@ -71,15 +71,9 @@ async function main(): Promise<void> {
     // Log status
     const status = workerManager.getStatus();
     const totalPools = status.poolPriceSubscriber.batches.reduce((sum, b) => sum + b.poolCount, 0);
-    const totalPositions = status.positionLiquiditySubscriber.batches.reduce(
-      (sum, b) => sum + b.positionCount,
-      0
-    );
     log.info({
       poolPriceBatches: status.poolPriceSubscriber.batchCount,
       totalPools,
-      positionLiquidityBatches: status.positionLiquiditySubscriber.batchCount,
-      totalPositions,
       rabbitmqConnected: status.rabbitmq.isConnected,
       msg: 'Worker started successfully',
     });

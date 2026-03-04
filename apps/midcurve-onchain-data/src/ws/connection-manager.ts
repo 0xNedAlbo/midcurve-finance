@@ -5,7 +5,6 @@
  * Connection handling is managed internally by viem's WebSocket transport.
  *
  * For UniswapV3 pool subscriptions, see ./providers/uniswap-v3-pools.ts
- * For NFPM position subscriptions, see ./providers/uniswap-v3-nfpm.ts
  */
 
 // Pool price subscriptions (Swap events)
@@ -16,14 +15,6 @@ export {
   SWAP_EVENT_TOPIC,
   type PoolInfo,
 } from './providers/uniswap-v3-pools';
-
-// Position liquidity subscriptions (NFPM events)
-export {
-  UniswapV3NfpmSubscriptionBatch,
-  createUniswapV3NfpmSubscriptionBatches,
-  MAX_POSITIONS_PER_SUBSCRIPTION,
-  type PositionInfo,
-} from './providers/uniswap-v3-nfpm';
 
 // Close order lifecycle subscriptions (UniswapV3PositionCloser events)
 export {

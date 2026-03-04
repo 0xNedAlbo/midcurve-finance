@@ -4,8 +4,7 @@
  * Single event consumer that handles position.created, position.closed, position.burned,
  * and position.deleted domain events to dynamically update WebSocket subscriptions.
  *
- * Notifies both:
- * - PositionLiquiditySubscriber: for position liquidity event subscriptions (NFPM)
+ * Notifies:
  * - PoolPriceSubscriber: for pool price subscriptions (Swap events)
  */
 
@@ -18,29 +17,20 @@ import {
   parsePositionRoutingKey,
   type DomainEvent,
 } from '@midcurve/services';
-import type { PositionLiquiditySubscriber } from '../workers/position-liquidity-subscriber';
 import type { PoolPriceSubscriber } from '../workers/pool-price-subscriber';
 
 /**
- * Handles position.created, position.closed, position.burned, and position.deleted events for WebSocket subscription management.
+ * Handles position.created, position.closed, position.burned, and position.deleted events
+ * for WebSocket subscription management.
  *
  * Uses a single queue bound to all event patterns, dispatching based on event type.
- * Notifies both position and pool price subscribers.
+ * Notifies the pool price subscriber.
  */
 export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   readonly eventPattern = ROUTING_PATTERNS.POSITION_CREATED; // Primary binding
   readonly queueName = 'onchain-data.position-events';
 
-  private positionSubscriber: PositionLiquiditySubscriber | null = null;
   private poolPriceSubscriber: PoolPriceSubscriber | null = null;
-
-  /**
-   * Set the position liquidity subscriber instance.
-   * Must be called before starting the consumer.
-   */
-  setPositionSubscriber(subscriber: PositionLiquiditySubscriber): void {
-    this.positionSubscriber = subscriber;
-  }
 
   /**
    * Set the pool price subscriber instance.
@@ -48,13 +38,6 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
    */
   setPoolPriceSubscriber(subscriber: PoolPriceSubscriber): void {
     this.poolPriceSubscriber = subscriber;
-  }
-
-  /**
-   * @deprecated Use setPositionSubscriber instead
-   */
-  setSubscriber(subscriber: PositionLiquiditySubscriber): void {
-    this.setPositionSubscriber(subscriber);
   }
 
   /**
@@ -98,7 +81,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
   }
 
   async handle(event: DomainEvent<PositionJSON>, routingKey: string): Promise<void> {
-    if (!this.positionSubscriber && !this.poolPriceSubscriber) {
+    if (!this.poolPriceSubscriber) {
       this.logger.warn({ eventId: event.id }, 'No subscribers set, skipping event');
       return;
     }
@@ -109,12 +92,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
     );
 
     if (event.type === 'position.created') {
-      // For created events, we need the full payload for position data
-      // Notify both subscribers in parallel
-      await Promise.all([
-        this.positionSubscriber?.handlePositionCreated(event.payload),
-        this.poolPriceSubscriber?.handlePositionCreated(event.payload),
-      ]);
+      await this.poolPriceSubscriber.handlePositionCreated(event.payload);
     } else if (event.type === 'position.closed') {
       // Don't unsubscribe — position may be reopened (IncreaseLiquidity on same NFT).
       // Subscriptions are cleaned up on position.deleted or by the inactive cleanup timer.
@@ -129,11 +107,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         this.logger.error({ routingKey }, `Invalid routing key for ${event.type} event`);
         return;
       }
-      // Notify both subscribers in parallel
-      await Promise.all([
-        this.positionSubscriber?.handlePositionDeleted(coords.chainId, coords.nftId),
-        this.poolPriceSubscriber?.handlePositionDeleted(coords.chainId, coords.nftId),
-      ]);
+      await this.poolPriceSubscriber.handlePositionDeleted(coords.chainId, coords.nftId);
     } else {
       this.logger.warn({ eventType: event.type }, 'Unknown position event type');
     }

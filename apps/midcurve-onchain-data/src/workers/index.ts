@@ -6,7 +6,6 @@
  *
  * Workers:
  * - PoolPriceSubscriber: Subscribes to Swap events for pools with active positions
- * - PositionLiquiditySubscriber: Subscribes to NFPM events for active positions
  * - Erc20ApprovalSubscriber: Subscribes to ERC-20 Approval events for token approvals
  * - Erc20BalanceSubscriber: Subscribes to ERC-20 Transfer events for token balances
  * - EvmTxStatusSubscriber: Polls RPC for EVM transaction status updates
@@ -14,14 +13,13 @@
  *
  * Event Consumers:
  * - PositionEventHandler: Handles position.created, position.closed, and position.deleted
- *   events, notifying both subscribers to dynamically update their WebSocket subscriptions
+ *   events, notifying PoolPriceSubscriber to dynamically update its WebSocket subscriptions
  */
 
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PositionEventHandler } from '../events';
 import { PoolPriceSubscriber } from './pool-price-subscriber';
-import { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
 import { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 import { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 import { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
@@ -36,7 +34,6 @@ const log = onchainDataLogger.child({ component: 'WorkerManager' });
  */
 export class WorkerManager {
   private poolPriceSubscriber: PoolPriceSubscriber;
-  private positionLiquiditySubscriber: PositionLiquiditySubscriber;
   private erc20ApprovalSubscriber: Erc20ApprovalSubscriber;
   private erc20BalanceSubscriber: Erc20BalanceSubscriber;
   private evmTxStatusSubscriber: EvmTxStatusSubscriber;
@@ -48,7 +45,6 @@ export class WorkerManager {
 
   constructor() {
     this.poolPriceSubscriber = new PoolPriceSubscriber();
-    this.positionLiquiditySubscriber = new PositionLiquiditySubscriber();
     this.erc20ApprovalSubscriber = new Erc20ApprovalSubscriber();
     this.erc20BalanceSubscriber = new Erc20BalanceSubscriber();
     this.evmTxStatusSubscriber = new EvmTxStatusSubscriber();
@@ -57,11 +53,7 @@ export class WorkerManager {
     this.nfpmTransferSubscriber = new NfpmTransferSubscriber();
     this.positionEventHandler = new PositionEventHandler();
 
-    // Wire both subscribers to event handler
-    // Position events trigger updates in both:
-    // - PositionLiquiditySubscriber: NFPM event subscriptions
-    // - PoolPriceSubscriber: pool price subscriptions
-    this.positionEventHandler.setPositionSubscriber(this.positionLiquiditySubscriber);
+    // Wire pool price subscriber to event handler
     this.positionEventHandler.setPoolPriceSubscriber(this.poolPriceSubscriber);
   }
 
@@ -92,7 +84,6 @@ export class WorkerManager {
       log.info({ msg: 'Starting subscribers...' });
       await Promise.all([
         this.poolPriceSubscriber.start(),
-        this.positionLiquiditySubscriber.start(),
         this.erc20ApprovalSubscriber.start(),
         this.erc20BalanceSubscriber.start(),
         this.evmTxStatusSubscriber.start(),
@@ -132,7 +123,6 @@ export class WorkerManager {
       log.info({ msg: 'Stopping subscribers...' });
       await Promise.all([
         this.poolPriceSubscriber.stop(),
-        this.positionLiquiditySubscriber.stop(),
         this.erc20ApprovalSubscriber.stop(),
         this.erc20BalanceSubscriber.stop(),
         this.evmTxStatusSubscriber.stop(),
@@ -162,7 +152,6 @@ export class WorkerManager {
   getStatus(): {
     isRunning: boolean;
     poolPriceSubscriber: ReturnType<PoolPriceSubscriber['getStatus']>;
-    positionLiquiditySubscriber: ReturnType<PositionLiquiditySubscriber['getStatus']>;
     erc20ApprovalSubscriber: ReturnType<Erc20ApprovalSubscriber['getStatus']>;
     erc20BalanceSubscriber: ReturnType<Erc20BalanceSubscriber['getStatus']>;
     evmTxStatusSubscriber: ReturnType<EvmTxStatusSubscriber['getStatus']>;
@@ -181,7 +170,6 @@ export class WorkerManager {
     return {
       isRunning: this.isRunning,
       poolPriceSubscriber: this.poolPriceSubscriber.getStatus(),
-      positionLiquiditySubscriber: this.positionLiquiditySubscriber.getStatus(),
       erc20ApprovalSubscriber: this.erc20ApprovalSubscriber.getStatus(),
       erc20BalanceSubscriber: this.erc20BalanceSubscriber.getStatus(),
       evmTxStatusSubscriber: this.evmTxStatusSubscriber.getStatus(),
@@ -209,7 +197,6 @@ export class WorkerManager {
  * Export subscribers for direct usage if needed.
  */
 export { PoolPriceSubscriber } from './pool-price-subscriber';
-export { PositionLiquiditySubscriber } from './position-liquidity-subscriber';
 export { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 export { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 export { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';

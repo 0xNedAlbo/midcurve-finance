@@ -17,7 +17,6 @@ import {
   RuleRegistry,
   EnrichCoingeckoTokensRule,
   RefreshCoingeckoTokensRule,
-  UpdatePositionOnLiquidityEventRule,
   ProcessCloseOrderEventsRule,
   CreateAutomationWalletOnUserRegisteredRule,
   PostJournalEntriesOnPositionEventsRule,
@@ -65,9 +64,6 @@ export class RuleManager {
 
     // CoinGecko token enrichment - runs every 5 minutes
     this.registry.register(new EnrichCoingeckoTokensRule());
-
-    // Position liquidity event handler - imports ledger events and refreshes positions
-    this.registry.register(new UpdatePositionOnLiquidityEventRule());
 
     // Close order lifecycle event handler - syncs close orders with on-chain state
     this.registry.register(new ProcessCloseOrderEventsRule());

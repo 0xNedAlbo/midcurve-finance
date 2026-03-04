@@ -3,7 +3,8 @@
  *
  * Declares topic exchanges for onchain data events:
  * - pool-prices: Pool swap events (price updates)
- * - position-liquidity-events: Position liquidity events (IncreaseLiquidity, DecreaseLiquidity, Collect)
+ * - close-order-events: Close order lifecycle events
+ * - nfpm-transfer-events: NFPM Transfer events (mint/burn/transfer)
  *
  * All operations are idempotent - safe to call multiple times.
  *
@@ -25,9 +26,6 @@ const log = onchainDataLogger.child({ component: 'Topology' });
 /** Exchange name for pool prices (Swap events) */
 export const EXCHANGE_POOL_PRICES = 'pool-prices';
 
-/** Exchange name for position liquidity events (IncreaseLiquidity, DecreaseLiquidity, Collect) */
-export const EXCHANGE_POSITION_LIQUIDITY = 'position-liquidity-events';
-
 /** Exchange name for close order lifecycle events (registration, cancellation, config updates) */
 export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
 
@@ -40,14 +38,6 @@ export const EXCHANGE_NFPM_TRANSFERS = 'nfpm-transfer-events';
  */
 export function buildUniswapV3RoutingKey(chainId: number, poolAddress: string): string {
   return `uniswapv3.${chainId}.${poolAddress.toLowerCase()}`;
-}
-
-/**
- * Build a routing key for position liquidity events.
- * Format: uniswapv3.{chainId}.{nftId}
- */
-export function buildPositionLiquidityRoutingKey(chainId: number, nftId: string): string {
-  return `uniswapv3.${chainId}.${nftId}`;
 }
 
 /**
@@ -85,7 +75,8 @@ export function buildNfpmTransferRoutingKey(
  *
  * Creates:
  * - pool-prices (topic exchange) - for Swap events
- * - position-liquidity-events (topic exchange) - for position events
+ * - close-order-events (topic exchange) - for close order lifecycle events
+ * - nfpm-transfer-events (topic exchange) - for NFPM Transfer events
  *
  * Note: No queues are created here. Consumers will create their own
  * queues and bind them with appropriate routing key patterns.
@@ -99,13 +90,6 @@ export async function setupOnchainDataTopology(channel: Channel): Promise<void> 
     autoDelete: false,
   });
   log.info({ exchange: EXCHANGE_POOL_PRICES, type: 'topic', msg: 'Exchange declared' });
-
-  // Create position-liquidity-events topic exchange
-  await channel.assertExchange(EXCHANGE_POSITION_LIQUIDITY, 'topic', {
-    durable: true,
-    autoDelete: false,
-  });
-  log.info({ exchange: EXCHANGE_POSITION_LIQUIDITY, type: 'topic', msg: 'Exchange declared' });
 
   // Create close-order-events topic exchange
   await channel.assertExchange(EXCHANGE_CLOSE_ORDER_EVENTS, 'topic', {
@@ -135,7 +119,6 @@ export const setupPoolPricesTopology = setupOnchainDataTopology;
 export async function verifyOnchainDataTopology(channel: Channel): Promise<boolean> {
   try {
     await channel.checkExchange(EXCHANGE_POOL_PRICES);
-    await channel.checkExchange(EXCHANGE_POSITION_LIQUIDITY);
     await channel.checkExchange(EXCHANGE_CLOSE_ORDER_EVENTS);
     await channel.checkExchange(EXCHANGE_NFPM_TRANSFERS);
     return true;
