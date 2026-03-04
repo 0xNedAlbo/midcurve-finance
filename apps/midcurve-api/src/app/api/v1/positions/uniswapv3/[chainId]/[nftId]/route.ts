@@ -13,16 +13,7 @@ import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import {
   getDomainEventPublisher,
-  EvmConfig,
-  UniswapV3LedgerService,
-  getPositionManagerAddress,
 } from '@midcurve/services';
-import type {
-  UniswapV3PositionConfigData,
-  UniswapV3PositionState,
-  UniswapV3LedgerEventState,
-} from '@midcurve/shared';
-import { normalizeAddress } from '@midcurve/shared';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -40,7 +31,6 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
-  getUniswapV3PoolService,
   getUniswapV3CloseOrderService,
   getJournalService,
 } from '@/lib/services';
@@ -50,8 +40,6 @@ import type {
   CreateUniswapV3PositionData,
 } from '@midcurve/api-shared';
 
-/** Zero address constant for default operator */
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -465,177 +453,33 @@ export async function PUT(
         });
       }
 
-      const {
-        poolAddress,
-        tickUpper,
-        tickLower,
-        ownerAddress,
-        isToken0Quote,
-        liquidity,
-        mintTxHash,
-      } = bodyValidation.data;
+      const { quoteTokenAddress } = bodyValidation.data;
 
       apiLog.businessOperation(apiLogger, requestId, 'create', 'position', `${chainId}/${nftId}`, {
         chainId,
         nftId,
-        poolAddress,
         userId: user.id,
       });
 
-      // 3. Execute within a database transaction
-      const position = await prisma.$transaction(async (tx) => {
-        // 3a. Discover pool (should hit cache, lightweight)
-        const pool = await getUniswapV3PoolService().discover(
-          { poolAddress, chainId },
-          tx
-        );
-
-        // 3b. Build config object
-        const config: UniswapV3PositionConfigData = {
-          chainId,
-          nftId,
-          poolAddress: normalizeAddress(poolAddress),
-          tickUpper,
-          tickLower,
-        };
-
-        // 3c. Build state with defaults for new position
-        const state: UniswapV3PositionState = {
-          ownerAddress: normalizeAddress(ownerAddress),
-          operator: ZERO_ADDRESS,
-          liquidity: BigInt(liquidity),
-          feeGrowthInside0LastX128: 0n,
-          feeGrowthInside1LastX128: 0n,
-          tokensOwed0: 0n,
-          tokensOwed1: 0n,
-          unclaimedFees0: 0n,
-          unclaimedFees1: 0n,
-          tickLowerFeeGrowthOutside0X128: 0n,
-          tickLowerFeeGrowthOutside1X128: 0n,
-          tickUpperFeeGrowthOutside0X128: 0n,
-          tickUpperFeeGrowthOutside1X128: 0n,
-          isBurned: false,
-          isClosed: false,
-        };
-
-        // 3d. Serialize config and state for database storage
-        const configDB = {
-          chainId: config.chainId,
-          nftId: config.nftId,
-          poolAddress: config.poolAddress,
-          tickUpper: config.tickUpper,
-          tickLower: config.tickLower,
-        };
-
-        const stateDB = {
-          ownerAddress: state.ownerAddress,
-          operator: state.operator,
-          liquidity: state.liquidity.toString(),
-          feeGrowthInside0LastX128: state.feeGrowthInside0LastX128.toString(),
-          feeGrowthInside1LastX128: state.feeGrowthInside1LastX128.toString(),
-          tokensOwed0: state.tokensOwed0.toString(),
-          tokensOwed1: state.tokensOwed1.toString(),
-          unclaimedFees0: state.unclaimedFees0.toString(),
-          unclaimedFees1: state.unclaimedFees1.toString(),
-          tickLowerFeeGrowthOutside0X128: state.tickLowerFeeGrowthOutside0X128.toString(),
-          tickLowerFeeGrowthOutside1X128: state.tickLowerFeeGrowthOutside1X128.toString(),
-          tickUpperFeeGrowthOutside0X128: state.tickUpperFeeGrowthOutside0X128.toString(),
-          tickUpperFeeGrowthOutside1X128: state.tickUpperFeeGrowthOutside1X128.toString(),
-          isBurned: state.isBurned,
-          isClosed: state.isClosed,
-        };
-
-        // 3e. Create position via service
-        const createdPosition = await getUniswapV3PositionService().create(
-          {
-            protocol: 'uniswapv3',
-            userId: user.id,
-            poolId: pool.id,
-            isToken0Quote,
-            config,
-            state,
-          },
-          configDB,
-          stateDB,
-          tx
-        );
-
-        // 3f. Emit position.created event (INSIDE transaction via outbox pattern)
-        const eventPublisher = getDomainEventPublisher();
-        await eventPublisher.createAndPublish(
-          {
-            type: 'position.created',
-            entityId: createdPosition.id,
-            entityType: 'position',
-            userId: user.id,
-            payload: createdPosition.toJSON(),
-            source: 'api',
-            traceId: requestId,
-          },
-          tx
-        );
-
-        return createdPosition;
+      // 3. Discover position from chain (creates if new, refreshes if existing).
+      // Handles full ledger import + on-chain state read internally.
+      const position = await getUniswapV3PositionService().discover(user.id, {
+        chainId,
+        nftId,
+        quoteTokenAddress,
       });
 
-      // 4. Create MINT lifecycle ledger event (fire-and-forget, non-fatal)
-      if (mintTxHash) {
-        try {
-          const evmConfig = EvmConfig.getInstance();
-          const client = evmConfig.getPublicClient(chainId);
-
-          const receipt = await client.getTransactionReceipt({
-            hash: mintTxHash as `0x${string}`,
-          });
-
-          // Find the ERC-721 Transfer event from NFPM (from=0x0 means mint)
-          const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-          const nftIdHex = '0x' + BigInt(nftId).toString(16).padStart(64, '0');
-          const nfpmAddress = getPositionManagerAddress(chainId);
-
-          const transferLog = receipt.logs.find(l =>
-            l.address.toLowerCase() === nfpmAddress.toLowerCase() &&
-            l.topics[0] === TRANSFER_TOPIC &&
-            l.topics[3]?.toLowerCase() === nftIdHex.toLowerCase()
-          );
-
-          if (transferLog) {
-            const block = await client.getBlock({ blockNumber: receipt.blockNumber });
-
-            const ledgerService = new UniswapV3LedgerService({ positionId: position.id });
-            await ledgerService.createLifecycleEvent({
-              chainId,
-              nftId: BigInt(nftId),
-              blockNumber: receipt.blockNumber,
-              txIndex: transferLog.transactionIndex,
-              logIndex: transferLog.logIndex,
-              txHash: receipt.transactionHash,
-              blockHash: receipt.blockHash,
-              timestamp: new Date(Number(block.timestamp) * 1000),
-              sqrtPriceX96: 0n,
-              state: {
-                eventType: 'MINT',
-                tokenId: BigInt(nftId),
-                to: normalizeAddress(ownerAddress),
-              } as UniswapV3LedgerEventState,
-            });
-
-            apiLog.businessOperation(apiLogger, requestId, 'created', 'mint-lifecycle-event', position.id, {
-              chainId,
-              nftId,
-              mintTxHash,
-            });
-          }
-        } catch (error) {
-          // Non-fatal: position was created, lifecycle event can be backfilled
-          apiLogger.warn({
-            requestId,
-            mintTxHash,
-            error: error instanceof Error ? error.message : String(error),
-            msg: 'Failed to create MINT lifecycle event from receipt',
-          });
-        }
-      }
+      // 4. Emit position.created domain event
+      const eventPublisher = getDomainEventPublisher();
+      await eventPublisher.createAndPublish({
+        type: 'position.created',
+        entityId: position.id,
+        entityType: 'position',
+        userId: user.id,
+        payload: position.toJSON(),
+        source: 'api',
+        traceId: requestId,
+      });
 
       // 5. Log position creation
       apiLog.businessOperation(apiLogger, requestId, 'created', 'position', position.id, {

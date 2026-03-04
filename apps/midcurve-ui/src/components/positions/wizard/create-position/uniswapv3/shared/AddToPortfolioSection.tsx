@@ -48,7 +48,7 @@ export function AddToPortfolioSection({
           ) : (
             <Circle className="w-5 h-5 text-slate-400" />
           )}
-          <span className="text-white">Add Position to Portfolio</span>
+          <span className="text-white">Adding the Position to your Portfolio</span>
         </div>
       </div>
 

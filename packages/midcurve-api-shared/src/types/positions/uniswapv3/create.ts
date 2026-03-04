@@ -17,62 +17,19 @@ import { z } from 'zod';
 /**
  * PUT /api/v1/positions/uniswapv3/{chainId}/{nftId} - Request body
  *
- * The user provides position configuration data after minting a position on-chain.
- * All data is available from the UI wizard state and the mint transaction receipt.
+ * Called by the UI after a successful on-chain mint. The backend calls discover()
+ * which reads real on-chain state, imports full ledger history, and creates the
+ * position record if it doesn't exist yet.
  */
 export interface CreateUniswapV3PositionRequest {
   /**
-   * Pool address on the blockchain
-   * EIP-55 checksummed address
+   * Address of the quote token (unit of account), as selected by the user in the wizard.
+   * Passed directly to discover() to override auto-detection.
+   * EIP-55 checksummed address.
    *
-   * @example "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640" (USDC/WETH on Ethereum)
+   * @example "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" (USDC on Ethereum)
    */
-  poolAddress: string;
-
-  /**
-   * Upper tick bound of the position's price range
-   * @example 201120
-   */
-  tickUpper: number;
-
-  /**
-   * Lower tick bound of the position's price range
-   * @example 199120
-   */
-  tickLower: number;
-
-  /**
-   * Owner address (wallet that owns the NFT)
-   * EIP-55 checksummed address
-   * This is the address that sent the mint transaction (msg.sender)
-   *
-   * @example "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"
-   */
-  ownerAddress: string;
-
-  /**
-   * Whether token0 is the quote token (unit of account)
-   * Determined by the UI based on user selection or token role comparison
-   *
-   * @example true (token0 is quote token, e.g., USDC in USDC/WETH pool)
-   */
-  isToken0Quote: boolean;
-
-  /**
-   * Initial liquidity amount from the mint transaction
-   * bigint as string - extracted from IncreaseLiquidity event in tx receipt
-   *
-   * @example "1000000000000000000"
-   */
-  liquidity: string;
-
-  /**
-   * Transaction hash of the mint transaction (0x-prefixed, 64 hex chars)
-   * When provided, the backend fetches the receipt to create a MINT lifecycle ledger event.
-   *
-   * @example "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-   */
-  mintTxHash?: string;
+  quoteTokenAddress: string;
 }
 
 /**
@@ -95,56 +52,12 @@ export type CreateUniswapV3PositionResponse = ApiResponse<CreateUniswapV3Positio
 // =============================================================================
 
 /**
- * Ethereum address validation regex
- * Matches hex addresses with or without 0x prefix
- */
-const ethereumAddressRegex = /^(0x)?[0-9a-fA-F]{40}$/;
-
-/**
- * BigInt string validation regex
- * Matches numeric strings (no scientific notation)
- */
-const bigIntStringRegex = /^[0-9]+$/;
-
-/**
  * PUT /api/v1/positions/uniswapv3/{chainId}/{nftId} - Request validation
- *
- * Validates the request body for creating a position record.
- * Position is created with default state values; historical ledger events
- * are fetched asynchronously by a business rule.
  */
 export const CreateUniswapV3PositionRequestSchema = z.object({
-  // Position Config
-  poolAddress: z
+  quoteTokenAddress: z
     .string()
-    .regex(ethereumAddressRegex, 'Pool address must be a valid Ethereum address'),
-
-  tickUpper: z
-    .number()
-    .int('Tick upper must be an integer'),
-
-  tickLower: z
-    .number()
-    .int('Tick lower must be an integer'),
-
-  // Owner
-  ownerAddress: z
-    .string()
-    .regex(ethereumAddressRegex, 'Owner address must be a valid Ethereum address'),
-
-  // Quote token selection (determined by UI)
-  isToken0Quote: z.boolean(),
-
-  // Initial liquidity from mint transaction
-  liquidity: z
-    .string()
-    .regex(bigIntStringRegex, 'Liquidity must be a numeric string'),
-
-  // Optional mint transaction hash for MINT lifecycle event creation
-  mintTxHash: z
-    .string()
-    .regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid transaction hash format')
-    .optional(),
+    .regex(/^(0x)?[0-9a-fA-F]{40}$/, 'Quote token address must be a valid Ethereum address'),
 });
 
 /**

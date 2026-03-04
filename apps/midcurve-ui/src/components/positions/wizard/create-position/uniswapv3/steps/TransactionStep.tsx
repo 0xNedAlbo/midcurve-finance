@@ -24,7 +24,7 @@ import { RiskTriggersSection } from '../shared/RiskTriggersSection';
 import { usePriceAdjustment } from '../hooks/usePriceAdjustment';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
 import { useMintPosition, type MintPositionParams } from '@/hooks/positions/uniswapv3/wizard/useMintPosition';
-import { useCreatePositionAPI, extractLiquidityFromLogs } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
+import { useCreatePositionAPI } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
@@ -657,31 +657,17 @@ export function TransactionStep() {
 
       // Call API to save position to database
       if (
-        mint.logs &&
         chainId &&
-        walletAddress &&
-        state.discoveredPool &&
         quoteTokenAddress &&
         !createPositionAPI.isPending &&
         !createPositionAPI.isSuccess
       ) {
         const chainSlug = getChainSlugByChainId(chainId);
         if (chainSlug) {
-          const liquidity = extractLiquidityFromLogs(mint.logs);
-          const isToken0Quote =
-            (state.discoveredPool.token0.config.address as string).toLowerCase() ===
-            quoteTokenAddress.toLowerCase();
-
           createPositionAPI.mutate({
             chainId: chainSlug,
             nftId: mint.tokenId.toString(),
-            poolAddress: state.discoveredPool.typedConfig.address as Address,
-            tickLower: effectiveTickLower,
-            tickUpper: effectiveTickUpper,
-            ownerAddress: walletAddress,
-            isToken0Quote,
-            liquidity,
-            mintTxHash: mint.mintTxHash,
+            quoteTokenAddress,
           });
         }
       }
