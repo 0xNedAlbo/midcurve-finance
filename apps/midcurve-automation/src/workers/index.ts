@@ -13,7 +13,6 @@ import {
   type CloseOrderMonitorStatus,
 } from './close-order-monitor';
 import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
-import { NfpmTransferMonitor, type NfpmTransferMonitorStatus } from './nfpm-transfer-monitor';
 import {
   OutboxPublisher,
   setupDomainEventsTopology,
@@ -37,7 +36,6 @@ export interface WorkerManagerStatus {
     orderExecutor: CloseOrderExecutorStatus;
     outboxPublisher: OutboxPublisherStatus;
     rangeMonitor: RangeMonitorStatus;
-    nfpmTransferMonitor: NfpmTransferMonitorStatus;
   };
 }
 
@@ -53,7 +51,6 @@ class WorkerManager {
   private orderExecutor: CloseOrderExecutor | null = null;
   private outboxPublisher: OutboxPublisher | null = null;
   private rangeMonitor: RangeMonitor | null = null;
-  private nfpmTransferMonitor: NfpmTransferMonitor | null = null;
 
   /**
    * Start all workers
@@ -90,10 +87,6 @@ class WorkerManager {
       // Start RangeMonitor (monitors all positions for range changes)
       this.rangeMonitor = new RangeMonitor();
       startPromises.push(this.rangeMonitor.start());
-
-      // Start NfpmTransferMonitor (consumes NFPM Transfer events)
-      this.nfpmTransferMonitor = new NfpmTransferMonitor();
-      startPromises.push(this.nfpmTransferMonitor.start());
 
       // Start all workers in parallel
       await Promise.all(startPromises);
@@ -132,7 +125,6 @@ class WorkerManager {
         this.closeOrderMonitor?.stop(),
         this.orderExecutor?.stop(),
         this.rangeMonitor?.stop(),
-        this.nfpmTransferMonitor?.stop(),
       ]);
 
       // Stop outbox publisher (synchronous)
@@ -186,15 +178,6 @@ class WorkerManager {
           rangeChangesDetected: 0,
           lastEventAt: null,
           lastSyncAt: null,
-        },
-        nfpmTransferMonitor: this.nfpmTransferMonitor?.getStatus() || {
-          status: 'idle',
-          processedTotal: 0,
-          mintsProcessed: 0,
-          burnsProcessed: 0,
-          transfersProcessed: 0,
-          errorsTotal: 0,
-          lastProcessedAt: null,
         },
       },
     };
@@ -259,4 +242,3 @@ export async function stopWorkers(): Promise<void> {
 export { CloseOrderMonitor, type CloseOrderMonitorStatus };
 export { CloseOrderExecutor, type CloseOrderExecutorStatus };
 export { RangeMonitor, type RangeMonitorStatus };
-export { NfpmTransferMonitor, type NfpmTransferMonitorStatus };

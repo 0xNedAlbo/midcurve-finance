@@ -9,7 +9,6 @@
  * - Erc20ApprovalSubscriber: Subscribes to ERC-20 Approval events for token approvals
  * - Erc20BalanceSubscriber: Subscribes to ERC-20 Transfer events for token balances
  * - EvmTxStatusSubscriber: Polls RPC for EVM transaction status updates
- * - NfpmTransferSubscriber: Subscribes to ERC-721 Transfer events for position lifecycle (mint/burn/transfer)
  *
  * Event Consumers:
  * - PositionEventHandler: Handles position.created, position.closed, and position.deleted
@@ -25,7 +24,6 @@ import { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 import { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
 import { UniswapV3PoolPriceSubscriber } from './uniswapv3-pool-price-subscriber';
 import { CloseOrderSubscriber } from './close-order-subscriber';
-import { NfpmTransferSubscriber } from './nfpm-transfer-subscriber';
 
 const log = onchainDataLogger.child({ component: 'WorkerManager' });
 
@@ -39,7 +37,6 @@ export class WorkerManager {
   private evmTxStatusSubscriber: EvmTxStatusSubscriber;
   private uniswapV3PoolPriceSubscriber: UniswapV3PoolPriceSubscriber;
   private closeOrderSubscriber: CloseOrderSubscriber;
-  private nfpmTransferSubscriber: NfpmTransferSubscriber;
   private positionEventHandler: PositionEventHandler;
   private isRunning = false;
 
@@ -50,7 +47,6 @@ export class WorkerManager {
     this.evmTxStatusSubscriber = new EvmTxStatusSubscriber();
     this.uniswapV3PoolPriceSubscriber = new UniswapV3PoolPriceSubscriber();
     this.closeOrderSubscriber = new CloseOrderSubscriber();
-    this.nfpmTransferSubscriber = new NfpmTransferSubscriber();
     this.positionEventHandler = new PositionEventHandler();
 
     // Wire pool price subscriber to event handler
@@ -89,7 +85,6 @@ export class WorkerManager {
         this.evmTxStatusSubscriber.start(),
         this.uniswapV3PoolPriceSubscriber.start(),
         this.closeOrderSubscriber.start(),
-        this.nfpmTransferSubscriber.start(),
       ]);
 
       this.isRunning = true;
@@ -128,7 +123,6 @@ export class WorkerManager {
         this.evmTxStatusSubscriber.stop(),
         this.uniswapV3PoolPriceSubscriber.stop(),
         this.closeOrderSubscriber.stop(),
-        this.nfpmTransferSubscriber.stop(),
       ]);
 
       // Close RabbitMQ connection
@@ -157,7 +151,6 @@ export class WorkerManager {
     evmTxStatusSubscriber: ReturnType<EvmTxStatusSubscriber['getStatus']>;
     uniswapV3PoolPriceSubscriber: ReturnType<UniswapV3PoolPriceSubscriber['getStatus']>;
     closeOrderSubscriber: ReturnType<CloseOrderSubscriber['getStatus']>;
-    nfpmTransferSubscriber: ReturnType<NfpmTransferSubscriber['getStatus']>;
     eventConsumer: {
       positionEvents: { isRunning: boolean };
     };
@@ -175,7 +168,6 @@ export class WorkerManager {
       evmTxStatusSubscriber: this.evmTxStatusSubscriber.getStatus(),
       uniswapV3PoolPriceSubscriber: this.uniswapV3PoolPriceSubscriber.getStatus(),
       closeOrderSubscriber: this.closeOrderSubscriber.getStatus(),
-      nfpmTransferSubscriber: this.nfpmTransferSubscriber.getStatus(),
       eventConsumer: {
         positionEvents: { isRunning: this.positionEventHandler.isRunning() },
       },
@@ -202,4 +194,3 @@ export { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 export { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
 export { UniswapV3PoolPriceSubscriber } from './uniswapv3-pool-price-subscriber';
 export { CloseOrderSubscriber } from './close-order-subscriber';
-export { NfpmTransferSubscriber } from './nfpm-transfer-subscriber';

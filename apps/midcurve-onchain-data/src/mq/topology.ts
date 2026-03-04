@@ -4,7 +4,6 @@
  * Declares topic exchanges for onchain data events:
  * - pool-prices: Pool swap events (price updates)
  * - close-order-events: Close order lifecycle events
- * - nfpm-transfer-events: NFPM Transfer events (mint/burn/transfer)
  *
  * All operations are idempotent - safe to call multiple times.
  *
@@ -29,9 +28,6 @@ export const EXCHANGE_POOL_PRICES = 'pool-prices';
 /** Exchange name for close order lifecycle events (registration, cancellation, config updates) */
 export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
 
-/** Exchange name for NFPM Transfer events (mint, burn, transfer) */
-export const EXCHANGE_NFPM_TRANSFERS = 'nfpm-transfer-events';
-
 /**
  * Build a routing key for UniswapV3 swap events.
  * Format: uniswapv3.{chainId}.{poolAddress}
@@ -48,23 +44,6 @@ export function buildCloseOrderRoutingKey(chainId: number, nftId: string, trigge
   return `closer.${chainId}.${nftId}.${triggerMode}`;
 }
 
-/**
- * NFPM Transfer event types.
- */
-export type NfpmTransferEventType = 'MINT' | 'BURN' | 'TRANSFER';
-
-/**
- * Build a routing key for NFPM Transfer events.
- * Format: uniswapv3.{chainId}.{eventType}.{nftId}
- */
-export function buildNfpmTransferRoutingKey(
-  chainId: number,
-  eventType: NfpmTransferEventType,
-  nftId: string,
-): string {
-  return `uniswapv3.${chainId}.${eventType.toLowerCase()}.${nftId}`;
-}
-
 // ============================================================
 // Topology Setup
 // ============================================================
@@ -76,7 +55,6 @@ export function buildNfpmTransferRoutingKey(
  * Creates:
  * - pool-prices (topic exchange) - for Swap events
  * - close-order-events (topic exchange) - for close order lifecycle events
- * - nfpm-transfer-events (topic exchange) - for NFPM Transfer events
  *
  * Note: No queues are created here. Consumers will create their own
  * queues and bind them with appropriate routing key patterns.
@@ -98,13 +76,6 @@ export async function setupOnchainDataTopology(channel: Channel): Promise<void> 
   });
   log.info({ exchange: EXCHANGE_CLOSE_ORDER_EVENTS, type: 'topic', msg: 'Exchange declared' });
 
-  // Create nfpm-transfer-events topic exchange
-  await channel.assertExchange(EXCHANGE_NFPM_TRANSFERS, 'topic', {
-    durable: true,
-    autoDelete: false,
-  });
-  log.info({ exchange: EXCHANGE_NFPM_TRANSFERS, type: 'topic', msg: 'Exchange declared' });
-
   log.info({ msg: 'Onchain data topology setup complete' });
 }
 
@@ -120,7 +91,6 @@ export async function verifyOnchainDataTopology(channel: Channel): Promise<boole
   try {
     await channel.checkExchange(EXCHANGE_POOL_PRICES);
     await channel.checkExchange(EXCHANGE_CLOSE_ORDER_EVENTS);
-    await channel.checkExchange(EXCHANGE_NFPM_TRANSFERS);
     return true;
   } catch {
     return false;

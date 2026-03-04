@@ -24,9 +24,3 @@ export {
   type CloserContractInfo,
 } from './providers/uniswap-v3-closer';
 
-// NFPM Transfer subscriptions (ERC-721 Transfer events for mint/burn/transfer)
-export {
-  UniswapV3NfpmTransferSubscriptionBatch,
-  createNfpmTransferSubscriptionBatches,
-  MAX_WALLETS_PER_SUBSCRIPTION,
-} from './providers/uniswap-v3-nfpm-transfer';

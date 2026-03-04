@@ -9,7 +9,7 @@ import amqplib, { type ChannelModel, type Channel } from 'amqplib';
 import { setupDomainEventsTopology } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConfig, type RabbitMQConfig } from '../lib/config';
-import { setupOnchainDataTopology, EXCHANGE_POOL_PRICES, EXCHANGE_CLOSE_ORDER_EVENTS, EXCHANGE_NFPM_TRANSFERS } from './topology';
+import { setupOnchainDataTopology, EXCHANGE_POOL_PRICES, EXCHANGE_CLOSE_ORDER_EVENTS } from './topology';
 
 const log = onchainDataLogger.child({ component: 'RabbitMQConnection' });
 
@@ -97,7 +97,7 @@ class RabbitMQConnectionManager {
           this.channel = null;
         });
 
-        // Setup onchain data topology (pool-prices, close-order-events, nfpm-transfer-events exchanges)
+        // Setup onchain data topology (pool-prices, close-order-events exchanges)
         await setupOnchainDataTopology(this.channel);
 
         // Setup domain events topology (domain-events exchange + DLQ for event consumers)
@@ -215,23 +215,6 @@ class RabbitMQConnectionManager {
 
     if (published) {
       priceLog.mqEvent(log, 'published', { exchange: EXCHANGE_POOL_PRICES, routingKey });
-    }
-
-    return published;
-  }
-
-  /**
-   * Publish a message to the nfpm-transfer-events exchange
-   */
-  async publishNfpmTransferEvent(routingKey: string, content: Buffer): Promise<boolean> {
-    const channel = await this.getChannel();
-    const published = channel.publish(EXCHANGE_NFPM_TRANSFERS, routingKey, content, {
-      persistent: true,
-      contentType: 'application/json',
-    });
-
-    if (published) {
-      priceLog.mqEvent(log, 'published', { exchange: EXCHANGE_NFPM_TRANSFERS, routingKey });
     }
 
     return published;
