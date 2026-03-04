@@ -1090,6 +1090,8 @@ export class CloseOrderExecutor {
       msg: 'Order executed successfully',
     });
 
+    await positionService.refresh(positionId);
+
     // Send execution success notification
     try {
       const userNotificationService = getUserNotificationService();
