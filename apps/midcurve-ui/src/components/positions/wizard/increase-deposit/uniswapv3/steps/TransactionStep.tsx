@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useEffect } from 'react';
 import { useAccount, useChainId } from 'wagmi';
 import type { Address } from 'viem';
 import { getAddress } from 'viem';
@@ -14,6 +14,8 @@ import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenAppro
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { usePriceAdjustment } from '@/components/positions/wizard/create-position/uniswapv3/hooks/usePriceAdjustment';
 import { useIncreaseLiquidity } from '@/hooks/positions/uniswapv3/useIncreaseLiquidity';
+import { useUniswapV3RefreshPosition } from '@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition';
+import { AddToPortfolioSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/AddToPortfolioSection';
 import { getChainSlugByChainId } from '@/config/chains';
 import { NONFUNGIBLE_POSITION_MANAGER_ADDRESSES } from '@/config/contracts/nonfungible-position-manager';
 import { PriceAdjustmentStep } from './PriceAdjustmentStep';
@@ -144,6 +146,19 @@ export function TransactionStep() {
 
   const increaseLiquidity = useIncreaseLiquidity(increaseLiquidityParams);
 
+  const refreshPosition = useUniswapV3RefreshPosition();
+
+  useEffect(() => {
+    if (
+      increaseLiquidity.isSuccess &&
+      config &&
+      !refreshPosition.isPending &&
+      !refreshPosition.isSuccess
+    ) {
+      refreshPosition.mutate({ chainId: poolChainId, nftId: config.nftId.toString() });
+    }
+  }, [increaseLiquidity.isSuccess, config, poolChainId, refreshPosition]);
+
   // Transaction prompt for increase liquidity (same visual as create wizard's mint step)
   const increasePrompt = useEvmTransactionPrompt({
     label: 'Increase Liquidity',
@@ -213,6 +228,17 @@ export function TransactionStep() {
 
           {/* 4. Increase Liquidity */}
           {increasePrompt.element}
+
+          {/* 5. Update position in portfolio */}
+          {increaseLiquidity.isSuccess && (
+            <AddToPortfolioSection
+              isPending={refreshPosition.isPending}
+              isSuccess={refreshPosition.isSuccess}
+              isError={refreshPosition.isError}
+              error={refreshPosition.error instanceof Error ? refreshPosition.error : null}
+              label="Updating the position in your portfolio"
+            />
+          )}
         </div>
       </div>
     );
@@ -222,7 +248,7 @@ export function TransactionStep() {
 
   const renderSummary = () => (
     <IncreaseWizardSummaryPanel
-      showFinish={increaseLiquidity.isSuccess}
+      showFinish={refreshPosition.isSuccess}
       onFinish={handleFinish}
       nextDisabled={true}
     />

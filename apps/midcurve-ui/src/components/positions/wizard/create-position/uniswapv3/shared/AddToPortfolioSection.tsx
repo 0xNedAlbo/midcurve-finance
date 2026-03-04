@@ -11,6 +11,8 @@ interface AddToPortfolioSectionProps {
   isError: boolean;
   /** Error object if the API call failed */
   error: Error | null;
+  /** Step label text */
+  label?: string;
 }
 
 /**
@@ -24,6 +26,7 @@ export function AddToPortfolioSection({
   isSuccess,
   isError,
   error,
+  label = 'Adding the Position to your Portfolio',
 }: AddToPortfolioSectionProps) {
   return (
     <div
@@ -48,7 +51,7 @@ export function AddToPortfolioSection({
           ) : (
             <Circle className="w-5 h-5 text-slate-400" />
           )}
-          <span className="text-white">Adding the Position to your Portfolio</span>
+          <span className="text-white">{label}</span>
         </div>
       </div>
 

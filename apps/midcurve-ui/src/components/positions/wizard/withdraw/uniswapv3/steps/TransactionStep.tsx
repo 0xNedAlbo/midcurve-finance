@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useEffect } from 'react';
 import { useAccount, useChainId } from 'wagmi';
 import type { Address } from 'viem';
 import { getTokenAmountsFromLiquidity } from '@midcurve/shared';
@@ -11,6 +11,8 @@ import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkProm
 import { EvmAccountSwitchPrompt } from '@/components/common/EvmAccountSwitchPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useDecreaseLiquidity } from '@/hooks/positions/uniswapv3/useDecreaseLiquidity';
+import { useUniswapV3RefreshPosition } from '@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition';
+import { AddToPortfolioSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/AddToPortfolioSection';
 import { getChainSlugByChainId } from '@/config/chains';
 
 export function TransactionStep() {
@@ -87,6 +89,19 @@ export function TransactionStep() {
 
   const decreaseLiquidity = useDecreaseLiquidity(decreaseParams);
 
+  const refreshPosition = useUniswapV3RefreshPosition();
+
+  useEffect(() => {
+    if (
+      decreaseLiquidity.withdrawSuccess &&
+      config &&
+      !refreshPosition.isPending &&
+      !refreshPosition.isSuccess
+    ) {
+      refreshPosition.mutate({ chainId: poolChainId, nftId: config.nftId.toString() });
+    }
+  }, [decreaseLiquidity.withdrawSuccess, config, poolChainId, refreshPosition]);
+
   // Transaction prompt
   const isBurning = state.burnAfterWithdraw && state.withdrawPercent >= 100;
   const withdrawPrompt = useEvmTransactionPrompt({
@@ -153,6 +168,17 @@ export function TransactionStep() {
 
         <div className="space-y-3">
           {withdrawPrompt.element}
+
+          {/* 2. Update position in portfolio */}
+          {decreaseLiquidity.withdrawSuccess && (
+            <AddToPortfolioSection
+              isPending={refreshPosition.isPending}
+              isSuccess={refreshPosition.isSuccess}
+              isError={refreshPosition.isError}
+              error={refreshPosition.error instanceof Error ? refreshPosition.error : null}
+              label="Updating the position in your portfolio"
+            />
+          )}
         </div>
       </div>
     );
@@ -162,7 +188,7 @@ export function TransactionStep() {
 
   const renderSummary = () => (
     <WithdrawWizardSummaryPanel
-      showFinish={decreaseLiquidity.isSuccess}
+      showFinish={refreshPosition.isSuccess}
       onFinish={handleFinish}
       nextDisabled={true}
     />
