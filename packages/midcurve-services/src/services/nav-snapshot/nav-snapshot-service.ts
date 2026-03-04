@@ -734,7 +734,7 @@ export class NavSnapshotService {
     }
 
     // User-scoped journal balances (replaces old per-position iteration)
-    const accountBalances = await this.getUserAccountBalancesForUser(userId);
+    const accountBalances = await this.getUserAccountBalancesForUser(userId, snapshotDate);
 
     const journalHash = await this.computeJournalHash(userId);
 
@@ -788,19 +788,19 @@ export class NavSnapshotService {
    * Queries user-scoped journal balances for all 11 accounts.
    * Single query per account aggregating across all tracked positions.
    */
-  private async getUserAccountBalancesForUser(userId: string): Promise<AccountBalances> {
+  private async getUserAccountBalancesForUser(userId: string, asOf: Date): Promise<AccountBalances> {
     const [dl, m2m, uf, cc, cr, fi, afi, rg, rl, ug, ul] = await Promise.all([
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, userId),
-      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, userId),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_GAINS, userId, asOf),
+      this.journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.UNREALIZED_LOSSES, userId, asOf),
     ]);
 
     return {
@@ -966,8 +966,8 @@ export class NavSnapshotService {
       }
     }
 
-    // User-scoped journal balances (current state, after deletions)
-    const accountBalances = await this.getUserAccountBalancesForUser(snapshot.userId);
+    // User-scoped journal balances as of the snapshot date (after deletions)
+    const accountBalances = await this.getUserAccountBalancesForUser(snapshot.userId, snapshot.snapshotDate);
     const newHash = await this.computeJournalHash(snapshot.userId);
 
     await this.prisma.nAVSnapshot.update({
@@ -1127,7 +1127,7 @@ export class NavSnapshotService {
     return this.prisma.nAVSnapshot.findFirst({
       where: {
         userId,
-        snapshotDate: { lte: date },
+        snapshotDate: { lt: date },
       },
       orderBy: { snapshotDate: 'desc' },
     });

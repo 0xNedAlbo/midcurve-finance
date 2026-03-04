@@ -327,7 +327,8 @@ export class JournalService {
    */
   async getUserAccountBalanceReporting(
     accountCode: number,
-    userId: string
+    userId: string,
+    asOf: Date,
   ): Promise<bigint> {
     const accountId = await this.resolveAccountId(accountCode);
 
@@ -335,7 +336,7 @@ export class JournalService {
       where: {
         accountId,
         amountReporting: { not: null },
-        journalEntry: { userId },
+        journalEntry: { userId, entryDate: { lte: asOf } },
       },
       select: { side: true, amountReporting: true },
     });
