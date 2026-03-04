@@ -59,7 +59,6 @@ interface SwapEventArgs {
 /** Raw log structure from viem */
 interface RawSwapLog {
   args: SwapEventArgs;
-  blockNumber: bigint;
 }
 
 export interface CloseOrderMonitorStatus {
@@ -76,14 +75,13 @@ export interface CloseOrderMonitorStatus {
 // =============================================================================
 
 /**
- * Extract sqrtPriceX96, tick, and blockNumber from raw Swap event
+ * Extract sqrtPriceX96 and tick from raw Swap event
  */
-function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number; blockNumber: bigint } {
+function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number } {
   const swapLog = raw as RawSwapLog;
   return {
     sqrtPriceX96: BigInt(swapLog.args.sqrtPriceX96),
     tick: Number(swapLog.args.tick),
-    blockNumber: BigInt(swapLog.blockNumber),
   };
 }
 
