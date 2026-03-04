@@ -113,6 +113,7 @@ interface PositionWithRelations {
   id: string;
   userId: string;
   positionHash: string;
+  isActive: boolean;
   isToken0Quote: boolean;
   currentCostBasis: string;
   currentValue: string;
@@ -141,6 +142,8 @@ interface RefreshedPositionData {
   tokensOwed1: bigint;
   uncollectedPrincipal0: bigint;
   uncollectedPrincipal1: bigint;
+  /** True when the NFT was confirmed burned at the snapshot block (zero-value entry, no DB update) */
+  burnedAtSnapshot: boolean;
 }
 
 interface AccountBalances {
@@ -242,17 +245,21 @@ export class NavSnapshotService {
     );
     const startTime = Date.now();
 
-    // Load active positions with pool + token relations
-    const whereClause: Record<string, unknown> = {
-      isActive: true,
-      positionHash: { not: null },
-    };
-    if (userId) {
-      whereClause.userId = userId;
+    // Load all positions referenced by tracked_positions, regardless of isActive.
+    // A position burned today may have had liquidity at a past snapshot block.
+    const trackedRows = await this.prisma.trackedPosition.findMany({
+      where: userId ? { userId } : {},
+      select: { positionRef: true },
+    });
+    const trackedRefs = trackedRows.map((r) => r.positionRef);
+
+    if (trackedRefs.length === 0) {
+      this.logger.info('No tracked positions, skipping snapshot');
+      return;
     }
 
     const rawPositions = await this.prisma.position.findMany({
-      where: whereClause,
+      where: { positionHash: { in: trackedRefs } },
       include: {
         pool: {
           include: {
@@ -269,11 +276,11 @@ export class NavSnapshotService {
 
     this.logger.info(
       { positionCount: positions.length },
-      'Loaded active positions for snapshot'
+      'Loaded tracked positions for snapshot'
     );
 
     if (positions.length === 0) {
-      this.logger.info('No active positions, skipping snapshot');
+      this.logger.info('No positions found for tracked refs, skipping snapshot');
       return;
     }
 
@@ -364,10 +371,25 @@ export class NavSnapshotService {
       const nftId = position.config.nftId.toString();
       const posData = positionMap.get(nftId);
       if (!posData) {
-        this.logger.warn(
+        // Position absent from subgraph at this block — burned before the snapshot date
+        this.logger.info(
           { positionId: position.id, nftId },
-          'Position not found in subgraph, skipping'
+          'Position absent from subgraph at snapshot block — burned before snapshot, using zero values'
         );
+        results.push({
+          position,
+          midnightBlock: blockNumberStr,
+          sqrtPriceX96: 0n,
+          liquidity: 0n,
+          currentValue: 0n,
+          unrealizedPnl: 0n,
+          unClaimedFees: 0n,
+          tokensOwed0: 0n,
+          tokensOwed1: 0n,
+          uncollectedPrincipal0: 0n,
+          uncollectedPrincipal1: 0n,
+          burnedAtSnapshot: true,
+        });
         continue;
       }
 
@@ -382,10 +404,28 @@ export class NavSnapshotService {
       }
 
       const collectResult = collectResults.get(position.id);
+      if (collectResult === 'burned') {
+        // ERC721 revert confirmed — NFT burned at this snapshot block
+        results.push({
+          position,
+          midnightBlock: blockNumberStr,
+          sqrtPriceX96: slot0.sqrtPriceX96,
+          liquidity: 0n,
+          currentValue: 0n,
+          unrealizedPnl: 0n,
+          unClaimedFees: 0n,
+          tokensOwed0: 0n,
+          tokensOwed1: 0n,
+          uncollectedPrincipal0: 0n,
+          uncollectedPrincipal1: 0n,
+          burnedAtSnapshot: true,
+        });
+        continue;
+      }
       if (!collectResult) {
         this.logger.warn(
           { positionId: position.id, nftId },
-          'collect() staticcall failed for position, skipping'
+          'collect() staticcall failed for unexpected reason, skipping position'
         );
         continue;
       }
@@ -479,6 +519,7 @@ export class NavSnapshotService {
         tokensOwed1: collectResult.tokensOwed1,
         uncollectedPrincipal0,
         uncollectedPrincipal1,
+        burnedAtSnapshot: false,
       });
     }
 
@@ -495,8 +536,8 @@ export class NavSnapshotService {
     nfpmAddress: Address,
     positions: PositionWithRelations[],
     blockNumber: bigint
-  ): Promise<Map<string, { tokensOwed0: bigint; tokensOwed1: bigint }>> {
-    const results = new Map<string, { tokensOwed0: bigint; tokensOwed1: bigint }>();
+  ): Promise<Map<string, { tokensOwed0: bigint; tokensOwed1: bigint } | 'burned'>> {
+    const results = new Map<string, { tokensOwed0: bigint; tokensOwed1: bigint } | 'burned'>();
 
     for (let i = 0; i < positions.length; i += NFPM_BATCH_SIZE) {
       const batch = positions.slice(i, i + NFPM_BATCH_SIZE);
@@ -520,15 +561,28 @@ export class NavSnapshotService {
             });
             return {
               positionId: position.id,
-              tokensOwed0: result.result[0],
-              tokensOwed1: result.result[1],
+              result: { tokensOwed0: result.result[0], tokensOwed1: result.result[1] } as const,
             };
           } catch (error) {
-            // Position may not exist at this block (minted later, or already burned)
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            // ERC721 revert patterns — NFT burned at this block (same detection as UniswapV3PositionService.fetchPositionState)
+            const isBurnedAtBlock =
+              errorMessage.includes('Invalid token ID') ||
+              errorMessage.includes('ERC721: invalid token ID') ||
+              errorMessage.includes('owner query for nonexistent token') ||
+              errorMessage.includes('ERC721NonexistentToken');
+
+            if (isBurnedAtBlock) {
+              this.logger.info(
+                { positionId: position.id, nftId: position.config.nftId, blockNumber: blockNumber.toString() },
+                'NFT burned at snapshot block — will use zero values'
+              );
+              return { positionId: position.id, result: 'burned' as const };
+            }
+
             this.logger.warn(
-              { positionId: position.id, nftId: position.config.nftId, blockNumber: blockNumber.toString(),
-                error: error instanceof Error ? error.message : String(error) },
-              'collect() staticcall reverted, position likely did not exist at snapshot block'
+              { positionId: position.id, nftId: position.config.nftId, blockNumber: blockNumber.toString(), error: errorMessage },
+              'collect() staticcall reverted for unexpected reason, skipping position'
             );
             return null;
           }
@@ -537,10 +591,7 @@ export class NavSnapshotService {
 
       for (const r of batchResults) {
         if (!r) continue;
-        results.set(r.positionId, {
-          tokensOwed0: r.tokensOwed0,
-          tokensOwed1: r.tokensOwed1,
-        });
+        results.set(r.positionId, r.result);
       }
     }
 
@@ -697,6 +748,11 @@ export class NavSnapshotService {
         unrealizedPnlReporting: unrealizedReporting,
         accruedFeesReporting: feesConversion.amountReporting,
       });
+
+      // Burned-at-snapshot positions have no meaningful on-chain state to cache
+      if (rp.burnedAtSnapshot) {
+        continue;
+      }
 
       // Accumulate cache data per chain
       let chainCache = cacheByChain.get(chainId);
