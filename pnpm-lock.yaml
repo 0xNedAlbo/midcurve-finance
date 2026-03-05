@@ -38,6 +38,9 @@ importers:
       '@prisma/nextjs-monorepo-workaround-plugin':
         specifier: ^6.19.0
         version: 6.19.0
+      amqplib:
+        specifier: ^0.10.7
+        version: 0.10.9
       nanoid:
         specifier: ^5.1.6
         version: 5.1.6
@@ -66,6 +69,9 @@ importers:
         specifier: ^3.22.0
         version: 3.25.76
     devDependencies:
+      '@types/amqplib':
+        specifier: ^0.10.7
+        version: 0.10.8
       '@types/node':
         specifier: ^20
         version: 20.19.25
