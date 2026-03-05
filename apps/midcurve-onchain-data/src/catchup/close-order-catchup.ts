@@ -178,7 +178,7 @@ const LIFECYCLE_EVENT_SIGNATURES = computeEventSignatures();
  * Filters by contract addresses and event signatures.
  * Processes in batches to respect RPC limits.
  */
-async function fetchHistoricalCloseOrderEvents(options: {
+export async function fetchHistoricalCloseOrderEvents(options: {
   chainId: number;
   contractAddresses: string[];
   fromBlock: bigint;

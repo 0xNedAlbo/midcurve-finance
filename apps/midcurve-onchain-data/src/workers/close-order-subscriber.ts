@@ -2,67 +2,56 @@
  * CloseOrderSubscriber Worker
  *
  * Loads active UniswapV3PositionCloser contracts from the SharedContract registry,
- * creates WebSocket subscription batches, and manages their lifecycle.
+ * creates polling batches, and manages their lifecycle.
  * Publishes incoming lifecycle events (registration, cancellation, config updates)
  * to RabbitMQ as structured domain events.
  *
- * Unlike PositionLiquiditySubscriber, this subscriber:
- * - Uses contract addresses (not NFPM nftId topics) for filtering
- * - Loads contracts from SharedContract table (not Position table)
- * - Has no cleanup timer (contracts are static; new deployments handled by restart)
- * - Has no per-position buffering (all events use global buffering only)
+ * Uses eth_getLogs polling instead of WebSocket subscriptions.
+ * On startup, runs catch-up from cached block → current block, then starts
+ * periodic polling for new events.
  */
 
-import { SharedContractService } from '@midcurve/services';
+import { SharedContractService, EvmConfig } from '@midcurve/services';
 import { SharedContractNameEnum, type EvmSmartContractConfigData } from '@midcurve/shared';
-import { EvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import {
-  getConfiguredWssUrls,
   getCatchUpConfig,
   isSupportedChain,
-  type SupportedChainId,
+  SUPPORTED_CHAIN_IDS,
 } from '../lib/config';
 import {
-  UniswapV3CloserSubscriptionBatch,
-  createCloserSubscriptionBatches,
+  UniswapV3CloserPollingBatch,
   type CloserContractInfo,
-} from '../ws/providers/uniswap-v3-closer';
+} from '../polling/uniswap-v3-closer';
 import {
-  executeCloseOrderCatchUpNonFinalizedForChains,
   executeCloseOrderCatchUpFinalizedForChains,
   setCloseOrderLastProcessedBlock,
-  updateCloseOrderBlockIfHigher,
 } from '../catchup/close-order-catchup';
 
 const log = onchainDataLogger.child({ component: 'CloseOrderSubscriber' });
 
 /**
- * CloseOrderSubscriber manages WebSocket subscriptions for closer contract lifecycle events.
+ * CloseOrderSubscriber manages polling batches for closer contract lifecycle events.
  */
 export class CloseOrderSubscriber {
-  private batches: UniswapV3CloserSubscriptionBatch[] = [];
-  private batchesByChain: Map<SupportedChainId, UniswapV3CloserSubscriptionBatch[]> = new Map();
+  private pollers: UniswapV3CloserPollingBatch[] = [];
   private isRunning = false;
 
-  // Block tracking state (for catch-up on restart)
+  // Block tracking state (for cache updates)
   private blockTrackingTimer: NodeJS.Timeout | null = null;
 
   // Track contract addresses by chain for catch-up
-  private contractsByChain: Map<SupportedChainId, string[]> = new Map();
+  private contractsByChain: Map<number, string[]> = new Map();
 
   /**
    * Start the subscriber.
-   * Loads active closer contracts, creates WebSocket batches, and performs reorg-safe catch-up.
+   * Loads active closer contracts, runs catch-up, and starts polling.
    *
-   * Catch-up flow (reorg-safe):
+   * Startup flow:
    * 1. Load closer contracts from SharedContract registry
-   * 2. Create WebSocket batches in BUFFERING mode
-   * 3. Start WebSocket subscriptions (events buffered, not published)
-   * 4. Scan NON-FINALIZED blocks (finalizedBlock+1 → currentBlock) - blocking
-   * 5. Flush buffered events and switch to normal mode
-   * 6. Start block tracking heartbeat
-   * 7. Scan FINALIZED blocks in background (cachedBlock → finalizedBlock)
+   * 2. Run finalized block catch-up (cachedBlock → current block)
+   * 3. Start polling batches for new events
+   * 4. Start block tracking heartbeat
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -72,80 +61,43 @@ export class CloseOrderSubscriber {
 
     priceLog.workerLifecycle(log, 'CloseOrderSubscriber', 'starting');
 
-    try {
-      // 1. Load active closer contracts from database
-      const contractsByChain = await this.loadActiveContracts();
+    // 1. Load active closer contracts from database
+    const contractsByChain = await this.loadActiveContracts();
 
-      // Get configured WSS URLs
-      const wssConfigs = getConfiguredWssUrls();
-
-      if (wssConfigs.length === 0) {
-        log.warn({
-          msg: 'No WS_RPC_URL_* environment variables configured, close order subscriber will not start',
-        });
-        return;
-      }
-
-      // 2. Create subscription batches for each configured chain
-      for (const wssConfig of wssConfigs) {
-        const chainId = wssConfig.chainId as SupportedChainId;
-        const contracts = contractsByChain.get(chainId);
-
-        if (!contracts || contracts.length === 0) {
-          log.info({ chainId, msg: 'No active closer contracts for chain, skipping' });
-          continue;
-        }
-
-        const chainBatches = createCloserSubscriptionBatches(chainId, wssConfig.url, contracts);
-        this.batches.push(...chainBatches);
-        this.batchesByChain.set(chainId, chainBatches);
-
-        // Track contract addresses for catch-up
-        this.contractsByChain.set(chainId, contracts.map((c) => c.address));
-      }
-
+    if (contractsByChain.size === 0) {
+      log.warn({ msg: 'No active closer contracts found, subscriber will idle' });
       this.isRunning = true;
-
-      // Set block update callback on all batches for block tracking
-      for (const batch of this.batches) {
-        batch.setBlockUpdateCallback((chainId, blockNumber) => {
-          this.handleBlockUpdate(chainId, blockNumber);
-        });
-      }
-
-      if (this.batches.length === 0) {
-        log.warn({ msg: 'No closer subscription batches created, close order subscriber will idle' });
-      } else {
-        // 3-5. Execute reorg-safe catch-up with buffering
-        await this.catchUpNonFinalizedBlocksWithBuffering();
-      }
-
-      // 6. Start block tracking heartbeat
-      this.startBlockTracking();
-
-      const totalContracts = this.batches.reduce(
-        (sum, batch) => sum + batch.getStatus().contractCount,
-        0
-      );
-
-      priceLog.workerLifecycle(log, 'CloseOrderSubscriber', 'started', {
-        batchCount: this.batches.length,
-        totalContracts,
-      });
-
-      // 7. Execute FINALIZED block catch-up in background
-      this.catchUpFinalizedBlocksInBackground();
-    } catch (error) {
-      priceLog.workerLifecycle(log, 'CloseOrderSubscriber', 'error', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
+      return;
     }
+
+    // 2. Run catch-up from cached block → current block
+    await this.runCatchUp();
+
+    // 3. Create and start polling batches
+    for (const [chainId, contracts] of contractsByChain) {
+      const poller = new UniswapV3CloserPollingBatch(chainId, contracts);
+      this.pollers.push(poller);
+      await poller.start();
+    }
+
+    this.isRunning = true;
+
+    // 4. Start block tracking heartbeat
+    this.startBlockTracking();
+
+    const totalContracts = Array.from(contractsByChain.values()).reduce(
+      (sum, contracts) => sum + contracts.length,
+      0
+    );
+
+    priceLog.workerLifecycle(log, 'CloseOrderSubscriber', 'started', {
+      pollerCount: this.pollers.length,
+      totalContracts,
+    });
   }
 
   /**
    * Stop the subscriber.
-   * Stops all WebSocket batches gracefully.
    */
   async stop(): Promise<void> {
     if (!this.isRunning) {
@@ -158,10 +110,9 @@ export class CloseOrderSubscriber {
     // Stop block tracking timer
     this.stopBlockTracking();
 
-    // Stop all batches
-    await Promise.all(this.batches.map((batch) => batch.stop()));
-    this.batches = [];
-    this.batchesByChain.clear();
+    // Stop all pollers
+    await Promise.all(this.pollers.map((poller) => poller.stop()));
+    this.pollers = [];
     this.contractsByChain.clear();
     this.isRunning = false;
 
@@ -173,21 +124,18 @@ export class CloseOrderSubscriber {
    */
   getStatus(): {
     isRunning: boolean;
-    batchCount: number;
-    batches: Array<{
+    pollerCount: number;
+    pollers: Array<{
       chainId: number;
-      batchIndex: number;
       contractCount: number;
-      isConnected: boolean;
       isRunning: boolean;
-      isBuffering: boolean;
-      bufferedEvents: number;
+      lastProcessedBlock: string | null;
     }>;
   } {
     return {
       isRunning: this.isRunning,
-      batchCount: this.batches.length,
-      batches: this.batches.map((batch) => batch.getStatus()),
+      pollerCount: this.pollers.length,
+      pollers: this.pollers.map((poller) => poller.getStatus()),
     };
   }
 
@@ -199,23 +147,25 @@ export class CloseOrderSubscriber {
    * Load active UniswapV3PositionCloser contracts from SharedContract registry,
    * grouped by chain ID.
    */
-  private async loadActiveContracts(): Promise<Map<SupportedChainId, CloserContractInfo[]>> {
+  private async loadActiveContracts(): Promise<Map<number, CloserContractInfo[]>> {
     priceLog.methodEntry(log, 'loadActiveContracts');
 
     const sharedContractService = new SharedContractService();
-    const contractsByChain = new Map<SupportedChainId, CloserContractInfo[]>();
+    const contractsByChain = new Map<number, CloserContractInfo[]>();
 
-    // Get configured WSS URLs to know which chains to check
-    const wssConfigs = getConfiguredWssUrls();
-
-    for (const wssConfig of wssConfigs) {
-      const chainId = wssConfig.chainId;
-
+    for (const chainId of SUPPORTED_CHAIN_IDS) {
       if (!isSupportedChain(chainId)) continue;
 
-      const supportedChainId = chainId as SupportedChainId;
-
       try {
+        // Verify we have an RPC client for this chain
+        const evmConfig = EvmConfig.getInstance();
+        try {
+          evmConfig.getPublicClient(chainId);
+        } catch {
+          log.debug({ chainId, msg: 'Chain not configured, skipping' });
+          continue;
+        }
+
         const contract = await sharedContractService.findLatestByChainAndName(
           chainId,
           SharedContractNameEnum.UNISWAP_V3_POSITION_CLOSER
@@ -233,14 +183,20 @@ export class CloseOrderSubscriber {
           continue;
         }
 
-        if (!contractsByChain.has(supportedChainId)) {
-          contractsByChain.set(supportedChainId, []);
+        if (!contractsByChain.has(chainId)) {
+          contractsByChain.set(chainId, []);
         }
 
-        contractsByChain.get(supportedChainId)!.push({
+        contractsByChain.get(chainId)!.push({
           address: config.address,
           chainId,
         });
+
+        // Track for catch-up
+        if (!this.contractsByChain.has(chainId)) {
+          this.contractsByChain.set(chainId, []);
+        }
+        this.contractsByChain.get(chainId)!.push(config.address);
 
         log.info({
           chainId,
@@ -273,7 +229,41 @@ export class CloseOrderSubscriber {
   }
 
   // ===========================================================================
-  // Block Tracking (for catch-up on restart)
+  // Catch-Up
+  // ===========================================================================
+
+  /**
+   * Run catch-up from cached block → current finalized block.
+   * Processes historical events before starting live polling.
+   */
+  private async runCatchUp(): Promise<void> {
+    const config = getCatchUpConfig();
+
+    if (!config.enabled) {
+      log.info({ msg: 'Close order catch-up disabled by configuration' });
+      return;
+    }
+
+    if (this.contractsByChain.size === 0) {
+      log.info({ msg: 'No contracts to catch up' });
+      return;
+    }
+
+    log.info({ msg: 'Running close order catch-up before starting polling' });
+    const results = await executeCloseOrderCatchUpFinalizedForChains(this.contractsByChain);
+
+    const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
+    const failedChains = results.filter((r) => r.error).length;
+    log.info({
+      chainsProcessed: results.length,
+      failedChains,
+      totalEvents,
+      msg: 'Close order catch-up completed',
+    });
+  }
+
+  // ===========================================================================
+  // Block Tracking
   // ===========================================================================
 
   /**
@@ -311,26 +301,12 @@ export class CloseOrderSubscriber {
   }
 
   /**
-   * Handle block update from WebSocket event.
-   */
-  private handleBlockUpdate(chainId: number, blockNumber: bigint): void {
-    updateCloseOrderBlockIfHigher(chainId, blockNumber).catch((err) => {
-      log.warn({
-        chainId,
-        blockNumber: blockNumber.toString(),
-        error: err instanceof Error ? err.message : String(err),
-        msg: 'Failed to update close order block tracking from event',
-      });
-    });
-  }
-
-  /**
    * Heartbeat update for block tracking.
    */
   private async updateBlockTrackingHeartbeat(): Promise<void> {
     const evmConfig = EvmConfig.getInstance();
 
-    for (const [chainId] of this.batchesByChain) {
+    for (const [chainId] of this.contractsByChain) {
       try {
         const client = evmConfig.getPublicClient(chainId);
         const currentBlock = await client.getBlockNumber();
@@ -344,90 +320,5 @@ export class CloseOrderSubscriber {
         });
       }
     }
-  }
-
-  // ===========================================================================
-  // Catch-Up with Buffering
-  // ===========================================================================
-
-  /**
-   * Catch up non-finalized blocks while WebSocket buffers incoming events.
-   *
-   * Flow:
-   * 1. Enable buffering on all batches
-   * 2. Start WebSocket subscriptions (events go to buffer)
-   * 3. Scan non-finalized blocks (finalizedBlock+1 → currentBlock)
-   * 4. Flush buffered events and switch to normal mode
-   */
-  private async catchUpNonFinalizedBlocksWithBuffering(): Promise<void> {
-    const config = getCatchUpConfig();
-
-    // 1. Enable buffering on all batches
-    for (const batch of this.batches) {
-      batch.enableBuffering();
-    }
-
-    // 2. Start WebSocket subscriptions (events will be buffered)
-    log.info({ msg: 'Starting closer WebSocket subscriptions in buffering mode' });
-    await Promise.all(this.batches.map((batch) => batch.start()));
-
-    // 3. Scan non-finalized blocks if catch-up is enabled
-    if (config.enabled) {
-      log.info({ msg: 'Scanning non-finalized blocks for close orders (blocking)' });
-      const results = await executeCloseOrderCatchUpNonFinalizedForChains(this.contractsByChain);
-
-      const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
-      const failedChains = results.filter((r) => r.error).length;
-      log.info({
-        chainsProcessed: results.length,
-        failedChains,
-        totalEvents,
-        msg: 'Non-finalized close order catch-up completed',
-      });
-    }
-
-    // 4. Flush buffered events and switch to normal mode
-    let totalFlushed = 0;
-    for (const batch of this.batches) {
-      const flushed = await batch.flushBufferAndDisableBuffering();
-      totalFlushed += flushed;
-    }
-
-    log.info({
-      totalFlushedEvents: totalFlushed,
-      msg: 'Buffered close order events flushed, now in normal mode',
-    });
-  }
-
-  /**
-   * Execute finalized block catch-up in background.
-   * Safe to run in background since finalized blocks are immutable.
-   */
-  private catchUpFinalizedBlocksInBackground(): void {
-    const config = getCatchUpConfig();
-
-    if (!config.enabled) {
-      log.info({ msg: 'Finalized close order catch-up disabled by configuration' });
-      return;
-    }
-
-    log.info({ msg: 'Starting finalized close order catch-up in background' });
-    executeCloseOrderCatchUpFinalizedForChains(this.contractsByChain)
-      .then((results) => {
-        const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
-        const failedChains = results.filter((r) => r.error).length;
-        log.info({
-          chainsProcessed: results.length,
-          failedChains,
-          totalEvents,
-          msg: 'Background finalized close order catch-up completed',
-        });
-      })
-      .catch((err) => {
-        log.error({
-          error: err instanceof Error ? err.message : String(err),
-          msg: 'Background finalized close order catch-up failed',
-        });
-      });
   }
 }

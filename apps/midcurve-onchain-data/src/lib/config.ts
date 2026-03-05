@@ -8,7 +8,6 @@ import {
   PRODUCTION_CHAIN_IDS as REGISTRY_PRODUCTION_CHAIN_IDS,
   ALL_CHAIN_IDS as REGISTRY_ALL_CHAIN_IDS,
   getChainShortName,
-  getWsRpcEnvVarName,
 } from '@midcurve/shared';
 
 /**
@@ -20,14 +19,6 @@ export interface RabbitMQConfig {
   username: string;
   password: string;
   vhost?: string;
-}
-
-/**
- * WebSocket configuration per chain
- */
-export interface WssConfig {
-  chainId: number;
-  url: string;
 }
 
 /**
@@ -109,7 +100,7 @@ export function getOnchainDataConfig(): OnchainDataConfig {
 export const getPoolPricesConfig = getOnchainDataConfig;
 
 /**
- * Supported chain IDs for WebSocket subscriptions
+ * Supported chain IDs for onchain data subscriptions
  *
  * Production chains are always available.
  * Local chain (31337) is only available in non-production environments.
@@ -128,32 +119,6 @@ export type SupportedChainId = 1 | 42161 | 8453 | 11155111 | 31337;
  */
 export function getChainName(chainId: SupportedChainId): string {
   return getChainShortName(chainId).toLowerCase();
-}
-
-/**
- * Get WebSocket RPC URL for a specific chain
- * Returns undefined if not configured
- */
-export function getWssUrl(chainId: number): string | undefined {
-  const envVar = getWsRpcEnvVarName(chainId);
-  return process.env[envVar];
-}
-
-/**
- * Get all configured WebSocket RPC URLs
- * Only returns chains that have WS_RPC_URL_* configured
- */
-export function getConfiguredWssUrls(): WssConfig[] {
-  const configs: WssConfig[] = [];
-
-  for (const chainId of SUPPORTED_CHAIN_IDS) {
-    const url = getWssUrl(chainId);
-    if (url) {
-      configs.push({ chainId, url });
-    }
-  }
-
-  return configs;
 }
 
 /**

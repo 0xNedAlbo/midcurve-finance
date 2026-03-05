@@ -1,26 +1,7 @@
 /**
  * WebSocket Connection Manager
  *
- * This module re-exports WebSocket-related utilities from providers.
- * Connection handling is managed internally by viem's WebSocket transport.
- *
- * For UniswapV3 pool subscriptions, see ./providers/uniswap-v3-pools.ts
+ * Previously re-exported WebSocket-related utilities from providers.
+ * WebSocket providers are kept in ./providers/ for reference but are
+ * no longer actively used — all subscribers have been migrated to polling.
  */
-
-// Pool price subscriptions (Swap events)
-export {
-  UniswapV3PoolSubscriptionBatch,
-  createSubscriptionBatches,
-  MAX_POOLS_PER_SUBSCRIPTION,
-  SWAP_EVENT_TOPIC,
-  type PoolInfo,
-} from './providers/uniswap-v3-pools';
-
-// Close order lifecycle subscriptions (UniswapV3PositionCloser events)
-export {
-  UniswapV3CloserSubscriptionBatch,
-  createCloserSubscriptionBatches,
-  MAX_CONTRACTS_PER_SUBSCRIPTION,
-  type CloserContractInfo,
-} from './providers/uniswap-v3-closer';
-
