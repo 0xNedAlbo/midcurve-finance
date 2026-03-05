@@ -31,6 +31,7 @@ import {
   generateOrderTagFromTick,
   getDomainEventPublisher,
   createDomainEvent,
+  EXCHANGE_CLOSE_ORDER_EVENTS,
 } from '@midcurve/services';
 import type {
   OrderCreatedContext,
@@ -69,9 +70,6 @@ import type {
 // =============================================================================
 // Constants
 // =============================================================================
-
-/** Exchange name for close order events from onchain-data service */
-const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
 
 /** Queue name for this rule's consumption */
 const QUEUE_NAME = 'business-logic.process-close-order-events';

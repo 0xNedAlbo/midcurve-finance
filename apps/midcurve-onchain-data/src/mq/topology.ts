@@ -14,6 +14,10 @@
  */
 
 import type { Channel } from 'amqplib';
+import {
+  EXCHANGE_CLOSE_ORDER_EVENTS,
+  buildCloseOrderRoutingKey,
+} from '@midcurve/services';
 import { onchainDataLogger } from '../lib/logger';
 
 const log = onchainDataLogger.child({ component: 'Topology' });
@@ -25,8 +29,8 @@ const log = onchainDataLogger.child({ component: 'Topology' });
 /** Exchange name for pool prices (Swap events) */
 export const EXCHANGE_POOL_PRICES = 'pool-prices';
 
-/** Exchange name for close order lifecycle events (registration, cancellation, config updates) */
-export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
+// Re-export close order topology from @midcurve/services
+export { EXCHANGE_CLOSE_ORDER_EVENTS, buildCloseOrderRoutingKey };
 
 /**
  * Build a routing key for UniswapV3 swap events.
@@ -34,14 +38,6 @@ export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
  */
 export function buildUniswapV3RoutingKey(chainId: number, poolAddress: string): string {
   return `uniswapv3.${chainId}.${poolAddress.toLowerCase()}`;
-}
-
-/**
- * Build a routing key for close order lifecycle events.
- * Format: closer.{chainId}.{nftId}.{triggerMode}
- */
-export function buildCloseOrderRoutingKey(chainId: number, nftId: string, triggerMode: string): string {
-  return `closer.${chainId}.${nftId}.${triggerMode}`;
 }
 
 // ============================================================

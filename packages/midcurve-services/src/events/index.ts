@@ -199,3 +199,63 @@ export {
   DomainEventConsumerRegistry,
 } from './consumer.js';
 
+// ============================================================
+// Close Order Event Decoder (on-chain event → domain event)
+// ============================================================
+
+export {
+  // Functions
+  buildCloseOrderEvent,
+  buildCloseOrderRoutingKey,
+  serializeCloseOrderEvent,
+  triggerModeToString,
+  swapDirectionToString,
+  // Constants
+  EXCHANGE_CLOSE_ORDER_EVENTS,
+  CLOSER_LIFECYCLE_EVENT_ABIS,
+} from './close-order-event-decoder.js';
+
+export type {
+  // Event types
+  CloseOrderOnChainEventType,
+  TriggerModeString,
+  SwapDirectionString,
+  // Event envelope
+  CloseOrderDomainEvent,
+  // Payload types
+  OrderRegisteredPayload as CloseOrderRegisteredOnChainPayload,
+  OrderCancelledPayload as CloseOrderCancelledOnChainPayload,
+  OrderExecutedPayload as CloseOrderExecutedOnChainPayload,
+  OrderOperatorUpdatedPayload,
+  OrderPayoutUpdatedPayload,
+  OrderTriggerTickUpdatedPayload,
+  OrderValidUntilUpdatedPayload,
+  OrderSlippageUpdatedPayload,
+  OrderSwapIntentUpdatedPayload,
+  // Typed events
+  OrderRegisteredEvent,
+  OrderCancelledEvent,
+  OrderExecutedEvent,
+  OrderOperatorUpdatedEvent,
+  OrderPayoutUpdatedEvent,
+  OrderTriggerTickUpdatedEvent,
+  OrderValidUntilUpdatedEvent,
+  OrderSlippageUpdatedEvent,
+  OrderSwapIntentUpdatedEvent,
+  AnyCloseOrderEvent,
+  // Raw log type
+  RawEventLog,
+} from './close-order-event-decoder.js';
+
+// ============================================================
+// Close Order Receipt Publisher
+// ============================================================
+
+export {
+  publishCloseOrderEventsFromReceipt,
+} from './close-order-receipt-publisher.js';
+
+export type {
+  PublishCloseOrderEventsResult,
+} from './close-order-receipt-publisher.js';
+
