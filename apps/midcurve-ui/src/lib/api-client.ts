@@ -244,6 +244,17 @@ export const automationApi = {
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`
       );
     },
+
+    /**
+     * Confirm a close order transaction by submitting its hash for immediate event processing.
+     * The API extracts event logs from the receipt and publishes them, avoiding the fallback poller delay.
+     */
+    confirmTx(chainId: number, nftId: number, txHash: string) {
+      return apiClient.post<{ eventsPublished: number }>(
+        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/confirm`,
+        { txHash }
+      );
+    },
   },
 
   // ---------------------------------------------------------------------------

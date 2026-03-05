@@ -31,6 +31,7 @@ import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/aut
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { getChainSlugByChainId } from '@/config/chains';
+import { automationApi } from '@/lib/api-client';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 
 // Zoom constants
@@ -408,9 +409,10 @@ export function TransactionStep() {
 
   // ----- Execution state -----
   // Phase: idle → approval → multicall → done
-  const [phase, setPhase] = useState<'idle' | 'approval' | 'multicall' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'approval' | 'multicall' | 'confirm' | 'done'>('idle');
   const [approvalDone, setApprovalDone] = useState(false);
   const [subOpsExpanded, setSubOpsExpanded] = useState(true);
+  const [confirmStatus, setConfirmStatus] = useState<'pending' | 'active' | 'success' | 'warning'>('pending');
 
   // Helper to check if error is user rejection
   const isUserRejection = (error: Error | null | undefined): boolean => {
@@ -434,9 +436,27 @@ export function TransactionStep() {
     if (phase !== 'multicall') return;
 
     if (multicall.isSuccess) {
-      setPhase('done');
+      setPhase('confirm');
     }
   }, [phase, multicall.isSuccess]);
+
+  // Confirm close order events via API (non-blocking)
+  useEffect(() => {
+    if (phase !== 'confirm') return;
+
+    const txHash = multicall.txHash;
+    if (!txHash || !chainId || !nftId) {
+      setPhase('done');
+      return;
+    }
+
+    setConfirmStatus('active');
+    automationApi.positionCloseOrders
+      .confirmTx(chainId, Number(nftId), txHash)
+      .then(() => setConfirmStatus('success'))
+      .catch(() => setConfirmStatus('warning'))
+      .finally(() => setPhase('done'));
+  }, [phase, multicall.txHash, chainId, nftId]);
 
   // Skip approval phase if not needed and initialize to correct phase
   useEffect(() => {
@@ -682,6 +702,31 @@ export function TransactionStep() {
         <div className="space-y-3">
           {(needsApproval || approvalDone) && approvalPrompt.element}
           {renderMulticallRow()}
+
+          {/* Confirm close order events via API */}
+          <div className={`py-3 px-4 rounded-lg transition-colors ${
+            confirmStatus === 'warning'
+              ? 'bg-yellow-500/10 border border-yellow-500/30'
+              : confirmStatus === 'success'
+                ? 'bg-green-500/10 border border-green-500/20'
+                : confirmStatus === 'active'
+                  ? 'bg-blue-500/10 border border-blue-500/20'
+                  : 'bg-slate-700/30 border border-slate-600/20'
+          }`}>
+            <div className="flex items-center gap-3">
+              {confirmStatus === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
+              {confirmStatus === 'active' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+              {confirmStatus === 'success' && <Check className="w-5 h-5 text-green-400" />}
+              {confirmStatus === 'warning' && <AlertCircle className="w-5 h-5 text-yellow-400" />}
+              <span className={
+                confirmStatus === 'success' ? 'text-slate-400'
+                  : confirmStatus === 'warning' ? 'text-yellow-300'
+                  : 'text-white'
+              }>
+                Updating close order monitor.
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     );

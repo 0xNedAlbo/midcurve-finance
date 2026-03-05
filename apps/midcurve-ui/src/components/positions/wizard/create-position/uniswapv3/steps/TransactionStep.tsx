@@ -32,6 +32,7 @@ import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { SwapDirection } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { getChainSlugByChainId } from '@/config/chains';
+import { automationApi } from '@/lib/api-client';
 import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
@@ -54,7 +55,7 @@ export function TransactionStep() {
   const { state, setStepValid, setDiscoveredPool, setPositionCreated, addTransaction, setAdjustedAmounts, saveOriginalAmounts, setPriceAdjustmentStatus } = useCreatePositionWizard();
 
   // Current phase of execution
-  const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'done'>('idle');
+  const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'confirm' | 'done'>('idle');
   const [, setActiveError] = useState<{ txId: string; message: string } | null>(null);
 
   // Track which transactions have been attempted (prevents infinite retry loops on cancel)
@@ -65,6 +66,9 @@ export function TransactionStep() {
 
   // Track if mint was successful (used to show success state on all pre-mint items after canceling subscriptions)
   const [mintSucceeded, setMintSucceeded] = useState(false);
+
+  // Track close order confirm API call status
+  const [confirmStatus, setConfirmStatus] = useState<'pending' | 'active' | 'success' | 'warning'>('pending');
 
   // Get chain ID from discovered pool
   const chainId = state.discoveredPool?.typedConfig.chainId;
@@ -726,9 +730,27 @@ export function TransactionStep() {
         });
       }
 
-      setCurrentPhase('done');
+      setCurrentPhase('confirm');
     }
   }, [currentPhase, multicallOrders.isSuccess, multicallOrders.error, multicallOrders.txHash, addTransaction]);
+
+  // Confirm close order events via API (non-blocking)
+  useEffect(() => {
+    if (currentPhase !== 'confirm') return;
+
+    const txHash = multicallOrders.txHash;
+    if (!txHash || !chainId || !mintedTokenId) {
+      setCurrentPhase('done');
+      return;
+    }
+
+    setConfirmStatus('active');
+    automationApi.positionCloseOrders
+      .confirmTx(chainId, Number(mintedTokenId), txHash)
+      .then(() => setConfirmStatus('success'))
+      .catch(() => setConfirmStatus('warning'))
+      .finally(() => setCurrentPhase('done'));
+  }, [currentPhase, multicallOrders.txHash, chainId, mintedTokenId]);
 
   // Update step validation
   useEffect(() => {
@@ -953,6 +975,33 @@ export function TransactionStep() {
 
           {/* Order registration - rendered by hook */}
           {(state.stopLossEnabled || state.takeProfitEnabled) && registerOrdersPrompt.element}
+
+          {/* Confirm close order events via API */}
+          {hasAutomation && (
+            <div className={`py-3 px-4 rounded-lg transition-colors ${
+              confirmStatus === 'warning'
+                ? 'bg-yellow-500/10 border border-yellow-500/30'
+                : confirmStatus === 'success'
+                  ? 'bg-green-500/10 border border-green-500/20'
+                  : confirmStatus === 'active'
+                    ? 'bg-blue-500/10 border border-blue-500/20'
+                    : 'bg-slate-700/30 border border-slate-600/20'
+            }`}>
+              <div className="flex items-center gap-3">
+                {confirmStatus === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
+                {confirmStatus === 'active' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+                {confirmStatus === 'success' && <Check className="w-5 h-5 text-green-400" />}
+                {confirmStatus === 'warning' && <AlertCircle className="w-5 h-5 text-yellow-400" />}
+                <span className={
+                  confirmStatus === 'success' ? 'text-slate-400'
+                    : confirmStatus === 'warning' ? 'text-yellow-300'
+                    : 'text-white'
+                }>
+                  Start monitoring close orders.
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
