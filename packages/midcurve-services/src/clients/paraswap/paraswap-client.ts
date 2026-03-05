@@ -17,6 +17,12 @@ const PARASWAP_API_BASE = 'https://api.paraswap.io';
 const PARTNER_NAME = 'midcurve';
 
 /**
+ * DEXs to exclude from Paraswap routing.
+ * Dexalot-42161 blacklists our contract address, causing 403 on buildTx.
+ */
+const EXCLUDED_DEXS = 'Dexalot-42161';
+
+/**
  * Augustus version to request from the Paraswap API.
  * The API defaults to V5 if omitted. Our on-chain ParaswapAdapter is deployed
  * with V6.2 Augustus addresses, so we must request V6.2 calldata.
@@ -156,6 +162,7 @@ export async function getParaswapQuote(
     partner: PARTNER_NAME,
     userAddress,
     version: PARASWAP_AUGUSTUS_VERSION,
+    excludeDEXS: EXCLUDED_DEXS,
   });
 
   const url = `${PARASWAP_API_BASE}/prices?${params}`;
@@ -254,6 +261,7 @@ export async function buildParaswapTransaction(
     deadline,
     ignoreChecks: true,
     ignoreGasEstimate: true,
+    excludeDEXS: EXCLUDED_DEXS,
   };
 
   const url = `${PARASWAP_API_BASE}/transactions/${chainId}`;
