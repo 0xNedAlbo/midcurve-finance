@@ -6,6 +6,7 @@
  */
 
 import type { Channel } from 'amqplib';
+import { EXCHANGE_CLOSE_ORDER_EVENTS } from '@midcurve/services';
 import { automationLogger } from '../lib/logger';
 
 const log = automationLogger.child({ component: 'Topology' });
@@ -78,6 +79,13 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
     msg: 'Queue bound to exchange',
   });
 
+  // Assert close-order-events exchange (executor publishes execution receipts)
+  await channel.assertExchange(EXCHANGE_CLOSE_ORDER_EVENTS, 'topic', {
+    durable: true,
+    autoDelete: false,
+  });
+  log.info({ exchange: EXCHANGE_CLOSE_ORDER_EVENTS, type: 'topic', msg: 'Exchange declared' });
+
   log.info({ msg: 'Automation topology setup complete' });
 }
 
@@ -88,6 +96,7 @@ export async function setupAutomationTopology(channel: Channel): Promise<void> {
 export async function verifyAutomationTopology(channel: Channel): Promise<boolean> {
   try {
     await channel.checkExchange(EXCHANGES.TRIGGERS);
+    await channel.checkExchange(EXCHANGE_CLOSE_ORDER_EVENTS);
     await channel.checkQueue(QUEUES.ORDERS_PENDING);
     return true;
   } catch {

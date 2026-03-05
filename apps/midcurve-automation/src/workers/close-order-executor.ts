@@ -14,7 +14,7 @@
  */
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
-import { ParaswapSwapService, isParaswapSupportedChain } from '@midcurve/services';
+import { ParaswapSwapService, isParaswapSupportedChain, publishCloseOrderEventsFromReceipt } from '@midcurve/services';
 import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
 import {
   broadcastTransaction,
@@ -1052,8 +1052,25 @@ export class CloseOrderExecutor {
       throw new Error(`Transaction reverted: ${revertReason || 'unknown reason'} (tx: ${txHash})`);
     }
 
-    // Order will be deleted from DB by the event handler when OrderExecuted event arrives.
-    // No need to update automationState here — the event handler handles cleanup.
+    // Publish close order events from receipt to close-order-events exchange.
+    // This triggers the ProcessCloseOrderEventsRule downstream (DB cleanup, domain events).
+    try {
+      const channel = await getRabbitMQConnection().getChannel();
+      const { eventsPublished } = await publishCloseOrderEventsFromReceipt(
+        channel,
+        chainId,
+        txHash as `0x${string}`,
+        contractAddress,
+      );
+      log.info({ orderId, txHash, eventsPublished, msg: 'Published close order events from execution receipt' });
+    } catch (err) {
+      log.warn({
+        orderId,
+        txHash,
+        error: err instanceof Error ? err.message : String(err),
+        msg: 'Failed to publish close order events from receipt (will be picked up by fallback poller)',
+      });
+    }
 
     // Remove per-order DB subscription (trivial — no "remaining orders?" check needed)
     try {
