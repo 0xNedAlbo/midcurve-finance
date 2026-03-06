@@ -82,12 +82,8 @@ export function SwapDialog({ isOpen, onClose, prefill, chainId: propChainId }: S
 
   const walletConnected = !!chain?.id;
 
-  const handleSwapClose = (reason: 'success' | 'cancelled' | 'error') => {
-    if (reason === 'success') {
-      setTimeout(() => onClose(), 500);
-    } else {
-      onClose();
-    }
+  const handleSwapClose = (_reason: 'success' | 'cancelled' | 'error') => {
+    onClose();
   };
 
   const modalContent = (

@@ -3,12 +3,14 @@
  *
  * Builds swap transaction via Paraswap API and submits it via wagmi.
  * No backend involvement — calls Paraswap directly from the browser.
+ *
+ * Transaction confirmation tracking is handled by EvmTransactionPrompt,
+ * not by this hook.
  */
 
 import { useState, useCallback, useEffect } from 'react';
 import type { Address } from 'viem';
 import { useSendTransaction } from 'wagmi';
-import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import {
   buildParaswapTransaction,
   type ParaswapQuoteResult,
@@ -29,8 +31,6 @@ export interface UseParaswapExecuteSwapResult {
   executeSwap: (input: ParaswapExecuteSwapInput) => Promise<void>;
   isPreparing: boolean;
   isExecuting: boolean;
-  isWaitingForConfirmation: boolean;
-  isSuccess: boolean;
   txHash: Address | undefined;
   error: Error | null;
   reset: () => void;
@@ -51,24 +51,9 @@ export function useParaswapExecuteSwap({
     reset: resetSend,
   } = useSendTransaction();
 
-  // Watch for tx confirmation via backend subscription
-  const txWatch = useWatchTransactionStatus({
-    txHash: txHash ?? null,
-    chainId: chainId ?? 0,
-    targetConfirmations: 1,
-    enabled: !!txHash,
-  });
-  const isWaitingForConfirmation =
-    !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
-  const isSuccess = txWatch.status === 'success';
-
   useEffect(() => {
     if (sendError) setError(sendError);
   }, [sendError]);
-
-  useEffect(() => {
-    if (txWatch.status === 'reverted') setError(new Error('Transaction reverted'));
-  }, [txWatch.status]);
 
   const executeSwap = useCallback(
     async (input: ParaswapExecuteSwapInput) => {
@@ -115,8 +100,6 @@ export function useParaswapExecuteSwap({
     executeSwap,
     isPreparing,
     isExecuting,
-    isWaitingForConfirmation,
-    isSuccess,
     txHash,
     error,
     reset,

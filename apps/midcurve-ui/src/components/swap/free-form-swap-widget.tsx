@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { parseUnits, formatUnits } from 'viem';
@@ -17,36 +17,16 @@ import { formatCompactValue } from '@midcurve/shared';
 import { ArrowDownUp } from 'lucide-react';
 import type { ParaswapSide } from '@/lib/paraswap-client';
 
-import { useParaswapQuote, useSwapApproval, useParaswapExecuteSwap } from '@/hooks/swap';
+import { useParaswapQuote, useParaswapExecuteSwap } from '@/hooks/swap';
 import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 import { getChainSlugByChainId } from '@/config/chains';
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
+import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
+import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { SourceTokenSelector } from './source-token-selector';
 import { TokenAmountInput } from './token-amount-input';
 import { QuoteDisplay } from './quote-display';
 import { SlippageSettings } from './slippage-settings';
-import { SwapButton } from './swap-button';
-
-function parseSwapError(error: Error | null): string | null {
-  if (!error) return null;
-  const message = error.message || '';
-
-  // Try to extract Paraswap error from JSON
-  const jsonMatch = message.match(/\{[^}]*"error"\s*:\s*"([^"]+)"[^}]*\}/);
-  if (jsonMatch) return jsonMatch[1];
-
-  if (message.includes('User rejected') || message.includes('user rejected')) {
-    return 'Transaction rejected by user';
-  }
-  if (message.includes('insufficient funds')) {
-    return 'Insufficient funds for transaction';
-  }
-  if (message.includes('EXTERNAL_SERVICE_ERROR') || message.includes('Failed to build swap')) {
-    return 'Swap service temporarily unavailable. Please try again.';
-  }
-
-  return message;
-}
 
 export interface SwapPrefill {
   /** Pre-selected source (sell) token */
@@ -125,22 +105,15 @@ export function FreeFormSwapWidget({
     autoRefresh: true,
   });
 
-  // Token approval — spender is Paraswap's TokenTransferProxy
-  const {
-    isApproved,
-    needsApproval,
-    isLoadingAllowance,
-    approve,
-    isApproving,
-    isWaitingForConfirmation: isApprovalConfirming,
-    approvalError,
-  } = useSwapApproval({
-    tokenAddress: sourceToken?.address as Address | null,
-    ownerAddress: userAddress as Address | null,
-    spenderAddress: (quote?.tokenTransferProxy as Address) ?? null,
+  // Token approval via shared prompt
+  const approvalPrompt = useErc20TokenApprovalPrompt({
+    tokenAddress: (sourceToken?.address as Address) ?? null,
+    tokenSymbol: sourceToken?.symbol ?? '',
+    tokenDecimals: sourceToken?.decimals ?? 18,
     requiredAmount: quote ? BigInt(quote.srcAmount) : 0n,
+    spenderAddress: (quote?.tokenTransferProxy as Address) ?? null,
     chainId,
-    enabled: !!sourceToken && !!quote && !!userAddress,
+    enabled: !!sourceToken && !!quote && !!userAddress && !isWrongNetwork,
   });
 
   // Source token balance
@@ -172,33 +145,29 @@ export function FreeFormSwapWidget({
   }, [quote, sourceTokenBalance]);
 
   // Execute swap
-  const {
-    executeSwap,
-    isPreparing,
-    isExecuting,
-    isWaitingForConfirmation: isSwapConfirming,
-    isSuccess,
-    error: swapError,
-  } = useParaswapExecuteSwap({
+  const swap = useParaswapExecuteSwap({
     chainId,
     userAddress: userAddress as Address | undefined,
   });
 
-  // Handle successful swap
-  useEffect(() => {
-    if (isSuccess) {
-      onSwapSuccess?.();
-      const timer = setTimeout(() => {
-        onClose('success');
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [isSuccess, onSwapSuccess, onClose]);
-
   const handleSwap = useCallback(() => {
     if (!quote) return;
-    executeSwap({ quote, slippageBps });
-  }, [quote, slippageBps, executeSwap]);
+    swap.executeSwap({ quote, slippageBps });
+  }, [quote, slippageBps, swap]);
+
+  // Swap transaction prompt
+  const swapTx = useEvmTransactionPrompt({
+    label: `Swap ${sourceToken?.symbol ?? ''} → ${destToken?.symbol ?? ''}`,
+    buttonLabel: 'Swap',
+    chainId,
+    enabled: approvalPrompt.isApproved && !!quote && !isExpired,
+    showActionButton: approvalPrompt.isApproved && !isExpired,
+    txHash: swap.txHash,
+    isSubmitting: swap.isPreparing || swap.isExecuting,
+    error: swap.error,
+    onExecute: handleSwap,
+    onReset: swap.reset,
+  });
 
   // Flip tokens
   const handleFlipTokens = useCallback(() => {
@@ -218,7 +187,13 @@ export function FreeFormSwapWidget({
     }
   }, [sourceTokenBalance, sourceToken]);
 
+  const handleFinish = useCallback(() => {
+    onSwapSuccess?.();
+    onClose('success');
+  }, [onSwapSuccess, onClose]);
+
   const amountLabel = side === 'SELL' ? 'Amount to sell' : 'Amount to buy';
+  const showSteps = !!quote && !insufficientBalance && !isWrongNetwork;
 
   return (
     <div className="space-y-4">
@@ -354,11 +329,11 @@ export function FreeFormSwapWidget({
         onSlippageChange={setSlippageBps}
       />
 
-      {/* Error Display */}
-      {(approvalError || swapError) && (
+      {/* Insufficient Balance */}
+      {insufficientBalance && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
           <p className="text-red-400 text-sm">
-            {parseSwapError(approvalError) || parseSwapError(swapError)}
+            Insufficient {sourceToken?.symbol} balance
           </p>
         </div>
       )}
@@ -368,25 +343,23 @@ export function FreeFormSwapWidget({
         <EvmSwitchNetworkPrompt chain={chainSlug} isWrongNetwork={isWrongNetwork} />
       )}
 
-      {/* Swap Button */}
-      <SwapButton
-        hasSourceToken={!!sourceToken && !!destToken}
-        hasQuote={!!quote}
-        isExpired={isExpired}
-        isWrongNetwork={isWrongNetwork}
-        insufficientBalance={insufficientBalance}
-        isLoadingBalance={isLoadingSourceBalance || (sourceTokenBalance === undefined && !!sourceToken && !!userAddress)}
-        needsApproval={needsApproval}
-        isLoadingAllowance={isLoadingAllowance}
-        isApproved={isApproved}
-        isApproving={isApproving || isApprovalConfirming}
-        isSwapping={isPreparing || isExecuting || isSwapConfirming}
-        isSuccess={isSuccess}
-        sourceSymbol={sourceToken?.symbol}
-        onApprove={approve}
-        onSwap={handleSwap}
-        onRefresh={refreshQuote}
-      />
+      {/* Steps — shown once quote is ready and conditions are met */}
+      {showSteps && (
+        <div className="space-y-2">
+          {approvalPrompt.element}
+          {swapTx.element}
+        </div>
+      )}
+
+      {/* Finish button — only when swap is done */}
+      {swapTx.isSuccess && (
+        <button
+          onClick={handleFinish}
+          className="w-full py-3 px-4 rounded-lg font-semibold bg-green-500 hover:bg-green-600 text-white transition-colors cursor-pointer"
+        >
+          Finish
+        </button>
+      )}
     </div>
   );
 }
