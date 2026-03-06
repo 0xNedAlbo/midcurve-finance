@@ -644,9 +644,7 @@ export function TransactionStep() {
       setMintedTokenId(mint.tokenId);
       setMintSucceeded(true);
 
-      // Cancel all polling subscriptions - transaction is complete, no need to keep watching
-      baseApprovalPrompt.cancel();
-      quoteApprovalPrompt.cancel();
+      // Cancel price adjustment polling - transaction is complete, no need to keep watching
       priceAdjustment.cancel();
 
       // Record transaction

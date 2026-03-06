@@ -2,111 +2,54 @@
  * Erc20TokenApprovalPrompt - Complete ERC-20 token approval flow component
  *
  * Encapsulates the entire approval flow including:
- * - Reading current allowance
- * - Real-time approval watching via WebSocket subscriptions
+ * - Reading current allowance directly via wagmi
  * - Exact amount approval
  * - Infinite (max) approval
  * - User rejection handling (silently ignored)
- * - Transaction status display
+ * - Transaction confirmation tracking
  * - Error handling with retry
+ *
+ * Exception to the no-direct-RPC rule (frontend-no-rpc.md):
+ * This hook reads allowance and waits for tx receipt via wagmi directly,
+ * instead of using backend subscription endpoints.
  */
 
 'use client';
 
 import { useCallback, useMemo } from 'react';
 import { Circle, Check, Loader2, AlertCircle, ExternalLink, Copy } from 'lucide-react';
-import { useAccount, useWriteContract } from 'wagmi';
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import type { Address } from 'viem';
-import { formatUnits, getAddress } from 'viem';
+import { formatUnits, getAddress, maxUint256 } from 'viem';
 import { ERC20_ABI } from '@/config/tokens/erc20-abi';
-import { useTokenApproval } from '@/hooks/positions/uniswapv3/wizard/useTokenApproval';
-import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
-import { useWatchErc20TokenApproval } from '@/hooks/tokens/erc20/useWatchErc20TokenApproval';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 
 export type ApprovalStatus = 'pending' | 'waiting' | 'confirming' | 'success' | 'error';
 
 export interface Erc20TokenApprovalPromptProps {
-  /**
-   * Token contract address
-   */
   tokenAddress: Address | null;
-
-  /**
-   * Token symbol (e.g., "WETH", "USDC")
-   */
   tokenSymbol: string;
-
-  /**
-   * Token decimals
-   */
   tokenDecimals: number;
-
-  /**
-   * Required approval amount (in smallest unit)
-   */
   requiredAmount: bigint;
-
-  /**
-   * Spender address (e.g., NonfungiblePositionManager)
-   */
   spenderAddress: Address | null;
-
-  /**
-   * Chain ID
-   */
   chainId: number | undefined;
-
-  /**
-   * Whether the component is enabled
-   */
   enabled?: boolean;
-
-  /**
-   * Callback when approval status changes
-   */
   onApprovalChange?: (isApproved: boolean) => void;
 }
 
 export interface UseErc20TokenApprovalPromptResult {
-  /**
-   * The rendered approval prompt element
-   */
   element: React.ReactNode;
-
-  /**
-   * Whether the token is approved for the required amount
-   */
   isApproved: boolean;
-
-  /**
-   * Current approval status
-   */
   status: ApprovalStatus;
-
-  /**
-   * Any error that occurred (filtered - no user rejections)
-   */
   error: string | null;
-
-  /**
-   * Cancel the approval watch subscription (calls DELETE endpoint)
-   */
-  cancel: () => Promise<void>;
 }
 
-/**
- * Helper to check if error is user rejection (not a real error)
- */
 function isUserRejection(error: Error | null | undefined): boolean {
   if (!error) return false;
   const message = error.message?.toLowerCase() || '';
   return message.includes('user rejected') || message.includes('user denied');
 }
 
-/**
- * Format token amount for display
- */
 function formatTokenAmount(amount: bigint, decimals: number): string {
   const formatted = formatUnits(amount, decimals);
   const num = parseFloat(formatted);
@@ -114,28 +57,14 @@ function formatTokenAmount(amount: bigint, decimals: number): string {
   if (num < 0.0001) return '<0.0001';
   if (num < 1) return num.toPrecision(4);
   if (num < 1000) return num.toFixed(4).replace(/\.?0+$/, '');
-  // Compact format for large numbers
   if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`;
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`;
   return num.toFixed(2);
 }
 
-/**
- * Complete ERC-20 token approval flow component
- *
- * @example
- * ```tsx
- * <Erc20TokenApprovalPrompt
- *   tokenAddress="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
- *   tokenSymbol="WETH"
- *   tokenDecimals={18}
- *   requiredAmount={BigInt('1000000000000000000')}
- *   spenderAddress="0x..."
- *   chainId={1}
- * />
- * ```
- */
+const POLL_INTERVAL_MS = 15_000;
+
 export function useErc20TokenApprovalPrompt({
   tokenAddress,
   tokenSymbol,
@@ -148,90 +77,88 @@ export function useErc20TokenApprovalPrompt({
 }: Erc20TokenApprovalPromptProps): UseErc20TokenApprovalPromptResult {
   const { address: ownerAddress } = useAccount();
 
-  // Token approval hook (for infinite approval via useTokenApproval)
-  const approval = useTokenApproval({
-    tokenAddress,
-    ownerAddress: ownerAddress ?? null,
-    requiredAmount,
-    chainId,
-    enabled: enabled && !!tokenAddress && !!ownerAddress && !!chainId && requiredAmount > 0n,
-  });
+  const canCheck = enabled && !!tokenAddress && !!ownerAddress && !!spenderAddress && !!chainId;
 
-  // Watch hook for real-time approval status updates
-  const approvalWatch = useWatchErc20TokenApproval({
-    tokenAddress,
-    ownerAddress: ownerAddress ?? null,
-    spenderAddress,
-    chainId: chainId ?? 0,
-    requiredAmount,
-    enabled: enabled && !!tokenAddress && !!ownerAddress && !!spenderAddress && !!chainId && requiredAmount > 0n,
-  });
-
-  // Exact amount approval hooks
+  // Read current allowance — once on mount, then poll every 15s
   const {
-    writeContract: writeExactApproval,
-    data: exactApprovalTxHash,
-    isPending: isExactApproving,
-    error: exactApprovalError,
-    reset: resetExactApproval,
+    data: allowanceData,
+  } = useReadContract({
+    address: tokenAddress ?? undefined,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: ownerAddress && spenderAddress ? [ownerAddress, spenderAddress] : undefined,
+    chainId,
+    query: {
+      enabled: canCheck && requiredAmount > 0n,
+      refetchInterval: (query) => {
+        // Stop polling once allowance meets the required amount
+        const data = query.state.data;
+        if (data !== undefined && BigInt(data.toString()) >= requiredAmount) {
+          return false;
+        }
+        return POLL_INTERVAL_MS;
+      },
+    },
+  });
+
+  const allowance = allowanceData !== undefined ? BigInt(allowanceData.toString()) : undefined;
+  const isApproved = requiredAmount === 0n || (allowance !== undefined && allowance >= requiredAmount);
+
+  // Single writeContract instance for both exact and infinite approvals
+  const {
+    writeContract,
+    data: txHash,
+    isPending: isSigning,
+    error: writeError,
+    reset: resetWrite,
   } = useWriteContract();
 
-  const exactTxWatch = useWatchTransactionStatus({
-    txHash: exactApprovalTxHash ?? null,
-    chainId: chainId ?? 0,
-    targetConfirmations: 1,
-    enabled: !!exactApprovalTxHash,
+  // Wait for 1 confirmation after tx is sent
+  const {
+    isLoading: isConfirming,
+    error: receiptError,
+  } = useWaitForTransactionReceipt({
+    hash: txHash,
+    confirmations: 1,
   });
-  const isExactWaiting = !!exactApprovalTxHash && exactTxWatch.status !== 'success' && exactTxWatch.status !== 'reverted' && !exactTxWatch.error;
-  const exactReceiptError = exactTxWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
-
-  // Combined approval status - prioritize watch hook (on-chain state) over local state
-  // Local approval.isApproved is only used as fallback when watch hasn't loaded yet
-  const isApproved = requiredAmount === 0n || approvalWatch.isApproved || (approval.isApproved && approvalWatch.allowance === undefined);
 
   // Filter user rejection errors
-  const approvalErrorFiltered = isUserRejection(approval.approvalError) ? null : approval.approvalError;
-  const exactErrorRaw = exactApprovalError || exactReceiptError;
-  const exactErrorFiltered = isUserRejection(exactErrorRaw) ? null : exactErrorRaw;
+  const filteredWriteError = isUserRejection(writeError) ? null : writeError;
+  const filteredReceiptError = receiptError && !isUserRejection(receiptError) ? receiptError : null;
+  const errorObj = filteredWriteError || filteredReceiptError;
+  const error = errorObj?.message || null;
 
-  // Determine current status
   const status = useMemo((): ApprovalStatus => {
     if (requiredAmount === 0n || isApproved) return 'success';
-    if (exactErrorFiltered || approvalErrorFiltered) return 'error';
-    if (isExactWaiting || approval.isWaitingForConfirmation) return 'confirming';
-    if (isExactApproving || approval.isApproving) return 'waiting';
+    if (errorObj) return 'error';
+    if (isConfirming) return 'confirming';
+    if (isSigning) return 'waiting';
     return 'pending';
-  }, [requiredAmount, isApproved, exactErrorFiltered, approvalErrorFiltered, isExactWaiting, approval.isWaitingForConfirmation, isExactApproving, approval.isApproving]);
+  }, [requiredAmount, isApproved, errorObj, isConfirming, isSigning]);
 
-  // Combined error message
-  const error = approvalErrorFiltered?.message || exactErrorFiltered?.message || null;
-
-  // Transaction hash (prefer exact approval if available)
-  const txHash = exactApprovalTxHash || approval.approvalTxHash;
-
-  // Formatted amount for display
-  const formattedAmount = formatTokenAmount(requiredAmount, tokenDecimals);
-
-  // Handler for exact amount approval
   const handleExactApprove = useCallback(() => {
     if (!tokenAddress || !spenderAddress || !chainId) return;
-    resetExactApproval();
-    writeExactApproval({
+    resetWrite();
+    writeContract({
       address: getAddress(tokenAddress),
       abi: ERC20_ABI,
       functionName: 'approve',
       args: [getAddress(spenderAddress), requiredAmount],
       chainId,
     });
-  }, [tokenAddress, spenderAddress, chainId, requiredAmount, writeExactApproval, resetExactApproval]);
+  }, [tokenAddress, spenderAddress, chainId, requiredAmount, writeContract, resetWrite]);
 
-  // Handler for infinite approval
   const handleInfiniteApprove = useCallback(() => {
     if (!tokenAddress || !spenderAddress || !chainId) return;
-    resetExactApproval();
-    // Use the useTokenApproval hook which approves maxUint256
-    approval.approve();
-  }, [tokenAddress, spenderAddress, chainId, approval, resetExactApproval]);
+    resetWrite();
+    writeContract({
+      address: getAddress(tokenAddress),
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [getAddress(spenderAddress), maxUint256],
+      chainId,
+    });
+  }, [tokenAddress, spenderAddress, chainId, writeContract, resetWrite]);
 
   // Notify parent of approval changes
   useMemo(() => {
@@ -241,10 +168,8 @@ export function useErc20TokenApprovalPrompt({
   const isActive = status === 'waiting' || status === 'confirming';
   const isError = status === 'error';
   const isSuccess = status === 'success';
-
-  // Show buttons when pending OR when there's an error (for retry), but not when active
   const showButtons = (status === 'pending' || isError) && !isActive;
-
+  const formattedAmount = formatTokenAmount(requiredAmount, tokenDecimals);
   const label = `Approve ${formattedAmount} ${tokenSymbol}`;
 
   const element = (
@@ -261,14 +186,12 @@ export function useErc20TokenApprovalPrompt({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* Status Icon */}
           {status === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
           {status === 'waiting' && <Circle className="w-5 h-5 text-blue-400" />}
           {status === 'confirming' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
           {status === 'success' && <Check className="w-5 h-5 text-green-400" />}
           {status === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
 
-          {/* Label */}
           <span
             className={
               isSuccess
@@ -282,7 +205,6 @@ export function useErc20TokenApprovalPrompt({
           </span>
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-2">
           {txHash && chainId && (
             <a
@@ -314,7 +236,6 @@ export function useErc20TokenApprovalPrompt({
         </div>
       </div>
 
-      {/* Error message */}
       {isError && error && (
         <div className="mt-2 pl-8 flex gap-2">
           <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
@@ -337,6 +258,5 @@ export function useErc20TokenApprovalPrompt({
     isApproved,
     status,
     error,
-    cancel: approvalWatch.cancel,
   };
 }
