@@ -376,6 +376,10 @@ export interface UpdateEventAggregatesInput {
     uncollectedPrincipal0After: bigint;
     /** Uncollected principal in token1 after this event */
     uncollectedPrincipal1After: bigint;
+    /** Fees collected in token0 (for COLLECT events, 0 otherwise) */
+    feesCollected0: bigint;
+    /** Fees collected in token1 (for COLLECT events, 0 otherwise) */
+    feesCollected1: bigint;
 }
 
 /**
@@ -768,6 +772,8 @@ export class UniswapV3LedgerService {
             liquidityAfter: updates.liquidityAfter,
             uncollectedPrincipal0After: updates.uncollectedPrincipal0After,
             uncollectedPrincipal1After: updates.uncollectedPrincipal1After,
+            feesCollected0: updates.feesCollected0,
+            feesCollected1: updates.feesCollected1,
         };
 
         await db.positionLedgerEvent.update({
@@ -1083,6 +1089,8 @@ export class UniswapV3LedgerService {
             let deltaCostBasis = 0n;
             let deltaPnl = 0n;
             let deltaCollectedFees = 0n;
+            let feesCollected0 = 0n;
+            let feesCollected1 = 0n;
 
             if (
                 state.eventType === "MINT" ||
@@ -1148,8 +1156,8 @@ export class UniswapV3LedgerService {
                         ? state.amount1
                         : previousUncollectedPrincipal1;
 
-                const feesCollected0 = state.amount0 - principal0Collected;
-                const feesCollected1 = state.amount1 - principal1Collected;
+                feesCollected0 = state.amount0 - principal0Collected;
+                feesCollected1 = state.amount1 - principal1Collected;
 
                 // Calculate fee value in quote tokens
                 let feeValue: bigint;
@@ -1273,6 +1281,8 @@ export class UniswapV3LedgerService {
                     collectedFeesAfter,
                     uncollectedPrincipal0After,
                     uncollectedPrincipal1After,
+                    feesCollected0,
+                    feesCollected1,
                 },
                 tx,
             );
