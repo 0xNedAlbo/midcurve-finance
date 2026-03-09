@@ -248,7 +248,7 @@ export function UniswapV3CollectFeesForm({
       )}
 
       {/* Finish Button - Small green button at bottom right, only shown after collection completes */}
-      {collectFeesTx.isSuccess && (
+      {collectFeesTx.isSuccess && refreshPosition.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}

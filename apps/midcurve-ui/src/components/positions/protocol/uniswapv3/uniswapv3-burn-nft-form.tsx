@@ -152,7 +152,7 @@ export function UniswapV3BurnNftForm({
       )}
 
       {/* Finish Button */}
-      {burnTx.isSuccess && (
+      {burnTx.isSuccess && refreshPosition.isSuccess && (
         <div className="flex justify-end">
           <button
             onClick={onClose}
