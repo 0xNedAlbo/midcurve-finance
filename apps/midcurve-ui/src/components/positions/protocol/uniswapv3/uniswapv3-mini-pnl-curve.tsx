@@ -46,6 +46,9 @@ interface CurvePoint {
   positionValue: number;
   pnlPercent: number;
   phase: "below" | "in-range" | "above";
+  priceBigint: bigint;
+  positionValueBigint: bigint;
+  pnlBigint: bigint;
 }
 
 /** Number of points to generate for the mini curve */
@@ -204,6 +207,9 @@ export function UniswapV3MiniPnLCurve({
           pnl: pnlDisplay,
           pnlPercent: result.pnlPercent,
           phase,
+          priceBigint: priceBigint,
+          positionValueBigint: result.positionValue,
+          pnlBigint: result.pnlValue,
         });
       }
 
@@ -481,10 +487,11 @@ export function UniswapV3MiniPnLCurve({
           style={{ left: `${tooltipPosition.x}px`, top: `${tooltipPosition.y}px` }}
         >
           <PnLCurveTooltip
-            price={hoveredPoint.price}
-            positionValue={hoveredPoint.positionValue}
-            pnl={hoveredPoint.pnl}
+            price={hoveredPoint.priceBigint}
+            positionValue={hoveredPoint.positionValueBigint}
+            pnl={hoveredPoint.pnlBigint}
             pnlPercent={hoveredPoint.pnlPercent}
+            quoteDecimals={quoteToken.decimals}
             quoteToken={quoteToken as any}
           />
         </div>,
