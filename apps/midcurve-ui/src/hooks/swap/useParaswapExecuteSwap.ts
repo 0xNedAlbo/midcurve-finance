@@ -12,7 +12,7 @@ import { useState, useCallback, useEffect } from 'react';
 import type { Address } from 'viem';
 import { useSendTransaction } from 'wagmi';
 import {
-  buildParaswapTransaction,
+  getParaswapSwap,
   type ParaswapQuoteResult,
   type ParaswapSupportedChainId,
 } from '@/lib/paraswap-client';
@@ -67,23 +67,26 @@ export function useParaswapExecuteSwap({
 
       const { quote, slippageBps } = input;
 
-      const txResult = await buildParaswapTransaction({
+      // Use /swap endpoint: fetches fresh quote + tx calldata in one atomic call,
+      // eliminating staleness between quote and transaction build.
+      const swapResult = await getParaswapSwap({
         chainId: chainId as ParaswapSupportedChainId,
         srcToken: quote.srcToken,
+        srcDecimals: quote.priceRoute.srcDecimals,
         destToken: quote.destToken,
-        srcAmount: quote.srcAmount,
-        destAmount: quote.destAmount,
-        priceRoute: quote.priceRoute,
+        destDecimals: quote.priceRoute.destDecimals,
+        amount: quote.side === 'SELL' ? quote.srcAmount : quote.destAmount,
         userAddress,
+        side: quote.side,
         slippageBps,
       });
 
       setIsPreparing(false);
 
       sendTransaction({
-        to: txResult.to,
-        data: txResult.data,
-        value: BigInt(txResult.value),
+        to: swapResult.to,
+        data: swapResult.data,
+        value: BigInt(swapResult.value),
         chainId,
       });
     },

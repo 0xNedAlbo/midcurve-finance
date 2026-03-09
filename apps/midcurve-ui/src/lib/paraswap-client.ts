@@ -81,22 +81,25 @@ export interface ParaswapQuoteResult {
   side: ParaswapSide;
 }
 
-export interface ParaswapBuildTxRequest {
+export interface ParaswapSwapRequest {
   chainId: ParaswapSupportedChainId;
   srcToken: string;
+  srcDecimals: number;
   destToken: string;
-  srcAmount: string;
-  destAmount: string;
-  priceRoute: ParaswapPriceRoute;
+  destDecimals: number;
+  /** Amount in wei. For SELL: srcAmount, for BUY: destAmount */
+  amount: string;
   userAddress: string;
+  side: ParaswapSide;
+  /** Slippage tolerance in basis points (e.g. 50 = 0.5%) */
   slippageBps: number;
 }
 
-export interface ParaswapTransactionResult {
+export interface ParaswapSwapResult {
   to: Address;
   data: Hex;
   value: string;
-  gasLimit: string;
+  chainId: number;
 }
 
 // =============================================================================
@@ -184,87 +187,65 @@ export async function getParaswapQuote(request: ParaswapQuoteRequest): Promise<P
 }
 
 /**
- * Build a swap transaction from a quote
+ * Get a fresh quote + ready-to-submit tx calldata in a single atomic API call.
+ * Uses Velora's /swap endpoint to eliminate staleness between quote and tx build.
+ * Docs: https://developers.velora.xyz/api/velora-api/velora-market-api/get-rate-for-a-token-pair-1
  */
-export async function buildParaswapTransaction(
-  request: ParaswapBuildTxRequest
-): Promise<ParaswapTransactionResult> {
+export async function getParaswapSwap(
+  request: ParaswapSwapRequest
+): Promise<ParaswapSwapResult> {
   const {
     chainId,
     srcToken,
+    srcDecimals,
     destToken,
-    srcAmount,
-    destAmount,
-    priceRoute,
+    destDecimals,
+    amount,
     userAddress,
+    side,
     slippageBps,
   } = request;
 
-  const side = priceRoute.side as ParaswapSide;
-  const deadline = Math.floor(Date.now() / 1000) + DEFAULT_QUOTE_VALIDITY_SECONDS;
-
-  // Slippage handling depends on swap side:
-  // SELL: user sells exact srcAmount, receives at least minDestAmount
-  // BUY: user receives exact destAmount, pays at most maxSrcAmount
-  let txSrcAmount: string;
-  let txDestAmount: string;
-
-  if (side === 'BUY') {
-    const srcAmountBigInt = BigInt(srcAmount);
-    const slippageMultiplier = 10000n + BigInt(slippageBps);
-    const maxSrcAmount = (srcAmountBigInt * slippageMultiplier) / 10000n;
-    txSrcAmount = maxSrcAmount.toString();
-    txDestAmount = destAmount;
-  } else {
-    const destAmountBigInt = BigInt(destAmount);
-    const slippageMultiplier = 10000n - BigInt(slippageBps);
-    const minDest = (destAmountBigInt * slippageMultiplier) / 10000n;
-    txSrcAmount = srcAmount;
-    txDestAmount = minDest.toString();
-  }
-
-  const body = {
+  const params = new URLSearchParams({
     srcToken,
+    srcDecimals: srcDecimals.toString(),
     destToken,
-    srcAmount: txSrcAmount,
-    destAmount: txDestAmount,
-    priceRoute,
+    destDecimals: destDecimals.toString(),
+    amount,
+    side,
+    network: chainId.toString(),
+    slippage: slippageBps.toString(),
     userAddress,
     partner: PARTNER_NAME,
-    srcDecimals: priceRoute.srcDecimals,
-    destDecimals: priceRoute.destDecimals,
-    deadline,
-  };
-
-  const url = `${PARASWAP_API_BASE}/transactions/${chainId}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
   });
+
+  const url = `${PARASWAP_API_BASE}/swap?${params}`;
+  const response = await fetch(url);
 
   if (!response.ok) {
     const errorBody = await response.text();
     throw new ParaswapApiError(
-      `Paraswap build tx failed: ${response.status} - ${errorBody}`,
+      `Paraswap swap failed: ${response.status} - ${errorBody}`,
       response.status,
       errorBody
     );
   }
 
-  const txData = (await response.json()) as {
-    from: string;
-    to: string;
-    value: string;
-    data: string;
-    gas?: string;
-    chainId: number;
+  const data = (await response.json()) as {
+    priceRoute: ParaswapPriceRoute;
+    txParams: {
+      from: string;
+      to: string;
+      value: string;
+      data: string;
+      chainId: number;
+    };
   };
 
   return {
-    to: txData.to as Address,
-    data: txData.data as Hex,
-    value: txData.value || '0',
-    gasLimit: txData.gas || '500000',
+    to: data.txParams.to as Address,
+    data: data.txParams.data as Hex,
+    value: data.txParams.value || '0',
+    chainId: data.txParams.chainId,
   };
 }
