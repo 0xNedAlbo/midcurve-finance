@@ -105,12 +105,38 @@ export function FreeFormSwapWidget({
     autoRefresh: true,
   });
 
+  // Execute swap — declared early so freshSrcAmount is available for approval
+  const swap = useParaswapExecuteSwap({
+    chainId,
+    userAddress: userAddress as Address | undefined,
+    srcTokenAddress: (sourceToken?.address as Address) ?? undefined,
+    spenderAddress: (quote?.tokenTransferProxy as Address) ?? undefined,
+  });
+
   // Token approval via shared prompt
+  // For BUY side, add slippage buffer since /swap may get a different srcAmount.
+  // If /swap returned a higher srcAmount (freshSrcAmount), use that instead.
+  const approvalAmount = useMemo(() => {
+    if (!quote) return 0n;
+    const quoteSrcAmount = BigInt(quote.srcAmount);
+    const bufferedAmount = side === 'BUY'
+      ? quoteSrcAmount * (10000n + BigInt(slippageBps)) / 10000n
+      : quoteSrcAmount;
+    // If the fresh /swap call returned a higher amount, use it (with buffer for BUY)
+    if (swap.freshSrcAmount !== null) {
+      const freshBuffered = side === 'BUY'
+        ? swap.freshSrcAmount * (10000n + BigInt(slippageBps)) / 10000n
+        : swap.freshSrcAmount;
+      return bufferedAmount > freshBuffered ? bufferedAmount : freshBuffered;
+    }
+    return bufferedAmount;
+  }, [quote, side, slippageBps, swap.freshSrcAmount]);
+
   const approvalPrompt = useErc20TokenApprovalPrompt({
     tokenAddress: (sourceToken?.address as Address) ?? null,
     tokenSymbol: sourceToken?.symbol ?? '',
     tokenDecimals: sourceToken?.decimals ?? 18,
-    requiredAmount: quote ? BigInt(quote.srcAmount) : 0n,
+    requiredAmount: approvalAmount,
     spenderAddress: (quote?.tokenTransferProxy as Address) ?? null,
     chainId,
     enabled: !!sourceToken && !!quote && !!userAddress && !isWrongNetwork,
@@ -143,12 +169,6 @@ export function FreeFormSwapWidget({
     if (!quote || sourceTokenBalance === undefined) return false;
     return sourceTokenBalance < BigInt(quote.srcAmount);
   }, [quote, sourceTokenBalance]);
-
-  // Execute swap
-  const swap = useParaswapExecuteSwap({
-    chainId,
-    userAddress: userAddress as Address | undefined,
-  });
 
   const handleSwap = useCallback(() => {
     if (!quote) return;

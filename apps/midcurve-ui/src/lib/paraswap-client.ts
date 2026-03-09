@@ -100,6 +100,8 @@ export interface ParaswapSwapResult {
   data: Hex;
   value: string;
   chainId: number;
+  /** The actual srcAmount from the fresh quote (may differ from display quote) */
+  srcAmount: string;
 }
 
 // =============================================================================
@@ -247,5 +249,6 @@ export async function getParaswapSwap(
     data: data.txParams.data as Hex,
     value: data.txParams.value || '0',
     chainId: data.txParams.chainId,
+    srcAmount: data.priceRoute.srcAmount,
   };
 }
