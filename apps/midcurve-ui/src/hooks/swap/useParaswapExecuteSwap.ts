@@ -108,12 +108,16 @@ export function useParaswapExecuteSwap({
         slippageBps,
       });
 
-      // Check if current allowance covers the fresh srcAmount
+      // Check if current allowance covers what the calldata will actually transferFrom.
+      // In BUY mode, Paraswap's calldata transfers up to srcAmount × (1 + slippage).
       const freshAmount = BigInt(swapResult.srcAmount);
+      const requiredAllowance = quote.side === 'BUY'
+        ? freshAmount * (10000n + BigInt(slippageBps)) / 10000n
+        : freshAmount;
       const { data: currentAllowance } = await refetchAllowance();
       const allowance = currentAllowance !== undefined ? BigInt(currentAllowance.toString()) : 0n;
 
-      if (allowance < freshAmount) {
+      if (allowance < requiredAllowance) {
         // Approval insufficient — expose fresh amount so widget can update approval
         setFreshSrcAmount(freshAmount);
         setIsPreparing(false);
