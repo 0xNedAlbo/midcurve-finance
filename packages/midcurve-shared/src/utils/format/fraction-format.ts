@@ -222,7 +222,7 @@ export function formatCompactValue(
   }
 
   // Get the full formatted string first
-  const fullFormatted = formatHumanWithDecimals(value, decimals, opts);
+  const fullFormatted = formatHumanWithDecimals(value, decimals, { ...opts, mantissaDigits: 4 });
 
   // Check if the absolute value is >= 1 by comparing to the denominator
   const denominator = 10n ** BigInt(decimals || 18);
