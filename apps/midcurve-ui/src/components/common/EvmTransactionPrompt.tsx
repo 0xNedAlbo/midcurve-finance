@@ -200,8 +200,8 @@ export function useEvmTransactionPrompt({
     // Check for waiting state (wallet popup)
     if (isSubmitting) return 'waiting';
 
-    // Check if we have a tx hash but still pending
-    if (effectiveTxHash && txWatch.status === 'not_found') return 'confirming';
+    // Check if we have a tx hash but backend hasn't caught up yet
+    if (effectiveTxHash && (txWatch.status === undefined || txWatch.status === 'not_found')) return 'confirming';
 
     return 'idle';
   }, [
