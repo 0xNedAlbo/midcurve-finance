@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { parseUnits, formatUnits } from 'viem';
@@ -69,6 +69,15 @@ export function FreeFormSwapWidget({
   });
   const [slippageBps, setSlippageBps] = useState(50); // 0.5% default
 
+  // Track whether the user has completed approval — pause quote auto-refresh
+  // once approved so rising prices don't invalidate the allowance.
+  const [approvedOnce, setApprovedOnce] = useState(false);
+
+  // Reset when swap inputs change
+  useEffect(() => {
+    setApprovedOnce(false);
+  }, [amount, sourceToken, destToken, side]);
+
   const chainSlug = getChainSlugByChainId(chainId);
 
   // Calculate amount in wei for the relevant token (source for SELL, dest for BUY)
@@ -102,7 +111,7 @@ export function FreeFormSwapWidget({
     userAddress,
     side,
     enabled: !!sourceToken && !!destToken && !!amountInWei && !!userAddress,
-    autoRefresh: true,
+    autoRefresh: !approvedOnce,
   });
 
   // Execute swap — declared early so freshSrcAmount is available for approval
@@ -132,6 +141,10 @@ export function FreeFormSwapWidget({
     return bufferedAmount;
   }, [quote, side, slippageBps, swap.freshSrcAmount]);
 
+  const handleApprovalChange = useCallback((isApproved: boolean) => {
+    if (isApproved) setApprovedOnce(true);
+  }, []);
+
   const approvalPrompt = useErc20TokenApprovalPrompt({
     tokenAddress: (sourceToken?.address as Address) ?? null,
     tokenSymbol: sourceToken?.symbol ?? '',
@@ -140,6 +153,7 @@ export function FreeFormSwapWidget({
     spenderAddress: (quote?.tokenTransferProxy as Address) ?? null,
     chainId,
     enabled: !!sourceToken && !!quote && !!userAddress && !isWrongNetwork,
+    onApprovalChange: handleApprovalChange,
   });
 
   // Source token balance
