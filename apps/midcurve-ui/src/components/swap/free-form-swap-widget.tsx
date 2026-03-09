@@ -278,35 +278,37 @@ export function FreeFormSwapWidget({
         onMaxClick={handleMaxClick}
       />
 
-      {/* Side Toggle */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => { setSide('SELL'); setAmount(''); }}
-          className={`
-            flex-1 py-2 px-4 rounded-lg text-sm font-medium
-            transition-colors cursor-pointer
-            ${side === 'SELL'
-              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-              : 'bg-slate-700/30 text-slate-400 border border-slate-600/30 hover:bg-slate-700/50'
-            }
-          `}
-        >
-          Sell
-        </button>
-        <button
-          onClick={() => { setSide('BUY'); setAmount(''); }}
-          className={`
-            flex-1 py-2 px-4 rounded-lg text-sm font-medium
-            transition-colors cursor-pointer
-            ${side === 'BUY'
-              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-              : 'bg-slate-700/30 text-slate-400 border border-slate-600/30 hover:bg-slate-700/50'
-            }
-          `}
-        >
-          Buy
-        </button>
-      </div>
+      {/* Side Toggle — hidden when direction is prefilled */}
+      {!prefill?.side && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setSide('SELL'); setAmount(''); }}
+            className={`
+              flex-1 py-2 px-4 rounded-lg text-sm font-medium
+              transition-colors cursor-pointer
+              ${side === 'SELL'
+                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                : 'bg-slate-700/30 text-slate-400 border border-slate-600/30 hover:bg-slate-700/50'
+              }
+            `}
+          >
+            Sell
+          </button>
+          <button
+            onClick={() => { setSide('BUY'); setAmount(''); }}
+            className={`
+              flex-1 py-2 px-4 rounded-lg text-sm font-medium
+              transition-colors cursor-pointer
+              ${side === 'BUY'
+                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                : 'bg-slate-700/30 text-slate-400 border border-slate-600/30 hover:bg-slate-700/50'
+              }
+            `}
+          >
+            Buy
+          </button>
+        </div>
+      )}
 
       {/* Quote Display */}
       {sourceToken && destToken && amountInWei && (

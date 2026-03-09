@@ -126,8 +126,6 @@ export function SourceTokenSelector({
 
   return (
     <div className="mb-4" ref={dropdownRef}>
-      <div className="text-sm text-slate-400 mb-2">Swap from</div>
-
       {/* Discovery error message */}
       {discoveryError && (
         <div className="mb-2 text-xs text-amber-400">{discoveryError}</div>
