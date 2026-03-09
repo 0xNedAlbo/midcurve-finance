@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Circle, Check, Loader2, AlertCircle, ExternalLink, Copy } from 'lucide-react';
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import type { Address } from 'viem';
@@ -82,6 +82,7 @@ export function useErc20TokenApprovalPrompt({
   // Read current allowance — once on mount, then poll every 15s
   const {
     data: allowanceData,
+    refetch: refetchAllowance,
   } = useReadContract({
     address: tokenAddress ?? undefined,
     abi: ERC20_ABI,
@@ -116,11 +117,17 @@ export function useErc20TokenApprovalPrompt({
   // Wait for 1 confirmation after tx is sent
   const {
     isLoading: isConfirming,
+    isSuccess: receiptSuccess,
     error: receiptError,
   } = useWaitForTransactionReceipt({
     hash: txHash,
     confirmations: 1,
   });
+
+  // Immediately refetch allowance when receipt confirms — don't wait for 15s poll
+  useEffect(() => {
+    if (receiptSuccess) refetchAllowance();
+  }, [receiptSuccess, refetchAllowance]);
 
   // Filter user rejection errors
   const filteredWriteError = isUserRejection(writeError) ? null : writeError;
@@ -131,10 +138,11 @@ export function useErc20TokenApprovalPrompt({
   const status = useMemo((): ApprovalStatus => {
     if (requiredAmount === 0n || isApproved) return 'success';
     if (errorObj) return 'error';
-    if (isConfirming) return 'confirming';
+    // Bridge the gap: receipt confirmed but allowance poll hasn't caught up yet
+    if (isConfirming || (receiptSuccess && !isApproved)) return 'confirming';
     if (isSigning) return 'waiting';
     return 'pending';
-  }, [requiredAmount, isApproved, errorObj, isConfirming, isSigning]);
+  }, [requiredAmount, isApproved, errorObj, isConfirming, receiptSuccess, isSigning]);
 
   const handleExactApprove = useCallback(() => {
     if (!tokenAddress || !spenderAddress || !chainId) return;
