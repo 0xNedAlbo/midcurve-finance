@@ -1,0 +1,14 @@
+{
+  "chainId": 11155111,
+  "network": "sepolia",
+  "deployedAt": "",
+  "deployer": "",
+  "contracts": {
+    "mcUSD": "",
+    "mcWETH": "",
+    "mcUSD_mcWETH_Pool": "",
+    "UniswapV3Adapter": "",
+    "MidcurveSwapRouter": "",
+    "UniswapV3PositionCloser": ""
+  }
+}
