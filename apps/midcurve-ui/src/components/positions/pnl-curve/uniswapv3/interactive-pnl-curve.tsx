@@ -603,18 +603,32 @@ function InteractivePnLCurveInner({
         );
 
         // Apply constraints: lower < upper (with at least one tick spacing gap)
-        if (boundary === 'lower') {
-          const constrainedTick = Math.min(newTick, tickUpper - tickSpacing);
-          onTickLowerChange?.(constrainedTick);
+        // When isToken0Quote, visual boundaries are inverted relative to tick space:
+        // visual lower renders from tickUpper, visual upper renders from tickLower
+        const isToken0Quote = !isBaseToken0;
+
+        if (isToken0Quote) {
+          if (boundary === 'lower') {
+            const constrainedTick = Math.max(newTick, tickLower + tickSpacing);
+            onTickUpperChange?.(constrainedTick);
+          } else {
+            const constrainedTick = Math.min(newTick, tickUpper - tickSpacing);
+            onTickLowerChange?.(constrainedTick);
+          }
         } else {
-          const constrainedTick = Math.max(newTick, tickLower + tickSpacing);
-          onTickUpperChange?.(constrainedTick);
+          if (boundary === 'lower') {
+            const constrainedTick = Math.min(newTick, tickUpper - tickSpacing);
+            onTickLowerChange?.(constrainedTick);
+          } else {
+            const constrainedTick = Math.max(newTick, tickLower + tickSpacing);
+            onTickUpperChange?.(constrainedTick);
+          }
         }
       } catch {
         // Invalid tick calculation - ignore
       }
     },
-    [xScale, poolData.feeBps, baseToken, quoteToken, tickLower, tickUpper, onTickLowerChange, onTickUpperChange]
+    [xScale, poolData.feeBps, baseToken, quoteToken, tickLower, tickUpper, onTickLowerChange, onTickUpperChange, isBaseToken0]
   );
 
   const handleRangeBoundaryMouseUp = useCallback(() => {
