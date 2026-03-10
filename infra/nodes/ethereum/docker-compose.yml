@@ -51,8 +51,7 @@ services:
       - --port=${RETH_P2P_PORT:-30303}
       - --discovery.port=${RETH_P2P_PORT:-30303}
       # Performance
-      - --rpc.gas-cap=${RETH_RPC_GAS_CAP:-50000000}
-      - --rpc.max-logs-per-response=${RETH_RPC_MAX_LOGS:-10000}
+      - --rpc.gascap=${RETH_RPC_GAS_CAP:-50000000}
     ports:
       # RPC/WS — bind to configured address (default: localhost only)
       - "${RPC_BIND_ADDRESS:-127.0.0.1}:${RETH_HTTP_PORT:-8545}:${RETH_HTTP_PORT:-8545}"
@@ -105,8 +104,6 @@ services:
       - --target-peers=${LIGHTHOUSE_TARGET_PEERS:-80}
       # Disable unused features for a non-validator setup
       - --disable-deposit-contract-sync
-      # Pruning — keep only recent states
-      - --slots-per-restore-point=8192
     ports:
       # Beacon API — localhost only
       - "${RPC_BIND_ADDRESS:-127.0.0.1}:${LIGHTHOUSE_HTTP_PORT:-5052}:${LIGHTHOUSE_HTTP_PORT:-5052}"
@@ -128,7 +125,6 @@ services:
 networks:
   ethereum-engine:
     driver: bridge
-    internal: true
 
 # ============================================================================
 # VOLUMES
