@@ -12,6 +12,7 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
+import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 import { usePriceAdjustment } from '@/components/positions/wizard/create-position/uniswapv3/hooks/usePriceAdjustment';
 import { useIncreaseLiquidity } from '@/hooks/positions/uniswapv3/useIncreaseLiquidity';
 import { useUniswapV3RefreshPosition } from '@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition';
@@ -59,6 +60,22 @@ export function TransactionStep() {
       decimals: token.decimals,
     };
   }, [pool, position?.isToken0Quote]);
+
+  // Watch wallet balances to cap increase amounts (prevents reverts when tolerance let user through with slightly less)
+  const token0Address = pool ? (pool.token0.config as { address: string }).address : null;
+  const token1Address = pool ? (pool.token1.config as { address: string }).address : null;
+  const { balanceBigInt: token0Balance } = useWatchErc20TokenBalance({
+    tokenAddress: token0Address,
+    walletAddress: walletAddress ?? null,
+    chainId: poolChainId,
+    enabled: !!token0Address && !!walletAddress && isConnected && !isWrongNetwork,
+  });
+  const { balanceBigInt: token1Balance } = useWatchErc20TokenBalance({
+    tokenAddress: token1Address,
+    walletAddress: walletAddress ?? null,
+    chainId: poolChainId,
+    enabled: !!token1Address && !!walletAddress && isConnected && !isWrongNetwork,
+  });
 
   // Original amounts for approvals
   const originalBaseAmount = BigInt(state.allocatedBaseAmount || '0');
@@ -131,18 +148,22 @@ export function TransactionStep() {
   }, [priceAdjustmentReady, priceAdjustment.adjustedLiquidity, priceAdjustment.currentSqrtPriceX96, state.discoveredPool, position, tickLower, tickUpper]);
 
   // ===== Increase Liquidity =====
+  // Cap amounts to actual wallet balance (tolerance in SwapStep may allow up to 1% shortfall)
+  const cappedToken0 = token0Balance !== undefined && token0Balance < adjustedAmounts.token0Amount ? token0Balance : adjustedAmounts.token0Amount;
+  const cappedToken1 = token1Balance !== undefined && token1Balance < adjustedAmounts.token1Amount ? token1Balance : adjustedAmounts.token1Amount;
+
   const increaseLiquidityParams = useMemo(() => {
     if (!config || !allApprovalsDone || !priceAdjustmentReady) return null;
-    if (adjustedAmounts.token0Amount === 0n && adjustedAmounts.token1Amount === 0n) return null;
+    if (cappedToken0 === 0n && cappedToken1 === 0n) return null;
 
     return {
       tokenId: BigInt(config.nftId),
-      amount0Desired: adjustedAmounts.token0Amount,
-      amount1Desired: adjustedAmounts.token1Amount,
+      amount0Desired: cappedToken0,
+      amount1Desired: cappedToken1,
       chainId: poolChainId,
       slippageBps: 50,
     };
-  }, [config, allApprovalsDone, priceAdjustmentReady, adjustedAmounts, poolChainId]);
+  }, [config, allApprovalsDone, priceAdjustmentReady, cappedToken0, cappedToken1, poolChainId]);
 
   const increaseLiquidity = useIncreaseLiquidity(increaseLiquidityParams);
 
