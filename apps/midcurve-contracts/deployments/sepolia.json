@@ -1,14 +1,14 @@
 {
   "chainId": 11155111,
   "network": "sepolia",
-  "deployedAt": "",
-  "deployer": "",
+  "deployedAt": "2025-03-08T03:49:23Z",
+  "deployer": "0x670A843229Fb0B7B86E74E74fAE41383314448Cf",
   "contracts": {
-    "mcUSD": "",
-    "mcWETH": "",
-    "mcUSD_mcWETH_Pool": "",
-    "UniswapV3Adapter": "",
-    "MidcurveSwapRouter": "",
-    "UniswapV3PositionCloser": ""
+    "mcUSD": "0xDf5f0577Bd56a67fd0844F7EA08649d63a5D5f3C",
+    "mcWETH": "0x5BB47f45Cd7b7611d4D54992Cf05e2cF2529e031",
+    "mcUSD_mcWETH_Pool": "0x15517EAF2C2167B83121ce9551A255b8C2d8584d",
+    "UniswapV3Adapter": "0x17725efC04feCc4bcC4B12e8c5Cd23BeBDcF7A91",
+    "MidcurveSwapRouter": "0x548128cA65612c83384192cB1a6583b231677120",
+    "UniswapV3PositionCloser": "0xb0Cf06802B3D17Cc17EAf30B8E71540422AAbe55"
   }
 }
