@@ -27,6 +27,7 @@ const CHAIN_IDS: Record<string, number> = {
   mainnet: 1,
   arbitrum: 42161,
   base: 8453,
+  sepolia: 11155111,
 };
 
 // Uniswap V3 SwapRouter02 addresses
@@ -34,23 +35,29 @@ const UNISWAP_V3_SWAP_ROUTER: Record<string, string> = {
   mainnet: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
   arbitrum: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
   base: '0x2626664c2603336E57B271c5C0b26F421741e481',
+  sepolia: '0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48e',
 };
 
 // WETH (or wrapped native token) addresses
+// Sepolia uses mcWETH mock token — populate from deployments/sepolia.json after initial deploy
 const WETH: Record<string, string> = {
   mainnet: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   arbitrum: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
   base: '0x4200000000000000000000000000000000000006',
+  sepolia: '', // TODO: populate after DeploySepolia.s.sol deployment
 };
 
 // USDC addresses (native, not bridged)
+// Sepolia uses mcUSD mock token — populate from deployments/sepolia.json after initial deploy
 const USDC: Record<string, string> = {
   mainnet: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
   arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
   base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  sepolia: '', // TODO: populate after DeploySepolia.s.sol deployment
 };
 
 // Paraswap Augustus V6.2 (same across all EVM chains)
+// Not available on Sepolia — omitted intentionally
 const AUGUSTUS: Record<string, string> = {
   mainnet: '0x6A000F20005980200259B80c5102003040001068',
   arbitrum: '0x6A000F20005980200259B80c5102003040001068',
@@ -60,6 +67,7 @@ const AUGUSTUS: Record<string, string> = {
 // Paraswap TokenTransferProxy for Augustus V6.2
 // V6.2 uses Augustus itself as the TokenTransferProxy (same address).
 // The adapter approves this address so Augustus can pull tokens via transferFrom.
+// Not available on Sepolia — omitted intentionally
 const TOKEN_TRANSFER_PROXY: Record<string, string> = {
   mainnet: '0x6A000F20005980200259B80c5102003040001068',
   arbitrum: '0x6A000F20005980200259B80c5102003040001068',
@@ -171,8 +179,15 @@ async function main(): Promise<void> {
   const augustusAddr = AUGUSTUS[chain];
   const tokenTransferProxyAddr = TOKEN_TRANSFER_PROXY[chain];
 
-  if (!swapRouterAddr || !wethAddr || !usdcAddr || !augustusAddr || !tokenTransferProxyAddr) {
+  if (!swapRouterAddr || !wethAddr || !usdcAddr) {
     console.error(`Missing address configuration for chain "${chain}".`);
+    console.error('Note: Sepolia mcWETH/mcUSD addresses must be populated after initial deployment.');
+    process.exit(1);
+  }
+
+  if (!augustusAddr || !tokenTransferProxyAddr) {
+    console.error(`Paraswap is not configured for chain "${chain}".`);
+    console.error('This wrapper requires Paraswap. For Sepolia initial deployment, use pnpm sepolia:deploy instead.');
     process.exit(1);
   }
 
