@@ -76,3 +76,6 @@ apps/midcurve-evm/contracts/broadcast/
 
 # Deployment artifacts
 apps/midcurve-automation/deployments/
+
+# Node infrastructure secrets
+infra/nodes/**/jwt.hex

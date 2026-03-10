@@ -1,0 +1,140 @@
+# Ethereum Full Node — Reth (execution) + Lighthouse (consensus)
+#
+# Prerequisites:
+#   1. Copy .env.example to .env and adjust values
+#   2. Run ./generate-jwt.sh to create the JWT secret
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f reth          # Follow execution client logs
+#   docker compose logs -f lighthouse    # Follow consensus client logs
+#   docker compose down                  # Stop both clients
+#
+# RPC Endpoints (from the host):
+#   HTTP:      http://<host>:8545
+#   WebSocket: ws://<host>:8546
+#
+# Initial sync takes several hours with checkpoint sync enabled.
+# Monitor progress: docker compose logs -f
+
+services:
+  # ==========================================================================
+  # EXECUTION CLIENT (Reth)
+  # ==========================================================================
+  reth:
+    image: ${RETH_IMAGE:-ghcr.io/paradigmxyz/reth:v1.3.12}
+    container_name: ethereum-reth
+    restart: unless-stopped
+    stop_grace_period: 3m
+    command:
+      - node
+      - --chain=mainnet
+      - --datadir=/data/reth
+      - --full
+      # HTTP RPC
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=${RETH_HTTP_PORT:-8545}
+      - --http.api=eth,net,web3,txpool,debug,trace
+      - --http.corsdomain=*
+      # WebSocket RPC
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=${RETH_WS_PORT:-8546}
+      - --ws.api=eth,net,web3,txpool,debug,trace
+      - --ws.origins=*
+      # Engine API (for Lighthouse communication)
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=${RETH_ENGINE_PORT:-8551}
+      - --authrpc.jwtsecret=/jwt/jwt.hex
+      # P2P
+      - --port=${RETH_P2P_PORT:-30303}
+      - --discovery.port=${RETH_P2P_PORT:-30303}
+      # Performance
+      - --rpc.gas-cap=${RETH_RPC_GAS_CAP:-50000000}
+      - --rpc.max-logs-per-response=${RETH_RPC_MAX_LOGS:-10000}
+    ports:
+      # RPC/WS — bind to configured address (default: localhost only)
+      - "${RPC_BIND_ADDRESS:-127.0.0.1}:${RETH_HTTP_PORT:-8545}:${RETH_HTTP_PORT:-8545}"
+      - "${RPC_BIND_ADDRESS:-127.0.0.1}:${RETH_WS_PORT:-8546}:${RETH_WS_PORT:-8546}"
+      # P2P — must be publicly accessible for peer discovery
+      - "0.0.0.0:${RETH_P2P_PORT:-30303}:${RETH_P2P_PORT:-30303}/tcp"
+      - "0.0.0.0:${RETH_P2P_PORT:-30303}:${RETH_P2P_PORT:-30303}/udp"
+    volumes:
+      - ethereum-reth-data:/data/reth
+      - ./jwt.hex:/jwt/jwt.hex:ro
+    networks:
+      - ethereum-engine
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:${RETH_HTTP_PORT:-8545} --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":1}' --header='Content-Type: application/json' || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ==========================================================================
+  # CONSENSUS CLIENT (Lighthouse)
+  # ==========================================================================
+  lighthouse:
+    image: ${LIGHTHOUSE_IMAGE:-sigp/lighthouse:v6.0.1}
+    container_name: ethereum-lighthouse
+    restart: unless-stopped
+    stop_grace_period: 3m
+    command:
+      - lighthouse
+      - bn
+      - --network=mainnet
+      - --datadir=/data/lighthouse
+      # Checkpoint sync for fast initial sync
+      - --checkpoint-sync-url=${LIGHTHOUSE_CHECKPOINT_SYNC_URL:-https://beaconstate.ethstaker.cc}
+      # Engine API connection to Reth
+      - --execution-endpoint=http://reth:${RETH_ENGINE_PORT:-8551}
+      - --execution-jwt=/jwt/jwt.hex
+      # Beacon API
+      - --http
+      - --http-address=0.0.0.0
+      - --http-port=${LIGHTHOUSE_HTTP_PORT:-5052}
+      - --http-allow-origin=*
+      # P2P
+      - --port=${LIGHTHOUSE_P2P_PORT:-9000}
+      - --discovery-port=${LIGHTHOUSE_P2P_PORT:-9000}
+      - --target-peers=${LIGHTHOUSE_TARGET_PEERS:-80}
+      # Disable unused features for a non-validator setup
+      - --disable-deposit-contract-sync
+      # Pruning — keep only recent states
+      - --slots-per-restore-point=8192
+    ports:
+      # Beacon API — localhost only
+      - "${RPC_BIND_ADDRESS:-127.0.0.1}:${LIGHTHOUSE_HTTP_PORT:-5052}:${LIGHTHOUSE_HTTP_PORT:-5052}"
+      # P2P — must be publicly accessible
+      - "0.0.0.0:${LIGHTHOUSE_P2P_PORT:-9000}:${LIGHTHOUSE_P2P_PORT:-9000}/tcp"
+      - "0.0.0.0:${LIGHTHOUSE_P2P_PORT:-9000}:${LIGHTHOUSE_P2P_PORT:-9000}/udp"
+    volumes:
+      - ethereum-lighthouse-data:/data/lighthouse
+      - ./jwt.hex:/jwt/jwt.hex:ro
+    depends_on:
+      reth:
+        condition: service_started
+    networks:
+      - ethereum-engine
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  ethereum-engine:
+    driver: bridge
+    internal: true
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+volumes:
+  ethereum-reth-data:
+    driver: local
+  ethereum-lighthouse-data:
+    driver: local
