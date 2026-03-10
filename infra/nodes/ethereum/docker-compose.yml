@@ -79,7 +79,7 @@ services:
   # CONSENSUS CLIENT (Lighthouse)
   # ==========================================================================
   lighthouse:
-    image: ${LIGHTHOUSE_IMAGE:-sigp/lighthouse:v6.0.1}
+    image: ${LIGHTHOUSE_IMAGE:-sigp/lighthouse:v8.1.2}
     container_name: ethereum-lighthouse
     restart: unless-stopped
     stop_grace_period: 3m
@@ -102,8 +102,6 @@ services:
       - --port=${LIGHTHOUSE_P2P_PORT:-9000}
       - --discovery-port=${LIGHTHOUSE_P2P_PORT:-9000}
       - --target-peers=${LIGHTHOUSE_TARGET_PEERS:-80}
-      # Disable unused features for a non-validator setup
-      - --disable-deposit-contract-sync
     ports:
       # Beacon API — localhost only
       - "${RPC_BIND_ADDRESS:-127.0.0.1}:${LIGHTHOUSE_HTTP_PORT:-5052}:${LIGHTHOUSE_HTTP_PORT:-5052}"
