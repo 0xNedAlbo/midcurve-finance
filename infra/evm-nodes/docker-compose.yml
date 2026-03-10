@@ -1,28 +1,24 @@
-# Ethereum Full Node — Reth (execution) + Lighthouse (consensus)
-#
-# Prerequisites:
-#   1. Copy .env.example to .env and adjust values
-#   2. Run ./generate-jwt.sh to create the JWT secret
+# EVM Nodes — Reth + Lighthouse + Caddy Reverse Proxy
 #
 # Usage:
 #   docker compose up -d
-#   docker compose logs -f reth          # Follow execution client logs
-#   docker compose logs -f lighthouse    # Follow consensus client logs
-#   docker compose down                  # Stop both clients
+#   docker compose logs -f reth
+#   docker compose logs -f lighthouse
+#   docker compose logs -f caddy
+#   docker compose down
 #
-# RPC Endpoints (from the host):
-#   HTTP:      http://<host>:8545
-#   WebSocket: ws://<host>:8546
-#
-# Initial sync takes several hours with checkpoint sync enabled.
-# Monitor progress: docker compose logs -f
+# RPC Endpoints (extern, via Caddy):
+#   HTTP:      https://nodes.midcurve.finance/ethereum/{API_KEY}
+#   WebSocket: wss://nodes.midcurve.finance/ethereum/{API_KEY}/ws
+#   Beacon:    https://nodes.midcurve.finance/ethereum/{API_KEY}/beacon
 
 services:
+
   # ==========================================================================
   # EXECUTION CLIENT (Reth)
   # ==========================================================================
   reth:
-    image: ${RETH_IMAGE:-ghcr.io/paradigmxyz/reth:v1.3.12}
+    image: ${RETH_IMAGE:-ghcr.io/paradigmxyz/reth:v1.9.3}
     container_name: ethereum-reth
     restart: unless-stopped
     stop_grace_period: 3m
@@ -43,7 +39,7 @@ services:
       - --ws.port=${RETH_WS_PORT:-8546}
       - --ws.api=eth,net,web3,txpool,debug,trace
       - --ws.origins=*
-      # Engine API (for Lighthouse communication)
+      # Engine API (für Lighthouse)
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=${RETH_ENGINE_PORT:-8551}
       - --authrpc.jwtsecret=/jwt/jwt.hex
@@ -53,17 +49,18 @@ services:
       # Performance
       - --rpc.gascap=${RETH_RPC_GAS_CAP:-50000000}
     ports:
-      # RPC/WS — bind to configured address (default: localhost only)
-      - "${RPC_BIND_ADDRESS:-127.0.0.1}:${RETH_HTTP_PORT:-8545}:${RETH_HTTP_PORT:-8545}"
-      - "${RPC_BIND_ADDRESS:-127.0.0.1}:${RETH_WS_PORT:-8546}:${RETH_WS_PORT:-8546}"
-      # P2P — must be publicly accessible for peer discovery
+      # RPC/WS — nur localhost, Caddy proxied nach außen
+      - "127.0.0.1:${RETH_HTTP_PORT:-8545}:${RETH_HTTP_PORT:-8545}"
+      - "127.0.0.1:${RETH_WS_PORT:-8546}:${RETH_WS_PORT:-8546}"
+      # P2P — muss öffentlich erreichbar sein
       - "0.0.0.0:${RETH_P2P_PORT:-30303}:${RETH_P2P_PORT:-30303}/tcp"
       - "0.0.0.0:${RETH_P2P_PORT:-30303}:${RETH_P2P_PORT:-30303}/udp"
     volumes:
       - ethereum-reth-data:/data/reth
       - ./jwt.hex:/jwt/jwt.hex:ro
     networks:
-      - ethereum-engine
+      - engine-net
+      - proxy-net
     healthcheck:
       test:
         [
@@ -88,9 +85,9 @@ services:
       - bn
       - --network=mainnet
       - --datadir=/data/lighthouse
-      # Checkpoint sync for fast initial sync
+      # Checkpoint sync
       - --checkpoint-sync-url=${LIGHTHOUSE_CHECKPOINT_SYNC_URL:-https://beaconstate.ethstaker.cc}
-      # Engine API connection to Reth
+      # Engine API
       - --execution-endpoint=http://reth:${RETH_ENGINE_PORT:-8551}
       - --execution-jwt=/jwt/jwt.hex
       # Beacon API
@@ -103,9 +100,9 @@ services:
       - --discovery-port=${LIGHTHOUSE_P2P_PORT:-9000}
       - --target-peers=${LIGHTHOUSE_TARGET_PEERS:-80}
     ports:
-      # Beacon API — localhost only
-      - "${RPC_BIND_ADDRESS:-127.0.0.1}:${LIGHTHOUSE_HTTP_PORT:-5052}:${LIGHTHOUSE_HTTP_PORT:-5052}"
-      # P2P — must be publicly accessible
+      # Beacon API — nur localhost
+      - "127.0.0.1:${LIGHTHOUSE_HTTP_PORT:-5052}:${LIGHTHOUSE_HTTP_PORT:-5052}"
+      # P2P — muss öffentlich erreichbar sein
       - "0.0.0.0:${LIGHTHOUSE_P2P_PORT:-9000}:${LIGHTHOUSE_P2P_PORT:-9000}/tcp"
       - "0.0.0.0:${LIGHTHOUSE_P2P_PORT:-9000}:${LIGHTHOUSE_P2P_PORT:-9000}/udp"
     volumes:
@@ -115,13 +112,39 @@ services:
       reth:
         condition: service_started
     networks:
-      - ethereum-engine
+      - engine-net
+      - proxy-net
+
+  # ==========================================================================
+  # REVERSE PROXY (Caddy)
+  # ==========================================================================
+  caddy:
+    image: caddy:latest
+    container_name: midcurve-caddy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:443:443/udp"    # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    env_file:
+      - .env
+    networks:
+      - proxy-net
 
 # ============================================================================
 # NETWORKS
 # ============================================================================
 networks:
-  ethereum-engine:
+  engine-net:
+    # Interne Kommunikation Reth ↔ Lighthouse (Engine API)
+    driver: bridge
+    internal: true
+  proxy-net:
+    # Caddy ↔ Reth/Lighthouse (RPC)
     driver: bridge
 
 # ============================================================================
@@ -132,3 +155,8 @@ volumes:
     driver: local
   ethereum-lighthouse-data:
     driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+    

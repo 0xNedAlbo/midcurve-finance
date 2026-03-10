@@ -1,0 +1,44 @@
+nodes.midcurve.finance {
+
+    # Alles ohne gültigen API-Key → 404
+    @invalid {
+        not path /ethereum/{$API_KEY} /ethereum/{$API_KEY}/* \
+                 /base/{$API_KEY}     /base/{$API_KEY}/*     \
+                 /arbitrum/{$API_KEY} /arbitrum/{$API_KEY}/*
+    }
+    respond @invalid 404
+
+    # ── Ethereum (Reth) ───────────────────────────────────────────
+    handle /ethereum/{$API_KEY} {
+        uri strip_prefix /ethereum/{$API_KEY}
+        reverse_proxy ethereum-reth:8545
+    }
+    handle /ethereum/{$API_KEY}/ws {
+        uri strip_prefix /ethereum/{$API_KEY}/ws
+        reverse_proxy ethereum-reth:8546
+    }
+    handle /ethereum/{$API_KEY}/beacon {
+        uri strip_prefix /ethereum/{$API_KEY}/beacon
+        reverse_proxy ethereum-lighthouse:5052
+    }
+
+    # ── Base (später) ─────────────────────────────────────────────
+    # handle /base/{$API_KEY} {
+    #     uri strip_prefix /base/{$API_KEY}
+    #     reverse_proxy base-reth:8545
+    # }
+    # handle /base/{$API_KEY}/ws {
+    #     uri strip_prefix /base/{$API_KEY}/ws
+    #     reverse_proxy base-reth:8546
+    # }
+
+    # ── Arbitrum (später) ─────────────────────────────────────────
+    # handle /arbitrum/{$API_KEY} {
+    #     uri strip_prefix /arbitrum/{$API_KEY}
+    #     reverse_proxy arbitrum-node:8547
+    # }
+    # handle /arbitrum/{$API_KEY}/ws {
+    #     uri strip_prefix /arbitrum/{$API_KEY}/ws
+    #     reverse_proxy arbitrum-node:8548
+    # }
+}
