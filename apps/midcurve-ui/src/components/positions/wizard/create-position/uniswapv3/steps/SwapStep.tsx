@@ -216,15 +216,17 @@ export function SwapStep() {
     }
   }, [state.allocatedQuoteAmount]);
 
-  // Calculate missing amounts
+  // Calculate missing amounts (with 1% tolerance to avoid whack-a-mole after swaps)
   const missingBaseAmount = useMemo(() => {
     if (baseBalance === undefined) return requiredBaseAmount;
-    return requiredBaseAmount > baseBalance ? requiredBaseAmount - baseBalance : 0n;
+    const toleranceThreshold = requiredBaseAmount * 99n / 100n;
+    return toleranceThreshold > baseBalance ? requiredBaseAmount - baseBalance : 0n;
   }, [baseBalance, requiredBaseAmount]);
 
   const missingQuoteAmount = useMemo(() => {
     if (quoteBalance === undefined) return requiredQuoteAmount;
-    return requiredQuoteAmount > quoteBalance ? requiredQuoteAmount - quoteBalance : 0n;
+    const toleranceThreshold = requiredQuoteAmount * 99n / 100n;
+    return toleranceThreshold > quoteBalance ? requiredQuoteAmount - quoteBalance : 0n;
   }, [quoteBalance, requiredQuoteAmount]);
 
   // Check if both balances are sufficient

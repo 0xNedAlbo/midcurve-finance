@@ -37,6 +37,7 @@ import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
+import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
 
 // Transaction IDs
 const TX_IDS = {
@@ -105,12 +106,30 @@ export function TransactionStep() {
   const baseTokenAddress = state.baseToken?.address as Address | undefined;
   const quoteTokenAddress = state.quoteToken?.address as Address | undefined;
 
-  const baseAmount = state.adjustedBaseAmount && state.adjustedBaseAmount !== '0'
+  // Watch wallet balances to cap mint amounts (prevents reverts when tolerance let user through with slightly less)
+  const { balanceBigInt: baseBalance } = useWatchErc20TokenBalance({
+    tokenAddress: baseTokenAddress ?? null,
+    walletAddress: walletAddress ?? null,
+    chainId: chainId ?? 0,
+    enabled: !!baseTokenAddress && !!walletAddress && !!chainId,
+  });
+  const { balanceBigInt: quoteBalance } = useWatchErc20TokenBalance({
+    tokenAddress: quoteTokenAddress ?? null,
+    walletAddress: walletAddress ?? null,
+    chainId: chainId ?? 0,
+    enabled: !!quoteTokenAddress && !!walletAddress && !!chainId,
+  });
+
+  const uncappedBaseAmount = state.adjustedBaseAmount && state.adjustedBaseAmount !== '0'
     ? BigInt(state.adjustedBaseAmount)
     : state.allocatedBaseAmount ? BigInt(state.allocatedBaseAmount) : 0n;
-  const quoteAmount = state.adjustedQuoteAmount && state.adjustedQuoteAmount !== '0'
+  const uncappedQuoteAmount = state.adjustedQuoteAmount && state.adjustedQuoteAmount !== '0'
     ? BigInt(state.adjustedQuoteAmount)
     : state.allocatedQuoteAmount ? BigInt(state.allocatedQuoteAmount) : 0n;
+
+  // Cap mint amounts to actual wallet balance (tolerance in SwapStep may allow up to 1% shortfall)
+  const baseAmount = baseBalance !== undefined && baseBalance < uncappedBaseAmount ? baseBalance : uncappedBaseAmount;
+  const quoteAmount = quoteBalance !== undefined && quoteBalance < uncappedQuoteAmount ? quoteBalance : uncappedQuoteAmount;
 
   // Get spender address for approvals (NonfungiblePositionManager)
   const spenderAddress = chainId ? getNonfungiblePositionManagerAddress(chainId) : null;
