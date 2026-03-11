@@ -30,6 +30,8 @@ export function useCreatePositionAPI() {
     const queryClient = useQueryClient();
 
     return useMutation({
+        retry: 3,
+        retryDelay: (attemptIndex: number) => Math.min(2000 * 2 ** attemptIndex, 10000),
         mutationFn: async (data: CreatePositionData) => {
             const numericChainId = getChainId(data.chainId);
 
