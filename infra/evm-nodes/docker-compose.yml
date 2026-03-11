@@ -134,14 +134,17 @@ services:
   # Snapshot-Init empfohlen: https://snapshot.arbitrum.foundation/arb1/nitro-archive.tar
   # ==========================================================================
   arbitrum-nitro:
-    image: ${ARBITRUM_NITRO_IMAGE:-offchainlabs/nitro-node:v3.5.3-adc29a3}
+    image: ${ARBITRUM_NITRO_IMAGE:-offchainlabs/nitro-node:v3.9.7-75e084e}
     container_name: arbitrum-nitro
     restart: unless-stopped
     stop_grace_period: 3m
     command:
-      - --parent-chain.connection.url=http://ethereum-reth:${RETH_HTTP_PORT:-8545}
+      - --parent-chain.connection.url=${ARBITRUM_PARENT_CHAIN_URL:-http://ethereum-reth:${RETH_HTTP_PORT:-8545}}
+      - --parent-chain.blob-client.beacon-url=${ARBITRUM_BEACON_URL:-http://ethereum-lighthouse:${LIGHTHOUSE_HTTP_PORT:-5052}}
       - --chain.id=42161
+      - --chain.name=arb1
       - --persistent.chain=/data/arbitrum
+      - --init.latest=pruned
       - --http.addr=0.0.0.0
       - --http.port=${ARBITRUM_HTTP_PORT:-8547}
       - --http.api=net,web3,eth,arb
@@ -162,9 +165,6 @@ services:
       - "0.0.0.0:${ARBITRUM_METRICS_PORT:-6070}:${ARBITRUM_METRICS_PORT:-6070}"
     volumes:
       - arbitrum-nitro-data:/data/arbitrum
-    depends_on:
-      reth:
-        condition: service_healthy
     networks:
       - proxy-net
     healthcheck:
