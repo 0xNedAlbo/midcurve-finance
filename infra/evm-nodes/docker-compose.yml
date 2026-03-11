@@ -11,6 +11,10 @@
 #   HTTP:      https://nodes.midcurve.finance/ethereum/{API_KEY}
 #   WebSocket: wss://nodes.midcurve.finance/ethereum/{API_KEY}/ws
 #   Beacon:    https://nodes.midcurve.finance/ethereum/{API_KEY}/beacon
+#
+#   Arbitrum:
+#   HTTP:      https://nodes.midcurve.finance/arbitrum/{API_KEY}
+#   WebSocket: wss://nodes.midcurve.finance/arbitrum/{API_KEY}/ws
 
 services:
 
@@ -55,7 +59,7 @@ services:
       - "127.0.0.1:${RETH_HTTP_PORT:-8545}:${RETH_HTTP_PORT:-8545}"
       - "127.0.0.1:${RETH_WS_PORT:-8546}:${RETH_WS_PORT:-8546}"
       # Metrics — nur localhost
-      - "127.0.0.1:${RETH_METRICS_PORT:-9001}:${RETH_METRICS_PORT:-9001}"
+      - "0.0.0.0:${RETH_METRICS_PORT:-9001}:${RETH_METRICS_PORT:-9001}"
       # P2P — muss öffentlich erreichbar sein
       - "0.0.0.0:${RETH_P2P_PORT:-30303}:${RETH_P2P_PORT:-30303}/tcp"
       - "0.0.0.0:${RETH_P2P_PORT:-30303}:${RETH_P2P_PORT:-30303}/udp"
@@ -111,7 +115,7 @@ services:
       # Beacon API — nur localhost
       - "127.0.0.1:${LIGHTHOUSE_HTTP_PORT:-5052}:${LIGHTHOUSE_HTTP_PORT:-5052}"
       # Metrics — nur localhost
-      - "127.0.0.1:${LIGHTHOUSE_METRICS_PORT:-9090}:${LIGHTHOUSE_METRICS_PORT:-9090}"
+      - "0.0.0.0:${LIGHTHOUSE_METRICS_PORT:-9090}:${LIGHTHOUSE_METRICS_PORT:-9090}"
       # P2P — muss öffentlich erreichbar sein
       - "0.0.0.0:${LIGHTHOUSE_P2P_PORT:-9000}:${LIGHTHOUSE_P2P_PORT:-9000}/tcp"
       - "0.0.0.0:${LIGHTHOUSE_P2P_PORT:-9000}:${LIGHTHOUSE_P2P_PORT:-9000}/udp"
@@ -124,6 +128,55 @@ services:
     networks:
       - engine-net
       - proxy-net
+
+  # ==========================================================================
+  # ARBITRUM ONE (Nitro)
+  # Snapshot-Init empfohlen: https://snapshot.arbitrum.foundation/arb1/nitro-archive.tar
+  # ==========================================================================
+  arbitrum-nitro:
+    image: ${ARBITRUM_NITRO_IMAGE:-offchainlabs/nitro-node:v3.5.3-adc29a3}
+    container_name: arbitrum-nitro
+    restart: unless-stopped
+    stop_grace_period: 3m
+    command:
+      - --parent-chain.connection.url=http://ethereum-reth:${RETH_HTTP_PORT:-8545}
+      - --chain.id=42161
+      - --persistent.chain=/data/arbitrum
+      - --http.addr=0.0.0.0
+      - --http.port=${ARBITRUM_HTTP_PORT:-8547}
+      - --http.api=net,web3,eth,arb
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --ws.addr=0.0.0.0
+      - --ws.port=${ARBITRUM_WS_PORT:-8548}
+      - --ws.api=net,web3,eth,arb
+      - --ws.origins=*
+      - --metrics
+      - --metrics-server.addr=0.0.0.0
+      - --metrics-server.port=${ARBITRUM_METRICS_PORT:-6070}
+    ports:
+      # RPC/WS — nur localhost, Caddy proxied nach außen
+      - "127.0.0.1:${ARBITRUM_HTTP_PORT:-8547}:${ARBITRUM_HTTP_PORT:-8547}"
+      - "127.0.0.1:${ARBITRUM_WS_PORT:-8548}:${ARBITRUM_WS_PORT:-8548}"
+      # Metrics
+      - "0.0.0.0:${ARBITRUM_METRICS_PORT:-6070}:${ARBITRUM_METRICS_PORT:-6070}"
+    volumes:
+      - arbitrum-nitro-data:/data/arbitrum
+    depends_on:
+      reth:
+        condition: service_healthy
+    networks:
+      - proxy-net
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:${ARBITRUM_HTTP_PORT:-8547} --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":1}' --header='Content-Type: application/json' || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   # ==========================================================================
   # REVERSE PROXY (Caddy)
@@ -185,4 +238,10 @@ volumes:
     driver: local
   caddy-config:
     driver: local
+  arbitrum-nitro-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/arbitrum
     
