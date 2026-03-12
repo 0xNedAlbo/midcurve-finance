@@ -19,6 +19,7 @@
 #   3. onchain-data                (needs postgres, rabbitmq)
 #   4. automation, business-logic  (need postgres, rabbitmq, signer, onchain-data)
 #   5. api                         (needs postgres, signer, automation)
+#      → runs migrations + seeds on startup (contracts, accounts, tokens, allowlist)
 #   6. ui                          (no runtime dependencies)
 #
 # Environment variables — REQUIRED (no defaults, must be set):
@@ -27,12 +28,11 @@
 #   SIGNER_INTERNAL_API_KEY        Shared secret between api/automation/business-logic and signer
 #   SIGNER_LOCAL_ENCRYPTION_KEY    AES key for encrypting private keys at rest
 #   RPC_URL_BASE                   HTTP RPC endpoint for Base (e.g. Alchemy)
-#   WS_RPC_URL_BASE                WebSocket RPC endpoint for Base (for Swap event subscriptions)
 #   THE_GRAPH_API_KEY              The Graph API key (Uniswap V3 subgraph queries)
-#   UNISWAP_V3_SUBGRAPH_ID_BASE    Uniswap V3 subgraph deployment ID for Base
 #   VITE_WALLETCONNECT_PROJECT_ID  WalletConnect project ID (build-time arg for UI)
 #   VITE_API_URL                   Public URL of the API (build-time arg for UI, e.g. https://yourdomain.com)
 #   ALLOWED_ORIGINS                CORS allowed origins for API (e.g. https://yourdomain.com)
+#   ADMIN_WALLET_ADDRESS           EVM wallet address for initial admin signup access
 #
 # Environment variables — OPTIONAL (have defaults or are chain-specific):
 #   POSTGRES_USER                  default: midcurve
@@ -43,11 +43,9 @@
 #   LOG_LEVEL                      default: info
 #   RPC_URL_ETHEREUM               HTTP RPC for Ethereum (required if using Ethereum pools)
 #   RPC_URL_ARBITRUM               HTTP RPC for Arbitrum (required if using Arbitrum pools)
-#   WS_RPC_URL_ETHEREUM            WebSocket RPC for Ethereum
-#   WS_RPC_URL_ARBITRUM            WebSocket RPC for Arbitrum
-#   UNISWAP_V3_SUBGRAPH_ID_ETHEREUM
-#   UNISWAP_V3_SUBGRAPH_ID_ARBITRUM
-#   ETHERSCAN_API_KEY              For transaction lookups / ledger sync
+#   UNISWAP_V3_SUBGRAPH_ID_ETHEREUM  default: Midcurve-managed subgraph
+#   UNISWAP_V3_SUBGRAPH_ID_ARBITRUM  default: Midcurve-managed subgraph
+#   UNISWAP_V3_SUBGRAPH_ID_BASE     default: Midcurve-managed subgraph
 #   COINGECKO_API_KEY              For price feeds (falls back to free tier without key)
 #   EXECUTION_FEE_RECIPIENT        Wallet address for automation fees (empty = no fees)
 #   EXECUTION_FEE_BPS              default: 50 (0.5%)
@@ -63,7 +61,7 @@
 #
 # Usage (self-hosted):
 #   docker compose -f docker-compose.railway.yml up -d
-#   docker compose -f docker-compose.railway.yml exec api npx prisma migrate deploy
+#   # Migrations and seeds run automatically on API startup
 
 services:
 
@@ -159,11 +157,6 @@ services:
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM:-}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
       - RPC_URL_BASE=${RPC_URL_BASE}
-      - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
-      - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
-      - WS_RPC_URL_BASE=${WS_RPC_URL_BASE:-}
-      # External APIs
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Worker configuration
       - MAX_POOLS_PER_CONNECTION=${MAX_POOLS_PER_CONNECTION:-1000}
       - RECONNECT_DELAY_MS=${RECONNECT_DELAY_MS:-5000}
@@ -203,8 +196,6 @@ services:
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM:-}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
       - RPC_URL_BASE=${RPC_URL_BASE}
-      # External APIs
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Signer
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
@@ -253,11 +244,10 @@ services:
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
       - RPC_URL_BASE=${RPC_URL_BASE}
       # External APIs
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY}
-      - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM:-}
-      - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM:-}
-      - UNISWAP_V3_SUBGRAPH_ID_BASE=${UNISWAP_V3_SUBGRAPH_ID_BASE:-}
+      - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM:-5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV}
+      - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM:-FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM}
+      - UNISWAP_V3_SUBGRAPH_ID_BASE=${UNISWAP_V3_SUBGRAPH_ID_BASE:-HMuAwufqZ1YCRmzL2SfHTVkzZovC9VL2UAKhjvRqKiR1}
       # Signer
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
@@ -297,13 +287,14 @@ services:
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
       - AUTOMATION_URL=http://automation:3004
+      # Admin wallet for allowlist seeding
+      - ADMIN_WALLET_ADDRESS=${ADMIN_WALLET_ADDRESS:-}
       # External APIs
       - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY:-}
-      - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM:-}
-      - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM:-}
-      - UNISWAP_V3_SUBGRAPH_ID_BASE=${UNISWAP_V3_SUBGRAPH_ID_BASE:-}
+      - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM:-5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV}
+      - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM:-FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM}
+      - UNISWAP_V3_SUBGRAPH_ID_BASE=${UNISWAP_V3_SUBGRAPH_ID_BASE:-HMuAwufqZ1YCRmzL2SfHTVkzZovC9VL2UAKhjvRqKiR1}
     depends_on:
       postgres:
         condition: service_healthy
