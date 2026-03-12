@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { WagmiProvider } from 'wagmi';
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit';
-import { wagmiConfig } from '../lib/wagmi-config';
+import { createWagmiConfig } from '../lib/wagmi-config';
+import { useConfig } from './ConfigProvider';
 import '@rainbow-me/rainbowkit/styles.css';
 
 interface Web3ProviderProps {
@@ -9,8 +10,15 @@ interface Web3ProviderProps {
 }
 
 export function Web3Provider({ children }: Web3ProviderProps) {
+  const { walletconnectProjectId } = useConfig();
+
+  const config = useMemo(
+    () => createWagmiConfig(walletconnectProjectId ?? ''),
+    [walletconnectProjectId],
+  );
+
   return (
-    <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={config}>
       <RainbowKitProvider>{children}</RainbowKitProvider>
     </WagmiProvider>
   );

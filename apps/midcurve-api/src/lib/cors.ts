@@ -33,7 +33,7 @@ export function getCorsHeaders(origin: string | null): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Config-Password',
     'Access-Control-Allow-Credentials': 'true', // Required for cookies
     'Access-Control-Max-Age': '86400', // 24 hours preflight cache
   };

@@ -48,6 +48,7 @@ export * from './services/transaction/index.js';
 export * from './services/swap-router/index.js';
 export * from './services/journal/index.js';
 export * from './services/nav-snapshot/index.js';
+export * from './services/setting/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';

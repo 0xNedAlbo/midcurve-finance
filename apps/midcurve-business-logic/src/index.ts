@@ -65,6 +65,11 @@ async function main(): Promise<void> {
   });
 
   try {
+    // Wait for DB-backed config (blocks until wizard is complete)
+    const { initAppConfig } = await import('@midcurve/services');
+    await initAppConfig();
+    log.info({ msg: 'AppConfig initialized' });
+
     // Ensure chart of accounts is seeded before any rules run
     const journalService = JournalService.getInstance();
     const accountCount = await journalService.ensureChartOfAccounts();

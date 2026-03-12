@@ -65,6 +65,11 @@ class WorkerManager {
     autoLog.workerLifecycle(log, 'WorkerManager', 'starting');
 
     try {
+      // Wait for DB-backed config (blocks until wizard is complete)
+      const { initAppConfig } = await import('@midcurve/services');
+      await initAppConfig();
+      log.info({ msg: 'AppConfig initialized' });
+
       // Initialize RabbitMQ connection first
       const mq = getRabbitMQConnection();
       const channel = await mq.connect();

@@ -19,9 +19,7 @@ node packages/midcurve-database/prisma/dist/seed-accounts.js
 echo "Seeding CoinGecko tokens..."
 node packages/midcurve-database/prisma/dist/seed-coingecko-tokens.js
 
-# 5. Seed admin allowlist entry (if ADMIN_WALLET_ADDRESS set)
-echo "Seeding allowlist..."
-node packages/midcurve-database/prisma/dist/seed-allowlist.js
+# Note: Admin allowlist seeding is now handled by the config wizard (POST /api/config)
 
 echo "=== Starting API server ==="
 exec node apps/midcurve-api/server.js

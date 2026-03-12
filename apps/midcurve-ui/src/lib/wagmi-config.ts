@@ -13,15 +13,8 @@ import {
   sepolia,
   type Chain,
 } from 'wagmi/chains';
-import { createConfig, createStorage, http, noopStorage } from 'wagmi';
+import { createConfig, createStorage, http, noopStorage, type Config } from 'wagmi';
 import { defineChain } from 'viem';
-
-// Get WalletConnect project ID from environment
-const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || '';
-
-if (!projectId) {
-  console.warn('VITE_WALLETCONNECT_PROJECT_ID is not set');
-}
 
 // Check if development chains are enabled
 const isDevChainsEnabled =
@@ -39,7 +32,6 @@ const localAnvil = defineChain({
     },
   },
   testnet: true,
-  // Multicall3 is available on the forked mainnet at the canonical address
   contracts: {
     multicall3: {
       address: '0xcA11bde05977b3631167028862bE2a173976CA11',
@@ -62,30 +54,6 @@ const chains: readonly [Chain, ...Chain[]] = isDevChainsEnabled
     ])
   : productionChains;
 
-// Explicitly configure wallets - this ensures Rabby is properly detected
-// and can trigger its unlock dialog when locked
-const connectors = connectorsForWallets(
-  [
-    {
-      groupName: 'Popular',
-      wallets: [
-        rabbyWallet,
-        metaMaskWallet,
-        coinbaseWallet,
-        walletConnectWallet,
-      ],
-    },
-    {
-      groupName: 'Other',
-      wallets: [injectedWallet],
-    },
-  ],
-  {
-    appName: 'Midcurve Finance',
-    projectId,
-  }
-);
-
 // Build transports configuration
 const productionTransports = {
   [mainnet.id]: http(),
@@ -93,7 +61,6 @@ const productionTransports = {
   [base.id]: http(),
 };
 
-// Add dev chain transports if enabled
 const transports = isDevChainsEnabled
   ? {
       ...productionTransports,
@@ -104,15 +71,40 @@ const transports = isDevChainsEnabled
     }
   : productionTransports;
 
-export const wagmiConfig = createConfig({
-  chains,
-  connectors,
-  // Enable SSR mode to delay hydration - this gives wallet extensions time to initialize
-  // before wagmi tries to reconnect. Prevents "getChainId is not a function" errors
-  // when wallet is locked or not ready.
-  ssr: true,
-  storage: createStorage({
-    storage: typeof window !== 'undefined' ? window.localStorage : noopStorage,
-  }),
-  transports,
-});
+/**
+ * Create a wagmi config with the given WalletConnect project ID.
+ * Called by Web3Provider once the project ID is known from the config API.
+ */
+export function createWagmiConfig(projectId: string): Config {
+  const connectors = connectorsForWallets(
+    [
+      {
+        groupName: 'Popular',
+        wallets: [
+          rabbyWallet,
+          metaMaskWallet,
+          coinbaseWallet,
+          walletConnectWallet,
+        ],
+      },
+      {
+        groupName: 'Other',
+        wallets: [injectedWallet],
+      },
+    ],
+    {
+      appName: 'Midcurve Finance',
+      projectId,
+    }
+  );
+
+  return createConfig({
+    chains,
+    connectors,
+    ssr: true,
+    storage: createStorage({
+      storage: typeof window !== 'undefined' ? window.localStorage : noopStorage,
+    }),
+    transports,
+  });
+}

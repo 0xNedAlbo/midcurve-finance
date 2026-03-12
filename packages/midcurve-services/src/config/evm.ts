@@ -4,17 +4,11 @@
  * Centralized configuration for all supported EVM chains.
  * Manages RPC endpoints, public clients, and chain metadata.
  *
- * Environment Variables (REQUIRED for production chains):
- * - RPC_URL_ETHEREUM    - Ethereum mainnet RPC
- * - RPC_URL_ARBITRUM    - Arbitrum One RPC
- * - RPC_URL_BASE        - Base RPC
+ * Production chains are configured via AppConfig (DB-backed settings).
+ * Call `EvmConfig.initialize(appConfig)` at startup (done by `initAppConfig()`).
  *
- * Environment Variables (OPTIONAL for development):
- * - RPC_URL_LOCAL       - Local Anvil fork RPC (e.g., http://localhost:8545)
- *                         Only enabled when NODE_ENV !== 'production'
- *
- * Note: getChainConfig() and getPublicClient() will throw an error if the
- * required RPC URL environment variable is not set for the requested chain.
+ * Development-only chains (Sepolia, Local Anvil) still read from env vars
+ * since they are not user-provided config.
  */
 
 import {
@@ -31,6 +25,7 @@ import {
   type Chain,
 } from 'viem/chains';
 import { type FinalityConfig, getChainEntry, getRpcEnvVarName } from '@midcurve/shared';
+import type { AppConfig } from './app-config.js';
 
 /**
  * Local Anvil chain definition for development testing
@@ -44,7 +39,6 @@ const localAnvil = defineChain({
     default: { http: ['http://localhost:8545'] },
   },
   testnet: true,
-  // Multicall3 is available on the forked mainnet at the canonical address
   contracts: {
     multicall3: {
       address: '0xcA11bde05977b3631167028862bE2a173976CA11',
@@ -85,13 +79,6 @@ export enum SupportedChainId {
 
 /**
  * Check if a chain ID is a local development chain
- *
- * Local chains don't have finalization delays and should skip
- * block confirmation checks. They also don't have Etherscan or
- * The Graph indexing support.
- *
- * @param chainId - Chain ID to check
- * @returns true if the chain is a local development chain
  */
 export function isLocalChain(chainId: number): boolean {
   return chainId === SupportedChainId.LOCAL;
@@ -103,9 +90,6 @@ export function isLocalChain(chainId: number): boolean {
  * Local Anvil chain (31337) is a fork of Ethereum mainnet (1),
  * so data lookups (e.g. CoinGecko token search) should use mainnet.
  * Only active in development mode — in production, returns the chainId as-is.
- *
- * @param chainId - Chain ID to resolve
- * @returns The fork source chain ID, or the original chainId if not a local/fork chain
  */
 export function getForkSourceChainId(chainId: number): number {
   if (
@@ -117,17 +101,20 @@ export function getForkSourceChainId(chainId: number): number {
   return chainId;
 }
 
-/**
- * Sentinel value used to mark missing RPC URLs
- * getChainConfig() will validate and throw comprehensive error when encountered
- */
-const INVALID_RPC_SENTINEL = '-INVALID-';
+// Viem chain objects per chain ID (runtime-specific, can't live in registry)
+const viemChains: Record<number, Chain> = {
+  [SupportedChainId.ETHEREUM]: mainnet,
+  [SupportedChainId.ARBITRUM]: arbitrum,
+  [SupportedChainId.BASE]: base,
+  [SupportedChainId.SEPOLIA]: sepolia,
+  [SupportedChainId.LOCAL]: localAnvil,
+};
 
 /**
  * EVM Configuration Manager
  *
  * Manages chain configurations, RPC endpoints, and viem public clients.
- * Uses singleton pattern for convenient default access.
+ * Initialized from AppConfig (DB-backed) via `EvmConfig.initialize(appConfig)`.
  */
 export class EvmConfig {
   private static instance: EvmConfig | null = null;
@@ -135,77 +122,89 @@ export class EvmConfig {
   private readonly clients: Map<number, PublicClient>;
 
   /**
-   * Creates a new EvmConfig instance
-   *
-   * Loads RPC URLs from environment variables. Missing RPC URLs are marked
-   * with a sentinel value and will cause getChainConfig() to throw an error.
-   * Environment variable format: RPC_URL_<CHAIN_NAME>
+   * Initialize the singleton from AppConfig.
+   * Called by `initAppConfig()` after settings are loaded from DB.
    */
-  constructor() {
-    this.chains = new Map();
-    this.clients = new Map();
-    this.initializeChains();
+  static initialize(appConfig: AppConfig): void {
+    EvmConfig.instance = new EvmConfig(appConfig);
   }
 
   /**
-   * Get singleton instance of EvmConfig
-   * Lazily creates instance on first access
+   * Initialize from explicit RPC URLs. For testing only.
+   */
+  static initializeForTest(rpcUrls: Record<number, string>): void {
+    const testAppConfig: AppConfig = {
+      alchemyApiKey: 'test-key',
+      theGraphApiKey: 'test-key',
+      coingeckoApiKey: null,
+      walletconnectProjectId: 'test-project-id',
+      rpcUrlEthereum: rpcUrls[SupportedChainId.ETHEREUM] ?? 'http://localhost:8545',
+      rpcUrlArbitrum: rpcUrls[SupportedChainId.ARBITRUM] ?? 'http://localhost:8545',
+      rpcUrlBase: rpcUrls[SupportedChainId.BASE] ?? 'http://localhost:8545',
+    };
+    EvmConfig.instance = new EvmConfig(testAppConfig);
+  }
+
+  /**
+   * Get singleton instance.
+   * Throws if `initialize()` hasn't been called.
    */
   static getInstance(): EvmConfig {
     if (!EvmConfig.instance) {
-      EvmConfig.instance = new EvmConfig();
+      throw new Error('EvmConfig not initialized — call initAppConfig() first');
     }
     return EvmConfig.instance;
   }
 
   /**
-   * Reset singleton instance (useful for testing)
+   * Reset singleton instance (for testing)
    */
   static resetInstance(): void {
     EvmConfig.instance = null;
   }
 
-  /**
-   * Initialize chain configurations from environment variables
-   * Missing RPC URLs are marked with sentinel value for validation in getChainConfig()
-   */
-  private initializeChains(): void {
-    const env = process.env;
+  private constructor(appConfig: AppConfig) {
+    this.chains = new Map();
+    this.clients = new Map();
+    this.initializeChains(appConfig);
+  }
 
-    // Viem chain objects per chain ID (runtime-specific, can't live in registry)
-    const viemChains: Record<number, Chain> = {
-      [SupportedChainId.ETHEREUM]: mainnet,
-      [SupportedChainId.ARBITRUM]: arbitrum,
-      [SupportedChainId.BASE]: base,
-      [SupportedChainId.SEPOLIA]: sepolia,
-      [SupportedChainId.LOCAL]: localAnvil,
+  /**
+   * Initialize chain configurations from AppConfig (production chains)
+   * and env vars (dev-only chains).
+   */
+  private initializeChains(appConfig: AppConfig): void {
+    // Production chains — RPC URLs from AppConfig (DB-backed)
+    const rpcUrls: Record<number, string> = {
+      [SupportedChainId.ETHEREUM]: appConfig.rpcUrlEthereum,
+      [SupportedChainId.ARBITRUM]: appConfig.rpcUrlArbitrum,
+      [SupportedChainId.BASE]: appConfig.rpcUrlBase,
     };
 
-    // Production chains
-    for (const chainId of [SupportedChainId.ETHEREUM, SupportedChainId.ARBITRUM, SupportedChainId.BASE]) {
+    for (const [chainIdStr, rpcUrl] of Object.entries(rpcUrls)) {
+      const chainId = Number(chainIdStr);
       const entry = getChainEntry(chainId);
-      const envVarName = getRpcEnvVarName(chainId);
       this.chains.set(chainId, {
         chainId,
         name: entry.shortName,
-        rpcUrl: env[envVarName] ?? INVALID_RPC_SENTINEL,
+        rpcUrl,
         blockExplorer: entry.explorer?.baseUrl,
         viemChain: viemChains[chainId]!,
         finality: entry.finality,
       });
     }
 
-    // Development-only chains (Sepolia, Local Anvil)
-    // Only available when NODE_ENV !== 'production' and RPC URL is set
-    if (env['NODE_ENV'] !== 'production') {
+    // Development-only chains (Sepolia, Local Anvil) — still from env vars
+    if (process.env['NODE_ENV'] !== 'production') {
       for (const chainId of [SupportedChainId.SEPOLIA, SupportedChainId.LOCAL]) {
         const rpcEnvVar = getRpcEnvVarName(chainId);
-        if (env[rpcEnvVar]) {
+        const rpcUrl = process.env[rpcEnvVar];
+        if (rpcUrl) {
           const entry = getChainEntry(chainId);
           this.chains.set(chainId, {
             chainId,
             name: entry.shortName,
-            rpcUrl: env[rpcEnvVar]!,
+            rpcUrl,
             blockExplorer: entry.explorer?.baseUrl,
             viemChain: viemChains[chainId]!,
             finality: entry.finality,
@@ -216,22 +215,7 @@ export class EvmConfig {
   }
 
   /**
-   * Get the environment variable name for a chain ID
-   *
-   * @param chainId - Chain ID
-   * @returns Environment variable name (e.g., 'RPC_URL_ETHEREUM')
-   */
-  private getEnvVarNameForChain(chainId: number): string {
-    return getRpcEnvVarName(chainId);
-  }
-
-  /**
    * Get chain configuration by chain ID
-   *
-   * @param chainId - Chain ID to look up
-   * @returns Chain configuration
-   * @throws Error if chain ID is not supported
-   * @throws Error if RPC URL is not configured (environment variable not set)
    */
   getChainConfig(chainId: number): ChainConfig {
     const config = this.chains.get(chainId);
@@ -242,83 +226,35 @@ export class EvmConfig {
         ).join(', ')}`
       );
     }
-
-    // Check if RPC URL is missing (marked as invalid)
-    if (config.rpcUrl === INVALID_RPC_SENTINEL) {
-      const envVarName = this.getEnvVarNameForChain(chainId);
-      throw new Error(
-        `RPC URL not configured for ${config.name} (Chain ID: ${chainId}).\n\n` +
-          `The environment variable '${envVarName}' is not set.\n\n` +
-          `To fix this:\n` +
-          `1. Copy .env.example to .env in your project root\n` +
-          `2. Set ${envVarName} to your RPC endpoint:\n` +
-          `   ${envVarName}=https://your-rpc-provider.com/v2/YOUR_API_KEY\n\n` +
-          `Example providers: Alchemy, Infura, QuickNode, or run your own node.\n\n` +
-          `Note: Environment variables must be set before starting the application.`
-      );
-    }
-
     return config;
   }
 
   /**
-   * Get viem PublicClient for a specific chain
-   *
-   * Creates and caches client instances for efficiency.
-   * Clients are reused across multiple calls.
-   *
-   * @param chainId - Chain ID to get client for
-   * @returns Viem PublicClient instance
-   * @throws Error if chain ID is not supported
+   * Get viem PublicClient for a specific chain.
+   * Creates and caches client instances.
    */
   getPublicClient(chainId: number): PublicClient {
-    // Return cached client if available
     const cached = this.clients.get(chainId);
-    if (cached) {
-      return cached;
-    }
+    if (cached) return cached;
 
-    // Get chain configuration
     const config = this.getChainConfig(chainId);
-
-    // Create new public client
     const client = createPublicClient({
       chain: config.viemChain,
       transport: http(config.rpcUrl),
     });
 
-    // Cache for future use
     this.clients.set(chainId, client);
-
     return client;
   }
 
-  /**
-   * Get all supported chain IDs
-   *
-   * @returns Array of supported chain IDs
-   */
   getSupportedChainIds(): number[] {
     return Array.from(this.chains.keys());
   }
 
-  /**
-   * Check if a chain ID is supported
-   *
-   * @param chainId - Chain ID to check
-   * @returns true if chain is supported
-   */
   isChainSupported(chainId: number): boolean {
     return this.chains.has(chainId);
   }
 
-  /**
-   * Get finality configuration for a chain
-   *
-   * @param chainId - Chain ID to get finality config for
-   * @returns Finality configuration for the chain
-   * @throws Error if chain ID is not supported
-   */
   getFinalityConfig(chainId: number): FinalityConfig {
     const config = this.getChainConfig(chainId);
     return config.finality;

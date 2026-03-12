@@ -62,6 +62,16 @@ model Cache {
   @@schema("public")
 }
 
+model Setting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+  @@schema("public")
+}
+
 model User {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -72,6 +82,9 @@ model User {
 
   // Wallet address (EIP-55 checksummed, chain-agnostic)
   address String @unique
+
+  // Admin flag (set by config wizard when admin wallet is saved)
+  isAdmin Boolean @default(false) @map("is_admin")
 
   // Reporting currency for accounting (ISO 4217)
   reportingCurrency String @default("USD")

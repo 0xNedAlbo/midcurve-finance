@@ -17,6 +17,7 @@ import type { ServiceLogger } from '../../logging/index.js';
 import { CacheService } from '../../services/cache/index.js';
 import { RequestScheduler } from '../../utils/request-scheduler/index.js';
 import { getAddress, isAddress } from 'viem';
+import { getAppConfig } from '../../config/app-config.js';
 
 /**
  * CoinGecko token representation from the coins list API
@@ -241,7 +242,7 @@ export class CoinGeckoClient {
     this.cacheService = dependencies.cacheService ?? CacheService.getInstance();
 
     // Determine API tier from key
-    this.apiKey = dependencies.apiKey ?? process.env.COINGECKO_API_KEY ?? undefined;
+    this.apiKey = dependencies.apiKey ?? getAppConfig().coingeckoApiKey ?? undefined;
     // Empty string means no key configured
     if (this.apiKey === '') this.apiKey = undefined;
 

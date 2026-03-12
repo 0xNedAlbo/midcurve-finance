@@ -64,6 +64,11 @@ async function main(): Promise<void> {
   });
 
   try {
+    // Wait for DB-backed config (blocks until wizard is complete)
+    const { initAppConfig } = await import('@midcurve/services');
+    await initAppConfig();
+    log.info({ msg: 'AppConfig initialized' });
+
     // Create and start worker manager
     workerManager = new WorkerManager();
     await workerManager.start();

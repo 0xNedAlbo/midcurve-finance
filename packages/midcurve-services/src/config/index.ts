@@ -3,6 +3,15 @@
  */
 
 export {
+  initAppConfig,
+  getAppConfig,
+  isAppConfigReady,
+  resetAppConfig,
+  REQUIRED_SETTING_KEYS,
+  type AppConfig,
+} from './app-config.js';
+
+export {
   EvmConfig,
   getEvmConfig,
   SupportedChainId,

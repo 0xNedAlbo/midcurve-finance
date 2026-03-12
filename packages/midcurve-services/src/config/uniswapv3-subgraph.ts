@@ -14,6 +14,7 @@
  */
 
 import { SupportedChainId } from "./evm.js";
+import { getAppConfig } from "./app-config.js";
 
 /**
  * Environment variable names for Uniswap V3 subgraph deployment IDs
@@ -47,23 +48,10 @@ function getSubgraphId(chainId: SupportedChainId): string | undefined {
  * @throws Error if API key is not configured (unless in test mode)
  */
 function getTheGraphApiKey(): string {
-    const apiKey = process.env.THE_GRAPH_API_KEY;
-
-    if (!apiKey) {
-        if (process.env.NODE_ENV === "test") {
-            return "test-api-key-placeholder";
-        }
-
-        throw new Error(
-            `The Graph API key not configured.\n\n` +
-                `Please set the THE_GRAPH_API_KEY environment variable.\n` +
-                `You can get an API key from: https://thegraph.com/studio/apikeys/\n\n` +
-                `Example:\n` +
-                `THE_GRAPH_API_KEY=your_api_key_here`
-        );
+    if (process.env.NODE_ENV === "test") {
+        return "test-api-key-placeholder";
     }
-
-    return apiKey;
+    return getAppConfig().theGraphApiKey;
 }
 
 /**
