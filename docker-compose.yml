@@ -87,7 +87,6 @@ services:
       - AUTOMATION_URL=http://automation:3004
       # External APIs
       - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY:-}
       - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM}
       - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM}
@@ -105,7 +104,7 @@ services:
 
   # ============================================
   # ONCHAIN DATA SERVICE
-  # - Real-time Swap event subscriptions via WebSocket
+  # - Real-time Swap event subscriptions via polling
   # - Real-time position liquidity event subscriptions
   # - Publishes to RabbitMQ exchanges (pool-prices, position-liquidity-events)
   # ============================================
@@ -126,12 +125,6 @@ services:
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
       - RPC_URL_BASE=${RPC_URL_BASE}
-      # WebSocket RPC URLs (for Swap event subscriptions)
-      - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
-      - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
-      - WS_RPC_URL_BASE=${WS_RPC_URL_BASE:-}
-      # External APIs
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Worker configuration (optional, has sensible defaults)
       - MAX_POOLS_PER_CONNECTION=${MAX_POOLS_PER_CONNECTION:-1000}
       - RECONNECT_DELAY_MS=${RECONNECT_DELAY_MS:-5000}
@@ -173,8 +166,6 @@ services:
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
       - RPC_URL_BASE=${RPC_URL_BASE}
-      # External APIs (for position ledger sync)
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # Signer service (for tx signing)
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
@@ -224,8 +215,6 @@ services:
       - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
       - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
       - RPC_URL_BASE=${RPC_URL_BASE}
-      # External APIs
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       # The Graph (Uniswap V3 subgraph for NAV snapshots)
       - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY}
       - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM}
