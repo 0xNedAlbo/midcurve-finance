@@ -1,0 +1,358 @@
+# Midcurve Finance - Railway / Self-Hosted Docker Compose
+#
+# Changes from production compose:
+#   - Postgres added as internal service (replaces external AWS RDS)
+#   - DATABASE_URL now points to internal postgres container
+#   - backend network: internal: true removed (breaks Railway networking)
+#   - Caddy removed for Railway (Railway handles SSL/routing natively)
+#     → For pure self-hosted with your own domain, add Caddy back
+#
+# Railway deployment notes:
+#   - Each service becomes a Railway Service in your project
+#   - Volumes are provisioned as Railway Volumes automatically
+#   - Internal hostnames (postgres, rabbitmq, etc.) work via Railway's private network
+#   - Set all required env vars in Railway dashboard before first deploy
+#
+# Startup sequence (derived from depends_on):
+#   1. postgres, rabbitmq          (no dependencies)
+#   2. signer                      (needs postgres)
+#   3. onchain-data                (needs postgres, rabbitmq)
+#   4. automation, business-logic  (need postgres, rabbitmq, signer, onchain-data)
+#   5. api                         (needs postgres, signer, automation)
+#   6. ui                          (no runtime dependencies)
+#
+# Environment variables — REQUIRED (no defaults, must be set):
+#   POSTGRES_PASSWORD              Postgres superuser password
+#   RABBITMQ_PASS                  RabbitMQ password
+#   SIGNER_INTERNAL_API_KEY        Shared secret between api/automation/business-logic and signer
+#   SIGNER_LOCAL_ENCRYPTION_KEY    AES key for encrypting private keys at rest
+#   RPC_URL_BASE                   HTTP RPC endpoint for Base (e.g. Alchemy)
+#   WS_RPC_URL_BASE                WebSocket RPC endpoint for Base (for Swap event subscriptions)
+#   THE_GRAPH_API_KEY              The Graph API key (Uniswap V3 subgraph queries)
+#   UNISWAP_V3_SUBGRAPH_ID_BASE    Uniswap V3 subgraph deployment ID for Base
+#   VITE_WALLETCONNECT_PROJECT_ID  WalletConnect project ID (build-time arg for UI)
+#   VITE_API_URL                   Public URL of the API (build-time arg for UI, e.g. https://yourdomain.com)
+#   ALLOWED_ORIGINS                CORS allowed origins for API (e.g. https://yourdomain.com)
+#
+# Environment variables — OPTIONAL (have defaults or are chain-specific):
+#   POSTGRES_USER                  default: midcurve
+#   POSTGRES_DB                    default: midcurve
+#   RABBITMQ_USER                  default: midcurve
+#   COOKIE_DOMAIN                  default: empty (Railway domain works without this)
+#   SIGNER_USE_LOCAL_KEYS          default: true
+#   LOG_LEVEL                      default: info
+#   RPC_URL_ETHEREUM               HTTP RPC for Ethereum (required if using Ethereum pools)
+#   RPC_URL_ARBITRUM               HTTP RPC for Arbitrum (required if using Arbitrum pools)
+#   WS_RPC_URL_ETHEREUM            WebSocket RPC for Ethereum
+#   WS_RPC_URL_ARBITRUM            WebSocket RPC for Arbitrum
+#   UNISWAP_V3_SUBGRAPH_ID_ETHEREUM
+#   UNISWAP_V3_SUBGRAPH_ID_ARBITRUM
+#   ETHERSCAN_API_KEY              For transaction lookups / ledger sync
+#   COINGECKO_API_KEY              For price feeds (falls back to free tier without key)
+#   EXECUTION_FEE_RECIPIENT        Wallet address for automation fees (empty = no fees)
+#   EXECUTION_FEE_BPS              default: 50 (0.5%)
+#   MAX_POOLS_PER_CONNECTION       default: 1000
+#   RECONNECT_DELAY_MS             default: 5000
+#   MAX_RECONNECT_ATTEMPTS         default: 10
+#   POLL_INTERVAL_MS               default: 5000
+#   CLEANUP_INTERVAL_MS            default: 60000
+#   STALE_THRESHOLD_MS             default: 60000
+#   PRUNE_THRESHOLD_MS             default: 86400000
+#   DEPLOY_POLL_INTERVAL_MS        default: 5000
+#   ORDER_EXECUTOR_POOL_SIZE       default: 3
+#
+# Usage (self-hosted):
+#   docker compose -f docker-compose.railway.yml up -d
+#   docker compose -f docker-compose.railway.yml exec api npx prisma migrate deploy
+
+services:
+
+  # ============================================
+  # DATABASE
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: midcurve-postgres
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-midcurve}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-midcurve}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-midcurve} -d ${POSTGRES_DB:-midcurve}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - database
+
+  # ============================================
+  # MESSAGE BROKER
+  # ============================================
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: midcurve-rabbitmq
+    expose:
+      - "5672"
+      - "15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-midcurve}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ============================================
+  # SIGNING SERVICE (INTERNAL ONLY)
+  # ============================================
+  signer:
+    image: ghcr.io/0xnedalbo/midcurve-signer:latest
+    container_name: midcurve-signer
+    expose:
+      - "3003"
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-midcurve}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-midcurve}
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+      - SIGNER_USE_LOCAL_KEYS=${SIGNER_USE_LOCAL_KEYS:-true}
+      - SIGNER_LOCAL_ENCRYPTION_KEY=${SIGNER_LOCAL_ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+      - database
+
+  # ============================================
+  # ONCHAIN DATA SERVICE
+  # ============================================
+  onchain-data:
+    image: ghcr.io/0xnedalbo/midcurve-onchain-data:latest
+    container_name: midcurve-onchain-data
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-midcurve}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-midcurve}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # RabbitMQ
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER:-midcurve}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+      # RPC URLs
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM:-}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      - WS_RPC_URL_ETHEREUM=${WS_RPC_URL_ETHEREUM:-}
+      - WS_RPC_URL_ARBITRUM=${WS_RPC_URL_ARBITRUM:-}
+      - WS_RPC_URL_BASE=${WS_RPC_URL_BASE:-}
+      # External APIs
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      # Worker configuration
+      - MAX_POOLS_PER_CONNECTION=${MAX_POOLS_PER_CONNECTION:-1000}
+      - RECONNECT_DELAY_MS=${RECONNECT_DELAY_MS:-5000}
+      - MAX_RECONNECT_ATTEMPTS=${MAX_RECONNECT_ATTEMPTS:-10}
+      - POLL_INTERVAL_MS=${POLL_INTERVAL_MS:-5000}
+      - CLEANUP_INTERVAL_MS=${CLEANUP_INTERVAL_MS:-60000}
+      - STALE_THRESHOLD_MS=${STALE_THRESHOLD_MS:-60000}
+      - PRUNE_THRESHOLD_MS=${PRUNE_THRESHOLD_MS:-86400000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+      - database
+
+  # ============================================
+  # AUTOMATION SERVICE
+  # ============================================
+  automation:
+    image: ghcr.io/0xnedalbo/midcurve-automation:latest
+    container_name: midcurve-automation
+    expose:
+      - "3004"
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-midcurve}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-midcurve}
+      # RabbitMQ
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER:-midcurve}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+      # RPC URLs
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM:-}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      # External APIs
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      # Signer
+      - SIGNER_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+      # Worker configuration
+      - DEPLOY_POLL_INTERVAL_MS=${DEPLOY_POLL_INTERVAL_MS:-5000}
+      - ORDER_EXECUTOR_POOL_SIZE=${ORDER_EXECUTOR_POOL_SIZE:-3}
+      # Fee configuration
+      - EXECUTION_FEE_RECIPIENT=${EXECUTION_FEE_RECIPIENT:-}
+      - EXECUTION_FEE_BPS=${EXECUTION_FEE_BPS:-50}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      onchain-data:
+        condition: service_started
+      signer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - backend
+      - database
+
+  # ============================================
+  # BUSINESS LOGIC SERVICE
+  # ============================================
+  business-logic:
+    image: ghcr.io/0xnedalbo/midcurve-business-logic:latest
+    container_name: midcurve-business-logic
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-midcurve}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-midcurve}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # RabbitMQ
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER=${RABBITMQ_USER:-midcurve}
+      - RABBITMQ_PASS=${RABBITMQ_PASS}
+      # RPC URLs
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM:-}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      # External APIs
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY}
+      - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM:-}
+      - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM:-}
+      - UNISWAP_V3_SUBGRAPH_ID_BASE=${UNISWAP_V3_SUBGRAPH_ID_BASE:-}
+      # Signer
+      - SIGNER_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      signer:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - backend
+      - database
+
+  # ============================================
+  # API SERVER
+  # ============================================
+  api:
+    image: ghcr.io/0xnedalbo/midcurve-api:latest
+    container_name: midcurve-api
+    expose:
+      - "3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-midcurve}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-midcurve}
+      # CORS & Cookies
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      # RPC URLs
+      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM:-}
+      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM:-}
+      - RPC_URL_BASE=${RPC_URL_BASE}
+      # Internal services
+      - SIGNER_URL=http://signer:3003
+      - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
+      - AUTOMATION_URL=http://automation:3004
+      # External APIs
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY:-}
+      - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM:-}
+      - UNISWAP_V3_SUBGRAPH_ID_ARBITRUM=${UNISWAP_V3_SUBGRAPH_ID_ARBITRUM:-}
+      - UNISWAP_V3_SUBGRAPH_ID_BASE=${UNISWAP_V3_SUBGRAPH_ID_BASE:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      signer:
+        condition: service_started
+      automation:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - frontend
+      - backend
+      - database
+
+  # ============================================
+  # FRONTEND
+  # ============================================
+  ui:
+    build:
+      context: .
+      dockerfile: apps/midcurve-ui/Dockerfile
+      args:
+        - VITE_WALLETCONNECT_PROJECT_ID=${VITE_WALLETCONNECT_PROJECT_ID}
+        - VITE_API_URL=${VITE_API_URL}
+    container_name: midcurve-ui
+    expose:
+      - "3000"
+    restart: unless-stopped
+    networks:
+      - frontend
+
+# ============================================
+# NETWORKS
+# ============================================
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    # Note: internal: true removed — breaks Railway's service mesh.
+    # Security is maintained by only attaching services that need
+    # backend access to this network.
+  database:
+    driver: bridge
+
+# ============================================
+# VOLUMES
+# ============================================
+volumes:
+  postgres-data:
+    driver: local
+  rabbitmq-data:
+    driver: local
