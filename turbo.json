@@ -16,14 +16,7 @@
                 "dist/**"
             ],
             "env": [
-                "NEXTAUTH_URL",
-                "NEXTAUTH_SECRET",
                 "DATABASE_URL",
-                "RPC_URL_ETHEREUM",
-                "RPC_URL_ARBITRUM",
-                "RPC_URL_BASE",
-                "ETHERSCAN_API_KEY",
-                "THE_GRAPH_API_KEY",
                 "LOG_LEVEL",
                 "NODE_ENV"
             ]
@@ -41,14 +34,7 @@
             "persistent": true,
             "cache": false,
             "env": [
-                "NEXTAUTH_URL",
-                "NEXTAUTH_SECRET",
                 "DATABASE_URL",
-                "RPC_URL_ETHEREUM",
-                "RPC_URL_ARBITRUM",
-                "RPC_URL_BASE",
-                "ETHERSCAN_API_KEY",
-                "THE_GRAPH_API_KEY",
                 "LOG_LEVEL",
                 "NODE_ENV"
             ]

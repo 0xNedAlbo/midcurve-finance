@@ -28,7 +28,7 @@ cd apps/midcurve-contracts && forge build  # Solidity contracts
 ## Key Conventions
 - Import types from `@midcurve/shared`, NEVER from `@prisma/client` directly
 - Use `viem` for all EVM interactions, never ethers.js
-- Frontend uses only `VITE_API_URL` and `VITE_WALLETCONNECT_PROJECT_ID`
+- Frontend uses only `VITE_API_URL` (WalletConnect project ID comes from the setup wizard via API)
 - Use `workspace:*` protocol for internal package references
 - Prisma schema lives in `packages/midcurve-database/prisma/schema.prisma`
 - English-only frontend (no i18n)

@@ -58,9 +58,10 @@ src/
 ## Env Vars
 ```
 VITE_API_URL                    # API base URL (empty = proxied via vite.config.ts)
-VITE_WALLETCONNECT_PROJECT_ID   # Required for RainbowKit
 VITE_ENABLE_LOCAL_CHAIN         # Optional: enable Anvil chain 31337
 ```
+Note: WalletConnect project ID is configured via the setup wizard and served
+from `GET /api/config` — it is NOT a build-time env var.
 
 ## Key Rules
 - NO direct RPC calls from frontend — all blockchain reads go through API
