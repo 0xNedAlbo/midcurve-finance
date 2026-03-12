@@ -1,0 +1,84 @@
+name: Build & Push Backend Images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Trigger on any app source change
+      - "apps/midcurve-api/**"
+      - "apps/midcurve-signer/**"
+      - "apps/midcurve-onchain-data/**"
+      - "apps/midcurve-automation/**"
+      - "apps/midcurve-business-logic/**"
+      # Trigger on shared packages (affects all services)
+      - "packages/**"
+      # Trigger on workflow changes
+      - ".github/workflows/build-images.yml"
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/midcurve
+
+jobs:
+  build:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            dockerfile: apps/midcurve-api/Dockerfile
+          - service: signer
+            dockerfile: apps/midcurve-signer/Dockerfile
+          - service: onchain-data
+            dockerfile: apps/midcurve-onchain-data/Dockerfile
+          - service: automation
+            dockerfile: apps/midcurve-automation/Dockerfile
+          - service: business-logic
+            dockerfile: apps/midcurve-business-logic/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          tags: |
+            # latest on every main push
+            type=raw,value=latest
+            # immutable SHA tag for rollbacks
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache layers in GHCR to speed up subsequent builds
+          cache-from: type=registry,ref=${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:buildcache,mode=max
+          provenance: false
