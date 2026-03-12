@@ -152,10 +152,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }),
   ]);
 
-  // Trigger AppConfig initialization (non-blocking — it will complete and unblock 503 middleware)
-  initAppConfig().catch((err) => {
-    apiLogger.error({ err }, 'Failed to initialize AppConfig after wizard save');
-  });
+  // Initialize AppConfig (loads settings into singletons like EvmConfig)
+  // Must complete before returning — the UI navigates to the dashboard immediately after.
+  await initAppConfig();
 
   apiLog.requestEnd(apiLogger, requestId, 200, 0);
 

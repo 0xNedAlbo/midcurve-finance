@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
+import { initAppConfig } from '@midcurve/services';
 import { getSessionService, getAuthUserService } from '@/lib/services';
 import { getCorsHeaders } from '@/lib/cors';
 import { apiLogger, apiLog } from '@/lib/logger';
@@ -36,6 +37,10 @@ export async function withSessionAuth(
   request: NextRequest,
   handler: (user: AuthenticatedUser, requestId: string) => Promise<Response>
 ): Promise<Response> {
+  // Ensure AppConfig + EvmConfig are initialized in this webpack bundle.
+  // Idempotent — returns immediately if already initialized.
+  await initAppConfig();
+
   const requestId = nanoid();
   const origin = request.headers.get('origin');
 
