@@ -1,0 +1,9 @@
+{
+  "chainId": 8453,
+  "network": "base",
+  "deployedAt": "2026-03-12T00:00:00Z",
+  "contracts": {
+    "UniswapV3PositionCloser": "0x03A3Db793913F8Ae464eDC950556D1A2Af174CAe",
+    "MidcurveSwapRouter": "0xcd3617a0e6Ae57c4096e86384f02589668056824"
+  }
+}

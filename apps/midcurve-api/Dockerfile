@@ -16,6 +16,9 @@ COPY packages/ packages/
 # Copy API app
 COPY apps/midcurve-api/ apps/midcurve-api/
 
+# Copy contract deployment files (for seed script)
+COPY apps/midcurve-contracts/deployments/ apps/midcurve-contracts/deployments/
+
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
@@ -29,6 +32,19 @@ RUN pnpm --filter @midcurve/services build
 
 # Build the API (skip migrations - they run at deploy time)
 RUN cd apps/midcurve-api && npx next build
+
+# Bundle seed scripts with esbuild (self-contained JS, Prisma client external)
+RUN npx esbuild \
+  packages/midcurve-database/prisma/seed-accounts.ts \
+  packages/midcurve-database/prisma/seed-contracts.ts \
+  packages/midcurve-database/prisma/seed-allowlist.ts \
+  packages/midcurve-database/prisma/seed-coingecko-tokens.ts \
+  --bundle \
+  --platform=node \
+  --target=node20 \
+  --format=cjs \
+  --outdir=packages/midcurve-database/prisma/dist \
+  --external:../src/generated/prisma/index.js
 
 # Production stage
 FROM node:20-alpine AS runner
@@ -50,9 +66,18 @@ COPY --from=builder /app/apps/midcurve-api/public ./apps/midcurve-api/public
 
 # Copy Prisma client and query engine
 COPY --from=builder /app/packages/midcurve-database/src/generated/prisma ./packages/midcurve-database/src/generated/prisma
+
+# Copy Prisma schema, migrations, bundled seed scripts, and seed data
 COPY --from=builder /app/packages/midcurve-database/prisma ./packages/midcurve-database/prisma
+
+# Copy contract deployment files (for contract seed script)
+COPY --from=builder /app/apps/midcurve-contracts/deployments ./apps/midcurve-contracts/deployments
+
+# Copy entrypoint script
+COPY apps/midcurve-api/entrypoint.sh ./apps/midcurve-api/entrypoint.sh
+RUN chmod +x apps/midcurve-api/entrypoint.sh
 
 EXPOSE 3001
 
-# Start the server
-CMD ["node", "apps/midcurve-api/server.js"]
+# Run migrations, seeds, then start the server
+CMD ["sh", "apps/midcurve-api/entrypoint.sh"]
