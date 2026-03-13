@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Install pnpm and build dependencies
@@ -31,14 +31,17 @@ RUN pnpm --filter @midcurve/services build
 RUN pnpm --filter @midcurve/signer build
 
 # Production stage
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3003
 
-# Install required system packages
-RUN apk add --no-cache openssl
+# Apply Alpine security patches and install required system packages
+RUN apk upgrade --no-cache && apk add --no-cache openssl
+
+# Update npm to patch bundled dependency CVEs (tar, minimatch, glob)
+RUN npm install -g npm@latest
 
 # Copy standalone build
 COPY --from=builder /app/apps/midcurve-signer/.next/standalone ./

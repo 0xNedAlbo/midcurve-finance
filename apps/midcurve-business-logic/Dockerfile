@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Install pnpm and build dependencies
@@ -31,10 +31,16 @@ RUN pnpm --filter @midcurve/services build
 RUN pnpm --filter @midcurve/business-logic build
 
 # Production stage
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+# Apply Alpine security patches
+RUN apk upgrade --no-cache
+
+# Update npm to patch bundled dependency CVEs (tar, minimatch, glob)
+RUN npm install -g npm@latest
 
 # Copy built application
 COPY --from=builder /app/apps/midcurve-business-logic/dist ./dist
