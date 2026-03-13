@@ -1,7 +1,7 @@
 # PRD: Database-Backed Configuration Wizard
 
 **Author:** Ned Albo (Midcurve Finance)
-**Status:** Draft
+**Status:** Implemented
 **Created:** 2026-03-12
 **Last Updated:** 2026-03-12
 
@@ -325,3 +325,15 @@ Users can reconfigure by visiting the wizard URL directly (e.g., `/setup`). The 
 | New DB table | `settings` (key/value), `isAdmin` field on `users` |
 | New API endpoints | `GET /api/config`, `POST /api/config` |
 | New UI pages | Setup wizard (`/setup`) |
+
+---
+
+## 13. Implementation Summary
+
+The config wizard was implemented across prior work. A follow-up added the admin Settings page (Section 11 — reconfiguration without redeployment) with allowlist management:
+
+- **`91e1642`** — `feat: expose isAdmin flag in session and auth types`
+  Added `isAdmin: boolean` to `SessionUser` and `AuthenticatedUser` interfaces in `@midcurve/api-shared`. Plumbed through auth middleware, session validation, and SIWE verify endpoints so the frontend can conditionally render admin-only UI.
+
+- **`f2db262`** — `feat: add admin settings page with API key management and allowlist`
+  New `GET/PATCH /api/v1/admin/settings` endpoint (session-authenticated, admin-only) that returns masked API keys and the full allowlist, and accepts partial updates. Admin addresses are never removed from the allowlist. New `SettingsPage` component matching the existing page layout (Notifications/Autowallet pattern). Admin-only "Settings" link in the user dropdown. Route at `/settings`.
