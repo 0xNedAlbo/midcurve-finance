@@ -44,7 +44,7 @@ RUN pnpm exec esbuild \
   --target=node20 \
   --format=cjs \
   --out-extension:.js=.cjs \
-  --outdir=packages/midcurve-database/prisma/dist \
+  --outdir=packages/midcurve-database/prisma \
   --external:../src/generated/prisma/index.js
 
 # Production stage
