@@ -4,11 +4,9 @@ WORKDIR /app
 
 # Build args for Vite (must be available at build time)
 ARG VITE_WALLETCONNECT_PROJECT_ID
-ARG VITE_API_URL
 
 # Convert ARG to ENV so Vite can access them during build
 ENV VITE_WALLETCONNECT_PROJECT_ID=$VITE_WALLETCONNECT_PROJECT_ID
-ENV VITE_API_URL=$VITE_API_URL
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
@@ -42,8 +40,12 @@ COPY --from=builder /app/apps/midcurve-ui/dist /usr/share/nginx/html
 # Copy nginx configuration
 COPY apps/midcurve-ui/nginx.conf /etc/nginx/conf.d/default.conf
 
+# Copy entrypoint script that generates runtime config
+COPY apps/midcurve-ui/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Expose port 3000 (nginx configured to listen on 3000)
 EXPOSE 3000
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start with entrypoint that injects runtime env vars
+ENTRYPOINT ["/docker-entrypoint.sh"]

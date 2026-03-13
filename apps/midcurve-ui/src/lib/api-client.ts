@@ -14,8 +14,10 @@
 
 import type { ApiResponse, ApiError as ApiErrorType } from '@midcurve/api-shared';
 
-// Get API URL from environment - empty string means same origin (proxied in dev)
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+import { API_URL } from './env';
+
+// Get API URL from runtime config, env var, or empty string (same origin / proxied in dev)
+const API_BASE_URL = API_URL;
 
 /**
  * Structured API error with status code and error details

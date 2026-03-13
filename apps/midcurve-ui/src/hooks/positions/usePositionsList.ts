@@ -8,6 +8,7 @@
 
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
+import { API_URL } from '@/lib/env';
 import type {
   ListPositionsParams,
   ListPositionsResponse,
@@ -45,8 +46,7 @@ export function usePositionsList(
         searchParams.toString() ? `?${searchParams}` : ''
       }`;
 
-      const API_BASE_URL = import.meta.env.VITE_API_URL || '';
-      const response = await fetch(`${API_BASE_URL}${url}`, {
+      const response = await fetch(`${API_URL}${url}`, {
         credentials: 'include',
       });
 

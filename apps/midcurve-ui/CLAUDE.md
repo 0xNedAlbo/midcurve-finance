@@ -57,10 +57,14 @@ src/
 
 ## Env Vars
 ```
-VITE_API_URL                    # API base URL (empty = proxied via vite.config.ts)
+VITE_API_URL                    # Local dev fallback for API base URL (empty = proxied via vite.config.ts)
 VITE_ENABLE_LOCAL_CHAIN         # Optional: enable Anvil chain 31337
+API_URL                         # Runtime env var injected into config.js by docker-entrypoint.sh
 ```
-Note: WalletConnect project ID is configured via the setup wizard and served
+Note: In production (Docker), the API URL is injected at container startup via `API_URL` env var
+into `/config.js`. The `VITE_API_URL` env var is only used as a local dev fallback.
+See `src/lib/env.ts` for the resolution order: `window.__ENV__.apiUrl` → `VITE_API_URL` → `''`.
+WalletConnect project ID is configured via the setup wizard and served
 from `GET /api/config` — it is NOT a build-time env var.
 
 ## Key Rules

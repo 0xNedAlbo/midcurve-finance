@@ -7,6 +7,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useConfig } from '@/providers/ConfigProvider';
+import { API_URL } from '@/lib/env';
 
 const inputClasses =
   'w-full px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500';
@@ -36,7 +37,7 @@ export function SetupWizardPage() {
     setError(null);
     setSubmitting(true);
 
-    const url = `${import.meta.env.VITE_API_URL || ''}/api/config`;
+    const url = `${API_URL}/api/config`;
 
     const res = await fetch(url, {
       method: 'POST',
