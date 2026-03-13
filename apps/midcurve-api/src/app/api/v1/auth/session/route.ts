@@ -35,6 +35,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const sessionUser: SessionUser = {
       id: user.id,
       address: user.address,
+      isAdmin: user.isAdmin,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

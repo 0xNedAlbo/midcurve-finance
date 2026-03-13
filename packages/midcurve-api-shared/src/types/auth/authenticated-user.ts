@@ -14,4 +14,5 @@ export interface AuthenticatedUser {
   id: string;
   address: string;
   name?: string | null;
+  isAdmin: boolean;
 }

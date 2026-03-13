@@ -110,6 +110,7 @@ export async function withSessionAuth(
     id: user.id,
     address: user.address,
     name: user.name,
+    isAdmin: user.isAdmin,
   };
 
   apiLog.authSuccess(apiLogger, requestId, user.id, 'session');

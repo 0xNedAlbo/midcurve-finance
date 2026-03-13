@@ -202,6 +202,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const sessionUser: SessionUser = {
       id: user.id,
       address: user.address,
+      isAdmin: user.isAdmin,
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
     };

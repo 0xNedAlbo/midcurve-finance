@@ -25,6 +25,7 @@ export type VerifySessionRequest = z.infer<typeof VerifySessionRequestSchema>;
 export interface SessionUser {
   id: string;
   address: string;
+  isAdmin: boolean;
   createdAt: string;
   updatedAt: string;
 }
