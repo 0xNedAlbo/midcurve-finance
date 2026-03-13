@@ -15,7 +15,12 @@
 import type { ApiResponse, ApiError as ApiErrorType } from '@midcurve/api-shared';
 
 // Get API URL from environment - empty string means same origin (proxied in dev)
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+function normalizeApiUrl(url: string | undefined): string {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `https://${url}`;
+}
+const API_BASE_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
 
 /**
  * Structured API error with status code and error details
