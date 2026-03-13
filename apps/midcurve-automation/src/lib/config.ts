@@ -8,6 +8,7 @@ import {
   PRODUCTION_CHAIN_IDS as REGISTRY_PRODUCTION_CHAIN_IDS,
   ALL_CHAIN_IDS as REGISTRY_ALL_CHAIN_IDS,
   isSupportedChainId as registryIsSupportedChainId,
+  normalizeAddress,
 } from '@midcurve/shared';
 
 /**
@@ -106,13 +107,11 @@ export function getSignerConfig(): SignerConfig {
  * Get fee configuration from environment
  */
 export function getFeeConfig(): FeeConfig {
-  const recipient = process.env.EXECUTION_FEE_RECIPIENT;
-  if (!recipient) {
-    throw new Error('EXECUTION_FEE_RECIPIENT environment variable is required');
-  }
+  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+  const recipient = process.env.EXECUTION_FEE_RECIPIENT || ZERO_ADDRESS;
 
   return {
-    recipient,
+    recipient: normalizeAddress(recipient),
     bps: parseInt(process.env.EXECUTION_FEE_BPS || '50', 10),
   };
 }
