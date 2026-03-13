@@ -1,4 +1,4 @@
-name: Build & Push Backend Images
+name: Build & Push Docker Images
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
     paths:
       # Trigger on any app source change
       - "apps/midcurve-api/**"
+      - "apps/midcurve-ui/**"
       - "apps/midcurve-signer/**"
       - "apps/midcurve-onchain-data/**"
       - "apps/midcurve-automation/**"
@@ -46,6 +47,8 @@ jobs:
         include:
           - service: api
             dockerfile: apps/midcurve-api/Dockerfile
+          - service: ui
+            dockerfile: apps/midcurve-ui/Dockerfile
           - service: signer
             dockerfile: apps/midcurve-signer/Dockerfile
           - service: onchain-data
