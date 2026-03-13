@@ -34,7 +34,7 @@ RUN pnpm --filter @midcurve/services build
 RUN cd apps/midcurve-api && npx next build
 
 # Bundle seed scripts with esbuild (self-contained JS, Prisma client external)
-RUN pnpm dlx esbuild \
+RUN pnpm exec esbuild \
   packages/midcurve-database/prisma/seed-accounts.ts \
   packages/midcurve-database/prisma/seed-contracts.ts \
   packages/midcurve-database/prisma/seed-allowlist.ts \
