@@ -31,7 +31,7 @@ RUN pnpm --filter @midcurve/api-shared build
 RUN pnpm --filter @midcurve/services build
 
 # Build the API (skip migrations - they run at deploy time)
-RUN cd apps/midcurve-api && npx next build
+RUN cd apps/midcurve-api && npx next build --webpack
 
 # Bundle seed scripts with esbuild (self-contained JS, Prisma client external)
 RUN pnpm exec esbuild \

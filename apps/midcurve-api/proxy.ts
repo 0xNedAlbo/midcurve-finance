@@ -1,7 +1,7 @@
 /**
- * Next.js Edge Middleware
+ * Next.js Proxy
  *
- * Handles CORS preflight requests at the edge level before route handlers.
+ * Handles CORS preflight requests before route handlers.
  * This ensures OPTIONS requests don't get redirected or blocked.
  */
 
@@ -31,7 +31,7 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   };
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const origin = request.headers.get('origin');
 
   // Handle preflight (OPTIONS) requests immediately
@@ -54,7 +54,7 @@ export function middleware(request: NextRequest) {
   return response;
 }
 
-// Apply middleware to all API routes
+// Apply proxy to all API routes
 export const config = {
   matcher: '/api/:path*',
 };

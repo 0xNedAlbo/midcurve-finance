@@ -9,10 +9,6 @@ const nextConfig: NextConfig = {
   output: 'standalone',
 
   /* Build Configuration */
-  eslint: {
-    // Disable ESLint during production builds (devDependencies not available)
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     // TypeScript errors will still fail the build
     ignoreBuildErrors: false,
