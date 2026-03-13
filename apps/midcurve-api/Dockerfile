@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Install pnpm and build dependencies
@@ -41,21 +41,24 @@ RUN pnpm exec esbuild \
   packages/midcurve-database/prisma/seed-coingecko-tokens.ts \
   --bundle \
   --platform=node \
-  --target=node20 \
+  --target=node22 \
   --format=cjs \
   --out-extension:.js=.cjs \
   --outdir=packages/midcurve-database/prisma \
   --external:../src/generated/prisma/index.js
 
 # Production stage
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
 
-# Install required system packages for Prisma
-RUN apk add --no-cache openssl
+# Apply Alpine security patches and install required system packages for Prisma
+RUN apk upgrade --no-cache && apk add --no-cache openssl
+
+# Update npm to patch bundled dependency CVEs (tar, minimatch, glob)
+RUN npm install -g npm@latest
 
 # Install prisma CLI for migrations (pinned to 6.x)
 RUN npm install -g prisma@6.19.0
