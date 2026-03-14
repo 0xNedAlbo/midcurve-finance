@@ -70,11 +70,7 @@ services:
       - engine-net
       - proxy-net
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://localhost:${RETH_HTTP_PORT:-8545} --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":1}' --header='Content-Type: application/json' || exit 1",
-        ]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/${RETH_HTTP_PORT:-8545}'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -139,8 +135,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 3m
     command:
-      - --parent-chain.connection.url=${ARBITRUM_PARENT_CHAIN_URL:-http://ethereum-reth:${RETH_HTTP_PORT:-8545}}
-      - --parent-chain.blob-client.beacon-url=${ARBITRUM_BEACON_URL:-http://ethereum-lighthouse:${LIGHTHOUSE_HTTP_PORT:-5052}}
+      - --parent-chain.connection.url=${ARBITRUM_PARENT_CHAIN_URL:-http://ethereum-reth:8545}
+      - --parent-chain.blob-client.beacon-url=${ARBITRUM_BEACON_URL:-http://ethereum-lighthouse:5052}
       - --chain.id=42161
       - --chain.name=arb1
       - --persistent.chain=/data/arbitrum
@@ -165,14 +161,15 @@ services:
       - "0.0.0.0:${ARBITRUM_METRICS_PORT:-6070}:${ARBITRUM_METRICS_PORT:-6070}"
     volumes:
       - arbitrum-nitro-data:/data/arbitrum
+    depends_on:
+      reth:
+        condition: service_healthy
+      lighthouse:
+        condition: service_started
     networks:
       - proxy-net
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://localhost:${ARBITRUM_HTTP_PORT:-8547} --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"eth_syncing\",\"params\":[],\"id\":1}' --header='Content-Type: application/json' || exit 1",
-        ]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/${ARBITRUM_HTTP_PORT:-8547}'"]
       interval: 30s
       timeout: 10s
       retries: 3
