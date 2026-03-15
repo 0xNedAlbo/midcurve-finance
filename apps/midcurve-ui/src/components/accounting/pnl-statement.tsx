@@ -2,8 +2,8 @@
  * PnlStatement - Hierarchical P&L with expandable instrument/position rows.
  *
  * Level 0: Portfolio totals (always visible)
- * Level 1: Instrument rows (expandable, 4-category breakdown)
- * Level 2: Position rows (expandable, 4-category breakdown)
+ * Level 1: Instrument rows (expandable, realized breakdown)
+ * Level 2: Position rows (expandable, realized breakdown)
  */
 
 import { useState } from 'react';
@@ -49,17 +49,9 @@ export function PnlStatement({ data }: PnlStatementProps) {
       {hasInstruments && (
         <div className="border-t border-slate-600 pt-3 mt-4">
           <div className="flex justify-between items-center px-4 py-2">
-            <span className="text-white font-semibold">Net P&L (Period)</span>
+            <span className="text-white font-semibold">Net Realized P&L (Period)</span>
             <span className={`text-lg font-bold ${pnlColor(data.netPnl)}`}>
               {formatPnl(data.netPnl)}
-            </span>
-          </div>
-          <div className="flex gap-6 px-4 text-xs text-slate-400">
-            <span>
-              Realized: <span className={pnlColor(addBigints(data.realizedFromWithdrawals, data.realizedFromCollectedFees))}>{formatPnl(addBigints(data.realizedFromWithdrawals, data.realizedFromCollectedFees))}</span>
-            </span>
-            <span>
-              Unrealized: <span className={pnlColor(addBigints(data.unrealizedFromPriceChanges, data.unrealizedFromUnclaimedFees))}>{formatPnl(addBigints(data.unrealizedFromPriceChanges, data.unrealizedFromUnclaimedFees))}</span>
             </span>
           </div>
         </div>
@@ -103,8 +95,6 @@ function InstrumentRow({ instrument }: { instrument: PnlInstrumentItem }) {
           <CategoryBreakdown
             realizedFromWithdrawals={instrument.realizedFromWithdrawals}
             realizedFromCollectedFees={instrument.realizedFromCollectedFees}
-            unrealizedFromPriceChanges={instrument.unrealizedFromPriceChanges}
-            unrealizedFromUnclaimedFees={instrument.unrealizedFromUnclaimedFees}
             indent={1}
           />
 
@@ -149,8 +139,6 @@ function PositionRow({ position }: { position: PnlPositionItem }) {
           <CategoryBreakdown
             realizedFromWithdrawals={position.realizedFromWithdrawals}
             realizedFromCollectedFees={position.realizedFromCollectedFees}
-            unrealizedFromPriceChanges={position.unrealizedFromPriceChanges}
-            unrealizedFromUnclaimedFees={position.unrealizedFromUnclaimedFees}
             indent={2}
           />
         </div>
@@ -166,16 +154,12 @@ function PositionRow({ position }: { position: PnlPositionItem }) {
 interface CategoryBreakdownProps {
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
-  unrealizedFromPriceChanges: string;
-  unrealizedFromUnclaimedFees: string;
   indent: number;
 }
 
 function CategoryBreakdown({
   realizedFromWithdrawals,
   realizedFromCollectedFees,
-  unrealizedFromPriceChanges,
-  unrealizedFromUnclaimedFees,
   indent,
 }: CategoryBreakdownProps) {
   const pl = indent === 1 ? 'pl-10' : 'pl-14';
@@ -185,9 +169,6 @@ function CategoryBreakdown({
       <div className="text-slate-500 font-medium mb-1">Realized Gains / (Losses)</div>
       <CategoryLine label="From Withdrawals" value={realizedFromWithdrawals} />
       <CategoryLine label="From Collected Fees" value={realizedFromCollectedFees} />
-      <div className="text-slate-500 font-medium mt-2 mb-1">Unrealized Gains / (Losses)</div>
-      <CategoryLine label="From Price Changes" value={unrealizedFromPriceChanges} />
-      <CategoryLine label="From Unclaimed Fees" value={unrealizedFromUnclaimedFees} />
     </div>
   );
 }
@@ -216,8 +197,4 @@ function pnlColor(value: string): string {
   if (n < 0n) return 'text-red-400';
   if (n > 0n) return 'text-emerald-400';
   return 'text-slate-400';
-}
-
-function addBigints(a: string, b: string): string {
-  return (BigInt(a) + BigInt(b)).toString();
 }

@@ -1,7 +1,6 @@
 export type {
   BalanceSheetResponse,
   BalanceSheetData,
-  BalanceSheetNoData,
   BalanceSheetLineItem,
 } from './balance-sheet.js';
 

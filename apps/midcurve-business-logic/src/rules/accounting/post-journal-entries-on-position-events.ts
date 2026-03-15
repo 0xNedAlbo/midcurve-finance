@@ -2,15 +2,15 @@
  * PostJournalEntriesOnPositionEventsRule
  *
  * Subscribes to all position domain events and creates balanced double-entry
- * journal entries in the accounting schema.
+ * journal entries in the accounting schema. Only realized entries are created.
  *
  * Events handled:
  * - position.created           → DR 1000 / CR 3000 (capital contribution)
  * - position.liquidity.increased → DR 1000 / CR 3000 (additional capital)
- * - position.liquidity.decreased → CR 1000 / DR 3100 + realized gain/loss + unrealized reclassification
- * - position.fees.collected    → DR 3100 / CR 1002 or 4000 (fee collection)
- * - position.state.refreshed   → Fee accrual + M2M adjustment
- * - position.closed            → Reclassify remaining unrealized → realized
+ * - position.liquidity.decreased → CR 1000 / DR 3100 + realized gain/loss
+ * - position.fees.collected    → DR 3100 / CR 4000 (fee income)
+ * - position.state.refreshed   → No-op (unrealized entries removed)
+ * - position.closed            → Zero out cost basis remainder
  * - position.burned            → No financial entry (gas deferred to Phase 2)
  * - position.deleted           → Delete all journal entries for position
  * - position.liquidity.reverted → Delete journal entries for reverted ledger events
@@ -26,8 +26,6 @@ import {
   JournalService,
   JournalLineBuilder,
   CoinGeckoClient,
-  NavSnapshotService,
-  getMidnightUTC,
   type DomainEvent,
   type PositionEventType,
   type PositionCreatedPayload,
@@ -36,7 +34,6 @@ import {
   type PositionLiquidityIncreasedPayload,
   type PositionLiquidityDecreasedPayload,
   type PositionFeesCollectedPayload,
-  type PositionStateRefreshedPayload,
   type PositionLiquidityRevertedPayload,
 } from '@midcurve/services';
 import type { JournalLineInput } from '@midcurve/shared';
@@ -72,12 +69,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
   private consumerTag: string | null = null;
   private readonly journalService: JournalService;
-  private readonly navSnapshotService: NavSnapshotService;
 
   constructor() {
     super();
     this.journalService = JournalService.getInstance();
-    this.navSnapshotService = NavSnapshotService.getInstance();
   }
 
   // ===========================================================================
@@ -150,7 +145,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       case 'position.fees.collected':
         return this.handleFeesCollected(event as DomainEvent<PositionFeesCollectedPayload>);
       case 'position.state.refreshed':
-        return this.handleStateRefreshed(event as DomainEvent<PositionStateRefreshedPayload>);
+        // No-op: unrealized journal entries (M2M, fee accrual) no longer created
+        return;
       case 'position.closed':
         return this.handlePositionClosed(event as DomainEvent<PositionClosedPayload>);
       case 'position.burned':
@@ -208,17 +204,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       },
       lines
     );
-
-    // Trigger an initial snapshot so the user has Balance Sheet data immediately.
-    // This is a one-time cost on position creation; subsequent updates come from the daily cron.
-    this.navSnapshotService
-      .generateSnapshot({ userId: position.userId, snapshotDate: getMidnightUTC() })
-      .catch((error) => {
-        this.logger.warn(
-          { error: error instanceof Error ? error.message : String(error), userId: position.userId },
-          'Initial snapshot generation failed (non-blocking)'
-        );
-      });
   }
 
   /**
@@ -311,13 +296,11 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
   /**
    * position.liquidity.decreased → CR 1000 / DR 3100 + realized gain/loss
-   *                                + unrealized reclassification
    *
-   * The most complex handler. Handles partial/full withdrawal with:
+   * Handles partial/full withdrawal with:
    * 1. Cost basis derecognition
    * 2. Capital return
    * 3. Realized gain or loss
-   * 4. Reclassification of proportional unrealized P&L
    */
   private async handleLiquidityDecreased(
     event: DomainEvent<PositionLiquidityDecreasedPayload>
@@ -358,34 +341,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
     }
 
-    // Line 4: Reclassify proportional unrealized P&L (if any M2M entries exist)
-    const unrealizedBalance = await this.journalService.getAccountBalance(
-      ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-      positionRef
-    );
-
-    if (unrealizedBalance !== 0n) {
-      // Calculate proportion: abs(deltaCostBasis) / costBasisBefore
-      const costBasisBefore = BigInt(ledgerEvent.costBasisAfter) + BigInt(absDeltaCostBasis);
-      if (costBasisBefore > 0n) {
-        const proportion = (BigInt(absDeltaCostBasis) * 10n ** 18n) / costBasisBefore;
-        const reclassAmount = (absBigintValue(unrealizedBalance) * proportion) / 10n ** 18n;
-
-        if (reclassAmount > 0n) {
-          const reclassStr = reclassAmount.toString();
-          if (unrealizedBalance > 0n) {
-            // Unrealized gain → reclassify to realized gain
-            builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, reclassStr, positionRef, instrumentRef);
-            builder.credit(ACCOUNT_CODES.REALIZED_GAINS, reclassStr, positionRef, instrumentRef);
-          } else {
-            // Unrealized loss → reclassify to realized loss
-            builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, reclassStr, positionRef, instrumentRef);
-            builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, reclassStr, positionRef, instrumentRef);
-          }
-        }
-      }
-    }
-
     const lines = builder.build();
 
     await this.journalService.createEntry(
@@ -403,10 +358,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   /**
-   * position.fees.collected → DR 3100 / CR 1002 or 4000
+   * position.fees.collected → DR 3100 / CR 4000
    *
-   * Resolves accrued fee income. If fees were previously accrued (via M2M),
-   * credits account 1002. Any excess goes to Fee Income (4000).
+   * All collected fees go directly to Fee Income (4000).
    */
   private async handleFeesCollected(
     event: DomainEvent<PositionFeesCollectedPayload>
@@ -423,36 +377,15 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const totalFees = BigInt(feesValueInQuote);
     if (totalFees <= 0n) return;
 
-    // Find the corresponding COLLECT ledger event
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'COLLECT', event.payload.eventTimestamp);
-
-    // Check how much is accrued in 1002 for this position
-    const accruedBalance = await this.journalService.getAccountBalance(
-      ACCOUNT_CODES.ACCRUED_FEE_INCOME,
-      positionRef
-    );
 
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
-    const builder = new JournalLineBuilder()
-      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-    builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, totalFees.toString(), positionRef, instrumentRef);
-
-    if (accruedBalance > 0n) {
-      // Use accrued amount first, then any excess to fee income
-      const accrualAmount = accruedBalance < totalFees ? accruedBalance : totalFees;
-      builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, accrualAmount.toString(), positionRef, instrumentRef);
-
-      const excess = totalFees - accrualAmount;
-      if (excess > 0n) {
-        builder.credit(ACCOUNT_CODES.FEE_INCOME, excess.toString(), positionRef, instrumentRef);
-      }
-    } else {
-      // No prior accrual — all goes to fee income
-      builder.credit(ACCOUNT_CODES.FEE_INCOME, totalFees.toString(), positionRef, instrumentRef);
-    }
-
-    const lines = builder.build();
+    const lines = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
+      .debit(ACCOUNT_CODES.CAPITAL_RETURNED, totalFees.toString(), positionRef, instrumentRef)
+      .credit(ACCOUNT_CODES.FEE_INCOME, totalFees.toString(), positionRef, instrumentRef)
+      .build();
 
     await this.journalService.createEntry(
       {
@@ -469,110 +402,11 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   /**
-   * position.state.refreshed → Fee accrual + M2M value change
-   *
-   * Two independent sub-entries (each with its own suffixed domainEventId):
-   * A) Fee accrual: DR 1002 / CR 4001 (if unclaimed fees increased)
-   * B) M2M: DR/CR 1001 vs 4200/5200 (unrealized gain/loss change)
-   */
-  private async handleStateRefreshed(
-    event: DomainEvent<PositionStateRefreshedPayload>
-  ): Promise<void> {
-    const { positionId, positionHash, unrealizedPnl, unClaimedFees } = event.payload;
-    const positionRef = positionHash;
-    const userId = await this.getPositionUserId(positionId);
-
-    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
-    if (!trackedPositionId) return;
-
-    const ctx = await this.getReportingContext(positionId);
-    const instrumentRef = ctx.poolHash;
-
-    // Sub-entry A: Fee accrual
-    // Compare current unclaimed fees with what's already accrued in account 1002
-    const feeAccrualEventId = `${event.id}:fee-accrual`;
-    if (!(await this.journalService.isProcessed(feeAccrualEventId))) {
-      const currentAccrued = await this.journalService.getAccountBalance(
-        ACCOUNT_CODES.ACCRUED_FEE_INCOME,
-        positionRef
-      );
-
-      const newUnclaimedFees = BigInt(unClaimedFees);
-      const feeDelta = newUnclaimedFees - currentAccrued;
-
-      if (feeDelta > 0n) {
-        const feeBuilder = new JournalLineBuilder()
-          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-        const feeDeltaStr = feeDelta.toString();
-        feeBuilder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, feeDeltaStr, positionRef, instrumentRef);
-        feeBuilder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, feeDeltaStr, positionRef, instrumentRef);
-
-        await this.journalService.createEntry(
-          {
-            userId,
-            trackedPositionId,
-            domainEventId: feeAccrualEventId,
-            domainEventType: event.type,
-            entryDate: new Date(event.timestamp),
-            description: `Fee accrual: ${positionRef}`,
-          },
-          feeBuilder.build()
-        );
-      }
-    }
-
-    // Sub-entry B: M2M unrealized P&L change
-    // Compare new unrealizedPnl with the current balance of 1001
-    const m2mEventId = `${event.id}:m2m`;
-    if (!(await this.journalService.isProcessed(m2mEventId))) {
-      const currentUnrealized = await this.journalService.getAccountBalance(
-        ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-        positionRef
-      );
-
-      const newUnrealized = BigInt(unrealizedPnl);
-      const delta = newUnrealized - currentUnrealized;
-
-      if (delta !== 0n) {
-        const builder = new JournalLineBuilder()
-          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-        const absDelta = absBigintValue(delta).toString();
-
-        if (delta > 0n) {
-          // Value increased
-          builder.debit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absDelta, positionRef, instrumentRef);
-          builder.credit(ACCOUNT_CODES.UNREALIZED_GAINS, absDelta, positionRef, instrumentRef);
-        } else {
-          // Value decreased
-          builder.debit(ACCOUNT_CODES.UNREALIZED_LOSSES, absDelta, positionRef, instrumentRef);
-          builder.credit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absDelta, positionRef, instrumentRef);
-        }
-
-        await this.journalService.createEntry(
-          {
-            userId,
-            trackedPositionId,
-            domainEventId: m2mEventId,
-            domainEventType: event.type,
-            entryDate: new Date(event.timestamp),
-            description: `Mark-to-market: ${positionRef}`,
-          },
-          builder.build()
-        );
-      }
-    }
-  }
-
-  /**
-   * position.closed → Reclassify remaining unrealized → realized
-   *                  + zero out cost basis remainder
-   *                  + zero out accrued fee remainder
+   * position.closed → Zero out cost basis remainder
    *
    * The actual withdrawal was handled by decrease/collect events.
-   * This handler creates up to three corrective entries:
-   * A) Reclassify remaining unrealized P&L (Account 1001)
-   * B) Zero out cost basis remainder (Account 1000) — fixes exchange rate mismatch
-   * C) Zero out accrued fee remainder (Account 1002)
+   * This handler creates a corrective entry for exchange rate mismatches
+   * between deposit and withdrawal time.
    */
   private async handlePositionClosed(
     event: DomainEvent<PositionClosedPayload>
@@ -583,43 +417,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const trackedPositionId = await this.journalService.getTrackedPositionId(position.userId, positionRef);
     if (!trackedPositionId) return;
 
-    // --- Part A: Reclassify remaining unrealized P&L (Account 1001) ---
-    if (!(await this.journalService.isProcessed(event.id))) {
-      const unrealizedBalance = await this.journalService.getAccountBalance(
-        ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-        positionRef
-      );
-
-      if (unrealizedBalance !== 0n) {
-        const ctx = await this.getReportingContext(position.id);
-        const instrumentRef = ctx.poolHash;
-        const builder = new JournalLineBuilder()
-          .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
-        const absAmount = absBigintValue(unrealizedBalance).toString();
-
-        if (unrealizedBalance > 0n) {
-          builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, absAmount, positionRef, instrumentRef);
-          builder.credit(ACCOUNT_CODES.REALIZED_GAINS, absAmount, positionRef, instrumentRef);
-        } else {
-          builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, absAmount, positionRef, instrumentRef);
-          builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, absAmount, positionRef, instrumentRef);
-        }
-
-        await this.journalService.createEntry(
-          {
-            userId: position.userId,
-            trackedPositionId,
-            domainEventId: event.id,
-            domainEventType: event.type,
-            entryDate: new Date(event.timestamp),
-            description: `Position closed: ${positionRef}`,
-          },
-          builder.build()
-        );
-      }
-    }
-
-    // --- Part B: Cost basis remainder correction (Account 1000) ---
+    // Cost basis remainder correction (Account 1000)
     // The quote token balance may be 0 while the reporting currency balance is not,
     // due to different exchange rates at deposit vs withdrawal time. Check both.
     const costBasisCorrectionEventId = `${event.id}:cost-basis-correction`;
@@ -671,60 +469,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         );
       }
     }
-
-    // --- Part C: Accrued fee remainder correction (Account 1002) ---
-    const feeAccrualCorrectionEventId = `${event.id}:fee-accrual-correction`;
-    if (!(await this.journalService.isProcessed(feeAccrualCorrectionEventId))) {
-      const feeQuote = await this.journalService.getAccountBalance(
-        ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef
-      );
-      const feeReporting = await this.journalService.getAccountBalanceReporting(
-        ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef
-      );
-
-      if (feeQuote !== 0n || feeReporting !== 0n) {
-        const ctx = await this.getReportingContext(position.id);
-        const instrumentRef = ctx.poolHash;
-        const absQuote = absBigintValue(feeQuote).toString();
-        const absReporting = absBigintValue(feeReporting).toString();
-        const isPositive = feeQuote > 0n || (feeQuote === 0n && feeReporting > 0n);
-
-        const lines: JournalLineInput[] = isPositive
-          ? [
-              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'credit', amountQuote: absQuote,
-                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
-                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
-              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'debit', amountQuote: absQuote,
-                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
-                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
-            ]
-          : [
-              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'debit', amountQuote: absQuote,
-                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
-                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
-              { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'credit', amountQuote: absQuote,
-                amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
-                exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
-            ];
-
-        await this.journalService.createEntry(
-          {
-            userId: position.userId,
-            trackedPositionId,
-            domainEventId: feeAccrualCorrectionEventId,
-            domainEventType: event.type,
-            entryDate: new Date(event.timestamp),
-            description: `Accrued fee correction: ${positionRef}`,
-          },
-          lines
-        );
-      }
-    }
   }
 
   /**
    * position.deleted → Untrack position (cascade deletes all journal entries)
-   *                   → Recompute all stale NAV snapshots for the user
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionDeletedPayload>
@@ -739,16 +487,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       { positionRef },
       'Untracked position (cascade deleted journal entries)'
     );
-
-    // Recompute stale snapshots: the journal hash changed because a position was removed.
-    // Each stale snapshot is recomputed from its cached on-chain state + current journal balances.
-    const recomputedCount = await this.navSnapshotService.recomputeStaleSnapshots(position.userId);
-    if (recomputedCount > 0) {
-      this.logger.info(
-        { positionRef, userId: position.userId, recomputedCount },
-        'Recomputed stale NAV snapshots after position deletion'
-      );
-    }
   }
 
   /**

@@ -9,8 +9,7 @@
     "build": "tsup",
     "start": "node --env-file=../../.env dist/index.js",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "nav-snapshot": "tsx --env-file=../../.env src/scripts/run-nav-snapshot.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@midcurve/database": "workspace:^",

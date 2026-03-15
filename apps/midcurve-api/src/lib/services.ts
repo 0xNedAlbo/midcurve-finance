@@ -31,7 +31,6 @@ import {
   UniswapV3LedgerService,
   UniswapV3AprService,
   SwapRouterService,
-  NavSnapshotService,
   JournalService,
   JournalBackfillService,
 } from '@midcurve/services';
@@ -285,13 +284,6 @@ export function getSwapRouterService(): SwapRouterService {
  */
 export function getSubgraphClient(): UniswapV3SubgraphClient {
   return UniswapV3SubgraphClient.getInstance();
-}
-
-/**
- * Get singleton instance of NavSnapshotService
- */
-export function getNavSnapshotService(): NavSnapshotService {
-  return NavSnapshotService.getInstance();
 }
 
 /**

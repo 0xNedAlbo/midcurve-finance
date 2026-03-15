@@ -7,11 +7,10 @@
  *
  * Handles three ledger event types:
  * - INCREASE_POSITION → DR 1000 / CR 3000 (capital contribution)
- * - DECREASE_POSITION → CR 1000 / DR 3100 + realized PnL + unrealized reclassification
+ * - DECREASE_POSITION → CR 1000 / DR 3100 + realized PnL
  * - COLLECT           → DR 3100 / CR 4000 (fee income)
  *
- * After replaying ledger events, creates final M2M and fee accrual
- * adjustment entries for active positions.
+ * For closed positions, creates a cost basis remainder correction entry.
  */
 
 import { prisma as prismaClient, type PrismaClient } from '@midcurve/database';
@@ -112,9 +111,6 @@ export class JournalBackfillService {
         id: true,
         positionHash: true,
         isToken0Quote: true,
-        unrealizedPnl: true,
-        unClaimedFees: true,
-        isActive: true,
         state: true,
         user: { select: { reportingCurrency: true } },
         pool: {
@@ -207,83 +203,12 @@ export class JournalBackfillService {
       if (created) entriesCreated++;
     }
 
-    // Final adjustment entries for active positions
-    if (position.isActive) {
-      const spotCtx = await this.getSpotReportingContext(
-        reportingCurrency,
-        quoteToken.decimals,
-        quoteToken.coingeckoId,
-      );
-
-      // Fee accrual
-      const unClaimedFees = BigInt(position.unClaimedFees ?? '0');
-      if (unClaimedFees > 0n) {
-        const feeEventId = `backfill:${positionId}:final-fee-accrual`;
-        if (!(await this.journalService.isProcessed(feeEventId))) {
-          const builder = new JournalLineBuilder()
-            .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
-          const feesStr = unClaimedFees.toString();
-          builder.debit(ACCOUNT_CODES.ACCRUED_FEE_INCOME, feesStr, positionRef, instrumentRef);
-          builder.credit(ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, feesStr, positionRef, instrumentRef);
-
-          await this.journalService.createEntry(
-            {
-              userId,
-              trackedPositionId,
-              domainEventId: feeEventId,
-              domainEventType: 'backfill.fee-accrual',
-              entryDate: new Date(),
-              description: `Fee accrual (backfill): ${positionRef}`,
-            },
-            builder.build(),
-          );
-          entriesCreated++;
-        }
-      }
-
-      // M2M unrealized P&L
-      const unrealizedPnl = BigInt(position.unrealizedPnl ?? '0');
-      if (unrealizedPnl !== 0n) {
-        const m2mEventId = `backfill:${positionId}:final-m2m`;
-        if (!(await this.journalService.isProcessed(m2mEventId))) {
-          const builder = new JournalLineBuilder()
-            .withReporting(spotCtx.reportingCurrency, spotCtx.exchangeRate, spotCtx.quoteTokenDecimals);
-          const absUnrealized = (unrealizedPnl < 0n ? -unrealizedPnl : unrealizedPnl).toString();
-
-          if (unrealizedPnl > 0n) {
-            builder.debit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absUnrealized, positionRef, instrumentRef);
-            builder.credit(ACCOUNT_CODES.UNREALIZED_GAINS, absUnrealized, positionRef, instrumentRef);
-          } else {
-            builder.debit(ACCOUNT_CODES.UNREALIZED_LOSSES, absUnrealized, positionRef, instrumentRef);
-            builder.credit(ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT, absUnrealized, positionRef, instrumentRef);
-          }
-
-          await this.journalService.createEntry(
-            {
-              userId,
-              trackedPositionId,
-              domainEventId: m2mEventId,
-              domainEventType: 'backfill.m2m',
-              entryDate: new Date(),
-              description: `Mark-to-market (backfill): ${positionRef}`,
-            },
-            builder.build(),
-          );
-          entriesCreated++;
-        }
-      }
-    }
-
     // Remainder corrections for closed positions
     // Uses state.isClosed (not isActive — that's only set false on burn)
     const positionState = position.state as Record<string, unknown>;
     const isClosed = positionState.isClosed === true;
 
     if (isClosed) {
-      const spotCtx = position.isActive
-        ? await this.getSpotReportingContext(reportingCurrency, quoteToken.decimals, quoteToken.coingeckoId)
-        : { reportingCurrency, exchangeRate: '100000000', quoteTokenDecimals: quoteToken.decimals };
-
       // Cost basis remainder correction (Account 1000)
       // Check both quote and reporting balances — the mismatch may only exist in reporting
       const costBasisCorrectionEventId = `backfill:${positionId}:cost-basis-correction`;
@@ -303,18 +228,18 @@ export class JournalBackfillService {
           const lines: JournalLineInput[] = isOverCredited
             ? [
                 { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
                 { accountCode: ACCOUNT_CODES.REALIZED_GAINS, side: 'credit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
               ]
             : [
                 { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
                 { accountCode: ACCOUNT_CODES.REALIZED_LOSSES, side: 'debit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
+                  amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
               ];
 
@@ -326,54 +251,6 @@ export class JournalBackfillService {
               domainEventType: 'position.closed',
               entryDate: new Date(),
               description: `Cost basis correction (backfill): ${positionRef}`,
-            },
-            lines,
-          );
-          entriesCreated++;
-        }
-      }
-
-      // Accrued fee remainder correction (Account 1002)
-      const feeAccrualCorrectionEventId = `backfill:${positionId}:fee-accrual-correction`;
-      if (!(await this.journalService.isProcessed(feeAccrualCorrectionEventId))) {
-        const feeQuote = await this.journalService.getAccountBalance(
-          ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef,
-        );
-        const feeReporting = await this.journalService.getAccountBalanceReporting(
-          ACCOUNT_CODES.ACCRUED_FEE_INCOME, positionRef,
-        );
-
-        if (feeQuote !== 0n || feeReporting !== 0n) {
-          const absQuote = absBigintValue(feeQuote).toString();
-          const absReporting = absBigintValue(feeReporting).toString();
-          const isPositive = feeQuote > 0n || (feeQuote === 0n && feeReporting > 0n);
-
-          const lines: JournalLineInput[] = isPositive
-            ? [
-                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'credit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
-                  positionRef, instrumentRef },
-                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'debit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
-                  positionRef, instrumentRef },
-              ]
-            : [
-                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME, side: 'debit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
-                  positionRef, instrumentRef },
-                { accountCode: ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE, side: 'credit', amountQuote: absQuote,
-                  amountReporting: absReporting, reportingCurrency, exchangeRate: spotCtx.exchangeRate,
-                  positionRef, instrumentRef },
-              ];
-
-          await this.journalService.createEntry(
-            {
-              userId,
-              trackedPositionId,
-              domainEventId: feeAccrualCorrectionEventId,
-              domainEventType: 'position.closed',
-              entryDate: new Date(),
-              description: `Accrued fee correction (backfill): ${positionRef}`,
             },
             lines,
           );
@@ -443,7 +320,7 @@ export class JournalBackfillService {
   }
 
   /**
-   * DECREASE_POSITION → CR 1000 / DR 3100 + realized gain/loss + unrealized reclassification
+   * DECREASE_POSITION → CR 1000 / DR 3100 + realized gain/loss
    */
   private async backfillLiquidityDecreased(
     event: LedgerEventRow,
@@ -474,31 +351,6 @@ export class JournalBackfillService {
       builder.credit(ACCOUNT_CODES.REALIZED_GAINS, deltaPnl.toString(), positionRef, instrumentRef);
     } else if (deltaPnl < 0n) {
       builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
-    }
-
-    // Line 4: Reclassify proportional unrealized P&L (if any M2M entries exist)
-    const unrealizedBalance = await this.journalService.getAccountBalance(
-      ACCOUNT_CODES.LP_POSITION_UNREALIZED_ADJUSTMENT,
-      positionRef,
-    );
-
-    if (unrealizedBalance !== 0n) {
-      const costBasisBefore = BigInt(event.costBasisAfter) + BigInt(absDeltaCostBasis);
-      if (costBasisBefore > 0n) {
-        const proportion = (BigInt(absDeltaCostBasis) * 10n ** 18n) / costBasisBefore;
-        const reclassAmount = (absBigintValue(unrealizedBalance) * proportion) / 10n ** 18n;
-
-        if (reclassAmount > 0n) {
-          const reclassStr = reclassAmount.toString();
-          if (unrealizedBalance > 0n) {
-            builder.debit(ACCOUNT_CODES.UNREALIZED_GAINS, reclassStr, positionRef, instrumentRef);
-            builder.credit(ACCOUNT_CODES.REALIZED_GAINS, reclassStr, positionRef, instrumentRef);
-          } else {
-            builder.credit(ACCOUNT_CODES.UNREALIZED_LOSSES, reclassStr, positionRef, instrumentRef);
-            builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, reclassStr, positionRef, instrumentRef);
-          }
-        }
-      }
     }
 
     await this.journalService.createEntry(
@@ -590,31 +442,6 @@ export class JournalBackfillService {
     };
   }
 
-  /**
-   * Compute reporting context using current spot price.
-   * Used for final M2M/fee accrual adjustment entries.
-   */
-  private async getSpotReportingContext(
-    reportingCurrency: string,
-    quoteTokenDecimals: number,
-    quoteCoingeckoId: string | null,
-  ): Promise<ReportingContext> {
-    let quoteTokenUsdPrice = 1.0;
-
-    if (quoteCoingeckoId) {
-      const prices = await this.coingecko.getSimplePrices([quoteCoingeckoId]);
-      quoteTokenUsdPrice = prices[quoteCoingeckoId]?.usd ?? 1.0;
-    }
-
-    const rate = quoteTokenUsdPrice / 1.0;
-    const exchangeRate = BigInt(Math.round(rate * FLOAT_TO_BIGINT_SCALE));
-
-    return {
-      reportingCurrency,
-      exchangeRate: exchangeRate.toString(),
-      quoteTokenDecimals,
-    };
-  }
 }
 
 // =============================================================================

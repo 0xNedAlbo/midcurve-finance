@@ -4,8 +4,7 @@
  * GET /api/v1/accounting/balance-sheet?period=week
  *
  * Returns a structured balance sheet with period-over-period comparison.
- * Both current and previous columns read exclusively from NAV snapshots
- * (snapshot-only reporting — single calculation path).
+ * Computes realized-only balances on-the-fly from journal entries.
  *
  * Authentication: Required (session only)
  */
@@ -21,9 +20,10 @@ import {
   type BalanceSheetResponse,
   type BalanceSheetLineItem,
 } from '@midcurve/api-shared';
-import { getCalendarPeriodBoundaries } from '@midcurve/shared';
+import { prisma } from '@midcurve/database';
+import { ACCOUNT_CODES, getCalendarPeriodBoundaries } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getNavSnapshotService } from '@/lib/services';
+import { getJournalService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -59,101 +59,80 @@ export async function GET(request: NextRequest): Promise<Response> {
       const offset = isNaN(offsetParam) ? 0 : Math.min(0, offsetParam);
       const { currentEnd, previousEnd } = getCalendarPeriodBoundaries(period, new Date(), offset);
 
-      const navSnapshotService = getNavSnapshotService();
+      const journalService = getJournalService();
 
-      // Current column: latest snapshot at or before the period's current end
-      const currentSnapshot = await navSnapshotService.getSnapshotAtBoundary(user.id, currentEnd);
+      // Query realized account balances for current and previous period in parallel
+      const [
+        curDepositedLiquidity,
+        curContributedCapital,
+        curCapitalReturned,
+        curRealizedGains,
+        curRealizedLosses,
+        curFeeIncome,
+        prevDepositedLiquidity,
+        prevContributedCapital,
+        prevCapitalReturned,
+        prevRealizedGains,
+        prevRealizedLosses,
+        prevFeeIncome,
+        activePositionCount,
+      ] = await Promise.all([
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, user.id, previousEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, user.id, previousEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, user.id, previousEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, user.id, previousEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, user.id, previousEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, user.id, previousEnd),
+        prisma.trackedPosition.count({ where: { userId: user.id } }),
+      ]);
 
-      if (!currentSnapshot) {
-        // Cold-start: no snapshot exists yet for this user
-        const noDataResponse: BalanceSheetResponse = {
-          noData: true,
-          message: 'Reporting data will be available after the next daily snapshot at 01:00 UTC.',
-        };
-        apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
-        return NextResponse.json(createSuccessResponse(noDataResponse), {
-          status: 200,
-          headers: { 'Cache-Control': 'private, no-cache' },
-        });
-      }
+      // Current period
+      const curTotalAssets = curDepositedLiquidity;
+      const curRealizedWithdrawals = -curRealizedGains - curRealizedLosses;
+      const curRealizedFees = -curFeeIncome;
+      const curTotalRetainedEarnings = curRealizedWithdrawals + curRealizedFees;
+      const curContCapDisplay = -curContributedCapital;
+      const curCapRetDisplay = -curCapitalReturned;
+      const curTotalEquity = curContCapDisplay + curCapRetDisplay + curTotalRetainedEarnings;
 
-      // Extract current values from snapshot (same sign adjustments as before)
-      const curDepositedLiquidity = BigInt(currentSnapshot.depositedLiquidityAtCost);
-      const curMarkToMarket = BigInt(currentSnapshot.markToMarketAdjustment);
-      const curUnclaimedFees = BigInt(currentSnapshot.unclaimedFees);
-      const curTotalAssets = curDepositedLiquidity + curMarkToMarket + curUnclaimedFees;
-
-      // Equity & retained earnings: negate raw journal values for display
-      // (snapshot stores debits - credits; credit-normal accounts need negation)
-      const curContributedCapital = -BigInt(currentSnapshot.contributedCapital);
-      const curCapitalReturned = -BigInt(currentSnapshot.capitalReturned);
-      const curRealizedWithdrawals = -BigInt(currentSnapshot.retainedRealizedWithdrawals);
-      const curRealizedFees = -BigInt(currentSnapshot.retainedRealizedFees);
-      const curUnrealizedPrice = -BigInt(currentSnapshot.retainedUnrealizedPrice);
-      const curUnrealizedFees = -BigInt(currentSnapshot.retainedUnrealizedFees);
-      const curTotalRetainedEarnings = curRealizedWithdrawals + curRealizedFees + curUnrealizedPrice + curUnrealizedFees;
-      const curTotalEquity = curContributedCapital + curCapitalReturned + curTotalRetainedEarnings;
-
-      // Previous column: read from closest NAV snapshot at period boundary
-      const previousSnapshot = await navSnapshotService.getSnapshotAtBoundary(user.id, previousEnd);
-
-      let previousDate: string | null = null;
-      let prevDepositedLiquidity: bigint | null = null;
-      let prevMarkToMarket: bigint | null = null;
-      let prevUnclaimedFees: bigint | null = null;
-      let prevTotalAssets: bigint | null = null;
-      let prevContributedCapital: bigint | null = null;
-      let prevCapitalReturned: bigint | null = null;
-      let prevRealizedWithdrawals: bigint | null = null;
-      let prevRealizedFees: bigint | null = null;
-      let prevUnrealizedPrice: bigint | null = null;
-      let prevUnrealizedFees: bigint | null = null;
-      let prevTotalRetainedEarnings: bigint | null = null;
-      let prevTotalEquity: bigint | null = null;
-
-      if (previousSnapshot) {
-        previousDate = previousSnapshot.snapshotDate.toISOString();
-        prevDepositedLiquidity = BigInt(previousSnapshot.depositedLiquidityAtCost);
-        prevMarkToMarket = BigInt(previousSnapshot.markToMarketAdjustment);
-        prevUnclaimedFees = BigInt(previousSnapshot.unclaimedFees);
-        prevTotalAssets = prevDepositedLiquidity + prevMarkToMarket + prevUnclaimedFees;
-        prevContributedCapital = -BigInt(previousSnapshot.contributedCapital);
-        prevCapitalReturned = -BigInt(previousSnapshot.capitalReturned);
-        prevRealizedWithdrawals = -BigInt(previousSnapshot.retainedRealizedWithdrawals);
-        prevRealizedFees = -BigInt(previousSnapshot.retainedRealizedFees);
-        prevUnrealizedPrice = -BigInt(previousSnapshot.retainedUnrealizedPrice);
-        prevUnrealizedFees = -BigInt(previousSnapshot.retainedUnrealizedFees);
-        prevTotalRetainedEarnings = prevRealizedWithdrawals + prevRealizedFees + prevUnrealizedPrice + prevUnrealizedFees;
-        prevTotalEquity = prevContributedCapital + prevCapitalReturned + prevTotalRetainedEarnings;
-      }
+      // Previous period
+      const prevTotalAssets = prevDepositedLiquidity;
+      const prevRealizedWithdrawals = -prevRealizedGains - prevRealizedLosses;
+      const prevRealizedFees = -prevFeeIncome;
+      const prevTotalRetainedEarnings = prevRealizedWithdrawals + prevRealizedFees;
+      const prevContCapDisplay = -prevContributedCapital;
+      const prevCapRetDisplay = -prevCapitalReturned;
+      const prevTotalEquity = prevContCapDisplay + prevCapRetDisplay + prevTotalRetainedEarnings;
 
       const response: BalanceSheetResponse = {
         period,
-        currentDate: currentSnapshot.snapshotDate.toISOString(),
-        previousDate,
-        reportingCurrency: currentSnapshot.reportingCurrency,
+        currentDate: currentEnd.toISOString(),
+        previousDate: previousEnd.toISOString(),
+        reportingCurrency: 'USD',
         assets: {
-          depositedLiquidityAtCost: buildLineItem(curDepositedLiquidity, prevDepositedLiquidity),
-          markToMarketAdjustment: buildLineItem(curMarkToMarket, prevMarkToMarket),
-          unclaimedFees: buildLineItem(curUnclaimedFees, prevUnclaimedFees),
+          depositedLiquidityAtCost: buildLineItem(curTotalAssets, prevTotalAssets),
           totalAssets: buildLineItem(curTotalAssets, prevTotalAssets),
         },
         liabilities: {
           totalLiabilities: buildLineItem(0n, 0n),
         },
         equity: {
-          contributedCapital: buildLineItem(curContributedCapital, prevContributedCapital),
-          capitalReturned: buildLineItem(curCapitalReturned, prevCapitalReturned),
+          contributedCapital: buildLineItem(curContCapDisplay, prevContCapDisplay),
+          capitalReturned: buildLineItem(curCapRetDisplay, prevCapRetDisplay),
           retainedEarnings: {
             realizedFromWithdrawals: buildLineItem(curRealizedWithdrawals, prevRealizedWithdrawals),
             realizedFromCollectedFees: buildLineItem(curRealizedFees, prevRealizedFees),
-            unrealizedFromPriceChanges: buildLineItem(curUnrealizedPrice, prevUnrealizedPrice),
-            unrealizedFromUnclaimedFees: buildLineItem(curUnrealizedFees, prevUnrealizedFees),
             totalRetainedEarnings: buildLineItem(curTotalRetainedEarnings, prevTotalRetainedEarnings),
           },
           totalEquity: buildLineItem(curTotalEquity, prevTotalEquity),
         },
-        activePositionCount: currentSnapshot.activePositionCount,
+        activePositionCount,
       };
 
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);

@@ -1,7 +1,7 @@
 /**
  * P&L Statement API types
  *
- * Hierarchical P&L: Portfolio → Instrument → Position with 4 sub-categories.
+ * Hierarchical P&L: Portfolio → Instrument → Position with realized sub-categories.
  */
 
 import { z } from 'zod';
@@ -16,8 +16,6 @@ export interface PnlPositionItem {
   nftId: string;
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
-  unrealizedFromPriceChanges: string;
-  unrealizedFromUnclaimedFees: string;
   netPnl: string;
 }
 
@@ -29,8 +27,6 @@ export interface PnlInstrumentItem {
   feeTier: string;
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
-  unrealizedFromPriceChanges: string;
-  unrealizedFromUnclaimedFees: string;
   netPnl: string;
   positions: PnlPositionItem[];
 }
@@ -42,8 +38,6 @@ export interface PnlResponse {
   reportingCurrency: string;
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
-  unrealizedFromPriceChanges: string;
-  unrealizedFromUnclaimedFees: string;
   netPnl: string;
   instruments: PnlInstrumentItem[];
 }

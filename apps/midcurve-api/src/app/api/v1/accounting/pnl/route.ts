@@ -4,7 +4,7 @@
  * GET /api/v1/accounting/pnl?period=week
  *
  * Returns hierarchical P&L: Portfolio → Instrument → Position
- * with 4 sub-categories.
+ * with realized sub-categories only.
  *
  * Authentication: Required (session only)
  */
@@ -79,8 +79,6 @@ export async function GET(request: NextRequest): Promise<Response> {
       interface PnlBuckets {
         realizedFromWithdrawals: bigint;
         realizedFromCollectedFees: bigint;
-        unrealizedFromPriceChanges: bigint;
-        unrealizedFromUnclaimedFees: bigint;
       }
 
       const instrumentMap = new Map<string, {
@@ -99,14 +97,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         if (!instrument) {
           instrument = {
             positions: new Map(),
-            totals: { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n, unrealizedFromPriceChanges: 0n, unrealizedFromUnclaimedFees: 0n },
+            totals: { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n },
           };
           instrumentMap.set(instrRef, instrument);
         }
 
         let position = instrument.positions.get(posRef);
         if (!position) {
-          position = { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n, unrealizedFromPriceChanges: 0n, unrealizedFromUnclaimedFees: 0n };
+          position = { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n };
           instrument.positions.set(posRef, position);
         }
 
@@ -124,18 +122,6 @@ export async function GET(request: NextRequest): Promise<Response> {
           case ACCOUNT_CODES.FEE_INCOME:
             position.realizedFromCollectedFees += -signed;
             instrument.totals.realizedFromCollectedFees += -signed;
-            break;
-          case ACCOUNT_CODES.UNREALIZED_GAINS:
-            position.unrealizedFromPriceChanges += -signed;
-            instrument.totals.unrealizedFromPriceChanges += -signed;
-            break;
-          case ACCOUNT_CODES.UNREALIZED_LOSSES:
-            position.unrealizedFromPriceChanges -= signed;
-            instrument.totals.unrealizedFromPriceChanges -= signed;
-            break;
-          case ACCOUNT_CODES.ACCRUED_FEE_INCOME_REVENUE:
-            position.unrealizedFromUnclaimedFees += -signed;
-            instrument.totals.unrealizedFromUnclaimedFees += -signed;
             break;
         }
       }
@@ -170,28 +156,20 @@ export async function GET(request: NextRequest): Promise<Response> {
       // Build response
       let totalRealizedWithdrawals = 0n;
       let totalRealizedFees = 0n;
-      let totalUnrealizedPrice = 0n;
-      let totalUnrealizedFees = 0n;
       const instruments: PnlInstrumentItem[] = [];
 
       for (const [instrRef, instrument] of instrumentMap.entries()) {
         totalRealizedWithdrawals += instrument.totals.realizedFromWithdrawals;
         totalRealizedFees += instrument.totals.realizedFromCollectedFees;
-        totalUnrealizedPrice += instrument.totals.unrealizedFromPriceChanges;
-        totalUnrealizedFees += instrument.totals.unrealizedFromUnclaimedFees;
 
         const meta = poolMetaMap.get(instrRef);
         const instrNetPnl = instrument.totals.realizedFromWithdrawals
-          + instrument.totals.realizedFromCollectedFees
-          + instrument.totals.unrealizedFromPriceChanges
-          + instrument.totals.unrealizedFromUnclaimedFees;
+          + instrument.totals.realizedFromCollectedFees;
 
         const positions: PnlPositionItem[] = [];
         for (const [posRef, buckets] of instrument.positions.entries()) {
           const posNetPnl = buckets.realizedFromWithdrawals
-            + buckets.realizedFromCollectedFees
-            + buckets.unrealizedFromPriceChanges
-            + buckets.unrealizedFromUnclaimedFees;
+            + buckets.realizedFromCollectedFees;
 
           const parts = posRef.split('/');
           positions.push({
@@ -199,8 +177,6 @@ export async function GET(request: NextRequest): Promise<Response> {
             nftId: parts[parts.length - 1] ?? posRef,
             realizedFromWithdrawals: buckets.realizedFromWithdrawals.toString(),
             realizedFromCollectedFees: buckets.realizedFromCollectedFees.toString(),
-            unrealizedFromPriceChanges: buckets.unrealizedFromPriceChanges.toString(),
-            unrealizedFromUnclaimedFees: buckets.unrealizedFromUnclaimedFees.toString(),
             netPnl: posNetPnl.toString(),
           });
         }
@@ -213,14 +189,12 @@ export async function GET(request: NextRequest): Promise<Response> {
           feeTier: meta?.feeTier ?? '0',
           realizedFromWithdrawals: instrument.totals.realizedFromWithdrawals.toString(),
           realizedFromCollectedFees: instrument.totals.realizedFromCollectedFees.toString(),
-          unrealizedFromPriceChanges: instrument.totals.unrealizedFromPriceChanges.toString(),
-          unrealizedFromUnclaimedFees: instrument.totals.unrealizedFromUnclaimedFees.toString(),
           netPnl: instrNetPnl.toString(),
           positions,
         });
       }
 
-      const totalNetPnl = totalRealizedWithdrawals + totalRealizedFees + totalUnrealizedPrice + totalUnrealizedFees;
+      const totalNetPnl = totalRealizedWithdrawals + totalRealizedFees;
 
       const response: PnlResponse = {
         period,
@@ -229,8 +203,6 @@ export async function GET(request: NextRequest): Promise<Response> {
         reportingCurrency: 'USD',
         realizedFromWithdrawals: totalRealizedWithdrawals.toString(),
         realizedFromCollectedFees: totalRealizedFees.toString(),
-        unrealizedFromPriceChanges: totalUnrealizedPrice.toString(),
-        unrealizedFromUnclaimedFees: totalUnrealizedFees.toString(),
         netPnl: totalNetPnl.toString(),
         instruments,
       };

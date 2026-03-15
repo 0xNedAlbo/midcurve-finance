@@ -1,11 +1,12 @@
 /**
- * BalanceSheetTable - Full balance sheet with period-over-period comparison.
+ * BalanceSheetTable - Balance sheet with period-over-period comparison.
  *
  * Four-column table: Current | Previous | Δ Abs | Δ %
  * Three sections: Assets, Liabilities, Equity with retained earnings sub-items.
+ * Reports realized values only (cost-basis model).
  */
 
-import type { BalanceSheetResponse, BalanceSheetNoData, BalanceSheetLineItem } from '@midcurve/api-shared';
+import type { BalanceSheetResponse, BalanceSheetLineItem } from '@midcurve/api-shared';
 import { formatReportingAmount } from '@midcurve/shared';
 
 interface BalanceSheetTableProps {
@@ -17,14 +18,6 @@ export function BalanceSheetTable({ data }: BalanceSheetTableProps) {
     return (
       <div className="text-center py-12 text-slate-400">
         No balance sheet data available. Track positions to get started.
-      </div>
-    );
-  }
-
-  if ('noData' in data) {
-    return (
-      <div className="text-center py-12 text-slate-400">
-        {(data as BalanceSheetNoData).message}
       </div>
     );
   }
@@ -45,8 +38,6 @@ export function BalanceSheetTable({ data }: BalanceSheetTableProps) {
           {/* Assets Section */}
           <SectionHeader label="Assets" />
           <LineItemRow label="Deposited Liquidity at Cost" item={data.assets.depositedLiquidityAtCost} indent={1} />
-          <LineItemRow label="Mark-to-Market Adjustment" item={data.assets.markToMarketAdjustment} indent={1} />
-          <LineItemRow label="Unclaimed Fees" item={data.assets.unclaimedFees} indent={1} />
           <TotalRow label="Total Assets" item={data.assets.totalAssets} />
 
           <SpacerRow />
@@ -65,12 +56,14 @@ export function BalanceSheetTable({ data }: BalanceSheetTableProps) {
           <SubSectionHeader label="Retained Earnings" />
           <LineItemRow label="Realized: Withdrawals" item={data.equity.retainedEarnings.realizedFromWithdrawals} indent={2} />
           <LineItemRow label="Realized: Collected Fees" item={data.equity.retainedEarnings.realizedFromCollectedFees} indent={2} />
-          <LineItemRow label="Unrealized: Price Changes" item={data.equity.retainedEarnings.unrealizedFromPriceChanges} indent={2} />
-          <LineItemRow label="Unrealized: Unclaimed Fees" item={data.equity.retainedEarnings.unrealizedFromUnclaimedFees} indent={2} />
           <TotalRow label="Total Retained Earnings" item={data.equity.retainedEarnings.totalRetainedEarnings} indent={1} />
           <TotalRow label="Total Equity" item={data.equity.totalEquity} />
         </tbody>
       </table>
+
+      <p className="text-xs text-slate-500 mt-4 px-4">
+        Positions are recorded at historical cost. Unrealized market gains and unclaimed fees are not reflected here — see the Dashboard for current market values.
+      </p>
     </div>
   );
 }

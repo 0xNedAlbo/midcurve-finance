@@ -2,6 +2,7 @@
  * Balance Sheet API types
  *
  * Structured balance sheet with period-over-period comparison.
+ * Reports realized values only (cost-basis model).
  */
 
 import type { PeriodQuery } from './pnl.js';
@@ -21,8 +22,6 @@ export interface BalanceSheetData {
 
   assets: {
     depositedLiquidityAtCost: BalanceSheetLineItem;
-    markToMarketAdjustment: BalanceSheetLineItem;
-    unclaimedFees: BalanceSheetLineItem;
     totalAssets: BalanceSheetLineItem;
   };
 
@@ -36,8 +35,6 @@ export interface BalanceSheetData {
     retainedEarnings: {
       realizedFromWithdrawals: BalanceSheetLineItem;
       realizedFromCollectedFees: BalanceSheetLineItem;
-      unrealizedFromPriceChanges: BalanceSheetLineItem;
-      unrealizedFromUnclaimedFees: BalanceSheetLineItem;
       totalRetainedEarnings: BalanceSheetLineItem;
     };
     totalEquity: BalanceSheetLineItem;
@@ -46,9 +43,4 @@ export interface BalanceSheetData {
   activePositionCount: number;
 }
 
-export interface BalanceSheetNoData {
-  noData: true;
-  message: string;
-}
-
-export type BalanceSheetResponse = BalanceSheetData | BalanceSheetNoData;
+export type BalanceSheetResponse = BalanceSheetData;
