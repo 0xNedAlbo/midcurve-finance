@@ -22,15 +22,15 @@ nodes.midcurve.finance {
         reverse_proxy ethereum-lighthouse:5052
     }
 
-    # ── Base (später) ─────────────────────────────────────────────
-    # handle /base/{$API_KEY} {
-    #     uri strip_prefix /base/{$API_KEY}
-    #     reverse_proxy base-reth:8545
-    # }
-    # handle /base/{$API_KEY}/ws {
-    #     uri strip_prefix /base/{$API_KEY}/ws
-    #     reverse_proxy base-reth:8546
-    # }
+    # ── Base (op-reth) ──────────────────────────────────────────────
+    handle /base/{$API_KEY} {
+        uri strip_prefix /base/{$API_KEY}
+        reverse_proxy base-reth:8545
+    }
+    handle /base/{$API_KEY}/ws {
+        uri strip_prefix /base/{$API_KEY}/ws
+        reverse_proxy base-reth:8546
+    }
 
     # ── Arbitrum (Nitro) ──────────────────────────────────────────
     handle /arbitrum/{$API_KEY} {

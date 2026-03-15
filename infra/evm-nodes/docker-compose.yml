@@ -15,6 +15,10 @@
 #   Arbitrum:
 #   HTTP:      https://nodes.midcurve.finance/arbitrum/{API_KEY}
 #   WebSocket: wss://nodes.midcurve.finance/arbitrum/{API_KEY}/ws
+#
+#   Base:
+#   HTTP:      https://nodes.midcurve.finance/base/{API_KEY}
+#   WebSocket: wss://nodes.midcurve.finance/base/{API_KEY}/ws
 
 services:
 
@@ -176,6 +180,114 @@ services:
       start_period: 120s
 
   # ==========================================================================
+  # BASE (OP Stack L2) — op-reth + op-node
+  # Uses local Ethereum node as L1 parent chain.
+  # ==========================================================================
+  base-reth:
+    image: ${BASE_OP_RETH_IMAGE:-ghcr.io/paradigmxyz/op-reth:v1.9.3}
+    container_name: base-reth
+    restart: unless-stopped
+    stop_grace_period: 3m
+    command:
+      - node
+      - --chain=base
+      - --datadir=/data/base-reth
+      - --full
+      # HTTP RPC
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3,txpool,debug,trace
+      - --http.corsdomain=*
+      # WebSocket RPC
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=eth,net,web3,txpool,debug,trace
+      - --ws.origins=*
+      # Engine API (for op-node)
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/jwt/jwt.hex
+      # P2P
+      - --port=30303
+      - --discovery.port=30303
+      # Performance
+      - --rpc.gascap=${RETH_RPC_GAS_CAP:-50000000}
+      # Metrics
+      - --metrics=0.0.0.0:9001
+      # Rollup
+      - --rollup.sequencer-http=https://mainnet-sequencer.base.org
+    ports:
+      # RPC/WS — nur localhost, Caddy proxied nach außen
+      - "127.0.0.1:${BASE_RETH_HTTP_PORT:-8549}:8545"
+      - "127.0.0.1:${BASE_RETH_WS_PORT:-8550}:8546"
+      # Metrics
+      - "0.0.0.0:${BASE_RETH_METRICS_PORT:-9003}:9001"
+      # P2P — muss öffentlich erreichbar sein
+      - "0.0.0.0:${BASE_RETH_P2P_PORT:-30305}:30303/tcp"
+      - "0.0.0.0:${BASE_RETH_P2P_PORT:-30305}:30303/udp"
+    volumes:
+      - base-reth-data:/data/base-reth
+      - ./jwt.hex:/jwt/jwt.hex:ro
+    networks:
+      - engine-net
+      - proxy-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8545'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  base-node:
+    image: ${BASE_OP_NODE_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.16.4}
+    container_name: base-node
+    restart: unless-stopped
+    stop_grace_period: 3m
+    command:
+      - op-node
+      - --network=base-mainnet
+      - --l1=${BASE_L1_RPC_URL:-http://ethereum-reth:8545}
+      - --l1.beacon=${BASE_L1_BEACON_URL:-https://ethereum-beacon-api.publicnode.com}
+      - --l2=http://base-reth:8551
+      - --l2.jwt-secret=/jwt/jwt.hex
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=9545
+      - --p2p.listen.tcp=9222
+      - --p2p.listen.udp=9222
+      - --metrics.enabled
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=7300
+      - --syncmode=execution-layer
+    ports:
+      # Rollup RPC — nur localhost
+      - "127.0.0.1:${BASE_OP_NODE_RPC_PORT:-9545}:9545"
+      # P2P — muss öffentlich erreichbar sein
+      - "0.0.0.0:${BASE_OP_NODE_P2P_PORT:-9222}:9222/tcp"
+      - "0.0.0.0:${BASE_OP_NODE_P2P_PORT:-9222}:9222/udp"
+      # Metrics
+      - "0.0.0.0:${BASE_OP_NODE_METRICS_PORT:-7300}:7300"
+    volumes:
+      - ./jwt.hex:/jwt/jwt.hex:ro
+    depends_on:
+      reth:
+        condition: service_healthy
+      lighthouse:
+        condition: service_started
+      base-reth:
+        condition: service_started
+    networks:
+      - engine-net
+      - proxy-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9545'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ==========================================================================
   # REVERSE PROXY (Caddy)
   # ==========================================================================
   caddy:
@@ -216,7 +328,7 @@ services:
 # ============================================================================
 networks:
   engine-net:
-    # Interne Kommunikation Reth ↔ Lighthouse (Engine API)
+    # Interne Kommunikation: Engine API (Reth ↔ Lighthouse, op-reth ↔ op-node)
     driver: bridge
     internal: true
   proxy-net:
@@ -241,4 +353,10 @@ volumes:
       type: none
       o: bind
       device: /data/arbitrum
+  base-reth-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/base
     
