@@ -206,7 +206,7 @@ See `.env.example` files in each app for complete configuration options.
 
 ## Self-Hosted Deployment
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/eaY-52?referralCode=m1LxJS&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/dyf7xl?referralCode=m1LxJS&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ## Deployment
 
