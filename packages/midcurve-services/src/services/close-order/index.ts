@@ -7,5 +7,5 @@ export type {
   UniswapV3CloseOrderServiceDependencies,
   CloseOrderWithPosition,
   DiscoverCloseOrdersResult,
-  RefreshCloseOrderResult,
+  RefreshCloseOrdersResult,
 } from './uniswapv3-close-order-service.js';

@@ -129,10 +129,18 @@ export interface DiscoverCloseOrdersResult {
 }
 
 /**
- * Result of refresh() — the updated order, or null if it was deleted
- * (e.g. cancelled on-chain).
+ * Result of refresh() — all orders after reconciliation with on-chain state.
  */
-export type RefreshCloseOrderResult = CloseOrder | null;
+export interface RefreshCloseOrdersResult {
+  /** All close orders for the position after reconciliation */
+  orders: CloseOrder[];
+  /** Number of new orders created from on-chain */
+  created: number;
+  /** Number of existing orders updated from on-chain */
+  updated: number;
+  /** Number of stale orders deleted (no longer active on-chain) */
+  deleted: number;
+}
 
 // ============================================================================
 // Service
@@ -158,14 +166,40 @@ export class UniswapV3CloseOrderService {
   /**
    * Discover close orders for a position from on-chain data.
    *
-   * Reads the PositionCloser contract for both trigger modes (LOWER, UPPER),
-   * creates DB records for any ACTIVE orders not already tracked, and returns all.
+   * Thin wrapper around refresh() that uses blockNumber='latest'.
+   * Preserves the DiscoverCloseOrdersResult interface for backward compatibility.
    */
   async discover(
     positionId: string,
     tx?: PrismaTransactionClient,
   ): Promise<DiscoverCloseOrdersResult> {
-    log.methodEntry(this.logger, 'discover', { positionId });
+    const result = await this.refresh(positionId, 'latest', tx);
+    return {
+      orders: result.orders,
+      discovered: result.created,
+      existing: result.updated,
+    };
+  }
+
+  /**
+   * Refresh all close orders for a position from on-chain data.
+   *
+   * Reads the PositionCloser contract for both trigger modes (LOWER, UPPER)
+   * and reconciles DB state:
+   * - Creates missing orders (exist on-chain but not in DB)
+   * - Updates existing orders (syncs on-chain state, adjusts automationState)
+   * - Deletes stale orders (no longer active on-chain)
+   *
+   * @param positionId - Position ID to reconcile close orders for
+   * @param blockNumber - Block number to read state at, or 'latest'
+   * @param tx - Optional Prisma transaction client
+   */
+  async refresh(
+    positionId: string,
+    blockNumber: number | 'latest' = 'latest',
+    tx?: PrismaTransactionClient,
+  ): Promise<RefreshCloseOrdersResult> {
+    log.methodEntry(this.logger, 'refresh', { positionId, blockNumber });
 
     try {
       const db = tx ?? this.prisma;
@@ -179,7 +213,7 @@ export class UniswapV3CloseOrderService {
       const chainId = posConfig.chainId as number;
       const nftId = String(posConfig.nftId);
 
-      // 1b. Look up user's EVM automation wallet to check operator ownership
+      // 2. Look up user's EVM automation wallet to check operator ownership
       const autoWallet = await db.automationWallet.findFirst({
         where: {
           userId: position.userId,
@@ -192,7 +226,7 @@ export class UniswapV3CloseOrderService {
         ? (autoWallet.config as { walletAddress?: string }).walletAddress ?? null
         : null;
 
-      // 2. Find the PositionCloser contract for this chain
+      // 3. Find the PositionCloser contract for this chain
       const sharedContract = await this.sharedContractService.findLatestByChainAndName(
         chainId,
         'UniswapV3PositionCloser',
@@ -204,10 +238,11 @@ export class UniswapV3CloseOrderService {
       }
       const contractAddress = sharedContract.config.address;
 
-      // 3. Read on-chain orders for both trigger modes
+      // 4. Read on-chain orders and reconcile with DB for both trigger modes
       const orders: CloseOrder[] = [];
-      let discovered = 0;
-      let existing = 0;
+      let created = 0;
+      let updated = 0;
+      let deleted = 0;
 
       const triggerModes = [ContractTriggerMode.LOWER, ContractTriggerMode.UPPER] as const;
 
@@ -217,28 +252,19 @@ export class UniswapV3CloseOrderService {
           contractAddress,
           BigInt(nftId),
           triggerMode,
+          blockNumber,
         );
 
-        // Skip non-active slots
-        if (!onChain || onChain.status !== OnChainOrderStatus.ACTIVE) {
-          continue;
-        }
-
-        // 4. Check if already tracked in DB
         const orderIdentityHash = `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
         const existingOrder = await this.findByOrderIdentityHash(orderIdentityHash, tx);
+        const isActive = onChain !== null && onChain.status === OnChainOrderStatus.ACTIVE;
 
-        if (existingOrder) {
-          orders.push(existingOrder);
-          existing++;
-        } else {
-          // 5. Create new order from on-chain data
+        if (isActive && !existingOrder) {
+          // On-chain ACTIVE + no DB record → create
           const closeOrderHash = deriveCloseOrderHashFromTick(
             triggerMode,
             onChain.triggerTick,
           );
-
-          // Determine if we are the operator for this order
           const isOurOrder = ourOperatorAddress !== null
             && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
 
@@ -273,35 +299,67 @@ export class UniswapV3CloseOrderService {
           );
 
           orders.push(newOrder);
-          discovered++;
+          created++;
+        } else if (isActive && existingOrder) {
+          // On-chain ACTIVE + DB record exists → update state
+          const updatedState: Record<string, unknown> = {
+            triggerTick: onChain.triggerTick,
+            slippageBps: onChain.slippageBps,
+            payoutAddress: onChain.payout,
+            operatorAddress: onChain.operator,
+            owner: onChain.owner,
+            pool: onChain.pool,
+            validUntil: new Date(Number(onChain.validUntil) * 1000).toISOString(),
+            swapDirection: onChain.swapDirection,
+            swapSlippageBps: onChain.swapSlippageBps,
+          };
+
+          const synced = await this.syncFromChain(existingOrder.id, { state: updatedState }, tx);
+
+          // Adjust automationState if operator ownership changed
+          const isOurOrder = ourOperatorAddress !== null
+            && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
+          const currentState = existingOrder.automationState;
+          const expectedState = isOurOrder ? 'monitoring' : 'inactive';
+
+          if (
+            (currentState === 'monitoring' || currentState === 'inactive')
+            && currentState !== expectedState
+          ) {
+            await db.closeOrder.update({
+              where: { id: existingOrder.id },
+              data: { automationState: expectedState },
+            });
+            this.logger.info(
+              { id: existingOrder.id, from: currentState, to: expectedState },
+              'Automation state updated after operator check',
+            );
+          }
+
+          orders.push(synced);
+          updated++;
+        } else if (!isActive && existingOrder) {
+          // Not active on-chain + DB record exists → delete stale record
+          this.logger.info(
+            { id: existingOrder.id, triggerMode },
+            'Order no longer active on-chain — deleting DB record',
+          );
+          await this.delete(existingOrder.id, tx);
+          deleted++;
         }
+        // Not active on-chain + no DB record → nothing to do
       }
 
       this.logger.info(
-        { positionId, discovered, existing },
-        'Close order discovery complete',
+        { positionId, created, updated, deleted },
+        'Close order refresh complete',
       );
-      log.methodExit(this.logger, 'discover', { discovered, existing });
-      return { orders, discovered, existing };
+      log.methodExit(this.logger, 'refresh', { created, updated, deleted });
+      return { orders, created, updated, deleted };
     } catch (error) {
-      log.methodError(this.logger, 'discover', error as Error, { positionId });
+      log.methodError(this.logger, 'refresh', error as Error, { positionId });
       throw error;
     }
-  }
-
-  /**
-   * Refresh a close order's state from on-chain data.
-   *
-   * Reads the current on-chain state via getOrder(nftId, triggerMode)
-   * and updates the DB record. May delete if cancelled on-chain.
-   */
-  async refresh(
-    _id: string,
-    _tx?: PrismaTransactionClient,
-  ): Promise<RefreshCloseOrderResult> {
-    throw new Error(
-      'UniswapV3CloseOrderService.refresh() is not yet implemented.',
-    );
   }
 
   // ==========================================================================
@@ -848,14 +906,17 @@ export class UniswapV3CloseOrderService {
     contractAddress: string,
     nftId: bigint,
     triggerMode: ContractTriggerMode,
+    blockNumber: number | 'latest' = 'latest',
   ): Promise<OnChainOrder | null> {
     const client = EvmConfig.getInstance().getPublicClient(chainId);
+    const blockNumberParam = blockNumber === 'latest' ? undefined : BigInt(blockNumber);
 
     const result = await client.readContract({
       address: contractAddress as `0x${string}`,
       abi: POSITION_CLOSER_GET_ORDER_ABI,
       functionName: 'getOrder',
       args: [nftId, triggerMode],
+      blockNumber: blockNumberParam,
     });
 
     if (result.status === OnChainOrderStatus.NONE) {

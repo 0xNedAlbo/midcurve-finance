@@ -1255,6 +1255,23 @@ export class UniswapV3PositionService {
             // 6. Refresh metrics (common fields: value, PnL, fees, price range)
             await this.refreshMetrics(id, resolvedBlockNumber, dbTx);
 
+            // 6.5 Reconcile close orders from on-chain (best-effort)
+            try {
+                await this._closeOrderService.refresh(
+                    id,
+                    resolvedBlockNumber,
+                    dbTx,
+                );
+            } catch (closeOrderError) {
+                this.logger.warn(
+                    {
+                        positionId: id,
+                        error: (closeOrderError as Error).message,
+                    },
+                    "Close order reconciliation failed (non-fatal)",
+                );
+            }
+
             // 7. Check if position should be marked as closed
             const refreshedPosition = await this.findById(id, dbTx);
             if (!refreshedPosition) {
