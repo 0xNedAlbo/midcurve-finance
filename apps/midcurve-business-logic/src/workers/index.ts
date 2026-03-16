@@ -20,6 +20,7 @@ import {
   ProcessCloseOrderEventsRule,
   CreateAutomationWalletOnUserRegisteredRule,
   PostJournalEntriesOnPositionEventsRule,
+  ReconcileCostBasisCorrectionsRule,
   type BusinessRuleStatus,
 } from '../rules';
 import { getSchedulerService, type SchedulerStatus } from '../scheduler';
@@ -73,6 +74,8 @@ export class RuleManager {
     // Accounting rules
     // Double-entry journal entries from position domain events
     this.registry.register(new PostJournalEntriesOnPositionEventsRule());
+    // Periodic reconciliation for missed cost basis corrections
+    this.registry.register(new ReconcileCostBasisCorrectionsRule());
 
     log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
