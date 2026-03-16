@@ -8,7 +8,7 @@ import {
 } from 'react';
 import type { ListPositionData, SerializedCloseOrder } from '@midcurve/api-shared';
 import type { UniswapV3Pool } from '@midcurve/shared';
-import { tickToPrice, priceToTick, getTickSpacing } from '@midcurve/shared';
+import { tickToPrice, priceToTick } from '@midcurve/shared';
 import type { WizardStep } from '@/components/layout/wizard';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { ZOOM_STORAGE_KEYS, ZOOM_DEFAULTS } from '@/lib/zoom-settings';
@@ -714,7 +714,7 @@ export function RiskTriggersWizardProvider({
       return null;
     }
     try {
-      const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+      const tickSpacing = state.discoveredPool.tickSpacing;
       return priceToTick(
         state.stopLoss.priceBigint,
         tickSpacing,
@@ -732,7 +732,7 @@ export function RiskTriggersWizardProvider({
       return null;
     }
     try {
-      const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+      const tickSpacing = state.discoveredPool.tickSpacing;
       return priceToTick(
         state.takeProfit.priceBigint,
         tickSpacing,

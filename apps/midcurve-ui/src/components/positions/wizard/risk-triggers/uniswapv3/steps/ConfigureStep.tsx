@@ -616,6 +616,7 @@ export function ConfigureStep() {
             token1Address: pool.token1.config.address as string,
             token1Decimals: pool.token1.decimals,
             feeBps: pool.feeBps,
+            tickSpacing: pool.tickSpacing,
             currentTick: pool.state.currentTick as number,
             sqrtPriceX96: pool.state.sqrtPriceX96 as string,
           }}

@@ -80,6 +80,8 @@ export function getTokenMapping(
  * Get tick spacing for a given fee tier
  * @param fee Fee in basis points (100, 500, 3000, 10000)
  * @returns Tick spacing
+ * @deprecated Use pool.tickSpacing (from UniswapV3PoolConfig) instead.
+ * This function only supports the 4 standard fee tiers and throws on others.
  */
 export function getTickSpacing(fee: number): number {
   switch (fee) {

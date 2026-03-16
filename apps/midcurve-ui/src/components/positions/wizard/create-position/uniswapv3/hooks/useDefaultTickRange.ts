@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import type { UniswapV3Pool } from '@midcurve/shared';
-import { getTickSpacing } from '@midcurve/shared';
 
 /**
  * Hook to calculate a default price range from the current pool price.
@@ -18,7 +17,7 @@ export function useDefaultTickRange(
     if (!discoveredPool) return;
 
     const currentTick = discoveredPool.state.currentTick as number;
-    const tickSpacing = getTickSpacing(discoveredPool.feeBps);
+    const tickSpacing = discoveredPool.tickSpacing;
 
     // Tick calculations for price changes:
     // -20% price (0.8x): log1.0001(0.8) ≈ -2231 ticks
