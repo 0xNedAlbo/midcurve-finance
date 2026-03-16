@@ -36,7 +36,9 @@ export async function getRabbitMQChannel(): Promise<Channel> {
 
   connecting = (async () => {
     const url = buildUrl();
-    log.info({ msg: 'Connecting to RabbitMQ for event publishing' });
+    const host = process.env.RABBITMQ_HOST || 'localhost';
+    const port = process.env.RABBITMQ_PORT || '5672';
+    log.info({ host, port, msg: 'Connecting to RabbitMQ for event publishing' });
 
     connection = await amqplib.connect(url);
 

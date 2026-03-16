@@ -104,16 +104,22 @@ export const LogPatterns = {
     error: Error,
     context: Record<string, unknown> = {}
   ) => {
-    logger.error(
-      {
-        method,
-        error: error.message,
-        errorName: error.name,
-        stack: error.stack,
-        ...context,
-      },
-      `Error in ${method}`
-    );
+    const errorDetails: Record<string, unknown> = {
+      method,
+      error: error.message,
+      errorName: error.name,
+      stack: error.stack,
+      ...context,
+    };
+
+    // AggregateError stores individual errors in .errors array
+    if ('errors' in error && Array.isArray((error as AggregateError).errors)) {
+      errorDetails.aggregateErrors = (error as AggregateError).errors.map(
+        (e: Error) => ({ message: e.message, code: (e as NodeJS.ErrnoException).code })
+      );
+    }
+
+    logger.error(errorDetails, `Error in ${method}`);
   },
 
   /**
