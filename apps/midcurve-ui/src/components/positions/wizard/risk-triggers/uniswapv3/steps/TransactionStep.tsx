@@ -31,7 +31,7 @@ import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/aut
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
 import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { getChainSlugByChainId } from '@/config/chains';
-import { automationApi } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 
 // Zoom constants
@@ -451,8 +451,7 @@ export function TransactionStep() {
     }
 
     setConfirmStatus('active');
-    automationApi.positionCloseOrders
-      .confirmTx(chainId, Number(nftId), txHash)
+    apiClientFn(`/api/v1/positions/uniswapv3/${chainId}/${nftId}/refresh`, { method: 'POST' })
       .then(() => setConfirmStatus('success'))
       .catch(() => setConfirmStatus('warning'))
       .finally(() => setPhase('done'));
@@ -723,7 +722,7 @@ export function TransactionStep() {
                   : confirmStatus === 'warning' ? 'text-yellow-300'
                   : 'text-white'
               }>
-                Updating close order monitor.
+                Refresh position data.
               </span>
             </div>
           </div>

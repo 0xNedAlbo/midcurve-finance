@@ -32,7 +32,7 @@ import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { SwapDirection } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { getChainSlugByChainId } from '@/config/chains';
-import { automationApi } from '@/lib/api-client';
+import { apiClientFn } from '@/lib/api-client';
 import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
@@ -762,8 +762,7 @@ export function TransactionStep() {
     }
 
     setConfirmStatus('active');
-    automationApi.positionCloseOrders
-      .confirmTx(chainId, Number(mintedTokenId), txHash)
+    apiClientFn(`/api/v1/positions/uniswapv3/${chainId}/${mintedTokenId}/refresh`, { method: 'POST' })
       .then(() => setConfirmStatus('success'))
       .catch(() => setConfirmStatus('warning'))
       .finally(() => setCurrentPhase('done'));
@@ -1014,7 +1013,7 @@ export function TransactionStep() {
                     : confirmStatus === 'warning' ? 'text-yellow-300'
                     : 'text-white'
                 }>
-                  Start monitoring close orders.
+                  Refresh position data.
                 </span>
               </div>
             </div>
