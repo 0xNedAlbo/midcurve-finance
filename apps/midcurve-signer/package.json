@@ -8,7 +8,7 @@
     "dev": "next dev --webpack -p 3003",
     "dev:pretty": "next dev --webpack -p 3003 | pino-pretty",
     "build": "next build --webpack",
-    "start": "next start --webpack -p 3003",
+    "start": "next start -p 3003",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
