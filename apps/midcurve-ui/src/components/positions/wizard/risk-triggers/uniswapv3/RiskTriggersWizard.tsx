@@ -8,7 +8,6 @@ import {
 } from './context/RiskTriggersWizardContext';
 import { useUniswapV3Position } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
-import { useCloseOrders } from '@/hooks/automation/useCloseOrders';
 import { getChainId, isValidChainSlug } from '@/config/chains';
 
 // Steps
@@ -156,10 +155,6 @@ function DataFetcher({
 
   const positionQuery = useUniswapV3Position(chainId, nftId);
   const discoverPool = useDiscoverPool();
-  const closeOrdersQuery = useCloseOrders({
-    chainId,
-    nftId,
-  });
 
   // Load position into context
   const positionLoaded = useRef(false);
@@ -205,11 +200,10 @@ function DataFetcher({
     }
   }, [positionQuery.data, discoverPool, setDiscoveredPool]);
 
-  // Initialize trigger state from existing close orders
+  // Initialize trigger state from existing close orders (included in position response)
   const ordersInitialized = useRef(false);
   useEffect(() => {
     if (
-      closeOrdersQuery.data &&
       positionQuery.data &&
       !ordersInitialized.current
     ) {
@@ -221,14 +215,14 @@ function DataFetcher({
       const quoteAddress = (quoteToken.config as { address: string }).address;
 
       initializeFromOrders(
-        closeOrdersQuery.data,
+        pos.closeOrders,
         baseAddress,
         quoteAddress,
         baseToken.decimals,
         pos.isToken0Quote,
       );
     }
-  }, [closeOrdersQuery.data, positionQuery.data, initializeFromOrders]);
+  }, [positionQuery.data, initializeFromOrders]);
 
   if (positionQuery.isLoading || !positionQuery.data) {
     return <LoadingState />;

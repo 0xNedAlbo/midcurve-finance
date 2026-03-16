@@ -50,7 +50,7 @@ interface StopLossButtonProps {
   isToken0Quote: boolean;
   disabled?: boolean;
   disabledReason?: string;
-  activeCloseOrders: SerializedCloseOrder[];
+  closeOrders: SerializedCloseOrder[];
 }
 
 export function StopLossButton({
@@ -61,7 +61,7 @@ export function StopLossButton({
   isToken0Quote,
   disabled = false,
   disabledReason,
-  activeCloseOrders,
+  closeOrders,
 }: StopLossButtonProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,8 +82,8 @@ export function StopLossButton({
   // Find the stop-loss order — trigger mode depends on isToken0Quote
   const slTriggerMode = (isToken0Quote ? 'UPPER' : 'LOWER') as TriggerMode;
   const activeOrder = useMemo(() => {
-    return findOrderForTriggerMode(activeCloseOrders, slTriggerMode);
-  }, [activeCloseOrders, slTriggerMode]);
+    return findOrderForTriggerMode(closeOrders, slTriggerMode);
+  }, [closeOrders, slTriggerMode]);
 
   // Generate button label if order exists
   const buttonLabel = useMemo(() => {

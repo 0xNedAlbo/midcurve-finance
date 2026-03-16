@@ -196,7 +196,7 @@ export function useUpdateCloseOrder(
       updateType: currentParams.updateType,
     });
 
-    // Invalidate position-scoped caches — position detail includes activeCloseOrders
+    // Invalidate position-scoped caches — position detail includes closeOrders
     queryClient.invalidateQueries({
       queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
     });

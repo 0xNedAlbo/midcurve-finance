@@ -129,14 +129,14 @@ export async function GET(
           positionHash,
         });
 
-        // 3b. Fetch active close orders for this position
-        const activeCloseOrders = await getUniswapV3CloseOrderService().findByPositionId(
+        // 3b. Fetch all close orders for this position
+        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
           position.id,
-          { automationState: ['monitoring', 'executing', 'retrying'] },
+          {},
           tx
         );
 
-        return { position, activeCloseOrders };
+        return { position, closeOrders };
       });
 
       // Handle position not found (outside transaction)
@@ -154,7 +154,7 @@ export async function GET(
         });
       }
 
-      const { position, activeCloseOrders } = result;
+      const { position, closeOrders } = result;
 
       apiLog.businessOperation(apiLogger, requestId, 'fetched', 'position', position.id, {
         chainId,
@@ -168,7 +168,7 @@ export async function GET(
       // 5. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
-        activeCloseOrders: activeCloseOrders.map(serializeCloseOrder),
+        closeOrders: closeOrders.map(serializeCloseOrder),
         isTrackedInAccounting,
       };
 

@@ -8,7 +8,6 @@ import {
 } from './context/IncreaseDepositWizardContext';
 import { useUniswapV3Position } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
-import { useCloseOrders } from '@/hooks/automation/useCloseOrders';
 import { getChainId, isValidChainSlug } from '@/config/chains';
 
 // Steps (lazy-loaded via wrapper components)
@@ -157,22 +156,17 @@ function DataFetcher({ chainId, nftId }: { chainId: number; nftId: string }) {
     setActiveCloseOrders,
   } = useIncreaseDepositWizard();
 
-  // Fetch position data
+  // Fetch position data (includes close orders)
   const positionQuery = useUniswapV3Position(chainId, nftId);
   const discoverPool = useDiscoverPool();
 
-  // Fetch close orders (all non-deleted orders for this position)
-  const closeOrdersQuery = useCloseOrders({
-    chainId,
-    nftId,
-  });
-
-  // Load position into context when fetched
+  // Load position and close orders into context when fetched
   const positionLoaded = useRef(false);
   useEffect(() => {
     if (positionQuery.data && !positionLoaded.current) {
       positionLoaded.current = true;
       setPosition(positionQuery.data);
+      setActiveCloseOrders(positionQuery.data.closeOrders);
     }
     if (positionQuery.isLoading) {
       setPositionLoading(true);
@@ -180,7 +174,7 @@ function DataFetcher({ chainId, nftId }: { chainId: number; nftId: string }) {
     if (positionQuery.error) {
       setPositionError(positionQuery.error.message);
     }
-  }, [positionQuery.data, positionQuery.isLoading, positionQuery.error, setPosition, setPositionLoading, setPositionError]);
+  }, [positionQuery.data, positionQuery.isLoading, positionQuery.error, setPosition, setPositionLoading, setPositionError, setActiveCloseOrders]);
 
   // Discover pool for simulation when position is loaded
   const poolDiscovered = useRef(false);
@@ -202,15 +196,6 @@ function DataFetcher({ chainId, nftId }: { chainId: number; nftId: string }) {
         });
     }
   }, [positionQuery.data, discoverPool, setDiscoveredPool]);
-
-  // Load close orders into context
-  const closeOrdersLoaded = useRef(false);
-  useEffect(() => {
-    if (closeOrdersQuery.data && !closeOrdersLoaded.current) {
-      closeOrdersLoaded.current = true;
-      setActiveCloseOrders(closeOrdersQuery.data);
-    }
-  }, [closeOrdersQuery.data, setActiveCloseOrders]);
 
   // Show loading while position is being fetched
   if (positionQuery.isLoading || !positionQuery.data) {

@@ -72,12 +72,12 @@ export function PortfolioSimulator({ position }: PortfolioSimulatorProps) {
 
   // Extract close order data
   const closeOrderData = useMemo(() => extractCloseOrderData(
-    position.activeCloseOrders,
+    position.closeOrders,
     position.isToken0Quote,
     position.pool.token0.decimals,
     position.pool.token1.decimals,
     quoteToken.decimals,
-  ), [position.activeCloseOrders, position.isToken0Quote, position.pool.token0.decimals, position.pool.token1.decimals, quoteToken.decimals]);
+  ), [position.closeOrders, position.isToken0Quote, position.pool.token0.decimals, position.pool.token1.decimals, quoteToken.decimals]);
 
   // Create simulation engine (useRef for mutability)
   const engineRef = useRef<SimulationEngine | null>(null);

@@ -24,12 +24,12 @@ export interface GetUniswapV3PositionParams {
  *
  * Returns the complete position data with all bigint fields converted to strings for JSON serialization.
  * The position state is refreshed from on-chain data before being returned.
- * Includes active close orders (status: active | triggering) for the position.
+ * Includes all close orders for the position (all automation states).
  *
  * PnL curve data is available separately via GET /api/v1/positions/:positionId/pnl-curve.
  */
 export interface GetUniswapV3PositionResponse extends UniswapV3PositionResponse {
-  activeCloseOrders: SerializedCloseOrder[];
+  closeOrders: SerializedCloseOrder[];
   isTrackedInAccounting: boolean;
 }
 

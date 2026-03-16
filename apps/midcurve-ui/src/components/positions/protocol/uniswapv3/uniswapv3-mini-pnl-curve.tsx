@@ -76,18 +76,18 @@ export function UniswapV3MiniPnLCurve({
 
   // Extract SL/TP prices and swap configs from active close orders
   const closeOrderData = useMemo(() => {
-    if (!position.activeCloseOrders?.length) {
+    if (!position.closeOrders?.length) {
       return { stopLossPrice: null, takeProfitPrice: null, slSwapConfig: null, tpSwapConfig: null };
     }
 
     return extractCloseOrderData(
-      position.activeCloseOrders,
+      position.closeOrders,
       position.isToken0Quote,
       position.pool.token0.decimals,
       position.pool.token1.decimals,
       quoteToken.decimals,
     );
-  }, [position.activeCloseOrders, position.isToken0Quote, position.pool.token0.decimals, position.pool.token1.decimals, quoteToken.decimals]);
+  }, [position.closeOrders, position.isToken0Quote, position.pool.token0.decimals, position.pool.token1.decimals, quoteToken.decimals]);
 
   // Create simulation position with SL/TP overlay
   const simulationPosition = useMemo(() => {

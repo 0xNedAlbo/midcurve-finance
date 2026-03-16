@@ -202,7 +202,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           isToken0Quote={position.isToken0Quote}
           disabled={automationDisabled}
           disabledReason={automationDisabledReason}
-          activeCloseOrders={position.activeCloseOrders}
+          closeOrders={position.closeOrders}
         />
 
         {/* Current Price Display - between SL and TP buttons */}
@@ -232,7 +232,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           isToken0Quote={position.isToken0Quote}
           disabled={automationDisabled}
           disabledReason={automationDisabledReason}
-          activeCloseOrders={position.activeCloseOrders}
+          closeOrders={position.closeOrders}
         />
 
       </div>

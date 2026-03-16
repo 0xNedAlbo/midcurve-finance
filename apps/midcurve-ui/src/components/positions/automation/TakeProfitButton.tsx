@@ -50,7 +50,7 @@ interface TakeProfitButtonProps {
   isToken0Quote: boolean;
   disabled?: boolean;
   disabledReason?: string;
-  activeCloseOrders: SerializedCloseOrder[];
+  closeOrders: SerializedCloseOrder[];
 }
 
 export function TakeProfitButton({
@@ -61,7 +61,7 @@ export function TakeProfitButton({
   isToken0Quote,
   disabled = false,
   disabledReason,
-  activeCloseOrders,
+  closeOrders,
 }: TakeProfitButtonProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,8 +82,8 @@ export function TakeProfitButton({
   // Find the take-profit order — trigger mode depends on isToken0Quote
   const tpTriggerMode = (isToken0Quote ? 'LOWER' : 'UPPER') as TriggerMode;
   const activeOrder = useMemo(() => {
-    return findOrderForTriggerMode(activeCloseOrders, tpTriggerMode);
-  }, [activeCloseOrders, tpTriggerMode]);
+    return findOrderForTriggerMode(closeOrders, tpTriggerMode);
+  }, [closeOrders, tpTriggerMode]);
 
   // Generate button label if order exists
   const buttonLabel = useMemo(() => {

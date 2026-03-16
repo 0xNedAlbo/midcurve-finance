@@ -46,7 +46,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Refresh a specific Uniswap V3 position from on-chain data.
  *
  * Fetches current liquidity, fees, PnL from the blockchain and updates
- * the database. Returns the refreshed position with active close orders.
+ * the database. Returns the refreshed position with all close orders.
  *
  * Path parameters:
  * - chainId: EVM chain ID (e.g., 1 = Ethereum, 42161 = Arbitrum, etc.)
@@ -119,14 +119,14 @@ export async function POST(
           tx
         );
 
-        // 3c. Fetch active close orders for this position
-        const activeCloseOrders = await getUniswapV3CloseOrderService().findByPositionId(
+        // 3c. Fetch all close orders for this position
+        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
           dbPosition.id,
-          { automationState: ['monitoring', 'executing', 'retrying'] },
+          {},
           tx
         );
 
-        return { position: refreshedPosition, activeCloseOrders };
+        return { position: refreshedPosition, closeOrders };
       });
 
       // Handle position not found
@@ -144,7 +144,7 @@ export async function POST(
         });
       }
 
-      const { position, activeCloseOrders } = result;
+      const { position, closeOrders } = result;
 
       apiLog.businessOperation(apiLogger, requestId, 'refreshed', 'position', position.id, {
         chainId,
@@ -160,7 +160,7 @@ export async function POST(
       // 5. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
-        activeCloseOrders: activeCloseOrders.map(serializeCloseOrder),
+        closeOrders: closeOrders.map(serializeCloseOrder),
         isTrackedInAccounting,
       };
 
