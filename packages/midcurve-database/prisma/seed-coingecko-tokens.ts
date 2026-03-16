@@ -28,6 +28,12 @@ interface TokenSeedEntry {
 }
 
 async function main() {
+  const existingCount = await prisma.coingeckoToken.count();
+  if (existingCount > 0) {
+    console.log(`CoinGecko tokens already seeded (${existingCount} rows), skipping.`);
+    return;
+  }
+
   console.log('Seeding CoinGecko tokens...');
 
   const seedPath = resolve(
