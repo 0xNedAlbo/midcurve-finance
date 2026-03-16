@@ -56,7 +56,7 @@ export function TransactionStep() {
   const { state, setStepValid, setDiscoveredPool, setPositionCreated, addTransaction, setAdjustedAmounts, saveOriginalAmounts, setPriceAdjustmentStatus } = useCreatePositionWizard();
 
   // Current phase of execution
-  const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'nft-approval' | 'automation' | 'confirm' | 'done'>('idle');
+  const [currentPhase, setCurrentPhase] = useState<'idle' | 'approvals' | 'refresh' | 'mint' | 'portfolio' | 'nft-approval' | 'automation' | 'confirm' | 'done'>('idle');
   const [, setActiveError] = useState<{ txId: string; message: string } | null>(null);
 
   // Track which transactions have been attempted (prevents infinite retry loops on cancel)
@@ -696,15 +696,23 @@ export function TransactionStep() {
       // Set position created in wizard state
       setPositionCreated(`pos_${mint.tokenId.toString()}`, mint.tokenId.toString());
 
+      // Wait for portfolio addition before proceeding
+      setCurrentPhase('portfolio');
+    }
+  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.logs, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
+
+  // Portfolio addition phase - wait for API before proceeding
+  useEffect(() => {
+    if (currentPhase !== 'portfolio') return;
+
+    if (createPositionAPI.isSuccess) {
       if (hasAutomation) {
-        // Move to NFT approval phase
         setCurrentPhase('nft-approval');
       } else {
-        // No automation, we're done
         setCurrentPhase('done');
       }
     }
-  }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.logs, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
+  }, [currentPhase, createPositionAPI.isSuccess, hasAutomation]);
 
   // NFT approval phase - skip to automation if already approved
   useEffect(() => {
