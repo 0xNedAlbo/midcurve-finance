@@ -12,7 +12,6 @@ import type { PnLScenario } from "@midcurve/shared";
 import {
   tickToPrice,
   compareAddresses,
-  getTickSpacing,
   priceToTick,
   formatCompactValue,
   CloseOrderSimulationOverlay,
@@ -32,6 +31,7 @@ export interface PnLCurvePoolData {
   token1Address: string;
   token1Decimals: number;
   feeBps: number;
+  tickSpacing: number;
   currentTick: number;
   sqrtPriceX96: bigint | string;
 }
@@ -588,7 +588,7 @@ function InteractivePnLCurveInner({
       const newPrice = xScale.invert(mouseX);
 
       // Convert to tick (with snapping)
-      const tickSpacing = getTickSpacing(poolData.feeBps);
+      const tickSpacing = poolData.tickSpacing;
       const priceBigInt = BigInt(
         Math.floor(Math.max(0.0001, newPrice) * Number(10n ** BigInt(quoteToken.decimals)))
       );

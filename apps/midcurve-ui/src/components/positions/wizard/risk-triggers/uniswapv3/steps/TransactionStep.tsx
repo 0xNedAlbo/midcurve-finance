@@ -17,7 +17,6 @@ import type { Address } from 'viem';
 import {
   formatCompactValue,
   priceToTick,
-  getTickSpacing,
 } from '@midcurve/shared';
 import {
   useRiskTriggersWizard,
@@ -125,7 +124,7 @@ export function TransactionStep() {
     )
       return null;
     try {
-      const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+      const tickSpacing = state.discoveredPool.tickSpacing;
       return priceToTick(
         state.stopLoss.priceBigint,
         tickSpacing,
@@ -147,7 +146,7 @@ export function TransactionStep() {
     )
       return null;
     try {
-      const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+      const tickSpacing = state.discoveredPool.tickSpacing;
       return priceToTick(
         state.takeProfit.priceBigint,
         tickSpacing,

@@ -10,7 +10,6 @@ import {
   priceToTick,
   compareAddresses,
   generatePnLCurve,
-  getTickSpacing,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
   INFINITE_RUNUP,
@@ -195,7 +194,7 @@ export function PositionConfigStep() {
   useEffect(() => {
     if (!slTpInitialized || !state.discoveredPool || !state.baseToken || !state.quoteToken) return;
 
-    const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+    const tickSpacing = state.discoveredPool.tickSpacing;
     const baseAddress = state.baseToken.address;
     const quoteAddress = state.quoteToken.address;
     const baseDecimals = state.baseToken.decimals;
@@ -543,7 +542,7 @@ export function PositionConfigStep() {
         };
       }
 
-      const tickSpacing = getTickSpacing(state.discoveredPool.feeBps);
+      const tickSpacing = state.discoveredPool.tickSpacing;
 
       // Generate curve with just a few points around the boundaries
       const lowerPriceMinBigInt = BigInt(Math.floor(lowerPrice * 0.99 * Number(divisor)));
@@ -969,6 +968,7 @@ export function PositionConfigStep() {
               token1Address: pool.token1.config.address as string,
               token1Decimals: pool.token1.decimals,
               feeBps: pool.feeBps,
+              tickSpacing: pool.tickSpacing,
               currentTick: pool.state.currentTick as number,
               sqrtPriceX96: pool.state.sqrtPriceX96 as string,
             }}

@@ -541,6 +541,7 @@ export function ConfigureStep() {
               token1Address: discoveredPool.token1.config.address as string,
               token1Decimals: discoveredPool.token1.decimals,
               feeBps: discoveredPool.feeBps,
+              tickSpacing: discoveredPool.tickSpacing,
               currentTick: discoveredPool.state.currentTick as number,
               sqrtPriceX96: discoveredPool.state.sqrtPriceX96 as string,
             }}
