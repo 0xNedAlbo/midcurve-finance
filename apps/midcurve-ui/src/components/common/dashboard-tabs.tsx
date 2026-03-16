@@ -4,7 +4,7 @@
  * Allows switching between "Positions" and "Hedged Positions" views.
  */
 
-export type DashboardTab = 'positions' | 'summary';
+export type DashboardTab = 'positions' | 'accounting';
 
 interface DashboardTabsProps {
   activeTab: DashboardTab;
@@ -25,14 +25,14 @@ export function DashboardTabs({ activeTab, onTabChange }: DashboardTabsProps) {
         Positions
       </button>
       <button
-        onClick={() => onTabChange('summary')}
+        onClick={() => onTabChange('accounting')}
         className={`px-4 py-3 font-medium transition-colors cursor-pointer ${
-          activeTab === 'summary'
+          activeTab === 'accounting'
             ? 'text-blue-400 border-b-2 border-blue-400 -mb-px'
             : 'text-slate-400 hover:text-slate-200'
         }`}
       >
-        Summary
+        Accounting
       </button>
     </div>
   );

@@ -79,7 +79,7 @@ export function DashboardPage() {
           </div>
         )}
 
-        {activeTab === 'summary' && <AccountingSummary />}
+        {activeTab === 'accounting' && <AccountingSummary />}
       </div>
     </div>
   );
