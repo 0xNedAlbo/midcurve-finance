@@ -144,6 +144,7 @@ export function useWatchUniswapV3PoolPrice(
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [cancelled, setCancelled] = useState(false);
+  const [recreateKey, setRecreateKey] = useState(0);
   const mountedRef = useRef(true);
 
   // Query key for this subscription (memoized to prevent unnecessary re-renders)
@@ -191,7 +192,7 @@ export function useWatchUniswapV3PoolPrice(
     return () => {
       mountedRef.current = false;
     };
-  }, [enabled, poolAddress, chainId]);
+  }, [enabled, poolAddress, chainId, recreateKey]);
 
   // Poll for subscription updates
   const pollQuery = useQuery({
@@ -220,6 +221,17 @@ export function useWatchUniswapV3PoolPrice(
       return failureCount < 2;
     },
   });
+
+  // Detect 404 (expired/pruned subscription) and recreate
+  useEffect(() => {
+    if (!pollQuery.error) return;
+    const msg = pollQuery.error.message || '';
+    if (msg.includes('404') || msg.includes('not found')) {
+      setSubscriptionId(null);
+      setCancelled(false);
+      setRecreateKey((k) => k + 1);
+    }
+  }, [pollQuery.error]);
 
   // Parse sqrtPriceX96 from string to bigint
   const sqrtPriceX96BigInt = pollQuery.data?.currentSqrtPriceX96
