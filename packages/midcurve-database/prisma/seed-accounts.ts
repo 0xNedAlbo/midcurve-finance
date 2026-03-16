@@ -16,6 +16,12 @@ import { CHART_OF_ACCOUNTS } from '@midcurve/shared';
 const prisma = new PrismaClient();
 
 async function main() {
+  const existingCount = await prisma.accountDefinition.count();
+  if (existingCount > 0) {
+    console.log(`Chart of Accounts already seeded (${existingCount} rows), skipping.`);
+    return;
+  }
+
   console.log('Seeding Chart of Accounts...');
 
   for (const account of CHART_OF_ACCOUNTS) {
