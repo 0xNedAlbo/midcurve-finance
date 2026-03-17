@@ -92,11 +92,14 @@ function extractSwapData(raw: unknown): { sqrtPriceX96: bigint; tick: number } {
 /** Queue name for order domain event notifications */
 const ORDER_EVENTS_QUEUE = 'automation.close-order-monitor.order-events';
 
+/** Periodic sync interval as safety net for missed domain events (60s) */
+const SYNC_INTERVAL_MS = 60_000;
 
 export class CloseOrderMonitor {
   private status: 'idle' | 'running' | 'stopping' | 'stopped' = 'idle';
   private orderSubscribers = new Map<string, PoolPriceSubscriber>();
   private orderEventConsumerTag: string | null = null;
+  private syncInterval: ReturnType<typeof setInterval> | null = null;
   private eventsProcessed = 0;
   private triggersPublished = 0;
   private lastProcessedAt: Date | null = null;
@@ -124,6 +127,11 @@ export class CloseOrderMonitor {
       // Sync subscriptions on startup to catch up
       await this.syncSubscriptions();
 
+      // Periodic sync as safety net for missed domain events
+      this.syncInterval = setInterval(() => {
+        this.syncSubscriptions();
+      }, SYNC_INTERVAL_MS);
+
       autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'started', {
         orderSubscribers: this.orderSubscribers.size,
       });
@@ -144,6 +152,12 @@ export class CloseOrderMonitor {
 
     autoLog.workerLifecycle(log, 'CloseOrderMonitor', 'stopping');
     this.status = 'stopping';
+
+    // Clear periodic sync interval
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+      this.syncInterval = null;
+    }
 
     // Cancel order event consumer
     if (this.orderEventConsumerTag) {
