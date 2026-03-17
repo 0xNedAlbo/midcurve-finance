@@ -261,7 +261,6 @@ export async function buildParaswapTransaction(
     deadline,
     ignoreChecks: true,
     ignoreGasEstimate: true,
-    excludeDEXS: EXCLUDED_DEXS,
   };
 
   const url = `${PARASWAP_API_BASE}/transactions/${chainId}`;
