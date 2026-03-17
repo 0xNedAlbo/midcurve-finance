@@ -14,7 +14,7 @@
  * preventing transaction failures due to insufficient approvals or balances.
  */
 
-import { useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
 import {
@@ -68,6 +68,8 @@ export interface UsePriceAdjustmentReturn {
   cancel: () => Promise<void>;
   /** Force refresh the price subscription */
   refresh: () => Promise<void>;
+  /** Reset price change baseline to current price (priceChangePercent resets to ~0) */
+  resetBaseline: () => void;
 }
 
 /**
@@ -113,13 +115,15 @@ export function usePriceAdjustment({
   enabled,
   pollIntervalMs = 2000,
 }: UsePriceAdjustmentParams): UsePriceAdjustmentReturn {
-  // Track original sqrtPrice for comparison
-  const originalSqrtPriceRef = useRef<bigint | null>(null);
+  // Track baseline sqrtPrice for price change comparison (state so memo recomputes on reset)
+  const [baselineSqrtPrice, setBaselineSqrtPrice] = useState<bigint | null>(null);
+  const baselineInitRef = useRef(false);
 
-  // Store original sqrt price when first loaded
+  // Set initial baseline when first loaded
   useEffect(() => {
-    if (discoveredPool && originalSqrtPriceRef.current === null) {
-      originalSqrtPriceRef.current = BigInt(discoveredPool.state.sqrtPriceX96 as string);
+    if (discoveredPool && !baselineInitRef.current) {
+      baselineInitRef.current = true;
+      setBaselineSqrtPrice(BigInt(discoveredPool.state.sqrtPriceX96 as string));
     }
   }, [discoveredPool]);
 
@@ -234,7 +238,7 @@ export function usePriceAdjustment({
           adjustedLiquidity: '0',
           adjustedTotalQuoteValue: '0',
           priceChangePercent: calculatePriceChangePercent(
-            originalSqrtPriceRef.current ?? effectiveSqrtPriceX96,
+            baselineSqrtPrice ?? effectiveSqrtPriceX96,
             effectiveSqrtPriceX96
           ),
         };
@@ -300,7 +304,7 @@ export function usePriceAdjustment({
 
       // Calculate price change percentage
       const priceChangePercent = calculatePriceChangePercent(
-        originalSqrtPriceRef.current ?? effectiveSqrtPriceX96,
+        baselineSqrtPrice ?? effectiveSqrtPriceX96,
         effectiveSqrtPriceX96
       );
 
@@ -342,6 +346,7 @@ export function usePriceAdjustment({
     currentSqrtPriceX96,
     isLoading,
     enabled,
+    baselineSqrtPrice,
   ]);
 
   // Build error message
@@ -360,6 +365,12 @@ export function usePriceAdjustment({
     await refresh();
   }, [refresh]);
 
+  const resetBaseline = useCallback(() => {
+    if (currentSqrtPriceX96) {
+      setBaselineSqrtPrice(currentSqrtPriceX96);
+    }
+  }, [currentSqrtPriceX96]);
+
   return {
     status: calculation.status,
     error,
@@ -372,5 +383,6 @@ export function usePriceAdjustment({
     priceChangePercent: calculation.priceChangePercent,
     cancel: stableCancel,
     refresh: stableRefresh,
+    resetBaseline,
   };
 }

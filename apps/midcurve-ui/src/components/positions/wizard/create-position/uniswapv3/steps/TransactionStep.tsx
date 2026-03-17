@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Circle, Check, Loader2, AlertCircle, Copy, RefreshCw } from 'lucide-react';
+import { Circle, Check, Loader2, AlertCircle, Copy } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice, formatCompactValue } from '@midcurve/shared';
@@ -70,6 +70,11 @@ export function TransactionStep() {
 
   // Track close order confirm API call status
   const [confirmStatus, setConfirmStatus] = useState<'pending' | 'active' | 'success' | 'warning'>('pending');
+
+  // Track manual price recalculation state (minimum 1s spinner feedback)
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  // Track whether amounts have been manually adjusted at least once
+  const [hasAdjusted, setHasAdjusted] = useState(false);
 
   // Get chain ID from discovered pool
   const chainId = state.discoveredPool?.typedConfig.chainId;
@@ -786,33 +791,59 @@ export function TransactionStep() {
   // Complete when all transactions done AND position added to portfolio (or API failed — position exists on-chain)
   const isComplete = currentPhase === 'done' && (createPositionAPI.isSuccess || createPositionAPI.isError);
 
+  // Handle manual "Adjust token amounts" click with minimum 1s spinner
+  const handleAdjustAmounts = useCallback(async () => {
+    setIsRecalculating(true);
+    const minDelay = new Promise(resolve => setTimeout(resolve, 1000));
+    const refreshPromise = priceAdjustment.refresh();
+    await Promise.all([minDelay, refreshPromise]);
+    // Reset baseline so priceChangePercent is relative to this new price
+    priceAdjustment.resetBaseline();
+    setIsRecalculating(false);
+    setHasAdjusted(true);
+  }, [priceAdjustment]);
+
   // Render price adjustment item (special handling for pool price confirmation)
   const renderPriceAdjustmentItem = () => {
     const hookStatus = priceAdjustment.status;
     const isEnabled = priceAdjustmentEnabled;
 
+    const hasPriceMoved = priceAdjustment.priceChangePercent !== null && Math.abs(priceAdjustment.priceChangePercent) >= 0.01;
+
     // Determine display status:
+    // - Manual recalculation in progress: calculating (overrides all)
     // - Mint succeeded: always show success (subscriptions are cancelled)
     // - Not enabled yet (approvals not done): pending
     // - Enabled and calculating: calculating
     // - Enabled and ready: success
     // - Error: error
-    const displayStatus = mintSucceeded
-      ? 'success'
-      : !isEnabled
-        ? 'pending'
-        : hookStatus === 'calculating'
-          ? 'calculating'
-          : hookStatus === 'error'
-            ? 'error'
-            : hookStatus === 'ready'
-              ? 'success'
-              : 'pending';
+    const displayStatus = isRecalculating
+      ? 'calculating'
+      : mintSucceeded
+        ? 'success'
+        : !isEnabled
+          ? 'pending'
+          : hookStatus === 'calculating'
+            ? 'calculating'
+            : hookStatus === 'error'
+              ? 'error'
+              : hookStatus === 'ready'
+                ? 'success'
+                : 'pending';
 
     const isActive = displayStatus === 'calculating';
     const isError = displayStatus === 'error';
     const isSuccess = displayStatus === 'success';
     const isPending = displayStatus === 'pending';
+
+    // Dynamic label based on state
+    const label = isRecalculating
+      ? 'Recalculating...'
+      : hasAdjusted && isSuccess && !hasPriceMoved
+        ? 'Adjusted token amounts to pool price.'
+        : hasPriceMoved && isSuccess
+          ? `Pool price moved by ${priceAdjustment.priceChangePercent! >= 0 ? '+' : ''}${priceAdjustment.priceChangePercent!.toFixed(2)}%`
+          : 'Confirm Pool Price';
 
     // Calculate current price from sqrtPriceX96
     const currentPriceText = useMemo(() => {
@@ -868,6 +899,9 @@ export function TransactionStep() {
       }
     }, [priceAdjustment.currentSqrtPriceX96, state.discoveredPool, state.baseToken, state.quoteToken]);
 
+    // Show "Adjust token amounts" link only when price has moved, not during recalculation, and not after mint
+    const showAdjustLink = !mintSucceeded && isEnabled && !isActive && hasPriceMoved;
+
     return (
       <div
         className={`py-3 px-4 rounded-lg transition-colors ${
@@ -898,34 +932,23 @@ export function TransactionStep() {
                   : 'text-white'
               }
             >
-              Adjust amounts to pool price
+              {label}
             </span>
           </div>
 
-          {/* Current price display + refresh */}
+          {/* Right side: price + adjust link */}
           <div className="flex items-center gap-2">
             {isSuccess && currentPriceText && (
-              <>
-                <span className="text-sm text-slate-300">
-                  {currentPriceText} {state.quoteToken?.symbol}
-                </span>
-                {priceAdjustment.priceChangePercent !== null && Math.abs(priceAdjustment.priceChangePercent) >= 0.01 && (
-                  <span className={`text-xs font-medium ${priceAdjustment.priceChangePercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    ({priceAdjustment.priceChangePercent >= 0 ? '+' : ''}{priceAdjustment.priceChangePercent.toFixed(2)}%)
-                  </span>
-                )}
-              </>
+              <span className="text-sm text-slate-300">
+                {currentPriceText} {state.quoteToken?.symbol}
+              </span>
             )}
-            {isActive && (
-              <span className="text-sm text-blue-400">Calculating...</span>
-            )}
-            {!mintSucceeded && isEnabled && !isActive && (
+            {showAdjustLink && (
               <button
-                onClick={() => priceAdjustment.refresh()}
-                className="p-1 text-slate-400 hover:text-blue-400 transition-colors cursor-pointer"
-                title="Refresh pool price"
+                onClick={handleAdjustAmounts}
+                className="text-sm text-yellow-400 hover:text-yellow-300 underline decoration-dashed underline-offset-2 transition-colors cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                Adjust token amounts
               </button>
             )}
           </div>
