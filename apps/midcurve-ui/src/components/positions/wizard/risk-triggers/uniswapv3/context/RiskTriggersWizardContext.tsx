@@ -400,13 +400,12 @@ export function convertOrdersToTriggerState(
       return { ...EMPTY_TRIGGER, hasFailedOnChainOrder };
     }
 
-    // Extract tick from closeOrderHash format: "sl@{tick}" or "tp@{tick}"
-    const parts = order.closeOrderHash.split('@');
-    const tick = parts.length === 2 ? parseInt(parts[1], 10) : null;
+    // Use triggerTick directly — closeOrderHash may contain a stale tick after updates
+    const tick = order.triggerTick;
 
     // Convert tick to price
     let priceBigint: bigint | null = null;
-    if (tick !== null && !isNaN(tick)) {
+    if (tick !== null) {
       try {
         priceBigint = tickToPrice(
           tick,

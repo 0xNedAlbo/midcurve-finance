@@ -151,16 +151,16 @@ function DataFetcher({
     setPositionError,
     setDiscoveredPool,
     initializeFromOrders,
+    hasChanges,
+    state,
   } = useRiskTriggersWizard();
 
   const positionQuery = useUniswapV3Position(chainId, nftId);
   const discoverPool = useDiscoverPool();
 
-  // Load position into context
-  const positionLoaded = useRef(false);
+  // Load position into context (no ref guard — idempotent, always use latest data)
   useEffect(() => {
-    if (positionQuery.data && !positionLoaded.current) {
-      positionLoaded.current = true;
+    if (positionQuery.data) {
       setPosition(positionQuery.data);
     }
     if (positionQuery.isLoading) {
@@ -200,15 +200,20 @@ function DataFetcher({
     }
   }, [positionQuery.data, discoverPool, setDiscoveredPool]);
 
-  // Initialize trigger state from existing close orders (included in position response)
-  const ordersInitialized = useRef(false);
+  // Initialize trigger state from existing close orders (included in position response).
+  // Re-initialize when fresh data arrives (new dataUpdatedAt), but only while the user
+  // hasn't started editing (hasChanges) and is still on the configure step.
+  const lastInitializedAt = useRef(0);
   useEffect(() => {
     if (
       positionQuery.data &&
-      !ordersInitialized.current
+      positionQuery.dataUpdatedAt !== lastInitializedAt.current &&
+      !hasChanges &&
+      state.currentStepIndex === 0
     ) {
-      ordersInitialized.current = true;
+      lastInitializedAt.current = positionQuery.dataUpdatedAt;
       const pos = positionQuery.data;
+
       const baseToken = pos.isToken0Quote ? pos.pool.token1 : pos.pool.token0;
       const quoteToken = pos.isToken0Quote ? pos.pool.token0 : pos.pool.token1;
       const baseAddress = (baseToken.config as { address: string }).address;
@@ -222,7 +227,7 @@ function DataFetcher({
         pos.isToken0Quote,
       );
     }
-  }, [positionQuery.data, initializeFromOrders]);
+  }, [positionQuery.data, positionQuery.dataUpdatedAt, initializeFromOrders, hasChanges, state.currentStepIndex]);
 
   if (positionQuery.isLoading || !positionQuery.data) {
     return <LoadingState />;
