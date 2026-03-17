@@ -13,6 +13,8 @@ interface AddToPortfolioSectionProps {
   error: Error | null;
   /** Step label text */
   label?: string;
+  /** Callback to retry the API call */
+  onRetry?: () => void;
 }
 
 /**
@@ -27,6 +29,7 @@ export function AddToPortfolioSection({
   isError,
   error,
   label = 'Adding the Position to your Portfolio',
+  onRetry,
 }: AddToPortfolioSectionProps) {
   return (
     <div
@@ -53,6 +56,15 @@ export function AddToPortfolioSection({
           )}
           <span className="text-white">{label}</span>
         </div>
+
+        {isError && onRetry && (
+          <button
+            onClick={onRetry}
+            className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
+        )}
       </div>
 
       {/* Error details */}

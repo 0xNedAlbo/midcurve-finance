@@ -15,6 +15,7 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import { Circle, Check, Loader2, AlertCircle, ExternalLink, Copy } from 'lucide-react';
 import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
+import { parseTransactionError } from '@/utils/parse-evm-transaction-error';
 
 export type TransactionStatus = 'idle' | 'pending' | 'waiting' | 'confirming' | 'success' | 'error';
 
@@ -95,6 +96,12 @@ export interface EvmTransactionPromptProps {
    * Target confirmations before marking complete (default: 1)
    */
   targetConfirmations?: number;
+
+  /**
+   * Custom message to show when the transaction reverts on-chain.
+   * If not provided, a generic revert message is shown.
+   */
+  revertMessage?: string;
 }
 
 export interface UseEvmTransactionPromptResult {
@@ -168,6 +175,7 @@ export function useEvmTransactionPrompt({
   onReset,
   onStatusChange,
   targetConfirmations = 1,
+  revertMessage,
 }: EvmTransactionPromptProps): UseEvmTransactionPromptResult {
   const [internalTxHash, setInternalTxHash] = useState<string | null>(null);
 
@@ -218,8 +226,22 @@ export function useEvmTransactionPrompt({
     onStatusChange?.(status);
   }, [status, onStatusChange]);
 
-  // Combined error message
-  const error = errorFiltered?.message || (txWatch.status === 'reverted' ? 'Transaction reverted' : null);
+  // Parse error into user-friendly title + message
+  const parsedError = useMemo(() => {
+    if (errorFiltered) {
+      return parseTransactionError(errorFiltered);
+    }
+    if (txWatch.status === 'reverted') {
+      if (revertMessage) {
+        return { title: 'Transaction Reverted', message: revertMessage, canRetry: true };
+      }
+      return parseTransactionError(new Error('Transaction reverted'));
+    }
+    return null;
+  }, [errorFiltered, txWatch.status, revertMessage]);
+
+  // Combined error message (for backward-compatible return value)
+  const error = parsedError ? `${parsedError.title}: ${parsedError.message}` : null;
 
   // Success state
   const isSuccess = status === 'success';
@@ -305,13 +327,14 @@ export function useEvmTransactionPrompt({
       </div>
 
       {/* Error message */}
-      {isError && error && (
+      {isError && parsedError && (
         <div className="mt-2 pl-8 flex gap-2">
-          <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
-            {error}
+          <div className="flex-1 max-h-20 overflow-y-auto text-sm bg-red-950/30 rounded p-2">
+            <span className="font-medium text-red-400">{parsedError.title}</span>
+            <span className="text-red-400/80"> — {parsedError.message}</span>
           </div>
           <button
-            onClick={() => navigator.clipboard.writeText(error)}
+            onClick={() => navigator.clipboard.writeText(`${parsedError.title}: ${parsedError.message}`)}
             className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
             title="Copy error to clipboard"
           >

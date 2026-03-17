@@ -66,6 +66,8 @@ export interface UsePriceAdjustmentReturn {
   priceChangePercent: number | null;
   /** Cancel the price watching subscription */
   cancel: () => Promise<void>;
+  /** Force refresh the price subscription */
+  refresh: () => Promise<void>;
 }
 
 /**
@@ -127,6 +129,7 @@ export function usePriceAdjustment({
     currentTick,
     isLoading,
     cancel,
+    refresh,
   } = useWatchUniswapV3PoolPrice({
     poolAddress: discoveredPool?.address ?? null,
     chainId: discoveredPool?.chainId ?? 0,
@@ -348,10 +351,14 @@ export function usePriceAdjustment({
     return null;
   }, [calculation.status]);
 
-  // Wrap cancel in useCallback for stable reference
+  // Wrap cancel/refresh in useCallback for stable reference
   const stableCancel = useCallback(async () => {
     await cancel();
   }, [cancel]);
+
+  const stableRefresh = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
 
   return {
     status: calculation.status,
@@ -364,5 +371,6 @@ export function usePriceAdjustment({
     currentTick,
     priceChangePercent: calculation.priceChangePercent,
     cancel: stableCancel,
+    refresh: stableRefresh,
   };
 }

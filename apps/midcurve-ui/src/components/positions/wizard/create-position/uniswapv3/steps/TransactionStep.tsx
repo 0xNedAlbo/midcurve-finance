@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Circle, Check, Loader2, AlertCircle, Copy } from 'lucide-react';
+import { Circle, Check, Loader2, AlertCircle, Copy, RefreshCw } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
 import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice, formatCompactValue } from '@midcurve/shared';
@@ -261,6 +261,7 @@ export function TransactionStep() {
     isWaitingForConfirmation: mint.isWaitingForConfirmation,
     isSuccess: mint.isSuccess,
     error: mint.mintError,
+    revertMessage: 'The pool price likely moved beyond slippage tolerance while the transaction was pending. Click Retry to re-attempt with updated token amounts.',
     onExecute: () => {
       // Ensure we're in mint phase (in case we started from idle with approvals already done)
       if (currentPhase === 'idle') {
@@ -702,17 +703,18 @@ export function TransactionStep() {
   }, [currentPhase, mint.isSuccess, mint.tokenId, mint.mintError, mint.mintTxHash, mint.logs, hasAutomation, setPositionCreated, addTransaction, baseApprovalPrompt, quoteApprovalPrompt, priceAdjustment, chainId, walletAddress, state.discoveredPool, quoteTokenAddress, effectiveTickLower, effectiveTickUpper, createPositionAPI]);
 
   // Portfolio addition phase - wait for API before proceeding
+  // If API fails, still proceed — the position exists on-chain regardless
   useEffect(() => {
     if (currentPhase !== 'portfolio') return;
 
-    if (createPositionAPI.isSuccess) {
+    if (createPositionAPI.isSuccess || createPositionAPI.isError) {
       if (hasAutomation) {
         setCurrentPhase('nft-approval');
       } else {
         setCurrentPhase('done');
       }
     }
-  }, [currentPhase, createPositionAPI.isSuccess, hasAutomation]);
+  }, [currentPhase, createPositionAPI.isSuccess, createPositionAPI.isError, hasAutomation]);
 
   // NFT approval phase - skip to automation if already approved
   useEffect(() => {
@@ -781,8 +783,8 @@ export function TransactionStep() {
     setStepValid('transactions', currentPhase === 'done');
   }, [currentPhase, setStepValid]);
 
-  // Complete when all transactions done AND position added to portfolio
-  const isComplete = currentPhase === 'done' && createPositionAPI.isSuccess;
+  // Complete when all transactions done AND position added to portfolio (or API failed — position exists on-chain)
+  const isComplete = currentPhase === 'done' && (createPositionAPI.isSuccess || createPositionAPI.isError);
 
   // Render price adjustment item (special handling for pool price confirmation)
   const renderPriceAdjustmentItem = () => {
@@ -896,19 +898,35 @@ export function TransactionStep() {
                   : 'text-white'
               }
             >
-              Confirm Pool Price
+              Adjust amounts to pool price
             </span>
           </div>
 
-          {/* Current price display */}
+          {/* Current price display + refresh */}
           <div className="flex items-center gap-2">
             {isSuccess && currentPriceText && (
-              <span className="text-sm text-slate-300">
-                {currentPriceText} {state.quoteToken?.symbol}
-              </span>
+              <>
+                <span className="text-sm text-slate-300">
+                  {currentPriceText} {state.quoteToken?.symbol}
+                </span>
+                {priceAdjustment.priceChangePercent !== null && Math.abs(priceAdjustment.priceChangePercent) >= 0.01 && (
+                  <span className={`text-xs font-medium ${priceAdjustment.priceChangePercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    ({priceAdjustment.priceChangePercent >= 0 ? '+' : ''}{priceAdjustment.priceChangePercent.toFixed(2)}%)
+                  </span>
+                )}
+              </>
             )}
             {isActive && (
               <span className="text-sm text-blue-400">Calculating...</span>
+            )}
+            {!mintSucceeded && isEnabled && !isActive && (
+              <button
+                onClick={() => priceAdjustment.refresh()}
+                className="p-1 text-slate-400 hover:text-blue-400 transition-colors cursor-pointer"
+                title="Refresh pool price"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
         </div>
@@ -991,6 +1009,18 @@ export function TransactionStep() {
                   ? createPositionAPI.error
                   : null
               }
+              onRetry={() => {
+                if (chainId && quoteTokenAddress && mintedTokenId) {
+                  const chainSlug = getChainSlugByChainId(chainId);
+                  if (chainSlug) {
+                    createPositionAPI.mutate({
+                      chainId: chainSlug,
+                      nftId: mintedTokenId.toString(),
+                      quoteTokenAddress,
+                    });
+                  }
+                }
+              }}
             />
           )}
 
