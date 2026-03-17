@@ -40,7 +40,7 @@ function StepRenderer({ content }: { content: StepContent }) {
   const returnTo = (location.state as { returnTo?: string })?.returnTo || '/dashboard';
 
   const handleClose = () => {
-    navigate(returnTo);
+    navigate(returnTo, { replace: true });
   };
 
   return (

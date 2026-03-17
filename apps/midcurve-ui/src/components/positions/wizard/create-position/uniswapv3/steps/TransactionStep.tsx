@@ -12,10 +12,12 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Circle, Check, Loader2, AlertCircle, Copy } from 'lucide-react';
+import { Circle, Check, Loader2, AlertCircle } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice, formatCompactValue } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice } from '@midcurve/shared';
+import { PriceAdjustmentStep } from '@/components/common/PriceAdjustmentStep';
+import { usePriceAdjustmentInteraction } from '@/components/common/usePriceAdjustmentInteraction';
 import { useCreatePositionWizard, computeSwapDirection } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
 import { AllocatedCapitalSection } from '../shared/AllocatedCapitalSection';
@@ -70,11 +72,6 @@ export function TransactionStep() {
 
   // Track close order confirm API call status
   const [confirmStatus, setConfirmStatus] = useState<'pending' | 'active' | 'success' | 'warning'>('pending');
-
-  // Track manual price recalculation state (minimum 1s spinner feedback)
-  const [isRecalculating, setIsRecalculating] = useState(false);
-  // Track whether amounts have been manually adjusted at least once
-  const [hasAdjusted, setHasAdjusted] = useState(false);
 
   // Get chain ID from discovered pool
   const chainId = state.discoveredPool?.typedConfig.chainId;
@@ -791,188 +788,11 @@ export function TransactionStep() {
   // Complete when all transactions done AND position added to portfolio (or API failed — position exists on-chain)
   const isComplete = currentPhase === 'done' && (createPositionAPI.isSuccess || createPositionAPI.isError);
 
-  // Handle manual "Adjust token amounts" click with minimum 1s spinner
-  const handleAdjustAmounts = useCallback(async () => {
-    setIsRecalculating(true);
-    const minDelay = new Promise(resolve => setTimeout(resolve, 1000));
-    const refreshPromise = priceAdjustment.refresh();
-    await Promise.all([minDelay, refreshPromise]);
-    // Reset baseline so priceChangePercent is relative to this new price
-    priceAdjustment.resetBaseline();
-    setIsRecalculating(false);
-    setHasAdjusted(true);
-  }, [priceAdjustment]);
+  // Price adjustment interaction state (recalculating spinner, baseline reset)
+  const priceAdjustmentInteraction = usePriceAdjustmentInteraction(priceAdjustment);
 
-  // Render price adjustment item (special handling for pool price confirmation)
-  const renderPriceAdjustmentItem = () => {
-    const hookStatus = priceAdjustment.status;
-    const isEnabled = priceAdjustmentEnabled;
-
-    const hasPriceMoved = priceAdjustment.priceChangePercent !== null && Math.abs(priceAdjustment.priceChangePercent) >= 0.01;
-
-    // Determine display status:
-    // - Manual recalculation in progress: calculating (overrides all)
-    // - Mint succeeded: always show success (subscriptions are cancelled)
-    // - Not enabled yet (approvals not done): pending
-    // - Enabled and calculating: calculating
-    // - Enabled and ready: success
-    // - Error: error
-    const displayStatus = isRecalculating
-      ? 'calculating'
-      : mintSucceeded
-        ? 'success'
-        : !isEnabled
-          ? 'pending'
-          : hookStatus === 'calculating'
-            ? 'calculating'
-            : hookStatus === 'error'
-              ? 'error'
-              : hookStatus === 'ready'
-                ? 'success'
-                : 'pending';
-
-    const isActive = displayStatus === 'calculating';
-    const isError = displayStatus === 'error';
-    const isSuccess = displayStatus === 'success';
-    const isPending = displayStatus === 'pending';
-
-    // Dynamic label based on state
-    const label = isRecalculating
-      ? 'Recalculating...'
-      : hasAdjusted && isSuccess && !hasPriceMoved
-        ? 'Adjusted token amounts to pool price.'
-        : hasPriceMoved && isSuccess
-          ? `Pool price moved by ${priceAdjustment.priceChangePercent! >= 0 ? '+' : ''}${priceAdjustment.priceChangePercent!.toFixed(2)}%`
-          : 'Confirm Pool Price';
-
-    // Calculate current price from sqrtPriceX96
-    const currentPriceText = useMemo(() => {
-      if (!priceAdjustment.currentSqrtPriceX96 || !state.discoveredPool || !state.baseToken || !state.quoteToken) {
-        return null;
-      }
-
-      try {
-        const pool = state.discoveredPool;
-        const sqrtPriceX96 = priceAdjustment.currentSqrtPriceX96;
-
-        const isToken0Base = compareAddresses(
-          pool.token0.config.address as string,
-          state.baseToken.address
-        ) === 0;
-
-        // price = (sqrtPriceX96 / 2^96)^2
-        const Q96 = 2n ** 96n;
-        const Q192 = Q96 * Q96;
-        const rawPriceNum = sqrtPriceX96 * sqrtPriceX96;
-
-        const token0Decimals = pool.token0.decimals;
-        const token1Decimals = pool.token1.decimals;
-        const quoteDecimals = state.quoteToken.decimals;
-
-        // Calculate price as bigint with quote token decimals precision
-        let priceBigint: bigint;
-        if (isToken0Base) {
-          // Price is token1/token0 (quote per base)
-          const decimalDiff = token0Decimals - token1Decimals;
-          if (decimalDiff >= 0) {
-            const adjustment = 10n ** BigInt(decimalDiff);
-            priceBigint = (rawPriceNum * adjustment * (10n ** BigInt(quoteDecimals))) / Q192;
-          } else {
-            const adjustment = 10n ** BigInt(-decimalDiff);
-            priceBigint = (rawPriceNum * (10n ** BigInt(quoteDecimals))) / (Q192 * adjustment);
-          }
-        } else {
-          // Price is token0/token1 (quote per base) = 1 / (token1/token0)
-          const decimalDiff = token1Decimals - token0Decimals;
-          if (decimalDiff >= 0) {
-            const adjustment = 10n ** BigInt(decimalDiff);
-            priceBigint = (Q192 * adjustment * (10n ** BigInt(quoteDecimals))) / rawPriceNum;
-          } else {
-            const adjustment = 10n ** BigInt(-decimalDiff);
-            priceBigint = (Q192 * (10n ** BigInt(quoteDecimals))) / (rawPriceNum * adjustment);
-          }
-        }
-
-        return formatCompactValue(priceBigint, quoteDecimals);
-      } catch {
-        return null;
-      }
-    }, [priceAdjustment.currentSqrtPriceX96, state.discoveredPool, state.baseToken, state.quoteToken]);
-
-    // Show "Adjust token amounts" link only when price has moved, not during recalculation, and not after mint
-    const showAdjustLink = !mintSucceeded && isEnabled && !isActive && hasPriceMoved;
-
-    return (
-      <div
-        className={`py-3 px-4 rounded-lg transition-colors ${
-          isError
-            ? 'bg-red-500/10 border border-red-500/30'
-            : isSuccess
-            ? 'bg-green-500/10 border border-green-500/20'
-            : isActive
-            ? 'bg-blue-500/10 border border-blue-500/20'
-            : 'bg-slate-700/30 border border-slate-600/20'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {/* Status Icon */}
-            {isPending && <Circle className="w-5 h-5 text-slate-500" />}
-            {isActive && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
-            {isSuccess && <Check className="w-5 h-5 text-green-400" />}
-            {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
-
-            {/* Label */}
-            <span
-              className={
-                isSuccess
-                  ? 'text-slate-400'
-                  : isError
-                  ? 'text-red-300'
-                  : 'text-white'
-              }
-            >
-              {label}
-            </span>
-          </div>
-
-          {/* Right side: price + adjust link */}
-          <div className="flex items-center gap-2">
-            {isSuccess && currentPriceText && (
-              <span className="text-sm text-slate-300">
-                {currentPriceText} {state.quoteToken?.symbol}
-              </span>
-            )}
-            {showAdjustLink && (
-              <button
-                onClick={handleAdjustAmounts}
-                className="text-sm text-yellow-400 hover:text-yellow-300 underline decoration-dashed underline-offset-2 transition-colors cursor-pointer"
-              >
-                Adjust token amounts
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Error message */}
-        {isError && priceAdjustment.error && (
-          <div className="mt-2 pl-8 flex gap-2">
-            <div className="flex-1 max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
-              {priceAdjustment.error}
-            </div>
-            <button
-              onClick={() => navigator.clipboard.writeText(priceAdjustment.error || '')}
-              className="flex-shrink-0 p-1.5 text-red-400/60 hover:text-red-400 transition-colors cursor-pointer"
-              title="Copy error to clipboard"
-            >
-              <Copy className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  };
-
+  // Effective status for price adjustment display (accounts for enabled state)
+  const effectivePriceAdjustmentStatus = !priceAdjustmentEnabled ? 'idle' as const : priceAdjustment.status;
 
   const renderInteractive = () => {
     if (!walletAddress) {
@@ -1016,7 +836,19 @@ export function TransactionStep() {
           ) : quoteApprovalPrompt.element)}
 
           {/* Price adjustment (confirms current pool price) - between approvals and mint */}
-          {renderPriceAdjustmentItem()}
+          <PriceAdjustmentStep
+            status={effectivePriceAdjustmentStatus}
+            currentSqrtPriceX96={priceAdjustment.currentSqrtPriceX96}
+            discoveredPool={state.discoveredPool}
+            baseToken={state.baseToken}
+            quoteToken={state.quoteToken}
+            isTxSuccess={mintSucceeded}
+            priceChangePercent={priceAdjustment.priceChangePercent}
+            onAdjust={priceAdjustmentInteraction.handleAdjust}
+            isRecalculating={priceAdjustmentInteraction.isRecalculating}
+            hasAdjusted={priceAdjustmentInteraction.hasAdjusted}
+            error={priceAdjustment.error}
+          />
 
           {/* Mint position (rendered by hook) */}
           {mintPrompt.element}

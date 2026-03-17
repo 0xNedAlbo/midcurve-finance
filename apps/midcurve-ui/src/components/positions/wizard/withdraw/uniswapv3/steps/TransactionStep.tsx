@@ -116,13 +116,14 @@ export function TransactionStep() {
     isWaitingForConfirmation: decreaseLiquidity.isWaitingForWithdraw,
     isSuccess: decreaseLiquidity.withdrawSuccess,
     error: decreaseLiquidity.withdrawError,
+    revertMessage: 'The pool price likely moved beyond slippage tolerance. Click Retry to re-attempt the withdrawal.',
     onExecute: () => decreaseLiquidity.withdraw(),
     onReset: () => decreaseLiquidity.reset(),
   });
 
   // Handle finish — navigate back to origin page
   const handleFinish = useCallback(() => {
-    navigate(returnTo);
+    navigate(returnTo, { replace: true });
   }, [navigate, returnTo]);
 
   // ===== Render =====
@@ -177,6 +178,11 @@ export function TransactionStep() {
               isError={refreshPosition.isError}
               error={refreshPosition.error instanceof Error ? refreshPosition.error : null}
               label="Updating the position in your portfolio"
+              onRetry={() => {
+                if (config) {
+                  refreshPosition.mutate({ chainId: poolChainId, nftId: config.nftId.toString() });
+                }
+              }}
             />
           )}
         </div>
@@ -188,7 +194,7 @@ export function TransactionStep() {
 
   const renderSummary = () => (
     <WithdrawWizardSummaryPanel
-      showFinish={refreshPosition.isSuccess}
+      showFinish={refreshPosition.isSuccess || refreshPosition.isError}
       onFinish={handleFinish}
       nextDisabled={true}
     />

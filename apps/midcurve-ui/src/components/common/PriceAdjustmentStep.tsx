@@ -1,16 +1,41 @@
+/**
+ * PriceAdjustmentStep - Shared pool price adjustment UI for wizard transaction steps
+ *
+ * Displays current pool price, price change percentage, and an "Adjust token amounts"
+ * link when the price has moved. Shows recalculating spinner with min 1s feedback.
+ *
+ * Used by create position and increase deposit wizards.
+ */
+
 import { useMemo } from 'react';
 import { Circle, Check, Loader2, AlertCircle } from 'lucide-react';
 import type { PoolSearchTokenInfo } from '@midcurve/api-shared';
 import { formatCompactValue, compareAddresses } from '@midcurve/shared';
 import type { UniswapV3Pool } from '@midcurve/shared';
 
-interface PriceAdjustmentStepProps {
+export interface PriceAdjustmentStepProps {
+  /** Hook status: idle, calculating, ready, error */
   status: 'idle' | 'calculating' | 'ready' | 'error';
+  /** Current sqrtPriceX96 from pool watcher */
   currentSqrtPriceX96: bigint | undefined;
+  /** Discovered pool instance */
   discoveredPool: UniswapV3Pool | null;
+  /** Base token info */
   baseToken: PoolSearchTokenInfo | null;
+  /** Quote token info */
   quoteToken: PoolSearchTokenInfo | null;
-  isIncreaseSuccess: boolean;
+  /** Whether the main transaction (mint/increase) succeeded */
+  isTxSuccess: boolean;
+  /** Price change percentage from baseline (from usePriceAdjustment) */
+  priceChangePercent: number | null;
+  /** Callback when user clicks "Adjust token amounts" */
+  onAdjust: () => void;
+  /** Whether recalculation is in progress (min 1s spinner) */
+  isRecalculating: boolean;
+  /** Whether amounts have been manually adjusted at least once */
+  hasAdjusted: boolean;
+  /** Error message from price adjustment hook */
+  error?: string | null;
 }
 
 export function PriceAdjustmentStep({
@@ -19,24 +44,41 @@ export function PriceAdjustmentStep({
   discoveredPool,
   baseToken,
   quoteToken,
-  isIncreaseSuccess,
+  isTxSuccess,
+  priceChangePercent,
+  onAdjust,
+  isRecalculating,
+  hasAdjusted,
+  error: errorProp,
 }: PriceAdjustmentStepProps) {
+  const hasPriceMoved = priceChangePercent !== null && Math.abs(priceChangePercent) >= 0.01;
+
   // Determine display status
-  // After increase tx succeeds, always show success (subscription is cancelled)
-  const displayStatus = isIncreaseSuccess
-    ? 'success'
-    : status === 'calculating'
-      ? 'calculating'
-      : status === 'error'
-        ? 'error'
-        : status === 'ready'
-          ? 'success'
-          : 'pending';
+  const displayStatus = isRecalculating
+    ? 'calculating'
+    : isTxSuccess
+      ? 'success'
+      : status === 'calculating'
+        ? 'calculating'
+        : status === 'error'
+          ? 'error'
+          : status === 'ready'
+            ? 'success'
+            : 'pending';
 
   const isActive = displayStatus === 'calculating';
   const isError = displayStatus === 'error';
   const isSuccess = displayStatus === 'success';
   const isPending = displayStatus === 'pending';
+
+  // Dynamic label based on state
+  const label = isRecalculating
+    ? 'Recalculating...'
+    : hasAdjusted && isSuccess && !hasPriceMoved
+      ? 'Adjusted token amounts to pool price.'
+      : hasPriceMoved && isSuccess
+        ? `Pool price moved by ${priceChangePercent! >= 0 ? '+' : ''}${priceChangePercent!.toFixed(2)}%`
+        : 'Confirm Pool Price';
 
   // Calculate current price text from sqrtPriceX96
   const currentPriceText = useMemo(() => {
@@ -86,6 +128,8 @@ export function PriceAdjustmentStep({
     }
   }, [currentSqrtPriceX96, discoveredPool, baseToken, quoteToken]);
 
+  const showAdjustLink = !isTxSuccess && !isActive && hasPriceMoved;
+
   return (
     <div
       className={`py-3 px-4 rounded-lg transition-colors ${
@@ -100,13 +144,11 @@ export function PriceAdjustmentStep({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* Status Icon */}
           {isPending && <Circle className="w-5 h-5 text-slate-500" />}
           {isActive && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
           {isSuccess && <Check className="w-5 h-5 text-green-400" />}
           {isError && <AlertCircle className="w-5 h-5 text-red-400" />}
 
-          {/* Label */}
           <span
             className={
               isSuccess
@@ -116,22 +158,34 @@ export function PriceAdjustmentStep({
                 : 'text-white'
             }
           >
-            Confirm Pool Price
+            {label}
           </span>
         </div>
 
-        {/* Current price display */}
         <div className="flex items-center gap-2">
           {isSuccess && currentPriceText && (
             <span className="text-sm text-slate-300">
               {currentPriceText} {quoteToken?.symbol}
             </span>
           )}
-          {isActive && (
-            <span className="text-sm text-blue-400">Calculating...</span>
+          {showAdjustLink && (
+            <button
+              onClick={onAdjust}
+              className="text-sm text-yellow-400 hover:text-yellow-300 underline decoration-dashed underline-offset-2 transition-colors cursor-pointer"
+            >
+              Adjust token amounts
+            </button>
           )}
         </div>
       </div>
+
+      {isError && errorProp && (
+        <div className="mt-2 pl-8">
+          <div className="max-h-20 overflow-y-auto text-sm text-red-400/80 bg-red-950/30 rounded p-2">
+            {errorProp}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

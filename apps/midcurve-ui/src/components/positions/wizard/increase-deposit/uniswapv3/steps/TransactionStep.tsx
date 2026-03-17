@@ -17,9 +17,10 @@ import { usePriceAdjustment } from '@/components/positions/wizard/create-positio
 import { useIncreaseLiquidity } from '@/hooks/positions/uniswapv3/useIncreaseLiquidity';
 import { useUniswapV3RefreshPosition } from '@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition';
 import { AddToPortfolioSection } from '@/components/positions/wizard/create-position/uniswapv3/shared/AddToPortfolioSection';
+import { PriceAdjustmentStep } from '@/components/common/PriceAdjustmentStep';
+import { usePriceAdjustmentInteraction } from '@/components/common/usePriceAdjustmentInteraction';
 import { getChainSlugByChainId } from '@/config/chains';
 import { NONFUNGIBLE_POSITION_MANAGER_ADDRESSES } from '@/config/contracts/nonfungible-position-manager';
-import { PriceAdjustmentStep } from './PriceAdjustmentStep';
 
 export function TransactionStep() {
   const { state } = useIncreaseDepositWizard();
@@ -120,6 +121,7 @@ export function TransactionStep() {
   });
 
   const priceAdjustmentReady = priceAdjustment.status === 'ready';
+  const priceAdjustmentInteraction = usePriceAdjustmentInteraction(priceAdjustment);
 
   // Compute token0/token1 amounts from adjusted values
   const adjustedAmounts = useMemo(() => {
@@ -193,13 +195,14 @@ export function TransactionStep() {
     isWaitingForConfirmation: increaseLiquidity.isWaitingForConfirmation,
     isSuccess: increaseLiquidity.isSuccess,
     error: increaseLiquidity.increaseError,
+    revertMessage: 'The pool price likely moved beyond slippage tolerance while the transaction was pending. Click Retry to re-attempt with updated token amounts.',
     onExecute: () => increaseLiquidity.increase(),
     onReset: () => increaseLiquidity.reset(),
   });
 
   // Handle finish
   const handleFinish = useCallback(() => {
-    navigate(returnTo);
+    navigate(returnTo, { replace: true });
   }, [navigate, returnTo]);
 
   // ===== Render =====
@@ -239,12 +242,17 @@ export function TransactionStep() {
 
           {/* 3. Confirm Pool Price */}
           <PriceAdjustmentStep
-            status={priceAdjustment.status}
+            status={allApprovalsDone ? priceAdjustment.status : 'idle'}
             currentSqrtPriceX96={priceAdjustment.currentSqrtPriceX96}
             discoveredPool={state.discoveredPool}
             baseToken={baseToken}
             quoteToken={quoteToken}
-            isIncreaseSuccess={increaseLiquidity.isSuccess}
+            isTxSuccess={increaseLiquidity.isSuccess}
+            priceChangePercent={priceAdjustment.priceChangePercent}
+            onAdjust={priceAdjustmentInteraction.handleAdjust}
+            isRecalculating={priceAdjustmentInteraction.isRecalculating}
+            hasAdjusted={priceAdjustmentInteraction.hasAdjusted}
+            error={priceAdjustment.error}
           />
 
           {/* 4. Increase Liquidity */}
@@ -258,6 +266,11 @@ export function TransactionStep() {
               isError={refreshPosition.isError}
               error={refreshPosition.error instanceof Error ? refreshPosition.error : null}
               label="Updating the position in your portfolio"
+              onRetry={() => {
+                if (config) {
+                  refreshPosition.mutate({ chainId: poolChainId, nftId: config.nftId.toString() });
+                }
+              }}
             />
           )}
         </div>
@@ -269,7 +282,7 @@ export function TransactionStep() {
 
   const renderSummary = () => (
     <IncreaseWizardSummaryPanel
-      showFinish={refreshPosition.isSuccess}
+      showFinish={refreshPosition.isSuccess || refreshPosition.isError}
       onFinish={handleFinish}
       nextDisabled={true}
     />
