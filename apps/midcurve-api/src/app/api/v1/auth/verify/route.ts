@@ -4,7 +4,7 @@
  * POST /api/v1/auth/verify
  *
  * Verifies SIWE signature and creates a server-side session.
- * Returns session cookie (httpOnly, secure, sameSite=none for cross-origin).
+ * Returns session token in response body for Authorization header auth.
  *
  * Request Body:
  * {
@@ -17,11 +17,10 @@
  *   "success": true,
  *   "data": {
  *     "user": { id, name, address },
+ *     "token": "<session-id>",
  *     "expiresAt": "2024-02-19T..."
  *   }
  * }
- *
- * Sets cookie: midcurve_session=<sessionId> (httpOnly, secure, sameSite=none)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -39,13 +38,10 @@ import { getDomainEventPublisher } from '@midcurve/services';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getAuthNonceService, getAuthUserService, getSessionService, getUserAllowListService } from '@/lib/services';
 import { getCorsHeaders, createPreflightResponse } from '@/lib/cors';
-import { SESSION_COOKIE_NAME } from '@/middleware/with-session-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || undefined; // e.g., '.midcurve.finance'
 
 export async function OPTIONS(request: NextRequest): Promise<Response> {
   return createPreflightResponse(request.headers.get('origin'));
@@ -207,25 +203,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       updatedAt: user.updatedAt.toISOString(),
     };
 
-    // 8. Create response with session cookie
+    // 8. Create response with session token
     const responseData = createSuccessResponse({
       user: sessionUser,
+      token: sessionId,
       expiresAt: expiresAt.toISOString(),
     });
 
     apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
 
     const response = NextResponse.json(responseData, { status: 200 });
-
-    // Set httpOnly cookie for cross-origin
-    response.cookies.set(SESSION_COOKIE_NAME, sessionId, {
-      httpOnly: true,
-      secure: IS_PRODUCTION,
-      sameSite: IS_PRODUCTION ? 'none' : 'lax', // 'none' required for cross-origin
-      domain: COOKIE_DOMAIN,
-      path: '/',
-      expires: expiresAt,
-    });
 
     // Add CORS headers
     Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => {

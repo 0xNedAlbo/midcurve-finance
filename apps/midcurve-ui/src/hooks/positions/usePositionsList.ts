@@ -9,6 +9,7 @@
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { API_URL } from '@/lib/env';
+import { getStoredToken } from '@/lib/api-client';
 import type {
   ListPositionsParams,
   ListPositionsResponse,
@@ -46,8 +47,9 @@ export function usePositionsList(
         searchParams.toString() ? `?${searchParams}` : ''
       }`;
 
+      const token = getStoredToken();
       const response = await fetch(`${API_URL}${url}`, {
-        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
       if (!response.ok) {

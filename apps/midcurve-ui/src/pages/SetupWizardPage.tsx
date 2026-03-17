@@ -45,7 +45,6 @@ export function SetupWizardPage() {
         'Content-Type': 'application/json',
         'X-Config-Password': configPassword,
       },
-      credentials: 'include',
       body: JSON.stringify({
         alchemyApiKey,
         theGraphApiKey,

@@ -6,7 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
-import { apiClient } from '../lib/api-client';
+import { apiClient, setStoredToken, clearStoredToken } from '../lib/api-client';
 import type { SessionResponse, SessionUser } from '@midcurve/api-shared';
 
 // Use SessionUser from api-shared as our User type
@@ -60,7 +60,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         signature,
       });
 
-      if (response.data && response.data.user) {
+      if (response.data && response.data.user && response.data.token) {
+        setStoredToken(response.data.token);
         setUser(response.data.user as User);
         setStatus('authenticated');
       } else {
@@ -76,6 +77,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       await apiClient.post('/api/v1/auth/logout', {});
     } finally {
+      clearStoredToken();
       setUser(null);
       setStatus('unauthenticated');
     }

@@ -1,8 +1,7 @@
 /**
  * Session Authentication Middleware
  *
- * Validates session cookie and injects authenticated user into handler.
- * This replaces the dual auth (session + API key) middleware from the old UI.
+ * Validates session token from Authorization header and injects authenticated user into handler.
  *
  * Usage:
  * ```typescript
@@ -24,8 +23,6 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { createErrorResponse, ApiErrorCode, ErrorCodeToHttpStatus } from '@midcurve/api-shared';
 import type { AuthenticatedUser } from '@midcurve/api-shared';
 
-export const SESSION_COOKIE_NAME = 'midcurve_session';
-
 /**
  * Middleware wrapper for authenticated routes
  *
@@ -44,18 +41,18 @@ export async function withSessionAuth(
   const requestId = nanoid();
   const origin = request.headers.get('origin');
 
-  // Get session cookie
-  const sessionId = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  // Get session token from Authorization header
+  const authHeader = request.headers.get('authorization');
+  const sessionId = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
   if (!sessionId) {
-    apiLog.authFailure(apiLogger, requestId, 'No session cookie provided', 'session');
+    apiLog.authFailure(apiLogger, requestId, 'No authorization token provided', 'session');
 
     const response = NextResponse.json(
-      createErrorResponse(ApiErrorCode.UNAUTHORIZED, 'No session cookie provided'),
+      createErrorResponse(ApiErrorCode.UNAUTHORIZED, 'No authorization token provided'),
       { status: ErrorCodeToHttpStatus[ApiErrorCode.UNAUTHORIZED] }
     );
 
-    // Add CORS headers
     Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
@@ -74,10 +71,6 @@ export async function withSessionAuth(
       { status: ErrorCodeToHttpStatus[ApiErrorCode.UNAUTHORIZED] }
     );
 
-    // Clear invalid cookie
-    response.cookies.delete(SESSION_COOKIE_NAME);
-
-    // Add CORS headers
     Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
@@ -95,10 +88,6 @@ export async function withSessionAuth(
       { status: ErrorCodeToHttpStatus[ApiErrorCode.UNAUTHORIZED] }
     );
 
-    // Clear invalid session cookie
-    response.cookies.delete(SESSION_COOKIE_NAME);
-
-    // Add CORS headers
     Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => {
       response.headers.set(key, value);
     });

@@ -2,14 +2,11 @@
  * API Client - Type-safe HTTP wrapper with session authentication
  *
  * Centralized fetch wrapper that:
- * - Automatically includes session cookies (cross-origin with credentials)
+ * - Sends session token via Authorization: Bearer header
+ * - Stores session token in localStorage
  * - Handles API errors with structured error types
+ * - Automatically clears token on 401 responses
  * - Provides type-safe request/response handling
- *
- * Architecture:
- * - UI runs as Vite SPA on a different origin from API
- * - Session cookies sent with credentials: 'include'
- * - API validates session via custom session middleware
  */
 
 import type { ApiResponse, ApiError as ApiErrorType } from '@midcurve/api-shared';
@@ -18,6 +15,21 @@ import { API_URL } from './env';
 
 // Get API URL from runtime config, env var, or empty string (same origin / proxied in dev)
 const API_BASE_URL = API_URL;
+
+// Session token storage
+const TOKEN_KEY = 'midcurve_session';
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearStoredToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
 
 /**
  * Structured API error with status code and error details
@@ -55,10 +67,14 @@ async function request<T>(
     ...options?.headers,
   };
 
+  const token = getStoredToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const fetchOptions: RequestInit = {
     method,
     headers,
-    credentials: 'include', // Important: include cookies for session auth
     signal: options?.signal,
   };
 
@@ -71,6 +87,9 @@ async function request<T>(
     const json = await response.json();
 
     if (!response.ok) {
+      if (response.status === 401) {
+        clearStoredToken();
+      }
       const error = json as ApiErrorType;
       throw new ApiError(
         error.error?.message || 'An error occurred',

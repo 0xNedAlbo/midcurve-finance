@@ -38,6 +38,7 @@ export interface SessionUser {
  */
 export interface SessionResponse {
   user: SessionUser | null;
+  token?: string;
   expiresAt: string | null;
 }
 
