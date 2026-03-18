@@ -28,7 +28,7 @@
  */
 
 import crypto from 'crypto';
-import { isLocalChain } from '../../../config/evm.js';
+import { isNonProductionChain } from '../../../config/evm.js';
 import { createServiceLogger, log } from '../../../logging/index.js';
 import type { ServiceLogger } from '../../../logging/index.js';
 import { CacheService } from '../../../services/cache/index.js';
@@ -250,12 +250,12 @@ export class UniswapV3SubgraphClient {
   async getPoolMetrics(chainId: number, poolAddress: string): Promise<PoolMetrics> {
     log.methodEntry(this.logger, 'getPoolMetrics', { chainId, poolAddress });
 
-    // Graceful degradation for local development chains
-    // The Graph doesn't index local chains, so return default metrics
-    if (isLocalChain(chainId)) {
+    // Graceful degradation for non-production chains (testnets, local dev)
+    // The Graph doesn't index these chains, so return default metrics
+    if (isNonProductionChain(chainId)) {
       this.logger.warn(
         { chainId, poolAddress },
-        'Subgraph not available for local chain, returning default metrics'
+        'Subgraph not available for non-production chain, returning default metrics'
       );
 
       const defaultMetrics: PoolMetrics = {
@@ -378,17 +378,17 @@ export class UniswapV3SubgraphClient {
   async getPoolFeeData(chainId: number, poolAddress: string): Promise<PoolFeeData> {
     log.methodEntry(this.logger, 'getPoolFeeData', { chainId, poolAddress });
 
-    // Graceful degradation for local development chains
-    // The Graph doesn't index local chains, so we can't provide fee data
-    if (isLocalChain(chainId)) {
+    // Graceful degradation for non-production chains (testnets, local dev)
+    // The Graph doesn't index these chains, so we can't provide fee data
+    if (isNonProductionChain(chainId)) {
       this.logger.warn(
         { chainId, poolAddress },
-        'Subgraph not available for local chain, fee data unavailable'
+        'Subgraph not available for non-production chain, fee data unavailable'
       );
 
-      // For local chains, throw a specific error that callers can handle
+      // For non-production chains, throw a specific error that callers can handle
       const error = new PoolNotFoundInSubgraphError(chainId, normalizeAddress(poolAddress));
-      log.methodError(this.logger, 'getPoolFeeData', error, { reason: 'local_chain' });
+      log.methodError(this.logger, 'getPoolFeeData', error, { reason: 'non_production_chain' });
       throw error;
     }
 
@@ -518,13 +518,13 @@ export class UniswapV3SubgraphClient {
       tokenSetB,
     });
 
-    // Graceful degradation for local development chains
-    if (isLocalChain(chainId)) {
+    // Graceful degradation for non-production chains (testnets, local dev)
+    if (isNonProductionChain(chainId)) {
       this.logger.warn(
         { chainId },
-        'Subgraph not available for local chain, returning empty results'
+        'Subgraph not available for non-production chain, returning empty results'
       );
-      log.methodExit(this.logger, 'searchPoolsByTokenSets', { reason: 'local_chain' });
+      log.methodExit(this.logger, 'searchPoolsByTokenSets', { reason: 'non_production_chain' });
       return [];
     }
 
@@ -661,10 +661,10 @@ export class UniswapV3SubgraphClient {
       return new Map();
     }
 
-    // Local chain - return empty map
-    if (isLocalChain(chainId)) {
-      this.logger.warn({ chainId }, 'Subgraph not available for local chain');
-      log.methodExit(this.logger, 'getPoolsMetricsBatch', { reason: 'local_chain' });
+    // Non-production chain - return empty map
+    if (isNonProductionChain(chainId)) {
+      this.logger.warn({ chainId }, 'Subgraph not available for non-production chain');
+      log.methodExit(this.logger, 'getPoolsMetricsBatch', { reason: 'non_production_chain' });
       return new Map();
     }
 

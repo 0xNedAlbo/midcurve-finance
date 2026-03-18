@@ -44,6 +44,12 @@ export const DEFAULT_QUOTE_TOKENS_BY_CHAIN: Record<number, string[]> = {
     '0x4200000000000000000000000000000000000006', // WETH
   ],
 
+  // Sepolia Testnet (Chain ID: 11155111) — mock tokens
+  [SupportedChainId.SEPOLIA]: [
+    '0xDf5f0577Bd56a67fd0844F7EA08649d63a5D5f3C', // mcUSD
+    '0x5BB47f45Cd7b7611d4D54992Cf05e2cF2529e031', // mcWETH
+  ],
+
 };
 
 /**

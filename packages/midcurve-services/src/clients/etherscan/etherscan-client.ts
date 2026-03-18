@@ -15,6 +15,7 @@
  */
 
 import { isLocalChain, EvmConfig } from '../../config/evm.js';
+import { UNISWAPV3_NFPM_ADDRESSES } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { CacheService } from '../../services/cache/index.js';
@@ -47,19 +48,15 @@ export const EVENT_SIGNATURES = {
 } as const;
 
 /**
- * Uniswap V3 NFT Position Manager addresses per chain
+ * Uniswap V3 NFT Position Manager addresses per chain.
+ * Re-exported from @midcurve/shared for backward compatibility.
  */
-export const NFT_POSITION_MANAGER_ADDRESSES: Record<number, string> = {
-  1: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Ethereum
-  42161: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Arbitrum
-  8453: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', // Base (deployed at block 1371714)
-  31337: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Local Anvil fork (mainnet NFPM)
-};
+export const NFT_POSITION_MANAGER_ADDRESSES = UNISWAPV3_NFPM_ADDRESSES;
 
 /**
  * Supported chain IDs for Etherscan v2 API
  */
-export const SUPPORTED_CHAIN_IDS = [1, 42161, 8453] as const;
+export const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 11155111] as const;
 
 /**
  * Error thrown when Etherscan API request fails

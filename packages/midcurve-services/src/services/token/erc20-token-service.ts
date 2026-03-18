@@ -26,7 +26,7 @@ import {
     readTokenMetadata,
     TokenMetadataError,
 } from "../../utils/evm/index.js";
-import { EvmConfig, isLocalChain } from "../../config/evm.js";
+import { EvmConfig, isLocalChain, isNonProductionChain } from "../../config/evm.js";
 import { CoinGeckoClient } from "../../clients/coingecko/index.js";
 import { CoingeckoTokenService } from "../coingecko-token/coingecko-token-service.js";
 import { log } from "../../logging/index.js";
@@ -209,8 +209,8 @@ export class Erc20TokenService extends TokenService {
                     return existing;
                 }
 
-                // For local chains, CoinGecko enrichment is not possible - return as-is
-                if (isLocalChain(chainId)) {
+                // For non-production chains (testnets, local), CoinGecko enrichment is not possible - return as-is
+                if (isNonProductionChain(chainId)) {
                     this.logger.info(
                         {
                             id: existing.id,
@@ -218,7 +218,7 @@ export class Erc20TokenService extends TokenService {
                             chainId,
                             symbol: existing.symbol,
                         },
-                        "Token exists on local chain, skipping CoinGecko enrichment"
+                        "Token exists on non-production chain, skipping CoinGecko enrichment"
                     );
                     log.methodExit(this.logger, "discover", { id: existing.id, fromDatabase: true });
                     return existing;
@@ -310,6 +310,12 @@ export class Erc20TokenService extends TokenService {
                 enrichmentData = await this.getLocalChainEnrichment(
                     normalizedAddress,
                     metadata.symbol
+                );
+            } else if (isNonProductionChain(chainId)) {
+                // Testnets like Sepolia: no CoinGecko enrichment available
+                this.logger.debug(
+                    { address: normalizedAddress, chainId },
+                    "Skipping CoinGecko enrichment for testnet chain"
                 );
             } else {
                 // Check coingecko_tokens cache first (if service is available)
@@ -981,6 +987,12 @@ export class Erc20TokenService extends TokenService {
                     address,
                     existing.symbol
                 );
+            } else if (isNonProductionChain(chainId)) {
+                // Testnets like Sepolia: no CoinGecko enrichment available
+                this.logger.debug(
+                    { tokenId, address, chainId },
+                    "Skipping CoinGecko enrichment for testnet chain"
+                );
             } else {
                 // Check coingecko_tokens cache first (if service is available)
                 let cacheHit = false;
@@ -1169,12 +1181,12 @@ export class Erc20TokenService extends TokenService {
                 throw error;
             }
 
-            // Get platform ID for this chain (null for local chains)
+            // Get platform ID for this chain (null for non-production chains)
             const platformId = this.getPlatformId(chainId);
-            const isLocal = isLocalChain(chainId);
+            const isNonProd = isNonProductionChain(chainId);
 
-            // For non-local chains, require a CoinGecko platform mapping
-            if (!platformId && !isLocal) {
+            // For production chains, require a CoinGecko platform mapping
+            if (!platformId && !isNonProd) {
                 const error = new Error(
                     `No CoinGecko platform mapping for chain ${chainId}`
                 );
@@ -1276,7 +1288,7 @@ export class Erc20TokenService extends TokenService {
             );
 
             // 2. If we have less than 10 DB results, search CoinGecko for more
-            // Skip CoinGecko search for local chains (no platform mapping available)
+            // Skip CoinGecko search for non-production chains (no platform mapping available)
             let coinGeckoToAdd: Erc20TokenSearchCandidate[] = [];
 
             if (dbCandidates.length < 10 && platformId) {
@@ -1328,10 +1340,10 @@ export class Erc20TokenService extends TokenService {
                     },
                     "CoinGecko search completed"
                 );
-            } else if (isLocal) {
+            } else if (isNonProd) {
                 this.logger.debug(
                     { chainId, dbCount: dbCandidates.length },
-                    "Skipping CoinGecko search (local chain - no platform mapping)"
+                    "Skipping CoinGecko search (non-production chain - no platform mapping)"
                 );
             } else {
                 this.logger.debug(
@@ -1346,13 +1358,13 @@ export class Erc20TokenService extends TokenService {
                 ...coinGeckoToAdd,
             ];
 
-            // 4. Auto-discover fallback for LOCAL CHAINS only
-            // If user searched by specific address on a local chain and we found nothing,
-            // try on-chain discovery (CoinGecko doesn't index local chains)
-            if (candidates.length === 0 && normalizedAddress && isLocal) {
+            // 4. Auto-discover fallback for NON-PRODUCTION CHAINS only
+            // If user searched by specific address on a non-production chain and we found nothing,
+            // try on-chain discovery (CoinGecko doesn't index non-production chains)
+            if (candidates.length === 0 && normalizedAddress && isNonProd) {
                 this.logger.debug(
                     { chainId, address: normalizedAddress },
-                    "No search results on local chain, attempting on-chain discovery"
+                    "No search results on non-production chain, attempting on-chain discovery"
                 );
 
                 try {

@@ -24,7 +24,7 @@ import {
   sepolia,
   type Chain,
 } from 'viem/chains';
-import { type FinalityConfig, getChainEntry, getRpcEnvVarName } from '@midcurve/shared';
+import { type FinalityConfig, getChainEntry, getRpcEnvVarName, isProductionChainId } from '@midcurve/shared';
 import type { AppConfig } from './app-config.js';
 
 /**
@@ -82,6 +82,14 @@ export enum SupportedChainId {
  */
 export function isLocalChain(chainId: number): boolean {
   return chainId === SupportedChainId.LOCAL;
+}
+
+/**
+ * Check if a chain ID is a non-production chain (testnet or local dev).
+ * Non-production chains lack external service support (CoinGecko, subgraphs, etc.)
+ */
+export function isNonProductionChain(chainId: number): boolean {
+  return !isProductionChainId(chainId);
 }
 
 /**
