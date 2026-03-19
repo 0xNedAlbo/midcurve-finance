@@ -44,7 +44,7 @@ const WETH: Record<string, string> = {
   mainnet: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   arbitrum: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
   base: '0x4200000000000000000000000000000000000006',
-  sepolia: '', // TODO: populate after DeploySepolia.s.sol deployment
+  sepolia: '0x5BB47f45Cd7b7611d4D54992Cf05e2cF2529e031', // mcWETH mock token
 };
 
 // USDC addresses (native, not bridged)
@@ -53,7 +53,7 @@ const USDC: Record<string, string> = {
   mainnet: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
   arbitrum: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
   base: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  sepolia: '', // TODO: populate after DeploySepolia.s.sol deployment
+  sepolia: '0xDf5f0577Bd56a67fd0844F7EA08649d63a5D5f3C', // mcUSD mock token
 };
 
 // Paraswap Augustus V6.2 (same across all EVM chains)
