@@ -512,14 +512,16 @@ export class EvmTxStatusSubscriber {
       return;
     }
 
-    log.info({ count: subscriptions.length, msg: 'Found new tx status subscriptions' });
+    const staleIds: string[] = [];
+    let addedCount = 0;
 
     for (const sub of subscriptions) {
       const config = sub.config as unknown as EvmTxStatusSubscriptionConfig;
       const state = sub.state as unknown as EvmTxStatusSubscriptionState;
 
-      // Skip completed subscriptions
+      // Completed subscriptions still marked active — delete immediately
       if (state.isComplete) {
+        staleIds.push(sub.subscriptionId);
         continue;
       }
 
@@ -537,12 +539,24 @@ export class EvmTxStatusSubscriber {
         targetConfirmations: config.targetConfirmations,
       });
 
+      addedCount++;
       log.info({
         chainId,
         txHash: config.txHash,
         subscriptionId: sub.subscriptionId,
         msg: 'Added new tx status subscription',
       });
+    }
+
+    if (staleIds.length > 0) {
+      await prisma.onchainDataSubscribers.deleteMany({
+        where: { subscriptionId: { in: staleIds } },
+      });
+      log.info({ count: staleIds.length, msg: 'Deleted stale completed tx status subscriptions' });
+    }
+
+    if (addedCount > 0) {
+      log.info({ count: addedCount, msg: 'Found new tx status subscriptions' });
     }
   }
 
