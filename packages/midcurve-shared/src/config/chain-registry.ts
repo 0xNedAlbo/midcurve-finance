@@ -54,6 +54,8 @@ export interface ChainRegistryEntry {
   isProduction: boolean;
   /** How to determine the finalized block on this chain */
   finality: FinalityConfig;
+  /** Wrapped native currency token (e.g. WETH, wMATIC, wBNB), or null for local chains */
+  wrappedNativeCurrency: { name: string; symbol: string; address: string; decimals: number } | null;
 }
 
 // ============================================================================
@@ -72,6 +74,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     envVarSuffix: 'ETHEREUM',
     isProduction: true,
     finality: { type: 'blockTag' },
+    wrappedNativeCurrency: { name: 'Wrapped Ether', symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', decimals: 18 },
   },
   42161: {
     id: 42161,
@@ -84,6 +87,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     envVarSuffix: 'ARBITRUM',
     isProduction: true,
     finality: { type: 'blockTag' },
+    wrappedNativeCurrency: { name: 'Wrapped Ether', symbol: 'WETH', address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18 },
   },
   8453: {
     id: 8453,
@@ -96,6 +100,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     envVarSuffix: 'BASE',
     isProduction: true,
     finality: { type: 'blockTag' },
+    wrappedNativeCurrency: { name: 'Wrapped Ether', symbol: 'WETH', address: '0x4200000000000000000000000000000000000006', decimals: 18 },
   },
   11155111: {
     id: 11155111,
@@ -108,6 +113,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     envVarSuffix: 'SEPOLIA',
     isProduction: false,
     finality: { type: 'blockTag' },
+    wrappedNativeCurrency: { name: 'Wrapped Ether', symbol: 'WETH', address: '0xd7cda2021e97DA29d188B78139D358aFB9010a6A', decimals: 18 },
   },
   31337: {
     id: 31337,
@@ -120,6 +126,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     envVarSuffix: 'LOCAL',
     isProduction: false,
     finality: { type: 'blockTag' },
+    wrappedNativeCurrency: { name: 'Wrapped Ether', symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', decimals: 18 },
   },
 };
 
