@@ -71,5 +71,5 @@ export type ContractSwapDirection =
  *
  * Note: Executed orders are deleted from the DB (execution history lives in AutomationLog).
  */
-export const AUTOMATION_STATES = ['inactive', 'monitoring', 'executing', 'retrying', 'failed'] as const;
+export const AUTOMATION_STATES = ['inactive', 'paused', 'monitoring', 'executing', 'retrying', 'failed'] as const;
 export type AutomationState = (typeof AUTOMATION_STATES)[number];

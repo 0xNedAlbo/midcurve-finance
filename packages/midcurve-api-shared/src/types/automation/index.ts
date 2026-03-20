@@ -37,6 +37,9 @@ export {
   CloseOrderHashSchema,
   type ListCloseOrdersResponse,
   type GetCloseOrderResponse,
+  SetAutomationStateBodySchema,
+  type SetAutomationStateBody,
+  type SetAutomationStateResponse,
 } from './close-orders.js';
 
 // Logs

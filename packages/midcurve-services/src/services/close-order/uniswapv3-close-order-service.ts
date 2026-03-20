@@ -270,7 +270,7 @@ export class UniswapV3CloseOrderService {
               sharedContractId: sharedContract.id,
               orderIdentityHash,
               closeOrderHash,
-              automationState: isOurOrder ? 'monitoring' : 'inactive',
+              automationState: isOurOrder ? 'paused' : 'inactive',
               config: {
                 chainId,
                 nftId,
@@ -311,25 +311,36 @@ export class UniswapV3CloseOrderService {
 
           const synced = await this.syncFromChain(existingOrder.id, { state: updatedState }, tx);
 
-          // Adjust automationState if operator ownership changed
+          // Adjust automationState based on operator ownership.
+          // Never touch in-flight execution states or failed (user must reactivate).
           const isOurOrder = hasOperator && ourOperatorAddress !== null
             && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
           const currentState = existingOrder.automationState;
-          const expectedState = isOurOrder ? 'monitoring' : 'inactive';
 
-          if (
-            (currentState === 'monitoring' || currentState === 'inactive' || currentState === 'failed')
-            && currentState !== expectedState
-          ) {
+          if (currentState === 'executing' || currentState === 'retrying') {
+            // In-flight execution — do not touch
+          } else if (!isOurOrder && currentState !== 'inactive') {
+            // Operator is not ours → inactive
             await db.closeOrder.update({
               where: { id: existingOrder.id },
-              data: { automationState: expectedState },
+              data: { automationState: 'inactive' },
             });
             this.logger.info(
-              { id: existingOrder.id, from: currentState, to: expectedState },
-              'Automation state updated after operator check',
+              { id: existingOrder.id, from: currentState, to: 'inactive' },
+              'Automation state set to inactive (operator not ours)',
+            );
+          } else if (isOurOrder && currentState === 'inactive') {
+            // Operator changed to us → paused (don't auto-monitor)
+            await db.closeOrder.update({
+              where: { id: existingOrder.id },
+              data: { automationState: 'paused' },
+            });
+            this.logger.info(
+              { id: existingOrder.id, from: currentState, to: 'paused' },
+              'Automation state set to paused (operator now ours)',
             );
           }
+          // All other states (monitoring, paused, failed) when operator matches: no change
 
           orders.push(synced);
           updated++;
@@ -886,6 +897,57 @@ export class UniswapV3CloseOrderService {
       log.methodError(this.logger, 'markFailed', err as Error, { id });
       throw err;
     }
+  }
+
+  /**
+   * Sets automation state for user-initiated monitoring control.
+   * Allowed transitions: paused→monitoring, monitoring→paused, failed→monitoring, failed→paused.
+   * Rejects transitions from inactive, executing, or retrying.
+   */
+  async setAutomationState(
+    id: string,
+    targetState: 'monitoring' | 'paused',
+    tx?: PrismaTransactionClient,
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'setAutomationState', { id, targetState });
+
+    const db = tx ?? this.prisma;
+    const order = await db.closeOrder.findUniqueOrThrow({ where: { id } });
+    const currentState = order.automationState;
+
+    const ALLOWED_SOURCE_STATES = ['paused', 'monitoring', 'failed'];
+    if (!ALLOWED_SOURCE_STATES.includes(currentState)) {
+      throw new Error(
+        `Cannot set automation state from '${currentState}' to '${targetState}'. ` +
+        `Only paused, monitoring, and failed orders can be changed.`
+      );
+    }
+
+    if (currentState === targetState) {
+      this.logger.info({ id, currentState }, 'Automation state already matches target, no change');
+      log.methodExit(this.logger, 'setAutomationState', { id });
+      return order;
+    }
+
+    const data: Record<string, unknown> = { automationState: targetState };
+
+    // Reset execution state when transitioning from failed
+    if (currentState === 'failed') {
+      data.executionAttempts = 0;
+      data.lastError = null;
+    }
+
+    const result = await db.closeOrder.update({
+      where: { id },
+      data,
+    });
+
+    this.logger.info(
+      { id, from: currentState, to: targetState },
+      'Automation state updated by user',
+    );
+    log.methodExit(this.logger, 'setAutomationState', { id });
+    return result;
   }
 
   // ==========================================================================

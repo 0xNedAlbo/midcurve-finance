@@ -80,9 +80,6 @@ const QUEUE_NAME = 'business-logic.process-close-order-events';
 /** Routing pattern to subscribe to all close order events */
 const ROUTING_PATTERN = 'closer.#';
 
-/** Terminal automation states — executed orders are deleted, so only 'failed' remains */
-const TERMINAL_AUTOMATION_STATES = ['failed'];
-
 // =============================================================================
 // String → Numeric Enum Mapping
 // =============================================================================
@@ -435,7 +432,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         }
 
         // Stale or terminal order at this slot — delete and re-create
-        const wasTerminal = TERMINAL_AUTOMATION_STATES.includes(existingOrder.automationState);
+        const wasTerminal = existingOrder.automationState === 'failed';
 
         await this.orderService.delete(existingOrder.id, tx);
 
@@ -742,25 +739,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * If the order is in a terminal state (failed), reset it to monitoring so
-   * the user can reactivate a failed order by updating any config field.
-   */
-  private async reactivateIfFailed(
-    order: CloseOrder,
-    tx: TxClient
-  ): Promise<boolean> {
-    if (TERMINAL_AUTOMATION_STATES.includes(order.automationState)) {
-      await this.orderService.resetToMonitoring(order.id, tx);
-      this.logger.info(
-        { orderId: order.id, previousState: order.automationState },
-        'Reactivated failed order after config update'
-      );
-      return true;
-    }
-    return false;
-  }
-
-  /**
    * Handles OrderOperatorUpdated events.
    */
   private async handleOperatorUpdated(
@@ -776,8 +754,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         tx
       );
 
-      const reactivated = await this.reactivateIfFailed(order, tx);
-
       this.logger.info(
         { orderId: order.id, newOperator: event.payload.newOperator },
         'Close order operator updated'
@@ -790,7 +766,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           order.id,
           {
             orderTag,
-            changes: reactivated ? 'operator address (reactivated)' : 'operator address',
+            changes: 'operator address',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
           tx
@@ -821,8 +797,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         tx
       );
 
-      const reactivated = await this.reactivateIfFailed(order, tx);
-
       this.logger.info(
         { orderId: order.id, newPayout: event.payload.newPayout },
         'Close order payout updated'
@@ -835,7 +809,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           order.id,
           {
             orderTag,
-            changes: reactivated ? 'payout address (reactivated)' : 'payout address',
+            changes: 'payout address',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
           tx
@@ -881,8 +855,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         tx
       );
 
-      const reactivated = await this.reactivateIfFailed(order, tx);
-
       this.logger.info(
         {
           orderId: order.id,
@@ -899,7 +871,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           order.id,
           {
             orderTag: oldOrderTag,
-            changes: reactivated ? 'trigger tick (reactivated)' : 'trigger tick',
+            changes: 'trigger tick',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
           tx
@@ -934,8 +906,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         tx
       );
 
-      const reactivated = await this.reactivateIfFailed(order, tx);
-
       this.logger.info(
         { orderId: order.id, newValidUntil: newValidUntil.toISOString() },
         'Close order valid-until updated'
@@ -948,7 +918,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           order.id,
           {
             orderTag,
-            changes: reactivated ? 'valid-until (reactivated)' : 'valid-until',
+            changes: 'valid-until',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
           tx
@@ -982,8 +952,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         tx
       );
 
-      const reactivated = await this.reactivateIfFailed(order, tx);
-
       this.logger.info(
         { orderId: order.id, newSlippageBps: event.payload.newSlippageBps },
         'Close order slippage updated'
@@ -996,7 +964,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           order.id,
           {
             orderTag,
-            changes: reactivated ? 'slippage (reactivated)' : 'slippage',
+            changes: 'slippage',
             previousSlippageBps: previousSlippageBps ?? undefined,
             newSlippageBps: event.payload.newSlippageBps,
             chainId: event.chainId,
@@ -1032,8 +1000,6 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         tx
       );
 
-      const reactivated = await this.reactivateIfFailed(order, tx);
-
       this.logger.info(
         { orderId: order.id, newDirection: event.payload.newDirection },
         'Close order swap intent updated'
@@ -1046,7 +1012,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           order.id,
           {
             orderTag,
-            changes: reactivated ? 'swap intent (reactivated)' : 'swap intent',
+            changes: 'swap intent',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
           tx

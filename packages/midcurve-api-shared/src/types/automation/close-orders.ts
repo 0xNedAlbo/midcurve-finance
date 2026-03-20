@@ -20,16 +20,17 @@ export type CloseOrderType = (typeof CLOSE_ORDER_TYPES)[number];
 /**
  * Automation state values — direct mapping from DB, no derivation needed.
  *
+ * paused:     Order is assigned to our operator but user has not activated monitoring
  * monitoring: Price monitor is watching for trigger condition
  * executing:  Execution in progress (simulation/signing/broadcasting)
  * retrying:   Execution failed, waiting before retry (60s delay)
- * failed:     Max execution attempts exhausted (terminal)
+ * failed:     Max execution attempts exhausted (user must reactivate via wizard)
  *
  * inactive:   Order exists on-chain but operator doesn't match (not auto-executed)
  *
  * Note: Executed orders are deleted from the DB (execution history lives in AutomationLog).
  */
-export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed', 'inactive'] as const;
+export const AUTOMATION_STATES = ['paused', 'monitoring', 'executing', 'retrying', 'failed', 'inactive'] as const;
 export type AutomationState = (typeof AUTOMATION_STATES)[number];
 
 /**
@@ -126,3 +127,16 @@ export type ListCloseOrdersResponse = ApiResponse<SerializedCloseOrder[]>;
  * GET /api/v1/positions/uniswapv3/:chainId/:nftId/close-orders/:hash - Response
  */
 export type GetCloseOrderResponse = ApiResponse<SerializedCloseOrder>;
+
+// =============================================================================
+// SET AUTOMATION STATE
+// =============================================================================
+
+/**
+ * PATCH /api/v1/positions/uniswapv3/:chainId/:nftId/close-orders/:hash/automation-state
+ */
+export const SetAutomationStateBodySchema = z.object({
+  automationState: z.enum(['monitoring', 'paused']),
+});
+export type SetAutomationStateBody = z.infer<typeof SetAutomationStateBodySchema>;
+export type SetAutomationStateResponse = ApiResponse<SerializedCloseOrder>;
