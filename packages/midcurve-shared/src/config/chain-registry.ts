@@ -47,7 +47,7 @@ export interface ChainRegistryEntry {
   /** CoinGecko platform identifier, or null for local chains */
   coingeckoPlatformId: string | null;
   /** Native currency info */
-  nativeCurrency: { symbol: string; decimals: number };
+  nativeCurrency: { symbol: string; decimals: number; coingeckoId: string };
   /** Suffix for env var names (e.g. "ETHEREUM" → RPC_URL_ETHEREUM) */
   envVarSuffix: string;
   /** Whether this is a production (non-dev) chain */
@@ -70,7 +70,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     slug: 'ethereum',
     explorer: { name: 'Etherscan', baseUrl: 'https://etherscan.io' },
     coingeckoPlatformId: 'ethereum',
-    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    nativeCurrency: { symbol: 'ETH', decimals: 18, coingeckoId: 'ethereum' },
     envVarSuffix: 'ETHEREUM',
     isProduction: true,
     finality: { type: 'blockTag' },
@@ -83,7 +83,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     slug: 'arbitrum',
     explorer: { name: 'Arbiscan', baseUrl: 'https://arbiscan.io' },
     coingeckoPlatformId: 'arbitrum-one',
-    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    nativeCurrency: { symbol: 'ETH', decimals: 18, coingeckoId: 'ethereum' },
     envVarSuffix: 'ARBITRUM',
     isProduction: true,
     finality: { type: 'blockTag' },
@@ -96,7 +96,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     slug: 'base',
     explorer: { name: 'Basescan', baseUrl: 'https://basescan.org' },
     coingeckoPlatformId: 'base',
-    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    nativeCurrency: { symbol: 'ETH', decimals: 18, coingeckoId: 'ethereum' },
     envVarSuffix: 'BASE',
     isProduction: true,
     finality: { type: 'blockTag' },
@@ -109,7 +109,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     slug: 'sepolia',
     explorer: { name: 'Etherscan', baseUrl: 'https://sepolia.etherscan.io' },
     coingeckoPlatformId: null,
-    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    nativeCurrency: { symbol: 'ETH', decimals: 18, coingeckoId: 'ethereum' },
     envVarSuffix: 'SEPOLIA',
     isProduction: false,
     finality: { type: 'blockTag' },
@@ -122,7 +122,7 @@ export const CHAIN_REGISTRY: Readonly<Record<number, ChainRegistryEntry>> = {
     slug: 'local',
     explorer: null,
     coingeckoPlatformId: null,
-    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    nativeCurrency: { symbol: 'ETH', decimals: 18, coingeckoId: 'ethereum' },
     envVarSuffix: 'LOCAL',
     isProduction: false,
     finality: { type: 'blockTag' },
@@ -243,6 +243,11 @@ export function buildAddressUrl(
 /** Get native currency symbol (e.g. "ETH") */
 export function getNativeCurrencySymbol(chainId: number): string {
   return getChainEntry(chainId).nativeCurrency.symbol;
+}
+
+/** Get native currency CoinGecko ID (e.g. "ethereum") */
+export function getNativeCurrencyCoingeckoId(chainId: number): string {
+  return getChainEntry(chainId).nativeCurrency.coingeckoId;
 }
 
 /** Check if a chain ID is in the registry */

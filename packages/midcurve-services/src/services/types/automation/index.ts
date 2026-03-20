@@ -31,6 +31,7 @@ export type {
   OrderModifiedContext,
   PreflightValidationContext,
   SimulationFailedContext,
+  ExecutionSkippedContext,
   // Union and inputs
   AutomationLogContext,
   CreateAutomationLogInput,

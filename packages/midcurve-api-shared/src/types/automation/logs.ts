@@ -48,6 +48,7 @@ export const AUTOMATION_LOG_TYPES = [
   'ORDER_FAILED',
   'ORDER_CANCELLED',
   'RETRY_SCHEDULED',
+  'EXECUTION_SKIPPED',
 ] as const;
 
 export type AutomationLogType = (typeof AUTOMATION_LOG_TYPES)[number];

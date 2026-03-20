@@ -26,6 +26,7 @@ import type {
   RetryScheduledContext,
   PreflightValidationContext,
   SimulationFailedContext,
+  ExecutionSkippedContext,
 } from '../types/automation/index.js';
 
 // =============================================================================
@@ -60,6 +61,7 @@ export const AutomationLogType = {
   RETRY_SCHEDULED: 'RETRY_SCHEDULED',
   PREFLIGHT_VALIDATION: 'PREFLIGHT_VALIDATION',
   SIMULATION_FAILED: 'SIMULATION_FAILED',
+  EXECUTION_SKIPPED: 'EXECUTION_SKIPPED',
 } as const;
 
 export type AutomationLogTypeValue =
@@ -550,6 +552,26 @@ export class AutomationLogService {
       closeOrderId,
       level: LogLevel.ERROR,
       logType: AutomationLogType.SIMULATION_FAILED,
+      message,
+      context,
+    }, tx);
+  }
+
+  async logExecutionSkipped(
+    positionId: string,
+    closeOrderId: string,
+    context: ExecutionSkippedContext,
+    tx?: PrismaTransactionClient
+  ): Promise<void> {
+    const message = this.formatWithOrderTag(
+      context.orderTag,
+      `Execution skipped: ${context.reason}`
+    );
+    await this.log({
+      positionId,
+      closeOrderId,
+      level: LogLevel.WARN,
+      logType: AutomationLogType.EXECUTION_SKIPPED,
       message,
       context,
     }, tx);

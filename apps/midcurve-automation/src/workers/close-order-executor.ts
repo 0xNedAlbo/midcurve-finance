@@ -30,12 +30,14 @@ import {
   readParaswapAdapterAddress,
   computeWithdrawMinAmounts,
   EMPTY_SWAP_PARAMS,
+  getPublicClient,
   type SupportedChainId,
   type PreflightValidation,
   type SimulationSwapParams,
   type SimulationFeeParams,
 } from '../lib/evm';
-import { isSupportedChain, getWorkerConfig, getFeeConfig } from '../lib/config';
+import { isSupportedChain, getWorkerConfig } from '../lib/config';
+import { computeDynamicFeeBps } from '../lib/dynamic-fee';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
 import { QUEUES, EXCHANGES, ROUTING_KEYS, ORDER_RETRY_DELAY_MS } from '../mq/topology';
@@ -475,7 +477,6 @@ export class CloseOrderExecutor {
     const closeOrderService = getUniswapV3CloseOrderService();
     const automationSubscriptionService = getAutomationSubscriptionService();
     const signerClient = getSignerClient();
-    const feeConfig = getFeeConfig();
 
     // Validate chain support
     if (!isSupportedChain(chainId)) {
@@ -489,7 +490,6 @@ export class CloseOrderExecutor {
     }
 
     const orderConfig = (order.config ?? {}) as Record<string, unknown>;
-    const orderState = (order.state ?? {}) as Record<string, unknown>;
 
     // triggerMode from config JSON (0=LOWER, 1=UPPER)
     const triggerMode = orderConfig.triggerMode as number;
@@ -500,11 +500,8 @@ export class CloseOrderExecutor {
       throw new Error(`Contract address not configured for order: ${orderId}`);
     }
 
-    // Operator address from state JSON
-    const operatorAddress = orderState.operatorAddress as string | undefined;
-    if (!operatorAddress) {
-      throw new Error(`Operator address not configured for order: ${orderId}`);
-    }
+    // Operator address from signer service (single operator key for all users)
+    const operatorAddress = await signerClient.getOperatorAddress();
 
     // Get full position data (needed for signer service + price formatting)
     const positionService = getPositionService();
@@ -681,6 +678,49 @@ export class CloseOrderExecutor {
     });
 
     // =========================================================================
+    // DYNAMIC FEE: Compute feeBps based on gas cost vs withdrawal value
+    // =========================================================================
+    const dynamicFee = await computeDynamicFeeBps({
+      chainId,
+      gasLimit: 500_000n, // Conservative estimate for gas estimation
+      gasPrice: await getPublicClient(chainId as SupportedChainId).getGasPrice(),
+      token0CoingeckoId: position.pool.token0.coingeckoId ?? undefined,
+      token1CoingeckoId: position.pool.token1.coingeckoId ?? undefined,
+      token0Decimals: position.pool.token0.decimals,
+      token1Decimals: position.pool.token1.decimals,
+      estimatedAmount0: withdrawParams.amount0Min,
+      estimatedAmount1: withdrawParams.amount1Min,
+    });
+
+    if (!dynamicFee.canCoverGas) {
+      const automationLogService = getAutomationLogService();
+      log.warn({
+        orderId,
+        positionId,
+        estimatedGasCostWei: dynamicFee.estimatedGasCostWei.toString(),
+        estimatedWithdrawalValueWei: dynamicFee.estimatedWithdrawalValueWei.toString(),
+        rawFeeBps: dynamicFee.rawFeeBps,
+        maxFeeBps: 100,
+        msg: 'Fee does not cover gas costs — skipping execution',
+      });
+
+      await automationLogService.logExecutionSkipped(positionId, orderId, {
+        platform: 'evm',
+        chainId,
+        orderTag: triggerSide === 'upper' ? 'TP' : 'SL',
+        reason: 'fee does not cover gas costs',
+        estimatedGasCostWei: dynamicFee.estimatedGasCostWei.toString(),
+        estimatedWithdrawalValueWei: dynamicFee.estimatedWithdrawalValueWei.toString(),
+        computedFeeBps: dynamicFee.rawFeeBps,
+        maxFeeBps: 100,
+      });
+
+      // Transition back to monitoring — don't count as a failed attempt
+      await closeOrderService.resetToMonitoring(orderId);
+      return;
+    }
+
+    // =========================================================================
     // SWAP PARAMS: Get Paraswap quote for guaranteed swap portion
     // =========================================================================
     let swapParamsInput: SwapParamsInput = {
@@ -709,12 +749,12 @@ export class CloseOrderExecutor {
         : withdrawParams.amount1Min;
 
       // Deduct fee to get guaranteed amount (contract deducts fees before swapping)
-      const guaranteedAmountIn = (swapTokenMin * BigInt(10000 - feeConfig.bps)) / 10000n;
+      const guaranteedAmountIn = (swapTokenMin * BigInt(10000 - dynamicFee.feeBps)) / 10000n;
 
       log.info({
         orderId,
         swapTokenMin: swapTokenMin.toString(),
-        feeBps: feeConfig.bps,
+        feeBps: dynamicFee.feeBps,
         guaranteedAmountIn: guaranteedAmountIn.toString(),
         msg: 'Computed guaranteedAmountIn (after fee deduction)',
       });
@@ -813,17 +853,14 @@ export class CloseOrderExecutor {
       }
     }
 
-    // =========================================================================
-    // FEE PARAMS
-    // =========================================================================
     const feeParamsInput: FeeParamsInput = {
-      feeRecipient: feeConfig.recipient,
-      feeBps: feeConfig.bps,
+      feeRecipient: operatorAddress,
+      feeBps: dynamicFee.feeBps,
     };
 
     const simulationFeeParams: SimulationFeeParams = {
-      feeRecipient: feeConfig.recipient as `0x${string}`,
-      feeBps: feeConfig.bps,
+      feeRecipient: operatorAddress as `0x${string}`,
+      feeBps: dynamicFee.feeBps,
     };
 
     // =========================================================================
@@ -918,8 +955,8 @@ export class CloseOrderExecutor {
         nftId: nftId.toString(),
         triggerMode,
         contractAddress,
-        feeRecipient: feeConfig.recipient,
-        feeBps: feeConfig.bps,
+        feeRecipient: operatorAddress,
+        feeBps: dynamicFee.feeBps,
         contractBalances,
       });
 
@@ -1089,7 +1126,7 @@ export class CloseOrderExecutor {
       gasUsed: receipt.gasUsed.toString(),
       amount0Out: '0', // TODO: Parse from tx receipt
       amount1Out: '0', // TODO: Parse from tx receipt
-      executionFeeBps: feeConfig.bps,
+      executionFeeBps: dynamicFee.feeBps,
     });
 
     autoLog.orderExecution(log, orderId, 'completed', {

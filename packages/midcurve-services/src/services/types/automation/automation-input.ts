@@ -201,6 +201,19 @@ export interface SimulationFailedContext extends OrderLogContext {
 }
 
 /**
+ * Context for EXECUTION_SKIPPED event
+ *
+ * @messageTemplate "[{orderTag}] Execution skipped: {reason}"
+ */
+export interface ExecutionSkippedContext extends OrderLogContext {
+  reason: string;
+  estimatedGasCostWei: string;
+  estimatedWithdrawalValueWei: string;
+  computedFeeBps: number;
+  maxFeeBps: number;
+}
+
+/**
  * Context for ORDER_CANCELLED event
  *
  * @messageTemplate "[{orderTag}] Close order cancelled by user"
@@ -253,7 +266,8 @@ export type AutomationLogContext =
   | OrderExpiredContext
   | OrderModifiedContext
   | PreflightValidationContext
-  | SimulationFailedContext;
+  | SimulationFailedContext
+  | ExecutionSkippedContext;
 
 /**
  * Input for creating an automation log entry
