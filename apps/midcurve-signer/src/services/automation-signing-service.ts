@@ -189,7 +189,7 @@ class AutomationSigningServiceImpl {
     signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, nonce, hasSwap: swapParams.hops.length > 0 });
 
     const operatorKeyService = OperatorKeyService.getInstance();
-    const operatorAddress = operatorKeyService.getOperatorAddress();
+    const operatorAddress = await operatorKeyService.getOperatorAddress();
 
     // Build param tuples
     const withdrawParamsTuple = {

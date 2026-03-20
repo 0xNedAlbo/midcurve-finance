@@ -142,6 +142,7 @@ const POSITION_CLOSER_ABI = [
 class SignerClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private cachedOperatorAddress: string | null = null;
 
   constructor() {
     const config = getSignerConfig();
@@ -310,16 +311,40 @@ class SignerClient {
   }
 
   /**
-   * Get the operator address for gas estimation
+   * Create the operator wallet (or return existing).
+   * Called on automation startup to ensure the key exists.
+   * Also serves as a signer health check.
+   */
+  async createOperatorWallet(): Promise<string> {
+    log.info({ msg: 'Ensuring operator wallet exists via signer service' });
+
+    const result = await this.request<{ address: string }>(
+      'POST',
+      '/api/operator/wallet'
+    );
+
+    this.cachedOperatorAddress = result.address;
+
+    log.info({ operatorAddress: result.address, msg: 'Operator wallet ready' });
+
+    return result.address;
+  }
+
+  /**
+   * Get the operator address for gas estimation.
+   * Returns cached value if available (address never changes).
    */
   async getOperatorAddress(): Promise<string> {
-    log.info({ msg: 'Getting operator address' });
+    if (this.cachedOperatorAddress) {
+      return this.cachedOperatorAddress;
+    }
 
     const result = await this.request<{ address: string }>(
       'GET',
       '/api/operator/address'
     );
 
+    this.cachedOperatorAddress = result.address;
     return result.address;
   }
 }

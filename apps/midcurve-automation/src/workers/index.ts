@@ -70,7 +70,13 @@ class WorkerManager {
       await initAppConfig();
       log.info({ msg: 'AppConfig initialized' });
 
-      // Initialize RabbitMQ connection first
+      // Ensure operator wallet exists (also validates signer reachability)
+      const { getSignerClient } = await import('../clients/signer-client');
+      const signerClient = getSignerClient();
+      const operatorAddress = await signerClient.createOperatorWallet();
+      log.info({ operatorAddress, msg: 'Operator wallet ready' });
+
+      // Initialize RabbitMQ connection
       const mq = getRabbitMQConnection();
       const channel = await mq.connect();
 
