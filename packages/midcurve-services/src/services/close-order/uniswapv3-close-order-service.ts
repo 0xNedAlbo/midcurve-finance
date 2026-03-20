@@ -319,7 +319,7 @@ export class UniswapV3CloseOrderService {
           const expectedState = isOurOrder ? 'monitoring' : 'inactive';
 
           if (
-            (currentState === 'monitoring' || currentState === 'inactive')
+            (currentState === 'monitoring' || currentState === 'inactive' || currentState === 'failed')
             && currentState !== expectedState
           ) {
             await db.closeOrder.update({
