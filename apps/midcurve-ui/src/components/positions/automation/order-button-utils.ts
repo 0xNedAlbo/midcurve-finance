@@ -40,7 +40,7 @@ export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended';
  * 'failed' orders remain visible (red warning) to prompt user action.
  */
 const VISIBLE_BUTTON_STATES: AutomationState[] = [
-  'monitoring', 'executing', 'retrying', 'failed',
+  'monitoring', 'executing', 'retrying', 'failed', 'inactive',
 ];
 
 /**
@@ -70,7 +70,7 @@ export function findOrderForTriggerMode(
  */
 export function getOrderButtonVisualState(order: SerializedCloseOrder): OrderButtonVisualState {
   if (order.automationState === 'executing' || order.automationState === 'retrying') return 'executing';
-  if (order.automationState === 'failed') return 'suspended';
+  if (order.automationState === 'failed' || order.automationState === 'inactive') return 'suspended';
   return 'monitoring';
 }
 

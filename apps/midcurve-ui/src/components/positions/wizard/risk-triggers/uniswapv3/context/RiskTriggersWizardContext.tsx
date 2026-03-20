@@ -359,8 +359,8 @@ export function convertOrdersToTriggerState(
   slSwap: SwapConfigState;
   tpSwap: SwapConfigState;
 } {
-  // Non-terminal states — orders that are still "alive" in the automation pipeline
-  const activeStates = ['monitoring', 'executing', 'retrying'];
+  // Non-terminal states — orders that are still "alive" (or pending operator fix)
+  const activeStates = ['monitoring', 'executing', 'retrying', 'inactive'];
 
   // config.triggerMode stores the on-chain value. When isToken0Quote, tick direction
   // is inverse to user price direction, so the on-chain triggerMode is flipped:

@@ -25,9 +25,11 @@ export type CloseOrderType = (typeof CLOSE_ORDER_TYPES)[number];
  * retrying:   Execution failed, waiting before retry (60s delay)
  * failed:     Max execution attempts exhausted (terminal)
  *
+ * inactive:   Order exists on-chain but operator doesn't match (not auto-executed)
+ *
  * Note: Executed orders are deleted from the DB (execution history lives in AutomationLog).
  */
-export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed'] as const;
+export const AUTOMATION_STATES = ['monitoring', 'executing', 'retrying', 'failed', 'inactive'] as const;
 export type AutomationState = (typeof AUTOMATION_STATES)[number];
 
 /**

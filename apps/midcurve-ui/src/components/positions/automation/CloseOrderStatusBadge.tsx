@@ -67,6 +67,12 @@ const STATUS_CONFIG: Record<
     bgColor: 'bg-red-900/30',
     borderColor: 'border-red-700/50',
   },
+  inactive: {
+    label: 'Inactive',
+    textColor: 'text-slate-400',
+    bgColor: 'bg-slate-800/30',
+    borderColor: 'border-slate-600/50',
+  },
 };
 
 export function CloseOrderStatusBadge({ status, size = 'md' }: CloseOrderStatusBadgeProps) {

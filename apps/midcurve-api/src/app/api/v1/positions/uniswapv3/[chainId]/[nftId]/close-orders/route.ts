@@ -36,7 +36,7 @@ const PathParamsSchema = z.object({
  */
 const QueryParamsSchema = z.object({
   automationState: z
-    .enum(['monitoring', 'executing', 'retrying', 'failed'])
+    .enum(['monitoring', 'executing', 'retrying', 'failed', 'inactive'])
     .optional(),
   type: z.enum(['sl', 'tp']).optional(),
 });
