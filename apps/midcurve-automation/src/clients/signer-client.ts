@@ -310,24 +310,17 @@ class SignerClient {
   }
 
   /**
-   * Get automation wallet for a user
-   *
-   * Throws if wallet doesn't exist - wallet must be created during order registration in UI.
-   * This is intentional: if wallet doesn't exist at execution time, it's an error condition.
+   * Get the operator address for gas estimation
    */
-  async getWallet(userId: string): Promise<{ walletAddress: string }> {
-    log.info({ userId, msg: 'Getting automation wallet' });
+  async getOperatorAddress(): Promise<string> {
+    log.info({ msg: 'Getting operator address' });
 
-    const result = await this.request<{ wallet: { walletAddress: string } | null }>(
+    const result = await this.request<{ address: string }>(
       'GET',
-      `/api/wallets/automation?userId=${userId}`
+      '/api/operator/address'
     );
 
-    if (!result.wallet) {
-      throw new Error(`No automation wallet found for user ${userId}. Wallet must be created during order registration.`);
-    }
-
-    return { walletAddress: result.wallet.walletAddress };
+    return result.address;
   }
 }
 

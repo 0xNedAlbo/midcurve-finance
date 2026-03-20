@@ -11,7 +11,7 @@
  * The caller is responsible for fetching the on-chain nonce.
  *
  * Prerequisites:
- * - User must have an automation wallet
+ * - Operator key must be initialized (via instrumentation.ts on startup)
  * - Close order must be registered and active
  * - Price condition must be met
  *

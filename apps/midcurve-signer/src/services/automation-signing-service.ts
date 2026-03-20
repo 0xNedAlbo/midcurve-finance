@@ -1,31 +1,27 @@
 /**
  * Automation Signing Service
  *
- * Signs transactions for position automation on mainnet chains.
- * Unlike strategy signing (which uses SEMSEE), this service works with
- * real mainnet chains (Ethereum, Arbitrum, etc).
+ * Signs transactions for position automation using a single operator key.
+ * The operator key is managed by OperatorKeyService (persisted in Settings table).
  *
  * This service ONLY signs executeOrder transactions for the automation operator.
  * - registerOrder and cancelOrder are owner-only functions signed by user's EOA
- * - executeOrder is operator-only and signed by the automation wallet
+ * - executeOrder is operator-only and signed by the single operator key
  *
  * Security: This service has NO RPC access. Gas parameters (gasLimit, gasPrice)
  * must be provided by the caller (automation service).
- *
- * Note: Contract deployment is done by the user via their own EOA wallet.
- * Bytecode is served by the midcurve-automation service.
  */
 
 import {
   encodeFunctionData,
   keccak256,
+  serializeTransaction,
   type Address,
   type Hex,
   type Hash,
 } from 'viem';
 import { signerLogger, signerLog } from '@/lib/logger';
-import { automationWalletService } from './automation-wallet-service';
-import { privateKeyToAccount } from 'viem/accounts';
+import { OperatorKeyService } from './operator-key-service';
 
 // =============================================================================
 // Types
@@ -104,7 +100,7 @@ export interface SignExecuteOrderInput {
  * Signing error codes
  */
 export type AutomationSigningErrorCode =
-  | 'WALLET_NOT_FOUND'
+  | 'OPERATOR_NOT_INITIALIZED'
   | 'SIGNING_FAILED'
   | 'INTERNAL_ERROR';
 
@@ -129,9 +125,6 @@ export class AutomationSigningError extends Error {
 
 /**
  * UniswapV3PositionCloser ABI (minimal - only executeOrder needed)
- *
- * Only executeOrder is signed by the automation wallet (operator).
- * registerOrder and cancelOrder are signed by user's EOA (owner).
  */
 const POSITION_CLOSER_ABI = [
   {
@@ -189,26 +182,16 @@ class AutomationSigningServiceImpl {
   private readonly logger = signerLogger.child({ service: 'AutomationSigningService' });
 
   /**
-   * Sign an executeOrder transaction
-   *
-   * @param input - Execution input
-   * @returns Signed transaction
+   * Sign an executeOrder transaction using the singleton operator key.
    */
   async signExecuteOrder(input: SignExecuteOrderInput): Promise<SignTransactionResult> {
     const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = input;
     signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, nonce, hasSwap: swapParams.hops.length > 0 });
 
-    // 1. Get wallet
-    const wallet = await automationWalletService.getWalletByUserId(userId);
-    if (!wallet) {
-      throw new AutomationSigningError(
-        `No automation wallet found for user ${userId}`,
-        'WALLET_NOT_FOUND',
-        404
-      );
-    }
+    const operatorKeyService = OperatorKeyService.getInstance();
+    const operatorAddress = operatorKeyService.getOperatorAddress();
 
-    // 2. Build param tuples
+    // Build param tuples
     const withdrawParamsTuple = {
       amount0Min: BigInt(withdrawParams.amount0Min),
       amount1Min: BigInt(withdrawParams.amount1Min),
@@ -231,64 +214,14 @@ class AutomationSigningServiceImpl {
       feeBps: feeParams.feeBps,
     };
 
-    // 3. Encode function call
+    // Encode function call
     const callData = encodeFunctionData({
       abi: POSITION_CLOSER_ABI,
       functionName: 'executeOrder',
       args: [nftId, triggerMode, withdrawParamsTuple, swapParamsTuple, feeParamsTuple],
     });
 
-    // 4. Sign and return (gas params and nonce provided by caller)
-    const result = await this.signContractCall({
-      walletId: wallet.id,
-      walletAddress: wallet.walletAddress,
-      chainId,
-      contractAddress,
-      callData,
-      gasLimit,
-      gasPrice,
-      nonce,
-    });
-
-    this.logger.info({
-      userId,
-      chainId,
-      contractAddress,
-      nftId: nftId.toString(),
-      triggerMode,
-      nonce: result.nonce,
-      msg: 'executeOrder transaction signed',
-    });
-
-    signerLog.methodExit(this.logger, 'signExecuteOrder', { nonce: result.nonce });
-
-    return result;
-  }
-
-  // =============================================================================
-  // Private Helpers
-  // =============================================================================
-
-  /**
-   * Sign a contract call transaction
-   *
-   * Gas parameters (gasLimit, gasPrice) and nonce must be provided by the caller.
-   * This keeps the signer stateless and isolated from external RPC endpoints.
-   * The caller is responsible for fetching the on-chain nonce.
-   */
-  private async signContractCall(params: {
-    walletId: string;
-    walletAddress: Address;
-    chainId: number;
-    contractAddress: Address;
-    callData: Hex;
-    gasLimit: bigint;
-    gasPrice: bigint;
-    nonce: number;
-  }): Promise<SignTransactionResult> {
-    const { walletId, walletAddress, chainId, contractAddress, callData, gasLimit, gasPrice, nonce } = params;
-
-    // Build and sign transaction (nonce provided by caller)
+    // Build unsigned transaction
     const tx = {
       to: contractAddress,
       data: callData,
@@ -299,48 +232,40 @@ class AutomationSigningServiceImpl {
       type: 'legacy' as const,
     };
 
-    const signedTx = await this.signTransaction(walletId, tx);
-    const txHash = keccak256(signedTx);
+    // Serialize unsigned transaction to get the hash to sign
+    const unsignedTxHash = keccak256(serializeTransaction(tx));
 
-    // 3. Update last used
-    await automationWalletService.updateLastUsed(walletId);
+    // Sign with operator key
+    const signature = await operatorKeyService.signTransaction(unsignedTxHash);
+
+    // Serialize signed transaction
+    const signedTransaction = serializeTransaction(tx, {
+      r: signature.r,
+      s: signature.s,
+      v: BigInt(signature.v + 27), // Convert recovery id to v
+    });
+
+    const txHash = keccak256(signedTransaction);
+
+    this.logger.info({
+      userId,
+      chainId,
+      contractAddress,
+      nftId: nftId.toString(),
+      triggerMode,
+      nonce,
+      from: operatorAddress,
+      msg: 'executeOrder transaction signed with operator key',
+    });
+
+    signerLog.methodExit(this.logger, 'signExecuteOrder', { nonce });
 
     return {
-      signedTransaction: signedTx,
+      signedTransaction,
       txHash,
       nonce,
-      from: walletAddress,
+      from: operatorAddress,
     };
-  }
-
-  /**
-   * Sign a transaction with the wallet's private key
-   */
-  private async signTransaction(
-    walletId: string,
-    tx: {
-      to?: Address;
-      data: Hex;
-      chainId: number;
-      nonce: number;
-      gas: bigint;
-      gasPrice: bigint;
-      type: 'legacy';
-    }
-  ): Promise<Hex> {
-    // Get private key from wallet service
-    const privateKey = await automationWalletService.getPrivateKey(walletId);
-
-    // Create account from private key
-    const account = privateKeyToAccount(privateKey);
-
-    // Sign the transaction directly using viem's account.signTransaction
-    const signature = await account.signTransaction({
-      ...tx,
-      to: tx.to ?? null,
-    } as any);
-
-    return signature;
   }
 }
 
