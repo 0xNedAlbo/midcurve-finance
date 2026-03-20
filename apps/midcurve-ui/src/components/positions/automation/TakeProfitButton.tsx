@@ -14,7 +14,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { Plus, Eye, ArrowRight, Loader2, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, ArrowRight, Loader2, AlertTriangle, Pause, EyeOff } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { Address } from 'viem';
 import type { ListPositionData, TriggerMode, SerializedCloseOrder } from '@midcurve/api-shared';
@@ -151,6 +151,34 @@ export function TakeProfitButton({
         className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-red-300 bg-red-900/20 hover:bg-red-800/30 border-red-600/50 transition-colors cursor-pointer"
       >
         <AlertTriangle className="w-3 h-3" />
+        {priceLabel}
+      </button>
+    );
+  }
+
+  // Paused state — gray, pause icon, clickable
+  if (visualState === 'paused') {
+    return (
+      <button
+        onClick={handleNavigateToWizard}
+        title="Monitoring paused — click to manage"
+        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-slate-400 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 transition-colors cursor-pointer"
+      >
+        <Pause className="w-3 h-3" />
+        {priceLabel}
+      </button>
+    );
+  }
+
+  // Inactive state — gray, eye-off icon, clickable
+  if (visualState === 'inactive') {
+    return (
+      <button
+        onClick={handleNavigateToWizard}
+        title="Order not monitored (different operator)"
+        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-slate-500 bg-slate-800/20 hover:bg-slate-700/20 border-slate-600/30 transition-colors cursor-pointer"
+      >
+        <EyeOff className="w-3 h-3" />
         {priceLabel}
       </button>
     );

@@ -33,6 +33,8 @@ export interface SwapConfigState {
   exitSlippageBps: number; // slippage tolerance for decreaseLiquidity (basis points)
 }
 
+export type DesiredAutomationState = 'monitoring' | 'paused' | null;
+
 export interface RiskTriggersWizardState {
   currentStepIndex: number;
 
@@ -53,6 +55,13 @@ export interface RiskTriggersWizardState {
   takeProfit: TriggerState;
   slSwapConfig: SwapConfigState;
   tpSwapConfig: SwapConfigState;
+
+  // Monitoring control (ManageStep → ActivationStep)
+  slDesiredAutomationState: DesiredAutomationState;
+  tpDesiredAutomationState: DesiredAutomationState;
+
+  // Whether existing orders were found (drives dynamic step list)
+  hasExistingOrders: boolean;
 
   // UI
   stepValidation: Record<string, boolean>;
@@ -92,14 +101,24 @@ type WizardAction =
   | { type: 'SET_STEP_VALID'; stepId: string; valid: boolean }
   | { type: 'SET_INTERACTIVE_ZOOM'; zoom: number }
   | { type: 'SET_SUMMARY_ZOOM'; zoom: number }
+  | { type: 'SET_SL_DESIRED_AUTOMATION_STATE'; state: DesiredAutomationState }
+  | { type: 'SET_TP_DESIRED_AUTOMATION_STATE'; state: DesiredAutomationState }
   | { type: 'RESET' };
 
 // ----- Steps -----
 
-const RISK_TRIGGERS_STEPS: WizardStep[] = [
-  { id: 'configure', label: 'Configure Triggers' },
-  { id: 'transaction', label: 'Review & Execute' },
-];
+function computeSteps(hasExistingOrders: boolean): WizardStep[] {
+  const steps: WizardStep[] = [];
+  if (hasExistingOrders) {
+    steps.push({ id: 'manage', label: 'Manage Orders' });
+  }
+  steps.push(
+    { id: 'configure', label: 'Configure Triggers' },
+    { id: 'transaction', label: 'Review & Execute' },
+    { id: 'activation', label: 'Activate Monitoring' },
+  );
+  return steps;
+}
 
 // ----- Initial State -----
 
@@ -132,6 +151,9 @@ const initialState: RiskTriggersWizardState = {
   takeProfit: { ...EMPTY_TRIGGER },
   slSwapConfig: { ...DEFAULT_SWAP_CONFIG },
   tpSwapConfig: { ...DEFAULT_SWAP_CONFIG },
+  slDesiredAutomationState: null,
+  tpDesiredAutomationState: null,
+  hasExistingOrders: false,
   stepValidation: {},
   interactiveZoom: 1.0,
   summaryZoom: 1.0,
@@ -147,14 +169,16 @@ function wizardReducer(
     case 'GO_TO_STEP':
       return { ...state, currentStepIndex: action.stepIndex };
 
-    case 'GO_NEXT':
+    case 'GO_NEXT': {
+      const steps = computeSteps(state.hasExistingOrders);
       return {
         ...state,
         currentStepIndex: Math.min(
           state.currentStepIndex + 1,
-          RISK_TRIGGERS_STEPS.length - 1
+          steps.length - 1
         ),
       };
+    }
 
     case 'GO_BACK':
       return {
@@ -186,6 +210,7 @@ function wizardReducer(
     case 'INITIALIZE_FROM_ORDERS':
       return {
         ...state,
+        hasExistingOrders: action.sl.enabled || action.tp.enabled,
         initialStopLoss: { ...action.sl },
         initialTakeProfit: { ...action.tp },
         initialSlSwapConfig: { ...action.slSwap },
@@ -311,6 +336,12 @@ function wizardReducer(
     case 'SET_SUMMARY_ZOOM':
       return { ...state, summaryZoom: action.zoom };
 
+    case 'SET_SL_DESIRED_AUTOMATION_STATE':
+      return { ...state, slDesiredAutomationState: action.state };
+
+    case 'SET_TP_DESIRED_AUTOMATION_STATE':
+      return { ...state, tpDesiredAutomationState: action.state };
+
     case 'RESET':
       return initialState;
 
@@ -360,7 +391,7 @@ export function convertOrdersToTriggerState(
   tpSwap: SwapConfigState;
 } {
   // Non-terminal states — orders that are still "alive" (or pending operator fix)
-  const activeStates = ['monitoring', 'executing', 'retrying', 'inactive'];
+  const activeStates = ['paused', 'monitoring', 'executing', 'retrying', 'inactive'];
 
   // config.triggerMode stores the on-chain value. When isToken0Quote, tick direction
   // is inverse to user price direction, so the on-chain triggerMode is flipped:
@@ -512,6 +543,10 @@ interface RiskTriggersWizardContextValue {
   setTpSwapSlippage: (slippageBps: number) => void;
   setTpSwapToQuote: (swapToQuote: boolean) => void;
   setTpExitSlippage: (exitSlippageBps: number) => void;
+
+  // Monitoring control
+  setSlDesiredAutomationState: (state: DesiredAutomationState) => void;
+  setTpDesiredAutomationState: (state: DesiredAutomationState) => void;
 
   // UI
   setStepValid: (stepId: string, valid: boolean) => void;
@@ -668,6 +703,18 @@ export function RiskTriggersWizardProvider({
     []
   );
 
+  // Monitoring control
+  const setSlDesiredAutomationState = useCallback(
+    (automationState: DesiredAutomationState) =>
+      dispatch({ type: 'SET_SL_DESIRED_AUTOMATION_STATE', state: automationState }),
+    []
+  );
+  const setTpDesiredAutomationState = useCallback(
+    (automationState: DesiredAutomationState) =>
+      dispatch({ type: 'SET_TP_DESIRED_AUTOMATION_STATE', state: automationState }),
+    []
+  );
+
   // UI
   const setStepValid = useCallback(
     (stepId: string, valid: boolean) =>
@@ -777,14 +824,17 @@ export function RiskTriggersWizardProvider({
     [slOperation, tpOperation, slSwapChanged, tpSwapChanged]
   );
 
-  const currentStep =
-    RISK_TRIGGERS_STEPS[state.currentStepIndex] ?? RISK_TRIGGERS_STEPS[0];
-  const canGoNext = state.currentStepIndex < RISK_TRIGGERS_STEPS.length - 1;
+  const steps = useMemo(
+    () => computeSteps(state.hasExistingOrders),
+    [state.hasExistingOrders]
+  );
+  const currentStep = steps[state.currentStepIndex] ?? steps[0];
+  const canGoNext = state.currentStepIndex < steps.length - 1;
   const canGoBack = state.currentStepIndex > 0;
 
   const value: RiskTriggersWizardContextValue = {
     state,
-    steps: RISK_TRIGGERS_STEPS,
+    steps,
     currentStep,
     goNext,
     goBack,
@@ -808,6 +858,8 @@ export function RiskTriggersWizardProvider({
     setTpSwapSlippage,
     setTpSwapToQuote,
     setTpExitSlippage,
+    setSlDesiredAutomationState,
+    setTpDesiredAutomationState,
     setStepValid,
     isStepValid,
     setInteractiveZoom,

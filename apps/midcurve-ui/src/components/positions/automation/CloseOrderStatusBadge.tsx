@@ -37,6 +37,12 @@ const STATUS_CONFIG: Record<
     dotColor?: string;
   }
 > = {
+  paused: {
+    label: 'Paused',
+    textColor: 'text-slate-400',
+    bgColor: 'bg-slate-800/30',
+    borderColor: 'border-slate-600/50',
+  },
   monitoring: {
     label: 'Monitoring',
     textColor: 'text-emerald-300',
@@ -118,10 +124,10 @@ export function isCloseOrderProcessing(status: AutomationState): boolean {
 }
 
 /**
- * Check if order can be cancelled (only monitoring orders)
+ * Check if order can be cancelled (monitoring, paused, or failed orders)
  */
 export function canCancelCloseOrder(status: AutomationState): boolean {
-  return status === 'monitoring';
+  return status === 'monitoring' || status === 'paused' || status === 'failed';
 }
 
 /**

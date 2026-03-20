@@ -48,6 +48,12 @@ export {
 // Close Orders - Read only (position-scoped)
 export { useCloseOrders, useCloseOrderByHash } from './useCloseOrders';
 
+// Close Orders - Automation state control (API-only, no wallet signing)
+export {
+  useSetAutomationState,
+  type SetAutomationStateParams,
+} from './useSetAutomationState';
+
 // Automation Logs
 export {
   useAutomationLogs,

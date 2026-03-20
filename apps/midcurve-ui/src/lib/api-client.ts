@@ -191,6 +191,7 @@ import type {
   // Close Orders
   ListCloseOrdersResponse,
   GetCloseOrderResponse,
+  SerializedCloseOrder,
   // Shared Contracts
   GetPositionSharedContractsResponseData,
   GetChainSharedContractsResponseData,
@@ -257,6 +258,20 @@ export const automationApi = {
     get(chainId: number, nftId: string, closeOrderHash: string) {
       return apiClient.get<GetCloseOrderResponse['data']>(
         `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}`
+      );
+    },
+
+    /**
+     * Set automation state for a close order (monitoring or paused)
+     * @param chainId - Chain ID
+     * @param nftId - Uniswap V3 NFT token ID
+     * @param closeOrderHash - Semantic identifier
+     * @param automationState - Target state ('monitoring' or 'paused')
+     */
+    setAutomationState(chainId: number, nftId: string, closeOrderHash: string, automationState: 'monitoring' | 'paused') {
+      return apiClient.patch<SerializedCloseOrder>(
+        `/api/v1/positions/uniswapv3/${chainId}/${nftId}/close-orders/${closeOrderHash}/automation-state`,
+        { automationState }
       );
     },
 

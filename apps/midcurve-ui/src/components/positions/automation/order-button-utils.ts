@@ -31,7 +31,7 @@ export interface TokenConfig {
  * Visual state for the order button.
  * Derived from automationState, determines icon + color.
  */
-export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended';
+export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended' | 'paused' | 'inactive';
 
 /**
  * Automation states that make an order visible in the action button.
@@ -40,7 +40,7 @@ export type OrderButtonVisualState = 'monitoring' | 'executing' | 'suspended';
  * 'failed' orders remain visible (red warning) to prompt user action.
  */
 const VISIBLE_BUTTON_STATES: AutomationState[] = [
-  'monitoring', 'executing', 'retrying', 'failed', 'inactive',
+  'paused', 'monitoring', 'executing', 'retrying', 'failed', 'inactive',
 ];
 
 /**
@@ -70,7 +70,9 @@ export function findOrderForTriggerMode(
  */
 export function getOrderButtonVisualState(order: SerializedCloseOrder): OrderButtonVisualState {
   if (order.automationState === 'executing' || order.automationState === 'retrying') return 'executing';
-  if (order.automationState === 'failed' || order.automationState === 'inactive') return 'suspended';
+  if (order.automationState === 'failed') return 'suspended';
+  if (order.automationState === 'paused') return 'paused';
+  if (order.automationState === 'inactive') return 'inactive';
   return 'monitoring';
 }
 
