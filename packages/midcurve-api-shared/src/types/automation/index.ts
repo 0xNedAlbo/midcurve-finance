@@ -39,27 +39,6 @@ export {
   type GetCloseOrderResponse,
 } from './close-orders.js';
 
-// Wallet
-export {
-  type AutowalletChainBalance,
-  type AutowalletActivity,
-  // Get
-  type GetAutowalletResponseData,
-  type GetAutowalletResponse,
-  // Create
-  type CreateAutowalletResponseData,
-  type CreateAutowalletResponse,
-  // Refund
-  type RefundAutowalletRequest,
-  RefundAutowalletRequestSchema,
-  type RefundAutowalletInput,
-  type RefundAutowalletResponseData,
-  type RefundAutowalletResponse,
-  // Refund Status
-  type RefundOperationStatus,
-  type GetRefundStatusResponse,
-} from './wallet.js';
-
 // Logs
 export {
   AUTOMATION_LOG_LEVELS,

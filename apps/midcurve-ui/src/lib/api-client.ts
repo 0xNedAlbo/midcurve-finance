@@ -194,12 +194,6 @@ import type {
   // Shared Contracts
   GetPositionSharedContractsResponseData,
   GetChainSharedContractsResponseData,
-  // Wallet
-  GetAutowalletResponse,
-  CreateAutowalletResponse,
-  RefundAutowalletRequest,
-  RefundAutowalletResponse,
-  GetRefundStatusResponse,
   // Logs
   ListAutomationLogsResponse,
   // Notifications
@@ -290,38 +284,6 @@ export const automationApi = {
     return apiClient.get<GetChainSharedContractsResponseData>(
       `/api/v1/automation/shared-contracts/${chainId}`
     );
-  },
-
-  // ---------------------------------------------------------------------------
-  // Automation Wallet
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Get user's automation wallet info (address, balances, activity)
-   */
-  getWallet() {
-    return apiClient.get<GetAutowalletResponse['data']>('/api/v1/automation/wallet');
-  },
-
-  /**
-   * Create user's automation wallet
-   */
-  createWallet() {
-    return apiClient.post<CreateAutowalletResponse['data']>('/api/v1/automation/wallet', {});
-  },
-
-  /**
-   * Request refund of gas from autowallet to user's wallet
-   */
-  requestRefund(input: RefundAutowalletRequest) {
-    return apiClient.post<RefundAutowalletResponse['data']>('/api/v1/automation/wallet/refund', input);
-  },
-
-  /**
-   * Get refund operation status (for polling)
-   */
-  getRefundStatus(requestId: string) {
-    return apiClient.get<GetRefundStatusResponse['data']>(`/api/v1/automation/wallet/refund/${requestId}`);
   },
 
   // ---------------------------------------------------------------------------

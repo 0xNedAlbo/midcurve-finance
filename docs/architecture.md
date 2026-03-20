@@ -269,7 +269,7 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 - **Models:**
   - User, Session, AuthWalletAddress
   - Token, Pool, Position
-  - AutomationWallet, CloseOrder, AutomationContract
+  - CloseOrder, AutomationContract
   - PositionLedgerEvent, AprPeriod
   - Cache (for distributed caching)
 
@@ -513,8 +513,6 @@ midcurve-onchain-data/
 2. **EnrichCoingeckoTokensRule** - Token enrichment every 5 minutes
 3. **UpdatePositionOnLiquidityEventRule** - Processes liquidity events from RabbitMQ
 4. **ProcessCloseOrderEventsRule** - Syncs close orders with on-chain state
-5. **CreateAutomationWalletOnUserRegisteredRule** - Auto-creates automation wallet on registration
-
 **Key Characteristics:**
 - Rule-based architecture - Abstract `BusinessRule` base class with lifecycle hooks
 - RuleRegistry - Manages rule registration, startup, shutdown

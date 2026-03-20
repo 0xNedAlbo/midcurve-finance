@@ -18,9 +18,6 @@ import { RiskTriggersPage } from './pages/RiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-// Automation
-import { AutowalletPage } from './components/automation';
-
 export function App() {
   return (
     <QueryProvider>
@@ -62,10 +59,6 @@ function ConfigGate() {
               <Route
                 path="/positions/:protocol/:chain/:nftId"
                 element={<PositionDetailPage />}
-              />
-              <Route
-                path="/automation/wallet"
-                element={<AutowalletPage />}
               />
               <Route
                 path="/notifications"

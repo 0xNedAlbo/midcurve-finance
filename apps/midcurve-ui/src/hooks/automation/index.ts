@@ -69,11 +69,3 @@ export { useSharedContract } from './useSharedContract';
 // Operator Approval (setApprovalForAll on NFPM)
 export { useOperatorApproval, type UseOperatorApprovalResult } from './useOperatorApproval';
 
-// Wallet (autowallet)
-export {
-  useAutowallet,
-  useCreateAutowallet,
-  useRefundAutowallet,
-  useRefundStatus,
-  autowalletQueryKey,
-} from './useAutowallet';

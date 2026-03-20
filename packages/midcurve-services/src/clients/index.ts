@@ -54,8 +54,6 @@ export {
   SignerClientError,
   type SignerConfig,
   type SignerClientDependencies,
-  type SignerCreateAutomationWalletRequest,
-  type SignerCreateAutomationWalletResponse,
   type SignerDeployStrategyRequest,
   type SignerDeployStrategyResponse,
   type SignerErrorResponse,

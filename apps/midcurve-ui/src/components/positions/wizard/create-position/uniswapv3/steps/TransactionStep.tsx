@@ -29,7 +29,6 @@ import { useMintPosition, type MintPositionParams } from '@/hooks/positions/unis
 import { useCreatePositionAPI } from '@/hooks/positions/uniswapv3/wizard/useCreatePositionAPI';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
-import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { SwapDirection } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
@@ -88,10 +87,6 @@ export function TransactionStep() {
   // Get effective tick range (use configured or defaults)
   const effectiveTickLower = state.tickLower !== 0 ? state.tickLower : state.defaultTickLower;
   const effectiveTickUpper = state.tickUpper !== 0 ? state.tickUpper : state.defaultTickUpper;
-
-  // Get automation wallet
-  const { data: autowallet } = useAutowallet();
-  const autowalletAddress = autowallet?.address as Address | undefined;
 
   // Pool discovery hook for price refresh
   const discoverPool = useDiscoverPool();
@@ -341,7 +336,7 @@ export function TransactionStep() {
 
   // Build multicall calls for order registration
   const buildRegisterOrderCalls = useCallback((): PositionCloserCall[] => {
-    if (!mintedTokenId || !walletAddress || !autowalletAddress) return [];
+    if (!mintedTokenId || !walletAddress) return [];
 
     const poolAddress = state.discoveredPool?.typedConfig.address as Address | undefined;
     if (!poolAddress) return [];
@@ -357,7 +352,7 @@ export function TransactionStep() {
           triggerMode: isToken0Quote ? 1 : 0,
           triggerTick: state.stopLossTick,
           payout: walletAddress,
-          operator: autowalletAddress,
+          operator: walletAddress,
           validUntil: 0n,
           slippageBps: state.slSwapConfig.exitSlippageBps,
           swapDirection: slSwapDirection,
@@ -375,7 +370,7 @@ export function TransactionStep() {
           triggerMode: isToken0Quote ? 0 : 1,
           triggerTick: state.takeProfitTick,
           payout: walletAddress,
-          operator: autowalletAddress,
+          operator: walletAddress,
           validUntil: 0n,
           slippageBps: state.tpSwapConfig.exitSlippageBps,
           swapDirection: tpSwapDirection,
@@ -385,7 +380,7 @@ export function TransactionStep() {
     }
 
     return calls;
-  }, [mintedTokenId, walletAddress, autowalletAddress, state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, state.slSwapConfig, state.tpSwapConfig, isToken0Quote, slSwapDirection, tpSwapDirection]);
+  }, [mintedTokenId, walletAddress, state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, state.slSwapConfig, state.tpSwapConfig, isToken0Quote, slSwapDirection, tpSwapDirection]);
 
   // Order registration label
   const registerOrdersLabel = [

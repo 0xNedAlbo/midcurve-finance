@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/providers/AuthProvider";
-import { LogOut, ChevronDown, Wallet, Bell, ArrowLeftRight, Settings } from "lucide-react";
+import { LogOut, ChevronDown, Bell, ArrowLeftRight, Settings } from "lucide-react";
 import { SwapDialog } from "@/components/swap";
 import { WalletAvatar } from "@/components/ui/wallet-avatar";
 
@@ -97,17 +97,6 @@ export function UserDropdown({ mode }: UserDropdownProps) {
           </div>
 
           <div className="py-1">
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                navigate('/automation/wallet');
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors cursor-pointer"
-            >
-              <Wallet className="w-4 h-4" />
-              Automation Wallet
-            </button>
-
             <button
               onClick={() => {
                 setIsOpen(false);

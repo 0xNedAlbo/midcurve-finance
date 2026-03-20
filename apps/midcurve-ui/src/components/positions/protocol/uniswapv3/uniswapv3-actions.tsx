@@ -20,7 +20,7 @@ import { UniswapV3BurnNftModal } from "./uniswapv3-burn-nft-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
 import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
-import { useSharedContract, useAutowallet } from "@/hooks/automation";
+import { useSharedContract } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
 
@@ -64,21 +64,17 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     positionConfig.chainId,
     positionConfig.nftId.toString()
   );
-  const { data: autowalletData } = useAutowallet();
-
   // Automation availability checks
   const isChainSupported = contractData?.isSupported ?? false;
-  const hasAutowallet = !!autowalletData?.address;
 
   // Calculate automation disabled state and reason
-  const automationDisabled = !position.isActive || isClosed || !isChainSupported || !hasAutowallet;
+  const automationDisabled = !position.isActive || isClosed || !isChainSupported;
 
   const automationDisabledReason = useMemo(() => {
     if (!position.isActive || isClosed) return 'Position is closed';
     if (!isChainSupported) return 'Automation not supported on this chain';
-    if (!hasAutowallet) return 'No automation wallet configured';
     return undefined;
-  }, [position.isActive, isClosed, isChainSupported, hasAutowallet]);
+  }, [position.isActive, isClosed, isChainSupported]);
 
   // Build token config for price display
   const tokenConfig: TokenConfig = useMemo(

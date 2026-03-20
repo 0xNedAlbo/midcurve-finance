@@ -28,7 +28,6 @@ import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPromp
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
-import { useAutowallet } from '@/hooks/automation/useAutowallet';
 import { getChainSlugByChainId } from '@/config/chains';
 import { apiClientFn } from '@/lib/api-client';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
@@ -109,8 +108,6 @@ export function TransactionStep() {
   const contractAddress = sharedContract?.contractAddress as
     | Address
     | undefined;
-  const { data: autowalletData } = useAutowallet();
-
   const operatorApproval = useOperatorApproval(chainId, contractAddress);
   const multicall = useMulticallPositionCloser(chainId, nftId);
 
@@ -242,7 +239,6 @@ export function TransactionStep() {
     if (!tokenInfo) return null;
 
     const nftIdBigInt = BigInt(nftId);
-    const autowalletAddress = autowalletData?.address as Address | undefined;
     const calls: PositionCloserCall[] = [];
 
     // Map OrderType to TriggerMode contract value
@@ -346,7 +342,7 @@ export function TransactionStep() {
     }
 
     // Creates
-    if (slOperation === 'CREATE' && currentSlTick !== null && autowalletAddress) {
+    if (slOperation === 'CREATE' && currentSlTick !== null && connectedAddress) {
       const swapCfg = state.slSwapConfig;
       const swapDirection = swapCfg.enabled
         ? swapDirectionMap[computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)]
@@ -362,7 +358,7 @@ export function TransactionStep() {
             triggerMode: slContractMode,
             triggerTick: currentSlTick,
             payout: connectedAddress as Address,
-            operator: autowalletAddress,
+            operator: connectedAddress,
             validUntil,
             slippageBps: swapCfg.exitSlippageBps,
             swapDirection,
@@ -371,7 +367,7 @@ export function TransactionStep() {
         ],
       });
     }
-    if (tpOperation === 'CREATE' && currentTpTick !== null && autowalletAddress) {
+    if (tpOperation === 'CREATE' && currentTpTick !== null && connectedAddress) {
       const swapCfg = state.tpSwapConfig;
       const swapDirection = swapCfg.enabled
         ? swapDirectionMap[computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)]
@@ -387,7 +383,7 @@ export function TransactionStep() {
             triggerMode: tpContractMode,
             triggerTick: currentTpTick,
             payout: connectedAddress as Address,
-            operator: autowalletAddress,
+            operator: connectedAddress,
             validUntil,
             slippageBps: swapCfg.exitSlippageBps,
             swapDirection,
@@ -399,7 +395,7 @@ export function TransactionStep() {
 
     return calls.length > 0 ? calls : null;
   }, [
-    nftId, tokenInfo, autowalletData, slOperation, tpOperation,
+    nftId, tokenInfo, connectedAddress, slOperation, tpOperation,
     slSwapChanged, tpSwapChanged, currentSlTick, currentTpTick,
     state.stopLoss, state.takeProfit, state.slSwapConfig, state.tpSwapConfig,
     state.initialStopLoss.hasFailedOnChainOrder, state.initialTakeProfit.hasFailedOnChainOrder,

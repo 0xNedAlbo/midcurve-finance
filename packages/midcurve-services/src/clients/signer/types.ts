@@ -53,31 +53,6 @@ export interface SignerDeployStrategyResponse {
 }
 
 /**
- * Create automation wallet request to signer service
- */
-export interface SignerCreateAutomationWalletRequest {
-  userId: string;
-  label?: string;
-}
-
-/**
- * Create automation wallet response from signer service
- */
-export interface SignerCreateAutomationWalletResponse {
-  success: true;
-  wallet: {
-    id: string;
-    userId: string;
-    walletAddress: string;
-    label: string;
-    keyProvider: string;
-    isActive: boolean;
-    createdAt: string;
-  };
-  requestId: string;
-}
-
-/**
  * Signer error response
  */
 export interface SignerErrorResponse {

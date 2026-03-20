@@ -22,7 +22,7 @@
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { CloseOrder, Prisma } from '@midcurve/database';
-import { ContractTriggerMode, OnChainOrderStatus, compareAddresses } from '@midcurve/shared';
+import { ContractTriggerMode, OnChainOrderStatus } from '@midcurve/shared';
 import type { ContractSwapDirection } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -213,18 +213,12 @@ export class UniswapV3CloseOrderService {
       const chainId = posConfig.chainId as number;
       const nftId = String(posConfig.nftId);
 
-      // 2. Look up user's EVM automation wallet to check operator ownership
-      const autoWallet = await db.automationWallet.findFirst({
-        where: {
-          userId: position.userId,
-          walletType: 'evm',
-          walletPurpose: 'automation',
-          isActive: true,
-        },
-      });
-      const ourOperatorAddress = autoWallet
-        ? (autoWallet.config as { walletAddress?: string }).walletAddress ?? null
-        : null;
+      // 2. Look up operator address from settings (single operator key)
+      const operatorKeyId = await db.setting.findUnique({ where: { key: 'operator.kms.keyId' } });
+      // If operator key is configured, orders with matching operator are "ours"
+      // The operator address is stored in order state during registration
+      // For discovery, we mark all active orders as monitoring (the executor validates operator)
+      const hasOperator = operatorKeyId !== null;
 
       // 3. Find the PositionCloser contract for this chain
       const sharedContract = await this.sharedContractService.findLatestByChainAndName(
@@ -265,8 +259,9 @@ export class UniswapV3CloseOrderService {
             triggerMode,
             onChain.triggerTick,
           );
-          const isOurOrder = ourOperatorAddress !== null
-            && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
+          // With single operator key, mark as monitoring if operator key is configured
+          // The executor will validate the operator address at execution time
+          const isOurOrder = hasOperator;
 
           const newOrder = await this.create(
             {
@@ -317,8 +312,9 @@ export class UniswapV3CloseOrderService {
           const synced = await this.syncFromChain(existingOrder.id, { state: updatedState }, tx);
 
           // Adjust automationState if operator ownership changed
-          const isOurOrder = ourOperatorAddress !== null
-            && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
+          // With single operator key, mark as monitoring if operator key is configured
+          // The executor will validate the operator address at execution time
+          const isOurOrder = hasOperator;
           const currentState = existingOrder.automationState;
           const expectedState = isOurOrder ? 'monitoring' : 'inactive';
 

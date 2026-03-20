@@ -21,7 +21,6 @@ import { sqrtPriceX96ToTick } from '@midcurve/shared';
 import {
   useCreateCloseOrder,
   useOperatorApproval,
-  useAutowallet,
   type OrderType,
 } from '@/hooks/automation';
 import { CloseOrderConfigureStep } from './steps/CloseOrderConfigureStep';
@@ -222,10 +221,6 @@ export function CloseOrderModal({
   const [createdOrder, setCreatedOrder] = useState<SerializedCloseOrder | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // Get user's autowallet (operator address for executing close orders)
-  const { data: autowalletData } = useAutowallet();
-  const operatorAddress = autowalletData?.address as Address | undefined;
-
   // Operator approval hook (NFPM setApprovalForAll)
   const {
     isApproved,
@@ -347,12 +342,6 @@ export function CloseOrderModal({
       return;
     }
 
-    if (!operatorAddress) {
-      setLocalError('Autowallet not available. Please try again.');
-      setStep('review');
-      return;
-    }
-
     if (!isHookReady) {
       setLocalError('Contract not ready. Please wait and try again.');
       setStep('review');
@@ -407,7 +396,7 @@ export function CloseOrderModal({
       orderType: orderTypeValue,
       triggerTick,
       payoutAddress: userAddress,
-      operatorAddress,
+      operatorAddress: userAddress,
       validUntil,
       slippageBps: formData.slippageBps,
       positionId,
@@ -423,7 +412,6 @@ export function CloseOrderModal({
     });
   }, [
     userAddress,
-    operatorAddress,
     formData,
     positionId,
     poolAddress,
@@ -449,12 +437,6 @@ export function CloseOrderModal({
       return;
     }
 
-    if (!operatorAddress) {
-      setLocalError('Autowallet not available. Please try again.');
-      setStep('review');
-      return;
-    }
-
     setLocalError(null);
 
     // Step 1: Approve if needed
@@ -465,7 +447,7 @@ export function CloseOrderModal({
 
     // Step 2: Register the order
     executeRegistration();
-  }, [userAddress, operatorAddress, needsApproval, approve, executeRegistration]);
+  }, [userAddress, needsApproval, approve, executeRegistration]);
 
   // Handle step progression
   const handleContinue = useCallback(() => {
@@ -558,7 +540,7 @@ export function CloseOrderModal({
                 positionChainId={chainId}
                 connectedAddress={userAddress}
                 positionOwner={positionOwner}
-                hasAutowallet={!!operatorAddress}
+                hasAutowallet={true}
               />
             )}
 
@@ -615,7 +597,7 @@ export function CloseOrderModal({
                 </button>
                 <button
                   onClick={handleContinue}
-                  disabled={!isConnected || isWrongNetwork || isWrongAccount || !operatorAddress}
+                  disabled={!isConnected || isWrongNetwork || isWrongAccount}
                   className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Confirm
