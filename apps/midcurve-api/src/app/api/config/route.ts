@@ -45,10 +45,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     responseData = { configured: false };
   } else {
     // Only return inherently public values (WalletConnect project ID is domain-gated)
-    const settings = await settingService.getMany(['walletconnect_project_id']);
+    const settings = await settingService.getMany(['walletconnect_project_id', 'operator.address']);
     responseData = {
       configured: true,
       walletconnectProjectId: settings['walletconnect_project_id'],
+      operatorAddress: settings['operator.address'] ?? null,
     };
   }
 

@@ -28,6 +28,7 @@ import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPromp
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
+import { useConfig } from '@/providers/ConfigProvider';
 import { getChainSlugByChainId } from '@/config/chains';
 import { apiClientFn } from '@/lib/api-client';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
@@ -61,6 +62,7 @@ export function TransactionStep() {
 
   const { address: connectedAddress, isConnected } = useAccount();
   const walletChainId = useChainId();
+  const { operatorAddress } = useConfig();
 
   const position = state.position;
 
@@ -342,7 +344,7 @@ export function TransactionStep() {
     }
 
     // Creates
-    if (slOperation === 'CREATE' && currentSlTick !== null && connectedAddress) {
+    if (slOperation === 'CREATE' && currentSlTick !== null && connectedAddress && operatorAddress) {
       const swapCfg = state.slSwapConfig;
       const swapDirection = swapCfg.enabled
         ? swapDirectionMap[computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)]
@@ -358,7 +360,7 @@ export function TransactionStep() {
             triggerMode: slContractMode,
             triggerTick: currentSlTick,
             payout: connectedAddress as Address,
-            operator: connectedAddress,
+            operator: operatorAddress as Address,
             validUntil,
             slippageBps: swapCfg.exitSlippageBps,
             swapDirection,
@@ -367,7 +369,7 @@ export function TransactionStep() {
         ],
       });
     }
-    if (tpOperation === 'CREATE' && currentTpTick !== null && connectedAddress) {
+    if (tpOperation === 'CREATE' && currentTpTick !== null && connectedAddress && operatorAddress) {
       const swapCfg = state.tpSwapConfig;
       const swapDirection = swapCfg.enabled
         ? swapDirectionMap[computeSwapDirection(swapCfg.swapToQuote, tokenInfo.isToken0Quote)]
@@ -383,7 +385,7 @@ export function TransactionStep() {
             triggerMode: tpContractMode,
             triggerTick: currentTpTick,
             payout: connectedAddress as Address,
-            operator: connectedAddress,
+            operator: operatorAddress as Address,
             validUntil,
             slippageBps: swapCfg.exitSlippageBps,
             swapDirection,
@@ -395,11 +397,11 @@ export function TransactionStep() {
 
     return calls.length > 0 ? calls : null;
   }, [
-    nftId, tokenInfo, connectedAddress, slOperation, tpOperation,
+    nftId, tokenInfo, connectedAddress, operatorAddress, slOperation, tpOperation,
     slSwapChanged, tpSwapChanged, currentSlTick, currentTpTick,
     state.stopLoss, state.takeProfit, state.slSwapConfig, state.tpSwapConfig,
     state.initialStopLoss.hasFailedOnChainOrder, state.initialTakeProfit.hasFailedOnChainOrder,
-    poolAddress, connectedAddress,
+    poolAddress,
   ]);
 
   // ----- Execution state -----
@@ -537,6 +539,7 @@ export function TransactionStep() {
     const multicallError = isUserRejection(multicall.error) ? null : multicall.error;
     const isError = !!multicallError;
     const isSuccess = multicall.isSuccess;
+
     const isPending = !isActive && !isError && !isSuccess;
 
     // Show Execute button when: approval is done (or not needed) AND multicall not yet executing

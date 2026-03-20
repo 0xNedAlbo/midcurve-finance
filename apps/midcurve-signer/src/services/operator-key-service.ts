@@ -23,6 +23,7 @@ import { SettingService } from '@midcurve/services';
 
 const SETTING_OPERATOR_KEY_ID = 'operator.kms.keyId';
 const SETTING_OPERATOR_ENCRYPTED_PK = 'operator.kms.encryptedPrivateKey';
+const SETTING_OPERATOR_ADDRESS = 'operator.address';
 
 // =============================================================================
 // Service
@@ -80,6 +81,12 @@ export class OperatorKeyService {
     this.operatorAddress = await this.signer.getAddress(existingKeyId);
     this.loaded = true;
 
+    // Backfill operator.address if not yet persisted (migration for existing keys)
+    const existingAddress = await this.settingService.get(SETTING_OPERATOR_ADDRESS);
+    if (!existingAddress) {
+      await this.settingService.set(SETTING_OPERATOR_ADDRESS, this.operatorAddress);
+    }
+
     this.logger.info({
       operatorAddress: this.operatorAddress,
       keyId: existingKeyId,
@@ -110,6 +117,7 @@ export class OperatorKeyService {
     // Persist to Settings table
     const settings: Record<string, string> = {
       [SETTING_OPERATOR_KEY_ID]: result.keyId,
+      [SETTING_OPERATOR_ADDRESS]: result.walletAddress,
     };
 
     if (result.encryptedPrivateKey) {

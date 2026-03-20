@@ -27,6 +27,7 @@ import { CloseOrderConfigureStep } from './steps/CloseOrderConfigureStep';
 import { CloseOrderReviewStep } from './steps/CloseOrderReviewStep';
 import { CloseOrderProcessingStep } from './steps/CloseOrderProcessingStep';
 import { CloseOrderSuccessStep } from './steps/CloseOrderSuccessStep';
+import { useConfig } from '@/providers/ConfigProvider';
 
 export interface CloseOrderModalProps {
   /**
@@ -202,6 +203,7 @@ export function CloseOrderModal({
       ? 'Set Take-Profit Order'
       : 'Set Close Order';
   const { address: userAddress, isConnected, chainId: connectedChainId } = useAccount();
+  const { operatorAddress: configOperatorAddress } = useConfig();
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<WizardStep>('configure');
   const [formData, setFormData] = useState<CloseOrderFormData>({
@@ -396,7 +398,7 @@ export function CloseOrderModal({
       orderType: orderTypeValue,
       triggerTick,
       payoutAddress: userAddress,
-      operatorAddress: userAddress,
+      operatorAddress: (configOperatorAddress ?? userAddress) as Address,
       validUntil,
       slippageBps: formData.slippageBps,
       positionId,

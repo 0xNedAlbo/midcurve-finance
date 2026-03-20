@@ -39,6 +39,7 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useWatchErc20TokenBalance } from '@/hooks/tokens/erc20/useWatchErc20TokenBalance';
+import { useConfig } from '@/providers/ConfigProvider';
 
 // Transaction IDs
 const TX_IDS = {
@@ -54,6 +55,7 @@ const TX_IDS = {
 export function TransactionStep() {
   const navigate = useNavigate();
   const { address: walletAddress } = useAccount();
+  const { operatorAddress } = useConfig();
   const { state, setStepValid, setDiscoveredPool, setPositionCreated, addTransaction, setAdjustedAmounts, saveOriginalAmounts, setPriceAdjustmentStatus } = useCreatePositionWizard();
 
   // Current phase of execution
@@ -336,7 +338,7 @@ export function TransactionStep() {
 
   // Build multicall calls for order registration
   const buildRegisterOrderCalls = useCallback((): PositionCloserCall[] => {
-    if (!mintedTokenId || !walletAddress) return [];
+    if (!mintedTokenId || !walletAddress || !operatorAddress) return [];
 
     const poolAddress = state.discoveredPool?.typedConfig.address as Address | undefined;
     if (!poolAddress) return [];
@@ -352,7 +354,7 @@ export function TransactionStep() {
           triggerMode: isToken0Quote ? 1 : 0,
           triggerTick: state.stopLossTick,
           payout: walletAddress,
-          operator: walletAddress,
+          operator: operatorAddress as Address,
           validUntil: 0n,
           slippageBps: state.slSwapConfig.exitSlippageBps,
           swapDirection: slSwapDirection,
@@ -370,7 +372,7 @@ export function TransactionStep() {
           triggerMode: isToken0Quote ? 0 : 1,
           triggerTick: state.takeProfitTick,
           payout: walletAddress,
-          operator: walletAddress,
+          operator: operatorAddress as Address,
           validUntil: 0n,
           slippageBps: state.tpSwapConfig.exitSlippageBps,
           swapDirection: tpSwapDirection,
@@ -380,7 +382,7 @@ export function TransactionStep() {
     }
 
     return calls;
-  }, [mintedTokenId, walletAddress, state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, state.slSwapConfig, state.tpSwapConfig, isToken0Quote, slSwapDirection, tpSwapDirection]);
+  }, [mintedTokenId, walletAddress, operatorAddress, state.discoveredPool, state.stopLossEnabled, state.stopLossTick, state.takeProfitEnabled, state.takeProfitTick, state.slSwapConfig, state.tpSwapConfig, isToken0Quote, slSwapDirection, tpSwapDirection]);
 
   // Order registration label
   const registerOrdersLabel = [

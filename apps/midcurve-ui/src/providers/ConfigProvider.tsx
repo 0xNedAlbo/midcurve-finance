@@ -12,11 +12,13 @@ import { apiClient } from '@/lib/api-client';
 interface ConfigData {
   configured: boolean;
   walletconnectProjectId?: string;
+  operatorAddress?: string;
 }
 
 interface ConfigState {
   status: 'loading' | 'unconfigured' | 'configured';
   walletconnectProjectId: string | null;
+  operatorAddress: string | null;
   refetch: () => void;
 }
 
@@ -57,6 +59,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const value: ConfigState = {
     status,
     walletconnectProjectId: data?.walletconnectProjectId ?? null,
+    operatorAddress: data?.operatorAddress ?? null,
     refetch,
   };
 
