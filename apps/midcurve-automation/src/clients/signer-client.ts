@@ -314,20 +314,42 @@ class SignerClient {
    * Create the operator wallet (or return existing).
    * Called on automation startup to ensure the key exists.
    * Also serves as a signer health check.
+   *
+   * Retries with linear backoff because services start concurrently —
+   * the signer may not be ready when automation starts.
    */
   async createOperatorWallet(): Promise<string> {
     log.info({ msg: 'Ensuring operator wallet exists via signer service' });
 
-    const result = await this.request<{ address: string }>(
-      'POST',
-      '/api/operator/wallet'
-    );
+    const MAX_RETRIES = 10;
+    const RETRY_DELAY_MS = 3000;
 
-    this.cachedOperatorAddress = result.address;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await this.request<{ address: string }>(
+          'POST',
+          '/api/operator/wallet'
+        );
 
-    log.info({ operatorAddress: result.address, msg: 'Operator wallet ready' });
+        this.cachedOperatorAddress = result.address;
+        log.info({ operatorAddress: result.address, msg: 'Operator wallet ready' });
+        return result.address;
+      } catch (error) {
+        if (attempt === MAX_RETRIES) throw error;
 
-    return result.address;
+        const delayMs = attempt * RETRY_DELAY_MS;
+        log.warn({
+          attempt,
+          maxRetries: MAX_RETRIES,
+          nextRetryMs: delayMs,
+          error: error instanceof Error ? error.message : String(error),
+          msg: 'Signer not ready, retrying...',
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    throw new Error('Unreachable');
   }
 
   /**
