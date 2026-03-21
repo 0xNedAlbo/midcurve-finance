@@ -8,7 +8,6 @@ import {
   PRODUCTION_CHAIN_IDS as REGISTRY_PRODUCTION_CHAIN_IDS,
   ALL_CHAIN_IDS as REGISTRY_ALL_CHAIN_IDS,
   isSupportedChainId as registryIsSupportedChainId,
-  normalizeAddress,
 } from '@midcurve/shared';
 
 /**
@@ -43,23 +42,12 @@ export interface SignerConfig {
 }
 
 /**
- * Fee configuration
- */
-export interface FeeConfig {
-  /** Address to receive execution fees */
-  recipient: string;
-  /** Execution fee in basis points (100 = 1%) */
-  bps: number;
-}
-
-/**
  * Full automation configuration
  */
 export interface AutomationConfig {
   rabbitmq: RabbitMQConfig;
   worker: WorkerConfig;
   signer: SignerConfig;
-  fee: FeeConfig;
   logLevel: string;
 }
 
@@ -104,19 +92,6 @@ export function getSignerConfig(): SignerConfig {
 }
 
 /**
- * Get fee configuration from environment
- */
-export function getFeeConfig(): FeeConfig {
-  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-  const recipient = process.env.EXECUTION_FEE_RECIPIENT || ZERO_ADDRESS;
-
-  return {
-    recipient: normalizeAddress(recipient),
-    bps: parseInt(process.env.EXECUTION_FEE_BPS || '50', 10),
-  };
-}
-
-/**
  * Get full automation configuration
  */
 export function getAutomationConfig(): AutomationConfig {
@@ -124,7 +99,6 @@ export function getAutomationConfig(): AutomationConfig {
     rabbitmq: getRabbitMQConfig(),
     worker: getWorkerConfig(),
     signer: getSignerConfig(),
-    fee: getFeeConfig(),
     logLevel: process.env.LOG_LEVEL || 'info',
   };
 }

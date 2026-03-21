@@ -38,6 +38,7 @@ import {
 } from '../lib/evm';
 import { isSupportedChain, getWorkerConfig } from '../lib/config';
 import { computeDynamicFeeBps } from '../lib/dynamic-fee';
+import { resolveFeeRecipient } from '../lib/fee-recipient';
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
 import { QUEUES, EXCHANGES, ROUTING_KEYS, ORDER_RETRY_DELAY_MS } from '../mq/topology';
@@ -853,13 +854,15 @@ export class CloseOrderExecutor {
       }
     }
 
+    const feeRecipient = await resolveFeeRecipient(chainId);
+
     const feeParamsInput: FeeParamsInput = {
-      feeRecipient: operatorAddress,
+      feeRecipient,
       feeBps: dynamicFee.feeBps,
     };
 
     const simulationFeeParams: SimulationFeeParams = {
-      feeRecipient: operatorAddress as `0x${string}`,
+      feeRecipient: feeRecipient as `0x${string}`,
       feeBps: dynamicFee.feeBps,
     };
 

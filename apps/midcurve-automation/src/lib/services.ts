@@ -15,6 +15,7 @@ import {
   UserNotificationService,
   UiNotificationAdapter,
   WebhookNotificationAdapter,
+  SharedContractService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -25,6 +26,7 @@ let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
+let _sharedContractService: SharedContractService | null = null;
 
 /**
  * Get singleton instance of UniswapV3CloseOrderService
@@ -84,6 +86,16 @@ export function getWebhookConfigService(): WebhookConfigService {
     _webhookConfigService = new WebhookConfigService();
   }
   return _webhookConfigService;
+}
+
+/**
+ * Get singleton instance of SharedContractService
+ */
+export function getSharedContractService(): SharedContractService {
+  if (!_sharedContractService) {
+    _sharedContractService = new SharedContractService();
+  }
+  return _sharedContractService;
 }
 
 /**
