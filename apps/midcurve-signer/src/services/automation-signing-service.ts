@@ -242,7 +242,7 @@ class AutomationSigningServiceImpl {
     const signedTransaction = serializeTransaction(tx, {
       r: signature.r,
       s: signature.s,
-      v: BigInt(signature.v + 27), // Convert recovery id to v
+      v: BigInt(signature.v - 27 + chainId * 2 + 35), // EIP-155: v = recovery_id + chainId * 2 + 35
     });
 
     const txHash = keccak256(signedTransaction);
