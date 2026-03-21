@@ -8,8 +8,9 @@
  * Flow:
  * 1. User calls cancelOrder()
  * 2. User signs cancelOrder() tx in their wallet (Wagmi)
- * 3. Wait for tx confirmation
- * 4. Invalidate caches (backend event subscriber updates the DB record)
+ * 3. Wait for tx confirmation (via backend tx status polling using our RPC)
+ * 4. Call POST /refresh to sync on-chain state into DB
+ * 5. Invalidate caches so UI picks up the deletion
  *
  * V1.0 Interface (tick-based):
  * - Uses cancelOrder(nftId, orderType) instead of cancelClose(closeId)
@@ -22,6 +23,7 @@ import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTran
 import { useQueryClient } from '@tanstack/react-query';
 import type { Address, Hash } from 'viem';
 import { queryKeys } from '@/lib/query-keys';
+import { apiClientFn } from '@/lib/api-client';
 import { useSharedContract } from './useSharedContract';
 import type { OrderType } from './useCreateCloseOrder';
 
@@ -107,20 +109,24 @@ export function useCancelCloseOrder(
   const isTxSuccess = txWatch.status === 'success';
   const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
-  // Handle transaction success — invalidate caches so UI picks up
-  // the cancellation made by the backend event subscriber.
+  // Handle transaction success — refresh on-chain state via our RPC,
+  // then invalidate caches so the UI picks up the deletion.
   useEffect(() => {
     if (!isTxSuccess || !txHash || result) return;
 
     setResult({ txHash });
 
-    // Invalidate caches — backend event subscriber will have cancelled the order
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
-    });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
-    });
+    // Refresh position on-chain state (syncs cancel into DB), then invalidate caches
+    const refreshEndpoint = `/api/v1/positions/uniswapv3/${chainId}/${nftId}/refresh`;
+    apiClientFn(refreshEndpoint, { method: 'POST' })
+      .finally(() => {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.positions.uniswapv3.closeOrders.all(chainId, nftId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.positions.uniswapv3.detail(chainId, nftId),
+        });
+      });
   }, [isTxSuccess, txHash, result, queryClient, chainId, nftId]);
 
   // Handle errors

@@ -901,8 +901,15 @@ export class UniswapV3CloseOrderService {
 
   /**
    * Sets automation state for user-initiated monitoring control.
-   * Allowed transitions: paused→monitoring, monitoring→paused, failed→monitoring, failed→paused.
-   * Rejects transitions from inactive, executing, or retrying.
+   *
+   * Before validating the transition, refreshes on-chain state so the DB
+   * reflects the latest operator/order status. This allows the UI to call
+   * this method right after an on-chain setOperator() tx is confirmed —
+   * refresh() will transition inactive→paused if the operator is now ours,
+   * and then the paused→monitoring transition succeeds in the same request.
+   *
+   * Allowed source states after refresh: paused, monitoring, failed.
+   * Rejects: inactive (operator not ours), executing, retrying.
    */
   async setAutomationState(
     id: string,
@@ -913,7 +920,14 @@ export class UniswapV3CloseOrderService {
 
     const db = tx ?? this.prisma;
     const order = await db.closeOrder.findUniqueOrThrow({ where: { id } });
-    const currentState = order.automationState;
+
+    // Refresh on-chain state before validating. This syncs operator changes
+    // (inactive→paused) so the subsequent transition can succeed.
+    await this.refresh(order.positionId, 'latest', tx);
+
+    // Re-read order after refresh — its automationState may have changed
+    const refreshedOrder = await db.closeOrder.findUniqueOrThrow({ where: { id } });
+    const currentState = refreshedOrder.automationState;
 
     const ALLOWED_SOURCE_STATES = ['paused', 'monitoring', 'failed'];
     if (!ALLOWED_SOURCE_STATES.includes(currentState)) {
@@ -926,7 +940,7 @@ export class UniswapV3CloseOrderService {
     if (currentState === targetState) {
       this.logger.info({ id, currentState }, 'Automation state already matches target, no change');
       log.methodExit(this.logger, 'setAutomationState', { id });
-      return order;
+      return refreshedOrder;
     }
 
     const data: Record<string, unknown> = { automationState: targetState };
