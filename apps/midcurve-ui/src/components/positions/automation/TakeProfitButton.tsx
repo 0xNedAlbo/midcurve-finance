@@ -1,20 +1,14 @@
 /**
  * Take Profit Button
  *
- * Action button for creating or displaying a take-profit order.
- *
- * Visual states (driven by automationState):
- * - Disabled: Slate, Plus icon (automation unavailable)
- * - No order: Green, Plus icon (navigates to Risk Triggers wizard)
- * - Monitoring: Emerald, Eye icon (actively watching price)
- * - Executing: Blue, Loader2 spinner (trigger fired, execution in progress)
- * - Suspended: Red, AlertTriangle icon (execution failed, needs attention)
+ * When no order exists: green "+" button to create via wizard.
+ * When order exists: 3-zone inline control (toggle monitoring | edit | cancel).
  */
 
 'use client';
 
 import { useMemo } from 'react';
-import { Plus, Eye, ArrowRight, Loader2, AlertTriangle, Pause, EyeOff } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { Address } from 'viem';
 import type { ListPositionData, TriggerMode, SerializedCloseOrder } from '@midcurve/api-shared';
@@ -25,6 +19,7 @@ import {
   getOrderButtonVisualState,
   type TokenConfig,
 } from './order-button-utils';
+import { OrderActionButton } from './OrderActionButton';
 
 interface TakeProfitButtonProps {
   position: ListPositionData;
@@ -66,7 +61,6 @@ export function TakeProfitButton({
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Build token config for utilities
   const tokenConfig: TokenConfig = useMemo(
     () => ({
       baseTokenAddress: baseToken.address,
@@ -79,22 +73,28 @@ export function TakeProfitButton({
     [baseToken, quoteToken]
   );
 
-  // Find the take-profit order — trigger mode depends on isToken0Quote
   const tpTriggerMode = (isToken0Quote ? 'LOWER' : 'UPPER') as TriggerMode;
   const activeOrder = useMemo(() => {
     return findOrderForTriggerMode(closeOrders, tpTriggerMode);
   }, [closeOrders, tpTriggerMode]);
 
-  // Generate button label if order exists
   const buttonLabel = useMemo(() => {
     if (!activeOrder) return null;
     return getOrderButtonLabel(activeOrder, 'takeProfit', tokenConfig);
   }, [activeOrder, tokenConfig]);
 
-  // Derive visual state from automationState
   const visualState = activeOrder ? getOrderButtonVisualState(activeOrder) : null;
 
-  // If disabled, show disabled button with tooltip
+  const handleNavigateToWizard = () => {
+    const nftIdStr = nftId.toString();
+    const chainSlug = getChainSlugByChainId(chainId);
+    if (chainSlug) {
+      navigate(`/positions/triggers/uniswapv3/${chainSlug}/${nftIdStr}`, {
+        state: { returnTo: location.pathname },
+      });
+    }
+  };
+
   if (disabled) {
     return (
       <button
@@ -108,97 +108,22 @@ export function TakeProfitButton({
     );
   }
 
-  // Navigate to Risk Triggers wizard
-  const handleNavigateToWizard = () => {
-    const nftIdStr = nftId.toString();
-    const chainSlug = getChainSlugByChainId(chainId);
-    if (chainSlug) {
-      navigate(`/positions/triggers/uniswapv3/${chainSlug}/${nftIdStr}`, {
-        state: { returnTo: location.pathname },
-      });
-    }
-  };
-
-  // Price label content (shared across monitoring/executing/suspended states)
-  const priceLabel = buttonLabel && (
-    <span className="flex items-center gap-0.5">
-      {buttonLabel.prefix} @{buttonLabel.priceDisplay}
-      {buttonLabel.hasSwap && (
-        <>
-          <ArrowRight className="w-3 h-3 mx-0.5" />
-          {buttonLabel.targetSymbol}
-        </>
-      )}
-    </span>
-  );
-
-  // Executing state — blue, spinner, non-interactive
-  if (visualState === 'executing') {
+  // Active order → 3-zone inline control
+  if (activeOrder && buttonLabel && visualState) {
     return (
-      <div className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-blue-300 bg-blue-900/20 border-blue-600/50">
-        <Loader2 className="w-3 h-3 animate-spin" />
-        {priceLabel}
-      </div>
+      <OrderActionButton
+        order={activeOrder}
+        orderType="TAKE_PROFIT"
+        visualState={visualState}
+        buttonLabel={buttonLabel}
+        chainId={chainId}
+        nftId={nftId.toString()}
+        onNavigateToWizard={handleNavigateToWizard}
+      />
     );
   }
 
-  // Suspended state — red, warning icon, clickable
-  if (visualState === 'suspended') {
-    return (
-      <button
-        onClick={handleNavigateToWizard}
-        title="Execution failed — click to manage"
-        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-red-300 bg-red-900/20 hover:bg-red-800/30 border-red-600/50 transition-colors cursor-pointer"
-      >
-        <AlertTriangle className="w-3 h-3" />
-        {priceLabel}
-      </button>
-    );
-  }
-
-  // Paused state — gray, pause icon, clickable
-  if (visualState === 'paused') {
-    return (
-      <button
-        onClick={handleNavigateToWizard}
-        title="Monitoring paused — click to manage"
-        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-slate-400 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 transition-colors cursor-pointer"
-      >
-        <Pause className="w-3 h-3" />
-        {priceLabel}
-      </button>
-    );
-  }
-
-  // Inactive state — gray, eye-off icon, clickable
-  if (visualState === 'inactive') {
-    return (
-      <button
-        onClick={handleNavigateToWizard}
-        title="Order not monitored (different operator)"
-        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-slate-500 bg-slate-800/20 hover:bg-slate-700/20 border-slate-600/30 transition-colors cursor-pointer"
-      >
-        <EyeOff className="w-3 h-3" />
-        {priceLabel}
-      </button>
-    );
-  }
-
-  // Monitoring state — emerald, eye icon, clickable
-  if (visualState === 'monitoring') {
-    return (
-      <button
-        onClick={handleNavigateToWizard}
-        title="Click to manage triggers"
-        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg text-emerald-300 bg-emerald-900/20 hover:bg-emerald-800/30 border-emerald-600/50 transition-colors cursor-pointer"
-      >
-        <Eye className="w-3 h-3" />
-        {priceLabel}
-      </button>
-    );
-  }
-
-  // No order — green, plus icon, create button
+  // No order → create button
   return (
     <button
       onClick={handleNavigateToWizard}

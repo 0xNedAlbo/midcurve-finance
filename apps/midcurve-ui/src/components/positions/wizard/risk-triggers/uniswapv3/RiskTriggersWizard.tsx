@@ -11,21 +11,14 @@ import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { getChainId, isValidChainSlug } from '@/config/chains';
 
 // Steps
-import { ManageStep } from './steps/ManageStep';
 import { ConfigureStep } from './steps/ConfigureStep';
 import { TransactionStep } from './steps/TransactionStep';
-import { ActivationStep } from './steps/ActivationStep';
 
 // Step content interface
 interface StepContent {
   interactive: React.ReactNode;
   visual: React.ReactNode;
   summary: React.ReactNode;
-}
-
-function ManageStepRenderer() {
-  const content = ManageStep();
-  return <StepRenderer content={content} />;
 }
 
 function ConfigureStepRenderer() {
@@ -35,11 +28,6 @@ function ConfigureStepRenderer() {
 
 function TransactionStepRenderer() {
   const content = TransactionStep();
-  return <StepRenderer content={content} />;
-}
-
-function ActivationStepRenderer() {
-  const content = ActivationStep();
   return <StepRenderer content={content} />;
 }
 
@@ -315,14 +303,10 @@ function RiskTriggersWizardContent() {
   }, [state.currentStepIndex, goBack, goToStep, navigate, returnTo]);
 
   switch (currentStepId) {
-    case 'manage':
-      return <ManageStepRenderer />;
     case 'configure':
       return <ConfigureStepRenderer />;
     case 'transaction':
       return <TransactionStepRenderer />;
-    case 'activation':
-      return <ActivationStepRenderer />;
     default:
       return <ConfigureStepRenderer />;
   }
