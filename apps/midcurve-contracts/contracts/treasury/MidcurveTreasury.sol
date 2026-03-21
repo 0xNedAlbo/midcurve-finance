@@ -111,22 +111,25 @@ contract MidcurveTreasury is IMidcurveTreasury {
         uint256 deadline,
         IMidcurveSwapRouter.Hop[] calldata hops
     ) external onlyAdminOrOperator {
-        // 1. Approve router to pull tokenIn
-        IERC20(tokenIn).forceApprove(address(swapRouter), amountIn);
+        uint256 wethAmount;
 
-        // 2. Swap tokenIn -> WETH via router (WETH sent to this contract)
-        uint256 wethReceived = swapRouter.sell(tokenIn, weth, amountIn, minEthOut, address(this), deadline, hops);
+        if (tokenIn == weth) {
+            // Direct path: WETH already in treasury, skip swap
+            wethAmount = amountIn;
+        } else {
+            // Swap path: tokenIn -> WETH via router
+            IERC20(tokenIn).forceApprove(address(swapRouter), amountIn);
+            wethAmount = swapRouter.sell(tokenIn, weth, amountIn, minEthOut, address(this), deadline, hops);
+            IERC20(tokenIn).forceApprove(address(swapRouter), 0);
+        }
 
-        // 3. Unwrap WETH -> ETH
-        IWETH(weth).withdraw(wethReceived);
+        // Unwrap WETH -> ETH
+        IWETH(weth).withdraw(wethAmount);
 
-        // 4. Send ETH to operator
-        (bool success,) = operator.call{ value: wethReceived }("");
+        // Send ETH to operator
+        (bool success,) = operator.call{ value: wethAmount }("");
         if (!success) revert EthTransferFailed();
 
-        // 5. Reset approval
-        IERC20(tokenIn).forceApprove(address(swapRouter), 0);
-
-        emit RefuelOperator(tokenIn, amountIn, wethReceived);
+        emit RefuelOperator(tokenIn, amountIn, wethAmount);
     }
 }

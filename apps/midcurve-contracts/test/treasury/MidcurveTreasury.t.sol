@@ -351,6 +351,58 @@ contract MidcurveTreasuryTest is Test {
     }
 
     // ============================================================================
+    // refuelOperator — direct WETH path (skip swap)
+    // ============================================================================
+
+    function test_refuelOperator_directWethPath() public {
+        uint256 amountIn = 1 ether;
+
+        // Fund treasury with WETH directly (simulating WETH fees)
+        vm.deal(address(this), amountIn);
+        mockWeth.deposit{ value: amountIn }();
+        MockERC20(address(mockWeth)).transfer(address(treasury), amountIn);
+
+        uint256 operatorBalBefore = operatorAddr.balance;
+
+        vm.prank(admin);
+        treasury.refuelOperator(address(mockWeth), amountIn, amountIn, 0, _emptyHops());
+
+        // Operator received ETH
+        assertEq(operatorAddr.balance - operatorBalBefore, amountIn);
+        // Treasury WETH balance is zero
+        assertEq(MockERC20(address(mockWeth)).balanceOf(address(treasury)), 0);
+    }
+
+    function test_refuelOperator_directWethPath_doesNotTouchRouter() public {
+        uint256 amountIn = 1 ether;
+
+        // Fund treasury with WETH
+        vm.deal(address(this), amountIn);
+        mockWeth.deposit{ value: amountIn }();
+        MockERC20(address(mockWeth)).transfer(address(treasury), amountIn);
+
+        vm.prank(operatorAddr);
+        treasury.refuelOperator(address(mockWeth), amountIn, amountIn, 0, _emptyHops());
+
+        // Router should have zero allowance (was never approved)
+        assertEq(MockERC20(address(mockWeth)).allowance(address(treasury), address(mockRouter)), 0);
+    }
+
+    function test_refuelOperator_directWethPath_emitsEvent() public {
+        uint256 amountIn = 1 ether;
+
+        vm.deal(address(this), amountIn);
+        mockWeth.deposit{ value: amountIn }();
+        MockERC20(address(mockWeth)).transfer(address(treasury), amountIn);
+
+        vm.expectEmit(true, false, false, true);
+        emit IMidcurveTreasury.RefuelOperator(address(mockWeth), amountIn, amountIn);
+
+        vm.prank(admin);
+        treasury.refuelOperator(address(mockWeth), amountIn, amountIn, 0, _emptyHops());
+    }
+
+    // ============================================================================
     // Helpers
     // ============================================================================
 
