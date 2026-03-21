@@ -20,6 +20,7 @@ import {
   ProcessCloseOrderEventsRule,
   PostJournalEntriesOnPositionEventsRule,
   ReconcileCostBasisCorrectionsRule,
+  RefuelOperatorRule,
   type BusinessRuleStatus,
 } from '../rules';
 import { getSchedulerService, type SchedulerStatus } from '../scheduler';
@@ -71,6 +72,10 @@ export class RuleManager {
     this.registry.register(new PostJournalEntriesOnPositionEventsRule());
     // Periodic reconciliation for missed cost basis corrections
     this.registry.register(new ReconcileCostBasisCorrectionsRule());
+
+    // Automation rules
+    // Operator gas refueling from treasury WETH
+    this.registry.register(new RefuelOperatorRule());
 
     log.info({ ruleCount: this.registry.size, msg: 'Rules registered' });
   }
