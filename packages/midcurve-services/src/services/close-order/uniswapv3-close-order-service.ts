@@ -270,7 +270,7 @@ export class UniswapV3CloseOrderService {
               sharedContractId: sharedContract.id,
               orderIdentityHash,
               closeOrderHash,
-              automationState: isOurOrder ? 'paused' : 'inactive',
+              automationState: isOurOrder ? 'monitoring' : 'inactive',
               config: {
                 chainId,
                 nftId,
