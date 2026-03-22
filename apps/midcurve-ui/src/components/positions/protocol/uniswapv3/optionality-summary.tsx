@@ -121,14 +121,19 @@ export function OptionalitySummary({
           <div className="flex justify-between items-center text-sm">
             <span className="text-slate-400">Premium Earned</span>
             <span className="text-white font-medium">
-              {formatCompactValue(totalPremium, quoteTokenDecimals)} {quoteTokenSymbol}
+              {netBase < 0n ? "+" : "-"}{formatCompactValue(totalPremium, quoteTokenDecimals)} {quoteTokenSymbol}
             </span>
           </div>
           <div className="border-t border-slate-600/50 pt-2 mt-2">
             <div className="flex justify-between items-center text-sm">
               <span className="text-white font-medium">Total</span>
               <span className="text-white font-medium">
-                {formatCompactValue(absNetQuote + totalPremium, quoteTokenDecimals)} {quoteTokenSymbol}
+                {formatCompactValue(
+                  netBase < 0n
+                    ? absNetQuote + totalPremium   // sold: proceeds + fees
+                    : absNetQuote - totalPremium,  // bought: cost - fees
+                  quoteTokenDecimals
+                )} {quoteTokenSymbol}
               </span>
             </div>
           </div>
@@ -138,13 +143,21 @@ export function OptionalitySummary({
       {/* vs. Spot Market */}
       {direction && (() => {
         const quoteAtSpot = absNetBase * BigInt(summary.currentSpotPrice) / (10n ** BigInt(baseTokenDecimals));
-        // difference = what position received (rebalancing quote + fees) minus what market would give now
+        // For sold: effective proceeds = absNetQuote + premium; got more than spot = premium (green)
+        // For bought: effective cost = absNetQuote - premium; paid less than spot = discount (green)
+        const effectiveQuote = netBase < 0n
+          ? absNetQuote + totalPremium   // sold: total received
+          : absNetQuote - totalPremium;  // bought: net cost after fees
         const difference = netBase < 0n
-          ? (absNetQuote + totalPremium) - quoteAtSpot   // sold: got more = premium
-          : quoteAtSpot - (absNetQuote + totalPremium);  // bought: paid less = discount
-        const isFavorable = difference > 0n;
+          ? effectiveQuote - quoteAtSpot   // sold: positive = got more = premium
+          : quoteAtSpot - effectiveQuote;  // bought: positive = paid less = discount
         const absDifference = difference < 0n ? -difference : difference;
-        const comparisonLabel = isFavorable ? "premium" : "discount";
+        // For sold: positive diff = premium (green), negative = discount (red)
+        // For bought: positive diff = discount (green), negative = premium (red)
+        const isFavorable = difference > 0n;
+        const comparisonLabel = netBase < 0n
+          ? (isFavorable ? "premium" : "discount")
+          : (isFavorable ? "discount" : "premium");
         const comparisonColor = isFavorable ? "text-green-400" : "text-red-400";
 
         return (
