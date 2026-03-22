@@ -42,6 +42,7 @@ export function OptionalitySummary({
     currentBase,
     currentQuote,
     currentSpotPrice,
+    isClosed,
   } = summary;
 
   const netBase = netRebalancingBase;
@@ -94,7 +95,7 @@ export function OptionalitySummary({
 
         {/* Box B: Current Holdings in Position */}
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
-          <h4 className="text-sm font-semibold text-slate-400 mb-3">Current Holdings in Position</h4>
+          <h4 className="text-sm font-semibold text-slate-400 mb-3">{isClosed ? "Holdings at Close" : "Current Holdings in Position"}</h4>
           <div className="space-y-1.5">
             <div className="text-white text-lg font-semibold">
               {formatCompactValue(currentBase, baseTokenDecimals)} {baseTokenSymbol}

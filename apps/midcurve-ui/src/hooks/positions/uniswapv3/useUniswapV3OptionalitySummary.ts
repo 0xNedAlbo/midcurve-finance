@@ -40,6 +40,7 @@ export interface OptionalitySummary {
   currentBase: bigint;
   currentQuote: bigint;
   currentSpotPrice: bigint;
+  isClosed: boolean;
   baseTokenSymbol: string;
   quoteTokenSymbol: string;
   baseTokenDecimals: number;
@@ -117,6 +118,7 @@ function computeSummary(
   const baseIsToken0 = !position.isToken0Quote;
   const currentSqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
   const currentLiquidity = BigInt(posState.liquidity);
+  const isClosed = currentLiquidity === 0n;
 
   const baseToken = baseIsToken0 ? position.pool.token0 : position.pool.token1;
   const quoteToken = baseIsToken0 ? position.pool.token1 : position.pool.token0;
@@ -196,22 +198,12 @@ function computeSummary(
       }
     }
 
-    // Deposit / withdrawal
-    if (event.eventType === "INCREASE_POSITION" || event.eventType === "DECREASE_POSITION") {
+    // Deposits only (INCREASE events) — withdrawals are excluded
+    // Withdrawals are the "exercise" of the option, not part of the deposit
+    if (event.eventType === "INCREASE_POSITION") {
       const state = parseState(event);
-      let deltaToken0 = 0n;
-      let deltaToken1 = 0n;
-
-      if (state.eventType === "INCREASE_LIQUIDITY") {
-        deltaToken0 = state.amount0;
-        deltaToken1 = state.amount1;
-      } else if (state.eventType === "DECREASE_LIQUIDITY") {
-        deltaToken0 = -state.amount0;
-        deltaToken1 = -state.amount1;
-      }
-
       const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
-        deltaToken0, deltaToken1, baseIsToken0,
+        state.amount0, state.amount1, baseIsToken0,
       );
 
       netDepositBase += deltaBase;
@@ -260,10 +252,25 @@ function computeSummary(
     }
   }
 
-  // Current holdings
+  // Current holdings (or holdings at close for closed positions)
   let currentHoldingsBase = 0n;
   let currentHoldingsQuote = 0n;
-  if (currentLiquidity > 0n) {
+  if (isClosed) {
+    // For closed positions: use the amounts from the final DECREASE event (the "exercise")
+    for (let j = financialEvents.length - 1; j >= 0; j--) {
+      const evt = financialEvents[j]!;
+      if (evt.eventType === "DECREASE_POSITION") {
+        const closeCfg = parseConfig(evt);
+        if (closeCfg.liquidityAfter === 0n) {
+          const closeState = parseState(evt);
+          const mapped = toBaseQuote(closeState.amount0, closeState.amount1, baseIsToken0);
+          currentHoldingsBase = mapped.base;
+          currentHoldingsQuote = mapped.quote;
+          break;
+        }
+      }
+    }
+  } else if (currentLiquidity > 0n) {
     const currentAmounts = getTokenAmountsFromLiquidity(
       currentLiquidity, currentSqrtPriceX96, tickLower, tickUpper,
     );
@@ -308,6 +315,7 @@ function computeSummary(
     currentSpotPrice: baseIsToken0
       ? pricePerToken0InToken1(currentSqrtPriceX96, baseTokenDecimals)
       : pricePerToken1InToken0(currentSqrtPriceX96, baseTokenDecimals),
+    isClosed,
     baseTokenSymbol: baseToken.symbol,
     quoteTokenSymbol: quoteToken.symbol,
     baseTokenDecimals,
