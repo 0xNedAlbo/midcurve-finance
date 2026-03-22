@@ -7,6 +7,7 @@
 
 'use client';
 
+import { useState } from 'react';
 import { formatUnits } from 'viem';
 import type { SwapToken } from '@midcurve/api-shared';
 import { formatCompactValue } from '@midcurve/shared';
@@ -35,6 +36,8 @@ export function QuoteDisplay({
   destToken,
   side,
 }: QuoteDisplayProps) {
+  const [rateInverted, setRateInverted] = useState(false);
+
   // Loading state
   if (isLoading) {
     return (
@@ -55,7 +58,8 @@ export function QuoteDisplay({
   // Calculate exchange rate
   const srcNum = parseFloat(formatUnits(BigInt(quote.srcAmount), sourceToken.decimals));
   const destNum = parseFloat(formatUnits(BigInt(quote.destAmount), destToken.decimals));
-  const rate = srcNum > 0 ? (destNum / srcNum).toPrecision(6) : '0';
+  const forwardRate = srcNum > 0 ? (destNum / srcNum).toPrecision(6) : '0';
+  const inverseRate = destNum > 0 ? (srcNum / destNum).toPrecision(6) : '0';
 
   const priceImpactPercent = (quote.priceImpact * 100).toFixed(2);
   const isHighImpact = Math.abs(quote.priceImpact) > 0.03;
@@ -77,9 +81,17 @@ export function QuoteDisplay({
       {/* Exchange rate */}
       <div className="flex items-center justify-between">
         <span className="text-sm text-slate-400">Rate</span>
-        <span className="text-sm text-slate-300">
-          1 {sourceToken.symbol} = {rate} {destToken.symbol}
-        </span>
+        <button
+          onClick={() => setRateInverted((prev) => !prev)}
+          className="text-sm text-slate-300 hover:text-white cursor-pointer flex items-center gap-1"
+        >
+          {rateInverted
+            ? `1 ${destToken.symbol} = ${inverseRate} ${sourceToken.symbol}`
+            : `1 ${sourceToken.symbol} = ${forwardRate} ${destToken.symbol}`}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 text-slate-500">
+            <path fillRule="evenodd" d="M13.78 10.47a.75.75 0 0 1 0 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 1 1 1.06-1.06l.97.97V5.75a.75.75 0 0 1 1.5 0v5.69l.97-.97a.75.75 0 0 1 1.06 0ZM2.22 5.53a.75.75 0 0 1 0-1.06l2.25-2.25a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1-1.06 1.06l-.97-.97v5.69a.75.75 0 0 1-1.5 0V4.56l-.97.97a.75.75 0 0 1-1.06 0Z" clipRule="evenodd" />
+          </svg>
+        </button>
       </div>
 
       {/* Price impact */}
