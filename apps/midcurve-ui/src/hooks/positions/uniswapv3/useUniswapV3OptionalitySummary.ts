@@ -41,6 +41,8 @@ export interface OptionalitySummary {
   currentQuote: bigint;
   currentSpotPrice: bigint;
   isClosed: boolean;
+  /** Days position was active (for closed positions), null if still active */
+  daysActive: number | null;
   baseTokenSymbol: string;
   quoteTokenSymbol: string;
   baseTokenDecimals: number;
@@ -119,6 +121,29 @@ function computeSummary(
   const currentSqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
   const currentLiquidity = BigInt(posState.liquidity);
   const isClosed = currentLiquidity === 0n;
+
+  // Days position was active (for closed positions)
+  // Use last DECREASE event timestamp as close time since positionClosedAt may be null
+  let daysActive: number | null = null;
+  if (isClosed && position.positionOpenedAt) {
+    const opened = new Date(position.positionOpenedAt).getTime();
+    // Find the closing event timestamp from ledger events
+    let closedAt: number | null = null;
+    if (position.positionClosedAt) {
+      closedAt = new Date(position.positionClosedAt).getTime();
+    } else {
+      // Fall back to last DECREASE event timestamp
+      for (let j = events.length - 1; j >= 0; j--) {
+        if (events[j]!.eventType === "DECREASE_POSITION") {
+          closedAt = new Date(events[j]!.timestamp).getTime();
+          break;
+        }
+      }
+    }
+    if (closedAt) {
+      daysActive = Math.max(1, Math.round((closedAt - opened) / (1000 * 60 * 60 * 24)));
+    }
+  }
 
   const baseToken = baseIsToken0 ? position.pool.token0 : position.pool.token1;
   const quoteToken = baseIsToken0 ? position.pool.token1 : position.pool.token0;
@@ -255,8 +280,9 @@ function computeSummary(
   // Current holdings (or holdings at close for closed positions)
   let currentHoldingsBase = 0n;
   let currentHoldingsQuote = 0n;
+  let spotPriceX96 = currentSqrtPriceX96; // live price for active, overridden for closed
   if (isClosed) {
-    // For closed positions: use the amounts from the final DECREASE event (the "exercise")
+    // For closed positions: use the amounts and price from the final DECREASE event
     for (let j = financialEvents.length - 1; j >= 0; j--) {
       const evt = financialEvents[j]!;
       if (evt.eventType === "DECREASE_POSITION") {
@@ -266,6 +292,7 @@ function computeSummary(
           const mapped = toBaseQuote(closeState.amount0, closeState.amount1, baseIsToken0);
           currentHoldingsBase = mapped.base;
           currentHoldingsQuote = mapped.quote;
+          spotPriceX96 = closeCfg.sqrtPriceX96;
           break;
         }
       }
@@ -313,9 +340,10 @@ function computeSummary(
     currentBase: currentHoldingsBase,
     currentQuote: currentHoldingsQuote,
     currentSpotPrice: baseIsToken0
-      ? pricePerToken0InToken1(currentSqrtPriceX96, baseTokenDecimals)
-      : pricePerToken1InToken0(currentSqrtPriceX96, baseTokenDecimals),
+      ? pricePerToken0InToken1(spotPriceX96, baseTokenDecimals)
+      : pricePerToken1InToken0(spotPriceX96, baseTokenDecimals),
     isClosed,
+    daysActive,
     baseTokenSymbol: baseToken.symbol,
     quoteTokenSymbol: quoteToken.symbol,
     baseTokenDecimals,

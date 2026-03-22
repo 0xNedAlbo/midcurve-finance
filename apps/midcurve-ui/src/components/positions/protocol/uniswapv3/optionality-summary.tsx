@@ -43,17 +43,19 @@ export function OptionalitySummary({
     currentQuote,
     currentSpotPrice,
     isClosed,
+    daysActive,
   } = summary;
 
   const netBase = netRebalancingBase;
   const netQuote = netRebalancingQuote;
+  const daysLabel = daysActive !== null ? `after ${daysActive} ${daysActive === 1 ? "day" : "days"}` : "now";
 
   // Build single narrative line from net rebalancing
   let narrative: string;
   if (netBase < 0n) {
-    narrative = `The position sold ${formatCompactValue(-netBase, baseTokenDecimals)} ${baseTokenSymbol} at an average price of ${formatCompactValue(netRebalancingAvgPrice, quoteTokenDecimals)} ${quoteTokenSymbol}, earning ${formatCompactValue(totalPremium, quoteTokenDecimals)} ${quoteTokenSymbol} in premium.`;
+    narrative = `The position sold ${formatCompactValue(-netBase, baseTokenDecimals)} ${baseTokenSymbol} at an average price of ${formatCompactValue(netRebalancingAvgPrice, quoteTokenDecimals)} ${quoteTokenSymbol}, earning ${formatCompactValue(totalPremium, quoteTokenDecimals)} ${quoteTokenSymbol} in fees.`;
   } else if (netBase > 0n) {
-    narrative = `The position bought ${formatCompactValue(netBase, baseTokenDecimals)} ${baseTokenSymbol} at an average price of ${formatCompactValue(netRebalancingAvgPrice, quoteTokenDecimals)} ${quoteTokenSymbol}, earning ${formatCompactValue(totalPremium, quoteTokenDecimals)} ${quoteTokenSymbol} in premium.`;
+    narrative = `The position bought ${formatCompactValue(netBase, baseTokenDecimals)} ${baseTokenSymbol} at an average price of ${formatCompactValue(netRebalancingAvgPrice, quoteTokenDecimals)} ${quoteTokenSymbol}, earning ${formatCompactValue(totalPremium, quoteTokenDecimals)} ${quoteTokenSymbol} in fees.`;
   } else {
     narrative = "No rebalancing has occurred yet.";
   }
@@ -167,11 +169,11 @@ export function OptionalitySummary({
 
         return (
           <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
-            <h4 className="text-sm font-semibold text-slate-400 mb-3">vs. Current Spot Market</h4>
+            <h4 className="text-sm font-semibold text-slate-400 mb-3">{isClosed ? `vs. Spot Market ${daysLabel}` : "vs. Current Spot Market"}</h4>
             <div className="space-y-3">
               <div className="flex justify-between items-center text-sm">
                 <span>
-                  <span className={directionColor}>{netBase < 0n ? "If held and sold now" : "If waited and bought now"}</span>{" "}
+                  <span className={directionColor}>{netBase < 0n ? `If held and sold ${daysLabel}` : `If waited and bought ${daysLabel}`}</span>{" "}
                   <span className="text-slate-500">
                     @ {formatCompactValue(currentSpotPrice, quoteTokenDecimals)} {quoteTokenSymbol}
                   </span>
@@ -185,7 +187,7 @@ export function OptionalitySummary({
                 <p className="text-sm text-slate-300">
                   Including earned fees, you {direction.toLowerCase()} at a{" "}
                   <span className={comparisonColor}>{comparisonLabel}</span> of{" "}
-                  {formatCompactValue(absDifference, quoteTokenDecimals)} {quoteTokenSymbol} vs. current market.
+                  {formatCompactValue(absDifference, quoteTokenDecimals)} {quoteTokenSymbol} vs. market {daysLabel}.
                 </p>
               </div>
             </div>
