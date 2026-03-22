@@ -9,4 +9,3 @@ export * from './list.js';
 export * from './ledger.js';
 export * from './apr.js';
 export * from './pnl-curve.js';
-export * from './optionality.js';

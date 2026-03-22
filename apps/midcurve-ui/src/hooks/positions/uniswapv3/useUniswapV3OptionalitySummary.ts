@@ -1,0 +1,330 @@
+/**
+ * Client-Side Optionality Summary Computation
+ *
+ * Computes optionality metrics from position data + ledger events.
+ * No API call needed — uses data already fetched by position detail and ledger hooks.
+ * Reacts to live pool price updates via the position prop.
+ *
+ * All arithmetic uses bigint. No conversions to Number or float.
+ */
+
+import { useMemo } from "react";
+import type { LedgerEventData } from "@midcurve/api-shared";
+import type { UniswapV3PositionData } from "./useUniswapV3Position";
+import {
+  getTokenAmountsFromLiquidity,
+  valueOfToken0AmountInToken1,
+  valueOfToken1AmountInToken0,
+  pricePerToken0InToken1,
+  pricePerToken1InToken0,
+} from "@midcurve/shared";
+
+// =============================================================================
+// Output Type
+// =============================================================================
+
+export interface OptionalitySummary {
+  netDepositBase: bigint;
+  netDepositQuote: bigint;
+  netDepositAvgPrice: bigint;
+  ammBoughtBase: bigint;
+  ammBoughtAvgPrice: bigint;
+  ammBoughtPremium: bigint;
+  ammSoldBase: bigint;
+  ammSoldAvgPrice: bigint;
+  ammSoldPremium: bigint;
+  netRebalancingBase: bigint;
+  netRebalancingQuote: bigint;
+  netRebalancingAvgPrice: bigint;
+  totalPremium: bigint;
+  currentBase: bigint;
+  currentQuote: bigint;
+  currentSpotPrice: bigint;
+  baseTokenSymbol: string;
+  quoteTokenSymbol: string;
+  baseTokenDecimals: number;
+  quoteTokenDecimals: number;
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function absBI(x: bigint): bigint {
+  return x < 0n ? -x : x;
+}
+
+function feesToQuote(
+  fee0: bigint,
+  fee1: bigint,
+  sqrtPriceX96: bigint,
+  baseIsToken0: boolean,
+): bigint {
+  if (baseIsToken0) {
+    return valueOfToken0AmountInToken1(fee0, sqrtPriceX96) + fee1;
+  } else {
+    return fee0 + valueOfToken1AmountInToken0(fee1, sqrtPriceX96);
+  }
+}
+
+function toBaseQuote(
+  token0Amount: bigint,
+  token1Amount: bigint,
+  baseIsToken0: boolean,
+): { base: bigint; quote: bigint } {
+  return baseIsToken0
+    ? { base: token0Amount, quote: token1Amount }
+    : { base: token1Amount, quote: token0Amount };
+}
+
+/** Extract typed config fields from serialized ledger event */
+function parseConfig(event: LedgerEventData) {
+  const config = event.config as Record<string, unknown>;
+  return {
+    sqrtPriceX96: BigInt(config.sqrtPriceX96 as string),
+    liquidityAfter: BigInt(config.liquidityAfter as string),
+    feesCollected0: BigInt(config.feesCollected0 as string),
+    feesCollected1: BigInt(config.feesCollected1 as string),
+    blockNumber: BigInt(config.blockNumber as string),
+    logIndex: config.logIndex as number,
+  };
+}
+
+/** Extract typed state fields from serialized ledger event */
+function parseState(event: LedgerEventData) {
+  const state = event.state as Record<string, unknown>;
+  return {
+    eventType: state.eventType as string,
+    amount0: BigInt((state.amount0 as string) ?? "0"),
+    amount1: BigInt((state.amount1 as string) ?? "0"),
+  };
+}
+
+// =============================================================================
+// Computation
+// =============================================================================
+
+function computeSummary(
+  position: UniswapV3PositionData,
+  events: LedgerEventData[],
+): OptionalitySummary {
+  const posConfig = position.config as { tickLower: number; tickUpper: number };
+  const posState = position.state as { liquidity: string; unclaimedFees0: string; unclaimedFees1: string };
+  const poolState = position.pool.state as { sqrtPriceX96: string };
+
+  const tickLower = posConfig.tickLower;
+  const tickUpper = posConfig.tickUpper;
+  const baseIsToken0 = !position.isToken0Quote;
+  const currentSqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
+  const currentLiquidity = BigInt(posState.liquidity);
+
+  const baseToken = baseIsToken0 ? position.pool.token0 : position.pool.token1;
+  const quoteToken = baseIsToken0 ? position.pool.token1 : position.pool.token0;
+  const baseTokenDecimals = baseToken.decimals;
+
+  // Filter and sort events
+  const financialEvents = events
+    .filter(
+      (e) =>
+        e.eventType === "INCREASE_POSITION" ||
+        e.eventType === "DECREASE_POSITION" ||
+        e.eventType === "COLLECT",
+    )
+    .sort((a, b) => {
+      const cfgA = parseConfig(a);
+      const cfgB = parseConfig(b);
+      const blockDiff = cfgA.blockNumber - cfgB.blockNumber;
+      if (blockDiff !== 0n) return blockDiff < 0n ? -1 : 1;
+      return cfgA.logIndex - cfgB.logIndex;
+    });
+
+  // Accumulators
+  let netDepositBase = 0n;
+  let netDepositQuote = 0n;
+  let depositVwapNumerator = 0n;
+  let depositVwapDenominator = 0n;
+  let ammSoldBase = 0n;
+  let ammSoldQuoteVolume = 0n;
+  let ammSoldPremium = 0n;
+  let ammBoughtBase = 0n;
+  let ammBoughtQuoteVolume = 0n;
+  let ammBoughtPremium = 0n;
+  let totalPremium = 0n;
+  let netRebalancingBase = 0n;
+  let netRebalancingQuote = 0n;
+
+  for (let i = 0; i < financialEvents.length; i++) {
+    const event = financialEvents[i]!;
+    const cfg = parseConfig(event);
+
+    // Rebalancing segment
+    if (i > 0) {
+      const prevCfg = parseConfig(financialEvents[i - 1]!);
+      const segmentL = prevCfg.liquidityAfter;
+
+      if (segmentL > 0n) {
+        const amountsStart = getTokenAmountsFromLiquidity(
+          segmentL, prevCfg.sqrtPriceX96, tickLower, tickUpper,
+        );
+        const amountsEnd = getTokenAmountsFromLiquidity(
+          segmentL, cfg.sqrtPriceX96, tickLower, tickUpper,
+        );
+
+        const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
+          amountsEnd.token0Amount - amountsStart.token0Amount,
+          amountsEnd.token1Amount - amountsStart.token1Amount,
+          baseIsToken0,
+        );
+
+        const premium = feesToQuote(
+          cfg.feesCollected0, cfg.feesCollected1, cfg.sqrtPriceX96, baseIsToken0,
+        );
+
+        netRebalancingBase += deltaBase;
+        netRebalancingQuote += deltaQuote;
+        totalPremium += premium;
+
+        if (deltaBase < 0n) {
+          ammSoldBase += absBI(deltaBase);
+          ammSoldQuoteVolume += absBI(deltaQuote);
+          ammSoldPremium += premium;
+        } else if (deltaBase > 0n) {
+          ammBoughtBase += absBI(deltaBase);
+          ammBoughtQuoteVolume += absBI(deltaQuote);
+          ammBoughtPremium += premium;
+        }
+      }
+    }
+
+    // Deposit / withdrawal
+    if (event.eventType === "INCREASE_POSITION" || event.eventType === "DECREASE_POSITION") {
+      const state = parseState(event);
+      let deltaToken0 = 0n;
+      let deltaToken1 = 0n;
+
+      if (state.eventType === "INCREASE_LIQUIDITY") {
+        deltaToken0 = state.amount0;
+        deltaToken1 = state.amount1;
+      } else if (state.eventType === "DECREASE_LIQUIDITY") {
+        deltaToken0 = -state.amount0;
+        deltaToken1 = -state.amount1;
+      }
+
+      const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
+        deltaToken0, deltaToken1, baseIsToken0,
+      );
+
+      netDepositBase += deltaBase;
+      netDepositQuote += deltaQuote;
+
+      const absBase = absBI(deltaBase);
+      if (absBase > 0n) {
+        const spotPrice = baseIsToken0
+          ? pricePerToken0InToken1(cfg.sqrtPriceX96, baseTokenDecimals)
+          : pricePerToken1InToken0(cfg.sqrtPriceX96, baseTokenDecimals);
+        depositVwapNumerator += spotPrice * absBase;
+        depositVwapDenominator += absBase;
+      }
+    }
+  }
+
+  // Trailing segment
+  if (financialEvents.length > 0) {
+    const lastCfg = parseConfig(financialEvents[financialEvents.length - 1]!);
+    const trailingL = lastCfg.liquidityAfter;
+
+    if (trailingL > 0n) {
+      const amountsStart = getTokenAmountsFromLiquidity(
+        trailingL, lastCfg.sqrtPriceX96, tickLower, tickUpper,
+      );
+      const amountsEnd = getTokenAmountsFromLiquidity(
+        trailingL, currentSqrtPriceX96, tickLower, tickUpper,
+      );
+
+      const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
+        amountsEnd.token0Amount - amountsStart.token0Amount,
+        amountsEnd.token1Amount - amountsStart.token1Amount,
+        baseIsToken0,
+      );
+
+      netRebalancingBase += deltaBase;
+      netRebalancingQuote += deltaQuote;
+
+      if (deltaBase < 0n) {
+        ammSoldBase += absBI(deltaBase);
+        ammSoldQuoteVolume += absBI(deltaQuote);
+      } else if (deltaBase > 0n) {
+        ammBoughtBase += absBI(deltaBase);
+        ammBoughtQuoteVolume += absBI(deltaQuote);
+      }
+    }
+  }
+
+  // Current holdings
+  let currentHoldingsBase = 0n;
+  let currentHoldingsQuote = 0n;
+  if (currentLiquidity > 0n) {
+    const currentAmounts = getTokenAmountsFromLiquidity(
+      currentLiquidity, currentSqrtPriceX96, tickLower, tickUpper,
+    );
+    const mapped = toBaseQuote(
+      currentAmounts.token0Amount, currentAmounts.token1Amount, baseIsToken0,
+    );
+    currentHoldingsBase = mapped.base;
+    currentHoldingsQuote = mapped.quote;
+  }
+
+  // Unclaimed fees
+  totalPremium += feesToQuote(
+    BigInt(posState.unclaimedFees0),
+    BigInt(posState.unclaimedFees1),
+    currentSqrtPriceX96,
+    baseIsToken0,
+  );
+
+  // Derived values
+  const scale = 10n ** BigInt(baseTokenDecimals);
+
+  return {
+    netDepositBase,
+    netDepositQuote,
+    netDepositAvgPrice: depositVwapDenominator > 0n
+      ? depositVwapNumerator / depositVwapDenominator
+      : 0n,
+    ammBoughtBase,
+    ammBoughtAvgPrice: ammBoughtBase > 0n ? (ammBoughtQuoteVolume * scale) / ammBoughtBase : 0n,
+    ammBoughtPremium,
+    ammSoldBase,
+    ammSoldAvgPrice: ammSoldBase > 0n ? (ammSoldQuoteVolume * scale) / ammSoldBase : 0n,
+    ammSoldPremium,
+    netRebalancingBase,
+    netRebalancingQuote,
+    netRebalancingAvgPrice: netRebalancingBase !== 0n
+      ? (absBI(netRebalancingQuote) * scale) / absBI(netRebalancingBase)
+      : 0n,
+    totalPremium,
+    currentBase: currentHoldingsBase,
+    currentQuote: currentHoldingsQuote,
+    currentSpotPrice: baseIsToken0
+      ? pricePerToken0InToken1(currentSqrtPriceX96, baseTokenDecimals)
+      : pricePerToken1InToken0(currentSqrtPriceX96, baseTokenDecimals),
+    baseTokenSymbol: baseToken.symbol,
+    quoteTokenSymbol: quoteToken.symbol,
+    baseTokenDecimals,
+    quoteTokenDecimals: quoteToken.decimals,
+  };
+}
+
+// =============================================================================
+// Hook
+// =============================================================================
+
+export function useUniswapV3OptionalitySummary(
+  position: UniswapV3PositionData,
+  events: LedgerEventData[] | undefined,
+): OptionalitySummary | null {
+  return useMemo(() => {
+    if (!events || events.length === 0) return null;
+    return computeSummary(position, events);
+  }, [position, events]);
+}

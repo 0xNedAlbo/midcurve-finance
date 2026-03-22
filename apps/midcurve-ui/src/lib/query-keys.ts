@@ -48,11 +48,6 @@ export const queryKeys = {
       apr: (chainId: number, nftId: string) =>
         [...queryKeys.positions.uniswapv3.aprs(), chainId, nftId] as const,
 
-      // Optionality operations
-      optionalities: () => [...queryKeys.positions.uniswapv3.all, 'optionality'] as const,
-      optionality: (chainId: number, nftId: string) =>
-        [...queryKeys.positions.uniswapv3.optionalities(), chainId, nftId] as const,
-
       // Close Orders (position-scoped)
       closeOrders: {
         // All close orders for a position
