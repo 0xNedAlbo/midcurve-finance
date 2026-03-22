@@ -228,6 +228,9 @@ export function LedgerEventTable({
                 VALUE
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
+                REALIZED PNL
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
                 DETAILS
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
@@ -280,6 +283,34 @@ export function LedgerEventTable({
                         </div>
                       )}
                     </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    {(() => {
+                      const deltaPnlBigint = BigInt(event.deltaPnl || "0");
+                      const pnlAfterBigint = BigInt(event.pnlAfter || "0");
+                      const deltaColor = deltaPnlBigint > 0n
+                        ? "text-emerald-400"
+                        : deltaPnlBigint < 0n
+                          ? "text-red-400"
+                          : "text-slate-500";
+                      const cumulativeColor = pnlAfterBigint > 0n
+                        ? "text-emerald-400/70"
+                        : pnlAfterBigint < 0n
+                          ? "text-red-400/70"
+                          : "text-slate-500";
+                      return (
+                        <div className="space-y-1">
+                          <div className={`font-medium ${deltaColor}`}>
+                            {deltaPnlBigint > 0n ? "+" : ""}
+                            {formatValue(event.deltaPnl, quoteToken.decimals)} {quoteToken.symbol}
+                          </div>
+                          <div className={`text-xs ${cumulativeColor}`}>
+                            &Sigma; {pnlAfterBigint > 0n ? "+" : ""}
+                            {formatValue(event.pnlAfter, quoteToken.decimals)} {quoteToken.symbol}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-400">
                     <div className="space-y-1">
@@ -367,6 +398,32 @@ export function LedgerEventTable({
                   <div className="text-white font-medium">
                     {formatValue(event.tokenValue, quoteToken.decimals)} {quoteToken.symbol}
                   </div>
+                  {(() => {
+                    const deltaPnlBigint = BigInt(event.deltaPnl || "0");
+                    const pnlAfterBigint = BigInt(event.pnlAfter || "0");
+                    const deltaColor = deltaPnlBigint > 0n
+                      ? "text-emerald-400"
+                      : deltaPnlBigint < 0n
+                        ? "text-red-400"
+                        : "text-slate-500";
+                    const cumulativeColor = pnlAfterBigint > 0n
+                      ? "text-emerald-400/70"
+                      : pnlAfterBigint < 0n
+                        ? "text-red-400/70"
+                        : "text-slate-500";
+                    return (
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className={`text-xs font-medium ${deltaColor}`}>
+                          PnL: {deltaPnlBigint > 0n ? "+" : ""}
+                          {formatValue(event.deltaPnl, quoteToken.decimals)} {quoteToken.symbol}
+                        </span>
+                        <span className={`text-xs ${cumulativeColor}`}>
+                          (&Sigma; {pnlAfterBigint > 0n ? "+" : ""}
+                          {formatValue(event.pnlAfter, quoteToken.decimals)})
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <a
                   href={buildTxUrl(chainId, txHash)}
