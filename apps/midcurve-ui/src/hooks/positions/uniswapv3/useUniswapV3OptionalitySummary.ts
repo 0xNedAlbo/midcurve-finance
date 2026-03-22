@@ -184,6 +184,12 @@ function computeSummary(
     const event = financialEvents[i]!;
     const cfg = parseConfig(event);
 
+    // Fees from this event (always counted, even without rebalancing)
+    const eventFees = feesToQuote(
+      cfg.feesCollected0, cfg.feesCollected1, cfg.sqrtPriceX96, baseIsToken0,
+    );
+    totalPremium += eventFees;
+
     // Rebalancing segment
     if (i > 0) {
       const prevCfg = parseConfig(financialEvents[i - 1]!);
@@ -203,22 +209,17 @@ function computeSummary(
           baseIsToken0,
         );
 
-        const premium = feesToQuote(
-          cfg.feesCollected0, cfg.feesCollected1, cfg.sqrtPriceX96, baseIsToken0,
-        );
-
         netRebalancingBase += deltaBase;
         netRebalancingQuote += deltaQuote;
-        totalPremium += premium;
 
         if (deltaBase < 0n) {
           ammSoldBase += absBI(deltaBase);
           ammSoldQuoteVolume += absBI(deltaQuote);
-          ammSoldPremium += premium;
+          ammSoldPremium += eventFees;
         } else if (deltaBase > 0n) {
           ammBoughtBase += absBI(deltaBase);
           ammBoughtQuoteVolume += absBI(deltaQuote);
-          ammBoughtPremium += premium;
+          ammBoughtPremium += eventFees;
         }
       }
     }
