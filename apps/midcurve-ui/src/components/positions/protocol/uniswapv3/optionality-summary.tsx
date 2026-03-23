@@ -147,6 +147,20 @@ export function OptionalitySummary({
                 )} {quoteTokenSymbol}
               </span>
             </div>
+            {absNetBase > 0n && (
+              <div className="flex justify-between items-center text-sm mt-2">
+                <span className="text-yellow-400 font-medium">Effective Execution Price</span>
+                <span className="text-yellow-400 font-medium">
+                  {formatCompactValue(
+                    (netBase < 0n
+                      ? absNetQuote + totalPremium
+                      : absNetQuote - totalPremium
+                    ) * 10n ** BigInt(baseTokenDecimals) / absNetBase,
+                    quoteTokenDecimals
+                  )} {quoteTokenSymbol}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
