@@ -81,15 +81,8 @@ export function OptionalitySummary({
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
           <h4 className="text-sm font-semibold text-slate-400 mb-3">Deposits</h4>
           <div className="space-y-1.5">
-            <div>
-              <span className="text-white text-lg font-semibold">
-                {formatCompactValue(netDepositBase, baseTokenDecimals)} {baseTokenSymbol}
-              </span>
-              {netDepositAvgPrice > 0n && (
-                <span className="text-slate-500 text-lg ml-1">
-                  @ {formatCompactValue(netDepositAvgPrice, quoteTokenDecimals)} {quoteTokenSymbol}
-                </span>
-              )}
+            <div className="text-white text-lg font-semibold">
+              {formatCompactValue(netDepositBase, baseTokenDecimals)} {baseTokenSymbol}
             </div>
             <div className="text-white text-lg font-semibold">
               {formatCompactValue(netDepositQuote, quoteTokenDecimals)} {quoteTokenSymbol}
@@ -127,12 +120,22 @@ export function OptionalitySummary({
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
           <h4 className="text-sm font-semibold text-slate-400 mb-3">= Net Conversion</h4>
           <div className="space-y-1.5">
-            <div className={`text-lg font-semibold ${netDepositBase - withdrawnBase - currentBase >= 0n ? "text-green-400" : "text-red-400"}`}>
-              {netDepositBase - withdrawnBase - currentBase >= 0n ? "+" : ""}{formatCompactValue(netDepositBase - withdrawnBase - currentBase, baseTokenDecimals)} {baseTokenSymbol}
-            </div>
-            <div className={`text-lg font-semibold ${netDepositQuote - withdrawnQuote - currentQuote >= 0n ? "text-green-400" : "text-red-400"}`}>
-              {netDepositQuote - withdrawnQuote - currentQuote >= 0n ? "+" : ""}{formatCompactValue(netDepositQuote - withdrawnQuote - currentQuote, quoteTokenDecimals)} {quoteTokenSymbol}
-            </div>
+            {(() => {
+              const netConvBase = netDepositBase - withdrawnBase - currentBase;
+              const netConvQuote = netDepositQuote - withdrawnQuote - currentQuote;
+              const absBase = netConvBase < 0n ? -netConvBase : netConvBase;
+              const absQuote = netConvQuote < 0n ? -netConvQuote : netConvQuote;
+              return (
+                <>
+                  <div className={`text-lg font-semibold ${netConvBase < 0n ? "text-green-400" : "text-red-400"}`}>
+                    {formatCompactValue(absBase, baseTokenDecimals)} {baseTokenSymbol} {netConvBase < 0n ? "in" : "out"}
+                  </div>
+                  <div className={`text-lg font-semibold ${netConvQuote < 0n ? "text-green-400" : "text-red-400"}`}>
+                    {formatCompactValue(absQuote, quoteTokenDecimals)} {quoteTokenSymbol} {netConvQuote < 0n ? "in" : "out"}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>

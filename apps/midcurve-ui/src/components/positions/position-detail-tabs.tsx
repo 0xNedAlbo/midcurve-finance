@@ -6,7 +6,7 @@
  */
 
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Clock, TrendingUp, Settings, Shield, ChartSpline } from "lucide-react";
+import { BarChart3, Clock, TrendingUp, Settings, Shield, Scale } from "lucide-react";
 
 interface PositionDetailTabsProps {
   activeTab: string;
@@ -30,9 +30,9 @@ const tabs = [
     label: "APR Analysis",
   },
   {
-    id: "optionality",
-    icon: ChartSpline,
-    label: "Optionality",
+    id: "conversion",
+    icon: Scale,
+    label: "Conversion",
   },
   {
     id: "automation",

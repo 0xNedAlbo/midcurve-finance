@@ -18,7 +18,7 @@ interface UniswapV3PositionDetailProps {
   position: UniswapV3PositionData;
 }
 
-export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "optionality" | "automation" | "technical";
+export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "conversion" | "automation" | "technical";
 
 export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3PositionDetailProps) {
   const [searchParams] = useSearchParams();
@@ -94,7 +94,7 @@ export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3Posi
         {activeTab === "overview" && <UniswapV3OverviewTab position={position} />}
         {activeTab === "apr-analysis" && <UniswapV3AprTab position={position} />}
         {activeTab === "pnl-analysis" && <UniswapV3HistoryTab position={position} />}
-        {activeTab === "optionality" && <UniswapV3OptionalityTab position={position} />}
+        {activeTab === "conversion" && <UniswapV3OptionalityTab position={position} />}
         {activeTab === "automation" && <UniswapV3AutomationTab position={position} />}
         {activeTab === "technical" && <UniswapV3TechnicalTab position={position} />}
       </div>
