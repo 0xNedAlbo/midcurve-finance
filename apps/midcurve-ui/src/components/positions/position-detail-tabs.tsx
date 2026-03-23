@@ -6,7 +6,7 @@
  */
 
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Clock, TrendingUp, Settings, Shield, Scale } from "lucide-react";
+import { BarChart3, Clock, TrendingUp, Settings, Shield, Repeat } from "lucide-react";
 
 interface PositionDetailTabsProps {
   activeTab: string;
@@ -31,7 +31,7 @@ const tabs = [
   },
   {
     id: "conversion",
-    icon: Scale,
+    icon: Repeat,
     label: "Conversion",
   },
   {
