@@ -27,6 +27,8 @@ export interface OptionalitySummary {
   netDepositBase: bigint;
   netDepositQuote: bigint;
   netDepositAvgPrice: bigint;
+  withdrawnBase: bigint;
+  withdrawnQuote: bigint;
   ammBoughtBase: bigint;
   ammBoughtAvgPrice: bigint;
   ammBoughtPremium: bigint;
@@ -170,6 +172,8 @@ function computeSummary(
   let netDepositQuote = 0n;
   let depositVwapNumerator = 0n;
   let depositVwapDenominator = 0n;
+  let withdrawnBase = 0n;
+  let withdrawnQuote = 0n;
   let ammSoldBase = 0n;
   let ammSoldQuoteVolume = 0n;
   let ammSoldPremium = 0n;
@@ -243,6 +247,16 @@ function computeSummary(
         depositVwapNumerator += spotPrice * absBase;
         depositVwapDenominator += absBase;
       }
+    }
+
+    // Track withdrawals (DECREASE events)
+    if (event.eventType === "DECREASE_POSITION") {
+      const state = parseState(event);
+      const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
+        state.amount0, state.amount1, baseIsToken0,
+      );
+      withdrawnBase += deltaBase;
+      withdrawnQuote += deltaQuote;
     }
   }
 
@@ -326,6 +340,8 @@ function computeSummary(
     netDepositAvgPrice: depositVwapDenominator > 0n
       ? depositVwapNumerator / depositVwapDenominator
       : 0n,
+    withdrawnBase,
+    withdrawnQuote,
     ammBoughtBase,
     ammBoughtAvgPrice: ammBoughtBase > 0n ? (ammBoughtQuoteVolume * scale) / ammBoughtBase : 0n,
     ammBoughtPremium,

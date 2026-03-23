@@ -39,6 +39,8 @@ export function OptionalitySummary({
     netDepositBase,
     netDepositQuote,
     netDepositAvgPrice,
+    withdrawnBase,
+    withdrawnQuote,
     currentBase,
     currentQuote,
     currentSpotPrice,
@@ -73,8 +75,8 @@ export function OptionalitySummary({
         <p className="text-slate-300 text-sm leading-relaxed">{narrative}</p>
       </div>
 
-      {/* Box A + Box B */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Box A + B + C + D */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Box A: Deposits */}
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
           <h4 className="text-sm font-semibold text-slate-400 mb-3">Deposits</h4>
@@ -95,15 +97,41 @@ export function OptionalitySummary({
           </div>
         </div>
 
-        {/* Box B: Current Holdings in Position */}
+        {/* Box B: Already Withdrawn */}
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
-          <h4 className="text-sm font-semibold text-slate-400 mb-3">{isClosed ? "Holdings at Close" : "Current Holdings in Position"}</h4>
+          <h4 className="text-sm font-semibold text-slate-400 mb-3">- Already Withdrawn</h4>
+          <div className="space-y-1.5">
+            <div className="text-white text-lg font-semibold">
+              {formatCompactValue(withdrawnBase, baseTokenDecimals)} {baseTokenSymbol}
+            </div>
+            <div className="text-white text-lg font-semibold">
+              {formatCompactValue(withdrawnQuote, quoteTokenDecimals)} {quoteTokenSymbol}
+            </div>
+          </div>
+        </div>
+
+        {/* Box C: Current Holdings in Position */}
+        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
+          <h4 className="text-sm font-semibold text-slate-400 mb-3">- {isClosed ? "Holdings at Close" : "Current Holdings in Position"}</h4>
           <div className="space-y-1.5">
             <div className="text-white text-lg font-semibold">
               {formatCompactValue(currentBase, baseTokenDecimals)} {baseTokenSymbol}
             </div>
             <div className="text-white text-lg font-semibold">
               {formatCompactValue(currentQuote, quoteTokenDecimals)} {quoteTokenSymbol}
+            </div>
+          </div>
+        </div>
+
+        {/* Box D: Net Conversion */}
+        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
+          <h4 className="text-sm font-semibold text-slate-400 mb-3">= Net Conversion</h4>
+          <div className="space-y-1.5">
+            <div className={`text-lg font-semibold ${netDepositBase - withdrawnBase - currentBase >= 0n ? "text-green-400" : "text-red-400"}`}>
+              {netDepositBase - withdrawnBase - currentBase >= 0n ? "+" : ""}{formatCompactValue(netDepositBase - withdrawnBase - currentBase, baseTokenDecimals)} {baseTokenSymbol}
+            </div>
+            <div className={`text-lg font-semibold ${netDepositQuote - withdrawnQuote - currentQuote >= 0n ? "text-green-400" : "text-red-400"}`}>
+              {netDepositQuote - withdrawnQuote - currentQuote >= 0n ? "+" : ""}{formatCompactValue(netDepositQuote - withdrawnQuote - currentQuote, quoteTokenDecimals)} {quoteTokenSymbol}
             </div>
           </div>
         </div>
@@ -201,7 +229,7 @@ export function OptionalitySummary({
                 <p className="text-sm text-slate-300">
                   Including earned fees, you {direction.toLowerCase()} at a{" "}
                   <span className={comparisonColor}>{comparisonLabel}</span> of{" "}
-                  {formatCompactValue(absDifference, quoteTokenDecimals)} {quoteTokenSymbol} vs. market {daysLabel}.
+                  {formatCompactValue(absDifference, quoteTokenDecimals)} {quoteTokenSymbol} vs. {isClosed ? `market ${daysLabel}` : "the current market"}.
                 </p>
               </div>
             </div>
