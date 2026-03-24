@@ -20,6 +20,7 @@ const TESTNET_CHAIN_IDS = [11155111, 31337];
 
 const CONTRACT_NAME_TO_KEBAB: Record<string, string> = {
   UniswapV3PositionCloser: 'uniswap-v3-position-closer',
+  UniswapV3FeeCollector: 'uniswap-v3-fee-collector',
   MidcurveSwapRouter: 'midcurve-swap-router',
 };
 

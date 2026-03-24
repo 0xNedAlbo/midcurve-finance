@@ -66,6 +66,10 @@ interface SetupState {
   positionCloserVersion?: { major: number; minor: number };
   sharedContractId?: string;
   sharedContractHash?: string;
+  feeCollectorAddress?: string;
+  feeCollectorVersion?: { major: number; minor: number };
+  feeCollectorContractId?: string;
+  feeCollectorContractHash?: string;
   poolAddress?: string;
   positionTokenId?: string;
   swapRouterAddress?: string;
@@ -173,6 +177,7 @@ function updateEnvFile(envPath: string, key: string, value: string): void {
 function updateLocalChainConfig(
   mockUsdAddress: string,
   positionCloserAddress?: string,
+  feeCollectorAddress?: string,
   poolAddress?: string,
   swapRouterAddress?: string
 ): void {
@@ -189,6 +194,9 @@ function updateLocalChainConfig(
       if (positionCloserAddress) {
         updateEnvFile(envPath, 'UNISWAPV3_POSITION_CLOSER_ADDRESS_LOCAL', positionCloserAddress);
       }
+      if (feeCollectorAddress) {
+        updateEnvFile(envPath, 'UNISWAPV3_FEE_COLLECTOR_ADDRESS_LOCAL', feeCollectorAddress);
+      }
       if (poolAddress) {
         updateEnvFile(envPath, 'MOCK_USD_WETH_POOL_ADDRESS', poolAddress);
       }
@@ -204,7 +212,7 @@ function updateLocalChainConfig(
 
 async function step1Deploy(state: SetupState): Promise<void> {
   console.log('\n' + '='.repeat(60));
-  console.log('Step 1: Deploy MockUSD, PositionCloser, and MidcurveSwapRouter');
+  console.log('Step 1: Deploy MockUSD, PositionCloser, FeeCollector, and MidcurveSwapRouter');
   console.log('='.repeat(60) + '\n');
 
   const output = await runCommand('forge', [
@@ -222,6 +230,7 @@ async function step1Deploy(state: SetupState): Promise<void> {
   // Looking for patterns like "MockUSD deployed at: 0x..."
   state.mockUsdAddress = extractAddress(output, /MockUSD deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.positionCloserAddress = extractAddress(output, /PositionCloser deployed at:\s*(0x[a-fA-F0-9]{40})/);
+  state.feeCollectorAddress = extractAddress(output, /FeeCollector deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.swapRouterAddress = extractAddress(output, /MidcurveSwapRouter deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.uniswapV3AdapterAddress = extractAddress(output, /UniswapV3Adapter deployed at:\s*(0x[a-fA-F0-9]{40})/);
 
@@ -232,19 +241,15 @@ async function step1Deploy(state: SetupState): Promise<void> {
   console.log('\n--- Extracted Addresses ---');
   console.log('MockUSD:', state.mockUsdAddress);
   console.log('PositionCloser:', state.positionCloserAddress || '(not found)');
+  console.log('FeeCollector:', state.feeCollectorAddress || '(not found)');
   console.log('MidcurveSwapRouter:', state.swapRouterAddress || '(not found)');
   console.log('UniswapV3Adapter:', state.uniswapV3AdapterAddress || '(not found)');
 }
 
 async function step1bReadDiamondVersion(state: SetupState): Promise<void> {
   console.log('\n' + '='.repeat(60));
-  console.log('Step 1b: Read Diamond Interface Version');
+  console.log('Step 1b: Read Diamond Interface Versions');
   console.log('='.repeat(60) + '\n');
-
-  if (!state.positionCloserAddress) {
-    console.log('PositionCloser not deployed - skipping version read');
-    return;
-  }
 
   // Create viem client for local chain
   const client = createPublicClient({
@@ -252,19 +257,39 @@ async function step1bReadDiamondVersion(state: SetupState): Promise<void> {
     transport: http('http://localhost:8545'),
   });
 
-  // Read interfaceVersion from diamond via VersionFacet
-  const versionRaw = await client.readContract({
-    address: state.positionCloserAddress as `0x${string}`,
-    abi: parseAbi(['function interfaceVersion() view returns (uint32)']),
-    functionName: 'interfaceVersion',
-  });
+  const versionAbi = parseAbi(['function interfaceVersion() view returns (uint32)']);
 
-  // Parse the version (100 = v1.0, 101 = v1.1, etc.)
-  const version = parseInterfaceVersion(Number(versionRaw));
-  state.positionCloserVersion = version;
+  if (state.positionCloserAddress) {
+    const versionRaw = await client.readContract({
+      address: state.positionCloserAddress as `0x${string}`,
+      abi: versionAbi,
+      functionName: 'interfaceVersion',
+    });
 
-  console.log('Interface Version (raw):', versionRaw);
-  console.log(`Interface Version: v${version.major}.${version.minor}`);
+    const version = parseInterfaceVersion(Number(versionRaw));
+    state.positionCloserVersion = version;
+
+    console.log('PositionCloser Interface Version (raw):', versionRaw);
+    console.log(`PositionCloser Interface Version: v${version.major}.${version.minor}`);
+  } else {
+    console.log('PositionCloser not deployed - skipping version read');
+  }
+
+  if (state.feeCollectorAddress) {
+    const versionRaw = await client.readContract({
+      address: state.feeCollectorAddress as `0x${string}`,
+      abi: versionAbi,
+      functionName: 'interfaceVersion',
+    });
+
+    const version = parseInterfaceVersion(Number(versionRaw));
+    state.feeCollectorVersion = version;
+
+    console.log('FeeCollector Interface Version (raw):', versionRaw);
+    console.log(`FeeCollector Interface Version: v${version.major}.${version.minor}`);
+  } else {
+    console.log('FeeCollector not deployed - skipping version read');
+  }
 }
 
 async function step2CreatePool(state: SetupState): Promise<void> {
@@ -405,6 +430,35 @@ async function step5StoreSharedContract(state: SetupState): Promise<void> {
     throw error;
   }
 
+  // Store FeeCollector in database
+  if (state.feeCollectorAddress && state.feeCollectorVersion) {
+    try {
+      const fcResult = await sharedContractService.upsert({
+        sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
+        sharedContractName: SharedContractNameEnum.UNISWAP_V3_FEE_COLLECTOR,
+        interfaceVersionMajor: state.feeCollectorVersion.major,
+        interfaceVersionMinor: state.feeCollectorVersion.minor,
+        chainId: LOCAL_CHAIN_ID,
+        address: state.feeCollectorAddress,
+        isActive: true,
+      });
+
+      state.feeCollectorContractId = fcResult.id;
+      state.feeCollectorContractHash = fcResult.sharedContractHash;
+
+      console.log('SharedContract upserted (FeeCollector):');
+      console.log('  ID:', fcResult.id);
+      console.log('  Hash:', fcResult.sharedContractHash);
+      console.log('  Address:', fcResult.config.address);
+      console.log(`  Version: v${fcResult.interfaceVersionMajor}.${fcResult.interfaceVersionMinor}`);
+    } catch (error) {
+      console.error('Failed to store FeeCollector SharedContract:', error);
+      throw error;
+    }
+  } else {
+    console.log('FeeCollector not deployed or version unknown - skipping database storage');
+  }
+
   // Store SwapRouter in database
   if (state.swapRouterAddress) {
     try {
@@ -441,12 +495,12 @@ async function main(): Promise<void> {
   console.log('='.repeat(60));
   console.log('');
   console.log('This script will:');
-  console.log('1. Deploy MockUSD, PositionCloser (Diamond), and MidcurveSwapRouter');
-  console.log('1b. Read Diamond interface version');
+  console.log('1. Deploy MockUSD, PositionCloser, FeeCollector, and MidcurveSwapRouter');
+  console.log('1b. Read Diamond interface versions');
   console.log('2. Create a WETH/MockUSD Uniswap V3 pool');
   console.log('3. Add initial liquidity to the pool');
   console.log('4. Fund test account #0 with 100 WETH + 1,000,000 MockUSD');
-  console.log('5. Store SharedContract deployment info in database (PositionCloser + SwapRouter)');
+  console.log('5. Store SharedContract deployment info in database (PositionCloser + FeeCollector + SwapRouter)');
   console.log('');
   console.log('Prerequisites:');
   console.log('- Anvil running on port 8545 (pnpm local:anvil)');
@@ -464,6 +518,7 @@ async function main(): Promise<void> {
     updateLocalChainConfig(
       state.mockUsdAddress!,
       state.positionCloserAddress,
+      state.feeCollectorAddress,
       state.poolAddress,
       state.swapRouterAddress
     );
@@ -480,7 +535,11 @@ async function main(): Promise<void> {
     console.log('  MockUSD:', state.mockUsdAddress);
     console.log('  PositionCloser (Diamond):', state.positionCloserAddress || '(not deployed)');
     if (state.positionCloserVersion) {
-      console.log(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
+      console.log(`  PositionCloser Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
+    }
+    console.log('  FeeCollector (Diamond):', state.feeCollectorAddress || '(not deployed)');
+    if (state.feeCollectorVersion) {
+      console.log(`  FeeCollector Version: v${state.feeCollectorVersion.major}.${state.feeCollectorVersion.minor}`);
     }
     console.log('  MidcurveSwapRouter:', state.swapRouterAddress || '(not deployed)');
     console.log('  UniswapV3Adapter:', state.uniswapV3AdapterAddress || '(not deployed)');
@@ -491,6 +550,11 @@ async function main(): Promise<void> {
       console.log('  PositionCloser:');
       console.log('    ID:', state.sharedContractId);
       console.log('    Hash:', state.sharedContractHash);
+    }
+    if (state.feeCollectorContractId) {
+      console.log('  FeeCollector:');
+      console.log('    ID:', state.feeCollectorContractId);
+      console.log('    Hash:', state.feeCollectorContractHash);
     }
     if (state.swapRouterContractId) {
       console.log('  SwapRouter:');
@@ -504,6 +568,7 @@ async function main(): Promise<void> {
     console.log(`  export MOCK_USD_ADDRESS="${state.mockUsdAddress}"`);
     console.log(`  export MOCK_USD_WETH_POOL_ADDRESS="${state.poolAddress}"`);
     console.log(`  export POSITION_CLOSER_ADDRESS="${state.positionCloserAddress}"`);
+    console.log(`  export FEE_COLLECTOR_ADDRESS="${state.feeCollectorAddress}"`);
     console.log(`  export SWAP_ROUTER_ADDRESS="${state.swapRouterAddress}"`);
     console.log('');
     console.log('Next Steps:');
@@ -530,9 +595,11 @@ async function main(): Promise<void> {
     if (state.positionCloserVersion) {
       console.error(`  Interface Version: v${state.positionCloserVersion.major}.${state.positionCloserVersion.minor}`);
     }
+    console.error('  FeeCollector:', state.feeCollectorAddress || '(not deployed)');
     console.error('  MidcurveSwapRouter:', state.swapRouterAddress || '(not deployed)');
     console.error('  Pool:', state.poolAddress || '(not created)');
     console.error('  SharedContract (PositionCloser):', state.sharedContractId || '(not stored)');
+    console.error('  SharedContract (FeeCollector):', state.feeCollectorContractId || '(not stored)');
     console.error('  SharedContract (SwapRouter):', state.swapRouterContractId || '(not stored)');
     console.error('');
     console.error('Make sure Anvil is running: pnpm local:anvil');

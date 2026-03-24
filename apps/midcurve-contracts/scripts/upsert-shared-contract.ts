@@ -11,7 +11,7 @@
  * Environment variables:
  *   CONTRACT_ADDRESS  - The deployed contract address (required)
  *   CHAIN_ID          - Target chain ID, e.g. 42161 (required)
- *   CONTRACT_NAME     - Contract name: UniswapV3PositionCloser | MidcurveSwapRouter (required)
+ *   CONTRACT_NAME     - Contract name: UniswapV3PositionCloser | UniswapV3FeeCollector | MidcurveSwapRouter (required)
  *   VERSION_MAJOR     - Interface version major (default: 1)
  *   VERSION_MINOR     - Interface version minor (default: 0)
  *   DATABASE_URL      - PostgreSQL connection string (from .env)

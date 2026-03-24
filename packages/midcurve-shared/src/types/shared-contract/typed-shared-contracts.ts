@@ -19,3 +19,9 @@ export type EvmSharedContractJSON = SharedContractJSON<EvmSmartContractConfigJSO
  */
 export type UniswapV3PositionCloserContract = EvmSharedContract;
 export type UniswapV3PositionCloserContractJSON = EvmSharedContractJSON;
+
+/**
+ * UniswapV3FeeCollector contract on EVM chains
+ */
+export type UniswapV3FeeCollectorContract = EvmSharedContract;
+export type UniswapV3FeeCollectorContractJSON = EvmSharedContractJSON;

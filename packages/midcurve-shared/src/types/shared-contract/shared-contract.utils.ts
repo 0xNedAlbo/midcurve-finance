@@ -102,6 +102,24 @@ export function buildUniswapV3PositionCloserHash(
 }
 
 /**
+ * Build hash for UniswapV3FeeCollector on EVM
+ * Convenience function for fee collector lookups
+ */
+export function buildUniswapV3FeeCollectorHash(
+  major: number,
+  minor: number,
+  chainId: number
+): string {
+  return buildSharedContractHash(
+    SharedContractType.EVM_SMART_CONTRACT,
+    SharedContractName.UNISWAP_V3_FEE_COLLECTOR,
+    major,
+    minor,
+    chainId
+  );
+}
+
+/**
  * Build hash for MidcurveSwapRouter on EVM
  * Convenience function for swap router lookups
  */

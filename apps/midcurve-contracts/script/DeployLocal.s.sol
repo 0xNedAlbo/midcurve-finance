@@ -8,7 +8,7 @@ import {MockUSD} from "../contracts/MockUSD.sol";
 import {Diamond} from "../contracts/position-closer/diamond/Diamond.sol";
 import {IDiamondCut} from "../contracts/position-closer/diamond/interfaces/IDiamondCut.sol";
 
-// Facets
+// PositionCloser Facets
 import {DiamondCutFacet} from "../contracts/position-closer/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../contracts/position-closer/facets/DiamondLoupeFacet.sol";
 import {OwnershipFacet} from "../contracts/position-closer/facets/OwnershipFacet.sol";
@@ -19,8 +19,19 @@ import {OwnerUpdateFacet} from "../contracts/position-closer/facets/OwnerUpdateF
 import {ViewFacet} from "../contracts/position-closer/facets/ViewFacet.sol";
 import {MulticallFacet} from "../contracts/position-closer/facets/MulticallFacet.sol";
 
-// Init
+// PositionCloser Init
 import {DiamondInit} from "../contracts/position-closer/init/DiamondInit.sol";
+
+// FeeCollector Facets
+import {VersionFacet as FcVersionFacet} from "../contracts/fee-collector/facets/VersionFacet.sol";
+import {CollectRegistrationFacet} from "../contracts/fee-collector/facets/CollectRegistrationFacet.sol";
+import {CollectExecutionFacet} from "../contracts/fee-collector/facets/CollectExecutionFacet.sol";
+import {CollectOwnerUpdateFacet} from "../contracts/fee-collector/facets/CollectOwnerUpdateFacet.sol";
+import {CollectViewFacet} from "../contracts/fee-collector/facets/CollectViewFacet.sol";
+import {MulticallFacet as FcMulticallFacet} from "../contracts/fee-collector/facets/MulticallFacet.sol";
+
+// FeeCollector Init
+import {DiamondInit as FcDiamondInit} from "../contracts/fee-collector/init/DiamondInit.sol";
 
 // SwapRouter
 import {MidcurveSwapRouter} from "../contracts/swap-router/MidcurveSwapRouter.sol";
@@ -28,7 +39,7 @@ import {UniswapV3Adapter} from "../contracts/swap-router/adapters/UniswapV3Adapt
 
 /**
  * @title DeployLocalScript
- * @notice Deploys mock infrastructure and PositionCloser Diamond for local Anvil fork testing
+ * @notice Deploys mock infrastructure, PositionCloser Diamond, and FeeCollector Diamond for local Anvil fork testing
  * @dev Usage:
  *   pnpm local:deploy (or via pnpm local:setup)
  *
@@ -192,6 +203,98 @@ contract DeployLocalScript is Script {
         Diamond positionCloserDiamond = new Diamond(facetCuts, args);
         console.log("PositionCloser deployed at:", address(positionCloserDiamond));
 
+        // ========================================
+        // 4. Deploy FeeCollector Diamond
+        // ========================================
+        console.log("");
+        console.log("--- Deploying FeeCollector Diamond ---");
+
+        // Deploy FeeCollector-specific facets (reuse DiamondCut, Loupe, Ownership from PositionCloser)
+        DiamondCutFacet fcDiamondCutFacet = new DiamondCutFacet();
+        DiamondLoupeFacet fcDiamondLoupeFacet = new DiamondLoupeFacet();
+        OwnershipFacet fcOwnershipFacet = new OwnershipFacet();
+        FcVersionFacet fcVersionFacet = new FcVersionFacet();
+        CollectRegistrationFacet collectRegistrationFacet = new CollectRegistrationFacet();
+        CollectExecutionFacet collectExecutionFacet = new CollectExecutionFacet();
+        CollectOwnerUpdateFacet collectOwnerUpdateFacet = new CollectOwnerUpdateFacet();
+        CollectViewFacet collectViewFacet = new CollectViewFacet();
+        FcMulticallFacet fcMulticallFacet = new FcMulticallFacet();
+
+        FcDiamondInit fcDiamondInit = new FcDiamondInit();
+
+        IDiamondCut.FacetCut[] memory fcFacetCuts = new IDiamondCut.FacetCut[](9);
+
+        fcFacetCuts[0] = IDiamondCut.FacetCut({
+            facetAddress: address(fcDiamondCutFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getDiamondCutSelectors()
+        });
+
+        fcFacetCuts[1] = IDiamondCut.FacetCut({
+            facetAddress: address(fcDiamondLoupeFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getDiamondLoupeSelectors()
+        });
+
+        fcFacetCuts[2] = IDiamondCut.FacetCut({
+            facetAddress: address(fcOwnershipFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getOwnershipSelectors()
+        });
+
+        fcFacetCuts[3] = IDiamondCut.FacetCut({
+            facetAddress: address(fcVersionFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getFcVersionSelectors()
+        });
+
+        fcFacetCuts[4] = IDiamondCut.FacetCut({
+            facetAddress: address(collectRegistrationFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getCollectRegistrationSelectors()
+        });
+
+        fcFacetCuts[5] = IDiamondCut.FacetCut({
+            facetAddress: address(collectExecutionFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getCollectExecutionSelectors()
+        });
+
+        fcFacetCuts[6] = IDiamondCut.FacetCut({
+            facetAddress: address(collectOwnerUpdateFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getCollectOwnerUpdateSelectors()
+        });
+
+        fcFacetCuts[7] = IDiamondCut.FacetCut({
+            facetAddress: address(collectViewFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getCollectViewSelectors()
+        });
+
+        fcFacetCuts[8] = IDiamondCut.FacetCut({
+            facetAddress: address(fcMulticallFacet),
+            action: IDiamondCut.FacetCutAction.Add,
+            functionSelectors: getFcMulticallSelectors()
+        });
+
+        bytes memory fcInitCalldata = abi.encodeWithSelector(
+            FcDiamondInit.init.selector,
+            NFPM,
+            address(midcurveSwapRouter),
+            INTERFACE_VERSION,
+            MAX_FEE_BPS
+        );
+
+        Diamond.DiamondArgs memory fcArgs = Diamond.DiamondArgs({
+            owner: FOUNDRY_SENDER,
+            init: address(fcDiamondInit),
+            initCalldata: fcInitCalldata
+        });
+
+        Diamond feeCollectorDiamond = new Diamond(fcFacetCuts, fcArgs);
+        console.log("FeeCollector deployed at:", address(feeCollectorDiamond));
+
         vm.stopBroadcast();
 
         console.log("");
@@ -203,6 +306,7 @@ contract DeployLocalScript is Script {
         console.log("MidcurveSwapRouter:", address(midcurveSwapRouter));
         console.log("UniswapV3Adapter:", address(uniAdapter));
         console.log("PositionCloser:", address(positionCloserDiamond));
+        console.log("FeeCollector:", address(feeCollectorDiamond));
         console.log("Interface Version:", INTERFACE_VERSION);
         console.log("");
         console.log("========================================");
@@ -281,6 +385,56 @@ contract DeployLocalScript is Script {
     function getMulticallSelectors() internal pure returns (bytes4[] memory) {
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = MulticallFacet.multicall.selector;
+        return selectors;
+    }
+
+    // ========================================
+    // FEE COLLECTOR SELECTOR HELPERS
+    // ========================================
+
+    function getFcVersionSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](2);
+        selectors[0] = FcVersionFacet.interfaceVersion.selector;
+        selectors[1] = FcVersionFacet.version.selector;
+        return selectors;
+    }
+
+    function getCollectRegistrationSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](2);
+        selectors[0] = CollectRegistrationFacet.registerCollect.selector;
+        selectors[1] = CollectRegistrationFacet.cancelCollect.selector;
+        return selectors;
+    }
+
+    function getCollectExecutionSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = CollectExecutionFacet.executeCollect.selector;
+        return selectors;
+    }
+
+    function getCollectOwnerUpdateSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](5);
+        selectors[0] = CollectOwnerUpdateFacet.setCollectOperator.selector;
+        selectors[1] = CollectOwnerUpdateFacet.setCollectPayout.selector;
+        selectors[2] = CollectOwnerUpdateFacet.setCollectValidUntil.selector;
+        selectors[3] = CollectOwnerUpdateFacet.setCollectSwapIntent.selector;
+        selectors[4] = CollectOwnerUpdateFacet.setCollectMinFee.selector;
+        return selectors;
+    }
+
+    function getCollectViewSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](5);
+        selectors[0] = CollectViewFacet.getCollectOrder.selector;
+        selectors[1] = CollectViewFacet.hasCollectOrder.selector;
+        selectors[2] = CollectViewFacet.positionManager.selector;
+        selectors[3] = CollectViewFacet.swapRouter.selector;
+        selectors[4] = CollectViewFacet.maxFeeBps.selector;
+        return selectors;
+    }
+
+    function getFcMulticallSelectors() internal pure returns (bytes4[] memory) {
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = FcMulticallFacet.multicall.selector;
         return selectors;
     }
 }
