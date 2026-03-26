@@ -40,7 +40,7 @@ ENV NODE_ENV=production
 RUN apk upgrade --no-cache
 
 # Update npm to patch bundled dependency CVEs (tar, minimatch, glob)
-RUN npm install -g npm@latest
+RUN npm install -g npm@10
 
 # Copy built application
 COPY --from=builder /app/apps/midcurve-business-logic/dist ./dist

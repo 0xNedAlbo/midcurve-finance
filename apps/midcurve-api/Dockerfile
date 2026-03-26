@@ -58,7 +58,7 @@ ENV PORT=3001
 RUN apk upgrade --no-cache && apk add --no-cache openssl
 
 # Update npm to patch bundled dependency CVEs (tar, minimatch, glob)
-RUN npm install -g npm@latest
+RUN npm install -g npm@10
 
 # Install prisma CLI for migrations (pinned to 6.x)
 RUN npm install -g prisma@6.19.0

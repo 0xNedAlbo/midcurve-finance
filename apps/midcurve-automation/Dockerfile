@@ -42,7 +42,7 @@ ENV HOSTNAME=0.0.0.0
 RUN apk upgrade --no-cache && apk add --no-cache openssl wget
 
 # Update npm to patch bundled dependency CVEs (tar, minimatch, glob)
-RUN npm install -g npm@latest
+RUN npm install -g npm@10
 
 # Copy standalone build
 COPY --from=builder /app/apps/midcurve-automation/.next/standalone ./
