@@ -297,16 +297,13 @@ function computeSummary(
   let currentHoldingsQuote = 0n;
   let spotPriceX96 = currentSqrtPriceX96; // live price for active, overridden for closed
   if (isClosed) {
-    // For closed positions: use the amounts and price from the final DECREASE event
+    // For closed positions: holdings are 0 (already counted in withdrawnBase/Quote).
+    // Use the price from the final DECREASE event as the reference spot price.
     for (let j = financialEvents.length - 1; j >= 0; j--) {
       const evt = financialEvents[j]!;
       if (evt.eventType === "DECREASE_POSITION") {
         const closeCfg = parseConfig(evt);
         if (closeCfg.liquidityAfter === 0n) {
-          const closeState = parseState(evt);
-          const mapped = toBaseQuote(closeState.amount0, closeState.amount1, baseIsToken0);
-          currentHoldingsBase = mapped.base;
-          currentHoldingsQuote = mapped.quote;
           spotPriceX96 = closeCfg.sqrtPriceX96;
           break;
         }
