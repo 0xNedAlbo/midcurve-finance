@@ -23,6 +23,7 @@ import {
   X,
   ArrowRight,
 } from 'lucide-react';
+import { useChainId, useSwitchChain } from 'wagmi';
 import type { Address } from 'viem';
 import type { SerializedCloseOrder } from '@midcurve/api-shared';
 import { useSetAutomationState } from '@/hooks/automation/useSetAutomationState';
@@ -107,6 +108,8 @@ export function OrderActionButton({
   onNavigateToWizard,
 }: OrderActionButtonProps) {
   const { operatorAddress } = useConfig();
+  const walletChainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
   const setAutomationState = useSetAutomationState();
   const {
     cancelOrder,
@@ -150,13 +153,26 @@ export function OrderActionButton({
     }
   }, [isOperatorSuccess, order.closeOrderHash, chainId, nftId, setAutomationState, resetOperatorUpdate]);
 
+  // Ensure wallet is on the correct chain before on-chain actions.
+  // Returns true if chain is correct (or was switched), false if user rejected.
+  const ensureCorrectChain = useCallback(async () => {
+    if (walletChainId !== chainId) {
+      await switchChainAsync({ chainId });
+    }
+  }, [walletChainId, chainId, switchChainAsync]);
+
   // Toggle monitoring state
-  const handleToggleMonitoring = useCallback(() => {
+  const handleToggleMonitoring = useCallback(async () => {
     if (!order.closeOrderHash) return;
 
     // Inactive orders need an on-chain operator change first
     if (visualState === 'inactive') {
       if (!operatorAddress) return;
+      try {
+        await ensureCorrectChain();
+      } catch {
+        return; // User rejected chain switch
+      }
       updateOrder({
         updateType: 'operator',
         orderType,
@@ -175,12 +191,17 @@ export function OrderActionButton({
       closeOrderHash: order.closeOrderHash,
       automationState: newState,
     });
-  }, [order.automationState, order.closeOrderHash, visualState, operatorAddress, chainId, nftId, orderType, setAutomationState, updateOrder]);
+  }, [order.automationState, order.closeOrderHash, visualState, operatorAddress, chainId, nftId, orderType, setAutomationState, updateOrder, ensureCorrectChain]);
 
   // Cancel order on-chain
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
+    try {
+      await ensureCorrectChain();
+    } catch {
+      return; // User rejected chain switch
+    }
     cancelOrder({ orderType });
-  }, [cancelOrder, orderType]);
+  }, [cancelOrder, orderType, ensureCorrectChain]);
 
   const statusConfig = STATUS_ICON_CONFIG[visualState];
   const { Icon, colorClass, hoverClass, title, interactive } = statusConfig;
