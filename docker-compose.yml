@@ -77,10 +77,6 @@ services:
       # CORS & Cookies
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - COOKIE_DOMAIN=${COOKIE_DOMAIN:-.midcurve.finance}
-      # RPC URLs
-      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
-      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
-      - RPC_URL_BASE=${RPC_URL_BASE}
       # Internal services
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
@@ -121,10 +117,6 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASS=${RABBITMQ_PASS}
-      # RPC URLs (for close order catch-up, block finality checks)
-      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
-      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
-      - RPC_URL_BASE=${RPC_URL_BASE}
       # Worker configuration (optional, has sensible defaults)
       - MAX_POOLS_PER_CONNECTION=${MAX_POOLS_PER_CONNECTION:-1000}
       - RECONNECT_DELAY_MS=${RECONNECT_DELAY_MS:-5000}
@@ -162,10 +154,6 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASS=${RABBITMQ_PASS}
-      # RPC URLs (for reading pool prices, position data)
-      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
-      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
-      - RPC_URL_BASE=${RPC_URL_BASE}
       # Signer service (for tx signing)
       - SIGNER_URL=http://signer:3003
       - SIGNER_INTERNAL_API_KEY=${SIGNER_INTERNAL_API_KEY}
@@ -211,10 +199,6 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=${RABBITMQ_USER}
       - RABBITMQ_PASS=${RABBITMQ_PASS}
-      # RPC URLs (for on-chain state reads via @midcurve/services)
-      - RPC_URL_ETHEREUM=${RPC_URL_ETHEREUM}
-      - RPC_URL_ARBITRUM=${RPC_URL_ARBITRUM}
-      - RPC_URL_BASE=${RPC_URL_BASE}
       # The Graph (Uniswap V3 subgraph for NAV snapshots)
       - THE_GRAPH_API_KEY=${THE_GRAPH_API_KEY}
       - UNISWAP_V3_SUBGRAPH_ID_ETHEREUM=${UNISWAP_V3_SUBGRAPH_ID_ETHEREUM}

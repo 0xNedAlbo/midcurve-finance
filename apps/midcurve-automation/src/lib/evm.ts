@@ -2,95 +2,22 @@
  * EVM Client Utilities
  *
  * Provides viem public clients for reading pool prices and broadcasting transactions.
+ * Delegates to EvmConfig from @midcurve/services (DB-backed via AppConfig).
  */
 
-import { createPublicClient, http, type PublicClient, type Chain } from 'viem';
-import { mainnet, arbitrum, base, sepolia, localhost } from 'viem/chains';
-import { getRpcEnvVarName } from '@midcurve/shared';
+import { type PublicClient } from 'viem';
+import { getEvmConfig } from '@midcurve/services';
 import type { SupportedChainId } from './config';
 
 // Re-export for convenience
 export type { SupportedChainId } from './config';
 
 /**
- * Viem chain objects per chain ID (runtime-specific, can't live in registry)
- */
-const VIEM_CHAINS: Record<number, Chain> = {
-  1: mainnet,
-  42161: arbitrum,
-  8453: base,
-  11155111: sepolia,
-  31337: { ...localhost, id: 31337 },
-};
-
-/**
- * Production chain configurations
- * RPC env var names derived from chain registry.
- */
-const PRODUCTION_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  1: { chain: VIEM_CHAINS[1]!, rpcEnvVar: getRpcEnvVarName(1) },
-  42161: { chain: VIEM_CHAINS[42161]!, rpcEnvVar: getRpcEnvVarName(42161) },
-  8453: { chain: VIEM_CHAINS[8453]!, rpcEnvVar: getRpcEnvVarName(8453) },
-};
-
-/**
- * Development chain configurations (dev/test only)
- */
-const DEV_CHAIN_CONFIGS: Record<number, { chain: Chain; rpcEnvVar: string }> = {
-  11155111: { chain: VIEM_CHAINS[11155111]!, rpcEnvVar: getRpcEnvVarName(11155111) },
-  31337: { chain: VIEM_CHAINS[31337]!, rpcEnvVar: getRpcEnvVarName(31337) },
-};
-
-/**
- * Chain configurations with RPC URLs from environment
- * Dev chains are only included in non-production environments.
- */
-const CHAIN_CONFIGS: Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }> =
-  process.env.NODE_ENV === 'production'
-    ? (PRODUCTION_CHAIN_CONFIGS as Record<SupportedChainId, { chain: Chain; rpcEnvVar: string }>)
-    : ({ ...PRODUCTION_CHAIN_CONFIGS, ...DEV_CHAIN_CONFIGS } as Record<
-        SupportedChainId,
-        { chain: Chain; rpcEnvVar: string }
-      >);
-
-/**
- * Cache for public clients (one per chain)
- */
-const clientCache = new Map<SupportedChainId, PublicClient>();
-
-/**
- * Get RPC URL for a chain from environment
- */
-function getRpcUrl(chainId: SupportedChainId): string {
-  const config = CHAIN_CONFIGS[chainId];
-  const url = process.env[config.rpcEnvVar];
-
-  if (!url) {
-    throw new Error(`${config.rpcEnvVar} environment variable is required for chain ${chainId}`);
-  }
-
-  return url;
-}
-
-/**
- * Get a public client for a specific chain
+ * Get a public client for a specific chain.
+ * Delegates to EvmConfig (initialized from AppConfig at startup).
  */
 export function getPublicClient(chainId: SupportedChainId): PublicClient {
-  const cached = clientCache.get(chainId);
-  if (cached) {
-    return cached;
-  }
-
-  const config = CHAIN_CONFIGS[chainId];
-  const rpcUrl = getRpcUrl(chainId);
-
-  const client = createPublicClient({
-    chain: config.chain,
-    transport: http(rpcUrl),
-  });
-
-  clientCache.set(chainId, client);
-  return client;
+  return getEvmConfig().getPublicClient(chainId);
 }
 
 /**
