@@ -92,7 +92,7 @@ export function OptionalitySummary({
 
         {/* Box B: Already Withdrawn */}
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
-          <h4 className="text-sm font-semibold text-slate-400 mb-3">- Already Withdrawn</h4>
+          <h4 className="text-sm font-semibold text-slate-400 mb-3">- {isClosed ? "Withdrawn at Close" : "Already Withdrawn"}</h4>
           <div className="space-y-1.5">
             <div className="text-white text-lg font-semibold">
               {formatCompactValue(withdrawnBase, baseTokenDecimals)} {baseTokenSymbol}
