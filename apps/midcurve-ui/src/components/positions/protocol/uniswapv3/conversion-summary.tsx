@@ -1,18 +1,18 @@
 "use client";
 
-import type { OptionalitySummary as OptionalitySummaryType } from "@/hooks/positions/uniswapv3/useUniswapV3OptionalitySummary";
+import type { ConversionSummary as ConversionSummaryType } from "@/hooks/positions/uniswapv3/useUniswapV3ConversionSummary";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { RebalancingHistoryTable } from "./rebalancing-history-table";
 
-interface OptionalitySummaryProps {
-  summary: OptionalitySummaryType | null;
+interface ConversionSummaryProps {
+  summary: ConversionSummaryType | null;
   isLoading?: boolean;
 }
 
-export function OptionalitySummary({
+export function ConversionSummary({
   summary,
   isLoading,
-}: OptionalitySummaryProps) {
+}: ConversionSummaryProps) {
   if (isLoading || !summary) {
     return (
       <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">

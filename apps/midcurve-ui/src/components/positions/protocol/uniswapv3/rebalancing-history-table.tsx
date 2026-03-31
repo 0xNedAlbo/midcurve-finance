@@ -1,6 +1,6 @@
 "use client";
 
-import type { RebalancingSegment } from "@/hooks/positions/uniswapv3/useUniswapV3OptionalitySummary";
+import type { RebalancingSegment } from "@/hooks/positions/uniswapv3/useUniswapV3ConversionSummary";
 import { formatCompactValue } from "@/lib/fraction-format";
 
 interface RebalancingHistoryTableProps {

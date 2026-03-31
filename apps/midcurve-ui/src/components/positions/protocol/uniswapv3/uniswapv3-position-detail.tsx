@@ -10,7 +10,7 @@ import { UniswapV3AprTab } from "./uniswapv3-apr-tab";
 import { UniswapV3HistoryTab } from "./uniswapv3-history-tab";
 import { UniswapV3AutomationTab } from "./uniswapv3-automation-tab";
 import { UniswapV3TechnicalTab } from "./uniswapv3-technical-tab";
-import { UniswapV3OptionalityTab } from "./uniswapv3-optionality-tab";
+import { UniswapV3ConversionTab } from "./uniswapv3-conversion-tab";
 import { getChainMetadataByChainId } from "@/config/chains";
 import { getNonfungiblePositionManagerAddress } from "@/config/contracts/nonfungible-position-manager";
 
@@ -94,7 +94,7 @@ export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3Posi
         {activeTab === "overview" && <UniswapV3OverviewTab position={position} />}
         {activeTab === "apr-analysis" && <UniswapV3AprTab position={position} />}
         {activeTab === "pnl-analysis" && <UniswapV3HistoryTab position={position} />}
-        {activeTab === "conversion" && <UniswapV3OptionalityTab position={position} />}
+        {activeTab === "conversion" && <UniswapV3ConversionTab position={position} />}
         {activeTab === "automation" && <UniswapV3AutomationTab position={position} />}
         {activeTab === "technical" && <UniswapV3TechnicalTab position={position} />}
       </div>

@@ -1,7 +1,7 @@
 /**
- * Client-Side Optionality Summary Computation
+ * Client-Side Conversion Summary Computation
  *
- * Computes optionality metrics from position data + ledger events.
+ * Computes conversion metrics from position data + ledger events.
  * No API call needed — uses data already fetched by position detail and ledger hooks.
  * Reacts to live pool price updates via the position prop.
  *
@@ -34,7 +34,7 @@ export interface RebalancingSegment {
   feesEarned: bigint;
 }
 
-export interface OptionalitySummary {
+export interface ConversionSummary {
   netDepositBase: bigint;
   netDepositQuote: bigint;
   netDepositAvgPrice: bigint;
@@ -124,7 +124,7 @@ function parseState(event: LedgerEventData) {
 function computeSummary(
   position: UniswapV3PositionData,
   events: LedgerEventData[],
-): OptionalitySummary {
+): ConversionSummary {
   const posConfig = position.config as { tickLower: number; tickUpper: number };
   const posState = position.state as { liquidity: string; unclaimedFees0: string; unclaimedFees1: string };
   const poolState = position.pool.state as { sqrtPriceX96: string };
@@ -418,10 +418,10 @@ function computeSummary(
 // Hook
 // =============================================================================
 
-export function useUniswapV3OptionalitySummary(
+export function useUniswapV3ConversionSummary(
   position: UniswapV3PositionData,
   events: LedgerEventData[] | undefined,
-): OptionalitySummary | null {
+): ConversionSummary | null {
   return useMemo(() => {
     if (!events || events.length === 0) return null;
     return computeSummary(position, events);
