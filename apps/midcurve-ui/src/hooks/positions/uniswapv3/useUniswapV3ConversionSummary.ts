@@ -379,6 +379,24 @@ function computeSummary(
     baseIsToken0,
   );
 
+  // Distribute unattributed fees (from COLLECT events after close + unclaimed fees)
+  // to the last segment so per-segment execution prices account for all fees.
+  if (segments.length > 0) {
+    const attributedFees = segments.reduce((acc, s) => acc + s.feesEarned, 0n);
+    const unattributedFees = totalPremium - attributedFees;
+    if (unattributedFees > 0n) {
+      const last = segments[segments.length - 1]!;
+      last.feesEarned += unattributedFees;
+      // Recompute effective execution price for this segment
+      if (last.deltaBase !== 0n) {
+        const effectiveQuote = last.deltaBase < 0n
+          ? absBI(last.deltaQuote) + last.feesEarned
+          : absBI(last.deltaQuote) - last.feesEarned;
+        last.avgPrice = (effectiveQuote * scale) / absBI(last.deltaBase);
+      }
+    }
+  }
+
   return {
     netDepositBase,
     netDepositQuote,
