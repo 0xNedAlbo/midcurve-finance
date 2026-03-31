@@ -23,6 +23,17 @@ import {
 // Output Type
 // =============================================================================
 
+export interface RebalancingSegment {
+  index: number;
+  startTimestamp: string;
+  endTimestamp: string | null;
+  isTrailing: boolean;
+  deltaBase: bigint;
+  deltaQuote: bigint;
+  avgPrice: bigint;
+  feesEarned: bigint;
+}
+
 export interface OptionalitySummary {
   netDepositBase: bigint;
   netDepositQuote: bigint;
@@ -45,6 +56,7 @@ export interface OptionalitySummary {
   isClosed: boolean;
   /** Days position was active (for closed positions), null if still active */
   daysActive: number | null;
+  segments: RebalancingSegment[];
   baseTokenSymbol: string;
   quoteTokenSymbol: string;
   baseTokenDecimals: number;
@@ -167,6 +179,10 @@ function computeSummary(
       return cfgA.logIndex - cfgB.logIndex;
     });
 
+  // Scale factor for price calculations
+  const scale = 10n ** BigInt(baseTokenDecimals);
+  const segments: RebalancingSegment[] = [];
+
   // Accumulators
   let netDepositBase = 0n;
   let netDepositQuote = 0n;
@@ -225,6 +241,26 @@ function computeSummary(
           ammBoughtQuoteVolume += absBI(deltaQuote);
           ammBoughtPremium += eventFees;
         }
+
+        // Effective price includes fees:
+        // Sold base: received quote + fees → (|deltaQuote| + fees) / |deltaBase|
+        // Bought base: paid quote - fees → (|deltaQuote| - fees) / |deltaBase|
+        const effectiveQuoteForPrice = deltaBase < 0n
+          ? absBI(deltaQuote) + eventFees
+          : absBI(deltaQuote) - eventFees;
+
+        segments.push({
+          index: segments.length,
+          startTimestamp: financialEvents[i - 1]!.timestamp,
+          endTimestamp: event.timestamp,
+          isTrailing: false,
+          deltaBase,
+          deltaQuote,
+          avgPrice: deltaBase !== 0n
+            ? (effectiveQuoteForPrice * scale) / absBI(deltaBase)
+            : 0n,
+          feesEarned: eventFees,
+        });
       }
     }
 
@@ -289,6 +325,21 @@ function computeSummary(
         ammBoughtBase += absBI(deltaBase);
         ammBoughtQuoteVolume += absBI(deltaQuote);
       }
+
+      segments.push({
+        index: segments.length,
+        startTimestamp: financialEvents[financialEvents.length - 1]!.timestamp,
+        endTimestamp: isClosed
+          ? (position.positionClosedAt ?? financialEvents[financialEvents.length - 1]!.timestamp)
+          : null,
+        isTrailing: !isClosed,
+        deltaBase,
+        deltaQuote,
+        avgPrice: deltaBase !== 0n
+          ? (absBI(deltaQuote) * scale) / absBI(deltaBase)
+          : 0n,
+        feesEarned: 0n,
+      });
     }
   }
 
@@ -328,9 +379,6 @@ function computeSummary(
     baseIsToken0,
   );
 
-  // Derived values
-  const scale = 10n ** BigInt(baseTokenDecimals);
-
   return {
     netDepositBase,
     netDepositQuote,
@@ -351,6 +399,7 @@ function computeSummary(
       ? (absBI(netRebalancingQuote) * scale) / absBI(netRebalancingBase)
       : 0n,
     totalPremium,
+    segments,
     currentBase: currentHoldingsBase,
     currentQuote: currentHoldingsQuote,
     currentSpotPrice: baseIsToken0

@@ -2,6 +2,7 @@
 
 import type { OptionalitySummary as OptionalitySummaryType } from "@/hooks/positions/uniswapv3/useUniswapV3OptionalitySummary";
 import { formatCompactValue } from "@/lib/fraction-format";
+import { RebalancingHistoryTable } from "./rebalancing-history-table";
 
 interface OptionalitySummaryProps {
   summary: OptionalitySummaryType | null;
@@ -46,6 +47,7 @@ export function OptionalitySummary({
     currentSpotPrice,
     isClosed,
     daysActive,
+    segments,
   } = summary;
 
   const netBase = netRebalancingBase;
@@ -283,6 +285,15 @@ export function OptionalitySummary({
           </div>
         );
       })()}
+
+      {/* Rebalancing History Table */}
+      <RebalancingHistoryTable
+        segments={segments}
+        baseTokenSymbol={baseTokenSymbol}
+        quoteTokenSymbol={quoteTokenSymbol}
+        baseTokenDecimals={baseTokenDecimals}
+        quoteTokenDecimals={quoteTokenDecimals}
+      />
     </div>
   );
 }
