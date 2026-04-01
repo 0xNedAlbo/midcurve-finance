@@ -33,7 +33,7 @@ export function PositionList({ className }: PositionListProps) {
   const sortParam = searchParams.get("sortBy");
   const sortBy = (VALID_SORT_VALUES.includes(sortParam as any)
     ? sortParam
-    : "totalApr") as ListPositionsParams["sortBy"];
+    : "positionOpenedAt") as ListPositionsParams["sortBy"];
 
   const sortDirectionParam = searchParams.get("sortDirection");
   const sortDirection = (sortDirectionParam === "asc" || sortDirectionParam === "desc"
