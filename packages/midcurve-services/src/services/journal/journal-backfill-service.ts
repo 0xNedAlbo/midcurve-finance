@@ -230,7 +230,7 @@ export class JournalBackfillService {
                 { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
                   amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
-                { accountCode: ACCOUNT_CODES.REALIZED_GAINS, side: 'credit', amountQuote: absQuote,
+                { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'credit', amountQuote: absQuote,
                   amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
               ]
@@ -238,7 +238,7 @@ export class JournalBackfillService {
                 { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
                   amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
-                { accountCode: ACCOUNT_CODES.REALIZED_LOSSES, side: 'debit', amountQuote: absQuote,
+                { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'debit', amountQuote: absQuote,
                   amountReporting: absReporting, reportingCurrency, exchangeRate: '100000000',
                   positionRef, instrumentRef },
               ];
@@ -320,7 +320,10 @@ export class JournalBackfillService {
   }
 
   /**
-   * DECREASE_POSITION → CR 1000 / DR 3100 + realized gain/loss
+   * DECREASE_POSITION → CR 1000 / DR 3100 + realized gain/loss + FX effect
+   *
+   * Uses weighted average cost exchange rate for cost basis derecognition
+   * to minimize exchange rate drift corrections at position close.
    */
   private async backfillLiquidityDecreased(
     event: LedgerEventRow,
@@ -336,6 +339,15 @@ export class JournalBackfillService {
     const absDeltaCostBasis = absBigint(event.deltaCostBasis);
     const tokenValue = event.tokenValue;
     const deltaPnl = BigInt(event.deltaPnl);
+
+    const spotRate = BigInt(ctx.exchangeRate);
+    const decimalsScale = 10n ** BigInt(ctx.quoteTokenDecimals);
+
+    // Query WAC exchange rate for cost basis derecognition
+    const wacRate = await this.journalService.getAccountWacExchangeRate(
+      ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef, ctx.quoteTokenDecimals
+    );
+    const costBasisRate = wacRate ?? spotRate;
 
     const builder = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
@@ -353,6 +365,34 @@ export class JournalBackfillService {
       builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
     }
 
+    const lines = builder.build();
+
+    // Override cost basis line with WAC rate for reporting amounts
+    const costBasisLine = lines.find(
+      (l) => l.accountCode === ACCOUNT_CODES.LP_POSITION_AT_COST
+    )!;
+    const costBasisAtSpot = BigInt(costBasisLine.amountReporting!);
+    const costBasisAtWac = (BigInt(absDeltaCostBasis) * costBasisRate) / decimalsScale;
+    costBasisLine.amountReporting = costBasisAtWac.toString();
+    costBasisLine.exchangeRate = costBasisRate.toString();
+
+    // FX difference: positive = spot > WAC (FX gain), negative = FX loss
+    const fxDiff = costBasisAtSpot - costBasisAtWac;
+
+    if (fxDiff !== 0n) {
+      const fxLine: JournalLineInput = {
+        accountCode: ACCOUNT_CODES.FX_GAIN_LOSS,
+        side: fxDiff > 0n ? 'credit' : 'debit',
+        amountQuote: '0',
+        amountReporting: (fxDiff < 0n ? -fxDiff : fxDiff).toString(),
+        reportingCurrency: ctx.reportingCurrency,
+        exchangeRate: ctx.exchangeRate,
+        positionRef,
+        instrumentRef,
+      };
+      lines.push(fxLine);
+    }
+
     await this.journalService.createEntry(
       {
         userId,
@@ -363,7 +403,7 @@ export class JournalBackfillService {
         entryDate: event.timestamp,
         description: `Liquidity decrease (backfill): ${positionRef}`,
       },
-      builder.build(),
+      lines,
     );
 
     return true;

@@ -79,6 +79,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       interface PnlBuckets {
         realizedFromWithdrawals: bigint;
         realizedFromCollectedFees: bigint;
+        realizedFromFxEffect: bigint;
       }
 
       const instrumentMap = new Map<string, {
@@ -97,14 +98,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         if (!instrument) {
           instrument = {
             positions: new Map(),
-            totals: { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n },
+            totals: { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n, realizedFromFxEffect: 0n },
           };
           instrumentMap.set(instrRef, instrument);
         }
 
         let position = instrument.positions.get(posRef);
         if (!position) {
-          position = { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n };
+          position = { realizedFromWithdrawals: 0n, realizedFromCollectedFees: 0n, realizedFromFxEffect: 0n };
           instrument.positions.set(posRef, position);
         }
 
@@ -122,6 +123,10 @@ export async function GET(request: NextRequest): Promise<Response> {
           case ACCOUNT_CODES.FEE_INCOME:
             position.realizedFromCollectedFees += -signed;
             instrument.totals.realizedFromCollectedFees += -signed;
+            break;
+          case ACCOUNT_CODES.FX_GAIN_LOSS:
+            position.realizedFromFxEffect += -signed;
+            instrument.totals.realizedFromFxEffect += -signed;
             break;
         }
       }
@@ -156,20 +161,24 @@ export async function GET(request: NextRequest): Promise<Response> {
       // Build response
       let totalRealizedWithdrawals = 0n;
       let totalRealizedFees = 0n;
+      let totalRealizedFx = 0n;
       const instruments: PnlInstrumentItem[] = [];
 
       for (const [instrRef, instrument] of instrumentMap.entries()) {
         totalRealizedWithdrawals += instrument.totals.realizedFromWithdrawals;
         totalRealizedFees += instrument.totals.realizedFromCollectedFees;
+        totalRealizedFx += instrument.totals.realizedFromFxEffect;
 
         const meta = poolMetaMap.get(instrRef);
         const instrNetPnl = instrument.totals.realizedFromWithdrawals
-          + instrument.totals.realizedFromCollectedFees;
+          + instrument.totals.realizedFromCollectedFees
+          + instrument.totals.realizedFromFxEffect;
 
         const positions: PnlPositionItem[] = [];
         for (const [posRef, buckets] of instrument.positions.entries()) {
           const posNetPnl = buckets.realizedFromWithdrawals
-            + buckets.realizedFromCollectedFees;
+            + buckets.realizedFromCollectedFees
+            + buckets.realizedFromFxEffect;
 
           const parts = posRef.split('/');
           positions.push({
@@ -177,6 +186,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             nftId: parts[parts.length - 1] ?? posRef,
             realizedFromWithdrawals: buckets.realizedFromWithdrawals.toString(),
             realizedFromCollectedFees: buckets.realizedFromCollectedFees.toString(),
+            realizedFromFxEffect: buckets.realizedFromFxEffect.toString(),
             netPnl: posNetPnl.toString(),
           });
         }
@@ -189,12 +199,13 @@ export async function GET(request: NextRequest): Promise<Response> {
           feeTier: meta?.feeTier ?? '0',
           realizedFromWithdrawals: instrument.totals.realizedFromWithdrawals.toString(),
           realizedFromCollectedFees: instrument.totals.realizedFromCollectedFees.toString(),
+          realizedFromFxEffect: instrument.totals.realizedFromFxEffect.toString(),
           netPnl: instrNetPnl.toString(),
           positions,
         });
       }
 
-      const totalNetPnl = totalRealizedWithdrawals + totalRealizedFees;
+      const totalNetPnl = totalRealizedWithdrawals + totalRealizedFees + totalRealizedFx;
 
       const response: PnlResponse = {
         period,
@@ -203,6 +214,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         reportingCurrency: 'USD',
         realizedFromWithdrawals: totalRealizedWithdrawals.toString(),
         realizedFromCollectedFees: totalRealizedFees.toString(),
+        realizedFromFxEffect: totalRealizedFx.toString(),
         netPnl: totalNetPnl.toString(),
         instruments,
       };

@@ -69,12 +69,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         curRealizedGains,
         curRealizedLosses,
         curFeeIncome,
+        curFxGainLoss,
         prevDepositedLiquidity,
         prevContributedCapital,
         prevCapitalReturned,
         prevRealizedGains,
         prevRealizedLosses,
         prevFeeIncome,
+        prevFxGainLoss,
         activePositionCount,
       ] = await Promise.all([
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, user.id, currentEnd),
@@ -83,12 +85,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, user.id, currentEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, user.id, currentEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, user.id, currentEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FX_GAIN_LOSS, user.id, currentEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.LP_POSITION_AT_COST, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.CAPITAL_RETURNED, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_GAINS, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, user.id, previousEnd),
+        journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FX_GAIN_LOSS, user.id, previousEnd),
         prisma.trackedPosition.count({ where: { userId: user.id } }),
       ]);
 
@@ -96,7 +100,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       const curTotalAssets = curDepositedLiquidity;
       const curRealizedWithdrawals = -curRealizedGains - curRealizedLosses;
       const curRealizedFees = -curFeeIncome;
-      const curTotalRetainedEarnings = curRealizedWithdrawals + curRealizedFees;
+      const curRealizedFx = -curFxGainLoss;
+      const curTotalRetainedEarnings = curRealizedWithdrawals + curRealizedFees + curRealizedFx;
       const curContCapDisplay = -curContributedCapital;
       const curCapRetDisplay = -curCapitalReturned;
       const curTotalEquity = curContCapDisplay + curCapRetDisplay + curTotalRetainedEarnings;
@@ -105,7 +110,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       const prevTotalAssets = prevDepositedLiquidity;
       const prevRealizedWithdrawals = -prevRealizedGains - prevRealizedLosses;
       const prevRealizedFees = -prevFeeIncome;
-      const prevTotalRetainedEarnings = prevRealizedWithdrawals + prevRealizedFees;
+      const prevRealizedFx = -prevFxGainLoss;
+      const prevTotalRetainedEarnings = prevRealizedWithdrawals + prevRealizedFees + prevRealizedFx;
       const prevContCapDisplay = -prevContributedCapital;
       const prevCapRetDisplay = -prevCapitalReturned;
       const prevTotalEquity = prevContCapDisplay + prevCapRetDisplay + prevTotalRetainedEarnings;
@@ -128,6 +134,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           retainedEarnings: {
             realizedFromWithdrawals: buildLineItem(curRealizedWithdrawals, prevRealizedWithdrawals),
             realizedFromCollectedFees: buildLineItem(curRealizedFees, prevRealizedFees),
+            realizedFromFxEffect: buildLineItem(curRealizedFx, prevRealizedFx),
             totalRetainedEarnings: buildLineItem(curTotalRetainedEarnings, prevTotalRetainedEarnings),
           },
           totalEquity: buildLineItem(curTotalEquity, prevTotalEquity),

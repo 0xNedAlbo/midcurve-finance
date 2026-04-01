@@ -16,6 +16,7 @@ export interface PnlPositionItem {
   nftId: string;
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
+  realizedFromFxEffect: string;
   netPnl: string;
 }
 
@@ -27,6 +28,7 @@ export interface PnlInstrumentItem {
   feeTier: string;
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
+  realizedFromFxEffect: string;
   netPnl: string;
   positions: PnlPositionItem[];
 }
@@ -38,6 +40,7 @@ export interface PnlResponse {
   reportingCurrency: string;
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
+  realizedFromFxEffect: string;
   netPnl: string;
   instruments: PnlInstrumentItem[];
 }

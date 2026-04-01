@@ -172,7 +172,7 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
           { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
             amountReporting: absReporting, reportingCurrency, exchangeRate,
             positionRef, instrumentRef },
-          { accountCode: ACCOUNT_CODES.REALIZED_GAINS, side: 'credit', amountQuote: absQuote,
+          { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'credit', amountQuote: absQuote,
             amountReporting: absReporting, reportingCurrency, exchangeRate,
             positionRef, instrumentRef },
         ]
@@ -180,7 +180,7 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
           { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
             amountReporting: absReporting, reportingCurrency, exchangeRate,
             positionRef, instrumentRef },
-          { accountCode: ACCOUNT_CODES.REALIZED_LOSSES, side: 'debit', amountQuote: absQuote,
+          { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'debit', amountQuote: absQuote,
             amountReporting: absReporting, reportingCurrency, exchangeRate,
             positionRef, instrumentRef },
         ];

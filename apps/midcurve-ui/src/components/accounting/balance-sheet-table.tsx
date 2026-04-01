@@ -56,6 +56,7 @@ export function BalanceSheetTable({ data }: BalanceSheetTableProps) {
           <SubSectionHeader label="Retained Earnings" />
           <LineItemRow label="Realized: Withdrawals" item={data.equity.retainedEarnings.realizedFromWithdrawals} indent={2} />
           <LineItemRow label="Realized: Collected Fees" item={data.equity.retainedEarnings.realizedFromCollectedFees} indent={2} />
+          <LineItemRow label="Realized: FX Effect" item={data.equity.retainedEarnings.realizedFromFxEffect} indent={2} />
           <TotalRow label="Total Retained Earnings" item={data.equity.retainedEarnings.totalRetainedEarnings} indent={1} />
           <TotalRow label="Total Equity" item={data.equity.totalEquity} />
         </tbody>

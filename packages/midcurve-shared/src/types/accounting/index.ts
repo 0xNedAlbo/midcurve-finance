@@ -28,6 +28,7 @@ export const ACCOUNT_CODES = {
   ACCRUED_FEE_INCOME_REVENUE: 4001,
   REALIZED_GAINS: 4100,
   UNREALIZED_GAINS: 4200,
+  FX_GAIN_LOSS: 4300,
   // Expenses
   REALIZED_LOSSES: 5000,
   GAS_EXPENSE: 5100,
@@ -117,6 +118,14 @@ export const CHART_OF_ACCOUNTS: readonly AccountDefinitionSeed[] = [
     code: 4200,
     name: 'Unrealized Gains',
     description: 'Positive mark-to-market changes on open positions.',
+    category: 'revenue',
+    normalSide: 'credit',
+  },
+  {
+    code: 4300,
+    name: 'FX Gain / Loss',
+    description:
+      'Exchange rate differences between deposit-time and withdrawal-time rates on cost basis derecognition.',
     category: 'revenue',
     normalSide: 'credit',
   },

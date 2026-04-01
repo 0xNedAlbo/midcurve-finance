@@ -95,6 +95,7 @@ function InstrumentRow({ instrument }: { instrument: PnlInstrumentItem }) {
           <CategoryBreakdown
             realizedFromWithdrawals={instrument.realizedFromWithdrawals}
             realizedFromCollectedFees={instrument.realizedFromCollectedFees}
+            realizedFromFxEffect={instrument.realizedFromFxEffect}
             indent={1}
           />
 
@@ -139,6 +140,7 @@ function PositionRow({ position }: { position: PnlPositionItem }) {
           <CategoryBreakdown
             realizedFromWithdrawals={position.realizedFromWithdrawals}
             realizedFromCollectedFees={position.realizedFromCollectedFees}
+            realizedFromFxEffect={position.realizedFromFxEffect}
             indent={2}
           />
         </div>
@@ -154,12 +156,14 @@ function PositionRow({ position }: { position: PnlPositionItem }) {
 interface CategoryBreakdownProps {
   realizedFromWithdrawals: string;
   realizedFromCollectedFees: string;
+  realizedFromFxEffect: string;
   indent: number;
 }
 
 function CategoryBreakdown({
   realizedFromWithdrawals,
   realizedFromCollectedFees,
+  realizedFromFxEffect,
   indent,
 }: CategoryBreakdownProps) {
   const pl = indent === 1 ? 'pl-10' : 'pl-14';
@@ -169,6 +173,7 @@ function CategoryBreakdown({
       <div className="text-slate-500 font-medium mb-1">Realized Gains / (Losses)</div>
       <CategoryLine label="From Withdrawals" value={realizedFromWithdrawals} />
       <CategoryLine label="From Collected Fees" value={realizedFromCollectedFees} />
+      <CategoryLine label="From FX Effect" value={realizedFromFxEffect} />
     </div>
   );
 }

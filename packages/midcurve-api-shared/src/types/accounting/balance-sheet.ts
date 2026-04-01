@@ -35,6 +35,7 @@ export interface BalanceSheetData {
     retainedEarnings: {
       realizedFromWithdrawals: BalanceSheetLineItem;
       realizedFromCollectedFees: BalanceSheetLineItem;
+      realizedFromFxEffect: BalanceSheetLineItem;
       totalRetainedEarnings: BalanceSheetLineItem;
     };
     totalEquity: BalanceSheetLineItem;

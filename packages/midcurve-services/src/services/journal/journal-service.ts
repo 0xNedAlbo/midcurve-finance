@@ -287,6 +287,43 @@ export class JournalService {
   }
 
   /**
+   * Computes the weighted average exchange rate for debit-side entries
+   * on a given account + position. Used to determine the historical average
+   * rate at which cost basis was recorded.
+   *
+   * WAC rate = sum(amountReporting) / sum(amountQuote) * 10^quoteTokenDecimals
+   *
+   * Returns null if there are no debit-side entries with reporting amounts.
+   */
+  async getAccountWacExchangeRate(
+    accountCode: number,
+    positionRef: string,
+    quoteTokenDecimals: number
+  ): Promise<bigint | null> {
+    const accountId = await this.resolveAccountId(accountCode);
+
+    const lines = await this.prisma.journalLine.findMany({
+      where: { accountId, positionRef, side: 'debit', amountReporting: { not: null } },
+      select: { amountQuote: true, amountReporting: true },
+    });
+
+    let totalQuote = 0n;
+    let totalReporting = 0n;
+
+    for (const line of lines) {
+      totalQuote += BigInt(line.amountQuote);
+      totalReporting += BigInt(line.amountReporting!);
+    }
+
+    if (totalQuote === 0n) return null;
+
+    // WAC rate at the same scale as exchangeRate (10^8), derived from the totals
+    // amountReporting = amountQuote * exchangeRate / 10^quoteTokenDecimals
+    // => exchangeRate = amountReporting * 10^quoteTokenDecimals / amountQuote
+    return (totalReporting * 10n ** BigInt(quoteTokenDecimals)) / totalQuote;
+  }
+
+  /**
    * Computes the net balance for a specific account + position,
    * scoped to a specific user (via journal entries).
    */

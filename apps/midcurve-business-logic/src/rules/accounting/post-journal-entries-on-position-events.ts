@@ -295,12 +295,13 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   /**
-   * position.liquidity.decreased → CR 1000 / DR 3100 + realized gain/loss
+   * position.liquidity.decreased → CR 1000 / DR 3100 + realized gain/loss + FX effect
    *
    * Handles partial/full withdrawal with:
-   * 1. Cost basis derecognition
-   * 2. Capital return
+   * 1. Cost basis derecognition (at WAC exchange rate)
+   * 2. Capital return (at current spot rate)
    * 3. Realized gain or loss
+   * 4. FX gain/loss from exchange rate difference between WAC and spot
    */
   private async handleLiquidityDecreased(
     event: DomainEvent<PositionLiquidityDecreasedPayload>
@@ -325,6 +326,16 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
+    const spotRate = BigInt(ctx.exchangeRate);
+    const decimalsScale = 10n ** BigInt(ctx.quoteTokenDecimals);
+
+    // Query weighted average cost exchange rate for cost basis derecognition
+    const wacRate = await this.journalService.getAccountWacExchangeRate(
+      ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef, ctx.quoteTokenDecimals
+    );
+    const costBasisRate = wacRate ?? spotRate;
+
+    // Build lines with spot rate for amountQuote balancing
     const builder = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
 
@@ -342,6 +353,33 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     }
 
     const lines = builder.build();
+
+    // Override cost basis line with WAC rate for reporting amounts
+    const costBasisLine = lines.find(
+      (l) => l.accountCode === ACCOUNT_CODES.LP_POSITION_AT_COST
+    )!;
+    const costBasisAtSpot = BigInt(costBasisLine.amountReporting!);
+    const costBasisAtWac = (BigInt(absDeltaCostBasis) * costBasisRate) / decimalsScale;
+    costBasisLine.amountReporting = costBasisAtWac.toString();
+    costBasisLine.exchangeRate = costBasisRate.toString();
+
+    // FX difference: positive means spot > WAC (FX gain), negative means FX loss
+    const fxDiff = costBasisAtSpot - costBasisAtWac;
+
+    if (fxDiff !== 0n) {
+      // Add FX gain/loss line (reporting-only, amountQuote is "0")
+      const fxLine: JournalLineInput = {
+        accountCode: ACCOUNT_CODES.FX_GAIN_LOSS,
+        side: fxDiff > 0n ? 'credit' : 'debit',
+        amountQuote: '0',
+        amountReporting: (fxDiff < 0n ? -fxDiff : fxDiff).toString(),
+        reportingCurrency: ctx.reportingCurrency,
+        exchangeRate: ctx.exchangeRate,
+        positionRef,
+        instrumentRef,
+      };
+      lines.push(fxLine);
+    }
 
     await this.journalService.createEntry(
       {
@@ -443,7 +481,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
               { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
                 amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
                 exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
-              { accountCode: ACCOUNT_CODES.REALIZED_GAINS, side: 'credit', amountQuote: absQuote,
+              { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'credit', amountQuote: absQuote,
                 amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
                 exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
             ]
@@ -451,7 +489,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
               { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
                 amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
                 exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
-              { accountCode: ACCOUNT_CODES.REALIZED_LOSSES, side: 'debit', amountQuote: absQuote,
+              { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'debit', amountQuote: absQuote,
                 amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
                 exchangeRate: ctx.exchangeRate, positionRef, instrumentRef },
             ];
