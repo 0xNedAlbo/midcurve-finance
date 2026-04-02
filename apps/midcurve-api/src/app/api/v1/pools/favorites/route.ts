@@ -98,7 +98,6 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
 
       let result;
-      let alreadyFavorited = false;
 
       switch (protocol) {
         case 'uniswapv3': {
@@ -109,10 +108,6 @@ export async function POST(request: NextRequest): Promise<Response> {
               chainId,
               poolAddress,
             });
-
-            // Check if this was already favorited
-            const timeDiff = Date.now() - result.createdAt.getTime();
-            alreadyFavorited = timeDiff > 1000;
           } catch (error) {
             if (error instanceof Error) {
               if (
@@ -187,21 +182,19 @@ export async function POST(request: NextRequest): Promise<Response> {
           };
 
       // 4. Build response
-      const poolHash = `${protocol}/${chainId}/${result.pool.address}`;
       const serializedPool = serializeUniswapV3Pool(result.pool);
 
       const favoriteItem: FavoritePoolItem = {
-        poolHash,
+        poolHash: result.poolHash,
         chainId: result.pool.chainId,
         poolAddress: result.pool.address,
-        favoritedAt: result.createdAt.toISOString(),
         pool: serializedPool as unknown as FavoritePoolItem['pool'],
         ...metrics,
       };
 
       const responseData: AddFavoritePoolData = {
         favorite: favoriteItem,
-        alreadyFavorited,
+        alreadyFavorited: false,
       };
 
       const response = createSuccessResponse(responseData, {
@@ -209,9 +202,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         protocol,
       });
 
-      apiLog.requestEnd(apiLogger, requestId, alreadyFavorited ? 200 : 201, Date.now() - startTime);
+      apiLog.requestEnd(apiLogger, requestId, 201, Date.now() - startTime);
 
-      return NextResponse.json(response, { status: alreadyFavorited ? 200 : 201 });
+      return NextResponse.json(response, { status: 201 });
     } catch (error) {
       apiLog.methodError(apiLogger, 'POST /api/v1/pools/favorites', error, { requestId });
 
@@ -295,23 +288,18 @@ export async function GET(request: NextRequest): Promise<Response> {
       const favoriteItems: FavoritePoolItem[] = [];
 
       for (const fav of favorites) {
-        const favProtocol = 'uniswapv3'; // Currently all pools are uniswapv3
-
         // Filter by protocol if specified
-        if (protocol && protocol !== favProtocol) {
+        if (protocol && protocol !== 'uniswapv3') {
           continue;
         }
 
-        const poolHash = `${favProtocol}/${fav.pool.chainId}/${fav.pool.address}`;
         const serializedPool = serializeUniswapV3Pool(fav.pool);
 
         favoriteItems.push({
-          poolHash,
+          poolHash: fav.poolHash,
           chainId: fav.pool.chainId,
           poolAddress: fav.pool.address,
-          favoritedAt: fav.createdAt.toISOString(),
           pool: serializedPool as unknown as FavoritePoolItem['pool'],
-          // Include metrics from subgraph
           tvlUSD: fav.metrics.tvlUSD,
           volume24hUSD: fav.metrics.volume24hUSD,
           fees24hUSD: fav.metrics.fees24hUSD,

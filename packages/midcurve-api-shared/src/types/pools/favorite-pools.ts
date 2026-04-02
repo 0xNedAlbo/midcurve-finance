@@ -126,12 +126,6 @@ export interface FavoritePoolItem {
   poolAddress: string;
 
   /**
-   * When the pool was added to favorites (ISO 8601)
-   * @example "2025-01-31T10:30:00.000Z"
-   */
-  favoritedAt: string;
-
-  /**
    * Full pool data with current state
    *
    * Includes tokens, config, and latest on-chain state.

@@ -48,6 +48,7 @@ export * from './services/transaction/index.js';
 export * from './services/swap-router/index.js';
 export * from './services/journal/index.js';
 export * from './services/system-config/index.js';
+export * from './services/user-settings/index.js';
 
 // Export service types
 export * from './services/types/auth/index.js';
@@ -57,6 +58,7 @@ export * from './services/types/favorite-pool/index.js';
 export * from './services/types/notifications/index.js';
 export * from './services/types/position-apr/index.js';
 export * from './services/types/pool-search/index.js';
+export * from './services/types/user-settings/index.js';
 
 // Export domain events
 export * from './events/index.js';

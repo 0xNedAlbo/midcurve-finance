@@ -117,3 +117,8 @@ export type {
 export type {
   UpdateWebhookConfigInput,
 } from './notifications/index.js';
+
+// User settings input types
+export type {
+  UpdateUserSettingsInput,
+} from './user-settings/index.js';

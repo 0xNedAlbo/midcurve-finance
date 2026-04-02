@@ -5,6 +5,8 @@
 
 // User types
 export type { User } from './user.js';
+export type { UserSettingsData } from './user-settings.js';
+export { DEFAULT_USER_SETTINGS } from './user-settings.js';
 
 // ============================================================================
 // Accounting types (double-entry journal system)
