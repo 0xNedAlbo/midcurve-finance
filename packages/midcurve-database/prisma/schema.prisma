@@ -68,7 +68,7 @@ model SystemConfig {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("settings")
+  @@map("system_config")
   @@schema("public")
 }
 
@@ -98,8 +98,8 @@ model User {
   notifications UserNotification[]
   webhookConfig UserWebhookConfig?
 
-  // Favorite pools
-  favoritePools FavoritePool[]
+  // User settings (1:1)
+  userSettings UserSettings?
 
   // Accounting relations
   journalEntries     JournalEntry[]
@@ -218,7 +218,6 @@ model Pool {
   token1            Token                  @relation("PoolToken1", fields: [token1Id], references: [id])
   positions         Position[]
   poolPrices        PoolPrice[]
-  favoritedBy       FavoritePool[] // Users who favorited this pool
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -809,32 +808,24 @@ model PositionRangeStatus {
 // =============================================================================
 
 // =============================================================================
-// User Favorite Pools
+// User Settings (generic per-user settings as JSON)
 // =============================================================================
 
-// FavoritePool - User's saved/bookmarked pools for quick access
-// Simple junction table linking users to pools they want to track
-model FavoritePool {
+// UserSettings - Per-user settings stored as a single JSON structure
+// Typed as UserSettingsData in TypeScript (@midcurve/shared)
+model UserSettings {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // User reference
-  userId String
+  // User association (1:1 relationship)
+  userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Pool reference
-  poolId String
-  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  // Settings data as JSON (typed as UserSettingsData in TypeScript)
+  settings Json
 
-  // Unique constraint: one favorite per user+pool combination
-  @@unique([userId, poolId])
-
-  // Indexes for efficient queries
-  @@index([userId])
-  @@index([poolId])
-  @@index([userId, createdAt]) // For listing user's favorites in order
-  @@map("favorite_pools")
+  @@map("user_settings")
   @@schema("public")
 }
 
