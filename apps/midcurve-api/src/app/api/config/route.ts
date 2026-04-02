@@ -12,8 +12,8 @@ import { nanoid } from 'nanoid';
 import { getAddress, isAddress } from 'viem';
 import { prisma } from '@midcurve/database';
 import {
-  SettingService,
-  REQUIRED_SETTING_KEYS,
+  SystemConfigService,
+  REQUIRED_SYSTEM_CONFIG_KEYS,
   initAppConfig,
 } from '@midcurve/services';
 import { createSuccessResponse, createErrorResponse, ApiErrorCode, ErrorCodeToHttpStatus } from '@midcurve/api-shared';
@@ -36,8 +36,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const origin = request.headers.get('origin');
   apiLog.requestStart(apiLogger, requestId, request);
 
-  const settingService = SettingService.getInstance();
-  const configured = await settingService.hasAll([...REQUIRED_SETTING_KEYS]);
+  const systemConfigService = SystemConfigService.getInstance();
+  const configured = await systemConfigService.hasAll([...REQUIRED_SYSTEM_CONFIG_KEYS]);
 
   let responseData: Record<string, unknown>;
 
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     responseData = { configured: false };
   } else {
     // Only return inherently public values (WalletConnect project ID is domain-gated)
-    const settings = await settingService.getMany(['walletconnect_project_id', 'operator.address']);
+    const settings = await systemConfigService.getMany(['walletconnect_project_id', 'operator.address']);
     responseData = {
       configured: true,
       walletconnectProjectId: settings['walletconnect_project_id'],
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const normalizedAddress = getAddress(adminWalletAddress);
 
   // Save everything in a transaction
-  const settingService = SettingService.getInstance();
+  const systemConfigService = SystemConfigService.getInstance();
   const settings: Record<string, string> = {
     alchemy_api_key: alchemyApiKey,
     the_graph_api_key: theGraphApiKey,
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     settings['coingecko_api_key'] = coingeckoApiKey;
   }
 
-  await settingService.setMany(settings);
+  await systemConfigService.setMany(settings);
 
   // Upsert allowlist entry + user with isAdmin
   await prisma.$transaction([
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }),
   ]);
 
-  // Initialize AppConfig (loads settings into singletons like EvmConfig)
+  // Initialize AppConfig (loads system config into singletons like EvmConfig)
   // Must complete before returning — the UI navigates to the dashboard immediately after.
   await initAppConfig();
 

@@ -1,8 +1,8 @@
 /**
- * Admin Settings Endpoint
+ * Admin System Config Endpoint
  *
- * GET   /api/v1/admin/settings — Returns current settings (API keys masked) + allowlist
- * PATCH /api/v1/admin/settings — Update settings and/or allowlist
+ * GET   /api/v1/admin/system-config — Returns current system config (API keys masked) + allowlist
+ * PATCH /api/v1/admin/system-config — Update system config and/or allowlist
  *
  * Requires authenticated admin session.
  */
@@ -12,7 +12,7 @@ import { isAddress } from 'viem';
 import { normalizeAddress } from '@midcurve/shared';
 import { prisma } from '@midcurve/database';
 import {
-  SettingService,
+  SystemConfigService,
   resetAppConfig,
   initAppConfig,
 } from '@midcurve/services';
@@ -43,7 +43,7 @@ const KEY_MAP: Record<string, string> = {
   coingeckoApiKey: 'coingecko_api_key',
 };
 
-/** Settings that should be masked in GET responses. */
+/** Config keys that should be masked in GET responses. */
 const MASKED_KEYS = new Set([
   'alchemy_api_key',
   'the_graph_api_key',
@@ -55,8 +55,8 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 /**
- * GET /api/v1/admin/settings
- * Returns all settings with sensitive values masked, plus the allowlist.
+ * GET /api/v1/admin/system-config
+ * Returns all system config with sensitive values masked, plus the allowlist.
  */
 export async function GET(request: NextRequest): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
@@ -70,13 +70,13 @@ export async function GET(request: NextRequest): Promise<Response> {
       );
     }
 
-    const settingService = SettingService.getInstance();
-    const all = await settingService.getAll();
+    const systemConfigService = SystemConfigService.getInstance();
+    const all = await systemConfigService.getAll();
 
     // Build response with masked sensitive values
-    const settings: Record<string, string> = {};
+    const config: Record<string, string> = {};
     for (const [key, value] of Object.entries(all)) {
-      settings[key] = MASKED_KEYS.has(key) ? mask(value) : value;
+      config[key] = MASKED_KEYS.has(key) ? mask(value) : value;
     }
 
     // Fetch allowlist entries
@@ -88,15 +88,15 @@ export async function GET(request: NextRequest): Promise<Response> {
     apiLog.requestEnd(apiLogger, requestId, 200, 0);
 
     return NextResponse.json(
-      createSuccessResponse({ settings, allowlist }),
+      createSuccessResponse({ config, allowlist }),
       { status: 200, headers: corsHeaders },
     );
   });
 }
 
 /**
- * PATCH /api/v1/admin/settings
- * Update one or more settings and/or the allowlist. Only provided fields are updated.
+ * PATCH /api/v1/admin/system-config
+ * Update one or more system config entries and/or the allowlist. Only provided fields are updated.
  *
  * Body:
  * - alchemyApiKey, theGraphApiKey, walletconnectProjectId, coingeckoApiKey (optional strings)
@@ -116,7 +116,7 @@ export async function PATCH(request: NextRequest): Promise<Response> {
 
     const body = await request.json() as Record<string, unknown>;
 
-    // Build settings update map from provided fields
+    // Build config update map from provided fields
     const updates: Record<string, string> = {};
     for (const [camelKey, dbKey] of Object.entries(KEY_MAP)) {
       const value = body[camelKey];
@@ -125,20 +125,20 @@ export async function PATCH(request: NextRequest): Promise<Response> {
       }
     }
 
-    const hasSettingsUpdates = Object.keys(updates).length > 0;
+    const hasConfigUpdates = Object.keys(updates).length > 0;
     const hasAllowlistUpdate = Array.isArray(body.allowlist);
 
-    if (!hasSettingsUpdates && !hasAllowlistUpdate) {
+    if (!hasConfigUpdates && !hasAllowlistUpdate) {
       return NextResponse.json(
         createErrorResponse(ApiErrorCode.VALIDATION_ERROR, 'No valid fields provided'),
         { status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR], headers: corsHeaders },
       );
     }
 
-    // Persist settings updates
-    if (hasSettingsUpdates) {
-      const settingService = SettingService.getInstance();
-      await settingService.setMany(updates);
+    // Persist config updates
+    if (hasConfigUpdates) {
+      const systemConfigService = SystemConfigService.getInstance();
+      await systemConfigService.setMany(updates);
     }
 
     // Sync allowlist
@@ -189,20 +189,20 @@ export async function PATCH(request: NextRequest): Promise<Response> {
           // Add new entries
           ...toAdd.map((address) =>
             prisma.userAllowListEntry.create({
-              data: { address, note: 'added via settings' },
+              data: { address, note: 'added via system config' },
             }),
           ),
         ]);
       }
     }
 
-    // Reload app config singletons if settings changed
-    if (hasSettingsUpdates) {
+    // Reload app config singletons if config changed
+    if (hasConfigUpdates) {
       resetAppConfig();
       await initAppConfig();
     }
 
-    apiLog.businessOperation(apiLogger, requestId, 'updated', 'settings', user.id, {
+    apiLog.businessOperation(apiLogger, requestId, 'updated', 'system-config', user.id, {
       updatedKeys: Object.keys(updates),
       allowlistUpdated: hasAllowlistUpdate,
     });

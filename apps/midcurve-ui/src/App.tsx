@@ -16,7 +16,7 @@ import { IncreaseDepositPage } from './pages/IncreaseDepositPage';
 import { WithdrawPage } from './pages/WithdrawPage';
 import { RiskTriggersPage } from './pages/RiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
-import { SettingsPage } from './pages/SettingsPage';
+import { SystemConfigPage } from './pages/SystemConfigPage';
 
 export function App() {
   return (
@@ -84,7 +84,7 @@ function ConfigGate() {
                 path="/positions/triggers/:protocol/:chain/:nftId"
                 element={<RiskTriggersPage />}
               />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/system-config" element={<SystemConfigPage />} />
               <Route path="/setup" element={<SetupWizardPage />} />
             </Routes>
           </BrowserRouter>

@@ -7,7 +7,7 @@ export {
   getAppConfig,
   isAppConfigReady,
   resetAppConfig,
-  REQUIRED_SETTING_KEYS,
+  REQUIRED_SYSTEM_CONFIG_KEYS,
   type AppConfig,
 } from './app-config.js';
 

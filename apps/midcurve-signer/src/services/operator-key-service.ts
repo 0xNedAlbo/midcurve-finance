@@ -6,7 +6,7 @@
  * Key lifecycle:
  * - Creation: via createOperatorKey() called by the automation service on startup
  * - Loading: lazy, on first access (getOperatorAddress / signTransaction)
- * - Persistence: keyId stored in Settings table
+ * - Persistence: keyId stored in SystemConfig table
  *
  * The operator account is self-funded with ETH and recovers gas costs
  * via the feeRecipient/feeBps mechanism in UniswapV3PositionCloser.
@@ -15,15 +15,15 @@
 import type { Address, Hex, Hash } from 'viem';
 import { signerLogger } from '@/lib/logger';
 import { getSigner, shouldUseLocalKeys, type EvmSigner, type LocalDevSigner } from '@/lib/kms';
-import { SettingService } from '@midcurve/services';
+import { SystemConfigService } from '@midcurve/services';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const SETTING_OPERATOR_KEY_ID = 'operator.kms.keyId';
-const SETTING_OPERATOR_ENCRYPTED_PK = 'operator.kms.encryptedPrivateKey';
-const SETTING_OPERATOR_ADDRESS = 'operator.address';
+const SYSCONFIG_OPERATOR_KEY_ID = 'operator.kms.keyId';
+const SYSCONFIG_OPERATOR_ENCRYPTED_PK = 'operator.kms.encryptedPrivateKey';
+const SYSCONFIG_OPERATOR_ADDRESS = 'operator.address';
 
 // =============================================================================
 // Service
@@ -33,15 +33,15 @@ export class OperatorKeyService {
   private static instance: OperatorKeyService | null = null;
 
   private readonly logger = signerLogger.child({ service: 'OperatorKeyService' });
-  private readonly settingService: SettingService;
+  private readonly systemConfigService: SystemConfigService;
   private readonly signer: EvmSigner;
 
   private operatorKeyId: string | null = null;
   private operatorAddress: Address | null = null;
   private loaded = false;
 
-  constructor(dependencies: { settingService?: SettingService } = {}) {
-    this.settingService = dependencies.settingService ?? SettingService.getInstance();
+  constructor(dependencies: { systemConfigService?: SystemConfigService } = {}) {
+    this.systemConfigService = dependencies.systemConfigService ?? SystemConfigService.getInstance();
     this.signer = getSigner();
   }
 
@@ -57,22 +57,22 @@ export class OperatorKeyService {
   }
 
   /**
-   * Lazy-load an existing operator key from Settings.
+   * Lazy-load an existing operator key from SystemConfig.
    * Called internally before any access. Does nothing if already loaded.
-   * If no key exists in Settings, the service stays unloaded — callers
+   * If no key exists in SystemConfig, the service stays unloaded — callers
    * must use createOperatorKey() first.
    */
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
 
-    const existingKeyId = await this.settingService.get(SETTING_OPERATOR_KEY_ID);
+    const existingKeyId = await this.systemConfigService.get(SYSCONFIG_OPERATOR_KEY_ID);
     if (!existingKeyId) return; // No key yet — createOperatorKey() must be called
 
     this.operatorKeyId = existingKeyId;
 
     // For LocalDevSigner, also restore the encrypted private key
     if (shouldUseLocalKeys()) {
-      const encryptedPk = await this.settingService.get(SETTING_OPERATOR_ENCRYPTED_PK);
+      const encryptedPk = await this.systemConfigService.get(SYSCONFIG_OPERATOR_ENCRYPTED_PK);
       if (encryptedPk) {
         (this.signer as unknown as LocalDevSigner).loadKey(existingKeyId, encryptedPk);
       }
@@ -82,15 +82,15 @@ export class OperatorKeyService {
     this.loaded = true;
 
     // Backfill operator.address if not yet persisted (migration for existing keys)
-    const existingAddress = await this.settingService.get(SETTING_OPERATOR_ADDRESS);
+    const existingAddress = await this.systemConfigService.get(SYSCONFIG_OPERATOR_ADDRESS);
     if (!existingAddress) {
-      await this.settingService.set(SETTING_OPERATOR_ADDRESS, this.operatorAddress);
+      await this.systemConfigService.set(SYSCONFIG_OPERATOR_ADDRESS, this.operatorAddress);
     }
 
     this.logger.info({
       operatorAddress: this.operatorAddress,
       keyId: existingKeyId,
-      msg: 'Loaded existing operator key from settings',
+      msg: 'Loaded existing operator key from system config',
     });
   }
 
@@ -114,23 +114,23 @@ export class OperatorKeyService {
     this.operatorKeyId = result.keyId;
     this.operatorAddress = result.walletAddress;
 
-    // Persist to Settings table
+    // Persist to SystemConfig table
     const settings: Record<string, string> = {
-      [SETTING_OPERATOR_KEY_ID]: result.keyId,
-      [SETTING_OPERATOR_ADDRESS]: result.walletAddress,
+      [SYSCONFIG_OPERATOR_KEY_ID]: result.keyId,
+      [SYSCONFIG_OPERATOR_ADDRESS]: result.walletAddress,
     };
 
     if (result.encryptedPrivateKey) {
-      settings[SETTING_OPERATOR_ENCRYPTED_PK] = result.encryptedPrivateKey;
+      settings[SYSCONFIG_OPERATOR_ENCRYPTED_PK] = result.encryptedPrivateKey;
     }
 
-    await this.settingService.setMany(settings);
+    await this.systemConfigService.setMany(settings);
     this.loaded = true;
 
     this.logger.info({
       operatorAddress: this.operatorAddress,
       keyId: result.keyId,
-      msg: 'Created new operator key and persisted to settings',
+      msg: 'Created new operator key and persisted to system config',
     });
 
     return this.operatorAddress;
@@ -138,7 +138,7 @@ export class OperatorKeyService {
 
   /**
    * Get the operator's Ethereum address.
-   * Lazy-loads from Settings on first call.
+   * Lazy-loads from SystemConfig on first call.
    * Throws if no operator key has been created yet.
    */
   async getOperatorAddress(): Promise<Address> {

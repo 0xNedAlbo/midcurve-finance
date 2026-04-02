@@ -1,21 +1,21 @@
 /**
- * AppConfig — Central configuration singleton backed by the `settings` DB table.
+ * AppConfig — Central configuration singleton backed by the `system_config` DB table.
  *
- * All user-provided config (API keys, admin wallet, WalletConnect project ID) is stored
+ * All system-level config (API keys, admin wallet, WalletConnect project ID) is stored
  * in the database and accessed exclusively through `getAppConfig()`. No process.env reads
  * for any DB-backed values.
  *
  * Lifecycle:
  *   1. Backend services call `await initAppConfig()` at startup.
- *   2. `initAppConfig()` polls `SettingService.hasAll()` every 30 s until all required
- *      settings are present, then builds the config and initializes downstream singletons
+ *   2. `initAppConfig()` polls `SystemConfigService.hasAll()` every 30 s until all required
+ *      config keys are present, then builds the config and initializes downstream singletons
  *      (EvmConfig, etc.).
  *   3. After that, `getAppConfig()` returns the frozen config object synchronously.
  *   4. `isAppConfigReady()` is used by the API 503 middleware to gate data routes.
  */
 
 import { createServiceLogger } from '../logging/index.js';
-import { SettingService } from '../services/setting/setting-service.js';
+import { SystemConfigService } from '../services/system-config/system-config-service.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,7 +38,7 @@ export interface AppConfig {
 // Required setting keys (must be present before the app starts serving data)
 // ---------------------------------------------------------------------------
 
-export const REQUIRED_SETTING_KEYS = [
+export const REQUIRED_SYSTEM_CONFIG_KEYS = [
   'alchemy_api_key',
   'the_graph_api_key',
   'walletconnect_project_id',
@@ -58,7 +58,7 @@ let _config: AppConfig | null = null;
 // ---------------------------------------------------------------------------
 
 /**
- * Initialize AppConfig by waiting for all required settings to be present in the DB,
+ * Initialize AppConfig by waiting for all required system config keys to be present in the DB,
  * then build the config and initialize downstream singletons (EvmConfig).
  *
  * This function blocks (via polling) until the config wizard has been completed.
@@ -70,25 +70,25 @@ export async function initAppConfig(): Promise<void> {
     return;
   }
 
-  const settingService = SettingService.getInstance();
+  const systemConfigService = SystemConfigService.getInstance();
   const POLL_INTERVAL_MS = 30_000;
 
-  logger.info('Waiting for required settings...');
+  logger.info('Waiting for required system config...');
 
-  // Poll until all required settings exist
+  // Poll until all required system config keys exist
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const ready = await settingService.hasAll([...REQUIRED_SETTING_KEYS]);
+    const ready = await systemConfigService.hasAll([...REQUIRED_SYSTEM_CONFIG_KEYS]);
     if (ready) break;
     logger.info(
-      { requiredKeys: REQUIRED_SETTING_KEYS, pollIntervalMs: POLL_INTERVAL_MS },
-      'Required settings not yet present, retrying...',
+      { requiredKeys: REQUIRED_SYSTEM_CONFIG_KEYS, pollIntervalMs: POLL_INTERVAL_MS },
+      'Required system config not yet present, retrying...',
     );
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
-  const settings = await settingService.getMany([
-    ...REQUIRED_SETTING_KEYS,
+  const settings = await systemConfigService.getMany([
+    ...REQUIRED_SYSTEM_CONFIG_KEYS,
     'coingecko_api_key',
   ]);
 

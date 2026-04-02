@@ -213,11 +213,11 @@ export class UniswapV3CloseOrderService {
       const chainId = posConfig.chainId as number;
       const nftId = String(posConfig.nftId);
 
-      // 2. Look up operator key + address from settings (single operator key)
-      const operatorKeyId = await db.setting.findUnique({ where: { key: 'operator.kms.keyId' } });
-      const operatorAddressSetting = await db.setting.findUnique({ where: { key: 'operator.address' } });
+      // 2. Look up operator key + address from system config (single operator key)
+      const operatorKeyId = await db.systemConfig.findUnique({ where: { key: 'operator.kms.keyId' } });
+      const operatorAddressEntry = await db.systemConfig.findUnique({ where: { key: 'operator.address' } });
       const hasOperator = operatorKeyId !== null;
-      const ourOperatorAddress = operatorAddressSetting?.value ?? null;
+      const ourOperatorAddress = operatorAddressEntry?.value ?? null;
 
       // 3. Find the PositionCloser contract for this chain
       const sharedContract = await this.sharedContractService.findLatestByChainAndName(

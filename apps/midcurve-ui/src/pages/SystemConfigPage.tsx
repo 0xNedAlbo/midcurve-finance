@@ -1,5 +1,5 @@
 /**
- * SettingsPage
+ * SystemConfigPage
  *
  * Admin-only page for updating instance configuration (API keys, allowlist).
  * Pre-populates with current (masked) values from the backend.
@@ -14,12 +14,12 @@ import { apiClient } from '@/lib/api-client';
 const inputClasses =
   'w-full px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500';
 
-interface SettingsResponse {
-  settings: Record<string, string>;
+interface SystemConfigResponse {
+  config: Record<string, string>;
   allowlist: string[];
 }
 
-export function SettingsPage() {
+export function SystemConfigPage() {
   const { user, status } = useAuth();
   const navigate = useNavigate();
 
@@ -46,13 +46,13 @@ export function SettingsPage() {
     }
   }, [status, user, navigate]);
 
-  // Fetch current settings
+  // Fetch current system config
   useEffect(() => {
     if (status !== 'authenticated' || !user?.isAdmin) return;
 
-    async function fetchSettings() {
-      const response = await apiClient.get<SettingsResponse>('/api/v1/admin/settings');
-      const s = response.data.settings;
+    async function fetchSystemConfig() {
+      const response = await apiClient.get<SystemConfigResponse>('/api/v1/admin/system-config');
+      const s = response.data.config;
       setPlaceholders({
         alchemy_api_key: s.alchemy_api_key ?? '',
         the_graph_api_key: s.the_graph_api_key ?? '',
@@ -69,7 +69,7 @@ export function SettingsPage() {
       setLoading(false);
     }
 
-    fetchSettings();
+    fetchSystemConfig();
   }, [status, user]);
 
   async function handleSubmit(e: FormEvent) {
@@ -80,7 +80,7 @@ export function SettingsPage() {
 
     const body: Record<string, unknown> = {};
 
-    // Only send non-empty settings fields
+    // Only send non-empty config fields
     if (alchemyApiKey) body.alchemyApiKey = alchemyApiKey;
     if (theGraphApiKey) body.theGraphApiKey = theGraphApiKey;
     if (walletconnectProjectId) body.walletconnectProjectId = walletconnectProjectId;
@@ -93,10 +93,10 @@ export function SettingsPage() {
       .filter((line) => line.length > 0);
     body.allowlist = allowlist;
 
-    const response = await apiClient.patch('/api/v1/admin/settings', body);
+    const response = await apiClient.patch('/api/v1/admin/system-config', body);
 
     if (!response.success) {
-      setError('Failed to save settings');
+      setError('Failed to save system configuration');
       setSubmitting(false);
       return;
     }
@@ -139,7 +139,7 @@ export function SettingsPage() {
               <Settings className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-white">Settings</h1>
+              <h1 className="text-xl font-semibold text-white">System Configuration</h1>
               <p className="text-sm text-slate-400">
                 Update API keys and instance configuration
               </p>
@@ -238,7 +238,7 @@ export function SettingsPage() {
 
           {success && (
             <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-sm text-green-400">
-              Settings saved successfully
+              Configuration saved successfully
             </div>
           )}
 
@@ -247,7 +247,7 @@ export function SettingsPage() {
             disabled={submitting}
             className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
-            {submitting ? 'Saving...' : 'Save Settings'}
+            {submitting ? 'Saving...' : 'Save Configuration'}
           </button>
         </form>
       </div>
