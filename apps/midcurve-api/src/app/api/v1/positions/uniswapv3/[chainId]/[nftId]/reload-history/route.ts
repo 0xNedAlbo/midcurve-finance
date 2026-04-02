@@ -152,18 +152,8 @@ export async function POST(
         positionHash,
       });
 
-      // 3. Discover all historical events from blockchain
-      // TODO: discoverAllEvents was never implemented on UniswapV3LedgerService.
-      // Use importLogsForPosition or similar when available.
-
-      apiLog.businessOperation(apiLogger, requestId, 'events-discovery-skipped', 'position', dbPosition.id, {
-        chainId,
-        nftId,
-      });
-
-      // 5. Refresh position state from on-chain data
-      // This fetches current liquidity, fees, PnL, and updates the database
-      const position = await getUniswapV3PositionService().refresh(dbPosition.id);
+      // 3. Full reset: delete all ledger events and re-import from mint block
+      const position = await getUniswapV3PositionService().reset(dbPosition.id);
 
       apiLog.businessOperation(apiLogger, requestId, 'reload-history-complete', 'position', position.id, {
         chainId,
