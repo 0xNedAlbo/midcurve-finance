@@ -340,7 +340,7 @@ export class UniswapV3PositionService {
             new EvmBlockService({ evmConfig: this._evmConfig });
         this._poolPriceService =
             dependencies.poolPriceService ??
-            new UniswapV3PoolPriceService({ prisma: this._prisma });
+            new UniswapV3PoolPriceService();
         this._cacheService =
             dependencies.cacheService ?? CacheService.getInstance();
         this._closeOrderService =

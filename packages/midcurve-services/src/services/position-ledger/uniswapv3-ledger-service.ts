@@ -1580,8 +1580,7 @@ export class UniswapV3LedgerService {
         // Discover pool price at the event's block number
         const poolPrice = await poolPriceService.discover(
             position.pool.id,
-            { blockNumber: Number(blockNumber) },
-            tx,
+            { blockNumber: Number(blockNumber), blockHash: log.blockHash },
         );
         const sqrtPriceX96 = poolPrice.sqrtPriceX96;
         const blockTimestamp = poolPrice.timestamp;

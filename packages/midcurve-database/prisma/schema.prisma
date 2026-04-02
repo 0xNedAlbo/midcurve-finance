@@ -217,7 +217,6 @@ model Pool {
   token0            Token                  @relation("PoolToken0", fields: [token0Id], references: [id])
   token1            Token                  @relation("PoolToken1", fields: [token1Id], references: [id])
   positions         Position[]
-  poolPrices        PoolPrice[]
 
   // Indexes for efficient queries
   @@index([protocol])
@@ -306,39 +305,6 @@ model Position {
   @@schema("public")
 }
 
-
-model PoolPrice {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Protocol identification
-  protocol String // 'uniswapv3', etc.
-
-  // Pool reference
-  poolId String
-  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
-
-  // Timestamp when price was recorded
-  timestamp DateTime
-
-  // Price fields (stored as string for bigint precision)
-  // Price in smallest token units
-  token1PricePerToken0 String // bigint as string - How much token1 for 1 token0
-  token0PricePerToken1 String // bigint as string - How much token0 for 1 token1
-
-  // Protocol-specific data (JSON)
-  config Json // Protocol-specific config (e.g., blockNumber, blockTimestamp for Uniswap V3)
-  state  Json // Protocol-specific state (e.g., sqrtPriceX96, tick for Uniswap V3)
-
-  // Indexes for efficient queries
-  @@index([protocol])
-  @@index([poolId])
-  @@index([timestamp])
-  @@index([poolId, timestamp]) // Compound index for time-range queries on specific pool
-  @@map("pool_prices")
-  @@schema("public")
-}
 
 model PositionLedgerEvent {
   id        String   @id @default(cuid())

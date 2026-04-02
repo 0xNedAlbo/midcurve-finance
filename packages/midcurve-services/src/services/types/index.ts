@@ -30,10 +30,6 @@ export type {
 // Pool price input types
 export type {
   UniswapV3PoolPriceDiscoverInput,
-  CreateUniswapV3PoolPriceInput,
-  UpdateUniswapV3PoolPriceInput,
-  CreateAnyPoolPriceInput,
-  UpdateAnyPoolPriceInput,
 } from './pool-price/index.js';
 
 // Uniswap V3 service types

@@ -1,7 +1,8 @@
 /**
  * Uniswap V3 Pool Price Service
  *
- * Standalone service for managing historic pool price snapshots for Uniswap V3 pools.
+ * Discovers and caches historic pool price snapshots for Uniswap V3 pools.
+ * Uses CacheService (PostgreSQL-backed) instead of a dedicated PoolPrice table.
  *
  * Pool prices are historic snapshots used for:
  * - PnL calculations (comparing current value to historic cost basis)
@@ -9,42 +10,38 @@
  * - Performance tracking over time
  */
 
-import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
   UniswapV3PoolPrice,
-  poolPriceConfigToJSON,
-  priceStateToJSON,
   pricePerToken0InToken1,
   pricePerToken1InToken0,
 } from '@midcurve/shared';
 import type { UniswapV3PoolPriceRow } from '@midcurve/shared';
-import type {
-  CreateUniswapV3PoolPriceInput,
-  UniswapV3PoolPriceDiscoverInput,
-} from '../types/pool-price/pool-price-input.js';
+import type { UniswapV3PoolPriceDiscoverInput } from '../types/pool-price/pool-price-input.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { uniswapV3PoolAbi } from '../../utils/uniswapv3/pool-abi.js';
 import { EvmConfig } from '../../config/evm.js';
 import { UniswapV3PoolService } from '../pool/uniswapv3-pool-service.js';
-import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
+import { CacheService } from '../cache/cache-service.js';
+
+/** TTL for cached pool prices: 30 days (prices at finalized blocks are immutable) */
+const CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 /**
- * Database result interface for pool price queries.
- * Note: Prisma stores bigint as string in the database, so we use string here.
- * The factory methods handle conversion to native bigint.
+ * Flat, JSON-serializable shape stored in the cache.
+ * All bigint values stored as strings.
  */
-export interface PoolPriceDbResult {
-  id: string;
-  createdAt: Date;
-  updatedAt: Date;
-  protocol: string;
+interface CachedPoolPriceValue {
+  protocol: 'uniswapv3';
   poolId: string;
-  timestamp: Date;
-  token1PricePerToken0: string; // Prisma returns bigint as string
-  token0PricePerToken1: string; // Prisma returns bigint as string
-  config: Record<string, unknown>;
-  state: Record<string, unknown>;
+  timestamp: string; // ISO 8601
+  token1PricePerToken0: string;
+  token0PricePerToken1: string;
+  blockNumber: number;
+  blockHash: string;
+  blockTimestamp: number;
+  sqrtPriceX96: string;
+  tick: number;
 }
 
 /**
@@ -52,365 +49,245 @@ export interface PoolPriceDbResult {
  * All dependencies are optional and will use defaults if not provided
  */
 export interface UniswapV3PoolPriceServiceDependencies {
-  /**
-   * Prisma client for database operations
-   * If not provided, a new PrismaClient instance will be created
-   */
-  prisma?: PrismaClient;
-
-  /**
-   * EVM configuration for RPC clients
-   * If not provided, a new EvmConfig instance will be created
-   * Required for discover() method to fetch on-chain data
-   */
+  /** EVM configuration for RPC clients */
   evmConfig?: EvmConfig;
-
-  /**
-   * Uniswap V3 pool service for pool data access
-   * If not provided, a new UniswapV3PoolService instance will be created
-   */
+  /** Uniswap V3 pool service for pool data access */
   poolService?: UniswapV3PoolService;
+  /** Cache service for storing pool price snapshots */
+  cacheService?: CacheService;
 }
 
 /**
  * Uniswap V3 Pool Price Service
  *
- * Standalone service for Uniswap V3 pool price management.
+ * Discovers and caches historic pool price snapshots using CacheService.
  *
  * Features:
  * - Returns UniswapV3PoolPrice class instances with typed config/state
- * - Protocol validation (ensures only 'uniswapv3' pool prices)
- * - On-chain discovery at specific block numbers
+ * - Zero-RPC cache hits when caller provides blockHash (reorg detection in-memory)
+ * - On-chain discovery at specific block numbers on cache miss
  */
 export class UniswapV3PoolPriceService {
   protected readonly protocol = 'uniswapv3' as const;
-  protected readonly _prisma: PrismaClient;
   protected readonly _evmConfig: EvmConfig;
   protected readonly _poolService: UniswapV3PoolService;
+  protected readonly _cacheService: CacheService;
   protected readonly logger: ServiceLogger;
 
-  /**
-   * Creates a new UniswapV3PoolPriceService instance
-   *
-   * @param dependencies - Optional dependencies object
-   * @param dependencies.prisma - Prisma client instance (creates default if not provided)
-   * @param dependencies.evmConfig - EVM config instance (creates default if not provided)
-   * @param dependencies.poolService - Pool service instance (creates default if not provided)
-   */
   constructor(dependencies: UniswapV3PoolPriceServiceDependencies = {}) {
-    this._prisma = dependencies.prisma ?? prismaClient;
     this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
     this._poolService =
-      dependencies.poolService ?? new UniswapV3PoolService({ prisma: this._prisma });
+      dependencies.poolService ?? new UniswapV3PoolService();
+    this._cacheService = dependencies.cacheService ?? CacheService.getInstance();
     this.logger = createServiceLogger('UniswapV3PoolPriceService');
   }
 
-  /**
-   * Get the Prisma client instance
-   */
-  protected get prisma(): PrismaClient {
-    return this._prisma;
-  }
-
-  /**
-   * Get the EVM config instance
-   */
   protected get evmConfig(): EvmConfig {
     return this._evmConfig;
   }
 
-  /**
-   * Get the pool service instance
-   */
   protected get poolService(): UniswapV3PoolService {
     return this._poolService;
   }
 
-  // ============================================================================
-  // HELPER METHODS
-  // ============================================================================
-
-  /**
-   * Map database result to UniswapV3PoolPrice class instance.
-   *
-   * Converts string price fields to bigint for UniswapV3PoolPriceRow compatibility.
-   *
-   * @param dbResult - Raw database result from Prisma
-   * @returns UniswapV3PoolPrice class instance
-   */
-  private mapToUniswapV3PoolPrice(dbResult: PoolPriceDbResult): UniswapV3PoolPrice {
-    // Convert string price fields to bigint for UniswapV3PoolPriceRow compatibility
-    const rowWithBigInt: UniswapV3PoolPriceRow = {
-      ...dbResult,
-      protocol: 'uniswapv3' as const,
-      token1PricePerToken0: BigInt(dbResult.token1PricePerToken0),
-      token0PricePerToken1: BigInt(dbResult.token0PricePerToken1),
-    };
-    return UniswapV3PoolPrice.fromDB(rowWithBigInt);
+  protected get cacheService(): CacheService {
+    return this._cacheService;
   }
 
   // ============================================================================
-  // DISCOVERY IMPLEMENTATION
+  // CACHE KEY & MAPPING
   // ============================================================================
 
   /**
-   * Discover and create a historic pool price snapshot from on-chain data
+   * Build a deterministic cache key for a pool price at a specific block.
+   */
+  private buildCacheKey(
+    chainId: number,
+    poolAddress: string,
+    blockNumber: number,
+  ): string {
+    return `pool-price:uniswapv3:${chainId}:${poolAddress}:${blockNumber}`;
+  }
+
+  /**
+   * Reconstruct a UniswapV3PoolPrice from a cached value.
+   */
+  private mapFromCache(
+    cacheKey: string,
+    cached: CachedPoolPriceValue,
+  ): UniswapV3PoolPrice {
+    const row: UniswapV3PoolPriceRow = {
+      id: cacheKey,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      protocol: 'uniswapv3' as const,
+      poolId: cached.poolId,
+      timestamp: new Date(cached.timestamp),
+      token1PricePerToken0: BigInt(cached.token1PricePerToken0),
+      token0PricePerToken1: BigInt(cached.token0PricePerToken1),
+      config: {
+        blockNumber: cached.blockNumber,
+        blockHash: cached.blockHash,
+        blockTimestamp: cached.blockTimestamp,
+      },
+      state: {
+        sqrtPriceX96: cached.sqrtPriceX96,
+        tick: cached.tick,
+      },
+    };
+    return UniswapV3PoolPrice.fromDB(row);
+  }
+
+  // ============================================================================
+  // DISCOVERY
+  // ============================================================================
+
+  /**
+   * Discover and cache a historic pool price snapshot from on-chain data.
    *
-   * Fetches pool state at a specific block number from the blockchain,
-   * calculates prices, and stores in database. Idempotent - returns existing
-   * record if price already exists for the given pool and block with matching hash.
-   *
-   * Reorg detection: If a cached price exists but the blockHash doesn't match
-   * the on-chain blockHash, the cached record is deleted and re-fetched.
+   * Checks the cache first. On cache hit, validates blockHash for reorg detection.
+   * When the caller provides blockHash (e.g., from a raw log event), the cache hit
+   * path requires zero RPC calls.
    *
    * @param poolId - Pool ID to fetch price for
-   * @param params - Discovery parameters (blockNumber)
-   * @param tx - Optional Prisma transaction client for atomic operations
-   * @returns The discovered or existing pool price snapshot
-   * @throws Error if pool not found, not uniswapv3, chain not supported, or RPC call fails
+   * @param params - Discovery parameters (blockNumber, optional blockHash)
+   * @returns The discovered or cached pool price snapshot
    */
   async discover(
     poolId: string,
     params: UniswapV3PoolPriceDiscoverInput,
-    tx?: PrismaTransactionClient
   ): Promise<UniswapV3PoolPrice> {
     log.methodEntry(this.logger, 'discover', { poolId, params });
 
-    const db = tx ?? this.prisma;
+    // 1. Resolve pool to get chainId and poolAddress
+    const pool = await this.poolService.findById(poolId);
+    if (!pool) {
+      const error = new Error(`Pool not found: ${poolId}`);
+      log.methodError(this.logger, 'discover', error, { poolId });
+      throw error;
+    }
 
-    try {
-      // 1. Fetch pool using pool service (includes tokens and validates protocol)
-      const pool = await this.poolService.findById(poolId);
+    const { chainId, address: poolAddress } = pool.typedConfig;
 
-      if (!pool) {
-        const error = new Error(`Pool not found: ${poolId}`);
-        log.methodError(this.logger, 'discover', error, { poolId });
-        throw error;
-      }
+    // 2. Validate chain support
+    if (!this.evmConfig.isChainSupported(chainId)) {
+      const error = new Error(
+        `Chain ${chainId} is not supported. Please configure RPC_URL_${this.evmConfig
+          .getChainConfig(chainId)
+          ?.name.toUpperCase()}`
+      );
+      log.methodError(this.logger, 'discover', error, { chainId });
+      throw error;
+    }
 
-      // 2. Get chainId and pool address from typed config
-      const { chainId, address: poolAddress } = pool.typedConfig;
+    // 3. Build cache key and check cache
+    const cacheKey = this.buildCacheKey(chainId, poolAddress, params.blockNumber);
+    const cached = await this.cacheService.get<CachedPoolPriceValue>(cacheKey);
 
-      // 3. Validate chain support
-      if (!this.evmConfig.isChainSupported(chainId)) {
-        const error = new Error(
-          `Chain ${chainId} is not supported. Please configure RPC_URL_${this.evmConfig
-            .getChainConfig(chainId)
-            ?.name.toUpperCase()}`
+    if (cached) {
+      // 4. Reorg detection: compare blockHash
+      const canonicalBlockHash = params.blockHash
+        ?? (await this.evmConfig.getPublicClient(chainId).getBlock({
+          blockNumber: BigInt(params.blockNumber),
+        })).hash;
+
+      if (cached.blockHash === canonicalBlockHash) {
+        this.logger.info(
+          { poolId, blockNumber: params.blockNumber },
+          'Pool price cache hit with matching blockHash',
         );
-        log.methodError(this.logger, 'discover', error, { chainId });
-        throw error;
+        const result = this.mapFromCache(cacheKey, cached);
+        log.methodExit(this.logger, 'discover', { cacheKey });
+        return result;
       }
 
-      // 4. Get public client for the chain
-      const client = this.evmConfig.getPublicClient(chainId);
-
-      // 5. Fetch block info to get timestamp and hash for reorg detection
-      this.logger.debug(
-        { blockNumber: params.blockNumber },
-        'Fetching block info'
-      );
-      const block = await client.getBlock({
-        blockNumber: BigInt(params.blockNumber),
-      });
-
-      const blockTimestamp = Number(block.timestamp);
-      const blockHash = block.hash;
-      const timestamp = new Date(blockTimestamp * 1000);
-
-      // 6. Check for existing price snapshot at this block
-      const existingPrice = await db.poolPrice.findFirst({
-        where: {
-          poolId,
-          protocol: 'uniswapv3',
-          config: {
-            path: ['blockNumber'],
-            equals: params.blockNumber,
-          },
-        },
-      });
-
-      if (existingPrice) {
-        const existingConfig = existingPrice.config as { blockHash?: string };
-
-        // Compare blockHash for reorg detection
-        if (existingConfig.blockHash === blockHash) {
-          this.logger.info(
-            { poolId, blockNumber: params.blockNumber, blockHash },
-            'Pool price already exists with matching blockHash, returning cached'
-          );
-          return this.mapToUniswapV3PoolPrice(existingPrice as unknown as PoolPriceDbResult);
-        }
-
-        // Reorg detected - blockHash mismatch (common occurrence, not urgent)
-        this.logger.debug(
-          {
-            poolId,
-            blockNumber: params.blockNumber,
-            cachedBlockHash: existingConfig.blockHash,
-            onChainBlockHash: blockHash,
-          },
-          'Reorg detected: blockHash mismatch, deleting stale price and re-fetching'
-        );
-
-        // Delete the stale record
-        await db.poolPrice.delete({
-          where: { id: existingPrice.id },
-        });
-      }
-
-      // 8. Read pool state at specific block
-      this.logger.debug(
-        { poolAddress, blockNumber: params.blockNumber },
-        'Reading pool slot0 at block'
-      );
-
-      const slot0Data = (await client.readContract({
-        address: poolAddress as `0x${string}`,
-        abi: uniswapV3PoolAbi,
-        functionName: 'slot0',
-        blockNumber: BigInt(params.blockNumber),
-      })) as readonly [bigint, number, number, number, number, number, boolean];
-
-      const sqrtPriceX96 = slot0Data[0];
-      const tick = slot0Data[1];
-
-      // 9. Calculate prices using utility functions
-      const token1PricePerToken0 = pricePerToken0InToken1(
-        sqrtPriceX96,
-        pool.token0.decimals
-      );
-      const token0PricePerToken1 = pricePerToken1InToken0(
-        sqrtPriceX96,
-        pool.token1.decimals
-      );
-
+      // Reorg detected — delete stale cache entry
       this.logger.debug(
         {
-          sqrtPriceX96: sqrtPriceX96.toString(),
-          tick,
-          token1PricePerToken0: token1PricePerToken0.toString(),
-          token0PricePerToken1: token0PricePerToken1.toString(),
-        },
-        'Calculated prices from pool state'
-      );
-
-      // 10. Create pool price record
-      const poolPrice = await this.create(
-        {
-          protocol: 'uniswapv3',
-          poolId,
-          timestamp,
-          token1PricePerToken0,
-          token0PricePerToken1,
-          config: {
-            blockNumber: params.blockNumber,
-            blockHash,
-            blockTimestamp,
-          },
-          state: {
-            sqrtPriceX96,
-            tick,
-          },
-        },
-        tx
-      );
-
-      this.logger.info(
-        {
-          id: poolPrice.id,
           poolId,
           blockNumber: params.blockNumber,
-          timestamp,
+          cachedBlockHash: cached.blockHash,
+          canonicalBlockHash,
         },
-        'Pool price discovered and saved'
+        'Reorg detected: blockHash mismatch, invalidating cached pool price',
       );
-      log.methodExit(this.logger, 'discover', { id: poolPrice.id });
-      return poolPrice;
-    } catch (error) {
-      log.methodError(this.logger, 'discover', error as Error, {
-        poolId,
-        params,
-      });
-      throw error;
+      await this.cacheService.delete(cacheKey);
     }
-  }
 
-  // ============================================================================
-  // CRUD OPERATIONS
-  // ============================================================================
+    // 5. Cache miss (or reorg invalidation) — fetch from chain
+    const client = this.evmConfig.getPublicClient(chainId);
 
-  /**
-   * Create a new Uniswap V3 pool price snapshot
-   *
-   * @param input - Pool price data to create
-   * @param tx - Optional Prisma transaction client for atomic operations
-   * @returns The created pool price with generated id and timestamps
-   * @throws Error if protocol is not 'uniswapv3'
-   */
-  async create(
-    input: CreateUniswapV3PoolPriceInput,
-    tx?: PrismaTransactionClient
-  ): Promise<UniswapV3PoolPrice> {
-    log.methodEntry(this.logger, 'create', {
-      protocol: input.protocol,
-      poolId: input.poolId,
-      timestamp: input.timestamp,
+    const block = await client.getBlock({
+      blockNumber: BigInt(params.blockNumber),
     });
+    const blockTimestamp = Number(block.timestamp);
+    const blockHash = block.hash;
+    const timestamp = new Date(blockTimestamp * 1000);
 
-    const db = tx ?? this.prisma;
+    this.logger.debug(
+      { poolAddress, blockNumber: params.blockNumber },
+      'Reading pool slot0 at block',
+    );
 
-    try {
-      // Validate protocol
-      if (input.protocol !== 'uniswapv3') {
-        const error = new Error(
-          `Invalid protocol '${input.protocol}' for UniswapV3PoolPriceService. Expected 'uniswapv3'.`
-        );
-        log.methodError(this.logger, 'create', error, {
-          protocol: input.protocol,
-        });
-        throw error;
-      }
+    const slot0Data = (await client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: uniswapV3PoolAbi,
+      functionName: 'slot0',
+      blockNumber: BigInt(params.blockNumber),
+    })) as readonly [bigint, number, number, number, number, number, boolean];
 
-      // Serialize config and state for database storage
-      const configDB = poolPriceConfigToJSON(input.config);
-      const stateDB = priceStateToJSON(input.state);
+    const sqrtPriceX96 = slot0Data[0];
+    const tick = slot0Data[1];
 
-      log.dbOperation(this.logger, 'create', 'PoolPrice', {
-        protocol: input.protocol,
-        poolId: input.poolId,
-      });
+    // 6. Calculate prices
+    const token1PricePerToken0 = pricePerToken0InToken1(
+      sqrtPriceX96,
+      pool.token0.decimals,
+    );
+    const token0PricePerToken1 = pricePerToken1InToken0(
+      sqrtPriceX96,
+      pool.token1.decimals,
+    );
 
-      const result = await db.poolPrice.create({
-        data: {
-          protocol: 'uniswapv3',
-          poolId: input.poolId,
-          timestamp: input.timestamp,
-          token1PricePerToken0: input.token1PricePerToken0.toString(),
-          token0PricePerToken1: input.token0PricePerToken1.toString(),
-          config: configDB as object,
-          state: stateDB as object,
-        },
-      });
+    this.logger.debug(
+      {
+        sqrtPriceX96: sqrtPriceX96.toString(),
+        tick,
+        token1PricePerToken0: token1PricePerToken0.toString(),
+        token0PricePerToken1: token0PricePerToken1.toString(),
+      },
+      'Calculated prices from pool state',
+    );
 
-      const poolPrice = this.mapToUniswapV3PoolPrice(result as unknown as PoolPriceDbResult);
+    // 7. Store in cache
+    const cacheValue: CachedPoolPriceValue = {
+      protocol: 'uniswapv3',
+      poolId,
+      timestamp: timestamp.toISOString(),
+      token1PricePerToken0: token1PricePerToken0.toString(),
+      token0PricePerToken1: token0PricePerToken1.toString(),
+      blockNumber: params.blockNumber,
+      blockHash,
+      blockTimestamp,
+      sqrtPriceX96: sqrtPriceX96.toString(),
+      tick,
+    };
 
-      this.logger.info(
-        {
-          id: poolPrice.id,
-          protocol: poolPrice.protocol,
-          poolId: poolPrice.poolId,
-          timestamp: poolPrice.timestamp,
-        },
-        'Pool price created'
-      );
-      log.methodExit(this.logger, 'create', { id: poolPrice.id });
-      return poolPrice;
-    } catch (error) {
-      log.methodError(this.logger, 'create', error as Error, {
-        protocol: input.protocol,
-      });
-      throw error;
-    }
+    await this.cacheService.set(cacheKey, cacheValue, CACHE_TTL_SECONDS);
+
+    // 8. Map to UniswapV3PoolPrice and return
+    const poolPrice = this.mapFromCache(cacheKey, cacheValue);
+
+    this.logger.info(
+      {
+        cacheKey,
+        poolId,
+        blockNumber: params.blockNumber,
+        timestamp,
+      },
+      'Pool price discovered and cached',
+    );
+    log.methodExit(this.logger, 'discover', { cacheKey });
+    return poolPrice;
   }
 }
