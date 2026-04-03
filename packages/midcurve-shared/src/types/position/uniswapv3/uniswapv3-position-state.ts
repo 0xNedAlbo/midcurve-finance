@@ -180,12 +180,12 @@ export interface UniswapV3PositionStateJSON {
   isBurned: boolean;
   isClosed: boolean;
 
-  // Pool-level state
-  sqrtPriceX96: string;
-  currentTick: number;
-  poolLiquidity: string;
-  feeGrowthGlobal0: string;
-  feeGrowthGlobal1: string;
+  // Pool-level state (optional — present in DB JSON, omitted from API responses)
+  sqrtPriceX96?: string;
+  currentTick?: number;
+  poolLiquidity?: string;
+  feeGrowthGlobal0?: string;
+  feeGrowthGlobal1?: string;
 }
 
 // ============================================================================
@@ -222,13 +222,7 @@ export function positionStateToJSON(
       state.tickUpperFeeGrowthOutside1X128.toString(),
     isBurned: state.isBurned,
     isClosed: state.isClosed,
-
-    // Pool-level state
-    sqrtPriceX96: state.sqrtPriceX96.toString(),
-    currentTick: state.currentTick,
-    poolLiquidity: state.poolLiquidity.toString(),
-    feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
-    feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
+    // Pool-level fields intentionally omitted — they appear in pool.state via the computed getter
   };
 }
 
