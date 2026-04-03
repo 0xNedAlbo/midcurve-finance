@@ -112,16 +112,30 @@ export class JournalBackfillService {
         positionHash: true,
         isToken0Quote: true,
         state: true,
+        config: true,
         user: { select: { reportingCurrency: true } },
-        pool: {
-          select: {
-            token0: { select: { decimals: true, coingeckoId: true } },
-            token1: { select: { decimals: true, coingeckoId: true } },
-          },
-        },
       },
     });
     if (!position) throw new Error(`Position not found: ${positionId}`);
+
+    // Look up token decimals and coingeckoId from position config
+    const positionConfig = position.config as Record<string, unknown>;
+    const token0Address = positionConfig.token0Address as string;
+    const token1Address = positionConfig.token1Address as string;
+    const chainId = positionConfig.chainId as number;
+
+    const [token0Row, token1Row] = await Promise.all([
+      this.prisma.token.findFirst({
+        where: { config: { path: ['address'], equals: token0Address } },
+        select: { decimals: true, coingeckoId: true, symbol: true },
+      }),
+      this.prisma.token.findFirst({
+        where: { config: { path: ['address'], equals: token1Address } },
+        select: { decimals: true, coingeckoId: true, symbol: true },
+      }),
+    ]);
+    if (!token0Row) throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
+    if (!token1Row) throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
 
     // Fetch all ledger events chronologically
     const allEvents = await this.prisma.positionLedgerEvent.findMany({
@@ -152,7 +166,7 @@ export class JournalBackfillService {
     }
 
     // Resolve quote token info
-    const quoteToken = position.isToken0Quote ? position.pool.token0 : position.pool.token1;
+    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
 
     // Fetch historic price time series from CoinGecko

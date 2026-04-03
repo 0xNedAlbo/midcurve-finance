@@ -103,16 +103,14 @@ export interface UniswapV3CloseOrderServiceDependencies {
 }
 
 /**
- * CloseOrder with position and pool relations included.
+ * CloseOrder with position included.
  * Used by price monitor for subscription sync.
+ * Pool data (chainId, poolAddress) is in position.config JSON.
  */
 export interface CloseOrderWithPosition extends CloseOrder {
   position: {
     id: string;
-    pool: {
-      id: string;
-      config: Prisma.JsonValue;
-    } | null;
+    config: Prisma.JsonValue;
   };
 }
 
@@ -477,7 +475,7 @@ export class UniswapV3CloseOrderService {
   /**
    * Finds all orders that are actively being monitored.
    * automationState=monitoring.
-   * Includes position→pool relations for subscription sync.
+   * Includes position for subscription sync.
    */
   async findMonitoringOrders(
     tx?: PrismaTransactionClient,
@@ -491,7 +489,7 @@ export class UniswapV3CloseOrderService {
         position: {
           select: {
             id: true,
-            pool: { select: { id: true, config: true } },
+            config: true,
           },
         },
       },
@@ -501,10 +499,11 @@ export class UniswapV3CloseOrderService {
   /**
    * Gets distinct pools with actively monitoring orders.
    * Used for pool price subscription sync.
+   * Pool data (chainId, poolAddress) is extracted from position.config JSON.
    */
   async getPoolsWithMonitoringOrders(
     tx?: PrismaTransactionClient,
-  ): Promise<Array<{ chainId: number; poolAddress: string; poolId: string }>> {
+  ): Promise<Array<{ chainId: number; poolAddress: string }>> {
     log.methodEntry(this.logger, 'getPoolsWithMonitoringOrders', {});
 
     try {
@@ -516,7 +515,7 @@ export class UniswapV3CloseOrderService {
         select: {
           position: {
             select: {
-              pool: { select: { id: true, config: true } },
+              config: true,
             },
           },
         },
@@ -524,24 +523,20 @@ export class UniswapV3CloseOrderService {
 
       const poolsMap = new Map<
         string,
-        { chainId: number; poolAddress: string; poolId: string }
+        { chainId: number; poolAddress: string }
       >();
 
       for (const order of orders) {
-        const pool = order.position?.pool;
-        if (!pool) continue;
+        const positionConfig = order.position?.config as Record<string, unknown> | null;
+        if (!positionConfig) continue;
 
-        const poolConfig = pool.config as Record<string, unknown> | null;
-        if (!poolConfig) continue;
-
-        const chainId = poolConfig.chainId as number | undefined;
-        const poolAddress = poolConfig.address as string | undefined;
+        const chainId = positionConfig.chainId as number | undefined;
+        const poolAddress = positionConfig.poolAddress as string | undefined;
         if (chainId && poolAddress) {
           const key = `${chainId}-${poolAddress.toLowerCase()}`;
           poolsMap.set(key, {
             chainId,
             poolAddress,
-            poolId: pool.id,
           });
         }
       }
@@ -563,17 +558,21 @@ export class UniswapV3CloseOrderService {
   }
 
   /**
-   * Finds actively monitoring orders for a specific pool.
+   * Finds actively monitoring orders for a specific pool address on a given chain.
    */
   async findMonitoringOrdersForPool(
-    poolId: string,
+    chainId: number,
+    poolAddress: string,
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrder[]> {
     const db = tx ?? this.prisma;
     return db.closeOrder.findMany({
       where: {
         position: {
-          pool: { id: poolId },
+          AND: [
+            { config: { path: ['poolAddress'], equals: poolAddress } },
+            { config: { path: ['chainId'], equals: chainId } },
+          ],
         },
         automationState: 'monitoring',
       },

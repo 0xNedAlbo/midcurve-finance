@@ -100,7 +100,7 @@ export class FavoritePoolService {
     this.logger = createServiceLogger('FavoritePoolService');
     this._poolService =
       dependencies.poolService ??
-      new UniswapV3PoolService({ prisma: this._prisma });
+      new UniswapV3PoolService();
     this._subgraphClient =
       dependencies.subgraphClient ?? UniswapV3SubgraphClient.getInstance();
     this._userSettingsService =
@@ -234,48 +234,30 @@ export class FavoritePoolService {
       return [];
     }
 
-    // 3. Look up pools by hash
-    log.dbOperation(this.logger, 'findMany', 'Pool', { hashCount: paginatedHashes.length });
-
-    const poolRows = await this.prisma.pool.findMany({
-      where: {
-        poolHash: { in: paginatedHashes },
-        protocol: 'uniswapv3',
-      },
-      include: {
-        token0: true,
-        token1: true,
-      },
-    });
-
-    // Build a map for ordered access
-    const poolByHash = new Map<string, typeof poolRows[number]>();
-    for (const row of poolRows) {
-      if (row.poolHash) {
-        poolByHash.set(row.poolHash, row);
-      }
-    }
-
-    // 4. Resolve to UniswapV3Pool instances in hash order
+    // 3. Resolve pools by parsing hashes and discovering on-chain
+    // Hash format: "uniswapv3/{chainId}/{poolAddress}"
     const results: FavoritePoolResult[] = [];
 
     for (const hash of paginatedHashes) {
-      const row = poolByHash.get(hash);
-      if (!row) {
-        this.logger.debug({ poolHash: hash }, 'Favorite pool hash not found in DB, skipping');
+      const parts = hash.split('/');
+      if (parts.length !== 3 || parts[0] !== 'uniswapv3') {
+        this.logger.debug({ poolHash: hash }, 'Invalid pool hash format, skipping');
         continue;
       }
 
-      const pool = await this.poolService.findById(row.id);
+      const chainId = Number(parts[1]);
+      const poolAddress = parts[2]!;
+
+      const pool = await this.poolService.discover({ chainId, poolAddress });
       if (!pool) {
-        this.logger.warn({ poolHash: hash, poolId: row.id }, 'Pool findById returned null, skipping');
+        this.logger.debug({ poolHash: hash }, 'Pool discovery returned null, skipping');
         continue;
       }
 
       results.push({
         poolHash: hash,
         userId,
-        poolId: row.id,
+        poolId: pool.id,
         pool,
       });
     }

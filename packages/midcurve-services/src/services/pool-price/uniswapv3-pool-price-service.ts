@@ -51,10 +51,10 @@ interface CachedPoolPriceValue {
 export interface UniswapV3PoolPriceServiceDependencies {
   /** EVM configuration for RPC clients */
   evmConfig?: EvmConfig;
-  /** Uniswap V3 pool service for pool data access */
-  poolService?: UniswapV3PoolService;
   /** Cache service for storing pool price snapshots */
   cacheService?: CacheService;
+  /** Pool service for resolving pool token info */
+  poolService?: UniswapV3PoolService;
 }
 
 /**
@@ -70,24 +70,19 @@ export interface UniswapV3PoolPriceServiceDependencies {
 export class UniswapV3PoolPriceService {
   protected readonly protocol = 'uniswapv3' as const;
   protected readonly _evmConfig: EvmConfig;
-  protected readonly _poolService: UniswapV3PoolService;
   protected readonly _cacheService: CacheService;
+  protected readonly _poolService: UniswapV3PoolService;
   protected readonly logger: ServiceLogger;
 
   constructor(dependencies: UniswapV3PoolPriceServiceDependencies = {}) {
     this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
-    this._poolService =
-      dependencies.poolService ?? new UniswapV3PoolService();
     this._cacheService = dependencies.cacheService ?? CacheService.getInstance();
+    this._poolService = dependencies.poolService ?? new UniswapV3PoolService();
     this.logger = createServiceLogger('UniswapV3PoolPriceService');
   }
 
   protected get evmConfig(): EvmConfig {
     return this._evmConfig;
-  }
-
-  protected get poolService(): UniswapV3PoolService {
-    return this._poolService;
   }
 
   protected get cacheService(): CacheService {
@@ -145,29 +140,22 @@ export class UniswapV3PoolPriceService {
   /**
    * Discover and cache a historic pool price snapshot from on-chain data.
    *
-   * Checks the cache first. On cache hit, validates blockHash for reorg detection.
-   * When the caller provides blockHash (e.g., from a raw log event), the cache hit
-   * path requires zero RPC calls.
+   * Checks the cache first. On cache hit, returns immediately unless blockHash
+   * is provided — in that case, validates blockHash for reorg detection.
+   * Without blockHash, the cache is trusted (finalized blocks don't reorg).
    *
-   * @param poolId - Pool ID to fetch price for
-   * @param params - Discovery parameters (blockNumber, optional blockHash)
+   * @param poolIdentity - Pool chain ID and address
+   * @param params - Discovery parameters (blockNumber, optional blockHash for reorg detection)
    * @returns The discovered or cached pool price snapshot
    */
   async discover(
-    poolId: string,
+    poolIdentity: { chainId: number; poolAddress: string },
     params: UniswapV3PoolPriceDiscoverInput,
   ): Promise<UniswapV3PoolPrice> {
-    log.methodEntry(this.logger, 'discover', { poolId, params });
+    log.methodEntry(this.logger, 'discover', { poolIdentity, params });
 
-    // 1. Resolve pool to get chainId and poolAddress
-    const pool = await this.poolService.findById(poolId);
-    if (!pool) {
-      const error = new Error(`Pool not found: ${poolId}`);
-      log.methodError(this.logger, 'discover', error, { poolId });
-      throw error;
-    }
-
-    const { chainId, address: poolAddress } = pool.typedConfig;
+    const { chainId, poolAddress } = poolIdentity;
+    const poolHash = `uniswapv3/${chainId}/${poolAddress}`;
 
     // 2. Validate chain support
     if (!this.evmConfig.isChainSupported(chainId)) {
@@ -185,15 +173,21 @@ export class UniswapV3PoolPriceService {
     const cached = await this.cacheService.get<CachedPoolPriceValue>(cacheKey);
 
     if (cached) {
-      // 4. Reorg detection: compare blockHash
-      const canonicalBlockHash = params.blockHash
-        ?? (await this.evmConfig.getPublicClient(chainId).getBlock({
-          blockNumber: BigInt(params.blockNumber),
-        })).hash;
-
-      if (cached.blockHash === canonicalBlockHash) {
+      // 4. If no blockHash provided, trust the cache (finalized blocks don't reorg)
+      if (!params.blockHash) {
         this.logger.info(
-          { poolId, blockNumber: params.blockNumber },
+          { poolHash, blockNumber: params.blockNumber },
+          'Pool price cache hit (no blockHash, skipping reorg check)',
+        );
+        const result = this.mapFromCache(cacheKey, cached);
+        log.methodExit(this.logger, 'discover', { cacheKey });
+        return result;
+      }
+
+      // 5. Reorg detection: caller provided blockHash, compare with cached
+      if (cached.blockHash === params.blockHash) {
+        this.logger.info(
+          { poolHash, blockNumber: params.blockNumber },
           'Pool price cache hit with matching blockHash',
         );
         const result = this.mapFromCache(cacheKey, cached);
@@ -204,10 +198,10 @@ export class UniswapV3PoolPriceService {
       // Reorg detected — delete stale cache entry
       this.logger.debug(
         {
-          poolId,
+          poolHash,
           blockNumber: params.blockNumber,
           cachedBlockHash: cached.blockHash,
-          canonicalBlockHash,
+          providedBlockHash: params.blockHash,
         },
         'Reorg detected: blockHash mismatch, invalidating cached pool price',
       );
@@ -239,7 +233,9 @@ export class UniswapV3PoolPriceService {
     const sqrtPriceX96 = slot0Data[0];
     const tick = slot0Data[1];
 
-    // 6. Calculate prices
+    // 6. Discover pool to get token decimals, then calculate prices
+    const pool = await this._poolService.discover({ chainId, poolAddress });
+
     const token1PricePerToken0 = pricePerToken0InToken1(
       sqrtPriceX96,
       pool.token0.decimals,
@@ -262,7 +258,7 @@ export class UniswapV3PoolPriceService {
     // 7. Store in cache
     const cacheValue: CachedPoolPriceValue = {
       protocol: 'uniswapv3',
-      poolId,
+      poolId: poolHash,
       timestamp: timestamp.toISOString(),
       token1PricePerToken0: token1PricePerToken0.toString(),
       token0PricePerToken1: token0PricePerToken1.toString(),
@@ -281,7 +277,7 @@ export class UniswapV3PoolPriceService {
     this.logger.info(
       {
         cacheKey,
-        poolId,
+        poolHash,
         blockNumber: params.blockNumber,
         timestamp,
       },

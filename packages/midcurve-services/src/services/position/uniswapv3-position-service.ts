@@ -16,13 +16,11 @@ import type {
     PositionInterface,
     PositionRow,
     Erc20TokenRow,
-    UniswapV3PoolRow,
 } from "@midcurve/shared";
 import {
     UniswapV3Position,
     PositionFactory,
     Erc20Token,
-    PoolFactory,
 } from "@midcurve/shared";
 import type { UniswapV3Pool } from "@midcurve/shared";
 import type {
@@ -221,9 +219,7 @@ export interface PositionDbResult {
     totalApr: number | null;
     priceRangeLower: string;
     priceRangeUpper: string;
-    poolId: string;
     isToken0Quote: boolean;
-    pool: any; // Pool with token0, token1 from include
     positionOpenedAt: Date;
     positionClosedAt: Date | null;
     isActive: boolean;
@@ -331,7 +327,7 @@ export class UniswapV3PositionService {
         this._evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
         this._poolService =
             dependencies.poolService ??
-            new UniswapV3PoolService({ prisma: this._prisma });
+            new UniswapV3PoolService();
         this._quoteTokenService =
             dependencies.quoteTokenService ??
             new UniswapV3QuoteTokenService();
@@ -407,6 +403,10 @@ export class UniswapV3PositionService {
             chainId: number | string;
             nftId: number | string;
             poolAddress: string;
+            token0Address: string;
+            token1Address: string;
+            feeBps: number | string;
+            tickSpacing: number | string;
             tickUpper: number | string;
             tickLower: number | string;
         };
@@ -417,6 +417,10 @@ export class UniswapV3PositionService {
             typeof db.chainId === "number" ? db.chainId : Number(db.chainId);
         const nftId =
             typeof db.nftId === "number" ? db.nftId : Number(db.nftId);
+        const feeBps =
+            typeof db.feeBps === "number" ? db.feeBps : Number(db.feeBps);
+        const tickSpacing =
+            typeof db.tickSpacing === "number" ? db.tickSpacing : Number(db.tickSpacing);
         const tickUpper =
             typeof db.tickUpper === "number"
                 ? db.tickUpper
@@ -430,6 +434,10 @@ export class UniswapV3PositionService {
             chainId,
             nftId,
             poolAddress: db.poolAddress,
+            token0Address: db.token0Address,
+            token1Address: db.token1Address,
+            feeBps,
+            tickSpacing,
             tickUpper,
             tickLower,
         };
@@ -449,6 +457,10 @@ export class UniswapV3PositionService {
             chainId: config.chainId,
             nftId: config.nftId,
             poolAddress: config.poolAddress,
+            token0Address: config.token0Address,
+            token1Address: config.token1Address,
+            feeBps: config.feeBps,
+            tickSpacing: config.tickSpacing,
             tickUpper: config.tickUpper,
             tickLower: config.tickLower,
         };
@@ -480,6 +492,12 @@ export class UniswapV3PositionService {
             tickUpperFeeGrowthOutside1X128?: string;
             isBurned?: boolean;
             isClosed?: boolean;
+            // Pool-level state (merged from pool)
+            sqrtPriceX96?: string;
+            currentTick?: number | string;
+            poolLiquidity?: string;
+            feeGrowthGlobal0?: string;
+            feeGrowthGlobal1?: string;
         };
 
         return {
@@ -506,6 +524,12 @@ export class UniswapV3PositionService {
             ),
             isBurned: db.isBurned ?? false,
             isClosed: db.isClosed ?? false,
+            // Pool-level state (defaults to 0 for backward compat with pre-migration data)
+            sqrtPriceX96: BigInt(db.sqrtPriceX96 ?? "0"),
+            currentTick: typeof db.currentTick === "number" ? db.currentTick : Number(db.currentTick ?? 0),
+            poolLiquidity: BigInt(db.poolLiquidity ?? "0"),
+            feeGrowthGlobal0: BigInt(db.feeGrowthGlobal0 ?? "0"),
+            feeGrowthGlobal1: BigInt(db.feeGrowthGlobal1 ?? "0"),
         };
     }
 
@@ -723,13 +747,10 @@ export class UniswapV3PositionService {
             );
 
             // e) Discover pool via pool service
-            const pool = await this.poolService.discover(
-                {
-                    chainId,
-                    poolAddress: positionConfig.poolAddress,
-                },
-                dbTx,
-            );
+            const pool = await this.poolService.discover({
+                chainId,
+                poolAddress: positionConfig.poolAddress,
+            });
 
             // Determine quote token (isToken0Quote)
             const token0 = pool.token0 as Erc20Token;
@@ -763,6 +784,10 @@ export class UniswapV3PositionService {
                 chainId,
                 nftId,
                 poolAddress: positionConfig.poolAddress,
+                token0Address: pool.typedConfig.token0,
+                token1Address: pool.typedConfig.token1,
+                feeBps: pool.feeBps,
+                tickSpacing: pool.tickSpacing,
                 tickLower: positionConfig.tickLower,
                 tickUpper: positionConfig.tickUpper,
             };
@@ -783,6 +808,11 @@ export class UniswapV3PositionService {
                 tickUpperFeeGrowthOutside1X128: 0n,
                 isBurned: false,
                 isClosed: false,
+                sqrtPriceX96: pool.sqrtPriceX96,
+                currentTick: pool.currentTick,
+                poolLiquidity: pool.liquidity,
+                feeGrowthGlobal0: pool.feeGrowthGlobal0,
+                feeGrowthGlobal1: pool.feeGrowthGlobal1,
             };
 
             // Get timestamp from first log for positionOpenedAt
@@ -2671,14 +2701,9 @@ export class UniswapV3PositionService {
             const result = await db.position.update({
                 where: { id },
                 data: { state: stateDB as object },
-                include: {
-                    pool: {
-                        include: { token0: true, token1: true },
-                    },
-                },
             });
 
-            const position = this.mapToPosition(
+            const position = await this.mapToPosition(
                 result as PositionDbResult,
             ) as UniswapV3Position;
 
@@ -2750,14 +2775,9 @@ export class UniswapV3PositionService {
             const result = await db.position.update({
                 where: { id },
                 data: { state: stateDB as object },
-                include: {
-                    pool: {
-                        include: { token0: true, token1: true },
-                    },
-                },
             });
 
-            const position = this.mapToPosition(
+            const position = await this.mapToPosition(
                 result as PositionDbResult,
             ) as UniswapV3Position;
 
@@ -2854,14 +2874,9 @@ export class UniswapV3PositionService {
             const result = await db.position.update({
                 where: { id },
                 data: { state: stateDB as object },
-                include: {
-                    pool: {
-                        include: { token0: true, token1: true },
-                    },
-                },
             });
 
-            const position = this.mapToPosition(
+            const position = await this.mapToPosition(
                 result as PositionDbResult,
             ) as UniswapV3Position;
 
@@ -3101,14 +3116,9 @@ export class UniswapV3PositionService {
             const result = await db.position.update({
                 where: { id },
                 data: updateData,
-                include: {
-                    pool: {
-                        include: { token0: true, token1: true },
-                    },
-                },
             });
 
-            const position = this.mapToPosition(
+            const position = await this.mapToPosition(
                 result as PositionDbResult,
             ) as UniswapV3Position;
 
@@ -3532,7 +3542,6 @@ export class UniswapV3PositionService {
                 data: {
                     protocol: input.protocol,
                     userId: input.userId,
-                    poolId: input.poolId,
                     isToken0Quote: input.isToken0Quote,
                     positionHash,
                     config: configDB as object,
@@ -3554,18 +3563,10 @@ export class UniswapV3PositionService {
                     positionClosedAt: null,
                     isActive: true,
                 },
-                include: {
-                    pool: {
-                        include: {
-                            token0: true,
-                            token1: true,
-                        },
-                    },
-                },
             });
 
             // Map database result to Position type
-            const position = this.mapToPosition(result as PositionDbResult);
+            const position = await this.mapToPosition(result as PositionDbResult);
 
             this.logger.info(
                 {
@@ -3612,14 +3613,6 @@ export class UniswapV3PositionService {
 
             const result = await db.position.findUnique({
                 where: { id },
-                include: {
-                    pool: {
-                        include: {
-                            token0: true,
-                            token1: true,
-                        },
-                    },
-                },
             });
 
             if (!result) {
@@ -3642,7 +3635,7 @@ export class UniswapV3PositionService {
             }
 
             // Map to UniswapV3Position
-            const position = this.mapToPosition(result as any);
+            const position = await this.mapToPosition(result as any);
 
             log.methodExit(this.logger, "findById", { id, found: true });
             return position as UniswapV3Position;
@@ -3782,14 +3775,6 @@ export class UniswapV3PositionService {
                     userId,
                     positionHash,
                 },
-                include: {
-                    pool: {
-                        include: {
-                            token0: true,
-                            token1: true,
-                        },
-                    },
-                },
             });
 
             if (!result) {
@@ -3802,7 +3787,7 @@ export class UniswapV3PositionService {
             }
 
             // Map to Position type
-            const position = this.mapToPosition(result as PositionDbResult);
+            const position = await this.mapToPosition(result as PositionDbResult);
 
             log.methodExit(this.logger, "findByPositionHash", {
                 userId,
@@ -3851,18 +3836,10 @@ export class UniswapV3PositionService {
             const result = await this.prisma.position.update({
                 where: { id },
                 data,
-                include: {
-                    pool: {
-                        include: {
-                            token0: true,
-                            token1: true,
-                        },
-                    },
-                },
             });
 
             // Map to Position type
-            const position = this.mapToPosition(result as PositionDbResult);
+            const position = await this.mapToPosition(result as PositionDbResult);
 
             log.methodExit(this.logger, "update", { id });
             return position as UniswapV3Position;
@@ -3879,24 +3856,46 @@ export class UniswapV3PositionService {
     /**
      * Map database result to UniswapV3Position using factory
      *
-     * Converts string values to bigint for numeric fields, creates pool instance,
+     * Resolves token0/token1 from the position config JSON (token0Address, token1Address, chainId),
+     * converts string values to bigint for numeric fields,
      * and uses PositionFactory to create protocol-specific position class.
      *
      * @param dbResult - Raw database result from Prisma
      * @returns UniswapV3Position instance
      */
-    protected mapToPosition(dbResult: PositionDbResult): PositionInterface {
-        // Create token instances from included pool data
-        const token0 = Erc20Token.fromDB(dbResult.pool.token0 as Erc20TokenRow);
-        const token1 = Erc20Token.fromDB(dbResult.pool.token1 as Erc20TokenRow);
+    protected async mapToPosition(dbResult: PositionDbResult): Promise<PositionInterface> {
+        // Resolve tokens from position config (token0Address, token1Address, chainId)
+        const config = dbResult.config as Record<string, unknown>;
+        const token0Address = config.token0Address as string;
+        const token1Address = config.token1Address as string;
+        const chainId = config.chainId as number;
 
-        // Create pool instance from included pool data
-        const poolRow = dbResult.pool as UniswapV3PoolRow;
-        const pool = PoolFactory.fromDB(
-            poolRow,
-            token0,
-            token1,
-        ) as UniswapV3Pool;
+        const [token0Row, token1Row] = await Promise.all([
+            this.prisma.token.findFirst({
+                where: {
+                    tokenType: "erc20",
+                    config: { path: ["address"], equals: token0Address },
+                    AND: { config: { path: ["chainId"], equals: chainId } },
+                },
+            }),
+            this.prisma.token.findFirst({
+                where: {
+                    tokenType: "erc20",
+                    config: { path: ["address"], equals: token1Address },
+                    AND: { config: { path: ["chainId"], equals: chainId } },
+                },
+            }),
+        ]);
+
+        if (!token0Row) {
+            throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
+        }
+        if (!token1Row) {
+            throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
+        }
+
+        const token0 = Erc20Token.fromDB(token0Row as Erc20TokenRow);
+        const token1 = Erc20Token.fromDB(token1Row as Erc20TokenRow);
 
         // Convert string bigint fields to native bigint
         const rowWithBigInt: PositionRow = {
@@ -3904,7 +3903,7 @@ export class UniswapV3PositionService {
             positionHash: dbResult.positionHash ?? "",
             userId: dbResult.userId,
             protocol: dbResult.protocol,
-            poolId: dbResult.poolId,
+            poolId: "",
             isToken0Quote: dbResult.isToken0Quote,
             currentValue: BigInt(dbResult.currentValue),
             currentCostBasis: BigInt(dbResult.currentCostBasis),
@@ -3925,10 +3924,9 @@ export class UniswapV3PositionService {
             state: dbResult.state,
             createdAt: dbResult.createdAt,
             updatedAt: dbResult.updatedAt,
-            pool: dbResult.pool,
         };
 
-        // Use factory to create protocol-specific position class
-        return PositionFactory.fromDB(rowWithBigInt, pool);
+        // Use factory to create protocol-specific position class with direct token references
+        return PositionFactory.fromDB(rowWithBigInt, token0, token1);
     }
 }
