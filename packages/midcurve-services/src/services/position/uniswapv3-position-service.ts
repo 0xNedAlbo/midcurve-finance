@@ -562,6 +562,12 @@ export class UniswapV3PositionService {
                 state.tickUpperFeeGrowthOutside1X128?.toString() ?? "0",
             isBurned: state.isBurned,
             isClosed: state.isClosed,
+            // Pool-level state
+            sqrtPriceX96: state.sqrtPriceX96.toString(),
+            currentTick: state.currentTick,
+            poolLiquidity: state.poolLiquidity.toString(),
+            feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
+            feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
         };
     }
 
