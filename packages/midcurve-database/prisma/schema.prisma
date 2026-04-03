@@ -142,10 +142,6 @@ model Token {
   // Contains address/mint, chainId/programId, platform identifier, etc.
   config Json
 
-  // Relations
-  poolsAsToken0 Pool[] @relation("PoolToken0")
-  poolsAsToken1 Pool[] @relation("PoolToken1")
-
   // Indexes for efficient queries
   @@index([tokenType])
   @@index([symbol])
@@ -184,46 +180,6 @@ model CoingeckoToken {
   @@index([name])
   @@index([enrichedAt]) // For finding unenriched/stale tokens
   @@map("coingecko_tokens")
-  @@schema("public")
-}
-
-model Pool {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Common required fields
-  protocol String // 'uniswapv3', etc.
-  token0Id String
-  token1Id String
-
-  // Pool hash for fast lookups and uniqueness
-  // Human-readable composite key, format: "{protocol}/{chainId}/{poolAddress}"
-  // Example: "uniswapv3/1/0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
-  poolHash String? @unique
-
-  // Protocol-specific configuration (JSON) - Immutable
-  // Contains pool address, tick spacing, chainId, token addresses, etc.
-  config Json
-
-  // Protocol-specific state (JSON) - Mutable
-  // Contains current price, liquidity, tick, fee growth, etc.
-  // For Uniswap V3: sqrtPriceX96, currentTick, liquidity, feeGrowthGlobal0/1
-  state Json
-
-  // Relations to Token model
-  // Note: In TypeScript, Pool.token0 and Pool.token1 are full Token objects
-  // In database, we use foreign keys for efficient storage and queries
-  token0            Token                  @relation("PoolToken0", fields: [token0Id], references: [id])
-  token1            Token                  @relation("PoolToken1", fields: [token1Id], references: [id])
-  positions         Position[]
-
-  // Indexes for efficient queries
-  @@index([protocol])
-  @@index([token0Id])
-  @@index([token1Id])
-  @@index([poolHash])
-  @@map("pools")
   @@schema("public")
 }
 
@@ -273,9 +229,7 @@ model Position {
   priceRangeLower String // bigint as string
   priceRangeUpper String // bigint as string
 
-  // Pool and token roles
-  poolId        String
-  pool          Pool    @relation(fields: [poolId], references: [id])
+  // Token roles (pool identity stored in config JSON: poolAddress, token0Address, token1Address, feeBps, tickSpacing)
   isToken0Quote Boolean // true: token0 is quote, token1 is base; false: token0 is base, token1 is quote
 
   // Position state
@@ -299,7 +253,6 @@ model Position {
   // Indexes for efficient queries
   @@index([protocol])
   @@index([userId])
-  @@index([poolId])
   @@index([isActive])
   @@map("positions")
   @@schema("public")
