@@ -259,11 +259,11 @@ export function positionStateFromJSON(
     isBurned: json.isBurned,
     isClosed: json.isClosed,
 
-    // Pool-level state
-    sqrtPriceX96: BigInt(json.sqrtPriceX96),
-    currentTick: json.currentTick,
-    poolLiquidity: BigInt(json.poolLiquidity),
-    feeGrowthGlobal0: BigInt(json.feeGrowthGlobal0),
-    feeGrowthGlobal1: BigInt(json.feeGrowthGlobal1),
+    // Pool-level state (defaults for backward compat with pre-migration data)
+    sqrtPriceX96: BigInt(json.sqrtPriceX96 ?? '0'),
+    currentTick: json.currentTick ?? 0,
+    poolLiquidity: BigInt(json.poolLiquidity ?? '0'),
+    feeGrowthGlobal0: BigInt(json.feeGrowthGlobal0 ?? '0'),
+    feeGrowthGlobal1: BigInt(json.feeGrowthGlobal1 ?? '0'),
   };
 }
