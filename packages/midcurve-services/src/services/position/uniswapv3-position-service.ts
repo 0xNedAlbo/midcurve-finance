@@ -1288,6 +1288,9 @@ export class UniswapV3PositionService {
             // 5. Refresh fee state (tokensOwed, feeGrowthInside, unclaimed fees)
             await this.refreshFeeState(id, resolvedBlockNumber, dbTx);
 
+            // 5.5 Refresh pool state in position (sqrtPriceX96, currentTick, poolLiquidity, feeGrowth)
+            await this.refreshPoolState(id, resolvedBlockNumber, dbTx);
+
             // 6. Refresh metrics (common fields: value, PnL, fees, price range)
             await this.refreshMetrics(id, resolvedBlockNumber, dbTx);
 
@@ -3311,6 +3314,43 @@ export class UniswapV3PositionService {
      * @throws Error if chain is not supported
      * @throws Error if NFT doesn't exist (burned)
      */
+    /**
+     * Refresh pool-level state fields in position state.
+     *
+     * Fetches current pool state (sqrtPriceX96, currentTick, liquidity, feeGrowth)
+     * from on-chain and persists into position.state JSON.
+     */
+    private async refreshPoolState(
+        id: string,
+        blockNumber: number | "latest" = "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<void> {
+        const db = tx ?? this.prisma;
+
+        const existing = await this.findById(id, db);
+        if (!existing) {
+            throw new Error(`Position not found: ${id}`);
+        }
+
+        const { chainId, poolAddress } = existing.typedConfig;
+        const poolState = await this.poolService.fetchPoolState(chainId, poolAddress, blockNumber);
+
+        const currentState = this.parseState(existing.state);
+        const updatedState: UniswapV3PositionState = {
+            ...currentState,
+            sqrtPriceX96: poolState.sqrtPriceX96,
+            currentTick: poolState.currentTick,
+            poolLiquidity: poolState.liquidity,
+            feeGrowthGlobal0: poolState.feeGrowthGlobal0,
+            feeGrowthGlobal1: poolState.feeGrowthGlobal1,
+        };
+
+        await db.position.update({
+            where: { id },
+            data: { state: this.serializeState(updatedState) as object },
+        });
+    }
+
     private async refreshFeeState(
         id: string,
         blockNumber: number | "latest" = "latest",
