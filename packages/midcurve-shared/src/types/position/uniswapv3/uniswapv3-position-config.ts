@@ -32,6 +32,30 @@ export interface UniswapV3PositionConfigData {
   poolAddress: string;
 
   /**
+   * Token0 ERC-20 contract address (EIP-55 checksummed)
+   * By convention, token0 < token1 (lexicographic comparison)
+   */
+  token0Address: string;
+
+  /**
+   * Token1 ERC-20 contract address (EIP-55 checksummed)
+   * By convention, token1 > token0 (lexicographic comparison)
+   */
+  token1Address: string;
+
+  /**
+   * Fee tier in basis points
+   * - 100 = 0.01%, 500 = 0.05%, 3000 = 0.3%, 10000 = 1%
+   */
+  feeBps: number;
+
+  /**
+   * Tick spacing for this fee tier
+   * - 1 for 0.01%, 10 for 0.05%, 60 for 0.3%, 200 for 1%
+   */
+  tickSpacing: number;
+
+  /**
    * Upper tick bound
    * The upper tick of the position's price range
    */
@@ -56,6 +80,10 @@ export interface UniswapV3PositionConfigJSON {
   chainId: number;
   nftId: number;
   poolAddress: string;
+  token0Address: string;
+  token1Address: string;
+  feeBps: number;
+  tickSpacing: number;
   tickUpper: number;
   tickLower: number;
 }
@@ -91,6 +119,10 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
   readonly chainId: number;
   readonly nftId: number;
   readonly poolAddress: string;
+  readonly token0Address: string;
+  readonly token1Address: string;
+  readonly feeBps: number;
+  readonly tickSpacing: number;
   readonly tickUpper: number;
   readonly tickLower: number;
 
@@ -98,6 +130,10 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
     this.chainId = data.chainId;
     this.nftId = data.nftId;
     this.poolAddress = data.poolAddress;
+    this.token0Address = data.token0Address;
+    this.token1Address = data.token1Address;
+    this.feeBps = data.feeBps;
+    this.tickSpacing = data.tickSpacing;
     this.tickUpper = data.tickUpper;
     this.tickLower = data.tickLower;
   }
@@ -110,6 +146,10 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
       chainId: this.chainId,
       nftId: this.nftId,
       poolAddress: this.poolAddress,
+      token0Address: this.token0Address,
+      token1Address: this.token1Address,
+      feeBps: this.feeBps,
+      tickSpacing: this.tickSpacing,
       tickUpper: this.tickUpper,
       tickLower: this.tickLower,
     };
@@ -119,12 +159,6 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
    * Create from JSON (database or API input).
    */
   static fromJSON(json: UniswapV3PositionConfigJSON): UniswapV3PositionConfig {
-    return new UniswapV3PositionConfig({
-      chainId: json.chainId,
-      nftId: json.nftId,
-      poolAddress: json.poolAddress,
-      tickUpper: json.tickUpper,
-      tickLower: json.tickLower,
-    });
+    return new UniswapV3PositionConfig(json);
   }
 }

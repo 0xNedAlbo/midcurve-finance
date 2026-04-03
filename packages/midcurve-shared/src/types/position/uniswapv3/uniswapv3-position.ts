@@ -8,7 +8,9 @@
 import { TickMath } from '@uniswap/v3-sdk';
 import { BasePosition } from '../base-position.js';
 import { UniswapV3Pool } from '../../pool/index.js';
-import type { Erc20Token } from '../../token/index.js';
+import { UniswapV3PoolConfig } from '../../pool/uniswapv3/uniswapv3-pool-config.js';
+import type { PoolInterface } from '../../pool/index.js';
+import type { Erc20Token, TokenInterface } from '../../token/index.js';
 import type {
   PositionProtocol,
   BasePositionParams,
@@ -130,6 +132,35 @@ export class UniswapV3Position extends BasePosition {
     super(params);
     this._config = params.config;
     this._state = params.state;
+  }
+
+  // ============================================================================
+  // Computed Pool (virtual object from position data)
+  // ============================================================================
+
+  get pool(): PoolInterface {
+    return new UniswapV3Pool({
+      id: `uniswapv3/${this._config.chainId}/${this._config.poolAddress}`,
+      token0: this.token0,
+      token1: this.token1,
+      config: new UniswapV3PoolConfig({
+        chainId: this._config.chainId,
+        address: this._config.poolAddress,
+        token0: this._config.token0Address,
+        token1: this._config.token1Address,
+        feeBps: this._config.feeBps,
+        tickSpacing: this._config.tickSpacing,
+      }),
+      state: {
+        sqrtPriceX96: this._state.sqrtPriceX96,
+        currentTick: this._state.currentTick,
+        liquidity: this._state.poolLiquidity,
+        feeGrowthGlobal0: this._state.feeGrowthGlobal0,
+        feeGrowthGlobal1: this._state.feeGrowthGlobal1,
+      },
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+    });
   }
 
   // ============================================================================
@@ -330,12 +361,14 @@ export class UniswapV3Position extends BasePosition {
    * Create UniswapV3Position from database row.
    *
    * @param row - Database row from Prisma
-   * @param pool - UniswapV3Pool instance (must be pre-loaded)
+   * @param token0 - Pre-resolved token0 instance
+   * @param token1 - Pre-resolved token1 instance
    * @returns UniswapV3Position instance
    */
   static fromDB(
     row: UniswapV3PositionRow,
-    pool: UniswapV3Pool
+    token0: TokenInterface,
+    token1: TokenInterface
   ): UniswapV3Position {
     const configJSON = row.config as unknown as UniswapV3PositionConfigJSON;
     const stateJSON = row.state as unknown as UniswapV3PositionStateJSON;
@@ -346,8 +379,9 @@ export class UniswapV3Position extends BasePosition {
       positionHash: row.positionHash,
       userId: row.userId,
 
-      // Pool reference
-      pool,
+      // Token references
+      token0,
+      token1,
       isToken0Quote: row.isToken0Quote,
 
       // PnL fields
@@ -424,8 +458,9 @@ export class UniswapV3Position extends BasePosition {
       positionHash: 'simulation',
       userId: 'simulation',
 
-      // Pool reference
-      pool: params.pool,
+      // Token references
+      token0: params.pool.token0,
+      token1: params.pool.token1,
       isToken0Quote: params.isToken0Quote,
 
       // PnL fields (costBasis is the key input)
@@ -456,6 +491,10 @@ export class UniswapV3Position extends BasePosition {
         chainId: params.pool.chainId,
         nftId: 0, // Placeholder for simulation
         poolAddress: params.pool.address,
+        token0Address: params.pool.typedConfig.token0,
+        token1Address: params.pool.typedConfig.token1,
+        feeBps: params.pool.feeBps,
+        tickSpacing: params.pool.tickSpacing,
         tickLower: params.tickLower,
         tickUpper: params.tickUpper,
       }),
@@ -475,6 +514,11 @@ export class UniswapV3Position extends BasePosition {
         tickUpperFeeGrowthOutside1X128: 0n,
         isBurned: false,
         isClosed: false,
+        sqrtPriceX96: params.pool.sqrtPriceX96,
+        currentTick: params.pool.currentTick,
+        poolLiquidity: params.pool.liquidity,
+        feeGrowthGlobal0: params.pool.feeGrowthGlobal0,
+        feeGrowthGlobal1: params.pool.feeGrowthGlobal1,
       },
 
       // Timestamps
@@ -510,14 +554,18 @@ export class UniswapV3Position extends BasePosition {
       throw new Error(`Expected protocol 'uniswapv3', got '${json.protocol}'`);
     }
 
+    // Reconstruct tokens from pool JSON (backward compat for API responses)
+    const pool = UniswapV3Pool.fromJSON(json.pool);
+
     return new UniswapV3Position({
       // Identity
       id: json.id,
       positionHash: json.positionHash,
       userId: json.userId,
 
-      // Pool reference
-      pool: UniswapV3Pool.fromJSON(json.pool),
+      // Token references (extracted from pool JSON)
+      token0: pool.token0,
+      token1: pool.token1,
       isToken0Quote: json.isToken0Quote,
 
       // PnL fields (string → bigint)

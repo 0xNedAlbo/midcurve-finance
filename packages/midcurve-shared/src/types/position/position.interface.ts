@@ -41,7 +41,18 @@ export interface PositionInterface {
   readonly protocol: PositionProtocol;
 
   /**
-   * Pool reference (full object for token access)
+   * Token0 of the position's pool
+   */
+  readonly token0: TokenInterface;
+
+  /**
+   * Token1 of the position's pool
+   */
+  readonly token1: TokenInterface;
+
+  /**
+   * Virtual pool object constructed from position data.
+   * Provides backward compatibility for code that accesses pool.config, pool.state, etc.
    */
   readonly pool: PoolInterface;
 

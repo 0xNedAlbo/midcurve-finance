@@ -42,10 +42,11 @@ export abstract class BasePosition implements PositionInterface {
   readonly userId: string;
 
   // ============================================================================
-  // Pool Reference
+  // Token & Pool Reference
   // ============================================================================
 
-  readonly pool: PoolInterface;
+  readonly token0: TokenInterface;
+  readonly token1: TokenInterface;
   readonly isToken0Quote: boolean;
 
   // ============================================================================
@@ -100,6 +101,12 @@ export abstract class BasePosition implements PositionInterface {
   abstract readonly protocol: PositionProtocol;
 
   /**
+   * Virtual pool constructed from position data.
+   * Subclasses implement this to build a pool from their config/state/tokens.
+   */
+  abstract get pool(): PoolInterface;
+
+  /**
    * Get config as generic Record (for PositionInterface compliance).
    * Subclasses implement this to return their typed config as Record.
    */
@@ -135,8 +142,9 @@ export abstract class BasePosition implements PositionInterface {
     this.positionHash = params.positionHash;
     this.userId = params.userId;
 
-    // Pool reference
-    this.pool = params.pool;
+    // Token & pool reference
+    this.token0 = params.token0;
+    this.token1 = params.token1;
     this.isToken0Quote = params.isToken0Quote;
 
     // PnL fields
@@ -237,7 +245,7 @@ export abstract class BasePosition implements PositionInterface {
    * @returns The base token
    */
   getBaseToken(): TokenInterface {
-    return this.isToken0Quote ? this.pool.token1 : this.pool.token0;
+    return this.isToken0Quote ? this.token1 : this.token0;
   }
 
   /**
@@ -246,7 +254,7 @@ export abstract class BasePosition implements PositionInterface {
    * @returns The quote token
    */
   getQuoteToken(): TokenInterface {
-    return this.isToken0Quote ? this.pool.token0 : this.pool.token1;
+    return this.isToken0Quote ? this.token0 : this.token1;
   }
 
   /**

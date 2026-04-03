@@ -365,8 +365,16 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Pool Reference (always delegate)
+  // PositionInterface - Token & Pool Reference (always delegate)
   // ============================================================================
+
+  get token0(): TokenInterface {
+    return this._underlying.token0;
+  }
+
+  get token1(): TokenInterface {
+    return this._underlying.token1;
+  }
 
   get pool(): PoolInterface {
     return this._underlying.pool;

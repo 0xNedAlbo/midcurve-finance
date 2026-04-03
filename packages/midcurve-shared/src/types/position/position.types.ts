@@ -5,8 +5,8 @@
  * JSON serialization, and database row mapping.
  */
 
-import type { PoolInterface, PoolJSON, PoolRow } from '../pool/index.js';
-import type { TokenRow } from '../token/index.js';
+import type { PoolJSON } from '../pool/index.js';
+import type { TokenInterface } from '../token/index.js';
 
 // ============================================================================
 // PROTOCOL DISCRIMINATORS
@@ -99,7 +99,8 @@ export interface BasePositionParams {
   id: string;
   positionHash: string;
   userId: string;
-  pool: PoolInterface;
+  token0: TokenInterface;
+  token1: TokenInterface;
   isToken0Quote: boolean;
 
   // PnL fields
@@ -143,7 +144,7 @@ export interface PositionRow {
   positionHash: string;
   userId: string;
   protocol: string;
-  poolId: string;
+  poolId: string; // Kept temporarily during migration, removed in Phase 5
   isToken0Quote: boolean;
 
   // PnL fields (Prisma returns bigint)
@@ -176,10 +177,4 @@ export interface PositionRow {
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
-
-  // Included relation (from Prisma with include: { pool: { include: { token0: true, token1: true } } })
-  pool?: PoolRow & {
-    token0: TokenRow;
-    token1: TokenRow;
-  };
 }

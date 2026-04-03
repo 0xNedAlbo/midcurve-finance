@@ -121,6 +121,38 @@ export interface UniswapV3PositionState {
    * A closed position has no remaining value to extract
    */
   isClosed: boolean;
+
+  // ---- Pool-level state (merged from pool, updated during refresh) ----
+
+  /**
+   * Current sqrt(price) as a Q64.96 fixed-point value
+   * From pool.slot0().sqrtPriceX96
+   */
+  sqrtPriceX96: bigint;
+
+  /**
+   * Current tick of the pool
+   * From pool.slot0().tick
+   */
+  currentTick: number;
+
+  /**
+   * Total liquidity currently in the pool
+   * Named poolLiquidity to distinguish from position's own liquidity field
+   */
+  poolLiquidity: bigint;
+
+  /**
+   * Global accumulated fees per unit of liquidity for token0
+   * From pool.feeGrowthGlobal0X128()
+   */
+  feeGrowthGlobal0: bigint;
+
+  /**
+   * Global accumulated fees per unit of liquidity for token1
+   * From pool.feeGrowthGlobal1X128()
+   */
+  feeGrowthGlobal1: bigint;
 }
 
 // ============================================================================
@@ -147,6 +179,13 @@ export interface UniswapV3PositionStateJSON {
   tickUpperFeeGrowthOutside1X128: string;
   isBurned: boolean;
   isClosed: boolean;
+
+  // Pool-level state
+  sqrtPriceX96: string;
+  currentTick: number;
+  poolLiquidity: string;
+  feeGrowthGlobal0: string;
+  feeGrowthGlobal1: string;
 }
 
 // ============================================================================
@@ -183,6 +222,13 @@ export function positionStateToJSON(
       state.tickUpperFeeGrowthOutside1X128.toString(),
     isBurned: state.isBurned,
     isClosed: state.isClosed,
+
+    // Pool-level state
+    sqrtPriceX96: state.sqrtPriceX96.toString(),
+    currentTick: state.currentTick,
+    poolLiquidity: state.poolLiquidity.toString(),
+    feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
+    feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
   };
 }
 
@@ -212,5 +258,12 @@ export function positionStateFromJSON(
     tickUpperFeeGrowthOutside1X128: BigInt(json.tickUpperFeeGrowthOutside1X128),
     isBurned: json.isBurned,
     isClosed: json.isClosed,
+
+    // Pool-level state
+    sqrtPriceX96: BigInt(json.sqrtPriceX96),
+    currentTick: json.currentTick,
+    poolLiquidity: BigInt(json.poolLiquidity),
+    feeGrowthGlobal0: BigInt(json.feeGrowthGlobal0),
+    feeGrowthGlobal1: BigInt(json.feeGrowthGlobal1),
   };
 }

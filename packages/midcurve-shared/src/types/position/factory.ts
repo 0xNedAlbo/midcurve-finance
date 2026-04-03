@@ -5,8 +5,7 @@
  * Handles protocol discrimination and delegates to appropriate concrete class.
  */
 
-import type { PoolInterface } from '../pool/index.js';
-import { UniswapV3Pool } from '../pool/index.js';
+import type { TokenInterface } from '../token/index.js';
 import type { PositionInterface } from './position.interface.js';
 import type { PositionProtocol, PositionRow, PositionJSON } from './position.types.js';
 import {
@@ -26,24 +25,12 @@ import {
  *
  * @example
  * ```typescript
- * // From Prisma query with pool included
- * const row = await prisma.position.findUnique({
- *   where: { id },
- *   include: { pool: { include: { token0: true, token1: true } } },
- * });
+ * // Resolve tokens from position config
+ * const token0 = await tokenService.findByAddressAndChain(config.token0Address, config.chainId);
+ * const token1 = await tokenService.findByAddressAndChain(config.token1Address, config.chainId);
  *
- * // Create pool first
- * const pool = UniswapV3Pool.fromDB(row.pool, token0, token1);
- *
- * // Then create position
- * const position = PositionFactory.fromDB(row, pool);
- *
- * // position is now typed as PositionInterface
- * // For protocol-specific access, use type narrowing:
- * if (position.protocol === 'uniswapv3') {
- *   const uniPosition = position as UniswapV3Position;
- *   console.log(uniPosition.nftId); // Type-safe access
- * }
+ * // Create position with direct token references
+ * const position = PositionFactory.fromDB(row, token0, token1);
  * ```
  */
 export class PositionFactory {
@@ -51,16 +38,17 @@ export class PositionFactory {
    * Create a position instance from a database row.
    *
    * @param row - Database row from Prisma
-   * @param pool - Pre-loaded pool instance
+   * @param token0 - Pre-resolved token0 instance
+   * @param token1 - Pre-resolved token1 instance
    * @returns PositionInterface instance (concrete type based on protocol)
    * @throws Error if protocol is unknown
    */
-  static fromDB(row: PositionRow, pool: PoolInterface): PositionInterface {
+  static fromDB(row: PositionRow, token0: TokenInterface, token1: TokenInterface): PositionInterface {
     const protocol = row.protocol as PositionProtocol;
 
     switch (protocol) {
       case 'uniswapv3':
-        return UniswapV3Position.fromDB(row as UniswapV3PositionRow, pool as UniswapV3Pool);
+        return UniswapV3Position.fromDB(row as UniswapV3PositionRow, token0, token1);
 
       default:
         throw new Error(`Unknown position protocol: ${row.protocol}`);
