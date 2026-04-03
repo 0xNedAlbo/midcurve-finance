@@ -193,47 +193,46 @@ export class PoolPriceSubscriber {
   private async loadActiveSubscriptions(): Promise<Map<number, PoolInfo[]>> {
     priceLog.methodEntry(log, 'loadActiveSubscriptions');
 
-    // Query pools that have at least one active UniswapV3 position
-    const pools = await prisma.pool.findMany({
+    // Query active positions and deduplicate by pool address
+    const activePositions = await prisma.position.findMany({
       where: {
+        isActive: true,
         protocol: 'uniswapv3',
-        positions: {
-          some: {
-            isActive: true,
-            protocol: 'uniswapv3',
-          },
-        },
       },
       select: {
-        id: true,
         config: true,
       },
     });
 
-    log.info({ poolCount: pools.length, msg: 'Loaded pools with active positions' });
+    // Deduplicate by poolAddress (multiple positions can share a pool)
+    const uniquePools = new Map<string, PoolConfig>();
+    for (const pos of activePositions) {
+      const config = pos.config as unknown as { chainId: number; poolAddress: string };
+      if (!config.chainId || !config.poolAddress) continue;
+      const key = `${config.chainId}/${config.poolAddress.toLowerCase()}`;
+      if (!uniquePools.has(key)) {
+        uniquePools.set(key, { chainId: config.chainId, address: config.poolAddress });
+      }
+    }
+
+    log.info({ poolCount: uniquePools.size, msg: 'Loaded pools with active positions' });
 
     // Group pools by chain ID
     const poolsByChain = new Map<number, PoolInfo[]>();
 
-    for (const pool of pools) {
-      const config = pool.config as unknown as PoolConfig;
-
-      if (!config.chainId || !config.address) {
-        log.warn({ poolId: pool.id, msg: 'Pool config missing chainId or address' });
-        continue;
-      }
-
+    for (const [, config] of uniquePools) {
       if (!isSupportedChain(config.chainId)) {
-        log.warn({ chainId: config.chainId, poolId: pool.id, msg: 'Unsupported chain ID' });
+        log.warn({ chainId: config.chainId, msg: 'Unsupported chain ID' });
         continue;
       }
 
       const chainId = config.chainId;
       const normalizedAddress = config.address.toLowerCase();
+      const poolId = `uniswapv3/${chainId}/${normalizedAddress}`;
 
       // Track in internal state
       this.subscribedPools.set(normalizedAddress, {
-        poolId: pool.id,
+        poolId,
         poolAddress: normalizedAddress,
         chainId,
       });
@@ -245,7 +244,7 @@ export class PoolPriceSubscriber {
 
       poolsByChain.get(chainId)!.push({
         address: normalizedAddress,
-        poolId: pool.id,
+        poolId,
       });
     }
 
@@ -298,13 +297,8 @@ export class PoolPriceSubscriber {
       return;
     }
 
-    // 5. Look up pool ID from database (position.poolId or find by address)
-    const position = await prisma.position.findUnique({
-      where: { id: payload.id },
-      select: { poolId: true },
-    });
-
-    const poolId = position?.poolId ?? `pool-${chainId}-${normalizedAddress}`;
+    // 5. Compute pool ID from chain/address
+    const poolId = `uniswapv3/${chainId}/${normalizedAddress}`;
 
     // 6. Track and add to polling batch
     this.subscribedPools.set(normalizedAddress, {
@@ -359,7 +353,7 @@ export class PoolPriceSubscriber {
       return;
     }
 
-    // 2. Find the position by positionHash to get its poolId
+    // 2. Find the position by positionHash to get pool address from config
     const positionHash = `uniswapv3/${chainId}/${nftId}`;
     const position = await prisma.position.findFirst({
       where: {
@@ -368,12 +362,7 @@ export class PoolPriceSubscriber {
       },
       select: {
         id: true,
-        poolId: true,
-        pool: {
-          select: {
-            config: true,
-          },
-        },
+        config: true,
       },
     });
 
@@ -382,12 +371,12 @@ export class PoolPriceSubscriber {
       return;
     }
 
-    // 3. Get pool address
-    const poolConfig = position.pool.config as unknown as PoolConfig;
-    const poolAddress = poolConfig.address?.toLowerCase();
+    // 3. Get pool address from position config
+    const posConfig = position.config as unknown as { poolAddress: string; chainId: number };
+    const poolAddress = posConfig.poolAddress?.toLowerCase();
 
     if (!poolAddress) {
-      log.warn({ positionId: position.id, reason }, 'Pool address not found');
+      log.warn({ positionId: position.id, reason }, 'Pool address not found in position config');
       return;
     }
 
@@ -400,10 +389,10 @@ export class PoolPriceSubscriber {
     // 5. Check if other active positions still use this pool
     const otherActivePositions = await prisma.position.count({
       where: {
-        poolId: position.poolId,
         isActive: true,
         protocol: 'uniswapv3',
         id: { not: position.id },
+        config: { path: ['poolAddress'], string_contains: posConfig.poolAddress },
       },
     });
 
@@ -417,7 +406,7 @@ export class PoolPriceSubscriber {
 
     // 6. No other active positions - unsubscribe from pool
     log.info(
-      { poolId: position.poolId, poolAddress, chainId, reason },
+      { poolAddress, chainId, reason },
       'Pool has no more active positions, removing subscription'
     );
 
@@ -515,24 +504,23 @@ export class PoolPriceSubscriber {
       return;
     }
 
-    // Get all currently subscribed pool IDs
-    const subscribedPoolIds = Array.from(this.subscribedPools.values()).map((p) => p.poolId);
-
-    // Query which of these pools still have active positions
-    const poolsWithActivePositions = await prisma.pool.findMany({
+    // Query active positions to determine which pools still have active positions
+    const activePositions = await prisma.position.findMany({
       where: {
-        id: { in: subscribedPoolIds },
-        positions: {
-          some: {
-            isActive: true,
-            protocol: 'uniswapv3',
-          },
-        },
+        isActive: true,
+        protocol: 'uniswapv3',
       },
-      select: { id: true },
+      select: { config: true },
     });
 
-    const activePoolIds = new Set(poolsWithActivePositions.map((p) => p.id));
+    // Build set of active pool addresses
+    const activePoolIds = new Set<string>();
+    for (const pos of activePositions) {
+      const config = pos.config as unknown as { chainId: number; poolAddress: string };
+      if (config.chainId && config.poolAddress) {
+        activePoolIds.add(`uniswapv3/${config.chainId}/${config.poolAddress.toLowerCase()}`);
+      }
+    }
 
     // Find pools that are subscribed but have no active positions
     const orphanedPools: SubscribedPool[] = [];

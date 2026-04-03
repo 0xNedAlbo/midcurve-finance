@@ -131,31 +131,51 @@ export async function GET(request: NextRequest): Promise<Response> {
         }
       }
 
-      // Look up pool metadata for each instrumentRef (pool hash)
+      // Look up pool metadata from positions (one position per instrument ref is enough)
       const instrumentRefs = [...instrumentMap.keys()].filter((r) => r !== 'unknown');
-      const pools = instrumentRefs.length > 0
-        ? await prisma.pool.findMany({
-            where: { poolHash: { in: instrumentRefs } },
-            select: {
-              poolHash: true,
-              protocol: true,
-              config: true,
-              token0: { select: { symbol: true } },
-              token1: { select: { symbol: true } },
-            },
-          })
-        : [];
-
       const poolMetaMap = new Map<string, { symbol: string; protocol: string; chainId: number; feeTier: string }>();
-      for (const p of pools) {
-        if (!p.poolHash) continue;
-        const config = p.config as Record<string, unknown>;
-        poolMetaMap.set(p.poolHash, {
-          symbol: `${p.token0.symbol}/${p.token1.symbol}`,
-          protocol: p.protocol,
-          chainId: (config.chainId as number) ?? 0,
-          feeTier: String((config.feeBps as number) ?? 0),
-        });
+
+      if (instrumentRefs.length > 0) {
+        // Parse pool hashes to extract chainId + poolAddress, then find a position for each
+        for (const ref of instrumentRefs) {
+          const parts = ref.split('/');
+          if (parts.length !== 3) continue;
+          const [protocol, chainIdStr, poolAddress] = parts;
+          const chainId = Number(chainIdStr);
+
+          const position = await prisma.position.findFirst({
+            where: {
+              protocol,
+              config: {
+                path: ['chainId'],
+                equals: chainId,
+              },
+              AND: [
+                { config: { path: ['poolAddress'], string_contains: poolAddress } },
+              ],
+            },
+            select: { config: true },
+          });
+
+          if (position) {
+            const config = position.config as Record<string, unknown>;
+            const token0Addr = config.token0Address as string;
+            const token1Addr = config.token1Address as string;
+
+            // Look up token symbols
+            const [token0, token1] = await Promise.all([
+              prisma.token.findFirst({ where: { config: { path: ['address'], equals: token0Addr } }, select: { symbol: true } }),
+              prisma.token.findFirst({ where: { config: { path: ['address'], equals: token1Addr } }, select: { symbol: true } }),
+            ]);
+
+            poolMetaMap.set(ref, {
+              symbol: `${token0?.symbol ?? '???'}/${token1?.symbol ?? '???'}`,
+              protocol,
+              chainId,
+              feeTier: String((config.feeBps as number) ?? 0),
+            });
+          }
+        }
       }
 
       // Build response

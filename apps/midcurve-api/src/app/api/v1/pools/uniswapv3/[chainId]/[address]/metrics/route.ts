@@ -89,29 +89,22 @@ export async function GET(
       // Normalize address for database lookup (EIP-55 checksum)
       const normalizedAddress = normalizeAddress(validatedAddress);
 
-      // 2. Check if pool exists in database (must be discovered first)
-      const pool = await prisma.pool.findFirst({
+      // 2. Check if any position references this pool (pool must have been discovered via a position)
+      const positionWithPool = await prisma.position.findFirst({
         where: {
           protocol: 'uniswapv3',
+          config: {
+            path: ['chainId'],
+            equals: validatedChainId,
+          },
           AND: [
-            {
-              config: {
-                path: ['address'],
-                equals: normalizedAddress,
-              },
-            },
-            {
-              config: {
-                path: ['chainId'],
-                equals: validatedChainId,
-              },
-            },
+            { config: { path: ['poolAddress'], string_contains: normalizedAddress } },
           ],
         },
         select: { id: true },
       });
 
-      if (!pool) {
+      if (!positionWithPool) {
         apiLogger.warn(
           { requestId, chainId: validatedChainId, poolAddress: validatedAddress },
           'Pool not found in database - must discover first'
@@ -168,7 +161,6 @@ export async function GET(
       };
 
       const response = createSuccessResponse(metricsData, {
-        poolId: pool.id,
         chainId: validatedChainId,
         poolAddress: normalizedAddress,
       });

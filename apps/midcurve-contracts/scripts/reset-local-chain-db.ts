@@ -74,16 +74,7 @@ async function resetLocalChainDb(options: ResetOptions) {
   // Initialize SharedContractService for cleanup
   const sharedContractService = new SharedContractService({ prisma });
 
-  // 1. Find local chain pools
-  const localPools = await prisma.pool.findMany({
-    where: {
-      config: { path: ['chainId'], equals: LOCAL_CHAIN_ID },
-    },
-    select: { id: true, config: true },
-  });
-  console.log(`📊 Found ${localPools.length} local pools`);
-
-  // 2. Find local chain positions
+  // 1. Find local chain positions
   const localPositions = await prisma.position.findMany({
     where: {
       config: { path: ['chainId'], equals: LOCAL_CHAIN_ID },
@@ -135,15 +126,6 @@ async function resetLocalChainDb(options: ResetOptions) {
         where: { id: { in: localPositions.map((p) => p.id) } },
       });
       console.log(`🗑️  Deleted ${deleted.count} positions (+ cascaded records)`);
-    }
-
-    // Delete pools (cascades: pool prices, price subscriptions)
-    if (localPools.length > 0) {
-      const poolIds = localPools.map((p) => p.id);
-      const deletedPools = await tx.pool.deleteMany({
-        where: { id: { in: poolIds } },
-      });
-      console.log(`🗑️  Deleted ${deletedPools.count} pools (+ prices, subscriptions)`);
     }
 
     // Patch mockUSD token address

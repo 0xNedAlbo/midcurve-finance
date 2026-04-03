@@ -115,13 +115,8 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
         id: true,
         state: true,
         isToken0Quote: true,
-        pool: {
-          select: {
-            poolHash: true,
-            token0: { select: { decimals: true, coingeckoId: true } },
-            token1: { select: { decimals: true, coingeckoId: true } },
-          },
-        },
+        protocol: true,
+        config: true,
         user: { select: { reportingCurrency: true } },
       },
     });
@@ -151,10 +146,29 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
     // Nothing to correct
     if (costBasisQuote === 0n && costBasisReporting === 0n) return false;
 
-    // Build reporting context
-    const quoteToken = position.isToken0Quote ? position.pool.token0 : position.pool.token1;
+    // Build reporting context from position config
+    const positionConfig = position.config as Record<string, unknown>;
+    const token0Address = positionConfig.token0Address as string;
+    const token1Address = positionConfig.token1Address as string;
+    const chainId = positionConfig.chainId as number;
+    const poolAddress = positionConfig.poolAddress as string;
+
+    const [token0Row, token1Row] = await Promise.all([
+      prisma.token.findFirst({
+        where: { config: { path: ['address'], equals: token0Address } },
+        select: { decimals: true, coingeckoId: true },
+      }),
+      prisma.token.findFirst({
+        where: { config: { path: ['address'], equals: token1Address } },
+        select: { decimals: true, coingeckoId: true },
+      }),
+    ]);
+    if (!token0Row) throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
+    if (!token1Row) throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
+
+    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
-    const instrumentRef = position.pool.poolHash ?? '';
+    const instrumentRef = `${position.protocol}/${chainId}/${poolAddress}`;
 
     let quoteTokenUsdPrice = 1.0;
     if (quoteToken.coingeckoId) {

@@ -642,19 +642,33 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       where: { id: positionId },
       select: {
         isToken0Quote: true,
+        protocol: true,
+        config: true,
         user: { select: { reportingCurrency: true } },
-        pool: {
-          select: {
-            poolHash: true,
-            token0: { select: { decimals: true, coingeckoId: true } },
-            token1: { select: { decimals: true, coingeckoId: true } },
-          },
-        },
       },
     });
     if (!position) throw new Error(`Position not found: ${positionId}`);
 
-    const quoteToken = position.isToken0Quote ? position.pool.token0 : position.pool.token1;
+    const positionConfig = position.config as Record<string, unknown>;
+    const token0Address = positionConfig.token0Address as string;
+    const token1Address = positionConfig.token1Address as string;
+    const chainId = positionConfig.chainId as number;
+    const poolAddress = positionConfig.poolAddress as string;
+
+    const [token0Row, token1Row] = await Promise.all([
+      prisma.token.findFirst({
+        where: { config: { path: ['address'], equals: token0Address } },
+        select: { decimals: true, coingeckoId: true },
+      }),
+      prisma.token.findFirst({
+        where: { config: { path: ['address'], equals: token1Address } },
+        select: { decimals: true, coingeckoId: true },
+      }),
+    ]);
+    if (!token0Row) throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
+    if (!token1Row) throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
+
+    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
 
     // Phase 1: only USD supported. For non-USD, falls back to 1.0.
@@ -669,11 +683,13 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const rate = quoteTokenUsdPrice / reportingCurrencyUsdPrice;
     const exchangeRate = BigInt(Math.round(rate * FLOAT_TO_BIGINT_SCALE));
 
+    const poolHash = `${position.protocol}/${chainId}/${poolAddress}`;
+
     return {
       reportingCurrency,
       exchangeRate: exchangeRate.toString(),
       quoteTokenDecimals: quoteToken.decimals,
-      poolHash: position.pool.poolHash ?? '',
+      poolHash,
     };
   }
 }

@@ -285,7 +285,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     nftId: string,
     chainId: number,
     tx?: TxClient
-  ): Promise<{ id: string; poolId: string } | null> {
+  ): Promise<{ id: string; config: Record<string, unknown> } | null> {
     const db = tx ?? prisma;
     const positions = await db.position.findMany({
       where: {
@@ -295,7 +295,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
           equals: parseInt(nftId, 10),
         },
       },
-      select: { id: true, poolId: true, config: true },
+      select: { id: true, config: true },
     });
 
     const match = positions.find((p) => {
@@ -303,7 +303,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return config.chainId === chainId;
     });
 
-    return match ? { id: match.id, poolId: match.poolId } : null;
+    return match ? { id: match.id, config: match.config as Record<string, unknown> } : null;
   }
 
   /**
@@ -450,17 +450,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       const position = existingOrder
         ? await tx.position.findUnique({
             where: { id: existingOrder.positionId },
-            select: { id: true, poolId: true, pool: { select: { config: true } } },
+            select: { id: true, config: true },
           })
-        : await this.findPositionByNftIdAndChain(nftId, chainId, tx)
-          .then(async (p) => {
-            if (!p) return null;
-            const pool = await tx.pool.findUnique({
-              where: { id: p.poolId },
-              select: { config: true },
-            });
-            return { id: p.id, poolId: p.poolId, pool };
-          });
+        : await this.findPositionByNftIdAndChain(nftId, chainId, tx);
 
       if (!position) {
         this.logger.warn(
@@ -515,13 +507,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      const poolConfig = position.pool?.config as Record<string, unknown> | null;
-      const poolAddress = (poolConfig?.address as string | undefined)?.toLowerCase();
+      const positionConfig = position.config as Record<string, unknown>;
+      const poolAddress = (positionConfig.poolAddress as string | undefined)?.toLowerCase();
 
       return {
         orderId: created.id,
         positionId: position.id,
-        poolId: position.poolId,
         poolAddress: poolAddress ?? null,
         isNew,
       };

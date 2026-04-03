@@ -70,7 +70,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       where: { positionHash, userId: user.id },
       select: {
         id: true,
-        pool: { select: { poolHash: true } },
+        config: true,
       },
     });
 
@@ -85,7 +85,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       });
     }
 
-    const instrumentRef = position.pool.poolHash ?? '';
+    // Compute pool hash (instrumentRef) from position config
+    const posConfig = position.config as Record<string, unknown>;
+    const instrumentRef = `uniswapv3/${posConfig.chainId}/${posConfig.poolAddress}`;
 
     // Toggle tracking
     const journalService = getJournalService();

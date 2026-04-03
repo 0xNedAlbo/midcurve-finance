@@ -253,27 +253,22 @@ export class CloseOrderMonitor {
     // Add subscribers for new monitoring orders
     for (const order of monitoringOrders) {
       if (!this.orderSubscribers.has(order.id)) {
-        // Extract pool data from position→pool relation
-        const poolId = order.position?.pool?.id;
-        const poolConfig = order.position?.pool?.config as Record<string, unknown> | null;
-        const poolAddress = poolConfig?.address as string | undefined;
-        // Extract chainId from order config JSON
-        const orderConfig = (order.config ?? {}) as Record<string, unknown>;
-        const chainId = orderConfig.chainId as number | undefined;
+        // Extract pool data from position config
+        const posConfig = order.position?.config as Record<string, unknown> | null;
+        const poolAddress = posConfig?.poolAddress as string | undefined;
+        const chainId = posConfig?.chainId as number | undefined;
 
-        if (poolAddress && poolId && chainId) {
+        if (poolAddress && chainId) {
           await this.createOrderSubscriber({
             id: order.id,
             positionId: order.positionId,
             poolAddress,
-            poolId,
             chainId,
           });
         } else {
           log.warn({
             orderId: order.id,
             poolAddress,
-            poolId,
             chainId,
             msg: 'Cannot create subscriber: missing pool data or chainId',
           });
@@ -289,7 +284,6 @@ export class CloseOrderMonitor {
     id: string;
     positionId: string;
     poolAddress: string;
-    poolId: string;
     chainId: number;
   }): Promise<void> {
     try {

@@ -222,24 +222,37 @@ export class RangeMonitor {
   // ===========================================================================
 
   /**
-   * Get all unique pool IDs that have active positions
+   * Get all unique pool keys (chainId/poolAddress) that have active positions
    */
-  private async getActivePoolIds(): Promise<string[]> {
-    const pools = await prisma.position.findMany({
+  private async getActivePoolKeys(): Promise<string[]> {
+    const positions = await prisma.position.findMany({
       where: { isActive: true },
-      select: { poolId: true },
-      distinct: ['poolId'],
+      select: { config: true },
     });
-    return pools.map((p) => p.poolId);
+    const uniqueKeys = new Set<string>();
+    for (const p of positions) {
+      const config = p.config as { chainId: number; poolAddress: string };
+      if (config.chainId && config.poolAddress) {
+        uniqueKeys.add(`${config.chainId}/${config.poolAddress}`);
+      }
+    }
+    return Array.from(uniqueKeys);
   }
 
   /**
-   * Get all active positions for a pool with their range status
+   * Get all active positions for a pool (identified by chainId/poolAddress) with their range status
    */
-  private async getPositionsForPool(poolId: string): Promise<PositionTrackingInfo[]> {
+  private async getPositionsForPool(poolKey: string): Promise<PositionTrackingInfo[]> {
+    const [chainIdStr, poolAddress] = poolKey.split('/');
+    const chainId = Number(chainIdStr);
+
     const positions = await prisma.position.findMany({
-      where: { poolId, isActive: true },
-      include: { rangeStatus: true, pool: true },
+      where: {
+        isActive: true,
+        config: { path: ['chainId'], equals: chainId },
+        AND: [{ config: { path: ['poolAddress'], string_contains: poolAddress! } }],
+      },
+      include: { rangeStatus: true },
     });
 
     return positions.map((position) => {
@@ -250,19 +263,15 @@ export class RangeMonitor {
         tickLower: number;
         tickUpper: number;
       };
-      const poolConfig = position.pool.config as {
-        chainId: number;
-        address: string;
-      };
 
       return {
         positionId: position.id,
         userId: position.userId,
-        poolId: position.poolId,
+        poolId: `uniswapv3/${config.chainId}/${config.poolAddress}`,
         tickLower: config.tickLower,
         tickUpper: config.tickUpper,
-        chainId: poolConfig.chainId,
-        poolAddress: poolConfig.address,
+        chainId: config.chainId,
+        poolAddress: config.poolAddress,
         currentRangeStatus: position.rangeStatus
           ? {
               isInRange: position.rangeStatus.isInRange,
@@ -362,44 +371,44 @@ export class RangeMonitor {
     try {
       const automationSubscriptionService = getAutomationSubscriptionService();
 
-      // Get all unique pools with active positions
-      const activePoolIds = await this.getActivePoolIds();
-      const activePoolIdSet = new Set(activePoolIds);
+      // Get all unique pools with active positions (keyed by chainId/poolAddress)
+      const activePoolKeys = await this.getActivePoolKeys();
+      const activePoolKeySet = new Set(activePoolKeys);
 
       // Remove RabbitMQ subscribers for pools that no longer have active positions
-      for (const [poolId, subscriber] of this.poolSubscribers.entries()) {
-        if (!activePoolIdSet.has(poolId)) {
-          log.debug({ poolId }, 'Removing subscriber for pool with no active positions');
+      for (const [poolKey, subscriber] of this.poolSubscribers.entries()) {
+        if (!activePoolKeySet.has(poolKey)) {
+          log.debug({ poolKey }, 'Removing subscriber for pool with no active positions');
           await subscriber.shutdown().catch((err) => {
-            log.warn({ error: err, poolId, msg: 'Error shutting down pool subscriber' });
+            log.warn({ error: err, poolKey, msg: 'Error shutting down pool subscriber' });
           });
-          this.poolSubscribers.delete(poolId);
+          this.poolSubscribers.delete(poolKey);
 
           // Remove per-position DB subscriptions for this pool
-          const positionIds = this.poolPositionIds.get(poolId);
+          const positionIds = this.poolPositionIds.get(poolKey);
           if (positionIds) {
             for (const positionId of positionIds) {
               await automationSubscriptionService.removePositionSubscription(positionId);
             }
-            this.poolPositionIds.delete(poolId);
+            this.poolPositionIds.delete(poolKey);
           }
         }
       }
 
       // Sync per-position subscriptions and RabbitMQ subscribers for active pools
       let totalPositions = 0;
-      for (const poolId of activePoolIds) {
-        const positions = await this.getPositionsForPool(poolId);
+      for (const poolKey of activePoolKeys) {
+        const positions = await this.getPositionsForPool(poolKey);
         totalPositions += positions.length;
 
         if (positions.length === 0) continue;
 
-        const chainId = positions[0].chainId;
-        const poolAddress = positions[0].poolAddress;
+        const chainId = positions[0]!.chainId;
+        const poolAddress = positions[0]!.poolAddress;
 
         // Ensure per-position DB subscriptions
         const currentPositionIds = new Set(positions.map((p) => p.positionId));
-        const previousPositionIds = this.poolPositionIds.get(poolId) ?? new Set();
+        const previousPositionIds = this.poolPositionIds.get(poolKey) ?? new Set();
 
         // Add subscriptions for new positions
         for (const position of positions) {
@@ -417,17 +426,17 @@ export class RangeMonitor {
           }
         }
 
-        this.poolPositionIds.set(poolId, currentPositionIds);
+        this.poolPositionIds.set(poolKey, currentPositionIds);
 
         // Create RabbitMQ subscriber if not already running for this pool
-        if (!this.poolSubscribers.has(poolId)) {
+        if (!this.poolSubscribers.has(poolKey)) {
           // Skip unsupported chains
           if (!isSupportedChain(chainId)) {
-            log.debug({ poolId, chainId, msg: 'Skipping unsupported chain' });
+            log.debug({ poolKey, chainId, msg: 'Skipping unsupported chain' });
             continue;
           }
 
-          await this.createPoolSubscriber(poolId, chainId, poolAddress);
+          await this.createPoolSubscriber(poolKey, chainId, poolAddress);
         }
       }
 
@@ -437,7 +446,7 @@ export class RangeMonitor {
       log.info({
         poolSubscribers: this.poolSubscribers.size,
         positionsTracked: this.positionsTracked,
-        activePoolIds: activePoolIds.length,
+        activePoolKeys: activePoolKeys.length,
         msg: 'Subscription sync complete',
       });
 
