@@ -3874,19 +3874,15 @@ export class UniswapV3PositionService {
             this.prisma.token.findFirst({
                 where: {
                     tokenType: "erc20",
-                    AND: [
-                        { config: { path: ["address"], equals: token0Address } },
-                        { config: { path: ["chainId"], equals: chainId } },
-                    ],
+                    config: { path: ["address"], equals: token0Address },
+                    AND: { config: { path: ["chainId"], equals: chainId } },
                 },
             }),
             this.prisma.token.findFirst({
                 where: {
                     tokenType: "erc20",
-                    AND: [
-                        { config: { path: ["address"], equals: token1Address } },
-                        { config: { path: ["chainId"], equals: chainId } },
-                    ],
+                    config: { path: ["address"], equals: token1Address },
+                    AND: { config: { path: ["chainId"], equals: chainId } },
                 },
             }),
         ]);
