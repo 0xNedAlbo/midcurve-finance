@@ -80,12 +80,13 @@ export interface UniswapV3PositionConfigJSON {
   chainId: number;
   nftId: number;
   poolAddress: string;
-  token0Address: string;
-  token1Address: string;
-  feeBps: number;
-  tickSpacing: number;
   tickUpper: number;
   tickLower: number;
+  // Pool-level fields (optional — present in DB JSON, omitted from API responses)
+  token0Address?: string;
+  token1Address?: string;
+  feeBps?: number;
+  tickSpacing?: number;
 }
 
 // ============================================================================
@@ -146,12 +147,9 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
       chainId: this.chainId,
       nftId: this.nftId,
       poolAddress: this.poolAddress,
-      token0Address: this.token0Address,
-      token1Address: this.token1Address,
-      feeBps: this.feeBps,
-      tickSpacing: this.tickSpacing,
       tickUpper: this.tickUpper,
       tickLower: this.tickLower,
+      // Pool-level fields intentionally omitted — they appear in pool.config via the computed getter
     };
   }
 
@@ -159,6 +157,12 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
    * Create from JSON (database or API input).
    */
   static fromJSON(json: UniswapV3PositionConfigJSON): UniswapV3PositionConfig {
-    return new UniswapV3PositionConfig(json);
+    return new UniswapV3PositionConfig({
+      ...json,
+      token0Address: json.token0Address ?? '',
+      token1Address: json.token1Address ?? '',
+      feeBps: json.feeBps ?? 0,
+      tickSpacing: json.tickSpacing ?? 0,
+    });
   }
 }
