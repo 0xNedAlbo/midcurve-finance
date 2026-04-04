@@ -9,6 +9,7 @@
  */
 
 import type { PrismaClient } from '@prisma/client';
+import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 
 // ============================================================================
 // DEPENDENCIES
@@ -51,7 +52,7 @@ export class UniswapV3VaultPositionService {
   //   vaultAddress: string;
   //   userAddress: string;
   //   quoteTokenAddress?: string;
-  // }): Promise<UniswapV3VaultPosition> { ... }
+  // }, dbTx?: PrismaTransactionClient): Promise<UniswapV3VaultPosition> { ... }
 
   /**
    * Refresh a vault share position's on-chain state.
@@ -64,6 +65,11 @@ export class UniswapV3VaultPositionService {
    * 5. Detect closed position (sharesBalance == 0)
    *
    * @param positionId - Position database ID
+   * @param blockNumber - Block number to read state at ('latest' or specific block)
    */
-  // async refresh(positionId: string): Promise<UniswapV3VaultPosition> { ... }
+  // async refresh(
+  //   positionId: string,
+  //   blockNumber: number | 'latest' = 'latest',
+  //   dbTx?: PrismaTransactionClient,
+  // ): Promise<UniswapV3VaultPosition> { ... }
 }
