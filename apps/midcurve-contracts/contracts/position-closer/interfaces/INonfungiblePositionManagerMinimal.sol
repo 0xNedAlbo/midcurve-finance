@@ -63,6 +63,26 @@ interface INonfungiblePositionManagerMinimal is IERC721Minimal {
         external
         returns (uint256 amount0, uint256 amount1);
 
+    /// @notice Parameters for increasing liquidity
+    struct IncreaseLiquidityParams {
+        uint256 tokenId;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        uint256 deadline;
+    }
+
+    /// @notice Increases the amount of liquidity in a position, with tokens paid by the `msg.sender`
+    /// @param params The parameters for increasing liquidity
+    /// @return liquidity The new liquidity amount as a result of the increase
+    /// @return amount0 The amount of token0 to achieve resulting liquidity
+    /// @return amount1 The amount of token1 to achieve resulting liquidity
+    function increaseLiquidity(IncreaseLiquidityParams calldata params)
+        external
+        payable
+        returns (uint128 liquidity, uint256 amount0, uint256 amount1);
+
     /// @notice Collects up to a maximum amount of fees owed to a specific position
     /// @param params The parameters for collecting
     /// @return amount0 The amount of fees collected in token0
