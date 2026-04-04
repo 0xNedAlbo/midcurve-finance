@@ -11,6 +11,7 @@ import type {
   EventType,
   BasePositionLedgerEventParams,
   PositionLedgerEventRow,
+  PositionLedgerEventJSON,
   RewardJSON,
 } from '../position-ledger-event.types.js';
 import { rewardFromJSON } from '../position-ledger-event.types.js';
@@ -207,6 +208,42 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
   }
 
   // ============================================================================
+  // UniswapV3-Specific Event Properties (from state)
+  // ============================================================================
+
+  /** Pool price at event time in quote token units */
+  get poolPrice(): bigint {
+    return this._state.poolPrice;
+  }
+
+  /** Token0 amount involved in this event */
+  get token0Amount(): bigint {
+    return this._state.token0Amount;
+  }
+
+  /** Token1 amount involved in this event */
+  get token1Amount(): bigint {
+    return this._state.token1Amount;
+  }
+
+  // ============================================================================
+  // Serialization
+  // ============================================================================
+
+  /**
+   * Serialize to JSON for API responses.
+   * Extends base serialization with UniswapV3-specific fields.
+   */
+  override toJSON(): PositionLedgerEventJSON {
+    return {
+      ...super.toJSON(),
+      poolPrice: this.poolPrice.toString(),
+      token0Amount: this.token0Amount.toString(),
+      token1Amount: this.token1Amount.toString(),
+    };
+  }
+
+  // ============================================================================
   // Factory Methods
   // ============================================================================
 
@@ -239,9 +276,6 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       inputHash: row.inputHash,
 
       // Financial data (convert from string stored in DB to bigint)
-      poolPrice: typeof row.poolPrice === 'bigint' ? row.poolPrice : BigInt(row.poolPrice),
-      token0Amount: typeof row.token0Amount === 'bigint' ? row.token0Amount : BigInt(row.token0Amount),
-      token1Amount: typeof row.token1Amount === 'bigint' ? row.token1Amount : BigInt(row.token1Amount),
       tokenValue: typeof row.tokenValue === 'bigint' ? row.tokenValue : BigInt(row.tokenValue),
       rewards: rewardsJSON.map(rewardFromJSON),
 

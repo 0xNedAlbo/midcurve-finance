@@ -48,7 +48,6 @@ export abstract class BasePosition implements PositionInterface {
 
   readonly token0: TokenInterface;
   readonly token1: TokenInterface;
-  readonly isToken0Quote: boolean;
 
   // ============================================================================
   // PnL Fields
@@ -76,13 +75,6 @@ export abstract class BasePosition implements PositionInterface {
   readonly baseApr: number | null;
   readonly rewardApr: number | null;
   readonly totalApr: number | null;
-
-  // ============================================================================
-  // Price Range
-  // ============================================================================
-
-  readonly priceRangeLower: bigint;
-  readonly priceRangeUpper: bigint;
 
   // ============================================================================
   // Lifecycle
@@ -155,7 +147,6 @@ export abstract class BasePosition implements PositionInterface {
     // Token & pool reference
     this.token0 = params.token0;
     this.token1 = params.token1;
-    this.isToken0Quote = params.isToken0Quote;
 
     // PnL fields
     this.currentValue = params.currentValue;
@@ -174,10 +165,6 @@ export abstract class BasePosition implements PositionInterface {
     this.baseApr = params.baseApr;
     this.rewardApr = params.rewardApr;
     this.totalApr = params.totalApr;
-
-    // Price range
-    this.priceRangeLower = params.priceRangeLower;
-    this.priceRangeUpper = params.priceRangeUpper;
 
     // Lifecycle
     this.positionOpenedAt = params.positionOpenedAt;
@@ -203,7 +190,7 @@ export abstract class BasePosition implements PositionInterface {
    *
    * @returns PositionJSON ready for API response
    */
-  toJSON(): PositionJSON {
+  toJSON(): Omit<PositionJSON, 'isToken0Quote' | 'priceRangeLower' | 'priceRangeUpper'> {
     return {
       id: this.id,
       positionHash: this.positionHash,
@@ -211,7 +198,6 @@ export abstract class BasePosition implements PositionInterface {
       protocol: this.protocol,
       type: this.type,
       pool: this.pool.toJSON(),
-      isToken0Quote: this.isToken0Quote,
 
       // PnL fields (bigint → string)
       currentValue: this.currentValue.toString(),
@@ -231,10 +217,6 @@ export abstract class BasePosition implements PositionInterface {
       rewardApr: this.rewardApr,
       totalApr: this.totalApr,
 
-      // Price range (bigint → string)
-      priceRangeLower: this.priceRangeLower.toString(),
-      priceRangeUpper: this.priceRangeUpper.toString(),
-
       // Lifecycle
       positionOpenedAt: this.positionOpenedAt.toISOString(),
       positionClosedAt: this.positionClosedAt?.toISOString() ?? null,
@@ -253,28 +235,6 @@ export abstract class BasePosition implements PositionInterface {
   // ============================================================================
   // Helper Methods
   // ============================================================================
-
-  /**
-   * Get the base token (the token with price risk exposure).
-   *
-   * In quote/base terminology:
-   * - Quote token = reference currency (what you measure value in)
-   * - Base token = asset being priced (what you have exposure to)
-   *
-   * @returns The base token
-   */
-  getBaseToken(): TokenInterface {
-    return this.isToken0Quote ? this.token1 : this.token0;
-  }
-
-  /**
-   * Get the quote token (the reference/numeraire token).
-   *
-   * @returns The quote token
-   */
-  getQuoteToken(): TokenInterface {
-    return this.isToken0Quote ? this.token0 : this.token1;
-  }
 
   /**
    * Get total realized PnL including cashflow.

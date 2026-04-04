@@ -110,7 +110,6 @@ export class JournalBackfillService {
       select: {
         id: true,
         positionHash: true,
-        isToken0Quote: true,
         state: true,
         config: true,
         user: { select: { reportingCurrency: true } },
@@ -166,7 +165,8 @@ export class JournalBackfillService {
     }
 
     // Resolve quote token info
-    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
+    const isToken0Quote = positionConfig.isToken0Quote as boolean;
+    const quoteToken = isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
 
     // Fetch historic price time series from CoinGecko

@@ -6,6 +6,25 @@
  */
 
 // ============================================================================
+// COMMON FIELDS (present on all event types)
+// ============================================================================
+
+/**
+ * Common fields shared by all UniswapV3 ledger event state variants.
+ * These are computed financial data stored alongside the raw event data.
+ */
+export interface UniswapV3LedgerEventStateBase {
+  /** Pool price at event time in quote token units (bigint) */
+  poolPrice: bigint;
+
+  /** Token0 amount involved in this event (bigint) */
+  token0Amount: bigint;
+
+  /** Token1 amount involved in this event (bigint) */
+  token1Amount: bigint;
+}
+
+// ============================================================================
 // INCREASE LIQUIDITY EVENT
 // ============================================================================
 
@@ -14,7 +33,7 @@
  *
  * Emitted when liquidity is added to a position.
  */
-export interface UniswapV3IncreaseLiquidityEvent {
+export interface UniswapV3IncreaseLiquidityEvent extends UniswapV3LedgerEventStateBase {
   /** Event type discriminator */
   eventType: 'INCREASE_LIQUIDITY';
 
@@ -40,7 +59,7 @@ export interface UniswapV3IncreaseLiquidityEvent {
  *
  * Emitted when liquidity is removed from a position.
  */
-export interface UniswapV3DecreaseLiquidityEvent {
+export interface UniswapV3DecreaseLiquidityEvent extends UniswapV3LedgerEventStateBase {
   /** Event type discriminator */
   eventType: 'DECREASE_LIQUIDITY';
 
@@ -66,7 +85,7 @@ export interface UniswapV3DecreaseLiquidityEvent {
  *
  * Emitted when tokens (fees + principal) are collected from a position.
  */
-export interface UniswapV3CollectEvent {
+export interface UniswapV3CollectEvent extends UniswapV3LedgerEventStateBase {
   /** Event type discriminator */
   eventType: 'COLLECT';
 
@@ -93,7 +112,7 @@ export interface UniswapV3CollectEvent {
  * ERC-721 Transfer from address(0) — position NFT created.
  * Lifecycle event with no liquidity change.
  */
-export interface UniswapV3MintEvent {
+export interface UniswapV3MintEvent extends UniswapV3LedgerEventStateBase {
   /** Event type discriminator */
   eventType: 'MINT';
 
@@ -114,7 +133,7 @@ export interface UniswapV3MintEvent {
  * ERC-721 Transfer to address(0) — position NFT destroyed.
  * Lifecycle event with no liquidity change.
  */
-export interface UniswapV3BurnEvent {
+export interface UniswapV3BurnEvent extends UniswapV3LedgerEventStateBase {
   /** Event type discriminator */
   eventType: 'BURN';
 
@@ -135,7 +154,7 @@ export interface UniswapV3BurnEvent {
  * ERC-721 Transfer between non-zero addresses — ownership change.
  * Lifecycle event with no liquidity change.
  */
-export interface UniswapV3TransferEvent {
+export interface UniswapV3TransferEvent extends UniswapV3LedgerEventStateBase {
   /** Event type discriminator */
   eventType: 'TRANSFER';
 
@@ -172,9 +191,18 @@ export type UniswapV3LedgerEventState =
 // ============================================================================
 
 /**
+ * Common JSON fields shared by all event state variants.
+ */
+export interface UniswapV3LedgerEventStateBaseJSON {
+  poolPrice: string;
+  token0Amount: string;
+  token1Amount: string;
+}
+
+/**
  * JSON representation of IncreaseLiquidity event.
  */
-export interface UniswapV3IncreaseLiquidityEventJSON {
+export interface UniswapV3IncreaseLiquidityEventJSON extends UniswapV3LedgerEventStateBaseJSON {
   eventType: 'INCREASE_LIQUIDITY';
   tokenId: string;
   liquidity: string;
@@ -185,7 +213,7 @@ export interface UniswapV3IncreaseLiquidityEventJSON {
 /**
  * JSON representation of DecreaseLiquidity event.
  */
-export interface UniswapV3DecreaseLiquidityEventJSON {
+export interface UniswapV3DecreaseLiquidityEventJSON extends UniswapV3LedgerEventStateBaseJSON {
   eventType: 'DECREASE_LIQUIDITY';
   tokenId: string;
   liquidity: string;
@@ -196,7 +224,7 @@ export interface UniswapV3DecreaseLiquidityEventJSON {
 /**
  * JSON representation of Collect event.
  */
-export interface UniswapV3CollectEventJSON {
+export interface UniswapV3CollectEventJSON extends UniswapV3LedgerEventStateBaseJSON {
   eventType: 'COLLECT';
   tokenId: string;
   recipient: string;
@@ -207,7 +235,7 @@ export interface UniswapV3CollectEventJSON {
 /**
  * JSON representation of Mint event.
  */
-export interface UniswapV3MintEventJSON {
+export interface UniswapV3MintEventJSON extends UniswapV3LedgerEventStateBaseJSON {
   eventType: 'MINT';
   tokenId: string;
   to: string;
@@ -216,7 +244,7 @@ export interface UniswapV3MintEventJSON {
 /**
  * JSON representation of Burn event.
  */
-export interface UniswapV3BurnEventJSON {
+export interface UniswapV3BurnEventJSON extends UniswapV3LedgerEventStateBaseJSON {
   eventType: 'BURN';
   tokenId: string;
   from: string;
@@ -225,7 +253,7 @@ export interface UniswapV3BurnEventJSON {
 /**
  * JSON representation of Transfer event.
  */
-export interface UniswapV3TransferEventJSON {
+export interface UniswapV3TransferEventJSON extends UniswapV3LedgerEventStateBaseJSON {
   eventType: 'TRANSFER';
   tokenId: string;
   from: string;
@@ -250,12 +278,25 @@ export type UniswapV3LedgerEventStateJSON =
 /**
  * Convert state to JSON for API responses.
  */
+/**
+ * Serialize the common base fields to JSON.
+ */
+function baseStateToJSON(state: UniswapV3LedgerEventStateBase): UniswapV3LedgerEventStateBaseJSON {
+  return {
+    poolPrice: state.poolPrice.toString(),
+    token0Amount: state.token0Amount.toString(),
+    token1Amount: state.token1Amount.toString(),
+  };
+}
+
 export function ledgerEventStateToJSON(
   state: UniswapV3LedgerEventState
 ): UniswapV3LedgerEventStateJSON {
+  const base = baseStateToJSON(state);
   switch (state.eventType) {
     case 'INCREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'INCREASE_LIQUIDITY',
         tokenId: state.tokenId.toString(),
         liquidity: state.liquidity.toString(),
@@ -264,6 +305,7 @@ export function ledgerEventStateToJSON(
       };
     case 'DECREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'DECREASE_LIQUIDITY',
         tokenId: state.tokenId.toString(),
         liquidity: state.liquidity.toString(),
@@ -272,6 +314,7 @@ export function ledgerEventStateToJSON(
       };
     case 'COLLECT':
       return {
+        ...base,
         eventType: 'COLLECT',
         tokenId: state.tokenId.toString(),
         recipient: state.recipient,
@@ -280,18 +323,21 @@ export function ledgerEventStateToJSON(
       };
     case 'MINT':
       return {
+        ...base,
         eventType: 'MINT',
         tokenId: state.tokenId.toString(),
         to: state.to,
       };
     case 'BURN':
       return {
+        ...base,
         eventType: 'BURN',
         tokenId: state.tokenId.toString(),
         from: state.from,
       };
     case 'TRANSFER':
       return {
+        ...base,
         eventType: 'TRANSFER',
         tokenId: state.tokenId.toString(),
         from: state.from,
@@ -303,12 +349,25 @@ export function ledgerEventStateToJSON(
 /**
  * Create state from JSON (database or API input).
  */
+/**
+ * Parse the common base fields from JSON.
+ */
+function baseStateFromJSON(json: UniswapV3LedgerEventStateBaseJSON): UniswapV3LedgerEventStateBase {
+  return {
+    poolPrice: BigInt(json.poolPrice),
+    token0Amount: BigInt(json.token0Amount),
+    token1Amount: BigInt(json.token1Amount),
+  };
+}
+
 export function ledgerEventStateFromJSON(
   json: UniswapV3LedgerEventStateJSON
 ): UniswapV3LedgerEventState {
+  const base = baseStateFromJSON(json);
   switch (json.eventType) {
     case 'INCREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'INCREASE_LIQUIDITY',
         tokenId: BigInt(json.tokenId),
         liquidity: BigInt(json.liquidity),
@@ -317,6 +376,7 @@ export function ledgerEventStateFromJSON(
       };
     case 'DECREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'DECREASE_LIQUIDITY',
         tokenId: BigInt(json.tokenId),
         liquidity: BigInt(json.liquidity),
@@ -325,6 +385,7 @@ export function ledgerEventStateFromJSON(
       };
     case 'COLLECT':
       return {
+        ...base,
         eventType: 'COLLECT',
         tokenId: BigInt(json.tokenId),
         recipient: json.recipient,
@@ -333,18 +394,21 @@ export function ledgerEventStateFromJSON(
       };
     case 'MINT':
       return {
+        ...base,
         eventType: 'MINT',
         tokenId: BigInt(json.tokenId),
         to: json.to,
       };
     case 'BURN':
       return {
+        ...base,
         eventType: 'BURN',
         tokenId: BigInt(json.tokenId),
         from: json.from,
       };
     case 'TRANSFER':
       return {
+        ...base,
         eventType: 'TRANSFER',
         tokenId: BigInt(json.tokenId),
         from: json.from,

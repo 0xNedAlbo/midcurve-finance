@@ -277,6 +277,56 @@ export class UniswapV3Position extends BasePosition {
   }
 
   // ============================================================================
+  // UniswapV3-Specific Position Properties (from config)
+  // ============================================================================
+
+  /** Whether token0 is the quote token */
+  get isToken0Quote(): boolean {
+    return this._config.isToken0Quote;
+  }
+
+  /** Lower price range bound in quote token units */
+  get priceRangeLower(): bigint {
+    return this._config.priceRangeLower;
+  }
+
+  /** Upper price range bound in quote token units */
+  get priceRangeUpper(): bigint {
+    return this._config.priceRangeUpper;
+  }
+
+  /**
+   * Get the base token (the token with price risk exposure).
+   */
+  getBaseToken(): TokenInterface {
+    return this.isToken0Quote ? this.token1 : this.token0;
+  }
+
+  /**
+   * Get the quote token (the reference/numeraire token).
+   */
+  getQuoteToken(): TokenInterface {
+    return this.isToken0Quote ? this.token0 : this.token1;
+  }
+
+  // ============================================================================
+  // Serialization
+  // ============================================================================
+
+  /**
+   * Serialize position to JSON for API responses.
+   * Extends base serialization with UniswapV3-specific fields.
+   */
+  override toJSON(): PositionJSON {
+    return {
+      ...super.toJSON(),
+      isToken0Quote: this.isToken0Quote,
+      priceRangeLower: this.priceRangeLower.toString(),
+      priceRangeUpper: this.priceRangeUpper.toString(),
+    };
+  }
+
+  // ============================================================================
   // PnL Simulation
   // ============================================================================
 
@@ -383,7 +433,6 @@ export class UniswapV3Position extends BasePosition {
       // Token references
       token0,
       token1,
-      isToken0Quote: row.isToken0Quote,
 
       // PnL fields
       currentValue: row.currentValue,
@@ -402,10 +451,6 @@ export class UniswapV3Position extends BasePosition {
       baseApr: row.baseApr,
       rewardApr: row.rewardApr,
       totalApr: row.totalApr,
-
-      // Price range
-      priceRangeLower: row.priceRangeLower,
-      priceRangeUpper: row.priceRangeUpper,
 
       // Lifecycle
       positionOpenedAt: row.positionOpenedAt,
@@ -467,7 +512,6 @@ export class UniswapV3Position extends BasePosition {
       // Token references
       token0: params.pool.token0,
       token1: params.pool.token1,
-      isToken0Quote: params.isToken0Quote,
 
       // PnL fields (costBasis is the key input)
       currentValue: params.costBasis, // At creation, value equals cost
@@ -487,10 +531,6 @@ export class UniswapV3Position extends BasePosition {
       rewardApr: null,
       totalApr: null,
 
-      // Price range (computed from ticks)
-      priceRangeLower,
-      priceRangeUpper,
-
       // Lifecycle
       positionOpenedAt: now,
       positionClosedAt: null,
@@ -507,6 +547,9 @@ export class UniswapV3Position extends BasePosition {
         tickSpacing: params.pool.tickSpacing,
         tickLower: params.tickLower,
         tickUpper: params.tickUpper,
+        isToken0Quote: params.isToken0Quote,
+        priceRangeLower,
+        priceRangeUpper,
       }),
       state: {
         ownerAddress: '0x0000000000000000000000000000000000000000',
@@ -567,6 +610,15 @@ export class UniswapV3Position extends BasePosition {
     // Reconstruct tokens from pool JSON (backward compat for API responses)
     const pool = UniswapV3Pool.fromJSON(json.pool);
 
+    // Build config from both the nested config JSON and top-level position fields
+    const configJSON = json.config as unknown as UniswapV3PositionConfigJSON;
+    const config = UniswapV3PositionConfig.fromJSON({
+      ...configJSON,
+      isToken0Quote: json.isToken0Quote,
+      priceRangeLower: json.priceRangeLower,
+      priceRangeUpper: json.priceRangeUpper,
+    });
+
     return new UniswapV3Position({
       // Identity
       id: json.id,
@@ -577,7 +629,6 @@ export class UniswapV3Position extends BasePosition {
       // Token references (extracted from pool JSON)
       token0: pool.token0,
       token1: pool.token1,
-      isToken0Quote: json.isToken0Quote,
 
       // PnL fields (string → bigint)
       currentValue: BigInt(json.currentValue),
@@ -597,17 +648,13 @@ export class UniswapV3Position extends BasePosition {
       rewardApr: json.rewardApr,
       totalApr: json.totalApr,
 
-      // Price range (string → bigint)
-      priceRangeLower: BigInt(json.priceRangeLower),
-      priceRangeUpper: BigInt(json.priceRangeUpper),
-
       // Lifecycle
       positionOpenedAt: new Date(json.positionOpenedAt),
       positionClosedAt: json.positionClosedAt ? new Date(json.positionClosedAt) : null,
       isActive: json.isActive,
 
       // Protocol-specific
-      config: UniswapV3PositionConfig.fromJSON(json.config as unknown as UniswapV3PositionConfigJSON),
+      config,
       state: positionStateFromJSON(json.state as unknown as UniswapV3PositionStateJSON),
 
       // Timestamps

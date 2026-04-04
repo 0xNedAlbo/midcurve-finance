@@ -114,7 +114,6 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
       select: {
         id: true,
         state: true,
-        isToken0Quote: true,
         protocol: true,
         config: true,
         user: { select: { reportingCurrency: true } },
@@ -166,7 +165,8 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
     if (!token0Row) throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
     if (!token1Row) throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
 
-    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
+    const isToken0Quote = positionConfig.isToken0Quote as boolean;
+    const quoteToken = isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
     const instrumentRef = `${position.protocol}/${chainId}/${poolAddress}`;
 

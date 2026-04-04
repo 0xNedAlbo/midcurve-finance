@@ -220,9 +220,6 @@ export interface PositionDbResult {
     baseApr: number | null;
     rewardApr: number | null;
     totalApr: number | null;
-    priceRangeLower: string;
-    priceRangeUpper: string;
-    isToken0Quote: boolean;
     positionOpenedAt: Date;
     positionClosedAt: Date | null;
     isActive: boolean;
@@ -412,6 +409,9 @@ export class UniswapV3PositionService {
             tickSpacing: number | string;
             tickUpper: number | string;
             tickLower: number | string;
+            isToken0Quote?: boolean;
+            priceRangeLower?: string;
+            priceRangeUpper?: string;
         };
 
         // Defensive type conversion for JSON deserialization
@@ -443,6 +443,9 @@ export class UniswapV3PositionService {
             tickSpacing,
             tickUpper,
             tickLower,
+            isToken0Quote: db.isToken0Quote ?? false,
+            priceRangeLower: db.priceRangeLower ? BigInt(db.priceRangeLower) : 0n,
+            priceRangeUpper: db.priceRangeUpper ? BigInt(db.priceRangeUpper) : 0n,
         };
     }
 
@@ -799,6 +802,9 @@ export class UniswapV3PositionService {
                 tickSpacing: pool.tickSpacing,
                 tickLower: positionConfig.tickLower,
                 tickUpper: positionConfig.tickUpper,
+                isToken0Quote,
+                priceRangeLower: 0n, // Will be computed during refresh
+                priceRangeUpper: 0n, // Will be computed during refresh
             };
 
             const state: UniswapV3PositionState = {
@@ -1742,21 +1748,23 @@ export class UniswapV3PositionService {
                 throw error;
             }
 
-            // 2. Flip isToken0Quote in the database
-            const newIsToken0Quote = !existingPosition.isToken0Quote;
+            // 2. Flip isToken0Quote in the config JSON
+            const existingConfig = existingPosition.typedConfig;
+            const newIsToken0Quote = !existingConfig.isToken0Quote;
 
             this.logger.info(
                 {
                     positionId: id,
-                    previousIsToken0Quote: existingPosition.isToken0Quote,
+                    previousIsToken0Quote: existingConfig.isToken0Quote,
                     newIsToken0Quote,
                 },
                 "Flipping isToken0Quote before reset",
             );
 
+            const dbConfig = (await this._prisma.position.findUniqueOrThrow({ where: { id } })).config as Record<string, unknown>;
             await this._prisma.position.update({
                 where: { id },
-                data: { isToken0Quote: newIsToken0Quote },
+                data: { config: { ...dbConfig, isToken0Quote: newIsToken0Quote } },
             });
 
             // 3. Call reset() to rebuild the entire ledger with new orientation
@@ -3463,11 +3471,15 @@ export class UniswapV3PositionService {
                     "collectedYield",
                     "unclaimedYield",
                     "lastYieldClaimedAt",
-                    "priceRangeLower",
-                    "priceRangeUpper",
+                    "config.priceRangeLower",
+                    "config.priceRangeUpper",
                     "totalApr",
                 ],
             });
+
+            // Read existing config to merge price range updates
+            const existingPosition = await db.position.findUniqueOrThrow({ where: { id } });
+            const existingConfig = existingPosition.config as Record<string, unknown>;
 
             await db.position.update({
                 where: { id },
@@ -3481,8 +3493,11 @@ export class UniswapV3PositionService {
                     collectedYield: metrics.collectedYield.toString(),
                     unclaimedYield: metrics.unclaimedYield.toString(),
                     lastYieldClaimedAt: metrics.lastYieldClaimedAt,
-                    priceRangeLower: metrics.priceRangeLower.toString(),
-                    priceRangeUpper: metrics.priceRangeUpper.toString(),
+                    config: {
+                        ...existingConfig,
+                        priceRangeLower: metrics.priceRangeLower.toString(),
+                        priceRangeUpper: metrics.priceRangeUpper.toString(),
+                    },
                     totalApr: persistedApr,
                     baseApr: persistedApr,
                     rewardApr: 0,
@@ -3589,14 +3604,21 @@ export class UniswapV3PositionService {
                 positionHash,
             });
 
+            // Merge isToken0Quote and initial price range into config JSON
+            const configWithQuoteToken = {
+                ...(configDB as object as Record<string, unknown>),
+                isToken0Quote: input.isToken0Quote,
+                priceRangeLower: zeroValue,
+                priceRangeUpper: zeroValue,
+            };
+
             const result = await db.position.create({
                 data: {
                     type: "LP_CONCENTRATED",
                     protocol: input.protocol,
                     userId: input.userId,
-                    isToken0Quote: input.isToken0Quote,
                     positionHash,
-                    config: configDB as object,
+                    config: configWithQuoteToken as object,
                     state: stateDB as object,
                     // Default calculated values
                     currentValue: zeroValue,
@@ -3609,8 +3631,6 @@ export class UniswapV3PositionService {
                     collectedYield: zeroValue,
                     unclaimedYield: zeroValue,
                     lastYieldClaimedAt: now,
-                    priceRangeLower: zeroValue,
-                    priceRangeUpper: zeroValue,
                     positionOpenedAt: input.positionOpenedAt ?? now,
                     positionClosedAt: null,
                     isActive: true,
@@ -3956,7 +3976,6 @@ export class UniswapV3PositionService {
             userId: dbResult.userId,
             type: dbResult.type,
             protocol: dbResult.protocol,
-            isToken0Quote: dbResult.isToken0Quote,
             currentValue: BigInt(dbResult.currentValue),
             costBasis: BigInt(dbResult.costBasis),
             realizedPnl: BigInt(dbResult.realizedPnl),
@@ -3969,8 +3988,6 @@ export class UniswapV3PositionService {
             baseApr: dbResult.baseApr,
             rewardApr: dbResult.rewardApr,
             totalApr: dbResult.totalApr,
-            priceRangeLower: BigInt(dbResult.priceRangeLower),
-            priceRangeUpper: BigInt(dbResult.priceRangeUpper),
             positionOpenedAt: dbResult.positionOpenedAt,
             positionClosedAt: dbResult.positionClosedAt,
             isActive: dbResult.isActive,

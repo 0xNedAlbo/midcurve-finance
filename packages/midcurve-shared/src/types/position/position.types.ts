@@ -113,7 +113,6 @@ export interface BasePositionParams {
   type: string;
   token0: TokenInterface;
   token1: TokenInterface;
-  isToken0Quote: boolean;
 
   // PnL fields
   currentValue: bigint;
@@ -132,10 +131,6 @@ export interface BasePositionParams {
   baseApr: number | null;
   rewardApr: number | null;
   totalApr: number | null;
-
-  // Price range
-  priceRangeLower: bigint;
-  priceRangeUpper: bigint;
 
   // Lifecycle
   positionOpenedAt: Date;
@@ -161,7 +156,6 @@ export interface PositionRow {
   userId: string;
   protocol: string;
   type: string;
-  isToken0Quote: boolean;
 
   // PnL fields (Prisma returns bigint)
   currentValue: bigint;
@@ -180,10 +174,6 @@ export interface PositionRow {
   baseApr: number | null;
   rewardApr: number | null;
   totalApr: number | null;
-
-  // Price range
-  priceRangeLower: bigint;
-  priceRangeUpper: bigint;
 
   // Lifecycle
   positionOpenedAt: Date;

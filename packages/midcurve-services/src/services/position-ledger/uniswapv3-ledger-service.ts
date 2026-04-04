@@ -394,12 +394,6 @@ export interface CreateLedgerEventInput {
     eventType: EventType;
     /** Unique input hash for deduplication */
     inputHash: string;
-    /** Pool price at event time (in quote token units per base token) */
-    poolPrice: bigint;
-    /** Amount of token0 involved */
-    token0Amount: bigint;
-    /** Amount of token1 involved */
-    token1Amount: bigint;
     /** Total value in quote token units */
     tokenValue: bigint;
     /** Rewards/fees collected */
@@ -719,9 +713,6 @@ export class UniswapV3LedgerService {
                 timestamp: input.timestamp,
                 eventType: input.eventType,
                 inputHash: input.inputHash,
-                poolPrice: input.poolPrice.toString(),
-                token0Amount: input.token0Amount.toString(),
-                token1Amount: input.token1Amount.toString(),
                 tokenValue: input.tokenValue.toString(),
                 rewards: input.rewards.map((r) => ({
                     tokenId: r.tokenId,
@@ -1375,14 +1366,19 @@ export class UniswapV3LedgerService {
             sqrtPriceX96: params.sqrtPriceX96,
         };
 
+        // Merge common financial fields into protocol-specific state
+        const stateWithCommonFields: UniswapV3LedgerEventState = {
+            ...params.state,
+            poolPrice: params.sqrtPriceX96,
+            token0Amount: 0n,
+            token1Amount: 0n,
+        };
+
         const createInput: CreateLedgerEventInput = {
             previousId: null, // Will be fixed by recalculateAggregates
             timestamp: params.timestamp,
             eventType,
             inputHash,
-            poolPrice: params.sqrtPriceX96,
-            token0Amount: 0n,
-            token1Amount: 0n,
             tokenValue: 0n,
             rewards: [],
             deltaCostBasis: 0n,
@@ -1394,7 +1390,7 @@ export class UniswapV3LedgerService {
             deltaRealizedCashflow: 0n,
             realizedCashflowAfter: 0n,
             config,
-            state: params.state,
+            state: stateWithCommonFields,
         };
 
         const event = await this.create(createInput, tx);
@@ -1637,11 +1633,17 @@ export class UniswapV3LedgerService {
             sqrtPriceX96,
         };
 
-        // Build ledger event state
+        // Build ledger event state (includes common financial fields)
         const tokenIdBigInt = BigInt(nftId);
+        const stateBase = {
+            poolPrice: sqrtPriceX96,
+            token0Amount: decoded.amount0,
+            token1Amount: decoded.amount1,
+        };
         let ledgerState: UniswapV3LedgerEventState;
         if (validation.eventType === "INCREASE_LIQUIDITY") {
             ledgerState = {
+                ...stateBase,
                 eventType: "INCREASE_LIQUIDITY",
                 tokenId: tokenIdBigInt,
                 liquidity: decoded.liquidity ?? 0n,
@@ -1650,6 +1652,7 @@ export class UniswapV3LedgerService {
             };
         } else if (validation.eventType === "DECREASE_LIQUIDITY") {
             ledgerState = {
+                ...stateBase,
                 eventType: "DECREASE_LIQUIDITY",
                 tokenId: tokenIdBigInt,
                 liquidity: decoded.liquidity ?? 0n,
@@ -1658,6 +1661,7 @@ export class UniswapV3LedgerService {
             };
         } else {
             ledgerState = {
+                ...stateBase,
                 eventType: "COLLECT",
                 tokenId: tokenIdBigInt,
                 recipient: decoded.recipient ?? "",
@@ -1672,9 +1676,6 @@ export class UniswapV3LedgerService {
             timestamp: blockTimestamp,
             eventType,
             inputHash,
-            poolPrice: sqrtPriceX96,
-            token0Amount: decoded.amount0,
-            token1Amount: decoded.amount1,
             tokenValue,
             rewards: [],
             deltaCostBasis: 0n, // Will be fixed by recalculateAggregates

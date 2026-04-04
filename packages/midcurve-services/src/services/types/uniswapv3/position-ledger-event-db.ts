@@ -159,10 +159,19 @@ export function toEventConfigDB(
 // ============================================================================
 
 /**
+ * Common fields shared by all event DB variants.
+ */
+interface UniswapV3LedgerEventStateBaseDB {
+  poolPrice: string;
+  token0Amount: string;
+  token1Amount: string;
+}
+
+/**
  * Uniswap V3 IncreaseLiquidity Event (Database Format)
  * All bigint values as strings
  */
-export interface UniswapV3IncreaseLiquidityEventDB {
+export interface UniswapV3IncreaseLiquidityEventDB extends UniswapV3LedgerEventStateBaseDB {
   eventType: 'INCREASE_LIQUIDITY';
   tokenId: string;
   liquidity: string;
@@ -174,7 +183,7 @@ export interface UniswapV3IncreaseLiquidityEventDB {
  * Uniswap V3 DecreaseLiquidity Event (Database Format)
  * All bigint values as strings
  */
-export interface UniswapV3DecreaseLiquidityEventDB {
+export interface UniswapV3DecreaseLiquidityEventDB extends UniswapV3LedgerEventStateBaseDB {
   eventType: 'DECREASE_LIQUIDITY';
   tokenId: string;
   liquidity: string;
@@ -186,7 +195,7 @@ export interface UniswapV3DecreaseLiquidityEventDB {
  * Uniswap V3 Collect Event (Database Format)
  * All bigint values as strings
  */
-export interface UniswapV3CollectEventDB {
+export interface UniswapV3CollectEventDB extends UniswapV3LedgerEventStateBaseDB {
   eventType: 'COLLECT';
   tokenId: string;
   recipient: string;
@@ -198,7 +207,7 @@ export interface UniswapV3CollectEventDB {
  * Uniswap V3 Mint Event (Database Format)
  * All bigint values as strings
  */
-export interface UniswapV3MintEventDB {
+export interface UniswapV3MintEventDB extends UniswapV3LedgerEventStateBaseDB {
   eventType: 'MINT';
   tokenId: string;
   to: string;
@@ -208,7 +217,7 @@ export interface UniswapV3MintEventDB {
  * Uniswap V3 Burn Event (Database Format)
  * All bigint values as strings
  */
-export interface UniswapV3BurnEventDB {
+export interface UniswapV3BurnEventDB extends UniswapV3LedgerEventStateBaseDB {
   eventType: 'BURN';
   tokenId: string;
   from: string;
@@ -218,7 +227,7 @@ export interface UniswapV3BurnEventDB {
  * Uniswap V3 Transfer Event (Database Format)
  * All bigint values as strings
  */
-export interface UniswapV3TransferEventDB {
+export interface UniswapV3TransferEventDB extends UniswapV3LedgerEventStateBaseDB {
   eventType: 'TRANSFER';
   tokenId: string;
   from: string;
@@ -251,9 +260,15 @@ export type UniswapV3LedgerEventStateDB =
 export function toEventState(
   stateDB: UniswapV3LedgerEventStateDB
 ): UniswapV3LedgerEventState {
+  const base = {
+    poolPrice: BigInt(stateDB.poolPrice),
+    token0Amount: BigInt(stateDB.token0Amount),
+    token1Amount: BigInt(stateDB.token1Amount),
+  };
   switch (stateDB.eventType) {
     case 'INCREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'INCREASE_LIQUIDITY',
         tokenId: BigInt(stateDB.tokenId),
         liquidity: BigInt(stateDB.liquidity),
@@ -262,6 +277,7 @@ export function toEventState(
       };
     case 'DECREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'DECREASE_LIQUIDITY',
         tokenId: BigInt(stateDB.tokenId),
         liquidity: BigInt(stateDB.liquidity),
@@ -270,6 +286,7 @@ export function toEventState(
       };
     case 'COLLECT':
       return {
+        ...base,
         eventType: 'COLLECT',
         tokenId: BigInt(stateDB.tokenId),
         recipient: stateDB.recipient,
@@ -278,18 +295,21 @@ export function toEventState(
       };
     case 'MINT':
       return {
+        ...base,
         eventType: 'MINT',
         tokenId: BigInt(stateDB.tokenId),
         to: stateDB.to,
       };
     case 'BURN':
       return {
+        ...base,
         eventType: 'BURN',
         tokenId: BigInt(stateDB.tokenId),
         from: stateDB.from,
       };
     case 'TRANSFER':
       return {
+        ...base,
         eventType: 'TRANSFER',
         tokenId: BigInt(stateDB.tokenId),
         from: stateDB.from,
@@ -310,9 +330,15 @@ export function toEventState(
 export function toEventStateDB(
   state: UniswapV3LedgerEventState
 ): UniswapV3LedgerEventStateDB {
+  const base: UniswapV3LedgerEventStateBaseDB = {
+    poolPrice: state.poolPrice.toString(),
+    token0Amount: state.token0Amount.toString(),
+    token1Amount: state.token1Amount.toString(),
+  };
   switch (state.eventType) {
     case 'INCREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'INCREASE_LIQUIDITY',
         tokenId: state.tokenId.toString(),
         liquidity: state.liquidity.toString(),
@@ -321,6 +347,7 @@ export function toEventStateDB(
       };
     case 'DECREASE_LIQUIDITY':
       return {
+        ...base,
         eventType: 'DECREASE_LIQUIDITY',
         tokenId: state.tokenId.toString(),
         liquidity: state.liquidity.toString(),
@@ -329,6 +356,7 @@ export function toEventStateDB(
       };
     case 'COLLECT':
       return {
+        ...base,
         eventType: 'COLLECT',
         tokenId: state.tokenId.toString(),
         recipient: state.recipient,
@@ -337,18 +365,21 @@ export function toEventStateDB(
       };
     case 'MINT':
       return {
+        ...base,
         eventType: 'MINT',
         tokenId: state.tokenId.toString(),
         to: state.to,
       };
     case 'BURN':
       return {
+        ...base,
         eventType: 'BURN',
         tokenId: state.tokenId.toString(),
         from: state.from,
       };
     case 'TRANSFER':
       return {
+        ...base,
         eventType: 'TRANSFER',
         tokenId: state.tokenId.toString(),
         from: state.from,

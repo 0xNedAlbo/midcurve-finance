@@ -146,9 +146,6 @@ export interface BasePositionLedgerEventParams {
   timestamp: Date;
   eventType: EventType;
   inputHash: string;
-  poolPrice: bigint;
-  token0Amount: bigint;
-  token1Amount: bigint;
   tokenValue: bigint;
   rewards: Reward[];
   deltaCostBasis: bigint;
@@ -180,9 +177,6 @@ export interface PositionLedgerEventRow {
   timestamp: Date;
   eventType: string;
   inputHash: string;
-  poolPrice: bigint;
-  token0Amount: bigint;
-  token1Amount: bigint;
   tokenValue: bigint;
   rewards: unknown[];
   deltaCostBasis: bigint;

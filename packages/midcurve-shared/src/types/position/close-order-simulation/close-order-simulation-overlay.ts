@@ -17,6 +17,7 @@
 import type { TokenInterface } from '../../token/index.js';
 import type { PoolInterface } from '../../pool/index.js';
 import type { PositionInterface } from '../position.interface.js';
+import type { UniswapV3Position } from '../uniswapv3/uniswapv3-position.js';
 import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from '../position.types.js';
 import type { SwapConfig } from '../../automation/close-order-config.types.js';
 import { resolveExposure } from './resolve-exposure.js';
@@ -56,8 +57,8 @@ export type PnLScenario = 'combined' | 'sl_triggered' | 'tp_triggered';
  * Constructor parameters for CloseOrderSimulationOverlay.
  */
 export interface CloseOrderSimulationOverlayParams {
-  /** The underlying position to wrap */
-  underlyingPosition: PositionInterface;
+  /** The underlying position to wrap (must be UniswapV3Position for quote/base token access) */
+  underlyingPosition: UniswapV3Position;
   /** Take-profit trigger price in quote token units (null = no TP) */
   takeProfitPrice: bigint | null;
   /** Stop-loss trigger price in quote token units (null = no SL) */
@@ -104,7 +105,7 @@ export interface CloseOrderSimulationOverlayParams {
  * ```
  */
 export class CloseOrderSimulationOverlay implements PositionInterface {
-  private readonly _underlying: PositionInterface;
+  private readonly _underlying: UniswapV3Position;
   private readonly _takeProfitPrice: bigint | null;
   private readonly _stopLossPrice: bigint | null;
   private readonly _slSwapConfig: SwapConfig | null;
@@ -158,7 +159,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   /**
    * Get the underlying position.
    */
-  get underlyingPosition(): PositionInterface {
+  get underlyingPosition(): UniswapV3Position {
     return this._underlying;
   }
 
@@ -345,7 +346,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Identity (always delegate)
+  // UniswapV3Position - Identity (always delegate)
   // ============================================================================
 
   get id(): string {
@@ -369,7 +370,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Token & Pool Reference (always delegate)
+  // UniswapV3Position - Token & Pool Reference (always delegate)
   // ============================================================================
 
   get token0(): TokenInterface {
@@ -389,7 +390,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - PnL Fields (always delegate)
+  // UniswapV3Position - PnL Fields (always delegate)
   // ============================================================================
 
   get currentValue(): bigint {
@@ -426,7 +427,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Yield Fields (always delegate)
+  // UniswapV3Position - Yield Fields (always delegate)
   // ============================================================================
 
   get collectedYield(): bigint {
@@ -442,7 +443,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - APR Fields (always delegate)
+  // UniswapV3Position - APR Fields (always delegate)
   // ============================================================================
 
   get baseApr(): number | null {
@@ -458,7 +459,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Price Range (always delegate)
+  // UniswapV3Position - Price Range (always delegate)
   // ============================================================================
 
   get priceRangeLower(): bigint {
@@ -470,7 +471,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Lifecycle (always delegate)
+  // UniswapV3Position - Lifecycle (always delegate)
   // ============================================================================
 
   get positionOpenedAt(): Date {
@@ -486,7 +487,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Protocol-specific (always delegate)
+  // UniswapV3Position - Protocol-specific (always delegate)
   // ============================================================================
 
   get config(): Record<string, unknown> {
@@ -498,7 +499,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Timestamps (always delegate)
+  // UniswapV3Position - Timestamps (always delegate)
   // ============================================================================
 
   get createdAt(): Date {
@@ -510,7 +511,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Methods
+  // UniswapV3Position - Methods
   // ============================================================================
 
   /**

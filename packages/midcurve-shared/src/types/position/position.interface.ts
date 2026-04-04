@@ -7,7 +7,7 @@
 
 import type { TokenInterface } from '../token/index.js';
 import type { PoolInterface } from '../pool/index.js';
-import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from './position.types.js';
+import type { PositionProtocol, PositionType, PnLSimulationResult } from './position.types.js';
 
 /**
  * PositionInterface
@@ -61,13 +61,6 @@ export interface PositionInterface {
    * Provides backward compatibility for code that accesses pool.config, pool.state, etc.
    */
   readonly pool: PoolInterface;
-
-  /**
-   * Whether token0 is the quote token
-   * If true: token0 = quote, token1 = base
-   * If false: token0 = base, token1 = quote
-   */
-  readonly isToken0Quote: boolean;
 
   // ============================================================================
   // PnL Fields (all in quote token units)
@@ -142,20 +135,6 @@ export interface PositionInterface {
   readonly totalApr: number | null;
 
   // ============================================================================
-  // Price Range
-  // ============================================================================
-
-  /**
-   * Lower price bound (quote per base token)
-   */
-  readonly priceRangeLower: bigint;
-
-  /**
-   * Upper price bound (quote per base token)
-   */
-  readonly priceRangeUpper: bigint;
-
-  // ============================================================================
   // Lifecycle
   // ============================================================================
 
@@ -201,21 +180,6 @@ export interface PositionInterface {
   // Methods
   // ============================================================================
 
-  /**
-   * Serialize position to JSON format for API responses.
-   * Converts Date objects to ISO strings and bigint to strings.
-   */
-  toJSON(): PositionJSON;
-
-  /**
-   * Get the base token (the token with price risk exposure)
-   */
-  getBaseToken(): TokenInterface;
-
-  /**
-   * Get the quote token (the reference/numeraire token)
-   */
-  getQuoteToken(): TokenInterface;
 
   /**
    * Get total realized PnL including cashflow

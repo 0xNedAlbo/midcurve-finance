@@ -230,13 +230,6 @@ model Position {
   rewardApr Float? // Reward APR (incentive programs), null if not applicable
   totalApr  Float? // Total APR (baseApr + rewardApr), null if below threshold
 
-  // Price range (stored as string for bigint precision)
-  priceRangeLower String // bigint as string
-  priceRangeUpper String // bigint as string
-
-  // Token roles (pool identity stored in config JSON: poolAddress, token0Address, token1Address, feeBps, tickSpacing)
-  isToken0Quote Boolean // true: token0 is quote, token1 is base; false: token0 is base, token1 is quote
-
   // Position state
   positionOpenedAt DateTime
   positionClosedAt DateTime?
@@ -289,9 +282,6 @@ model PositionLedgerEvent {
   inputHash String
 
   // Financial data (stored as string for bigint precision)
-  poolPrice    String // bigint as string - Quote tokens per 1 Base token (in smallest units)
-  token0Amount String // bigint as string - Token0 amount in smallest units
-  token1Amount String // bigint as string - Token1 amount in smallest units
   tokenValue   String // bigint as string - Total value in quote token units
   rewards      Json // Array of {tokenId: string, tokenAmount: string, tokenValue: string}
 
@@ -718,10 +708,9 @@ model PositionRangeStatus {
   // Current range status
   isInRange Boolean
 
-  // Last price data when status was recorded
-  lastSqrtPriceX96 String // bigint as string
-  lastTick         Int
-  lastCheckedAt    DateTime
+  // Protocol-specific data (e.g., lastSqrtPriceX96, lastTick for UniswapV3)
+  data          Json @default("{}")
+  lastCheckedAt DateTime
 
   @@index([isInRange])
   @@map("position_range_statuses")

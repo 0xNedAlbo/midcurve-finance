@@ -82,7 +82,7 @@ interface PositionTrackingInfo {
   poolAddress: string;
   currentRangeStatus: {
     isInRange: boolean;
-    lastTick: number;
+    data: { lastTick: number; lastSqrtPriceX96: string };
   } | null;
 }
 
@@ -275,7 +275,7 @@ export class RangeMonitor {
         currentRangeStatus: position.rangeStatus
           ? {
               isInRange: position.rangeStatus.isInRange,
-              lastTick: position.rangeStatus.lastTick,
+              data: position.rangeStatus.data as { lastTick: number; lastSqrtPriceX96: string },
             }
           : null,
       };
@@ -309,15 +309,13 @@ export class RangeMonitor {
         where: { positionId: position.positionId },
         update: {
           isInRange: nowInRange,
-          lastSqrtPriceX96: sqrtPriceX96,
-          lastTick: currentTick,
+          data: { lastSqrtPriceX96: sqrtPriceX96, lastTick: currentTick },
           lastCheckedAt: new Date(),
         },
         create: {
           positionId: position.positionId,
           isInRange: nowInRange,
-          lastSqrtPriceX96: sqrtPriceX96,
-          lastTick: currentTick,
+          data: { lastSqrtPriceX96: sqrtPriceX96, lastTick: currentTick },
           lastCheckedAt: new Date(),
         },
       });

@@ -614,8 +614,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         deltaCollectedYield: true,
         collectedYieldAfter: true,
         tokenValue: true,
-        token0Amount: true,
-        token1Amount: true,
+        state: true,
       },
     });
   }
@@ -641,7 +640,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const position = await prisma.position.findUnique({
       where: { id: positionId },
       select: {
-        isToken0Quote: true,
         protocol: true,
         config: true,
         user: { select: { reportingCurrency: true } },
@@ -668,7 +666,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     if (!token0Row) throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
     if (!token1Row) throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
 
-    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
+    const isToken0Quote = positionConfig.isToken0Quote as boolean;
+    const quoteToken = isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
 
     // Phase 1: only USD supported. For non-USD, falls back to 1.0.
