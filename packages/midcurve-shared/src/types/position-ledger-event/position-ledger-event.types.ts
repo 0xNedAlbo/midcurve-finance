@@ -11,7 +11,7 @@
 /**
  * Supported protocols for ledger events
  */
-export type LedgerEventProtocol = 'uniswapv3';
+export type LedgerEventProtocol = 'uniswapv3' | 'uniswapv3-vault';
 
 // ============================================================================
 // EVENT TYPES
@@ -36,7 +36,12 @@ export type EventType =
   | 'COLLECT'
   | 'MINT'
   | 'BURN'
-  | 'TRANSFER';
+  | 'TRANSFER'
+  | 'VAULT_MINT'
+  | 'VAULT_BURN'
+  | 'VAULT_COLLECT_YIELD'
+  | 'VAULT_TRANSFER_IN'
+  | 'VAULT_TRANSFER_OUT';
 
 // ============================================================================
 // REWARD STRUCTURE

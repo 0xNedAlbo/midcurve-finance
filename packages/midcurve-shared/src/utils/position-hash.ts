@@ -31,18 +31,22 @@ export interface UniswapV3PositionHashData {
   nftId: number;
 }
 
-// Future protocols:
-// export interface OrcaPositionHashData {
-//   protocol: 'orca';
-//   positionId: string;
-// }
+/**
+ * Parsed UniswapV3 Vault position hash
+ */
+export interface UniswapV3VaultPositionHashData {
+  protocol: 'uniswapv3-vault';
+  chainId: number;
+  vaultAddress: string;
+}
 
 /**
  * Discriminated union of all parsed position hash types.
  * Extend this union when adding new protocol support.
  */
-export type ParsedPositionHash = UniswapV3PositionHashData;
-// Future: | OrcaPositionHashData;
+export type ParsedPositionHash =
+  | UniswapV3PositionHashData
+  | UniswapV3VaultPositionHashData;
 
 // ============================================================================
 // PARSING
@@ -83,6 +87,23 @@ export function parsePositionHash(hash: string): ParsedPositionHash {
         throw new Error(`Invalid nftId in positionHash: "${parts[2]}"`);
       }
       return { protocol: 'uniswapv3', chainId, nftId };
+    }
+
+    case 'uniswapv3-vault': {
+      if (parts.length !== 3) {
+        throw new Error(
+          `Invalid uniswapv3-vault positionHash: "${hash}" (expected "uniswapv3-vault/{chainId}/{vaultAddress}")`
+        );
+      }
+      const chainId = Number(parts[1]);
+      const vaultAddress = parts[2]!;
+      if (!Number.isInteger(chainId) || chainId <= 0) {
+        throw new Error(`Invalid chainId in positionHash: "${parts[1]}"`);
+      }
+      if (!vaultAddress || !vaultAddress.startsWith('0x')) {
+        throw new Error(`Invalid vaultAddress in positionHash: "${parts[2]}"`);
+      }
+      return { protocol: 'uniswapv3-vault', chainId, vaultAddress };
     }
 
     default:

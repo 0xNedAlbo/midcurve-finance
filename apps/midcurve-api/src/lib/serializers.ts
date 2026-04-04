@@ -202,7 +202,7 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
   return {
     id: position.id,
     positionHash: position.positionHash,
-    protocol: position.protocol,
+    protocol: position.protocol as 'uniswapv3',
     userId: position.userId,
 
     type: position.type,

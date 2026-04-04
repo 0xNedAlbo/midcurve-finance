@@ -21,5 +21,8 @@ export {
   type ImportLogsResult,
 } from './uniswapv3-ledger-service.js';
 
+export { UniswapV3VaultLedgerService } from './uniswapv3-vault-ledger-service.js';
+export type { UniswapV3VaultLedgerServiceDependencies } from './uniswapv3-vault-ledger-service.js';
+
 // Re-export APR types for backward compatibility
 export type { AprPeriodData } from '../types/position-apr/index.js';

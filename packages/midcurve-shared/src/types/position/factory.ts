@@ -12,6 +12,10 @@ import {
   UniswapV3Position,
   type UniswapV3PositionRow,
 } from './uniswapv3/uniswapv3-position.js';
+import {
+  UniswapV3VaultPosition,
+  type UniswapV3VaultPositionRow,
+} from './uniswapv3-vault/uniswapv3-vault-position.js';
 
 // ============================================================================
 // POSITION FACTORY
@@ -50,6 +54,9 @@ export class PositionFactory {
       case 'uniswapv3':
         return UniswapV3Position.fromDB(row as UniswapV3PositionRow, token0, token1);
 
+      case 'uniswapv3-vault':
+        return UniswapV3VaultPosition.fromDB(row as UniswapV3VaultPositionRow, token0, token1);
+
       default:
         throw new Error(`Unknown position protocol: ${row.protocol}`);
     }
@@ -72,6 +79,17 @@ export class PositionFactory {
       case 'uniswapv3':
         return UniswapV3Position.fromJSON(json);
 
+      case 'uniswapv3-vault': {
+        // fromJSON requires tokens — extract from pool if available
+        const token0 = json.pool?.token0;
+        const token1 = json.pool?.token1;
+        if (!token0 || !token1) {
+          throw new Error('UniswapV3VaultPosition.fromJSON requires pool.token0 and pool.token1');
+        }
+        // Token reconstruction handled by the concrete fromJSON
+        return UniswapV3VaultPosition.fromJSON(json, token0 as unknown as TokenInterface, token1 as unknown as TokenInterface);
+      }
+
       default:
         throw new Error(`Unknown position protocol: ${json.protocol}`);
     }
@@ -84,6 +102,6 @@ export class PositionFactory {
    * @returns True if protocol is supported
    */
   static isSupported(protocol: string): protocol is PositionProtocol {
-    return ['uniswapv3'].includes(protocol);
+    return ['uniswapv3', 'uniswapv3-vault'].includes(protocol);
   }
 }

@@ -16,13 +16,13 @@ import type { TokenInterface } from '../token/index.js';
  * Supported position protocols.
  * Extensible for future protocols (orca, raydium, etc.)
  */
-export type PositionProtocol = 'uniswapv3';
+export type PositionProtocol = 'uniswapv3' | 'uniswapv3-vault';
 
 /**
  * Supported position types.
  * Describes the category of DeFi position (not the protocol).
  */
-export type PositionType = 'LP_CONCENTRATED';
+export type PositionType = 'LP_CONCENTRATED' | 'VAULT_SHARES';
 
 // ============================================================================
 // PNL SIMULATION
