@@ -3,7 +3,7 @@
  *
  * Polls the pool price every 5 seconds via the pool price watcher subscription
  * and recalculates price-dependent metrics (currentValue, unrealizedPnl,
- * unClaimedFees) client-side. Returns a fully populated position structure
+ * unclaimedYield) client-side. Returns a fully populated position structure
  * so all child components automatically reflect the live price.
  *
  * Works alongside:
@@ -58,18 +58,18 @@ export function useUniswapV3LiveMetrics(
     );
 
     // Unrealized PnL = currentValue - costBasis
-    const unrealizedPnl = currentValue - BigInt(position.currentCostBasis);
+    const unrealizedPnl = currentValue - BigInt(position.costBasis);
 
     // Unclaimed fees: convert token0/token1 amounts to quote token value at live price
     const unclaimedFees0 = BigInt(state.unclaimedFees0);
     const unclaimedFees1 = BigInt(state.unclaimedFees1);
-    let unClaimedFees: bigint;
+    let unclaimedYield: bigint;
     if (position.isToken0Quote) {
-      unClaimedFees =
+      unclaimedYield =
         unclaimedFees0 +
         valueOfToken1AmountInToken0(unclaimedFees1, sqrtPriceX96BigInt);
     } else {
-      unClaimedFees =
+      unclaimedYield =
         unclaimedFees1 +
         valueOfToken0AmountInToken1(unclaimedFees0, sqrtPriceX96BigInt);
     }
@@ -85,7 +85,7 @@ export function useUniswapV3LiveMetrics(
       ...position,
       currentValue: currentValue.toString(),
       unrealizedPnl: unrealizedPnl.toString(),
-      unClaimedFees: unClaimedFees.toString(),
+      unclaimedYield: unclaimedYield.toString(),
       pool: {
         ...position.pool,
         state: livePoolState,

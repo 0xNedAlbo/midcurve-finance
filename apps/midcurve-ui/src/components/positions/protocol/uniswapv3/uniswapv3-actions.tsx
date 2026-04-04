@@ -35,7 +35,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const location = useLocation();
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showBurnModal, setShowBurnModal] = useState(false);
-  const hasUnclaimedFees = BigInt(position.unClaimedFees) > 0n;
+  const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
 
   // Position lifecycle state
   const positionState = position.state as { isClosed?: boolean; ownerAddress: string };

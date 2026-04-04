@@ -29,9 +29,9 @@ export function UniswapV3HistoryTab({ position }: UniswapV3HistoryTabProps) {
       {/* Section 1: PnL Breakdown */}
       <PnLBreakdown
         currentValue={position.currentValue}
-        currentCostBasis={position.currentCostBasis}
-        collectedFees={position.collectedFees}
-        unclaimedFees={position.unClaimedFees}
+        costBasis={position.costBasis}
+        collectedYield={position.collectedYield}
+        unclaimedFees={position.unclaimedYield}
         realizedPnL={position.realizedPnl}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}

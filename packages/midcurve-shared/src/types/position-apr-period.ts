@@ -9,7 +9,7 @@
  * - End: Next COLLECT event or current time (for active periods)
  *
  * APR Calculation:
- * APR (basis points) = (collectedFeeValue / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × 10000
+ * APR (basis points) = (collectedYieldValue / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × 10000
  *
  * Example:
  * - Cost basis: 10,000 USDC
@@ -135,9 +135,9 @@ export interface PositionAprPeriod {
    *
    * @example
    * // 50 USDC collected in fees
-   * collectedFeeValue = 50_000000n
+   * collectedYieldValue = 50_000000n
    */
-  collectedFeeValue: bigint;
+  collectedYieldValue: bigint;
 
   // ==========================================================================
   // APR METRIC
@@ -147,7 +147,7 @@ export interface PositionAprPeriod {
    * Annual Percentage Rate in basis points
    *
    * Formula:
-   * APR (bps) = (collectedFeeValue / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × 10000
+   * APR (bps) = (collectedYieldValue / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × 10000
    *
    * Where:
    * - SECONDS_PER_YEAR = 365.25 × 24 × 60 × 60 = 31,557,600
@@ -208,7 +208,7 @@ export interface AprPeriodSummary {
    * Fees collected (human-readable, in quote token units)
    * @example "50.00 USDC"
    */
-  feesCollected: string;
+  yieldCollected: string;
 
   /**
    * Is this period still active (no COLLECT event yet)?

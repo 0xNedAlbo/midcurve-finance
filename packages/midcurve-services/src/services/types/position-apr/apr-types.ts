@@ -23,7 +23,7 @@ export interface AprPeriodData {
     /** Time-weighted average cost basis during period (in quote token units) */
     costBasis: bigint;
     /** Total fees collected at end of period (in quote token units) */
-    collectedFeeValue: bigint;
+    collectedYieldValue: bigint;
     /** Annual Percentage Rate in basis points (e.g., 2500 = 25%) */
     aprBps: number;
     /** Number of events in this period */

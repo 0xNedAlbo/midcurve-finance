@@ -236,8 +236,8 @@ export interface PositionStateRefreshedPayload {
   currentValue: string;
   /** Unrealized PnL (as string for bigint) */
   unrealizedPnl: string;
-  /** Unclaimed fees in quote token (as string for bigint) */
-  unClaimedFees: string;
+  /** Unclaimed yield in quote token (as string for bigint) */
+  unclaimedYield: string;
 }
 
 // ============================================================

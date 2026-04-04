@@ -253,9 +253,9 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       deltaPnl: typeof row.deltaPnl === 'bigint' ? row.deltaPnl : BigInt(row.deltaPnl),
       pnlAfter: typeof row.pnlAfter === 'bigint' ? row.pnlAfter : BigInt(row.pnlAfter),
 
-      // Collected fees tracking (convert from string stored in DB to bigint)
-      deltaCollectedFees: typeof row.deltaCollectedFees === 'bigint' ? row.deltaCollectedFees : BigInt(row.deltaCollectedFees),
-      collectedFeesAfter: typeof row.collectedFeesAfter === 'bigint' ? row.collectedFeesAfter : BigInt(row.collectedFeesAfter),
+      // Collected yield tracking (convert from string stored in DB to bigint)
+      deltaCollectedYield: typeof row.deltaCollectedYield === 'bigint' ? row.deltaCollectedYield : BigInt(row.deltaCollectedYield),
+      collectedYieldAfter: typeof row.collectedYieldAfter === 'bigint' ? row.collectedYieldAfter : BigInt(row.collectedYieldAfter),
 
       // Realized cashflow tracking (always 0 for AMM positions)
       deltaRealizedCashflow: typeof row.deltaRealizedCashflow === 'bigint' ? row.deltaRealizedCashflow : BigInt(row.deltaRealizedCashflow),

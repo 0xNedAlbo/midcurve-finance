@@ -191,6 +191,9 @@ model Position {
   // Protocol identification
   protocol String // 'uniswapv3', etc.
 
+  // Position type classification
+  type String // 'LP_CONCENTRATED', etc.
+
   // Data ownership
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -204,26 +207,28 @@ model Position {
   positionHash String?
 
   // PnL related fields (stored as string for bigint precision)
-  currentValue     String // bigint as string
-  currentCostBasis String // bigint as string
-  realizedPnl      String // bigint as string
-  unrealizedPnl    String // bigint as string
+  currentValue String // bigint as string
+  costBasis    String // bigint as string
+  realizedPnl  String // bigint as string
+  unrealizedPnl String // bigint as string
 
   // General cash flow fields for non-AMM protocols (stored as string for bigint precision)
-  // For UniswapV3: always "0" (unused - fees tracked in collectedFees/unClaimedFees)
+  // For UniswapV3: always "0" (unused - yield tracked in collectedYield/unclaimedYield)
   // For Hyperliquid: funding payments, interest, etc.
   // Total Realized PnL = realizedPnl + realizedCashflow
   // Total Unrealized PnL = unrealizedPnl + unrealizedCashflow
   realizedCashflow   String @default("0") // bigint as string - locked-in cash flow
   unrealizedCashflow String @default("0") // bigint as string - pending cash flow
 
-  // Cash flow related fields for AMM protocols (stored as string for bigint precision)
-  collectedFees       String // bigint as string
-  unClaimedFees       String // bigint as string
-  lastFeesCollectedAt DateTime? // null = no fees collected yet
+  // Yield fields (stored as string for bigint precision)
+  collectedYield    String // bigint as string
+  unclaimedYield    String // bigint as string
+  lastYieldClaimedAt DateTime? // null = no yield claimed yet
 
   // APR metrics
-  totalApr Float? // Total APR (time-weighted across all periods + unrealized), null if below threshold
+  baseApr   Float? // Base APR (fee/yield APR), null if below threshold
+  rewardApr Float? // Reward APR (incentive programs), null if not applicable
+  totalApr  Float? // Total APR (baseApr + rewardApr), null if below threshold
 
   // Price range (stored as string for bigint precision)
   priceRangeLower String // bigint as string
@@ -252,6 +257,7 @@ model Position {
   @@unique([userId, positionHash]) // Same user can't import same position twice; allows multi-user watching
   // Indexes for efficient queries
   @@index([protocol])
+  @@index([type])
   @@index([userId])
   @@index([isActive])
   @@map("positions")
@@ -294,8 +300,8 @@ model PositionLedgerEvent {
   costBasisAfter      String // bigint as string - Cumulative cost basis after this event
   deltaPnl            String // bigint as string - Change in realized PnL from this event
   pnlAfter            String // bigint as string - Cumulative realized PnL after this event
-  deltaCollectedFees      String @default("0") // bigint as string - Fees collected in this event
-  collectedFeesAfter      String @default("0") // bigint as string - Cumulative collected fees after this event
+  deltaCollectedYield      String @default("0") // bigint as string - Yield collected in this event
+  collectedYieldAfter      String @default("0") // bigint as string - Cumulative collected yield after this event
   deltaRealizedCashflow   String @default("0") // bigint as string - Realized cashflow in this event (perpetuals, etc.)
   realizedCashflowAfter   String @default("0") // bigint as string - Cumulative realized cashflow after this event
 
@@ -333,7 +339,7 @@ model PositionAprPeriod {
 
   // Financial metrics (stored as string for bigint precision)
   costBasis         String // Average cost basis during period (in quote token units)
-  collectedFeeValue String // Total fees collected during period (in quote token units)
+  collectedYieldValue String // Total yield collected during period (in quote token units)
 
   // APR calculation
   aprBps Int // Annual Percentage Rate in basis points (e.g., 2500 = 25.00%)

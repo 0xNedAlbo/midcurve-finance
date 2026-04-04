@@ -99,7 +99,7 @@ export function UniswapV3MiniPnLCurve({
 
     try {
       const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
-      const costBasis = BigInt(position.currentCostBasis);
+      const costBasis = BigInt(position.costBasis);
       if (costBasis === 0n) return null;
 
       const basePosition = UniswapV3Position.forSimulation({
@@ -121,7 +121,7 @@ export function UniswapV3MiniPnLCurve({
     } catch {
       return null;
     }
-  }, [position.pool, position.config, position.state, position.isToken0Quote, position.currentCostBasis, closeOrderData]);
+  }, [position.pool, position.config, position.state, position.isToken0Quote, position.costBasis, closeOrderData]);
 
   // Generate PnL curve data locally
   const curveData = useMemo(() => {

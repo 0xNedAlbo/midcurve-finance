@@ -38,7 +38,7 @@ export interface AprPeriodData {
 
   // Financial metrics (bigint → string)
   costBasis: string;
-  collectedFeeValue: string;
+  collectedYieldValue: string;
 
   // APR metric
   aprBps: number;

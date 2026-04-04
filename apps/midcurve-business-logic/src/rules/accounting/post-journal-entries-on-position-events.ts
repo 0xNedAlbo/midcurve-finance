@@ -182,7 +182,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const costBasis = position.currentCostBasis;
+    const costBasis = position.costBasis;
     if (!costBasis || costBasis === '0') return;
 
     const ctx = await this.getReportingContext(position.id);
@@ -233,10 +233,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       if (!(await this.journalService.isProcessed(foundationEventId))) {
         const position = await prisma.position.findUnique({
           where: { id: positionId },
-          select: { currentCostBasis: true },
+          select: { costBasis: true },
         });
 
-        const costBasis = position?.currentCostBasis ?? '0';
+        const costBasis = position?.costBasis ?? '0';
         if (costBasis !== '0') {
           const lines = new JournalLineBuilder()
             .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
@@ -611,8 +611,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         costBasisAfter: true,
         deltaPnl: true,
         pnlAfter: true,
-        deltaCollectedFees: true,
-        collectedFeesAfter: true,
+        deltaCollectedYield: true,
+        collectedYieldAfter: true,
         tokenValue: true,
         token0Amount: true,
         token1Amount: true,

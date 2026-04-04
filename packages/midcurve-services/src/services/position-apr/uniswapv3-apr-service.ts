@@ -141,7 +141,7 @@ export class UniswapV3AprService {
                 endTimestamp: period.endTimestamp,
                 durationSeconds: period.durationSeconds,
                 costBasis: period.costBasis.toString(),
-                collectedFeeValue: period.collectedFeeValue.toString(),
+                collectedYieldValue: period.collectedYieldValue.toString(),
                 aprBps: period.aprBps,
                 eventCount: period.eventCount,
             },
@@ -175,8 +175,8 @@ export class UniswapV3AprService {
     async calculateSummary(
         params: {
             positionOpenedAt: Date;
-            currentCostBasis: bigint;
-            unClaimedFees: bigint;
+            costBasis: bigint;
+            unclaimedYield: bigint;
         },
         blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
@@ -189,7 +189,7 @@ export class UniswapV3AprService {
         let realizedTotalSeconds = 0;
 
         for (const period of aprPeriods) {
-            realizedFees += period.collectedFeeValue;
+            realizedFees += period.collectedYieldValue;
             realizedWeightedCostBasisSum +=
                 period.costBasis * BigInt(period.durationSeconds);
             realizedTotalSeconds += period.durationSeconds;
@@ -208,8 +208,8 @@ export class UniswapV3AprService {
                 : 0;
 
         // Unrealized metrics from current state
-        const unrealizedFees = params.unClaimedFees;
-        const unrealizedCostBasis = params.currentCostBasis;
+        const unrealizedFees = params.unclaimedYield;
+        const unrealizedCostBasis = params.costBasis;
         const firstPeriod = aprPeriods[0];
         const lastPeriodEnd = firstPeriod
             ? firstPeriod.endTimestamp
@@ -248,6 +248,8 @@ export class UniswapV3AprService {
             unrealizedActiveDays: Math.round(unrealizedActiveDays * 10) / 10,
             unrealizedApr,
             totalApr,
+            baseApr: totalApr,
+            rewardApr: 0,
             totalActiveDays: Math.round(totalActiveDays * 10) / 10,
             belowThreshold,
         };
@@ -267,7 +269,7 @@ export class UniswapV3AprService {
         endTimestamp: Date;
         durationSeconds: number;
         costBasis: string;
-        collectedFeeValue: string;
+        collectedYieldValue: string;
         aprBps: number;
         eventCount: number;
     }): AprPeriodData {
@@ -278,7 +280,7 @@ export class UniswapV3AprService {
             endTimestamp: period.endTimestamp,
             durationSeconds: period.durationSeconds,
             costBasis: BigInt(period.costBasis),
-            collectedFeeValue: BigInt(period.collectedFeeValue),
+            collectedYieldValue: BigInt(period.collectedYieldValue),
             aprBps: period.aprBps,
             eventCount: period.eventCount,
         };

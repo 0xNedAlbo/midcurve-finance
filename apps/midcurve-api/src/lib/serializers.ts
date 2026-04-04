@@ -205,19 +205,23 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     protocol: position.protocol,
     userId: position.userId,
 
+    type: position.type,
+
     // PnL fields (bigint → string)
     currentValue: position.currentValue.toString(),
-    currentCostBasis: position.currentCostBasis.toString(),
+    costBasis: position.costBasis.toString(),
     realizedPnl: position.realizedPnl.toString(),
     unrealizedPnl: position.unrealizedPnl.toString(),
     realizedCashflow: position.realizedCashflow.toString(),
     unrealizedCashflow: position.unrealizedCashflow.toString(),
 
-    // Fee fields (bigint → string)
-    collectedFees: position.collectedFees.toString(),
-    unClaimedFees: position.unClaimedFees.toString(),
-    lastFeesCollectedAt: position.lastFeesCollectedAt.toISOString(),
+    // Yield fields (bigint → string)
+    collectedYield: position.collectedYield.toString(),
+    unclaimedYield: position.unclaimedYield.toString(),
+    lastYieldClaimedAt: position.lastYieldClaimedAt.toISOString(),
     totalApr: position.totalApr,
+    baseApr: position.baseApr ?? null,
+    rewardApr: position.rewardApr ?? null,
 
     // Price range (bigint → string)
     priceRangeLower: position.priceRangeLower.toString(),

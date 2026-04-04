@@ -45,8 +45,8 @@ interface LedgerEventRow {
   costBasisAfter: string;
   deltaPnl: string;
   pnlAfter: string;
-  deltaCollectedFees: string;
-  collectedFeesAfter: string;
+  deltaCollectedYield: string;
+  collectedYieldAfter: string;
 }
 
 const FLOAT_TO_BIGINT_SCALE = 1e8;
@@ -150,8 +150,8 @@ export class JournalBackfillService {
         costBasisAfter: true,
         deltaPnl: true,
         pnlAfter: true,
-        deltaCollectedFees: true,
-        collectedFeesAfter: true,
+        deltaCollectedYield: true,
+        collectedYieldAfter: true,
       },
     });
 
@@ -440,7 +440,7 @@ export class JournalBackfillService {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
 
-    const totalFees = BigInt(event.deltaCollectedFees);
+    const totalFees = BigInt(event.deltaCollectedYield);
     if (totalFees <= 0n) return false;
 
     const lines = new JournalLineBuilder()

@@ -18,6 +18,12 @@ import type { TokenInterface } from '../token/index.js';
  */
 export type PositionProtocol = 'uniswapv3';
 
+/**
+ * Supported position types.
+ * Describes the category of DeFi position (not the protocol).
+ */
+export type PositionType = 'LP_CONCENTRATED';
+
 // ============================================================================
 // PNL SIMULATION
 // ============================================================================
@@ -52,21 +58,26 @@ export interface PositionJSON {
   positionHash: string;
   userId: string;
   protocol: PositionProtocol;
+  type: string;
   pool: PoolJSON;
   isToken0Quote: boolean;
 
   // PnL fields (bigint as string)
   currentValue: string;
-  currentCostBasis: string;
+  costBasis: string;
   realizedPnl: string;
   unrealizedPnl: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
 
-  // Fee fields
-  collectedFees: string;
-  unClaimedFees: string;
-  lastFeesCollectedAt: string;
+  // Yield fields
+  collectedYield: string;
+  unclaimedYield: string;
+  lastYieldClaimedAt: string;
+
+  // APR fields
+  baseApr: number | null;
+  rewardApr: number | null;
   totalApr: number | null;
 
   // Price range (bigint as string)
@@ -99,22 +110,27 @@ export interface BasePositionParams {
   id: string;
   positionHash: string;
   userId: string;
+  type: string;
   token0: TokenInterface;
   token1: TokenInterface;
   isToken0Quote: boolean;
 
   // PnL fields
   currentValue: bigint;
-  currentCostBasis: bigint;
+  costBasis: bigint;
   realizedPnl: bigint;
   unrealizedPnl: bigint;
   realizedCashflow: bigint;
   unrealizedCashflow: bigint;
 
-  // Fee fields
-  collectedFees: bigint;
-  unClaimedFees: bigint;
-  lastFeesCollectedAt: Date;
+  // Yield fields
+  collectedYield: bigint;
+  unclaimedYield: bigint;
+  lastYieldClaimedAt: Date;
+
+  // APR fields
+  baseApr: number | null;
+  rewardApr: number | null;
   totalApr: number | null;
 
   // Price range
@@ -144,21 +160,25 @@ export interface PositionRow {
   positionHash: string;
   userId: string;
   protocol: string;
-  poolId: string; // Kept temporarily during migration, removed in Phase 5
+  type: string;
   isToken0Quote: boolean;
 
   // PnL fields (Prisma returns bigint)
   currentValue: bigint;
-  currentCostBasis: bigint;
+  costBasis: bigint;
   realizedPnl: bigint;
   unrealizedPnl: bigint;
   realizedCashflow: bigint;
   unrealizedCashflow: bigint;
 
-  // Fee fields
-  collectedFees: bigint;
-  unClaimedFees: bigint;
-  lastFeesCollectedAt: Date;
+  // Yield fields
+  collectedYield: bigint;
+  unclaimedYield: bigint;
+  lastYieldClaimedAt: Date;
+
+  // APR fields
+  baseApr: number | null;
+  rewardApr: number | null;
   totalApr: number | null;
 
   // Price range

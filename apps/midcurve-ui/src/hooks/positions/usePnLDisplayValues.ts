@@ -9,7 +9,7 @@ import { useMemo } from "react";
 
 interface PnlBreakdown {
   currentValue: string;
-  currentCostBasis: string;
+  costBasis: string;
   realizedPnL: string;
   unclaimedFees: string;
 }
@@ -48,9 +48,9 @@ export function usePnLDisplayValues(
 
     // Calculate total PnL including fees
     // Total PnL = realizedPnL + unrealizedPnL + unclaimedFees
-    // Where unrealizedPnL = currentValue - currentCostBasis
-    // Note: realizedPnL already includes collectedFees (fees are added to pnlAfter in the ledger)
-    const unrealizedPnL = BigInt(pnlData.currentValue) - BigInt(pnlData.currentCostBasis);
+    // Where unrealizedPnL = currentValue - costBasis
+    // Note: realizedPnL already includes collectedYield (fees are added to pnlAfter in the ledger)
+    const unrealizedPnL = BigInt(pnlData.currentValue) - BigInt(pnlData.costBasis);
     const totalPnL =
       BigInt(pnlData.realizedPnL) +
       unrealizedPnL +

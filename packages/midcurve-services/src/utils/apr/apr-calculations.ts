@@ -37,11 +37,11 @@ export const BASIS_POINTS_MULTIPLIER = 10_000;
  * Calculate APR in basis points from fee collection data
  *
  * Formula:
- * APR (bps) = (collectedFeeValue / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × 10000
+ * APR (bps) = (collectedYieldValue / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × 10000
  *
  * This annualizes the return and expresses it in basis points.
  *
- * @param collectedFeeValue - Total fees collected during period (in smallest quote token units)
+ * @param collectedYieldValue - Total fees collected during period (in smallest quote token units)
  * @param costBasis - Average cost basis during period (in smallest quote token units)
  * @param durationSeconds - Duration of the period in seconds
  * @returns APR in basis points (e.g., 2500 = 25%)
@@ -70,7 +70,7 @@ export const BASIS_POINTS_MULTIPLIER = 10_000;
  * ```
  */
 export function calculateAprBps(
-  collectedFeeValue: bigint,
+  collectedYieldValue: bigint,
   costBasis: bigint,
   durationSeconds: number
 ): number {
@@ -83,19 +83,19 @@ export function calculateAprBps(
     throw new Error('Duration must be positive');
   }
 
-  if (collectedFeeValue < 0n) {
+  if (collectedYieldValue < 0n) {
     throw new Error('Collected fee value cannot be negative');
   }
 
   // Special case: no fees collected
-  if (collectedFeeValue === 0n) {
+  if (collectedYieldValue === 0n) {
     return 0;
   }
 
   // Calculate APR in basis points
   // Formula: (fees / costBasis) × (SECONDS_PER_YEAR / durationSeconds) × BASIS_POINTS_MULTIPLIER
   // To avoid precision loss, we multiply numerators first, then divide by denominators
-  const numerator = collectedFeeValue * BigInt(SECONDS_PER_YEAR) * BigInt(BASIS_POINTS_MULTIPLIER);
+  const numerator = collectedYieldValue * BigInt(SECONDS_PER_YEAR) * BigInt(BASIS_POINTS_MULTIPLIER);
   const denominator = costBasis * BigInt(durationSeconds);
 
   const aprBps = Number(numerator / denominator);

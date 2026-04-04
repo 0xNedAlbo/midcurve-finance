@@ -45,9 +45,9 @@ export interface PositionStates {
  */
 interface PnlBreakdown {
   currentValue: string;
-  currentCostBasis: string;
+  costBasis: string;
   realizedPnL: string;
-  collectedFees: string;
+  collectedYield: string;
   unclaimedFees: string;
 }
 
@@ -134,9 +134,9 @@ function calculatePositionStateAtTick(
   );
 
   // Get PnL components (default to 0 if no breakdown available)
-  const currentCostBasis = pnlBreakdown ? BigInt(pnlBreakdown.currentCostBasis) : 0n;
+  const currentCostBasis = pnlBreakdown ? BigInt(pnlBreakdown.costBasis) : 0n;
   const realizedPnL = pnlBreakdown ? BigInt(pnlBreakdown.realizedPnL) : 0n;
-  const collectedFees = pnlBreakdown ? BigInt(pnlBreakdown.collectedFees) : 0n;
+  const collectedFees = pnlBreakdown ? BigInt(pnlBreakdown.collectedYield) : 0n;
   const unclaimedFees = pnlBreakdown ? BigInt(pnlBreakdown.unclaimedFees) : 0n;
 
   // Calculate PnL including and excluding fees
@@ -312,7 +312,7 @@ export function calculatePositionStates(
   const quoteTokenConfig = quoteToken.config as { address: string };
 
   const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
-  const costBasis = BigInt(pnlBreakdown.currentCostBasis);
+  const costBasis = BigInt(pnlBreakdown.costBasis);
   const liquidity = BigInt(position.state.liquidity);
 
   const basePosition = UniswapV3Position.forSimulation({
@@ -349,7 +349,7 @@ export function calculatePositionStates(
   );
 
   const realizedPnL = BigInt(pnlBreakdown.realizedPnL);
-  const collectedFees = BigInt(pnlBreakdown.collectedFees);
+  const collectedFees = BigInt(pnlBreakdown.collectedYield);
 
   // Lower range: if SL trigger price is above the lower range boundary,
   // the trigger fires before reaching the range boundary
@@ -415,11 +415,11 @@ export function calculateBreakEvenPrice(
   const quoteTokenConfig = quoteToken.config as { address: string };
 
   // Calculate target value (net investment amount)
-  const currentCostBasis = BigInt(pnlBreakdown.currentCostBasis);
+  const currentCostBasis = BigInt(pnlBreakdown.costBasis);
   const realizedPnL = BigInt(pnlBreakdown.realizedPnL);
   const unclaimedFees = BigInt(pnlBreakdown.unclaimedFees);
 
-  // Note: realizedPnL already includes collectedFees
+  // Note: realizedPnL already includes collectedYield
   const targetValue =
     currentCostBasis - realizedPnL - unclaimedFees;
 

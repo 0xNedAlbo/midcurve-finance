@@ -96,7 +96,7 @@ export function PortfolioSimulator({ position }: PortfolioSimulatorProps) {
       tickLower: positionConfig.tickLower,
       tickUpper: positionConfig.tickUpper,
       liquidity: BigInt(position.state.liquidity),
-      costBasis: BigInt(position.currentCostBasis),
+      costBasis: BigInt(position.costBasis),
     });
 
     const eng = createUniswapV3SimulationEngine({

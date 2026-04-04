@@ -75,11 +75,11 @@ import { CacheService } from "../cache/cache-service.js";
 import { UniswapV3CloseOrderService } from "../close-order/uniswapv3-close-order-service.js";
 
 /**
- * Fee state for a position
+ * Yield state for a position
  *
- * Contains all fee-related fields that can be refreshed independently.
+ * Contains all yield-related fields that can be refreshed independently.
  */
-export interface PositionFeeState {
+export interface PositionYieldState {
     /** Fee growth inside the position's tick range for token0 */
     feeGrowthInside0LastX128: bigint;
     /** Fee growth inside the position's tick range for token1 */
@@ -205,17 +205,20 @@ export interface PositionDbResult {
     positionHash: string | null;
     createdAt: Date;
     updatedAt: Date;
+    type: string;
     protocol: string;
     userId: string;
     currentValue: string; // Prisma returns bigint as string
-    currentCostBasis: string;
+    costBasis: string;
     realizedPnl: string;
     unrealizedPnl: string;
     realizedCashflow: string;
     unrealizedCashflow: string;
-    collectedFees: string;
-    unClaimedFees: string;
-    lastFeesCollectedAt: Date;
+    collectedYield: string;
+    unclaimedYield: string;
+    lastYieldClaimedAt: Date;
+    baseApr: number | null;
+    rewardApr: number | null;
     totalApr: number | null;
     priceRangeLower: string;
     priceRangeUpper: string;
@@ -1166,12 +1169,12 @@ export class UniswapV3PositionService {
      *
      * Updates (common fields via refreshMetrics):
      * - currentValue (from pool price + position amounts)
-     * - currentCostBasis (from ledger events)
+     * - costBasis (from ledger events)
      * - realizedPnl (from ledger events)
      * - unrealizedPnl (currentValue - costBasis)
-     * - collectedFees (from ledger events)
-     * - unClaimedFees (from on-chain state, converted to quote)
-     * - lastFeesCollectedAt (from most recent COLLECT event)
+     * - collectedYield (from ledger events)
+     * - unclaimedYield (from on-chain state, converted to quote)
+     * - lastYieldClaimedAt (from most recent COLLECT event)
      * - priceRangeLower/Upper (from tick bounds)
      * - Pool state (sqrtPriceX96, currentTick, etc.)
      *
@@ -1499,7 +1502,7 @@ export class UniswapV3PositionService {
                 {
                     positionId: id,
                     currentValue: refreshedPosition.currentValue.toString(),
-                    costBasis: refreshedPosition.currentCostBasis.toString(),
+                    costBasis: refreshedPosition.costBasis.toString(),
                     realizedPnl: refreshedPosition.realizedPnl.toString(),
                     unrealizedPnl: refreshedPosition.unrealizedPnl.toString(),
                 },
@@ -1654,8 +1657,8 @@ export class UniswapV3PositionService {
 
             if (validEventType === "COLLECT") {
                 const feeDelta =
-                    importResult.aggregates.collectedFeesAfter -
-                    importResult.preImportAggregates.collectedFeesAfter;
+                    importResult.aggregates.collectedYieldAfter -
+                    importResult.preImportAggregates.collectedYieldAfter;
                 await publisher.createAndPublish<PositionFeesCollectedPayload>(
                     {
                         type: "position.fees.collected",
@@ -2139,12 +2142,12 @@ export class UniswapV3PositionService {
      *
      * Calculates metrics at a specific block number using on-chain data:
      * - currentValue: Position value in quote token (from on-chain liquidity + pool price)
-     * - currentCostBasis: Cost basis from ledger events up to block
+     * - costBasis: Cost basis from ledger events up to block
      * - realizedPnl: Realized PnL from ledger events up to block
      * - unrealizedPnl: currentValue - costBasis
-     * - collectedFees: Total collected fees from ledger events up to block
-     * - unClaimedFees: Unclaimed fee value from on-chain fee state
-     * - lastFeesCollectedAt: Timestamp of last fee collection up to block
+     * - collectedYield: Total collected fees from ledger events up to block
+     * - unclaimedYield: Unclaimed fee value from on-chain fee state
+     * - lastYieldClaimedAt: Timestamp of last fee collection up to block
      * - priceRangeLower/Upper: Position bounds in quote token price
      *
      * @param id - Position ID
@@ -2201,10 +2204,10 @@ export class UniswapV3PositionService {
             );
 
             // 6. Extract values from ledger events (or defaults)
-            const currentCostBasis = latestEvent?.costBasisAfter ?? 0n;
+            const costBasis = latestEvent?.costBasisAfter ?? 0n;
             const realizedPnl = latestEvent?.pnlAfter ?? 0n;
-            const collectedFees = latestEvent?.collectedFeesAfter ?? 0n;
-            const lastFeesCollectedAt =
+            const collectedYield = latestEvent?.collectedYieldAfter ?? 0n;
+            const lastYieldClaimedAt =
                 lastCollectEvent?.timestamp ?? position.positionOpenedAt;
 
             // 7. Calculate current position value using fetched on-chain data
@@ -2217,10 +2220,10 @@ export class UniswapV3PositionService {
             );
 
             // 8. Calculate unrealized PnL
-            const unrealizedPnl = currentValue - currentCostBasis;
+            const unrealizedPnl = currentValue - costBasis;
 
             // 9. Calculate unclaimed fees in quote token from fee state
-            const unClaimedFees = calculateTokenValueInQuote(
+            const unclaimedYield = calculateTokenValueInQuote(
                 feeState.unclaimedFees0,
                 feeState.unclaimedFees1,
                 poolState.sqrtPriceX96,
@@ -2235,12 +2238,12 @@ export class UniswapV3PositionService {
 
             const metrics: UniswapV3PositionMetrics = {
                 currentValue,
-                currentCostBasis,
+                costBasis,
                 realizedPnl,
                 unrealizedPnl,
-                collectedFees,
-                unClaimedFees,
-                lastFeesCollectedAt,
+                collectedYield,
+                unclaimedYield,
+                lastYieldClaimedAt,
                 priceRangeLower,
                 priceRangeUpper,
             };
@@ -2250,9 +2253,9 @@ export class UniswapV3PositionService {
                     id,
                     blockNumber,
                     currentValue: currentValue.toString(),
-                    currentCostBasis: currentCostBasis.toString(),
+                    costBasis: costBasis.toString(),
                     unrealizedPnl: unrealizedPnl.toString(),
-                    unClaimedFees: unClaimedFees.toString(),
+                    unclaimedYield: unclaimedYield.toString(),
                 },
                 "Position metrics fetched",
             );
@@ -2275,8 +2278,8 @@ export class UniswapV3PositionService {
      * Fetch PnL summary breakdown without persisting to database.
      *
      * Returns:
-     * - Realized PnL: collectedFees + realizedPnl (from withdrawn assets)
-     * - Unrealized PnL: unClaimedFees + currentValue - currentCostBasis
+     * - Realized PnL: collectedYield + realizedPnl (from withdrawn assets)
+     * - Unrealized PnL: unclaimedYield + currentValue - costBasis
      * - Total PnL: realized + unrealized
      *
      * @param id - Position ID
@@ -2297,22 +2300,22 @@ export class UniswapV3PositionService {
             const metrics = await this.fetchMetrics(id, blockNumber, tx);
 
             // 2. Calculate subtotals
-            const realizedSubtotal = metrics.collectedFees + metrics.realizedPnl;
+            const realizedSubtotal = metrics.collectedYield + metrics.realizedPnl;
             const unrealizedSubtotal =
-                metrics.unClaimedFees +
+                metrics.unclaimedYield +
                 metrics.currentValue -
-                metrics.currentCostBasis;
+                metrics.costBasis;
             const totalPnl = realizedSubtotal + unrealizedSubtotal;
 
             const summary: UniswapV3PositionPnLSummary = {
                 // Realized
-                collectedFees: metrics.collectedFees,
+                collectedYield: metrics.collectedYield,
                 realizedPnl: metrics.realizedPnl,
                 realizedSubtotal,
                 // Unrealized
-                unClaimedFees: metrics.unClaimedFees,
+                unclaimedYield: metrics.unclaimedYield,
                 currentValue: metrics.currentValue,
-                currentCostBasis: metrics.currentCostBasis,
+                costBasis: metrics.costBasis,
                 unrealizedSubtotal,
                 // Total
                 totalPnl,
@@ -2378,8 +2381,8 @@ export class UniswapV3PositionService {
             const summary = await aprService.calculateSummary(
                 {
                     positionOpenedAt: position.positionOpenedAt,
-                    currentCostBasis: metrics.currentCostBasis,
-                    unClaimedFees: metrics.unClaimedFees,
+                    costBasis: metrics.costBasis,
+                    unclaimedYield: metrics.unclaimedYield,
                 },
                 blockNumber,
                 tx,
@@ -2493,7 +2496,7 @@ export class UniswapV3PositionService {
         id: string,
         blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
-    ): Promise<PositionFeeState> {
+    ): Promise<PositionYieldState> {
         log.methodEntry(this.logger, "fetchFeeState", { id, blockNumber });
 
         try {
@@ -2632,7 +2635,7 @@ export class UniswapV3PositionService {
             );
 
             // 7. Create and return fee state (no persistence)
-            const feeState: PositionFeeState = {
+            const feeState: PositionYieldState = {
                 feeGrowthInside0LastX128,
                 feeGrowthInside1LastX128,
                 tokensOwed0,
@@ -2823,7 +2826,7 @@ export class UniswapV3PositionService {
      */
     async updateFeeState(
         id: string,
-        feeState: PositionFeeState,
+        feeState: PositionYieldState,
         tx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "updateFeeState", {
@@ -3355,7 +3358,7 @@ export class UniswapV3PositionService {
         id: string,
         blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
-    ): Promise<PositionFeeState> {
+    ): Promise<PositionYieldState> {
         log.methodEntry(this.logger, "refreshFeeState", { id, blockNumber });
 
         try {
@@ -3398,12 +3401,12 @@ export class UniswapV3PositionService {
      *
      * Calculates and persists all financial metrics:
      * - currentValue (from pool price + position liquidity)
-     * - currentCostBasis (from ledger)
+     * - costBasis (from ledger)
      * - realizedPnl (from ledger)
      * - unrealizedPnl (currentValue - costBasis)
-     * - collectedFees (from ledger)
-     * - unClaimedFees (from on-chain state)
-     * - lastFeesCollectedAt (from ledger)
+     * - collectedYield (from ledger)
+     * - unclaimedYield (from on-chain state)
+     * - lastYieldClaimedAt (from ledger)
      * - priceRangeLower/Upper (from ticks)
      *
      * Also refreshes pool state to ensure accurate price data.
@@ -3439,8 +3442,8 @@ export class UniswapV3PositionService {
             const aprSummary = await aprService.calculateSummary(
                 {
                     positionOpenedAt: position.positionOpenedAt,
-                    currentCostBasis: metrics.currentCostBasis,
-                    unClaimedFees: metrics.unClaimedFees,
+                    costBasis: metrics.costBasis,
+                    unclaimedYield: metrics.unclaimedYield,
                 },
                 blockNumber,
                 tx,
@@ -3454,12 +3457,12 @@ export class UniswapV3PositionService {
                 id,
                 fields: [
                     "currentValue",
-                    "currentCostBasis",
+                    "costBasis",
                     "realizedPnl",
                     "unrealizedPnl",
-                    "collectedFees",
-                    "unClaimedFees",
-                    "lastFeesCollectedAt",
+                    "collectedYield",
+                    "unclaimedYield",
+                    "lastYieldClaimedAt",
                     "priceRangeLower",
                     "priceRangeUpper",
                     "totalApr",
@@ -3470,17 +3473,19 @@ export class UniswapV3PositionService {
                 where: { id },
                 data: {
                     currentValue: metrics.currentValue.toString(),
-                    currentCostBasis: metrics.currentCostBasis.toString(),
+                    costBasis: metrics.costBasis.toString(),
                     realizedPnl: metrics.realizedPnl.toString(),
                     unrealizedPnl: metrics.unrealizedPnl.toString(),
                     realizedCashflow: "0",
                     unrealizedCashflow: "0",
-                    collectedFees: metrics.collectedFees.toString(),
-                    unClaimedFees: metrics.unClaimedFees.toString(),
-                    lastFeesCollectedAt: metrics.lastFeesCollectedAt,
+                    collectedYield: metrics.collectedYield.toString(),
+                    unclaimedYield: metrics.unclaimedYield.toString(),
+                    lastYieldClaimedAt: metrics.lastYieldClaimedAt,
                     priceRangeLower: metrics.priceRangeLower.toString(),
                     priceRangeUpper: metrics.priceRangeUpper.toString(),
                     totalApr: persistedApr,
+                    baseApr: persistedApr,
+                    rewardApr: 0,
                 },
             });
 
@@ -3488,9 +3493,9 @@ export class UniswapV3PositionService {
                 {
                     id,
                     currentValue: metrics.currentValue.toString(),
-                    currentCostBasis: metrics.currentCostBasis.toString(),
+                    costBasis: metrics.costBasis.toString(),
                     unrealizedPnl: metrics.unrealizedPnl.toString(),
-                    unClaimedFees: metrics.unClaimedFees.toString(),
+                    unclaimedYield: metrics.unclaimedYield.toString(),
                     totalApr: persistedApr?.toFixed(2) ?? null,
                 },
                 "Position metrics refreshed",
@@ -3586,6 +3591,7 @@ export class UniswapV3PositionService {
 
             const result = await db.position.create({
                 data: {
+                    type: "LP_CONCENTRATED",
                     protocol: input.protocol,
                     userId: input.userId,
                     isToken0Quote: input.isToken0Quote,
@@ -3594,15 +3600,15 @@ export class UniswapV3PositionService {
                     state: stateDB as object,
                     // Default calculated values
                     currentValue: zeroValue,
-                    currentCostBasis: zeroValue,
+                    costBasis: zeroValue,
                     realizedPnl: zeroValue,
                     unrealizedPnl: zeroValue,
                     // Cash flow fields for non-AMM protocols (always 0 for UniswapV3)
                     realizedCashflow: zeroValue,
                     unrealizedCashflow: zeroValue,
-                    collectedFees: zeroValue,
-                    unClaimedFees: zeroValue,
-                    lastFeesCollectedAt: now,
+                    collectedYield: zeroValue,
+                    unclaimedYield: zeroValue,
+                    lastYieldClaimedAt: now,
                     priceRangeLower: zeroValue,
                     priceRangeUpper: zeroValue,
                     positionOpenedAt: input.positionOpenedAt ?? now,
@@ -3948,18 +3954,20 @@ export class UniswapV3PositionService {
             id: dbResult.id,
             positionHash: dbResult.positionHash ?? "",
             userId: dbResult.userId,
+            type: dbResult.type,
             protocol: dbResult.protocol,
-            poolId: "",
             isToken0Quote: dbResult.isToken0Quote,
             currentValue: BigInt(dbResult.currentValue),
-            currentCostBasis: BigInt(dbResult.currentCostBasis),
+            costBasis: BigInt(dbResult.costBasis),
             realizedPnl: BigInt(dbResult.realizedPnl),
             unrealizedPnl: BigInt(dbResult.unrealizedPnl),
             realizedCashflow: BigInt(dbResult.realizedCashflow),
             unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
-            collectedFees: BigInt(dbResult.collectedFees),
-            unClaimedFees: BigInt(dbResult.unClaimedFees),
-            lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
+            collectedYield: BigInt(dbResult.collectedYield),
+            unclaimedYield: BigInt(dbResult.unclaimedYield),
+            lastYieldClaimedAt: dbResult.lastYieldClaimedAt,
+            baseApr: dbResult.baseApr,
+            rewardApr: dbResult.rewardApr,
             totalApr: dbResult.totalApr,
             priceRangeLower: BigInt(dbResult.priceRangeLower),
             priceRangeUpper: BigInt(dbResult.priceRangeUpper),

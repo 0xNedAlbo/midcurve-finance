@@ -17,9 +17,9 @@ interface PositionCardMetricsProps {
   currentValue: string; // BigInt as string (quote token units)
   realizedPnl: string; // BigInt as string (quote token units)
   unrealizedPnl: string; // BigInt as string (quote token units)
-  unClaimedFees: string; // BigInt as string (quote token units)
-  currentCostBasis: string; // BigInt as string (quote token units)
-  lastFeesCollectedAt: string | null; // ISO timestamp or null
+  unclaimedYield: string; // BigInt as string (quote token units)
+  costBasis: string; // BigInt as string (quote token units)
+  lastYieldClaimedAt: string | null; // ISO timestamp or null
   positionOpenedAt: string; // ISO timestamp
   quoteToken: Token;
   isActive: boolean; // Used for visual cues
@@ -32,9 +32,9 @@ export function PositionCardMetrics({
   currentValue,
   realizedPnl,
   unrealizedPnl,
-  unClaimedFees,
-  currentCostBasis: _currentCostBasis, // Reserved for future use
-  lastFeesCollectedAt: _lastFeesCollectedAt, // Reserved for future use
+  unclaimedYield,
+  costBasis: _costBasis, // Reserved for future use
+  lastYieldClaimedAt: _lastYieldClaimedAt, // Reserved for future use
   positionOpenedAt: _positionOpenedAt, // Reserved for future use
   quoteToken,
   isActive: _isActive, // Reserved for future visual cues
@@ -43,18 +43,18 @@ export function PositionCardMetrics({
   pnlCurveSlot,
 }: PositionCardMetricsProps) {
   // Calculate total PnL: realizedPnl + unrealizedPnl + unclaimedFees
-  // Note: realizedPnl already includes collectedFees (fees are added to pnlAfter in the ledger)
+  // Note: realizedPnl already includes collectedYield (fees are added to pnlAfter in the ledger)
   let totalPnl: string;
   try {
     const realized = BigInt(realizedPnl || '0');
     const unrealized = BigInt(unrealizedPnl || '0');
-    const unclaimed = BigInt(unClaimedFees || '0');
+    const unclaimed = BigInt(unclaimedYield || '0');
     totalPnl = (realized + unrealized + unclaimed).toString();
   } catch (error) {
     console.error('Error calculating total PnL:', {
       realizedPnl,
       unrealizedPnl,
-      unClaimedFees,
+      unclaimedYield,
       error,
     });
     totalPnl = '0';
@@ -63,7 +63,7 @@ export function PositionCardMetrics({
   // Format display values
   const formattedValue = formatCurrency(currentValue, quoteToken.decimals);
   const pnlFormatted = formatPnL(totalPnl, quoteToken.decimals);
-  const formattedFees = formatCurrency(unClaimedFees, quoteToken.decimals);
+  const formattedFees = formatCurrency(unclaimedYield, quoteToken.decimals);
 
   // Use pre-calculated APR from backend
   const apr = totalApr ?? 0;
@@ -118,7 +118,7 @@ export function PositionCardMetrics({
           Unclaimed Fees ({quoteToken.symbol})
         </div>
         <div className={`text-sm md:text-base font-semibold ${
-          BigInt(unClaimedFees) > 0n ? "text-amber-400" : "text-white"
+          BigInt(unclaimedYield) > 0n ? "text-amber-400" : "text-white"
         }`}>
           {formattedFees}
         </div>

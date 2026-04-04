@@ -71,7 +71,7 @@ interface CancelOrderConfirmModalProps {
   /**
    * Current cost basis (in quote token units, as string)
    */
-  currentCostBasis: string;
+  costBasis: string;
 
   /**
    * Current unclaimed fees (in quote token units, as string)
@@ -115,7 +115,7 @@ export function CancelOrderConfirmModal({
   liquidity,
   tickLower,
   tickUpper,
-  currentCostBasis,
+  costBasis,
   unclaimedFees,
   currentSqrtPriceX96,
   isToken0Quote,
@@ -288,7 +288,7 @@ export function CancelOrderConfirmModal({
                     liquidity={liquidity}
                     tickLower={tickLower}
                     tickUpper={tickUpper}
-                    currentCostBasis={currentCostBasis}
+                    costBasis={costBasis}
                     unclaimedFees={unclaimedFees}
                     triggerSqrtPriceX96={triggerSqrtPriceX96}
                     currentSqrtPriceX96={currentSqrtPriceX96}

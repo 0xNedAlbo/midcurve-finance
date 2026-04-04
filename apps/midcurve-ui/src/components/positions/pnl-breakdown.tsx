@@ -4,8 +4,8 @@ import { formatCompactValue } from "@/lib/fraction-format";
 
 interface PnLBreakdownProps {
   currentValue: string;
-  currentCostBasis: string;
-  collectedFees: string;
+  costBasis: string;
+  collectedYield: string;
   unclaimedFees: string;
   realizedPnL: string;
   quoteTokenSymbol: string;
@@ -14,8 +14,8 @@ interface PnLBreakdownProps {
 
 export function PnLBreakdown({
   currentValue,
-  currentCostBasis,
-  collectedFees,
+  costBasis,
+  collectedYield,
   unclaimedFees,
   realizedPnL,
   quoteTokenSymbol,
@@ -24,7 +24,7 @@ export function PnLBreakdown({
   // Calculate breakdown values
   const realizedPnLAmount = BigInt(realizedPnL);
   const unrealizedPnLAmount =
-    BigInt(unclaimedFees) + (BigInt(currentValue) - BigInt(currentCostBasis));
+    BigInt(unclaimedFees) + (BigInt(currentValue) - BigInt(costBasis));
   const totalPnLAmount = realizedPnLAmount + unrealizedPnLAmount;
 
   const realizedColor =
@@ -73,14 +73,14 @@ export function PnLBreakdown({
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">+ Fees Collected</span>
                 <span className="text-white font-medium">
-                  {formatCompactValue(BigInt(collectedFees), quoteTokenDecimals)}{" "}
+                  {formatCompactValue(BigInt(collectedYield), quoteTokenDecimals)}{" "}
                   {quoteTokenSymbol}
                 </span>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">+ Realized PnL*</span>
                 <span className="text-white font-medium">
-                  {formatCompactValue(BigInt(realizedPnL) - BigInt(collectedFees), quoteTokenDecimals)}{" "}
+                  {formatCompactValue(BigInt(realizedPnL) - BigInt(collectedYield), quoteTokenDecimals)}{" "}
                   {quoteTokenSymbol}
                 </span>
               </div>
@@ -120,7 +120,7 @@ export function PnLBreakdown({
               <div className="flex justify-between items-center text-sm">
                 <span className="text-slate-400">- Cost Basis</span>
                 <span className="text-white font-medium">
-                  -{formatCompactValue(BigInt(currentCostBasis), quoteTokenDecimals)}{" "}
+                  -{formatCompactValue(BigInt(costBasis), quoteTokenDecimals)}{" "}
                   {quoteTokenSymbol}
                 </span>
               </div>

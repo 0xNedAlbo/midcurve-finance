@@ -120,8 +120,8 @@ export interface PositionLedgerEventJSON {
   costBasisAfter: string;
   deltaPnl: string;
   pnlAfter: string;
-  deltaCollectedFees: string;
-  collectedFeesAfter: string;
+  deltaCollectedYield: string;
+  collectedYieldAfter: string;
   deltaRealizedCashflow: string;
   realizedCashflowAfter: string;
   config: Record<string, unknown>;
@@ -155,8 +155,8 @@ export interface BasePositionLedgerEventParams {
   costBasisAfter: bigint;
   deltaPnl: bigint;
   pnlAfter: bigint;
-  deltaCollectedFees: bigint;
-  collectedFeesAfter: bigint;
+  deltaCollectedYield: bigint;
+  collectedYieldAfter: bigint;
   deltaRealizedCashflow: bigint;
   realizedCashflowAfter: bigint;
 }
@@ -189,8 +189,8 @@ export interface PositionLedgerEventRow {
   costBasisAfter: bigint;
   deltaPnl: bigint;
   pnlAfter: bigint;
-  deltaCollectedFees: bigint;
-  collectedFeesAfter: bigint;
+  deltaCollectedYield: bigint;
+  collectedYieldAfter: bigint;
   deltaRealizedCashflow: bigint;
   realizedCashflowAfter: bigint;
   config: Record<string, unknown>;

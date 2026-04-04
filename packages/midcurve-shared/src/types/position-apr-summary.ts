@@ -44,7 +44,7 @@ export interface AprSummary {
    * Total fees collected in completed periods
    * In quote token units (smallest denomination)
    *
-   * Sum of all collectedFeeValue from all APR periods.
+   * Sum of all collectedYieldValue from all APR periods.
    */
   realizedFees: bigint;
 
@@ -118,6 +118,18 @@ export interface AprSummary {
   // ============================================================================
   // TOTAL METRICS (time-weighted combination)
   // ============================================================================
+
+  /**
+   * Base APR (fee/yield APR)
+   * Same as totalApr for protocols without reward programs.
+   */
+  baseApr: number;
+
+  /**
+   * Reward APR (incentive programs)
+   * 0 for protocols without reward programs.
+   */
+  rewardApr: number;
 
   /**
    * Time-weighted total APR combining realized and unrealized periods

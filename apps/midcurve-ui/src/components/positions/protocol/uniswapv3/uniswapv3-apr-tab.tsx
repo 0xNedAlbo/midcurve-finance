@@ -37,6 +37,8 @@ export function UniswapV3AprTab({ position }: UniswapV3AprTabProps) {
           unrealizedCostBasis: "0",
           unrealizedActiveDays: 0,
           unrealizedApr: 0,
+          baseApr: 0,
+          rewardApr: 0,
           totalApr: 0,
           totalActiveDays: 0,
           belowThreshold: true,

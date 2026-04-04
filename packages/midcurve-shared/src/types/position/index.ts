@@ -16,6 +16,7 @@ export type { PositionInterface } from './position.interface.js';
 // Types
 export type {
   PositionProtocol,
+  PositionType,
   PositionJSON,
   BasePositionParams,
   PositionRow,

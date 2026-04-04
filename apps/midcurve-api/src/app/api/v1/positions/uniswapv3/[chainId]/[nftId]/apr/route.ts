@@ -8,7 +8,7 @@
  *
  * APR Calculation:
  * - Each period represents time between two fee collection events
- * - APR = (collectedFeeValue / costBasis) * (365 days / duration) * 10000 (basis points)
+ * - APR = (collectedYieldValue / costBasis) * (365 days / duration) * 10000 (basis points)
  * - Realized APR: From completed fee collection periods
  * - Unrealized APR: From current unclaimed fees (time-weighted)
  * - Total APR: Time-weighted combination of realized and unrealized
@@ -78,7 +78,7 @@ export async function OPTIONS(request: NextRequest) {
  *       "endTimestamp": "2025-01-08T00:00:00.000Z",
  *       "durationSeconds": 604800,
  *       "costBasis": "1000000000",  // bigint as string
- *       "collectedFeeValue": "20000000",
+ *       "collectedYieldValue": "20000000",
  *       "aprBps": 1040,  // 10.40% APR
  *       "eventCount": 5
  *     },
@@ -88,9 +88,9 @@ export async function OPTIONS(request: NextRequest) {
  *     "realizedAprBps": 1250,        // 12.50% (from completed periods)
  *     "unrealizedAprBps": 350,       // 3.50% (from unclaimed fees)
  *     "totalAprBps": 1600,           // 16.00% (time-weighted total)
- *     "realizedFeeValue": "50000000",
- *     "unrealizedFeeValue": "10000000",
- *     "totalFeeValue": "60000000",
+ *     "realizedYieldValue": "50000000",
+ *     "unrealizedYieldValue": "10000000",
+ *     "totalYieldValue": "60000000",
  *     "totalDurationSeconds": 2592000,
  *     "averageCostBasis": "1000000000"
  *   },

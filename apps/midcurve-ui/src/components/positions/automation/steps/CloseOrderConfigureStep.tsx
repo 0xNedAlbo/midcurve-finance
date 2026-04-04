@@ -63,7 +63,7 @@ interface CloseOrderConfigureStepProps {
   /**
    * Current cost basis (in quote token units, as string)
    */
-  currentCostBasis: string;
+  costBasis: string;
 
   /**
    * Current unclaimed fees (in quote token units, as string)
@@ -166,7 +166,7 @@ export function CloseOrderConfigureStep({
   liquidity,
   tickLower,
   tickUpper,
-  currentCostBasis,
+  costBasis,
   unclaimedFees,
 }: CloseOrderConfigureStepProps) {
   // When orderType is provided, hide the trigger mode selector
@@ -368,7 +368,7 @@ export function CloseOrderConfigureStep({
             liquidity={liquidity}
             tickLower={tickLower}
             tickUpper={tickUpper}
-            currentCostBasis={currentCostBasis}
+            costBasis={costBasis}
             unclaimedFees={unclaimedFees}
             triggerSqrtPriceX96={triggerSqrtPriceX96}
             currentSqrtPriceX96={currentSqrtPriceX96}

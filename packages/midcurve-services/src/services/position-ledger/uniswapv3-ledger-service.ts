@@ -123,7 +123,7 @@ export interface LedgerAggregates {
     realizedPnlAfter: bigint;
 
     /** Total collected fees (in quote token units) */
-    collectedFeesAfter: bigint;
+    collectedYieldAfter: bigint;
 
     /** Total realized cashflow after all events (in quote token units) - always 0 for AMM positions */
     realizedCashflowAfter: bigint;
@@ -369,9 +369,9 @@ export interface UpdateEventAggregatesInput {
     /** PnL after this event */
     pnlAfter: bigint;
     /** Change in collected fees */
-    deltaCollectedFees: bigint;
+    deltaCollectedYield: bigint;
     /** Collected fees after this event */
-    collectedFeesAfter: bigint;
+    collectedYieldAfter: bigint;
     /** Uncollected principal in token0 after this event */
     uncollectedPrincipal0After: bigint;
     /** Uncollected principal in token1 after this event */
@@ -413,9 +413,9 @@ export interface CreateLedgerEventInput {
     /** PnL after this event */
     pnlAfter: bigint;
     /** Change in collected fees */
-    deltaCollectedFees: bigint;
+    deltaCollectedYield: bigint;
     /** Collected fees after this event */
-    collectedFeesAfter: bigint;
+    collectedYieldAfter: bigint;
     /** Change in realized cashflow (always 0 for AMM positions) */
     deltaRealizedCashflow: bigint;
     /** Realized cashflow after this event (always 0 for AMM positions) */
@@ -732,8 +732,8 @@ export class UniswapV3LedgerService {
                 costBasisAfter: input.costBasisAfter.toString(),
                 deltaPnl: input.deltaPnl.toString(),
                 pnlAfter: input.pnlAfter.toString(),
-                deltaCollectedFees: input.deltaCollectedFees.toString(),
-                collectedFeesAfter: input.collectedFeesAfter.toString(),
+                deltaCollectedYield: input.deltaCollectedYield.toString(),
+                collectedYieldAfter: input.collectedYieldAfter.toString(),
                 deltaRealizedCashflow: input.deltaRealizedCashflow.toString(),
                 realizedCashflowAfter: input.realizedCashflowAfter.toString(),
                 config: ledgerEventConfigToJSON(input.config) as object,
@@ -784,8 +784,8 @@ export class UniswapV3LedgerService {
                 costBasisAfter: updates.costBasisAfter.toString(),
                 deltaPnl: updates.deltaPnl.toString(),
                 pnlAfter: updates.pnlAfter.toString(),
-                deltaCollectedFees: updates.deltaCollectedFees.toString(),
-                collectedFeesAfter: updates.collectedFeesAfter.toString(),
+                deltaCollectedYield: updates.deltaCollectedYield.toString(),
+                collectedYieldAfter: updates.collectedYieldAfter.toString(),
                 config: ledgerEventConfigToJSON(updatedConfig) as object,
             },
         });
@@ -1039,7 +1039,7 @@ export class UniswapV3LedgerService {
                 liquidityAfter: 0n,
                 costBasisAfter: 0n,
                 realizedPnlAfter: 0n,
-                collectedFeesAfter: 0n,
+                collectedYieldAfter: 0n,
                 realizedCashflowAfter: 0n,
                 uncollectedPrincipal0: 0n,
                 uncollectedPrincipal1: 0n,
@@ -1056,7 +1056,7 @@ export class UniswapV3LedgerService {
         let liquidityAfter = 0n;
         let costBasisAfter = 0n;
         let pnlAfter = 0n;
-        let collectedFeesAfter = 0n;
+        let collectedYieldAfter = 0n;
         let uncollectedPrincipal0After = 0n;
         let uncollectedPrincipal1After = 0n;
         let previousEventId: string | null = null;
@@ -1080,7 +1080,7 @@ export class UniswapV3LedgerService {
             const previousLiquidity = liquidityAfter;
             const previousCostBasis = costBasisAfter;
             const previousPnl = pnlAfter;
-            const previousCollectedFees = collectedFeesAfter;
+            const previousCollectedYield = collectedYieldAfter;
             const previousUncollectedPrincipal0 = uncollectedPrincipal0After;
             const previousUncollectedPrincipal1 = uncollectedPrincipal1After;
 
@@ -1088,7 +1088,7 @@ export class UniswapV3LedgerService {
             let deltaL = 0n;
             let deltaCostBasis = 0n;
             let deltaPnl = 0n;
-            let deltaCollectedFees = 0n;
+            let deltaCollectedYield = 0n;
             let feesCollected0 = 0n;
             let feesCollected1 = 0n;
 
@@ -1177,8 +1177,8 @@ export class UniswapV3LedgerService {
 
                 deltaPnl = feeValue;
                 pnlAfter = previousPnl + deltaPnl;
-                deltaCollectedFees = feeValue;
-                collectedFeesAfter = previousCollectedFees + deltaCollectedFees;
+                deltaCollectedYield = feeValue;
+                collectedYieldAfter = previousCollectedYield + deltaCollectedYield;
 
                 // Uncollected principal decreases
                 uncollectedPrincipal0After =
@@ -1225,7 +1225,7 @@ export class UniswapV3LedgerService {
                         const aprBps =
                             durationSeconds > 0 && timeWeightedCostBasis > 0n
                                 ? calculateAprBps(
-                                      deltaCollectedFees,
+                                      deltaCollectedYield,
                                       timeWeightedCostBasis,
                                       durationSeconds,
                                   )
@@ -1238,7 +1238,7 @@ export class UniswapV3LedgerService {
                             endTimestamp: event.timestamp,
                             durationSeconds,
                             costBasis: timeWeightedCostBasis,
-                            collectedFeeValue: deltaCollectedFees,
+                            collectedYieldValue: deltaCollectedYield,
                             aprBps,
                             eventCount: periodEventCount,
                         };
@@ -1277,8 +1277,8 @@ export class UniswapV3LedgerService {
                     costBasisAfter,
                     deltaPnl,
                     pnlAfter,
-                    deltaCollectedFees,
-                    collectedFeesAfter,
+                    deltaCollectedYield,
+                    collectedYieldAfter,
                     uncollectedPrincipal0After,
                     uncollectedPrincipal1After,
                     feesCollected0,
@@ -1295,7 +1295,7 @@ export class UniswapV3LedgerService {
             liquidityAfter,
             costBasisAfter,
             realizedPnlAfter: pnlAfter,
-            collectedFeesAfter,
+            collectedYieldAfter,
             realizedCashflowAfter: 0n, // Always 0 for AMM positions
             uncollectedPrincipal0: uncollectedPrincipal0After,
             uncollectedPrincipal1: uncollectedPrincipal1After,
@@ -1389,8 +1389,8 @@ export class UniswapV3LedgerService {
             costBasisAfter: 0n,
             deltaPnl: 0n,
             pnlAfter: 0n,
-            deltaCollectedFees: 0n,
-            collectedFeesAfter: 0n,
+            deltaCollectedYield: 0n,
+            collectedYieldAfter: 0n,
             deltaRealizedCashflow: 0n,
             realizedCashflowAfter: 0n,
             config,
@@ -1681,8 +1681,8 @@ export class UniswapV3LedgerService {
             costBasisAfter: 0n, // Will be fixed by recalculateAggregates
             deltaPnl: 0n, // Will be fixed by recalculateAggregates
             pnlAfter: 0n, // Will be fixed by recalculateAggregates
-            deltaCollectedFees: 0n, // Will be fixed by recalculateAggregates
-            collectedFeesAfter: 0n, // Will be fixed by recalculateAggregates
+            deltaCollectedYield: 0n, // Will be fixed by recalculateAggregates
+            collectedYieldAfter: 0n, // Will be fixed by recalculateAggregates
             deltaRealizedCashflow: 0n,
             realizedCashflowAfter: 0n,
             config: ledgerConfig,

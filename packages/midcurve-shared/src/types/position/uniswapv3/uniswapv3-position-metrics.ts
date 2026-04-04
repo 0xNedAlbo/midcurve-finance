@@ -33,7 +33,7 @@ export interface UniswapV3PositionMetrics {
    * Cost basis in quote token units.
    * Accumulated from ledger events (INCREASE_LIQUIDITY adds, DECREASE_LIQUIDITY subtracts).
    */
-  currentCostBasis: bigint;
+  costBasis: bigint;
 
   /**
    * Realized PnL in quote token units.
@@ -43,7 +43,7 @@ export interface UniswapV3PositionMetrics {
 
   /**
    * Unrealized PnL in quote token units.
-   * Calculated as: currentValue - currentCostBasis
+   * Calculated as: currentValue - costBasis
    */
   unrealizedPnl: bigint;
 
@@ -52,22 +52,22 @@ export interface UniswapV3PositionMetrics {
   // ============================================================================
 
   /**
-   * Total collected fees in quote token units.
+   * Total collected yield in quote token units.
    * Accumulated from COLLECT ledger events.
    */
-  collectedFees: bigint;
+  collectedYield: bigint;
 
   /**
-   * Unclaimed fees in quote token units.
+   * Unclaimed yield in quote token units.
    * Calculated from on-chain fee state converted to quote token value.
    */
-  unClaimedFees: bigint;
+  unclaimedYield: bigint;
 
   /**
-   * Timestamp of last fee collection.
+   * Timestamp of last yield claim.
    * Falls back to position opened date if no collections yet.
    */
-  lastFeesCollectedAt: Date;
+  lastYieldClaimedAt: Date;
 
   // ============================================================================
   // Price Range

@@ -65,7 +65,7 @@ export function UniswapV3CollectFeesForm({
   const chainConfig = chain ? CHAIN_METADATA[chain] : null;
 
   // Get unclaimed fees from position (total in quote tokens)
-  const unclaimedFees = BigInt(position.unClaimedFees || '0');
+  const unclaimedFees = BigInt(position.unclaimedYield || '0');
 
   // Get individual token amounts from state (prefer unclaimedFees, fallback to tokensOwed)
   const token0Amount = BigInt(state.unclaimedFees0 || state.tokensOwed0 || '0');

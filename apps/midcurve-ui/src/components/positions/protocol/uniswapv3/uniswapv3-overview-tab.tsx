@@ -42,10 +42,10 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
   // PnL breakdown data
   const pnlBreakdown = {
     currentValue: position.currentValue,
-    currentCostBasis: position.currentCostBasis,
+    costBasis: position.costBasis,
     realizedPnL: position.realizedPnl,
-    collectedFees: position.collectedFees,
-    unclaimedFees: position.unClaimedFees,
+    collectedYield: position.collectedYield,
+    unclaimedFees: position.unclaimedYield,
   };
 
   // Get formatted display values

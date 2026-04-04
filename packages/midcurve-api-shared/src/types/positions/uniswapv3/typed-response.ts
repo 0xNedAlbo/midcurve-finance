@@ -63,6 +63,7 @@ export interface UniswapV3PositionResponse {
   positionHash: string;
   userId: string;
   protocol: 'uniswapv3';
+  type: string;
 
   // Pool reference
   pool: UniswapV3PoolResponse;
@@ -70,17 +71,19 @@ export interface UniswapV3PositionResponse {
 
   // PnL fields (bigint -> string)
   currentValue: string;
-  currentCostBasis: string;
+  costBasis: string;
   realizedPnl: string;
   unrealizedPnl: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
 
-  // Fee fields
-  collectedFees: string;
-  unClaimedFees: string;
-  lastFeesCollectedAt: string;
+  // Yield fields
+  collectedYield: string;
+  unclaimedYield: string;
+  lastYieldClaimedAt: string;
   totalApr: number | null;
+  baseApr: number | null;
+  rewardApr: number | null;
 
   // Price range (bigint -> string)
   priceRangeLower: string;

@@ -17,7 +17,7 @@
 import type { TokenInterface } from '../../token/index.js';
 import type { PoolInterface } from '../../pool/index.js';
 import type { PositionInterface } from '../position.interface.js';
-import type { PositionProtocol, PositionJSON, PnLSimulationResult } from '../position.types.js';
+import type { PositionProtocol, PositionType, PositionJSON, PnLSimulationResult } from '../position.types.js';
 import type { SwapConfig } from '../../automation/close-order-config.types.js';
 import { resolveExposure } from './resolve-exposure.js';
 
@@ -271,7 +271,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
       }
     }
 
-    const costBasis = this._underlying.currentCostBasis;
+    const costBasis = this._underlying.costBasis;
     const pnlValue = positionValue - costBasis;
     const pnlPercent = costBasis > 0n
       ? Number((pnlValue * 1000000n) / costBasis) / 10000
@@ -364,6 +364,10 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
     return this._underlying.protocol;
   }
 
+  get type(): PositionType {
+    return this._underlying.type;
+  }
+
   // ============================================================================
   // PositionInterface - Token & Pool Reference (always delegate)
   // ============================================================================
@@ -395,8 +399,8 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   /**
    * Cost basis - always delegates (doesn't change on closure).
    */
-  get currentCostBasis(): bigint {
-    return this._underlying.currentCostBasis;
+  get costBasis(): bigint {
+    return this._underlying.costBasis;
   }
 
   /**
@@ -422,19 +426,31 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
   }
 
   // ============================================================================
-  // PositionInterface - Fee Fields (always delegate)
+  // PositionInterface - Yield Fields (always delegate)
   // ============================================================================
 
-  get collectedFees(): bigint {
-    return this._underlying.collectedFees;
+  get collectedYield(): bigint {
+    return this._underlying.collectedYield;
   }
 
-  get unClaimedFees(): bigint {
-    return this._underlying.unClaimedFees;
+  get unclaimedYield(): bigint {
+    return this._underlying.unclaimedYield;
   }
 
-  get lastFeesCollectedAt(): Date {
-    return this._underlying.lastFeesCollectedAt;
+  get lastYieldClaimedAt(): Date {
+    return this._underlying.lastYieldClaimedAt;
+  }
+
+  // ============================================================================
+  // PositionInterface - APR Fields (always delegate)
+  // ============================================================================
+
+  get baseApr(): number | null {
+    return this._underlying.baseApr;
+  }
+
+  get rewardApr(): number | null {
+    return this._underlying.rewardApr;
   }
 
   get totalApr(): number | null {
@@ -506,21 +522,26 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
       positionHash: this.positionHash,
       userId: this.userId,
       protocol: this.protocol,
+      type: this.type,
       pool: this.pool.toJSON(),
       isToken0Quote: this.isToken0Quote,
 
       // PnL fields (bigint -> string)
       currentValue: this.currentValue.toString(),
-      currentCostBasis: this.currentCostBasis.toString(),
+      costBasis: this.costBasis.toString(),
       realizedPnl: this.realizedPnl.toString(),
       unrealizedPnl: this.unrealizedPnl.toString(),
       realizedCashflow: this.realizedCashflow.toString(),
       unrealizedCashflow: this.unrealizedCashflow.toString(),
 
-      // Fee fields
-      collectedFees: this.collectedFees.toString(),
-      unClaimedFees: this.unClaimedFees.toString(),
-      lastFeesCollectedAt: this.lastFeesCollectedAt.toISOString(),
+      // Yield fields
+      collectedYield: this.collectedYield.toString(),
+      unclaimedYield: this.unclaimedYield.toString(),
+      lastYieldClaimedAt: this.lastYieldClaimedAt.toISOString(),
+
+      // APR fields
+      baseApr: this.baseApr,
+      rewardApr: this.rewardApr,
       totalApr: this.totalApr,
 
       // Price range
@@ -631,7 +652,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
    * Always finite (bounded by costBasis).
    */
   maxDrawdown(): bigint {
-    const costBasis = this._underlying.currentCostBasis;
+    const costBasis = this._underlying.costBasis;
     const minValue = this.findMinPositionValue();
     const drawdown = costBasis - minValue;
     return drawdown > 0n ? drawdown : 0n;
@@ -644,7 +665,7 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
    * (ALL_BASE or HOLD_MIXED on the TP side), since value grows without bound.
    */
   maxRunup(): bigint {
-    const costBasis = this._underlying.currentCostBasis;
+    const costBasis = this._underlying.costBasis;
 
     // Check if the right side (TP) has base token exposure → infinite
     if (this._takeProfitPrice !== null) {

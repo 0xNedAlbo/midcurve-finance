@@ -85,11 +85,11 @@ export abstract class BasePositionLedgerEvent
   readonly pnlAfter: bigint;
 
   // ============================================================================
-  // COLLECTED FEES TRACKING
+  // COLLECTED YIELD TRACKING
   // ============================================================================
 
-  readonly deltaCollectedFees: bigint;
-  readonly collectedFeesAfter: bigint;
+  readonly deltaCollectedYield: bigint;
+  readonly collectedYieldAfter: bigint;
 
   // ============================================================================
   // REALIZED CASHFLOW TRACKING (for perpetuals, etc. - always 0 for AMM positions)
@@ -133,8 +133,8 @@ export abstract class BasePositionLedgerEvent
     this.costBasisAfter = params.costBasisAfter;
     this.deltaPnl = params.deltaPnl;
     this.pnlAfter = params.pnlAfter;
-    this.deltaCollectedFees = params.deltaCollectedFees;
-    this.collectedFeesAfter = params.collectedFeesAfter;
+    this.deltaCollectedYield = params.deltaCollectedYield;
+    this.collectedYieldAfter = params.collectedYieldAfter;
     this.deltaRealizedCashflow = params.deltaRealizedCashflow;
     this.realizedCashflowAfter = params.realizedCashflowAfter;
   }
@@ -167,8 +167,8 @@ export abstract class BasePositionLedgerEvent
       costBasisAfter: this.costBasisAfter.toString(),
       deltaPnl: this.deltaPnl.toString(),
       pnlAfter: this.pnlAfter.toString(),
-      deltaCollectedFees: this.deltaCollectedFees.toString(),
-      collectedFeesAfter: this.collectedFeesAfter.toString(),
+      deltaCollectedYield: this.deltaCollectedYield.toString(),
+      collectedYieldAfter: this.collectedYieldAfter.toString(),
       deltaRealizedCashflow: this.deltaRealizedCashflow.toString(),
       realizedCashflowAfter: this.realizedCashflowAfter.toString(),
       config: this.config,
