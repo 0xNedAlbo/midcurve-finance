@@ -100,6 +100,15 @@ interface IUniswapV3Vault {
     /// @notice Token1 of the underlying position
     function token1() external view returns (address);
 
+    /// @notice The Uniswap V3 pool address
+    function pool() external view returns (address);
+
+    /// @notice Lower tick bound of the underlying position
+    function tickLower() external view returns (int24);
+
+    /// @notice Upper tick bound of the underlying position
+    function tickUpper() external view returns (int24);
+
     /// @notice Cumulative fee per share for token0 (scaled by 1e18)
     function feePerShare0() external view returns (uint256);
 
@@ -111,4 +120,5 @@ interface IUniswapV3Vault {
 
     /// @notice Fee debt snapshot for a user (token1)
     function feeDebt1(address user) external view returns (uint256);
+
 }

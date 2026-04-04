@@ -3,6 +3,7 @@ import {
   safeDiff,
   computeFeeGrowthInside,
   calculateIncrementalFees,
+  calculateVaultClaimableFees,
 } from './fees.js';
 
 describe('Uniswap V3 Fee Calculation Utilities', () => {
@@ -242,6 +243,117 @@ describe('Uniswap V3 Fee Calculation Utilities', () => {
       );
 
       expect(fees).toBe(0n);
+    });
+  });
+
+  describe('calculateVaultClaimableFees', () => {
+    const FEE_PRECISION = 10n ** 18n;
+
+    const zeroInput = {
+      feePerShare0: 0n,
+      feePerShare1: 0n,
+      feeDebt0: 0n,
+      feeDebt1: 0n,
+      userShares: 0n,
+      tokensOwed0: 0n,
+      tokensOwed1: 0n,
+      totalSupply: 0n,
+      unsnapshottedFees0: 0n,
+      unsnapshottedFees1: 0n,
+    };
+
+    it('returns zero for all-zero input', () => {
+      const result = calculateVaultClaimableFees(zeroInput);
+      expect(result.fee0).toBe(0n);
+      expect(result.fee1).toBe(0n);
+    });
+
+    it('returns zero when userShares is zero', () => {
+      const result = calculateVaultClaimableFees({
+        ...zeroInput,
+        tokensOwed0: 500n,
+        totalSupply: 1000n,
+        unsnapshottedFees0: 200n,
+      });
+      expect(result.fee0).toBe(0n);
+      expect(result.fee1).toBe(0n);
+    });
+
+    it('computes accumulator delta correctly', () => {
+      const result = calculateVaultClaimableFees({
+        ...zeroInput,
+        feePerShare0: 10n * FEE_PRECISION,
+        feePerShare1: 20n * FEE_PRECISION,
+        userShares: 100n,
+        totalSupply: 1000n,
+      });
+      // (10 * 1e18 - 0) * 100 / 1e18 = 1000
+      expect(result.fee0).toBe(1000n);
+      expect(result.fee1).toBe(2000n);
+    });
+
+    it('computes tokensOwed (component 3) correctly', () => {
+      const result = calculateVaultClaimableFees({
+        ...zeroInput,
+        tokensOwed0: 10_000n,
+        tokensOwed1: 20_000n,
+        userShares: 250n,
+        totalSupply: 1000n,
+      });
+      // 10000 * 250 / 1000 = 2500
+      expect(result.fee0).toBe(2500n);
+      expect(result.fee1).toBe(5000n);
+    });
+
+    it('computes unsnapshotted fees (component 4) correctly', () => {
+      const result = calculateVaultClaimableFees({
+        ...zeroInput,
+        unsnapshottedFees0: 8000n,
+        unsnapshottedFees1: 16_000n,
+        userShares: 500n,
+        totalSupply: 1000n,
+      });
+      // 8000 * 500 / 1000 = 4000
+      expect(result.fee0).toBe(4000n);
+      expect(result.fee1).toBe(8000n);
+    });
+
+    it('sums all components correctly', () => {
+      const result = calculateVaultClaimableFees({
+        feePerShare0: 5n * FEE_PRECISION,
+        feePerShare1: 10n * FEE_PRECISION,
+        feeDebt0: 0n,
+        feeDebt1: 0n,
+        userShares: 500n,
+        tokensOwed0: 1000n,
+        tokensOwed1: 2000n,
+        totalSupply: 1000n,
+        unsnapshottedFees0: 600n,
+        unsnapshottedFees1: 1200n,
+      });
+      // Accumulator: (5*1e18 * 500) / 1e18 = 2500, (10*1e18 * 500) / 1e18 = 5000
+      // TokensOwed: 1000 * 500 / 1000 = 500, 2000 * 500 / 1000 = 1000
+      // Unsnapshotted: 600 * 500 / 1000 = 300, 1200 * 500 / 1000 = 600
+      // Total: 3300, 6600
+      expect(result.fee0).toBe(3300n);
+      expect(result.fee1).toBe(6600n);
+    });
+
+    it('handles totalSupply == 0 (components 3+4 contribute zero)', () => {
+      const result = calculateVaultClaimableFees({
+        ...zeroInput,
+        feePerShare0: 2n * FEE_PRECISION,
+        feePerShare1: 4n * FEE_PRECISION,
+        userShares: 50n,
+        tokensOwed0: 9999n,
+        tokensOwed1: 9999n,
+        totalSupply: 0n,
+        unsnapshottedFees0: 9999n,
+        unsnapshottedFees1: 9999n,
+      });
+      // Only accumulator contributes; tokensOwed + unsnapshotted skipped (totalSupply == 0)
+      expect(result.fee0).toBe(100n); // (2*1e18 * 50) / 1e18
+      expect(result.fee1).toBe(200n);
     });
   });
 });

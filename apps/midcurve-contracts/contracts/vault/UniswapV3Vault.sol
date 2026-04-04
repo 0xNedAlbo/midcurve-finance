@@ -141,13 +141,13 @@ contract UniswapV3Vault is ERC20 {
         if (positionManager.ownerOf(tokenId_) != address(this)) revert NFTNotReceived();
 
         // Read position data
-        (,, address t0, address t1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) =
+        (,, address t0, address t1, uint24 fee, int24 tl, int24 tu, uint128 liquidity,,,,) =
             positionManager.positions(tokenId_);
 
         token0 = t0;
         token1 = t1;
-        _tickLower = tickLower;
-        _tickUpper = tickUpper;
+        _tickLower = tl;
+        _tickUpper = tu;
 
         // Resolve pool address via Uniswap V3 Factory.getPool()
         (bool success, bytes memory data) =
@@ -297,11 +297,78 @@ contract UniswapV3Vault is ERC20 {
 
     // ============ View functions ============
 
-    /// @notice Returns claimable fee amounts for a user (includes unsettled + pending)
+    /// @notice Lower tick bound of the underlying position
+    function tickLower() external view returns (int24) {
+        return _tickLower;
+    }
+
+    /// @notice Upper tick bound of the underlying position
+    function tickUpper() external view returns (int24) {
+        return _tickUpper;
+    }
+
+    /// @notice Returns the full claimable fee amounts for a user.
+    /// @dev Computes all four fee components:
+    ///      1. Pending (settled, not yet transferred)
+    ///      2. Accumulated since last settlement (accumulator delta)
+    ///      3. Snapshotted in NFPM but not yet harvested (tokensOwed, pro-rata)
+    ///      4. Unsnapshotted fees still in pool (feeGrowthInside reconstruction, pro-rata)
     function claimableFees(address user) external view returns (uint256 fee0, uint256 fee1) {
         uint256 balance = balanceOf(user);
+        uint256 supply = totalSupply();
+
+        // Components 1+2: pending + accumulator delta
         fee0 = _pendingFees0[user] + (feePerShare0 - feeDebt0[user]) * balance / FEE_PRECISION;
         fee1 = _pendingFees1[user] + (feePerShare1 - feeDebt1[user]) * balance / FEE_PRECISION;
+
+        if (supply == 0) return (fee0, fee1);
+
+        // Read NFPM position state
+        (,,,,,,,uint128 L_total,
+         uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128,
+         uint128 owed0, uint128 owed1) = positionManager.positions(tokenId);
+
+        // Component 3: tokensOwed snapshotted in NFPM, scaled by user's share
+        fee0 += uint256(owed0) * balance / supply;
+        fee1 += uint256(owed1) * balance / supply;
+
+        // Component 4: unsnapshotted fees still in pool
+        if (L_total > 0) {
+            (, int24 currentTick,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+
+            uint256 feeGrowthGlobal0 = IUniswapV3PoolMinimal(pool).feeGrowthGlobal0X128();
+            uint256 feeGrowthGlobal1 = IUniswapV3PoolMinimal(pool).feeGrowthGlobal1X128();
+
+            (,, uint256 feeGrowthOutsideLower0, uint256 feeGrowthOutsideLower1,,,,)
+                = IUniswapV3PoolMinimal(pool).ticks(_tickLower);
+            (,, uint256 feeGrowthOutsideUpper0, uint256 feeGrowthOutsideUpper1,,,,)
+                = IUniswapV3PoolMinimal(pool).ticks(_tickUpper);
+
+            // Reconstruct feeGrowthInside using unchecked arithmetic (uint256 overflow semantics)
+            unchecked {
+                uint256 below0 = currentTick >= _tickLower
+                    ? feeGrowthOutsideLower0
+                    : feeGrowthGlobal0 - feeGrowthOutsideLower0;
+                uint256 below1 = currentTick >= _tickLower
+                    ? feeGrowthOutsideLower1
+                    : feeGrowthGlobal1 - feeGrowthOutsideLower1;
+
+                uint256 above0 = currentTick < _tickUpper
+                    ? feeGrowthOutsideUpper0
+                    : feeGrowthGlobal0 - feeGrowthOutsideUpper0;
+                uint256 above1 = currentTick < _tickUpper
+                    ? feeGrowthOutsideUpper1
+                    : feeGrowthGlobal1 - feeGrowthOutsideUpper1;
+
+                uint256 inside0 = feeGrowthGlobal0 - below0 - above0;
+                uint256 inside1 = feeGrowthGlobal1 - below1 - above1;
+
+                // Unsnapshotted fees: (delta × L_total × balance) / Q128 / supply
+                uint256 Q128 = 1 << 128;
+                fee0 += (inside0 - feeGrowthInside0LastX128) * uint256(L_total) * balance / Q128 / supply;
+                fee1 += (inside1 - feeGrowthInside1LastX128) * uint256(L_total) * balance / Q128 / supply;
+            }
+        }
     }
 
     // NOTE: quoteBurn and quoteMint are intentionally identical. This is not a bug —

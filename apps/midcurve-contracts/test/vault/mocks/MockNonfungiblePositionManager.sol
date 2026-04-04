@@ -227,10 +227,23 @@ contract MockUniswapV3Factory {
 }
 
 /// @title MockUniswapV3Pool
-/// @notice Minimal mock for slot0() calls
+/// @notice Minimal mock for slot0(), feeGrowthGlobal, and ticks() calls
 contract MockUniswapV3Pool {
     uint160 public sqrtPriceX96;
     int24 public currentTick;
+
+    uint256 public feeGrowthGlobal0X128;
+    uint256 public feeGrowthGlobal1X128;
+
+    struct TickData {
+        uint128 liquidityGross;
+        int128 liquidityNet;
+        uint256 feeGrowthOutside0X128;
+        uint256 feeGrowthOutside1X128;
+        bool initialized;
+    }
+
+    mapping(int24 => TickData) private _ticks;
 
     constructor(uint160 sqrtPriceX96_, int24 tick_) {
         sqrtPriceX96 = sqrtPriceX96_;
@@ -240,6 +253,25 @@ contract MockUniswapV3Pool {
     function setPrice(uint160 sqrtPriceX96_, int24 tick_) external {
         sqrtPriceX96 = sqrtPriceX96_;
         currentTick = tick_;
+    }
+
+    function setFeeGrowthGlobal(uint256 feeGrowth0, uint256 feeGrowth1) external {
+        feeGrowthGlobal0X128 = feeGrowth0;
+        feeGrowthGlobal1X128 = feeGrowth1;
+    }
+
+    function setTickData(
+        int24 tick,
+        uint256 feeGrowthOutside0X128_,
+        uint256 feeGrowthOutside1X128_
+    ) external {
+        _ticks[tick] = TickData({
+            liquidityGross: 0,
+            liquidityNet: 0,
+            feeGrowthOutside0X128: feeGrowthOutside0X128_,
+            feeGrowthOutside1X128: feeGrowthOutside1X128_,
+            initialized: true
+        });
     }
 
     function slot0()
@@ -256,5 +288,32 @@ contract MockUniswapV3Pool {
         )
     {
         return (sqrtPriceX96, currentTick, 0, 0, 0, 0, true);
+    }
+
+    function ticks(int24 tick)
+        external
+        view
+        returns (
+            uint128 liquidityGross,
+            int128 liquidityNet,
+            uint256 feeGrowthOutside0X128,
+            uint256 feeGrowthOutside1X128,
+            int56 tickCumulativeOutside,
+            uint160 secondsPerLiquidityOutsideX128,
+            uint32 secondsOutside,
+            bool initialized
+        )
+    {
+        TickData storage t = _ticks[tick];
+        return (
+            t.liquidityGross,
+            t.liquidityNet,
+            t.feeGrowthOutside0X128,
+            t.feeGrowthOutside1X128,
+            0, // tickCumulativeOutside
+            0, // secondsPerLiquidityOutsideX128
+            0, // secondsOutside
+            t.initialized
+        );
     }
 }

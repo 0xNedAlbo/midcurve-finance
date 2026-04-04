@@ -269,25 +269,94 @@ contract UniswapV3VaultTest is Test {
 
     // ============ View functions ============
 
-    function test_claimableFees_returnsCorrectAmounts() public {
+    function test_claimableFees_includesTokensOwed() public {
+        // Accrue fees in NFPM (component 3: tokensOwed)
         nfpm.accrueFeesForTesting(TOKEN_ID, 1000, 2000);
 
-        // Note: claimableFees is a view — it shows what WOULD be claimable
-        // if _collectAndUpdateAccumulator were called first.
-        // Since we haven't called any state-changing function, the accumulator
-        // hasn't been updated yet, so claimable shows 0.
+        // claimableFees now reads tokensOwed directly from NFPM — no state change needed
         (uint256 fee0, uint256 fee1) = vault.claimableFees(alice);
-        assertEq(fee0, 0);
-        assertEq(fee1, 0);
+        assertEq(fee0, 1000);
+        assertEq(fee1, 2000);
 
-        // After a state-changing call that triggers accumulator update:
+        // After collecting, claimable should be 0
         vm.prank(alice);
         vault.collectFees();
 
-        // Now claimable should be 0 (just collected)
         (fee0, fee1) = vault.claimableFees(alice);
         assertEq(fee0, 0);
         assertEq(fee1, 0);
+    }
+
+    function test_claimableFees_proportionalSplit() public {
+        // Transfer half the shares to bob
+        vm.prank(alice);
+        vault.transfer(bob, INITIAL_LIQUIDITY / 2);
+
+        // Accrue fees in NFPM
+        nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 20_000);
+
+        (uint256 aliceFee0, uint256 aliceFee1) = vault.claimableFees(alice);
+        (uint256 bobFee0, uint256 bobFee1) = vault.claimableFees(bob);
+
+        // Each holds 50% of shares — should see ~50% of tokensOwed
+        assertApproxEqAbs(aliceFee0, 5000, 1);
+        assertApproxEqAbs(aliceFee1, 10_000, 1);
+        assertApproxEqAbs(bobFee0, 5000, 1);
+        assertApproxEqAbs(bobFee1, 10_000, 1);
+    }
+
+    function test_claimableFees_includesUnsnapshottedPoolFees() public {
+        // Set up pool-level fee growth (component 4)
+        // Current tick is 0 (within range TICK_LOWER..TICK_UPPER)
+        // feeGrowthOutside for lower tick = 0 (default, since tick is above lower)
+        // feeGrowthOutside for upper tick = 0 (default, since tick is below upper)
+        // So feeGrowthInside = feeGrowthGlobal - 0 - 0 = feeGrowthGlobal
+        // feeGrowthInsideLast from NFPM = 0 (mock default)
+        // delta = feeGrowthGlobal
+        // unsnapshottedFees = delta * L_total / Q128
+
+        uint256 Q128 = 1 << 128;
+        // Set fee growth so that L_total * feeGrowth / Q128 = 1000 for token0
+        // L_total = INITIAL_LIQUIDITY = 1_000_000
+        // feeGrowth = 1000 * Q128 / 1_000_000
+        uint256 feeGrowth0 = 1000 * Q128 / INITIAL_LIQUIDITY;
+        uint256 feeGrowth1 = 2000 * Q128 / INITIAL_LIQUIDITY;
+        pool.setFeeGrowthGlobal(feeGrowth0, feeGrowth1);
+
+        (uint256 fee0, uint256 fee1) = vault.claimableFees(alice);
+        // Alice holds 100% of shares, so she gets full unsnapshotted fees
+        // Allow ±1 for integer division truncation in feeGrowth encoding
+        assertApproxEqAbs(fee0, 1000, 1);
+        assertApproxEqAbs(fee1, 2000, 1);
+    }
+
+    function test_claimableFees_allFourComponents() public {
+        // Component 1+2: accrue and settle fees via a collectFees then accrue more
+        nfpm.accrueFeesForTesting(TOKEN_ID, 500, 500);
+        vm.prank(alice);
+        vault.collectFees();
+
+        // Accrue more fees in NFPM but don't collect — creates fresh tokensOwed (component 3)
+        nfpm.accrueFeesForTesting(TOKEN_ID, 300, 300);
+
+        // Set pool fee growth for component 4
+        uint256 Q128 = 1 << 128;
+        uint256 feeGrowth0 = 200 * Q128 / INITIAL_LIQUIDITY;
+        uint256 feeGrowth1 = 200 * Q128 / INITIAL_LIQUIDITY;
+        pool.setFeeGrowthGlobal(feeGrowth0, feeGrowth1);
+
+        (uint256 fee0, uint256 fee1) = vault.claimableFees(alice);
+        // Component 1+2: 0 (just collected)
+        // Component 3: 300 (tokensOwed from NFPM)
+        // Component 4: 200 (unsnapshotted pool fees, ±1 truncation)
+        // Total: ~500
+        assertApproxEqAbs(fee0, 500, 1);
+        assertApproxEqAbs(fee1, 500, 1);
+    }
+
+    function test_tickBounds_exposed() public view {
+        assertEq(vault.tickLower(), TICK_LOWER);
+        assertEq(vault.tickUpper(), TICK_UPPER);
     }
 
     // ============ Reentrancy ============

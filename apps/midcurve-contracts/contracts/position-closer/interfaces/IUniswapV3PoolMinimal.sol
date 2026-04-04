@@ -34,6 +34,27 @@ interface IUniswapV3PoolMinimal {
             bool unlocked
         );
 
+    /// @notice The fee growth as a Q128.128 fees of token0 collected per unit of liquidity for the entire life of the pool
+    function feeGrowthGlobal0X128() external view returns (uint256);
+
+    /// @notice The fee growth as a Q128.128 fees of token1 collected per unit of liquidity for the entire life of the pool
+    function feeGrowthGlobal1X128() external view returns (uint256);
+
+    /// @notice Look up information about a specific tick in the pool
+    function ticks(int24 tick)
+        external
+        view
+        returns (
+            uint128 liquidityGross,
+            int128 liquidityNet,
+            uint256 feeGrowthOutside0X128,
+            uint256 feeGrowthOutside1X128,
+            int56 tickCumulativeOutside,
+            uint160 secondsPerLiquidityOutsideX128,
+            uint32 secondsOutside,
+            bool initialized
+        );
+
     /// @notice Swap token0 for token1, or token1 for token0
     /// @param recipient The address to receive the output of the swap
     /// @param zeroForOne The direction of the swap, true for token0 to token1
