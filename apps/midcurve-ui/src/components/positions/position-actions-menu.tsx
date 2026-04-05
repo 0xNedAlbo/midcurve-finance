@@ -16,18 +16,20 @@
 
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { MoreVertical, Trash2, RotateCcw, ArrowRightLeft, BookOpen, BookX } from "lucide-react";
+import { MoreVertical, Trash2, RotateCcw, ArrowRightLeft, BookOpen, BookX, Coins } from "lucide-react";
 
 interface PositionActionsMenuProps {
   onReloadHistory: () => void;
   onSwitchQuoteToken: () => void;
   onToggleTracking: () => void;
   onDelete: () => void;
+  onTokenize?: () => void;
   isTrackedInAccounting?: boolean;
   isDeleting?: boolean;
   isReloadingHistory?: boolean;
   isSwitchingQuoteToken?: boolean;
   isTogglingTracking?: boolean;
+  isTokenizing?: boolean;
 }
 
 export function PositionActionsMenu({
@@ -35,11 +37,13 @@ export function PositionActionsMenu({
   onSwitchQuoteToken,
   onToggleTracking,
   onDelete,
+  onTokenize,
   isTrackedInAccounting = true,
   isDeleting = false,
   isReloadingHistory = false,
   isSwitchingQuoteToken = false,
   isTogglingTracking = false,
+  isTokenizing = false,
 }: PositionActionsMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
@@ -63,7 +67,7 @@ export function PositionActionsMenu({
   }, [isOpen]);
 
   // Disable menu if any action is in progress
-  const isActionInProgress = isDeleting || isReloadingHistory || isSwitchingQuoteToken || isTogglingTracking;
+  const isActionInProgress = isDeleting || isReloadingHistory || isSwitchingQuoteToken || isTogglingTracking || isTokenizing;
 
   // Close menu when clicking outside
   const handleBackdropClick = () => {
@@ -86,6 +90,12 @@ export function PositionActionsMenu({
   const handleToggleTracking = () => {
     setIsOpen(false);
     onToggleTracking();
+  };
+
+  // Handle tokenize action
+  const handleTokenize = () => {
+    setIsOpen(false);
+    onTokenize?.();
   };
 
   // Handle delete action
@@ -155,6 +165,16 @@ export function PositionActionsMenu({
                   </>
                 )}
               </button>
+              {onTokenize && (
+                <button
+                  onClick={handleTokenize}
+                  disabled={isActionInProgress}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <Coins className="w-4 h-4" />
+                  Tokenize Position
+                </button>
+              )}
               <button
                 onClick={handleDelete}
                 disabled={isActionInProgress}

@@ -33,6 +33,7 @@ import {
   SwapRouterService,
   JournalService,
   JournalBackfillService,
+  UniswapV3VaultPositionService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -56,6 +57,7 @@ let _automationLogService: AutomationLogService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
+let _uniswapV3VaultPositionService: UniswapV3VaultPositionService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -267,6 +269,16 @@ export function getUniswapV3PositionLedgerService(positionId: string): UniswapV3
  */
 export function getUniswapV3AprService(positionId: string): UniswapV3AprService {
   return new UniswapV3AprService({ positionId });
+}
+
+/**
+ * Get singleton instance of UniswapV3VaultPositionService
+ */
+export function getUniswapV3VaultPositionService(): UniswapV3VaultPositionService {
+  if (!_uniswapV3VaultPositionService) {
+    _uniswapV3VaultPositionService = new UniswapV3VaultPositionService();
+  }
+  return _uniswapV3VaultPositionService;
 }
 
 /**
