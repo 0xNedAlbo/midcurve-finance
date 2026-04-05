@@ -29,7 +29,6 @@
     /* Skip Checking */
     "skipLibCheck": true,
     /* Path Mapping */
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },
