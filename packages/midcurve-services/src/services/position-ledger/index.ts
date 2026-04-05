@@ -21,8 +21,23 @@ export {
   type ImportLogsResult,
 } from './uniswapv3-ledger-service.js';
 
-export { UniswapV3VaultLedgerService } from './uniswapv3-vault-ledger-service.js';
-export type { UniswapV3VaultLedgerServiceDependencies } from './uniswapv3-vault-ledger-service.js';
+export {
+  UniswapV3VaultLedgerService,
+  type UniswapV3VaultLedgerServiceConfig,
+  type UniswapV3VaultLedgerServiceDependencies,
+  type CreateVaultLedgerEventInput,
+  type VaultRawLogInput,
+  type VaultLedgerAggregates,
+  type VaultSingleLogResult,
+  type VaultImportLogsResult,
+  // Vault event validation and decoding
+  VAULT_EVENT_SIGNATURES,
+  validateVaultEvent,
+  decodeVaultLogData,
+  type ValidVaultEventType,
+  type ValidateVaultEventResult,
+  type DecodedVaultLogData,
+} from './uniswapv3-vault-ledger-service.js';
 
 // Re-export APR types for backward compatibility
 export type { AprPeriodData } from '../types/position-apr/index.js';

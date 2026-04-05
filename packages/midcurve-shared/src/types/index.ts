@@ -118,6 +118,11 @@ export {
   CloseOrderSimulationOverlay,
   INFINITE_RUNUP,
   resolveExposure,
+  // Vault position
+  UniswapV3VaultPosition,
+  UniswapV3VaultPositionConfig,
+  vaultPositionStateToJSON,
+  vaultPositionStateFromJSON,
 } from './position/index.js';
 export type {
   PnLScenario,
@@ -125,6 +130,13 @@ export type {
   PostTriggerExposure,
   UniswapV3SimulationParams,
   PnLSimulationResult,
+  // Vault position types
+  UniswapV3VaultPositionParams,
+  UniswapV3VaultPositionRow,
+  UniswapV3VaultPositionConfigData,
+  UniswapV3VaultPositionConfigJSON,
+  UniswapV3VaultPositionState,
+  UniswapV3VaultPositionStateJSON,
 } from './position/index.js';
 
 // ============================================================================
@@ -226,6 +238,25 @@ export {
   ledgerEventConfigFromJSON,
   ledgerEventStateToJSON,
   ledgerEventStateFromJSON,
+  // Vault ledger events
+  UniswapV3VaultPositionLedgerEvent,
+  vaultLedgerEventConfigToJSON,
+  vaultLedgerEventConfigFromJSON,
+  vaultLedgerEventStateToJSON,
+  vaultLedgerEventStateFromJSON,
+} from './position-ledger-event/index.js';
+export type {
+  UniswapV3VaultLedgerEventConfig,
+  UniswapV3VaultLedgerEventConfigJSON,
+  UniswapV3VaultLedgerEventState,
+  UniswapV3VaultLedgerEventStateJSON,
+  UniswapV3VaultMintEvent,
+  UniswapV3VaultBurnEvent,
+  UniswapV3VaultCollectYieldEvent,
+  UniswapV3VaultTransferInEvent,
+  UniswapV3VaultTransferOutEvent,
+  UniswapV3VaultPositionLedgerEventParams,
+  UniswapV3VaultPositionLedgerEventRow,
 } from './position-ledger-event/index.js';
 
 // ============================================================================

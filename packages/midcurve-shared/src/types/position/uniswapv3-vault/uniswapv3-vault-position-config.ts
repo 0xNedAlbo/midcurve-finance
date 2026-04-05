@@ -22,6 +22,9 @@ export interface UniswapV3VaultPositionConfigData {
   /** UniswapV3VaultFactory address (EIP-55 checksummed) */
   factoryAddress: string;
 
+  /** User's wallet address that holds the shares (EIP-55 checksummed) */
+  userAddress: string;
+
   /** Uniswap V3 pool address (EIP-55 checksummed) */
   poolAddress: string;
 
@@ -65,6 +68,7 @@ export interface UniswapV3VaultPositionConfigJSON {
   vaultAddress: string;
   underlyingTokenId: number;
   factoryAddress: string;
+  userAddress: string;
   poolAddress: string;
   tickLower: number;
   tickUpper: number;
@@ -90,6 +94,7 @@ export class UniswapV3VaultPositionConfig
   readonly vaultAddress: string;
   readonly underlyingTokenId: number;
   readonly factoryAddress: string;
+  readonly userAddress: string;
   readonly poolAddress: string;
   readonly token0Address: string;
   readonly token1Address: string;
@@ -107,6 +112,7 @@ export class UniswapV3VaultPositionConfig
     this.vaultAddress = data.vaultAddress;
     this.underlyingTokenId = data.underlyingTokenId;
     this.factoryAddress = data.factoryAddress;
+    this.userAddress = data.userAddress;
     this.poolAddress = data.poolAddress;
     this.token0Address = data.token0Address;
     this.token1Address = data.token1Address;
@@ -126,6 +132,7 @@ export class UniswapV3VaultPositionConfig
       vaultAddress: this.vaultAddress,
       underlyingTokenId: this.underlyingTokenId,
       factoryAddress: this.factoryAddress,
+      userAddress: this.userAddress,
       poolAddress: this.poolAddress,
       tickLower: this.tickLower,
       tickUpper: this.tickUpper,

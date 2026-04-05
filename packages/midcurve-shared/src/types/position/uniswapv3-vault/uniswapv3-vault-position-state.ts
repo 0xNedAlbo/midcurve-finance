@@ -2,11 +2,12 @@
  * UniswapV3 Vault Position State
  *
  * Mutable state for vault share positions.
- * Tracks the user's share balance, vault-level liquidity, and fee accumulator state.
+ * Tracks the user's share balance, vault-level liquidity, and claimable fees.
  *
  * Key differences from UniswapV3PositionState:
  * - No ownerAddress/operator (ERC-20 ownership, not NFT)
- * - No per-position fee growth tracking (vault handles this via accumulator)
+ * - No fee accumulator internals (feePerShare, feeDebt) — the on-chain claimableFees()
+ *   computes the full fee picture including all 4 components
  * - No isBurned (vault positions are always reopenable)
  * - User's liquidity is derived: liquidity * sharesBalance / totalSupply
  */
@@ -25,22 +26,17 @@ export interface UniswapV3VaultPositionState {
   /** Vault's total liquidity in the underlying NFT */
   liquidity: bigint;
 
-  /** Global cumulative fee per share for token0 (scaled by 1e18) */
-  feePerShare0: bigint;
-
-  /** Global cumulative fee per share for token1 (scaled by 1e18) */
-  feePerShare1: bigint;
-
-  /** User's fee debt snapshot for token0 */
-  feeDebt0: bigint;
-
-  /** User's fee debt snapshot for token1 */
-  feeDebt1: bigint;
-
-  /** User's claimable fees for token0 */
+  /**
+   * User's claimable fees for token0.
+   * Populated from vault.claimableFees(user) which computes the full picture on-chain:
+   * pending + accumulator delta + tokensOwed (pro-rata) + unsnapshotted pool fees (pro-rata).
+   */
   unclaimedFees0: bigint;
 
-  /** User's claimable fees for token1 */
+  /**
+   * User's claimable fees for token1.
+   * Populated from vault.claimableFees(user) — same 4-component calculation.
+   */
   unclaimedFees1: bigint;
 
   /**
@@ -75,10 +71,6 @@ export interface UniswapV3VaultPositionStateJSON {
   sharesBalance: string;
   totalSupply: string;
   liquidity: string;
-  feePerShare0: string;
-  feePerShare1: string;
-  feeDebt0: string;
-  feeDebt1: string;
   unclaimedFees0: string;
   unclaimedFees1: string;
   isClosed: boolean;
@@ -101,10 +93,6 @@ export function vaultPositionStateToJSON(
     sharesBalance: state.sharesBalance.toString(),
     totalSupply: state.totalSupply.toString(),
     liquidity: state.liquidity.toString(),
-    feePerShare0: state.feePerShare0.toString(),
-    feePerShare1: state.feePerShare1.toString(),
-    feeDebt0: state.feeDebt0.toString(),
-    feeDebt1: state.feeDebt1.toString(),
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
     isClosed: state.isClosed,
@@ -119,10 +107,6 @@ export function vaultPositionStateFromJSON(
     sharesBalance: BigInt(json.sharesBalance),
     totalSupply: BigInt(json.totalSupply),
     liquidity: BigInt(json.liquidity),
-    feePerShare0: BigInt(json.feePerShare0),
-    feePerShare1: BigInt(json.feePerShare1),
-    feeDebt0: BigInt(json.feeDebt0),
-    feeDebt1: BigInt(json.feeDebt1),
     unclaimedFees0: BigInt(json.unclaimedFees0),
     unclaimedFees1: BigInt(json.unclaimedFees1),
     isClosed: json.isClosed,
