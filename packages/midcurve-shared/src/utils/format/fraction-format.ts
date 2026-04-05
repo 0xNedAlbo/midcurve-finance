@@ -205,7 +205,7 @@ export function formatHumanWithDecimals(
   return formatFractionHuman(
     {
       num: value,
-      den: 10n ** BigInt(decimals || 18),
+      den: 10n ** BigInt(decimals ?? 18),
     },
     { ...opts }
   );
@@ -225,7 +225,7 @@ export function formatCompactValue(
   const fullFormatted = formatHumanWithDecimals(value, decimals, { ...opts, mantissaDigits: 4 });
 
   // Check if the absolute value is >= 1 by comparing to the denominator
-  const denominator = 10n ** BigInt(decimals || 18);
+  const denominator = 10n ** BigInt(decimals ?? 18);
   const absValue = value < 0n ? -value : value;
   const isGreaterOrEqualToOne = absValue >= denominator;
 
@@ -279,6 +279,11 @@ export function formatCompactValue(
       const zeroSkip = useSubscript ? `₍${zeroCount}₎` : `(${zeroCount})`;
       return parts[0] + decimalSep + zeroSkip + significantPart;
     }
+  }
+
+  // Integer tokens (0 decimals) — no fractional part possible
+  if (decimals === 0) {
+    return fullFormatted;
   }
 
   // For values >= 1, truncate to max 2 decimal places
