@@ -190,6 +190,21 @@ export const UniswapV3VaultAbi = [
  * Factory contract ABI — VaultCreated event for wallet discovery.
  */
 export const UniswapV3VaultFactoryAbi = [
+  // ============ Factory functions ============
+  {
+    type: 'function',
+    name: 'createVault',
+    inputs: [
+      { name: 'tokenId_', type: 'uint256' },
+      { name: 'name_', type: 'string' },
+      { name: 'symbol_', type: 'string' },
+      { name: 'decimals_', type: 'uint8' },
+    ],
+    outputs: [{ name: 'vault', type: 'address' }],
+    stateMutability: 'nonpayable',
+  },
+
+  // ============ Factory events ============
   {
     type: 'event',
     name: 'VaultCreated',
