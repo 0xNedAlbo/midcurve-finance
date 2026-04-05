@@ -51,10 +51,65 @@ import { Erc20TokenService } from '../token/erc20-token-service.js';
 import { tickToPrice } from '@midcurve/shared';
 
 // ============================================================================
-// CONSTANTS
+// CACHE TYPES
 // ============================================================================
 
-const REFRESH_CACHE_MS = 15_000; // 15 seconds
+/**
+ * On-chain vault state fetched from RPC.
+ * Cached by block number for consistency and deduplication.
+ */
+interface OnChainVaultState {
+    blockNumber: bigint;
+    sharesBalance: bigint;
+    totalSupply: bigint;
+    liquidity: bigint;
+    unclaimedFees0: bigint;
+    unclaimedFees1: bigint;
+    sqrtPriceX96: bigint;
+    currentTick: number;
+    positionManagerAddress: string;
+}
+
+/** Serialized version for CacheService (bigints as strings) */
+interface OnChainVaultStateCached {
+    blockNumber: string;
+    sharesBalance: string;
+    totalSupply: string;
+    liquidity: string;
+    unclaimedFees0: string;
+    unclaimedFees1: string;
+    sqrtPriceX96: string;
+    currentTick: number;
+    positionManagerAddress: string;
+}
+
+function serializeVaultState(state: OnChainVaultState): OnChainVaultStateCached {
+    return {
+        blockNumber: state.blockNumber.toString(),
+        sharesBalance: state.sharesBalance.toString(),
+        totalSupply: state.totalSupply.toString(),
+        liquidity: state.liquidity.toString(),
+        unclaimedFees0: state.unclaimedFees0.toString(),
+        unclaimedFees1: state.unclaimedFees1.toString(),
+        sqrtPriceX96: state.sqrtPriceX96.toString(),
+        currentTick: state.currentTick,
+        positionManagerAddress: state.positionManagerAddress,
+    };
+}
+
+function deserializeVaultState(cached: OnChainVaultStateCached): OnChainVaultState {
+    return {
+        blockNumber: BigInt(cached.blockNumber),
+        sharesBalance: BigInt(cached.sharesBalance),
+        totalSupply: BigInt(cached.totalSupply),
+        liquidity: BigInt(cached.liquidity),
+        unclaimedFees0: BigInt(cached.unclaimedFees0),
+        unclaimedFees1: BigInt(cached.unclaimedFees1),
+        sqrtPriceX96: BigInt(cached.sqrtPriceX96),
+        currentTick: cached.currentTick,
+        positionManagerAddress: cached.positionManagerAddress,
+    };
+}
 
 // ============================================================================
 // DEPENDENCIES
@@ -86,7 +141,6 @@ export class UniswapV3VaultPositionService {
     private readonly _quoteTokenService: UniswapV3QuoteTokenService;
     private readonly _evmBlockService: EvmBlockService;
     private readonly _poolPriceService: UniswapV3PoolPriceService;
-    // @ts-expect-error — will be used for 15-second cache optimization
     private readonly _cacheService: CacheService;
     private readonly _sharedContractService: SharedContractService;
     private readonly _erc20TokenService: Erc20TokenService;
@@ -415,16 +469,6 @@ export class UniswapV3VaultPositionService {
         blockNumber: number | 'latest' = 'latest',
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
-        // 15-second cache check
-        const db = dbTx ?? this.prisma;
-        const row = await db.position.findFirst({ where: { id, protocol: 'uniswapv3-vault' } });
-        if (!row) throw new Error(`Vault position not found: ${id}`);
-
-        const age = Date.now() - row.updatedAt.getTime();
-        if (age < REFRESH_CACHE_MS) {
-            return this.mapToPosition(row as unknown as UniswapV3VaultPositionRow);
-        }
-
         await this.refreshAllPositionLogs(id, blockNumber, dbTx);
         return this.refreshOnChainState(id, blockNumber, dbTx);
     }
@@ -598,45 +642,20 @@ export class UniswapV3VaultPositionService {
         const position = await this.findById(id, dbTx);
         if (!position) throw new Error(`Vault position not found: ${id}`);
 
-        const chainId = position.chainId;
-        const vaultAddress = position.vaultAddress;
-        const client = this._evmConfig.getPublicClient(chainId);
+        const onChainState = await this.fetchVaultState(position, blockNumber);
 
-        const userAddress = position.typedConfig.userAddress;
+        const isClosed = onChainState.sharesBalance === 0n;
 
-        const resolvedBlock = blockNumber === 'latest' ? undefined : BigInt(blockNumber);
-
-        // 4 parallel RPC calls
-        const [sharesBalance, totalSupply, claimable, positionData] = await Promise.all([
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [userAddress as Address], blockNumber: resolvedBlock }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply', blockNumber: resolvedBlock }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [userAddress as Address], blockNumber: resolvedBlock }),
-            client.readContract({ address: position.typedConfig.poolAddress as Address, abi: [{ type: 'function', name: 'slot0', inputs: [], outputs: [{ name: '', type: 'uint160' }, { name: '', type: 'int24' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint8' }, { name: '', type: 'bool' }], stateMutability: 'view' }], functionName: 'slot0', blockNumber: resolvedBlock }),
-        ]) as [bigint, bigint, readonly [bigint, bigint], readonly [bigint, number, ...unknown[]]];
-
-        // Read NFPM liquidity
-        const nfpmData = await client.readContract({
-            address: position.typedConfig.poolAddress as Address, // Need NFPM address
-            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
-            functionName: 'positions',
-            args: [BigInt(position.underlyingTokenId)],
-            blockNumber: resolvedBlock,
-        }) as readonly unknown[];
-        const liquidity = nfpmData[7] as bigint;
-
-        const isClosed = sharesBalance === 0n;
-
-        // Update state
         const newState: UniswapV3VaultPositionState = {
-            sharesBalance,
-            totalSupply,
-            liquidity,
-            unclaimedFees0: claimable[0],
-            unclaimedFees1: claimable[1],
+            sharesBalance: onChainState.sharesBalance,
+            totalSupply: onChainState.totalSupply,
+            liquidity: onChainState.liquidity,
+            unclaimedFees0: onChainState.unclaimedFees0,
+            unclaimedFees1: onChainState.unclaimedFees1,
             isClosed,
-            sqrtPriceX96: positionData[0],
-            currentTick: positionData[1],
-            poolLiquidity: 0n, // Will be read separately if needed
+            sqrtPriceX96: onChainState.sqrtPriceX96,
+            currentTick: onChainState.currentTick,
+            poolLiquidity: 0n,
             feeGrowthGlobal0: 0n,
             feeGrowthGlobal1: 0n,
         };
@@ -670,6 +689,77 @@ export class UniswapV3VaultPositionService {
         }
 
         return (await this.findById(id, dbTx))!;
+    }
+
+    // ============================================================================
+    // PRIVATE: FETCH VAULT STATE (CACHED BY BLOCK NUMBER)
+    // ============================================================================
+
+    /**
+     * Fetch on-chain vault state with block-number-keyed caching.
+     *
+     * Cache key: `vault-onchain:{chainId}:{vaultAddress}:{userAddress}:{blockNumber}`
+     * TTL: 60 seconds (same block data is immutable, TTL is just for eviction)
+     */
+    private async fetchVaultState(
+        position: UniswapV3VaultPosition,
+        blockNumber: number | 'latest' = 'latest',
+    ): Promise<OnChainVaultState> {
+        const chainId = position.chainId;
+        const vaultAddress = position.vaultAddress;
+        const userAddress = position.typedConfig.userAddress;
+
+        // 1. Resolve block number
+        const resolvedBlockNumber = blockNumber === 'latest'
+            ? await this._evmBlockService.getCurrentBlockNumber(chainId)
+            : BigInt(blockNumber);
+
+        // 2. Check cache
+        const cacheKey = `vault-onchain:${chainId}:${vaultAddress}:${userAddress}:${resolvedBlockNumber}`;
+        const cached = await this._cacheService.get<OnChainVaultStateCached>(cacheKey);
+        if (cached) {
+            this.logger.debug({ chainId, vaultAddress, blockNumber: resolvedBlockNumber.toString(), cacheHit: true }, 'Vault on-chain state cache hit');
+            return deserializeVaultState(cached);
+        }
+
+        // 3. Cache miss — fetch from chain
+        const client = this._evmConfig.getPublicClient(chainId);
+
+        const [sharesBalance, totalSupply, claimable, slot0Data, positionManagerAddr] = await Promise.all([
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [userAddress as Address], blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply', blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [userAddress as Address], blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: position.typedConfig.poolAddress as Address, abi: [{ type: 'function', name: 'slot0', inputs: [], outputs: [{ name: '', type: 'uint160' }, { name: '', type: 'int24' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint8' }, { name: '', type: 'bool' }], stateMutability: 'view' }], functionName: 'slot0', blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
+        ]) as [bigint, bigint, readonly [bigint, bigint], readonly [bigint, number, ...unknown[]], string];
+
+        // Read NFPM liquidity
+        const nfpmData = await client.readContract({
+            address: positionManagerAddr as Address,
+            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+            functionName: 'positions',
+            args: [BigInt(position.underlyingTokenId)],
+            blockNumber: resolvedBlockNumber,
+        }) as readonly unknown[];
+
+        const state: OnChainVaultState = {
+            blockNumber: resolvedBlockNumber,
+            sharesBalance: sharesBalance as bigint,
+            totalSupply: totalSupply as bigint,
+            liquidity: nfpmData[7] as bigint,
+            unclaimedFees0: claimable[0],
+            unclaimedFees1: claimable[1],
+            sqrtPriceX96: slot0Data[0],
+            currentTick: slot0Data[1],
+            positionManagerAddress: positionManagerAddr as string,
+        };
+
+        // 4. Cache with 60s TTL
+        await this._cacheService.set(cacheKey, serializeVaultState(state), 60);
+
+        this.logger.debug({ chainId, vaultAddress, blockNumber: resolvedBlockNumber.toString(), cacheHit: false }, 'Vault on-chain state fetched and cached');
+
+        return state;
     }
 
     // ============================================================================
