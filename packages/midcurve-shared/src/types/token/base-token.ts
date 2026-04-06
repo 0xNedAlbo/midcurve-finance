@@ -31,6 +31,7 @@ export abstract class BaseToken implements TokenInterface {
   readonly logoUrl?: string;
   readonly coingeckoId?: string;
   readonly marketCap?: number;
+  readonly tokenHash: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -56,6 +57,7 @@ export abstract class BaseToken implements TokenInterface {
     this.logoUrl = params.logoUrl;
     this.coingeckoId = params.coingeckoId;
     this.marketCap = params.marketCap;
+    this.tokenHash = params.tokenHash;
     this.createdAt = params.createdAt;
     this.updatedAt = params.updatedAt;
   }
@@ -80,6 +82,7 @@ export abstract class BaseToken implements TokenInterface {
       logoUrl: this.logoUrl,
       coingeckoId: this.coingeckoId,
       marketCap: this.marketCap,
+      tokenHash: this.tokenHash,
       config: this.config,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),

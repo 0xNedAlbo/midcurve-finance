@@ -21,6 +21,7 @@ export interface TokenJSON {
   logoUrl?: string;
   coingeckoId?: string;
   marketCap?: number;
+  tokenHash: string;
   config: Record<string, unknown>;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
@@ -38,6 +39,7 @@ export interface BaseTokenParams {
   logoUrl?: string;
   coingeckoId?: string;
   marketCap?: number;
+  tokenHash: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,6 +57,7 @@ export interface TokenRow {
   logoUrl: string | null;
   coingeckoId: string | null;
   marketCap: number | null;
+  tokenHash: string;
   config: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;

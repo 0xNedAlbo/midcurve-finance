@@ -142,6 +142,10 @@ model Token {
   // Contains address/mint, chainId/programId, platform identifier, etc.
   config Json
 
+  // Token hash for fast lookups by type+chain+address
+  // Format: "erc20/{chainId}/{address}" or "basic-currency/{currencyCode}"
+  tokenHash String @unique
+
   // Indexes for efficient queries
   @@index([tokenType])
   @@index([symbol])

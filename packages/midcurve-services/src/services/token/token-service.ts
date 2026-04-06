@@ -46,6 +46,7 @@ export interface TokenDbResult {
   logoUrl: string | null;
   coingeckoId: string | null;
   marketCap: number | null;
+  tokenHash: string;
   config: unknown;
 }
 
@@ -110,6 +111,7 @@ export abstract class TokenService {
       logoUrl: dbResult.logoUrl,
       coingeckoId: dbResult.coingeckoId,
       marketCap: dbResult.marketCap,
+      tokenHash: dbResult.tokenHash,
       config: dbResult.config as Record<string, unknown>,
       createdAt: dbResult.createdAt,
       updatedAt: dbResult.updatedAt,

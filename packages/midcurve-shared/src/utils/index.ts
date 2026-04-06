@@ -23,5 +23,8 @@ export * from './position-helpers.js';
 // Position hash parsing
 export * from './position-hash.js';
 
+// Token hash creation and parsing
+export * from './token-hash.js';
+
 // Period utilities
 export * from './period/index.js';
