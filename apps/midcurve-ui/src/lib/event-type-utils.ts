@@ -8,7 +8,15 @@
 /**
  * Position ledger event types
  */
-export type EventType = 'INCREASE_POSITION' | 'DECREASE_POSITION' | 'COLLECT';
+export type EventType =
+  | 'INCREASE_POSITION'
+  | 'DECREASE_POSITION'
+  | 'COLLECT'
+  | 'VAULT_MINT'
+  | 'VAULT_BURN'
+  | 'VAULT_COLLECT_YIELD'
+  | 'VAULT_TRANSFER_IN'
+  | 'VAULT_TRANSFER_OUT';
 
 /**
  * Visual metadata for an event type
@@ -41,6 +49,36 @@ const EVENT_TYPE_MAP: Record<EventType, EventTypeInfo> = {
     icon: '💰',
     color: 'text-purple-400',
     bgColor: 'bg-purple-500/20',
+  },
+  VAULT_MINT: {
+    label: 'Shares Minted',
+    icon: '🪙',
+    color: 'text-green-400',
+    bgColor: 'bg-green-500/20',
+  },
+  VAULT_BURN: {
+    label: 'Shares Burned',
+    icon: '🔥',
+    color: 'text-red-400',
+    bgColor: 'bg-red-500/20',
+  },
+  VAULT_COLLECT_YIELD: {
+    label: 'Yield Collected',
+    icon: '💰',
+    color: 'text-purple-400',
+    bgColor: 'bg-purple-500/20',
+  },
+  VAULT_TRANSFER_IN: {
+    label: 'Shares Received',
+    icon: '📥',
+    color: 'text-blue-400',
+    bgColor: 'bg-blue-500/20',
+  },
+  VAULT_TRANSFER_OUT: {
+    label: 'Shares Sent',
+    icon: '📤',
+    color: 'text-orange-400',
+    bgColor: 'bg-orange-500/20',
   },
 };
 
@@ -86,5 +124,6 @@ export function isDecreaseEvent(eventType: EventType): boolean {
  * @returns True if this is a COLLECT event
  */
 export function isCollectEvent(eventType: EventType): boolean {
-  return eventType === 'COLLECT';
+  return eventType === 'COLLECT' || eventType === 'VAULT_COLLECT_YIELD';
 }
+
