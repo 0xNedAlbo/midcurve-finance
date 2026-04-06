@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Plus, Minus, DollarSign, Flame } from "lucide-react";
+import { Plus, Minus, DollarSign, Flame, Coins } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { Address } from "viem";
@@ -17,6 +17,7 @@ import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUnisw
 import { getChainSlugByChainId } from "@/config/chains";
 import { UniswapV3CollectFeesModal } from "./uniswapv3-collect-fees-modal";
 import { UniswapV3BurnNftModal } from "./uniswapv3-burn-nft-modal";
+import { UniswapV3TokenizePositionModal } from "./uniswapv3-tokenize-position-modal";
 import { StopLossButton } from "@/components/positions/automation/StopLossButton";
 import { TakeProfitButton } from "@/components/positions/automation/TakeProfitButton";
 import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
@@ -35,6 +36,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const location = useLocation();
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showBurnModal, setShowBurnModal] = useState(false);
+  const [showTokenizeModal, setShowTokenizeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
 
   // Position lifecycle state
@@ -231,6 +233,20 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           closeOrders={position.closeOrders}
         />
 
+        {/* Tokenize Position — only for active, non-closed positions */}
+        {!isClosed && (
+          <>
+            <div className="w-px h-6 bg-slate-600/50 mx-1" />
+            <button
+              onClick={() => setShowTokenizeModal(true)}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-violet-300 bg-violet-900/20 hover:bg-violet-800/30 border-violet-600/50"
+            >
+              <Coins className="w-3 h-3" />
+              Tokenize
+            </button>
+          </>
+        )}
+
       </div>
 
       {/* Collect Fees Modal */}
@@ -249,6 +265,15 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
         isOpen={showBurnModal}
         onClose={() => setShowBurnModal(false)}
         position={position}
+      />
+
+      {/* Tokenize Position Modal */}
+      <UniswapV3TokenizePositionModal
+        isOpen={showTokenizeModal}
+        onClose={() => setShowTokenizeModal(false)}
+        chainId={positionConfig.chainId}
+        nftId={positionConfig.nftId}
+        liquidity={(position.state as { liquidity: string }).liquidity}
       />
 
     </>

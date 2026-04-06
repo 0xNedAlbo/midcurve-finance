@@ -25,7 +25,7 @@ import { UniswapV3Actions } from "./uniswapv3-actions";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
 import { PositionActionsMenu } from "../../position-actions-menu";
 import { UniswapV3DeletePositionModal } from "./uniswapv3-delete-position-modal";
-import { UniswapV3TokenizePositionModal } from "./uniswapv3-tokenize-position-modal";
+
 import { UniswapV3ReloadHistoryModal } from "./uniswapv3-reload-history-modal";
 import { UniswapV3SwitchQuoteTokenModal } from "./uniswapv3-switch-quote-token-modal";
 import { useIsMutating } from "@tanstack/react-query";
@@ -49,8 +49,6 @@ export function UniswapV3PositionCard({ chainId, nftId, index = 0 }: UniswapV3Po
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
   const [showSwitchQuoteTokenModal, setShowSwitchQuoteTokenModal] = useState(false);
-  const [showTokenizeModal, setShowTokenizeModal] = useState(false);
-
   const isAlt = index % 2 === 1;
 
   // Fetch position detail (auto-refreshes every 60s)
@@ -73,8 +71,6 @@ export function UniswapV3PositionCard({ chainId, nftId, index = 0 }: UniswapV3Po
       setShowReloadHistoryModal={setShowReloadHistoryModal}
       showSwitchQuoteTokenModal={showSwitchQuoteTokenModal}
       setShowSwitchQuoteTokenModal={setShowSwitchQuoteTokenModal}
-      showTokenizeModal={showTokenizeModal}
-      setShowTokenizeModal={setShowTokenizeModal}
     />
   );
 }
@@ -94,8 +90,6 @@ interface UniswapV3PositionCardLoadedProps {
   setShowReloadHistoryModal: (show: boolean) => void;
   showSwitchQuoteTokenModal: boolean;
   setShowSwitchQuoteTokenModal: (show: boolean) => void;
-  showTokenizeModal: boolean;
-  setShowTokenizeModal: (show: boolean) => void;
 }
 
 function UniswapV3PositionCardLoaded({
@@ -109,8 +103,6 @@ function UniswapV3PositionCardLoaded({
   setShowReloadHistoryModal,
   showSwitchQuoteTokenModal,
   setShowSwitchQuoteTokenModal,
-  showTokenizeModal,
-  setShowTokenizeModal,
 }: UniswapV3PositionCardLoadedProps) {
   // Patch live pool price into position data (5s polling)
   const position = useUniswapV3LiveMetrics(rawPosition);
@@ -223,7 +215,6 @@ function UniswapV3PositionCardLoaded({
             onSwitchQuoteToken={() => setShowSwitchQuoteTokenModal(true)}
             onToggleTracking={() => toggleTrackingMutation.mutate({ positionHash: position.positionHash })}
             onDelete={() => setShowDeleteModal(true)}
-            onTokenize={position.isActive ? () => setShowTokenizeModal(true) : undefined}
             isTrackedInAccounting={position.isTrackedInAccounting}
             isDeleting={isDeleting}
             isReloadingHistory={isReloadingHistory}
@@ -276,14 +267,6 @@ function UniswapV3PositionCardLoaded({
         feeBps={position.pool.feeBps}
       />
 
-      {/* Tokenize Position Modal */}
-      <UniswapV3TokenizePositionModal
-        isOpen={showTokenizeModal}
-        onClose={() => setShowTokenizeModal(false)}
-        chainId={chainId}
-        nftId={nftId}
-        liquidity={(position.state as { liquidity: string }).liquidity}
-      />
     </div>
   );
 }
