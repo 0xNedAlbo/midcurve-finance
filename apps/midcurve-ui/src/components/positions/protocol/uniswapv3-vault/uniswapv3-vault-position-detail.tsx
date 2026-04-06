@@ -96,6 +96,18 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
         protocol={position.protocol}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
+        extraStatusBadges={
+          <>
+            <span className="px-3 py-1 rounded-lg text-sm font-medium border text-slate-300 bg-slate-500/10 border-slate-500/20">
+              Tokenized
+            </span>
+            <span className="px-3 py-1 rounded-lg text-sm font-medium border text-purple-400 bg-purple-500/10 border-purple-500/20">
+              {BigInt(state.totalSupply) > 0n
+                ? `${(Number(BigInt(state.sharesBalance) * 10000n / BigInt(state.totalSupply)) / 100).toFixed(2)}% Shares`
+                : "0% Shares"}
+            </span>
+          </>
+        }
         feeTierDisplay={<span>{(position.pool.feeBps / 10000).toFixed(2)}%</span>}
         identifierDisplay={<span>{truncatedAddress}</span>}
         explorerUrl={`${chainMetadata?.explorer}/address/${config.vaultAddress}`}

@@ -14,7 +14,6 @@ import {
   ChevronDown,
   ChevronUp,
   Minus,
-  PieChart,
 } from "lucide-react";
 import type { UniswapV3VaultPositionData } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultPosition";
 import type {
@@ -42,11 +41,6 @@ export function UniswapV3VaultOverviewTab({ position }: UniswapV3VaultOverviewTa
   const sharesBalance = BigInt(vaultState.sharesBalance);
   const totalSupply = BigInt(vaultState.totalSupply);
   const vaultLiquidity = BigInt(vaultState.liquidity);
-
-  // Calculate share percentage (scale up for precision, then format)
-  const sharePercentage = totalSupply > 0n
-    ? Number((sharesBalance * 10000n) / totalSupply) / 100
-    : 0;
 
   // Calculate user's proportional liquidity
   const userLiquidity = totalSupply > 0n
@@ -90,25 +84,9 @@ export function UniswapV3VaultOverviewTab({ position }: UniswapV3VaultOverviewTa
       {/* Position Values Overview */}
       <div
         className={`grid grid-cols-1 gap-6 ${
-          breakEvenPrice !== null ? "md:grid-cols-5" : "md:grid-cols-4"
+          breakEvenPrice !== null ? "md:grid-cols-4" : "md:grid-cols-3"
         }`}
       >
-        {/* Shares Balance */}
-        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-purple-500/20 rounded-lg">
-              <PieChart className="w-5 h-5 text-purple-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-white">Shares Balance</h3>
-          </div>
-          <div className="text-2xl font-bold text-purple-400">
-            {sharePercentage.toFixed(2)}%
-          </div>
-          <div className="text-sm text-slate-400 mt-1">
-            Your liquidity: {formatCompactValue(userLiquidity, 0)} L
-          </div>
-        </div>
-
         {/* Current Value */}
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
           <div className="flex items-center gap-3 mb-4">

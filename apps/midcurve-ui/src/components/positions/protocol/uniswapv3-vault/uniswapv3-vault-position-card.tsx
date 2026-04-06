@@ -159,7 +159,14 @@ function UniswapV3VaultPositionCardLoaded({
           status={position.isActive ? "active" : "closed"}
           protocol={position.protocol}
           positionOpenedAt={position.positionOpenedAt}
-          statusLineBadges={<UniswapV3VaultRangeStatus position={position} />}
+          statusLineBadges={
+            <>
+              <UniswapV3VaultRangeStatus position={position} />
+              <span className="px-1.5 md:px-2 py-0.5 rounded text-[10px] md:text-xs font-medium border text-slate-300 bg-slate-500/10 border-slate-500/20">
+                Tokenized
+              </span>
+            </>
+          }
           protocolLineBadges={
             <>
               <UniswapV3VaultChainBadge position={position} />

@@ -30,8 +30,6 @@ export function UniswapV3VaultChainBadge({ position }: UniswapV3VaultChainBadgeP
       <span className="hidden sm:inline">{chainName}</span>
       <span className="hidden md:inline">•</span>
       <span>{(poolConfig.feeBps / 10000).toFixed(2)}%</span>
-      <span className="hidden md:inline">•</span>
-      <span>Tokenized</span>
     </>
   );
 }
