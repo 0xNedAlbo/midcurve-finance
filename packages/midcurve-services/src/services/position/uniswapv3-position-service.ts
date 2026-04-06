@@ -49,7 +49,7 @@ import {
     UNISWAP_V3_POSITION_MANAGER_ABI,
     UNISWAP_V3_FACTORY_ABI,
 } from "../../config/uniswapv3.js";
-import { normalizeAddress } from "@midcurve/shared";
+import { normalizeAddress, createErc20TokenHash, createEvmOwnerWallet } from "@midcurve/shared";
 import { UniswapV3PoolService } from "../pool/uniswapv3-pool-service.js";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token-service.js";
@@ -2720,7 +2720,10 @@ export class UniswapV3PositionService {
 
             const result = await db.position.update({
                 where: { id },
-                data: { state: stateDB as object },
+                data: {
+                    state: stateDB as object,
+                    ownerWallet: createEvmOwnerWallet(ownerAddress),
+                },
             });
 
             const position = await this.mapToPosition(
@@ -3612,12 +3615,15 @@ export class UniswapV3PositionService {
                 priceRangeUpper: zeroValue,
             };
 
+            const ownerAddr = (stateDB as Record<string, unknown>).ownerAddress as string;
+
             const result = await db.position.create({
                 data: {
                     type: "LP_CONCENTRATED",
                     protocol: input.protocol,
                     userId: input.userId,
                     positionHash,
+                    ownerWallet: ownerAddr ? createEvmOwnerWallet(ownerAddr) : undefined,
                     config: configWithQuoteToken as object,
                     state: stateDB as object,
                     // Default calculated values
@@ -3943,19 +3949,11 @@ export class UniswapV3PositionService {
         const chainId = config.chainId as number;
 
         const [token0Row, token1Row] = await Promise.all([
-            this.prisma.token.findFirst({
-                where: {
-                    tokenType: "erc20",
-                    config: { path: ["address"], equals: token0Address },
-                    AND: { config: { path: ["chainId"], equals: chainId } },
-                },
+            this.prisma.token.findUnique({
+                where: { tokenHash: createErc20TokenHash(chainId, token0Address) },
             }),
-            this.prisma.token.findFirst({
-                where: {
-                    tokenType: "erc20",
-                    config: { path: ["address"], equals: token1Address },
-                    AND: { config: { path: ["chainId"], equals: chainId } },
-                },
+            this.prisma.token.findUnique({
+                where: { tokenHash: createErc20TokenHash(chainId, token1Address) },
             }),
         ]);
 

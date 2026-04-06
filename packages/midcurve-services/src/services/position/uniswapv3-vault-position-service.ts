@@ -48,7 +48,8 @@ import { UniswapV3VaultLedgerService, type VaultRawLogInput } from '../position-
 import { CacheService } from '../cache/index.js';
 import { SharedContractService } from '../automation/shared-contract-service.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
-import { tickToPrice, createErc20TokenHash } from '@midcurve/shared';
+import { tickToPrice, createErc20TokenHash, createEvmOwnerWallet, calculatePositionValue } from '@midcurve/shared';
+import { calculateTokenValueInQuote } from '../../utils/uniswapv3/ledger-calculations.js';
 
 // ============================================================================
 // CACHE TYPES
@@ -215,12 +216,12 @@ export class UniswapV3VaultPositionService {
         params: {
             chainId: number;
             vaultAddress: string;
-            userAddress: string;
+            ownerAddress: string;
             quoteTokenAddress?: string;
         },
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
-        const { chainId, userAddress } = params;
+        const { chainId, ownerAddress } = params;
         const vaultAddress = normalizeAddress(params.vaultAddress);
 
         // Check for existing position
@@ -253,9 +254,9 @@ export class UniswapV3VaultPositionService {
 
         // Read user state
         const [sharesBalance, totalSupply, claimable] = await Promise.all([
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [userAddress as Address] }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address] }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply' }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [userAddress as Address] }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [ownerAddress as Address] }),
         ]) as [bigint, bigint, readonly [bigint, bigint]];
 
         // Read liquidity from NFPM
@@ -320,7 +321,7 @@ export class UniswapV3VaultPositionService {
             vaultAddress,
             underlyingTokenId: Number(tokenId),
             factoryAddress,
-            userAddress: normalizeAddress(userAddress),
+            ownerAddress: normalizeAddress(ownerAddress),
             poolAddress: normalizeAddress(poolAddr as string),
             token0Address: token0.address,
             token1Address: token1.address,
@@ -359,10 +360,10 @@ export class UniswapV3VaultPositionService {
             { prisma: this.prisma },
         );
         const logs = await this.fetchAllVaultLogs(
-            client, vaultAddress as Address, userAddress as Address, 0n,
+            client, vaultAddress as Address, ownerAddress as Address, 0n,
         );
         await ledgerService.importLogsForPosition(
-            position, chainId, userAddress, logs, this._poolPriceService, dbTx,
+            position, chainId, ownerAddress, logs, this._poolPriceService, dbTx,
         );
 
         // Refresh to finalize metrics
@@ -453,7 +454,7 @@ export class UniswapV3VaultPositionService {
                     await this.discover(userId, {
                         chainId,
                         vaultAddress: vaultAddr,
-                        userAddress: walletAddress,
+                        ownerAddress: walletAddress,
                     });
                     imported++;
                 } catch (e) {
@@ -599,14 +600,14 @@ export class UniswapV3VaultPositionService {
             fromBlock = 0n; // Full sync — from block 0 (will be refined when we have vault deployment block)
         }
 
-        const userAddress = position.typedConfig.userAddress;
+        const ownerAddress = position.typedConfig.ownerAddress;
 
         const logs = await this.fetchAllVaultLogs(
-            client, vaultAddress as Address, userAddress as Address, fromBlock,
+            client, vaultAddress as Address, ownerAddress as Address, fromBlock,
         );
 
         const importResult = await ledgerService.importLogsForPosition(
-            position, chainId, userAddress, logs, this._poolPriceService, dbTx,
+            position, chainId, ownerAddress, logs, this._poolPriceService, dbTx,
         );
 
         // Emit domain events for deletions (reorgs)
@@ -666,12 +667,53 @@ export class UniswapV3VaultPositionService {
             feeGrowthGlobal1: 0n,
         };
 
+        // Calculate metrics from on-chain state
+        // User's proportional liquidity = totalLiquidity * shares / totalSupply
+        const userLiquidity = onChainState.totalSupply > 0n
+            ? onChainState.liquidity * onChainState.sharesBalance / onChainState.totalSupply
+            : 0n;
+
+        const currentValue = calculatePositionValue(
+            userLiquidity,
+            onChainState.sqrtPriceX96,
+            position.typedConfig.tickLower,
+            position.typedConfig.tickUpper,
+            !position.isToken0Quote, // baseIsToken0
+        );
+
+        const unclaimedYield = calculateTokenValueInQuote(
+            onChainState.unclaimedFees0,
+            onChainState.unclaimedFees1,
+            onChainState.sqrtPriceX96,
+            position.isToken0Quote,
+            position.token0.decimals,
+            position.token1.decimals,
+        );
+
+        // Get ledger-derived metrics (cost basis, realized PnL, collected yield)
+        const ledgerService = new UniswapV3VaultLedgerService(
+            { positionId: id },
+            { prisma: this.prisma },
+        );
+        const aggregates = await ledgerService.recalculateAggregates(
+            position.isToken0Quote,
+            dbTx,
+        );
+
+        const unrealizedPnl = currentValue - aggregates.costBasisAfter;
+
         // Update position in DB
         const db = dbTx ?? this.prisma;
         await db.position.update({
             where: { id },
             data: {
                 state: vaultPositionStateToJSON(newState) as object,
+                currentValue: currentValue.toString(),
+                costBasis: aggregates.costBasisAfter.toString(),
+                realizedPnl: aggregates.realizedPnlAfter.toString(),
+                unrealizedPnl: unrealizedPnl.toString(),
+                collectedYield: aggregates.collectedYieldAfter.toString(),
+                unclaimedYield: unclaimedYield.toString(),
                 isActive: true,
                 ...(isClosed && !position.positionClosedAt
                     ? { positionClosedAt: new Date() }
@@ -704,7 +746,7 @@ export class UniswapV3VaultPositionService {
     /**
      * Fetch on-chain vault state with block-number-keyed caching.
      *
-     * Cache key: `vault-onchain:{chainId}:{vaultAddress}:{userAddress}:{blockNumber}`
+     * Cache key: `vault-onchain:{chainId}:{vaultAddress}:{ownerAddress}:{blockNumber}`
      * TTL: 60 seconds (same block data is immutable, TTL is just for eviction)
      */
     private async fetchVaultState(
@@ -713,7 +755,7 @@ export class UniswapV3VaultPositionService {
     ): Promise<OnChainVaultState> {
         const chainId = position.chainId;
         const vaultAddress = position.vaultAddress;
-        const userAddress = position.typedConfig.userAddress;
+        const ownerAddress = position.typedConfig.ownerAddress;
 
         // 1. Resolve block number
         const resolvedBlockNumber = blockNumber === 'latest'
@@ -721,7 +763,7 @@ export class UniswapV3VaultPositionService {
             : BigInt(blockNumber);
 
         // 2. Check cache
-        const cacheKey = `vault-onchain:${chainId}:${vaultAddress}:${userAddress}:${resolvedBlockNumber}`;
+        const cacheKey = `vault-onchain:${chainId}:${vaultAddress}:${ownerAddress}:${resolvedBlockNumber}`;
         const cached = await this._cacheService.get<OnChainVaultStateCached>(cacheKey);
         if (cached) {
             this.logger.debug({ chainId, vaultAddress, blockNumber: resolvedBlockNumber.toString(), cacheHit: true }, 'Vault on-chain state cache hit');
@@ -732,9 +774,9 @@ export class UniswapV3VaultPositionService {
         const client = this._evmConfig.getPublicClient(chainId);
 
         const [sharesBalance, totalSupply, claimable, slot0Data, positionManagerAddr] = await Promise.all([
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [userAddress as Address], blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply', blockNumber: resolvedBlockNumber }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [userAddress as Address], blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
             client.readContract({ address: position.typedConfig.poolAddress as Address, abi: [{ type: 'function', name: 'slot0', inputs: [], outputs: [{ name: '', type: 'uint160' }, { name: '', type: 'int24' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint8' }, { name: '', type: 'bool' }], stateMutability: 'view' }], functionName: 'slot0', blockNumber: resolvedBlockNumber }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
         ]) as [bigint, bigint, readonly [bigint, bigint], readonly [bigint, number, ...unknown[]], string];
@@ -775,16 +817,10 @@ export class UniswapV3VaultPositionService {
     private async fetchAllVaultLogs(
         client: PublicClient,
         vaultAddress: Address,
-        userAddress: Address,
+        ownerAddress: Address,
         fromBlock: bigint,
         toBlock: bigint | 'latest' = 'latest',
     ): Promise<VaultRawLogInput[]> {
-        const mintedEvent = parseAbiItem(
-            'event Minted(address indexed to, uint256 shares, uint128 deltaL, uint256 amount0, uint256 amount1)',
-        );
-        const burnedEvent = parseAbiItem(
-            'event Burned(address indexed from, uint256 shares, uint128 deltaL, uint256 amount0, uint256 amount1)',
-        );
         const feesCollectedEvent = parseAbiItem(
             'event FeesCollected(address indexed user, uint256 fee0, uint256 fee1)',
         );
@@ -794,15 +830,13 @@ export class UniswapV3VaultPositionService {
 
         const commonParams = { address: vaultAddress, fromBlock, toBlock };
 
-        const [mintLogs, burnLogs, feeLogs, transferInLogs, transferOutLogs] = await Promise.all([
-            client.getLogs({ ...commonParams, event: mintedEvent, args: { to: userAddress } }),
-            client.getLogs({ ...commonParams, event: burnedEvent, args: { from: userAddress } }),
-            client.getLogs({ ...commonParams, event: feesCollectedEvent, args: { user: userAddress } }),
-            client.getLogs({ ...commonParams, event: transferEvent, args: { to: userAddress } }),
-            client.getLogs({ ...commonParams, event: transferEvent, args: { from: userAddress } }),
+        const [feeLogs, transferInLogs, transferOutLogs] = await Promise.all([
+            client.getLogs({ ...commonParams, event: feesCollectedEvent, args: { user: ownerAddress } }),
+            client.getLogs({ ...commonParams, event: transferEvent, args: { to: ownerAddress } }),
+            client.getLogs({ ...commonParams, event: transferEvent, args: { from: ownerAddress } }),
         ]);
 
-        const allLogs = [...mintLogs, ...burnLogs, ...feeLogs, ...transferInLogs, ...transferOutLogs];
+        const allLogs = [...feeLogs, ...transferInLogs, ...transferOutLogs];
         allLogs.sort((a, b) => {
             const blockDiff = Number(a.blockNumber! - b.blockNumber!);
             if (blockDiff !== 0) return blockDiff;
@@ -843,6 +877,7 @@ export class UniswapV3VaultPositionService {
                 protocol: 'uniswapv3-vault',
                 type: 'VAULT_SHARES',
                 positionHash,
+                ownerWallet: createEvmOwnerWallet(configData.ownerAddress),
                 config: config.toJSON() as object,
                 state: vaultPositionStateToJSON(stateData) as object,
                 currentValue: '0',

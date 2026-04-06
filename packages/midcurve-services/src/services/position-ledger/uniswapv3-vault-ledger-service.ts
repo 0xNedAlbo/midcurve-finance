@@ -9,7 +9,7 @@
  * - Event chaining via previousId
  * - Reorg detection via blockHash comparison
  *
- * Event types: VAULT_MINT, VAULT_BURN, VAULT_COLLECT_YIELD, VAULT_TRANSFER_IN, VAULT_TRANSFER_OUT
+ * Event types: VAULT_COLLECT_YIELD, VAULT_TRANSFER_IN, VAULT_TRANSFER_OUT
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
@@ -19,6 +19,7 @@ import {
     vaultLedgerEventStateToJSON,
     valueOfToken0AmountInToken1,
     valueOfToken1AmountInToken0,
+    calculatePositionValue,
 } from '@midcurve/shared';
 import type {
     UniswapV3VaultPositionLedgerEventRow,
@@ -48,8 +49,6 @@ import type { AprPeriodData } from '../types/position-apr/index.js';
  * Computed via cast sig-event from the Solidity event definitions.
  */
 export const VAULT_EVENT_SIGNATURES = {
-    MINTED: '0x71659f3c37bc384517d2440e2bcc5bb9753186ff4379336074763d3c0dbd0e4b',
-    BURNED: '0x6241800503b53ba1d3cc4783ca7bd3f868c9b6802706aa4d3b9397f9def15c5c',
     FEES_COLLECTED: '0x2e4fb6077d4acf86e12bb7411fb82b2b3eaa6a49787f4b1e17b423e7ea841169',
     TRANSFER: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
 } as const;
@@ -131,7 +130,7 @@ export function validateVaultEvent(
             return { valid: false, reason: 'wrong_user' };
         }
     } else {
-        // Minted(to), Burned(from), FeesCollected(user) — topic1 is the user
+        // FeesCollected(user) — topic1 is the user
         const indexedUser = log.topics[1]?.toLowerCase();
         if (indexedUser !== userHex) {
             return { valid: false, reason: 'wrong_user' };
@@ -145,22 +144,6 @@ export function validateVaultEvent(
 // DECODING
 // ============================================================================
 
-export interface DecodedVaultMintedData {
-    eventType: 'MINTED';
-    shares: bigint;
-    deltaL: bigint;
-    amount0: bigint;
-    amount1: bigint;
-}
-
-export interface DecodedVaultBurnedData {
-    eventType: 'BURNED';
-    shares: bigint;
-    deltaL: bigint;
-    amount0: bigint;
-    amount1: bigint;
-}
-
 export interface DecodedVaultFeesCollectedData {
     eventType: 'FEES_COLLECTED';
     fee0: bigint;
@@ -173,8 +156,6 @@ export interface DecodedVaultTransferData {
 }
 
 export type DecodedVaultLogData =
-    | DecodedVaultMintedData
-    | DecodedVaultBurnedData
     | DecodedVaultFeesCollectedData
     | DecodedVaultTransferData;
 
@@ -189,18 +170,6 @@ export function decodeVaultLogData(
     const chunks = hex.match(/.{64}/g) || [];
 
     switch (eventType) {
-        case 'MINTED':
-        case 'BURNED': {
-            // (uint256 shares, uint128 deltaL, uint256 amount0, uint256 amount1)
-            if (chunks.length < 4) throw new Error(`Invalid ${eventType} data: expected 4 chunks, got ${chunks.length}`);
-            return {
-                eventType,
-                shares: BigInt('0x' + chunks[0]!),
-                deltaL: BigInt('0x' + chunks[1]!),
-                amount0: BigInt('0x' + chunks[2]!),
-                amount1: BigInt('0x' + chunks[3]!),
-            };
-        }
         case 'FEES_COLLECTED': {
             // (uint256 fee0, uint256 fee1)
             if (chunks.length < 2) throw new Error(`Invalid FEES_COLLECTED data: expected 2 chunks, got ${chunks.length}`);
@@ -505,7 +474,7 @@ export class UniswapV3VaultLedgerService {
      * 2. Recalculate all running totals at end
      */
     async importLogsForPosition(
-        position: { typedConfig: { isToken0Quote: boolean; vaultAddress: string; poolAddress: string } },
+        position: { typedConfig: { isToken0Quote: boolean; vaultAddress: string; poolAddress: string; tickLower: number; tickUpper: number } },
         chainId: number,
         userAddress: string,
         logs: VaultRawLogInput[],
@@ -550,7 +519,7 @@ export class UniswapV3VaultLedgerService {
     // ============================================================================
 
     private async processSingleLog(
-        position: { typedConfig: { isToken0Quote: boolean; vaultAddress: string; poolAddress: string } },
+        position: { typedConfig: { isToken0Quote: boolean; vaultAddress: string; poolAddress: string; tickLower: number; tickUpper: number } },
         chainId: number,
         userAddress: string,
         log: VaultRawLogInput,
@@ -629,35 +598,7 @@ export class UniswapV3VaultLedgerService {
 
         const userHex = '0x' + userAddress.toLowerCase().slice(2).padStart(64, '0');
 
-        if (decoded.eventType === 'MINTED') {
-            eventType = 'VAULT_MINT';
-            shares = decoded.shares;
-            tokenValue = this.calculateTokenValue(decoded.amount0, decoded.amount1, sqrtPriceX96, position.typedConfig.isToken0Quote);
-            ledgerState = {
-                eventType: 'VAULT_MINT',
-                shares: decoded.shares,
-                deltaL: decoded.deltaL,
-                amount0: decoded.amount0,
-                amount1: decoded.amount1,
-                poolPrice: sqrtPriceX96,
-                token0Amount: decoded.amount0,
-                token1Amount: decoded.amount1,
-            };
-        } else if (decoded.eventType === 'BURNED') {
-            eventType = 'VAULT_BURN';
-            shares = decoded.shares;
-            tokenValue = this.calculateTokenValue(decoded.amount0, decoded.amount1, sqrtPriceX96, position.typedConfig.isToken0Quote);
-            ledgerState = {
-                eventType: 'VAULT_BURN',
-                shares: decoded.shares,
-                deltaL: decoded.deltaL,
-                amount0: decoded.amount0,
-                amount1: decoded.amount1,
-                poolPrice: sqrtPriceX96,
-                token0Amount: decoded.amount0,
-                token1Amount: decoded.amount1,
-            };
-        } else if (decoded.eventType === 'FEES_COLLECTED') {
+        if (decoded.eventType === 'FEES_COLLECTED') {
             eventType = 'VAULT_COLLECT_YIELD';
             shares = 0n;
             tokenValue = this.calculateTokenValue(decoded.fee0, decoded.fee1, sqrtPriceX96, position.typedConfig.isToken0Quote);
@@ -670,14 +611,25 @@ export class UniswapV3VaultLedgerService {
                 token1Amount: decoded.fee1,
             };
         } else {
-            // TRANSFER — determine direction based on indexed params
+            // TRANSFER — single source of truth for all share movements.
+            // Mints (from 0x0) and burns (to 0x0) are handled here as transfer-in/out.
+            // Since totalSupply == liquidity (vault invariant), shares == liquidity delta,
+            // so we can use calculatePositionValue with shares as liquidity.
             const from = log.topics[1]?.toLowerCase();
+            shares = decoded.value;
+            tokenValue = calculatePositionValue(
+                decoded.value,
+                sqrtPriceX96,
+                position.typedConfig.tickLower,
+                position.typedConfig.tickUpper,
+                !position.typedConfig.isToken0Quote, // baseIsToken0
+            );
+
             if (from === userHex) {
+                // Transfer FROM owner (includes burn to 0x0)
                 eventType = 'VAULT_TRANSFER_OUT';
                 const to = log.topics[2]!;
-                const toAddress = '0x' + to.slice(26); // last 20 bytes
-                shares = decoded.value;
-                tokenValue = 0n; // Fair value will be computed from pool price in recalculateAggregates
+                const toAddress = '0x' + to.slice(26);
                 ledgerState = {
                     eventType: 'VAULT_TRANSFER_OUT',
                     shares: decoded.value,
@@ -687,10 +639,9 @@ export class UniswapV3VaultLedgerService {
                     token1Amount: 0n,
                 };
             } else {
+                // Transfer TO owner (includes mint from 0x0)
                 eventType = 'VAULT_TRANSFER_IN';
                 const fromAddress = '0x' + from!.slice(26);
-                shares = decoded.value;
-                tokenValue = 0n;
                 ledgerState = {
                     eventType: 'VAULT_TRANSFER_IN',
                     shares: decoded.value,
@@ -799,25 +750,6 @@ export class UniswapV3VaultLedgerService {
             let deltaCollectedYield = 0n;
 
             switch (state.eventType) {
-                case 'VAULT_MINT': {
-                    sharesAfter = previousShares + state.shares;
-                    deltaCostBasis = event.tokenValue;
-                    costBasisAfter = previousCostBasis + deltaCostBasis;
-                    pnlAfter = previousPnl;
-                    break;
-                }
-                case 'VAULT_BURN': {
-                    let proportionalCostBasis = 0n;
-                    if (previousShares > 0n && state.shares > 0n) {
-                        proportionalCostBasis = (state.shares * previousCostBasis) / previousShares;
-                    }
-                    sharesAfter = previousShares - state.shares;
-                    deltaCostBasis = -proportionalCostBasis;
-                    costBasisAfter = previousCostBasis + deltaCostBasis;
-                    deltaPnl = event.tokenValue - proportionalCostBasis;
-                    pnlAfter = previousPnl + deltaPnl;
-                    break;
-                }
                 case 'VAULT_COLLECT_YIELD': {
                     sharesAfter = previousShares;
                     costBasisAfter = previousCostBasis;

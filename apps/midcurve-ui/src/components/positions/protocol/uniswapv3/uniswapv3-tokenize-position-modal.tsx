@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Pencil, Check, Circle, Loader2, AlertCircle } from 'lucide-react';
 import type { Address } from 'viem';
+import { useAccount } from 'wagmi';
 import { formatCompactValue } from '@midcurve/shared';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
@@ -85,6 +86,8 @@ export function UniswapV3TokenizePositionModal({
     decimals,
   });
 
+  const { address: connectedAddress } = useAccount();
+
   // Discover vault hook
   const discoverVault = useDiscoverVaultPosition();
 
@@ -122,17 +125,17 @@ export function UniswapV3TokenizePositionModal({
 
   // Auto-trigger discover when vault creation succeeds
   useEffect(() => {
-    if (createVault.isSuccess && createVault.vaultAddress && discoverStatus === 'idle') {
+    if (createVault.isSuccess && createVault.vaultAddress && connectedAddress && discoverStatus === 'idle') {
       setDiscoverStatus('active');
       discoverVault.mutate(
-        { chainId, vaultAddress: createVault.vaultAddress },
+        { chainId, vaultAddress: createVault.vaultAddress, shareOwnerAddress: connectedAddress },
         {
           onSuccess: () => setDiscoverStatus('success'),
           onError: () => setDiscoverStatus('error'),
         },
       );
     }
-  }, [createVault.isSuccess, createVault.vaultAddress, discoverStatus, chainId, discoverVault]);
+  }, [createVault.isSuccess, createVault.vaultAddress, discoverStatus, chainId, connectedAddress, discoverVault]);
 
   // Reset state when modal opens
   useEffect(() => {
