@@ -136,7 +136,13 @@ export async function GET(
           tx
         );
 
-        return { position, closeOrders };
+        // 3c. Fetch ownerWallet from DB (not on domain object)
+        const ownerWalletRow = await tx.position.findUnique({
+          where: { id: position.id },
+          select: { ownerWallet: true },
+        });
+
+        return { position, closeOrders, ownerWallet: ownerWalletRow?.ownerWallet ?? null };
       });
 
       // Handle position not found (outside transaction)
@@ -154,7 +160,7 @@ export async function GET(
         });
       }
 
-      const { position, closeOrders } = result;
+      const { position, closeOrders, ownerWallet } = result;
 
       apiLog.businessOperation(apiLogger, requestId, 'fetched', 'position', position.id, {
         chainId,
@@ -168,6 +174,7 @@ export async function GET(
       // 5. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
+        ownerWallet,
         closeOrders: closeOrders.map(serializeCloseOrder),
         isTrackedInAccounting,
       };

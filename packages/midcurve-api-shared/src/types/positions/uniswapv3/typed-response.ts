@@ -62,6 +62,7 @@ export interface UniswapV3PositionResponse {
   id: string;
   positionHash: string;
   userId: string;
+  ownerWallet: string | null;
   protocol: 'uniswapv3';
   type: string;
 

@@ -20,6 +20,7 @@ import { PositionCardMetrics } from "../../position-card-metrics";
 import { UniswapV3Identifier } from "./uniswapv3-identifier";
 import { UniswapV3RangeStatus } from "./uniswapv3-range-status";
 import { UniswapV3ChainBadge } from "./uniswapv3-chain-badge";
+import { UniswapV3OwnerBadge } from "./uniswapv3-owner-badge";
 import { UniswapV3Actions } from "./uniswapv3-actions";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
 import { PositionActionsMenu } from "../../position-actions-menu";
@@ -169,6 +170,7 @@ function UniswapV3PositionCardLoaded({
             <>
               <UniswapV3ChainBadge position={position} />
               <UniswapV3Identifier position={position} />
+              <UniswapV3OwnerBadge position={position} />
             </>
           }
         />
