@@ -23,6 +23,7 @@ import {
   type CoingeckoTokenRow,
   CHAIN_TO_COINGECKO_PLATFORM,
   PRODUCTION_CHAIN_IDS,
+  createErc20TokenHash,
 } from '@midcurve/shared';
 import type { TokenSymbolResult } from '@midcurve/api-shared';
 import { CoinGeckoClient } from '../../clients/coingecko/index.js';
@@ -455,14 +456,8 @@ export class CoingeckoTokenService {
       const foundChainIds = new Set(foundTokens.map((t) => t.chainId));
       for (const localChainId of localChainIds) {
         if (foundChainIds.has(localChainId)) continue; // already found via coingecko
-        const dbToken = await this.prisma.token.findFirst({
-          where: {
-            tokenType: 'erc20',
-            AND: [
-              { config: { path: ['chainId'], equals: localChainId } },
-              { config: { path: ['address'], equals: normalizedAddress } },
-            ],
-          },
+        const dbToken = await this.prisma.token.findUnique({
+          where: { tokenHash: createErc20TokenHash(localChainId, normalizedAddress) },
         });
         if (dbToken) {
           const cfg = dbToken.config as { address: string; chainId: number };

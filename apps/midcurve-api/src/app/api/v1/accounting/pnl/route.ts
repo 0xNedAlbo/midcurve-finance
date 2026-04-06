@@ -23,7 +23,7 @@ import {
   type PnlPositionItem,
 } from '@midcurve/api-shared';
 import { prisma } from '@midcurve/database';
-import { ACCOUNT_CODES, getCalendarPeriodBoundaries } from '@midcurve/shared';
+import { ACCOUNT_CODES, getCalendarPeriodBoundaries, createErc20TokenHash } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -164,8 +164,8 @@ export async function GET(request: NextRequest): Promise<Response> {
 
             // Look up token symbols
             const [token0, token1] = await Promise.all([
-              prisma.token.findFirst({ where: { config: { path: ['address'], equals: token0Addr } }, select: { symbol: true } }),
-              prisma.token.findFirst({ where: { config: { path: ['address'], equals: token1Addr } }, select: { symbol: true } }),
+              prisma.token.findUnique({ where: { tokenHash: createErc20TokenHash(chainId, token0Addr) }, select: { symbol: true } }),
+              prisma.token.findUnique({ where: { tokenHash: createErc20TokenHash(chainId, token1Addr) }, select: { symbol: true } }),
             ]);
 
             poolMetaMap.set(ref, {

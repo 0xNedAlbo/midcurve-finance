@@ -14,7 +14,7 @@
  */
 
 import { prisma as prismaClient, type PrismaClient } from '@midcurve/database';
-import { ACCOUNT_CODES, LEDGER_REF_PREFIX, type JournalLineInput } from '@midcurve/shared';
+import { ACCOUNT_CODES, LEDGER_REF_PREFIX, createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import { CoinGeckoClient, findClosestPrice } from '../../clients/coingecko/index.js';
@@ -124,12 +124,12 @@ export class JournalBackfillService {
     const chainId = positionConfig.chainId as number;
 
     const [token0Row, token1Row] = await Promise.all([
-      this.prisma.token.findFirst({
-        where: { config: { path: ['address'], equals: token0Address } },
+      this.prisma.token.findUnique({
+        where: { tokenHash: createErc20TokenHash(chainId, token0Address) },
         select: { decimals: true, coingeckoId: true, symbol: true },
       }),
-      this.prisma.token.findFirst({
-        where: { config: { path: ['address'], equals: token1Address } },
+      this.prisma.token.findUnique({
+        where: { tokenHash: createErc20TokenHash(chainId, token1Address) },
         select: { decimals: true, coingeckoId: true, symbol: true },
       }),
     ]);

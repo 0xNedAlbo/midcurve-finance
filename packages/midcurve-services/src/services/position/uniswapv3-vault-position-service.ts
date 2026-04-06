@@ -48,7 +48,7 @@ import { UniswapV3VaultLedgerService, type VaultRawLogInput } from '../position-
 import { CacheService } from '../cache/index.js';
 import { SharedContractService } from '../automation/shared-contract-service.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
-import { tickToPrice } from '@midcurve/shared';
+import { tickToPrice, createErc20TokenHash } from '@midcurve/shared';
 
 // ============================================================================
 // CACHE TYPES
@@ -233,17 +233,23 @@ export class UniswapV3VaultPositionService {
         const client = this._evmConfig.getPublicClient(chainId);
 
         // Read vault contract state in parallel
-        const [token0Addr, token1Addr, tokenId, poolAddr, tickLower, tickUpper, vaultDecimals, positionManagerAddr] =
-            await Promise.all([
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token0' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token1' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tokenId' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'pool' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickLower' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickUpper' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'decimals' }),
-                client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
-            ]) as [string, string, bigint, string, number, number, number, string];
+        let token0Addr: string, token1Addr: string, tokenId: bigint, poolAddr: string,
+            tickLower: number, tickUpper: number, vaultDecimals: number, positionManagerAddr: string;
+        try {
+            [token0Addr, token1Addr, tokenId, poolAddr, tickLower, tickUpper, vaultDecimals, positionManagerAddr] =
+                await Promise.all([
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token0' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token1' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tokenId' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'pool' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickLower' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickUpper' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'decimals' }),
+                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
+                ]) as [string, string, bigint, string, number, number, number, string];
+        } catch {
+            throw new Error(`INVALID_VAULT_CONTRACT: The address ${vaultAddress} is not a valid vault contract on chain ${chainId}`);
+        }
 
         // Read user state
         const [sharesBalance, totalSupply, claimable] = await Promise.all([
@@ -869,11 +875,11 @@ export class UniswapV3VaultPositionService {
         const configJSON = row.config as unknown as UniswapV3VaultPositionConfigJSON;
 
         const [token0Row, token1Row] = await Promise.all([
-            this.prisma.token.findFirst({
-                where: { config: { path: ['address'], equals: configJSON.token0Address } },
+            this.prisma.token.findUnique({
+                where: { tokenHash: createErc20TokenHash(configJSON.chainId, configJSON.token0Address!) },
             }),
-            this.prisma.token.findFirst({
-                where: { config: { path: ['address'], equals: configJSON.token1Address } },
+            this.prisma.token.findUnique({
+                where: { tokenHash: createErc20TokenHash(configJSON.chainId, configJSON.token1Address!) },
             }),
         ]);
 

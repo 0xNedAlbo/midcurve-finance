@@ -36,7 +36,7 @@ import {
   type PositionFeesCollectedPayload,
   type PositionLiquidityRevertedPayload,
 } from '@midcurve/services';
-import type { JournalLineInput } from '@midcurve/shared';
+import { createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
 import { BusinessRule } from '../base';
 
 // =============================================================================
@@ -654,12 +654,12 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const poolAddress = positionConfig.poolAddress as string;
 
     const [token0Row, token1Row] = await Promise.all([
-      prisma.token.findFirst({
-        where: { config: { path: ['address'], equals: token0Address } },
+      prisma.token.findUnique({
+        where: { tokenHash: createErc20TokenHash(chainId, token0Address) },
         select: { decimals: true, coingeckoId: true },
       }),
-      prisma.token.findFirst({
-        where: { config: { path: ['address'], equals: token1Address } },
+      prisma.token.findUnique({
+        where: { tokenHash: createErc20TokenHash(chainId, token1Address) },
         select: { decimals: true, coingeckoId: true },
       }),
     ]);
