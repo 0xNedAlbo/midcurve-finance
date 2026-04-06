@@ -18,7 +18,7 @@ import {
 } from '@midcurve/api-shared';
 import type { LedgerEventsResponse, LedgerEventData } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getUniswapV3VaultPositionService, getUniswapV3PositionLedgerService } from '@/lib/services';
+import { getUniswapV3VaultPositionService, getUniswapV3VaultLedgerService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,7 +57,7 @@ export async function GET(
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND] });
       }
 
-      const ledgerEvents = await getUniswapV3PositionLedgerService(dbPosition.id).findAll();
+      const ledgerEvents = await getUniswapV3VaultLedgerService(dbPosition.id).findAll();
 
       const serializedEvents = ledgerEvents.map((event: { toJSON: () => unknown }) => event.toJSON()) as unknown as LedgerEventData[];
 

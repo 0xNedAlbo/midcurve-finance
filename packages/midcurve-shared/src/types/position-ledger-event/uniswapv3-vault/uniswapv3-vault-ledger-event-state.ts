@@ -24,18 +24,14 @@ export interface UniswapV3VaultLedgerEventStateBase {
 
 export interface UniswapV3VaultMintEvent extends UniswapV3VaultLedgerEventStateBase {
   eventType: 'VAULT_MINT';
+  /** Shares minted (Transfer value from 0x0 → owner) */
   shares: bigint;
-  deltaL: bigint;
-  amount0: bigint;
-  amount1: bigint;
 }
 
 export interface UniswapV3VaultBurnEvent extends UniswapV3VaultLedgerEventStateBase {
   eventType: 'VAULT_BURN';
+  /** Shares burned (Transfer value from owner → 0x0) */
   shares: bigint;
-  deltaL: bigint;
-  amount0: bigint;
-  amount1: bigint;
 }
 
 export interface UniswapV3VaultCollectYieldEvent extends UniswapV3VaultLedgerEventStateBase {
@@ -81,16 +77,10 @@ export type UniswapV3VaultLedgerEventStateJSON =
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_MINT';
       shares: string;
-      deltaL: string;
-      amount0: string;
-      amount1: string;
     })
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_BURN';
       shares: string;
-      deltaL: string;
-      amount0: string;
-      amount1: string;
     })
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_COLLECT_YIELD';
@@ -134,9 +124,9 @@ export function vaultLedgerEventStateToJSON(
   const base = baseToJSON(state);
   switch (state.eventType) {
     case 'VAULT_MINT':
-      return { ...base, eventType: 'VAULT_MINT', shares: state.shares.toString(), deltaL: state.deltaL.toString(), amount0: state.amount0.toString(), amount1: state.amount1.toString() };
+      return { ...base, eventType: 'VAULT_MINT', shares: state.shares.toString() };
     case 'VAULT_BURN':
-      return { ...base, eventType: 'VAULT_BURN', shares: state.shares.toString(), deltaL: state.deltaL.toString(), amount0: state.amount0.toString(), amount1: state.amount1.toString() };
+      return { ...base, eventType: 'VAULT_BURN', shares: state.shares.toString() };
     case 'VAULT_COLLECT_YIELD':
       return { ...base, eventType: 'VAULT_COLLECT_YIELD', fee0: state.fee0.toString(), fee1: state.fee1.toString() };
     case 'VAULT_TRANSFER_IN':
@@ -152,9 +142,9 @@ export function vaultLedgerEventStateFromJSON(
   const base = baseFromJSON(json);
   switch (json.eventType) {
     case 'VAULT_MINT':
-      return { ...base, eventType: 'VAULT_MINT', shares: BigInt(json.shares), deltaL: BigInt(json.deltaL), amount0: BigInt(json.amount0), amount1: BigInt(json.amount1) };
+      return { ...base, eventType: 'VAULT_MINT', shares: BigInt(json.shares) };
     case 'VAULT_BURN':
-      return { ...base, eventType: 'VAULT_BURN', shares: BigInt(json.shares), deltaL: BigInt(json.deltaL), amount0: BigInt(json.amount0), amount1: BigInt(json.amount1) };
+      return { ...base, eventType: 'VAULT_BURN', shares: BigInt(json.shares) };
     case 'VAULT_COLLECT_YIELD':
       return { ...base, eventType: 'VAULT_COLLECT_YIELD', fee0: BigInt(json.fee0), fee1: BigInt(json.fee1) };
     case 'VAULT_TRANSFER_IN':

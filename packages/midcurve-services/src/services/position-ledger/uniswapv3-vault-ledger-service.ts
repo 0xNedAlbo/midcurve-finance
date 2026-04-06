@@ -612,10 +612,13 @@ export class UniswapV3VaultLedgerService {
             };
         } else {
             // TRANSFER — single source of truth for all share movements.
-            // Mints (from 0x0) and burns (to 0x0) are handled here as transfer-in/out.
+            // Classify as VAULT_MINT (from 0x0), VAULT_BURN (to 0x0),
+            // VAULT_TRANSFER_IN (from !0x0 to owner), or VAULT_TRANSFER_OUT (from owner to !0x0).
             // Since totalSupply == liquidity (vault invariant), shares == liquidity delta,
             // so we can use calculatePositionValue with shares as liquidity.
+            const ZERO_TOPIC = '0x' + '0'.repeat(64);
             const from = log.topics[1]?.toLowerCase();
+            const to = log.topics[2]?.toLowerCase();
             shares = decoded.value;
             tokenValue = calculatePositionValue(
                 decoded.value,
@@ -625,11 +628,30 @@ export class UniswapV3VaultLedgerService {
                 !position.typedConfig.isToken0Quote, // baseIsToken0
             );
 
-            if (from === userHex) {
-                // Transfer FROM owner (includes burn to 0x0)
+            if (from === ZERO_TOPIC && to === userHex) {
+                // Mint: from 0x0 → owner
+                eventType = 'VAULT_MINT';
+                ledgerState = {
+                    eventType: 'VAULT_MINT',
+                    shares: decoded.value,
+                    poolPrice: sqrtPriceX96,
+                    token0Amount: 0n,
+                    token1Amount: 0n,
+                };
+            } else if (from === userHex && to === ZERO_TOPIC) {
+                // Burn: from owner → 0x0
+                eventType = 'VAULT_BURN';
+                ledgerState = {
+                    eventType: 'VAULT_BURN',
+                    shares: decoded.value,
+                    poolPrice: sqrtPriceX96,
+                    token0Amount: 0n,
+                    token1Amount: 0n,
+                };
+            } else if (from === userHex) {
+                // Transfer OUT: from owner → another address
                 eventType = 'VAULT_TRANSFER_OUT';
-                const to = log.topics[2]!;
-                const toAddress = '0x' + to.slice(26);
+                const toAddress = '0x' + to!.slice(26);
                 ledgerState = {
                     eventType: 'VAULT_TRANSFER_OUT',
                     shares: decoded.value,
@@ -639,7 +661,7 @@ export class UniswapV3VaultLedgerService {
                     token1Amount: 0n,
                 };
             } else {
-                // Transfer TO owner (includes mint from 0x0)
+                // Transfer IN: from another address → owner
                 eventType = 'VAULT_TRANSFER_IN';
                 const fromAddress = '0x' + from!.slice(26);
                 ledgerState = {
@@ -762,6 +784,7 @@ export class UniswapV3VaultLedgerService {
                     collectedYieldAfter = previousCollectedYield + deltaCollectedYield;
                     break;
                 }
+                case 'VAULT_MINT':
                 case 'VAULT_TRANSFER_IN': {
                     sharesAfter = previousShares + state.shares;
                     deltaCostBasis = event.tokenValue;
@@ -769,6 +792,7 @@ export class UniswapV3VaultLedgerService {
                     pnlAfter = previousPnl;
                     break;
                 }
+                case 'VAULT_BURN':
                 case 'VAULT_TRANSFER_OUT': {
                     let proportionalCostBasis = 0n;
                     if (previousShares > 0n && state.shares > 0n) {

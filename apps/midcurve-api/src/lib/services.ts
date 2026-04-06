@@ -34,6 +34,7 @@ import {
   JournalService,
   JournalBackfillService,
   UniswapV3VaultPositionService,
+  UniswapV3VaultLedgerService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -269,6 +270,14 @@ export function getUniswapV3PositionLedgerService(positionId: string): UniswapV3
  */
 export function getUniswapV3AprService(positionId: string): UniswapV3AprService {
   return new UniswapV3AprService({ positionId });
+}
+
+/**
+ * Create a UniswapV3VaultLedgerService instance for a specific position.
+ * Not a singleton — each position requires its own scoped instance.
+ */
+export function getUniswapV3VaultLedgerService(positionId: string): UniswapV3VaultLedgerService {
+  return new UniswapV3VaultLedgerService({ positionId });
 }
 
 /**
