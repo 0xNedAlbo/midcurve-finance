@@ -10,6 +10,8 @@ import type {
   UniswapV3PoolState,
   UniswapV3Position,
   UniswapV3PositionState,
+  UniswapV3VaultPosition,
+  UniswapV3VaultPositionState,
   Erc20Token,
 } from '@midcurve/shared';
 import {
@@ -204,6 +206,7 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
     positionHash: position.positionHash,
     protocol: position.protocol as 'uniswapv3',
     userId: position.userId,
+    ownerWallet: null as string | null,
 
     type: position.type,
 
@@ -247,6 +250,99 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
       tickLower: position.typedConfig.tickLower,
     },
     state: serializeUniswapV3PositionState(position.typedState),
+
+    // Timestamps
+    createdAt: position.createdAt.toISOString(),
+    updatedAt: position.updatedAt.toISOString(),
+  };
+}
+
+// ============================================================================
+// VAULT POSITION SERIALIZATION
+// ============================================================================
+
+/**
+ * Serialize UniswapV3VaultPositionState for JSON response
+ */
+export function serializeUniswapV3VaultPositionState(state: UniswapV3VaultPositionState) {
+  return {
+    sharesBalance: state.sharesBalance.toString(),
+    totalSupply: state.totalSupply.toString(),
+    liquidity: state.liquidity.toString(),
+    unclaimedFees0: state.unclaimedFees0.toString(),
+    unclaimedFees1: state.unclaimedFees1.toString(),
+    isClosed: state.isClosed,
+    sqrtPriceX96: state.sqrtPriceX96.toString(),
+    currentTick: state.currentTick,
+    poolLiquidity: state.poolLiquidity.toString(),
+    feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
+    feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
+  };
+}
+
+/**
+ * Serialize UniswapV3VaultPosition for JSON response
+ */
+export function serializeUniswapV3VaultPosition(position: UniswapV3VaultPosition) {
+  return {
+    id: position.id,
+    positionHash: position.positionHash,
+    protocol: position.protocol as 'uniswapv3-vault',
+    ownerWallet: null as string | null,
+    userId: position.userId,
+    type: position.type,
+
+    // PnL fields (bigint → string)
+    currentValue: position.currentValue.toString(),
+    costBasis: position.costBasis.toString(),
+    realizedPnl: position.realizedPnl.toString(),
+    unrealizedPnl: position.unrealizedPnl.toString(),
+    realizedCashflow: position.realizedCashflow.toString(),
+    unrealizedCashflow: position.unrealizedCashflow.toString(),
+
+    // Yield fields (bigint → string)
+    collectedYield: position.collectedYield.toString(),
+    unclaimedYield: position.unclaimedYield.toString(),
+    lastYieldClaimedAt: position.lastYieldClaimedAt?.toISOString() ?? new Date(0).toISOString(),
+    totalApr: position.totalApr,
+    baseApr: position.baseApr ?? null,
+    rewardApr: position.rewardApr ?? null,
+
+    // Price range (bigint → string)
+    priceRangeLower: position.priceRangeLower.toString(),
+    priceRangeUpper: position.priceRangeUpper.toString(),
+
+    // Pool and tokens (nested serialization — same underlying pool)
+    pool: serializeUniswapV3Pool(position.pool as UniswapV3Pool),
+
+    // Token roles
+    isToken0Quote: position.isToken0Quote,
+
+    // Position state
+    positionOpenedAt: position.positionOpenedAt.toISOString(),
+    positionClosedAt: position.positionClosedAt?.toISOString() ?? null,
+    isActive: position.isActive,
+
+    // Protocol-specific
+    config: {
+      chainId: position.typedConfig.chainId,
+      vaultAddress: position.typedConfig.vaultAddress,
+      underlyingTokenId: position.typedConfig.underlyingTokenId,
+      factoryAddress: position.typedConfig.factoryAddress,
+      ownerAddress: position.typedConfig.ownerAddress,
+      poolAddress: position.typedConfig.poolAddress,
+      token0Address: position.typedConfig.token0Address,
+      token1Address: position.typedConfig.token1Address,
+      feeBps: position.typedConfig.feeBps,
+      tickSpacing: position.typedConfig.tickSpacing,
+      tickLower: position.typedConfig.tickLower,
+      tickUpper: position.typedConfig.tickUpper,
+      vaultDecimals: position.typedConfig.vaultDecimals,
+      isToken0Quote: position.typedConfig.isToken0Quote,
+      priceRangeLower: position.typedConfig.priceRangeLower.toString(),
+      priceRangeUpper: position.typedConfig.priceRangeUpper.toString(),
+    },
+    state: serializeUniswapV3VaultPositionState(position.typedState),
 
     // Timestamps
     createdAt: position.createdAt.toISOString(),

@@ -64,6 +64,23 @@ export const queryKeys = {
       },
     },
 
+    // UniswapV3 Vault positions
+    uniswapv3Vault: {
+      all: ['positions', 'uniswapv3-vault'] as const,
+
+      details: () => [...queryKeys.positions.uniswapv3Vault.all, 'detail'] as const,
+      detail: (chainId: number, vaultAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.details(), chainId, vaultAddress] as const,
+
+      ledgers: () => [...queryKeys.positions.uniswapv3Vault.all, 'ledger'] as const,
+      ledger: (chainId: number, vaultAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.ledgers(), chainId, vaultAddress] as const,
+
+      aprs: () => [...queryKeys.positions.uniswapv3Vault.all, 'apr'] as const,
+      apr: (chainId: number, vaultAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.aprs(), chainId, vaultAddress] as const,
+    },
+
     // Future: Orca (Solana)
     orca: {
       all: ['positions', 'orca'] as const,

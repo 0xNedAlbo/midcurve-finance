@@ -1,11 +1,14 @@
 "use client";
 
-import type { GetUniswapV3PositionResponse } from "@midcurve/api-shared";
+import type { GetUniswapV3PositionResponse, GetUniswapV3VaultPositionResponse } from "@midcurve/api-shared";
 import { UniswapV3PositionDetail } from "./protocol/uniswapv3/uniswapv3-position-detail";
+import { UniswapV3VaultPositionDetail } from "./protocol/uniswapv3-vault/uniswapv3-vault-position-detail";
 import { AlertCircle } from "lucide-react";
 
+type AnyPositionResponse = GetUniswapV3PositionResponse | GetUniswapV3VaultPositionResponse;
+
 interface PositionDetailLayoutProps {
-  position: GetUniswapV3PositionResponse; // Expand union type when adding more protocols
+  position: AnyPositionResponse;
 }
 
 export function PositionDetailLayout({ position }: PositionDetailLayoutProps) {
@@ -14,15 +17,16 @@ export function PositionDetailLayout({ position }: PositionDetailLayoutProps) {
     case "uniswapv3":
       return (
         <UniswapV3PositionDetail
-          position={position}
+          position={position as GetUniswapV3PositionResponse}
         />
       );
 
-    // Future protocols can be added here:
-    // case "orca":
-    //   return <OrcaPositionDetail position={position} />;
-    // case "raydium":
-    //   return <RaydiumPositionDetail position={position} />;
+    case "uniswapv3-vault":
+      return (
+        <UniswapV3VaultPositionDetail
+          position={position as GetUniswapV3VaultPositionResponse}
+        />
+      );
 
     default:
       return (
@@ -37,7 +41,7 @@ export function PositionDetailLayout({ position }: PositionDetailLayoutProps) {
               Unsupported Protocol
             </h3>
             <p className="text-slate-400 max-w-md">
-              Position details for protocol &quot;{position.protocol}&quot; are not
+              Position details for protocol &quot;{(position as AnyPositionResponse).protocol}&quot; are not
               yet supported.
             </p>
           </div>

@@ -9,6 +9,7 @@ import { Erc20TransferEventProvider } from './lib/events/erc20-transfer-event-co
 import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
+import { VaultPositionDetailPage } from './pages/VaultPositionDetailPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
@@ -59,6 +60,10 @@ function ConfigGate() {
               <Route
                 path="/positions/:protocol/:chain/:nftId"
                 element={<PositionDetailPage />}
+              />
+              <Route
+                path="/positions/uniswapv3-vault/:chain/:vaultAddress"
+                element={<VaultPositionDetailPage />}
               />
               <Route
                 path="/notifications"
