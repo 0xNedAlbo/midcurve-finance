@@ -106,6 +106,9 @@ model User {
   navSnapshots       NAVSnapshot[]
   trackedPositions TrackedPosition[]
 
+  // Wallet perimeter relations
+  userWallets UserWallet[]
+
   // Indexes for efficient queries
   @@index([name])
   @@map("users")
@@ -306,9 +309,13 @@ model PositionLedgerEvent {
   deltaRealizedCashflow   String @default("0") // bigint as string - Realized cashflow in this event (perpetuals, etc.)
   realizedCashflowAfter   String @default("0") // bigint as string - Cumulative realized cashflow after this event
 
+  // Ownership tracking — events outside user ownership are ignored for financials
+  isIgnored      Boolean @default(false)  // true = event happened outside user's ownership
+  ignoredReason  String?                  // e.g., "not_owned_by_user"
+
   // Protocol-specific data (JSON)
   config Json // Protocol-specific config (blockNumber, txIndex, logIndex, liquidity, fees, etc.)
-  state  Json // Raw event data (INCREASE_LIQUIDITY, DECREASE_LIQUIDITY, COLLECT)
+  state  Json // Raw event data (INCREASE_LIQUIDITY, DECREASE_LIQUIDITY, COLLECT, TRANSFER, etc.)
 
   @@unique([positionId, inputHash]) // Deduplication per-position; allows multi-user event import
   // Indexes for efficient queries
@@ -963,4 +970,86 @@ model TrackedPosition {
   @@index([userId])
   @@map("tracked_positions")
   @@schema("accounting")
+}
+
+// ============================================================================
+// WALLET PERIMETER (user-owned wallets + known protocol addresses)
+// ============================================================================
+
+// UserWallet — tracks which wallets belong to a user (cross-chain identity)
+model UserWallet {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // User association
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Type discriminator (platform)
+  walletType String // 'evm' | 'solana' | 'bitcoin'
+
+  // Human-readable composite key: "evm/{checksummed-address}"
+  // No chainId — an EVM wallet is the same identity across all chains
+  walletHash String @unique
+
+  // Display label (optional, user-assigned)
+  label String?
+
+  // Platform-specific immutable config (JSON)
+  // EVM:     { address: "0xABC..." }
+  // Solana:  { address: "ABC..." }
+  // Bitcoin: { address: "bc1q..." }
+  config Json
+
+  // Whether this is the primary/signing wallet (SIWE login wallet)
+  isPrimary Boolean @default(false)
+
+  @@unique([userId, walletHash])
+  @@index([userId])
+  @@index([walletType])
+  @@map("user_wallets")
+  @@schema("public")
+}
+
+// KnownProtocolAddress — registry of known protocol contract addresses
+// Used to classify transfers: vault deposit vs. sale vs. staking etc.
+model KnownProtocolAddress {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Type discriminator (chain platform)
+  chainType String // 'evm' | 'solana'
+
+  // Protocol identification
+  protocolName String // 'arrakis', 'aave', 'uniswapv3', etc.
+
+  // What happens when assets go to this address
+  // 'vault' = tokenized wrapper (position stays in user perimeter)
+  // 'staking' = staked/locked (position stays in user perimeter)
+  // 'bridge' = cross-chain transfer (position leaves but reappears)
+  // 'router' = transient (swap router, not a destination)
+  interactionType String // 'vault' | 'staking' | 'bridge' | 'router'
+
+  // Human-readable composite key: "evm/{chainId}/{address}"
+  // chainId IS needed — same address on different chains can be different protocols
+  protocolAddressHash String @unique
+
+  // Display label (optional)
+  label String?
+
+  // Platform-specific config (JSON)
+  // EVM: { chainId: 42161, address: "0xABC..." }
+  config Json
+
+  // Status (allows soft-disable without deletion)
+  isActive Boolean @default(true)
+
+  @@index([chainType])
+  @@index([protocolName])
+  @@index([interactionType])
+  @@index([isActive])
+  @@map("known_protocol_addresses")
+  @@schema("public")
 }

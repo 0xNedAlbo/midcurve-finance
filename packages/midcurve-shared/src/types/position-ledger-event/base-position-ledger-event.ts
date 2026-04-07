@@ -96,6 +96,16 @@ export abstract class BasePositionLedgerEvent
   readonly realizedCashflowAfter: bigint;
 
   // ============================================================================
+  // OWNERSHIP TRACKING
+  // ============================================================================
+
+  /** Whether this event is ignored for financial calculations (happened outside user ownership) */
+  readonly isIgnored: boolean;
+
+  /** Reason the event is ignored, e.g. "not_owned_by_user" */
+  readonly ignoredReason: string | null;
+
+  // ============================================================================
   // ABSTRACT MEMBERS
   // ============================================================================
 
@@ -131,6 +141,8 @@ export abstract class BasePositionLedgerEvent
     this.collectedYieldAfter = params.collectedYieldAfter;
     this.deltaRealizedCashflow = params.deltaRealizedCashflow;
     this.realizedCashflowAfter = params.realizedCashflowAfter;
+    this.isIgnored = params.isIgnored;
+    this.ignoredReason = params.ignoredReason;
   }
 
   // ============================================================================
@@ -162,6 +174,8 @@ export abstract class BasePositionLedgerEvent
       collectedYieldAfter: this.collectedYieldAfter.toString(),
       deltaRealizedCashflow: this.deltaRealizedCashflow.toString(),
       realizedCashflowAfter: this.realizedCashflowAfter.toString(),
+      isIgnored: this.isIgnored,
+      ignoredReason: this.ignoredReason,
       config: this.config,
       state: this.state,
     };

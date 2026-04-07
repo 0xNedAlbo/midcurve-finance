@@ -209,6 +209,8 @@ export class UniswapV3VaultPositionLedgerEvent extends BasePositionLedgerEvent {
         typeof row.realizedCashflowAfter === 'bigint'
           ? row.realizedCashflowAfter
           : BigInt(row.realizedCashflowAfter),
+      isIgnored: row.isIgnored ?? false,
+      ignoredReason: row.ignoredReason ?? null,
       config: vaultLedgerEventConfigFromJSON(configJSON),
       state: vaultLedgerEventStateFromJSON(stateJSON),
     });

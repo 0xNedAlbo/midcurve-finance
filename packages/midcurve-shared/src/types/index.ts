@@ -392,6 +392,16 @@ export type {
   UniswapV3PoolPriceSubscriptionJSON,
 } from './onchain-subscription/index.js';
 
+// ============================================================================
+// Wallet Perimeter types (transfer classification)
+// ============================================================================
+
+export type {
+  TransferClassificationType,
+  ProtocolCounterparty,
+  TransferClassification,
+} from './wallet-perimeter/index.js';
+
 export {
   // ERC-20 Approval
   emptyErc20ApprovalState,

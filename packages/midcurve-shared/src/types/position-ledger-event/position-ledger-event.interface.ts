@@ -97,6 +97,16 @@ export interface PositionLedgerEventInterface {
   readonly pnlAfter: bigint;
 
   // ============================================================================
+  // OWNERSHIP TRACKING
+  // ============================================================================
+
+  /** Whether this event is ignored for financial calculations */
+  readonly isIgnored: boolean;
+
+  /** Reason the event is ignored */
+  readonly ignoredReason: string | null;
+
+  // ============================================================================
   // PROTOCOL-SPECIFIC DATA
   // ============================================================================
 

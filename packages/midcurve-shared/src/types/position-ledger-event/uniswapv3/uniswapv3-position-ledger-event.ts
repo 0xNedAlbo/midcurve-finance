@@ -295,6 +295,10 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       deltaRealizedCashflow: typeof row.deltaRealizedCashflow === 'bigint' ? row.deltaRealizedCashflow : BigInt(row.deltaRealizedCashflow),
       realizedCashflowAfter: typeof row.realizedCashflowAfter === 'bigint' ? row.realizedCashflowAfter : BigInt(row.realizedCashflowAfter),
 
+      // Ownership tracking
+      isIgnored: row.isIgnored ?? false,
+      ignoredReason: row.ignoredReason ?? null,
+
       // Protocol-specific
       config: ledgerEventConfigFromJSON(configJSON),
       state: ledgerEventStateFromJSON(stateJSON),

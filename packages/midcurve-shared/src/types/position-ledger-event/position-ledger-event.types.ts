@@ -129,6 +129,8 @@ export interface PositionLedgerEventJSON {
   collectedYieldAfter: string;
   deltaRealizedCashflow: string;
   realizedCashflowAfter: string;
+  isIgnored: boolean;
+  ignoredReason: string | null;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
 }
@@ -161,6 +163,8 @@ export interface BasePositionLedgerEventParams {
   collectedYieldAfter: bigint;
   deltaRealizedCashflow: bigint;
   realizedCashflowAfter: bigint;
+  isIgnored: boolean;
+  ignoredReason: string | null;
 }
 
 // ============================================================================
@@ -192,6 +196,8 @@ export interface PositionLedgerEventRow {
   collectedYieldAfter: bigint;
   deltaRealizedCashflow: bigint;
   realizedCashflowAfter: bigint;
+  isIgnored: boolean;
+  ignoredReason: string | null;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
 }

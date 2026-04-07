@@ -73,6 +73,7 @@ import {
 import { SupportedChainId } from "../../config/evm.js";
 import { CacheService } from "../cache/cache-service.js";
 import { UniswapV3CloseOrderService } from "../close-order/uniswapv3-close-order-service.js";
+import { UserWalletService } from "../wallet-perimeter/user-wallet-service.js";
 
 /**
  * Yield state for a position
@@ -285,6 +286,13 @@ export interface UniswapV3PositionServiceDependencies {
      * If not provided, a new UniswapV3CloseOrderService instance will be created
      */
     closeOrderService?: UniswapV3CloseOrderService;
+
+    /**
+     * User wallet service for building the user's wallet address set
+     * Used by ledger service for ownership tracking during event processing
+     * If not provided, a new UserWalletService instance will be created
+     */
+    userWalletService?: UserWalletService;
 }
 
 /**
@@ -305,6 +313,7 @@ export class UniswapV3PositionService {
     private readonly _poolPriceService: UniswapV3PoolPriceService;
     private readonly _cacheService: CacheService;
     private readonly _closeOrderService: UniswapV3CloseOrderService;
+    private readonly _userWalletService: UserWalletService;
 
     /**
      * Creates a new UniswapV3PositionService instance
@@ -341,6 +350,8 @@ export class UniswapV3PositionService {
             dependencies.cacheService ?? CacheService.getInstance();
         this._closeOrderService =
             dependencies.closeOrderService ?? new UniswapV3CloseOrderService();
+        this._userWalletService =
+            dependencies.userWalletService ?? new UserWalletService({ prisma: this._prisma });
     }
 
     /**
@@ -348,6 +359,19 @@ export class UniswapV3PositionService {
      */
     protected get prisma(): PrismaClient {
         return this._prisma;
+    }
+
+    /**
+     * Build the set of normalized EVM wallet addresses for a user.
+     * Used by ledger service for ownership tracking during event processing.
+     */
+    private async buildUserWalletAddresses(userId: string): Promise<Set<string>> {
+        const wallets = await this._userWalletService.findByUserId(userId);
+        return new Set(
+            wallets
+                .filter(w => w.walletType === "evm")
+                .map(w => (w.config as { address: string }).address.toLowerCase()),
+        );
     }
 
     /**
@@ -863,11 +887,13 @@ export class UniswapV3PositionService {
                 { positionId: position.id },
                 { prisma: this.prisma },
             );
+            const userWalletAddresses = await this.buildUserWalletAddresses(userId);
             await ledgerService.importLogsForPosition(
                 position,
                 chainId,
                 logs,
                 this._poolPriceService,
+                userWalletAddresses,
                 dbTx,
             );
 
@@ -1289,7 +1315,26 @@ export class UniswapV3PositionService {
             const resolvedBlockNumber = Number(onChainState.blockNumber);
 
             // 3. Refresh owner address (may have been transferred)
-            await this.refreshOwnerAddress(id, resolvedBlockNumber, dbTx);
+            const currentOwner = await this.refreshOwnerAddress(id, resolvedBlockNumber, dbTx);
+
+            // 3.1 Check if position is still owned by user (wallet perimeter check)
+            const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
+            if (!userWalletAddresses.has(currentOwner.toLowerCase())) {
+                // Position has left the user's perimeter — mark inactive
+                this.logger.info(
+                    { id, currentOwner, userId: position.userId },
+                    "Position transferred outside user perimeter, marking inactive",
+                );
+                const db = dbTx ?? this.prisma;
+                await db.position.update({
+                    where: { id },
+                    data: {
+                        isActive: false,
+                        positionClosedAt: new Date(),
+                    },
+                });
+                // Still continue refresh to update metrics for display
+            }
 
             // 4. Refresh liquidity
             await this.refreshLiquidity(id, resolvedBlockNumber, dbTx);
@@ -1617,11 +1662,13 @@ export class UniswapV3PositionService {
             toBlock,
         );
 
+        const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
         const importResult = await ledgerService.importLogsForPosition(
             position,
             chainId,
             logs,
             this.poolPriceService,
+            userWalletAddresses,
             dbTx,
         );
 
@@ -2450,6 +2497,9 @@ export class UniswapV3PositionService {
         const collectEvent = parseAbiItem(
             "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)",
         );
+        const transferEvent = parseAbiItem(
+            "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+        );
 
         const commonParams = {
             address: nfpmAddress,
@@ -2458,15 +2508,16 @@ export class UniswapV3PositionService {
             toBlock,
         };
 
-        // 3 parallel calls instead of thousands of sequential batches
-        const [increaseLogs, decreaseLogs, collectLogs] = await Promise.all([
+        // 4 parallel calls — Transfer events include mint (from=0x0) and burn (to=0x0)
+        const [increaseLogs, decreaseLogs, collectLogs, transferLogs] = await Promise.all([
             client.getLogs({ ...commonParams, event: increaseLiquidityEvent }),
             client.getLogs({ ...commonParams, event: decreaseLiquidityEvent }),
             client.getLogs({ ...commonParams, event: collectEvent }),
+            client.getLogs({ ...commonParams, event: transferEvent }),
         ]);
 
         // Merge and sort by block number (then log index for same-block ordering)
-        const allLogs = [...increaseLogs, ...decreaseLogs, ...collectLogs];
+        const allLogs = [...increaseLogs, ...decreaseLogs, ...collectLogs, ...transferLogs];
         allLogs.sort((a, b) => {
             const blockDiff = Number(a.blockNumber! - b.blockNumber!);
             if (blockDiff !== 0) return blockDiff;

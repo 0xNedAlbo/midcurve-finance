@@ -12,12 +12,17 @@ import {
     ledgerEventStateToJSON,
     valueOfToken0AmountInToken1,
     valueOfToken1AmountInToken0,
+    normalizeAddress,
+    calculatePositionValue,
     type UniswapV3Position,
 } from "@midcurve/shared";
 import type {
     UniswapV3PositionLedgerEventRow,
     UniswapV3LedgerEventConfig,
     UniswapV3LedgerEventState,
+    UniswapV3TransferEvent,
+    UniswapV3MintEvent,
+    UniswapV3BurnEvent,
     EventType,
     Reward,
 } from "@midcurve/shared";
@@ -53,6 +58,8 @@ export const UNISWAP_V3_POSITION_EVENT_SIGNATURES = {
         "0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4",
     COLLECT:
         "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01",
+    TRANSFER:
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 } as const;
 
 /**
@@ -256,14 +263,26 @@ export function validateRawEvent(
         return { valid: false, reason: "unknown_event" };
     }
 
-    // Check topic[1] matches the expected nftId
-    // NFT ID is stored as a 32-byte (64 hex chars) padded value
+    // Check nftId matches the expected value.
+    // For TRANSFER: nftId is topic[3] (3rd indexed param: from, to, tokenId)
+    // For all others: nftId is topic[1] (1st indexed param: tokenId)
     const expectedNftIdHex =
         "0x" + BigInt(nftId).toString(16).padStart(64, "0");
-    const actualNftIdHex = log.topics[1]?.toLowerCase();
 
-    if (actualNftIdHex !== expectedNftIdHex.toLowerCase()) {
-        return { valid: false, reason: "wrong_nft_id" };
+    if (eventType === "TRANSFER") {
+        // ERC-721 Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+        if (!log.topics || log.topics.length < 4) {
+            return { valid: false, reason: "missing_topics" };
+        }
+        const actualNftIdHex = log.topics[3]?.toLowerCase();
+        if (actualNftIdHex !== expectedNftIdHex.toLowerCase()) {
+            return { valid: false, reason: "wrong_nft_id" };
+        }
+    } else {
+        const actualNftIdHex = log.topics[1]?.toLowerCase();
+        if (actualNftIdHex !== expectedNftIdHex.toLowerCase()) {
+            return { valid: false, reason: "wrong_nft_id" };
+        }
     }
 
     return { valid: true, eventType };
@@ -380,6 +399,12 @@ export interface UpdateEventAggregatesInput {
     feesCollected0: bigint;
     /** Fees collected in token1 (for COLLECT events, 0 otherwise) */
     feesCollected1: bigint;
+    /** Whether this event is ignored for financial calculations */
+    isIgnored: boolean;
+    /** Reason the event is ignored */
+    ignoredReason: string | null;
+    /** Override tokenValue (for Transfer events where FMV is calculated during recalculation) */
+    tokenValue?: bigint;
 }
 
 /**
@@ -777,6 +802,9 @@ export class UniswapV3LedgerService {
                 pnlAfter: updates.pnlAfter.toString(),
                 deltaCollectedYield: updates.deltaCollectedYield.toString(),
                 collectedYieldAfter: updates.collectedYieldAfter.toString(),
+                isIgnored: updates.isIgnored,
+                ignoredReason: updates.ignoredReason,
+                ...(updates.tokenValue !== undefined && { tokenValue: updates.tokenValue.toString() }),
                 config: ledgerEventConfigToJSON(updatedConfig) as object,
             },
         });
@@ -1021,6 +1049,9 @@ export class UniswapV3LedgerService {
      */
     private async recalculateAggregates(
         isToken0Quote: boolean,
+        userWalletAddresses: Set<string>,
+        tickLower: number,
+        tickUpper: number,
         tx?: PrismaTransactionClient,
     ): Promise<LedgerAggregates> {
         const events = await this.findAll(tx);
@@ -1052,6 +1083,9 @@ export class UniswapV3LedgerService {
         let uncollectedPrincipal1After = 0n;
         let previousEventId: string | null = null;
 
+        // Ownership tracking — starts false, proven by first Transfer event (MINT)
+        let ownershipActive = false;
+
         // APR period tracking
         let periodStartTimestamp: Date | null = null;
         let periodStartEventId: string | null = null;
@@ -1060,6 +1094,9 @@ export class UniswapV3LedgerService {
             costBasisAfter: bigint;
         }> = [];
         let periodEventCount = 0;
+
+        // baseIsToken0 = !isToken0Quote (needed for calculatePositionValue)
+        const baseIsToken0 = !isToken0Quote;
 
         // Process events in order, recalculating deltas and running totals
         for (const event of events) {
@@ -1082,176 +1119,257 @@ export class UniswapV3LedgerService {
             let deltaCollectedYield = 0n;
             let feesCollected0 = 0n;
             let feesCollected1 = 0n;
+            let isIgnored = false;
+            let ignoredReason: string | null = null;
+            let tokenValueOverride: bigint | undefined;
 
-            if (
-                state.eventType === "MINT" ||
-                state.eventType === "BURN" ||
-                state.eventType === "TRANSFER"
-            ) {
-                // Lifecycle events: no financial impact, pass through all running totals
-                deltaL = 0n;
+            if (state.eventType === "MINT") {
+                // MINT = Transfer from 0x0. Determine ownership from 'to' address.
+                const to = (state as UniswapV3MintEvent).to;
+                ownershipActive = userWalletAddresses.has(to.toLowerCase());
+                // No financial impact (liquidity = 0 at mint)
                 liquidityAfter = previousLiquidity;
-                deltaCostBasis = 0n;
                 costBasisAfter = previousCostBasis;
-                deltaPnl = 0n;
                 pnlAfter = previousPnl;
                 uncollectedPrincipal0After = previousUncollectedPrincipal0;
                 uncollectedPrincipal1After = previousUncollectedPrincipal1;
+                isIgnored = !ownershipActive;
+                ignoredReason = isIgnored ? "not_owned_by_user" : null;
+
+            } else if (state.eventType === "TRANSFER") {
+                const { from, to } = state as UniswapV3TransferEvent;
+                const isOutgoing = userWalletAddresses.has(from.toLowerCase());
+                const isIncoming = userWalletAddresses.has(to.toLowerCase());
+
+                // Liquidity unchanged by transfer
+                liquidityAfter = previousLiquidity;
+                uncollectedPrincipal0After = previousUncollectedPrincipal0;
+                uncollectedPrincipal1After = previousUncollectedPrincipal1;
+
+                if (isOutgoing) {
+                    // Transfer OUT — realize PnL at FMV
+                    if (previousLiquidity > 0n) {
+                        const fmv = calculatePositionValue(
+                            previousLiquidity, sqrtPriceX96, tickLower, tickUpper, baseIsToken0,
+                        );
+                        deltaPnl = fmv - previousCostBasis;
+                        pnlAfter = previousPnl + deltaPnl;
+                        deltaCostBasis = -previousCostBasis;
+                        costBasisAfter = 0n;
+                        tokenValueOverride = fmv;
+                    } else {
+                        costBasisAfter = previousCostBasis;
+                        pnlAfter = previousPnl;
+                    }
+                    ownershipActive = false;
+                }
+
+                if (isIncoming) {
+                    // Transfer IN — create cost basis at FMV
+                    ownershipActive = true;
+                    if (previousLiquidity > 0n) {
+                        const fmv = calculatePositionValue(
+                            previousLiquidity, sqrtPriceX96, tickLower, tickUpper, baseIsToken0,
+                        );
+                        deltaCostBasis = fmv;
+                        costBasisAfter = fmv;
+                        tokenValueOverride = fmv;
+                    } else {
+                        costBasisAfter = previousCostBasis;
+                    }
+                    pnlAfter = previousPnl;
+                }
+
+                if (!isOutgoing && !isIncoming) {
+                    // Neither recognized — pass through
+                    costBasisAfter = previousCostBasis;
+                    pnlAfter = previousPnl;
+                }
+
+                // Transfer events are never ignored — they're always visible
+                isIgnored = false;
+
+            } else if (state.eventType === "BURN") {
+                // BURN = Transfer to 0x0. Mark ownership as ended.
+                liquidityAfter = previousLiquidity;
+                costBasisAfter = previousCostBasis;
+                pnlAfter = previousPnl;
+                uncollectedPrincipal0After = previousUncollectedPrincipal0;
+                uncollectedPrincipal1After = previousUncollectedPrincipal1;
+                isIgnored = !ownershipActive;
+                ignoredReason = isIgnored ? "not_owned_by_user" : null;
+                ownershipActive = false;
+
             } else if (state.eventType === "INCREASE_LIQUIDITY") {
-                // Use stored tokenValue for cost basis (already calculated with correct price)
                 deltaL = state.liquidity;
                 liquidityAfter = previousLiquidity + deltaL;
-                deltaCostBasis = event.tokenValue;
-                costBasisAfter = previousCostBasis + deltaCostBasis;
-                deltaPnl = 0n;
+
+                if (ownershipActive) {
+                    // Normal: add to cost basis
+                    deltaCostBasis = event.tokenValue;
+                    costBasisAfter = previousCostBasis + deltaCostBasis;
+                } else {
+                    // Outside ownership: track liquidity but no financial impact
+                    costBasisAfter = previousCostBasis;
+                    isIgnored = true;
+                    ignoredReason = "not_owned_by_user";
+                }
                 pnlAfter = previousPnl;
-                // Uncollected principal unchanged
                 uncollectedPrincipal0After = previousUncollectedPrincipal0;
                 uncollectedPrincipal1After = previousUncollectedPrincipal1;
+
             } else if (state.eventType === "DECREASE_LIQUIDITY") {
                 deltaL = -state.liquidity;
                 liquidityAfter = previousLiquidity + deltaL;
 
-                // Calculate proportional cost basis being removed
-                let proportionalCostBasis = 0n;
-                if (previousLiquidity > 0n && state.liquidity > 0n) {
-                    proportionalCostBasis =
-                        (state.liquidity * previousCostBasis) /
-                        previousLiquidity;
-                }
-                deltaCostBasis = -proportionalCostBasis;
-                costBasisAfter = previousCostBasis + deltaCostBasis;
-
-                // Realize PnL: tokenValue (stored) vs proportional cost basis
-                deltaPnl = event.tokenValue - proportionalCostBasis;
-                pnlAfter = previousPnl + deltaPnl;
-
-                // Uncollected principal INCREASES
-                uncollectedPrincipal0After =
-                    previousUncollectedPrincipal0 + state.amount0;
-                uncollectedPrincipal1After =
-                    previousUncollectedPrincipal1 + state.amount1;
-            } else if (state.eventType === "COLLECT") {
-                deltaL = 0n;
-                liquidityAfter = previousLiquidity;
-                deltaCostBasis = 0n;
-                costBasisAfter = previousCostBasis;
-
-                // Determine principal vs fees
-                const principal0Collected =
-                    state.amount0 <= previousUncollectedPrincipal0
-                        ? state.amount0
-                        : previousUncollectedPrincipal0;
-                const principal1Collected =
-                    state.amount1 <= previousUncollectedPrincipal1
-                        ? state.amount1
-                        : previousUncollectedPrincipal1;
-
-                feesCollected0 = state.amount0 - principal0Collected;
-                feesCollected1 = state.amount1 - principal1Collected;
-
-                // Calculate fee value in quote tokens
-                let feeValue: bigint;
-                if (isToken0Quote) {
-                    const fees1InQuote = valueOfToken1AmountInToken0(
-                        feesCollected1,
-                        sqrtPriceX96,
-                    );
-                    feeValue = feesCollected0 + fees1InQuote;
-                } else {
-                    const fees0InQuote = valueOfToken0AmountInToken1(
-                        feesCollected0,
-                        sqrtPriceX96,
-                    );
-                    feeValue = fees0InQuote + feesCollected1;
-                }
-
-                deltaPnl = feeValue;
-                pnlAfter = previousPnl + deltaPnl;
-                deltaCollectedYield = feeValue;
-                collectedYieldAfter = previousCollectedYield + deltaCollectedYield;
-
-                // Uncollected principal decreases
-                uncollectedPrincipal0After =
-                    previousUncollectedPrincipal0 - principal0Collected;
-                uncollectedPrincipal1After =
-                    previousUncollectedPrincipal1 - principal1Collected;
-            }
-
-            // ================================================================
-            // APR Period Tracking
-            // ================================================================
-
-            // Initialize period on first event
-            if (periodStartTimestamp === null) {
-                periodStartTimestamp = event.timestamp;
-                periodStartEventId = event.id;
-            }
-
-            // Track cost basis snapshot for time-weighted calculation
-            periodCostBasisSnapshots.push({
-                timestamp: event.timestamp,
-                costBasisAfter: costBasisAfter,
-            });
-            periodEventCount++;
-
-            // COLLECT event ends the current APR period
-            if (state.eventType === "COLLECT") {
-                // Only create period if we have meaningful data (at least 2 snapshots for duration)
-                if (
-                    periodStartTimestamp &&
-                    periodCostBasisSnapshots.length >= 2
-                ) {
-                    try {
-                        const timeWeightedCostBasis =
-                            calculateTimeWeightedCostBasis(
-                                periodCostBasisSnapshots,
-                            );
-                        const durationSeconds = calculateDurationSeconds(
-                            periodStartTimestamp,
-                            event.timestamp,
-                        );
-
-                        // Calculate APR if we have valid cost basis and duration
-                        const aprBps =
-                            durationSeconds > 0 && timeWeightedCostBasis > 0n
-                                ? calculateAprBps(
-                                      deltaCollectedYield,
-                                      timeWeightedCostBasis,
-                                      durationSeconds,
-                                  )
-                                : 0;
-
-                        const aprPeriod: AprPeriodData = {
-                            startEventId: periodStartEventId!,
-                            endEventId: event.id,
-                            startTimestamp: periodStartTimestamp,
-                            endTimestamp: event.timestamp,
-                            durationSeconds,
-                            costBasis: timeWeightedCostBasis,
-                            collectedYieldValue: deltaCollectedYield,
-                            aprBps,
-                            eventCount: periodEventCount,
-                        };
-
-                        // Persist immediately
-                        await this._aprService.persistAprPeriod(aprPeriod, tx);
-                    } catch (e) {
-                        // Skip invalid periods (e.g., zero duration, same timestamps)
-                        this.logger.warn(
-                            { error: e },
-                            "Skipping invalid APR period",
-                        );
+                if (ownershipActive) {
+                    // Normal: realize proportional PnL
+                    let proportionalCostBasis = 0n;
+                    if (previousLiquidity > 0n && state.liquidity > 0n) {
+                        proportionalCostBasis =
+                            (state.liquidity * previousCostBasis) /
+                            previousLiquidity;
                     }
+                    deltaCostBasis = -proportionalCostBasis;
+                    costBasisAfter = previousCostBasis + deltaCostBasis;
+                    deltaPnl = event.tokenValue - proportionalCostBasis;
+                    pnlAfter = previousPnl + deltaPnl;
+                    uncollectedPrincipal0After =
+                        previousUncollectedPrincipal0 + state.amount0;
+                    uncollectedPrincipal1After =
+                        previousUncollectedPrincipal1 + state.amount1;
+                } else {
+                    // Outside ownership: track liquidity but no financial impact
+                    costBasisAfter = previousCostBasis;
+                    pnlAfter = previousPnl;
+                    uncollectedPrincipal0After = previousUncollectedPrincipal0;
+                    uncollectedPrincipal1After = previousUncollectedPrincipal1;
+                    isIgnored = true;
+                    ignoredReason = "not_owned_by_user";
                 }
 
-                // Reset for next period - COLLECT ends this period, next event starts new one
-                periodStartTimestamp = event.timestamp;
-                periodStartEventId = event.id;
-                periodCostBasisSnapshots = [
-                    { timestamp: event.timestamp, costBasisAfter },
-                ];
-                periodEventCount = 0;
+            } else if (state.eventType === "COLLECT") {
+                liquidityAfter = previousLiquidity;
+
+                if (ownershipActive) {
+                    // Normal: realize yield
+                    costBasisAfter = previousCostBasis;
+
+                    const principal0Collected =
+                        state.amount0 <= previousUncollectedPrincipal0
+                            ? state.amount0
+                            : previousUncollectedPrincipal0;
+                    const principal1Collected =
+                        state.amount1 <= previousUncollectedPrincipal1
+                            ? state.amount1
+                            : previousUncollectedPrincipal1;
+
+                    feesCollected0 = state.amount0 - principal0Collected;
+                    feesCollected1 = state.amount1 - principal1Collected;
+
+                    let feeValue: bigint;
+                    if (isToken0Quote) {
+                        const fees1InQuote = valueOfToken1AmountInToken0(
+                            feesCollected1, sqrtPriceX96,
+                        );
+                        feeValue = feesCollected0 + fees1InQuote;
+                    } else {
+                        const fees0InQuote = valueOfToken0AmountInToken1(
+                            feesCollected0, sqrtPriceX96,
+                        );
+                        feeValue = fees0InQuote + feesCollected1;
+                    }
+
+                    deltaPnl = feeValue;
+                    pnlAfter = previousPnl + deltaPnl;
+                    deltaCollectedYield = feeValue;
+                    collectedYieldAfter = previousCollectedYield + deltaCollectedYield;
+                    uncollectedPrincipal0After =
+                        previousUncollectedPrincipal0 - principal0Collected;
+                    uncollectedPrincipal1After =
+                        previousUncollectedPrincipal1 - principal1Collected;
+                } else {
+                    // Outside ownership: no financial impact
+                    costBasisAfter = previousCostBasis;
+                    pnlAfter = previousPnl;
+                    uncollectedPrincipal0After = previousUncollectedPrincipal0;
+                    uncollectedPrincipal1After = previousUncollectedPrincipal1;
+                    isIgnored = true;
+                    ignoredReason = "not_owned_by_user";
+                }
+            }
+
+            // ================================================================
+            // APR Period Tracking (only for owned events)
+            // ================================================================
+
+            if (!isIgnored) {
+                // Initialize period on first owned event
+                if (periodStartTimestamp === null) {
+                    periodStartTimestamp = event.timestamp;
+                    periodStartEventId = event.id;
+                }
+
+                // Track cost basis snapshot for time-weighted calculation
+                periodCostBasisSnapshots.push({
+                    timestamp: event.timestamp,
+                    costBasisAfter: costBasisAfter,
+                });
+                periodEventCount++;
+
+                // COLLECT event ends the current APR period
+                if (state.eventType === "COLLECT") {
+                    if (
+                        periodStartTimestamp &&
+                        periodCostBasisSnapshots.length >= 2
+                    ) {
+                        try {
+                            const timeWeightedCostBasis =
+                                calculateTimeWeightedCostBasis(
+                                    periodCostBasisSnapshots,
+                                );
+                            const durationSeconds = calculateDurationSeconds(
+                                periodStartTimestamp,
+                                event.timestamp,
+                            );
+
+                            const aprBps =
+                                durationSeconds > 0 && timeWeightedCostBasis > 0n
+                                    ? calculateAprBps(
+                                          deltaCollectedYield,
+                                          timeWeightedCostBasis,
+                                          durationSeconds,
+                                      )
+                                    : 0;
+
+                            const aprPeriod: AprPeriodData = {
+                                startEventId: periodStartEventId!,
+                                endEventId: event.id,
+                                startTimestamp: periodStartTimestamp,
+                                endTimestamp: event.timestamp,
+                                durationSeconds,
+                                costBasis: timeWeightedCostBasis,
+                                collectedYieldValue: deltaCollectedYield,
+                                aprBps,
+                                eventCount: periodEventCount,
+                            };
+
+                            await this._aprService.persistAprPeriod(aprPeriod, tx);
+                        } catch (e) {
+                            this.logger.warn(
+                                { error: e },
+                                "Skipping invalid APR period",
+                            );
+                        }
+                    }
+
+                    periodStartTimestamp = event.timestamp;
+                    periodStartEventId = event.id;
+                    periodCostBasisSnapshots = [
+                        { timestamp: event.timestamp, costBasisAfter },
+                    ];
+                    periodEventCount = 0;
+                }
             }
 
             // ================================================================
@@ -1274,6 +1392,9 @@ export class UniswapV3LedgerService {
                     uncollectedPrincipal1After,
                     feesCollected0,
                     feesCollected1,
+                    isIgnored,
+                    ignoredReason,
+                    tokenValue: tokenValueOverride,
                 },
                 tx,
             );
@@ -1429,11 +1550,17 @@ export class UniswapV3LedgerService {
         chainId: number,
         logs: RawLogInput[],
         poolPriceService: UniswapV3PoolPriceService,
+        userWalletAddresses: Set<string>,
         tx?: PrismaTransactionClient,
     ): Promise<ImportLogsResult> {
+        const { tickLower, tickUpper } = position.typedConfig;
+
         // Snapshot aggregates before import for delta calculations
         const preImportAggregates = await this.recalculateAggregates(
             position.isToken0Quote,
+            userWalletAddresses,
+            tickLower,
+            tickUpper,
             tx,
         );
 
@@ -1460,6 +1587,9 @@ export class UniswapV3LedgerService {
         // APR periods are persisted internally during recalculation
         const aggregates = await this.recalculateAggregates(
             position.isToken0Quote,
+            userWalletAddresses,
+            tickLower,
+            tickUpper,
             tx,
         );
 
@@ -1581,6 +1711,96 @@ export class UniswapV3LedgerService {
         const sqrtPriceX96 = poolPrice.sqrtPriceX96;
         const blockTimestamp = poolPrice.timestamp;
 
+        const tokenIdBigInt = BigInt(nftId);
+
+        // ================================================================
+        // TRANSFER events (ERC-721): no data payload, all info in topics
+        // Classify as MINT (from=0x0), BURN (to=0x0), or TRANSFER
+        // ================================================================
+        if (validation.eventType === "TRANSFER") {
+            const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+            const fromRaw = "0x" + (log.topics[1]?.slice(26) ?? "");
+            const toRaw = "0x" + (log.topics[2]?.slice(26) ?? "");
+            const from = fromRaw.toLowerCase() === ZERO_ADDRESS ? ZERO_ADDRESS : normalizeAddress(fromRaw);
+            const to = toRaw.toLowerCase() === ZERO_ADDRESS ? ZERO_ADDRESS : normalizeAddress(toRaw);
+
+            let eventType: EventType;
+            let ledgerState: UniswapV3LedgerEventState;
+            const stateBase = { poolPrice: sqrtPriceX96, token0Amount: 0n, token1Amount: 0n };
+
+            if (from === ZERO_ADDRESS) {
+                eventType = "MINT";
+                ledgerState = { ...stateBase, eventType: "MINT", tokenId: tokenIdBigInt, to } as UniswapV3MintEvent;
+            } else if (to === ZERO_ADDRESS) {
+                eventType = "BURN";
+                ledgerState = { ...stateBase, eventType: "BURN", tokenId: tokenIdBigInt, from } as UniswapV3BurnEvent;
+            } else {
+                eventType = "TRANSFER";
+                ledgerState = { ...stateBase, eventType: "TRANSFER", tokenId: tokenIdBigInt, from, to } as UniswapV3TransferEvent;
+            }
+
+            const ledgerConfig: UniswapV3LedgerEventConfig = {
+                chainId,
+                nftId: tokenIdBigInt,
+                blockNumber,
+                txIndex,
+                logIndex,
+                txHash: log.transactionHash,
+                blockHash: log.blockHash,
+                deltaL: 0n,
+                liquidityAfter: 0n,
+                feesCollected0: 0n,
+                feesCollected1: 0n,
+                uncollectedPrincipal0After: 0n,
+                uncollectedPrincipal1After: 0n,
+                sqrtPriceX96,
+            };
+
+            const createInput: CreateLedgerEventInput = {
+                previousId: null,
+                timestamp: blockTimestamp,
+                eventType,
+                inputHash,
+                tokenValue: 0n, // Will be fixed by recalculateAggregates for Transfer IN/OUT
+                rewards: [],
+                deltaCostBasis: 0n,
+                costBasisAfter: 0n,
+                deltaPnl: 0n,
+                pnlAfter: 0n,
+                deltaCollectedYield: 0n,
+                collectedYieldAfter: 0n,
+                deltaRealizedCashflow: 0n,
+                realizedCashflowAfter: 0n,
+                config: ledgerConfig,
+                state: ledgerState,
+            };
+
+            await this.create(createInput, tx);
+
+            this.logger.debug(
+                { inputHash, eventType, from, to },
+                "Transfer/lifecycle event created (aggregates pending recalculation)",
+            );
+
+            return {
+                action: "inserted",
+                inputHash,
+                eventDetail: {
+                    validEventType: validation.eventType,
+                    amount0: 0n,
+                    amount1: 0n,
+                    liquidityDelta: 0n,
+                    tokenValue: 0n,
+                    blockTimestamp,
+                },
+                ...(reorgDeletedEvents !== undefined && { reorgDeletedEvents }),
+            };
+        }
+
+        // ================================================================
+        // LIQUIDITY events (INCREASE, DECREASE, COLLECT): decode data payload
+        // ================================================================
+
         // Decode the log data
         const decoded = decodeLogData(validation.eventType, log.data);
 
@@ -1601,12 +1821,12 @@ export class UniswapV3LedgerService {
         }
 
         // Map ValidEventType to EventType for database
-        const eventTypeMap: Record<ValidEventType, EventType> = {
+        const liquidityEventTypeMap: Record<string, EventType> = {
             INCREASE_LIQUIDITY: "INCREASE_POSITION",
             DECREASE_LIQUIDITY: "DECREASE_POSITION",
             COLLECT: "COLLECT",
         };
-        const eventType = eventTypeMap[validation.eventType];
+        const eventType = liquidityEventTypeMap[validation.eventType]!;
 
         // Build ledger event config (running totals will be fixed by recalculateAggregates)
         const deltaL =
@@ -1618,7 +1838,7 @@ export class UniswapV3LedgerService {
 
         const ledgerConfig: UniswapV3LedgerEventConfig = {
             chainId,
-            nftId: BigInt(nftId),
+            nftId: tokenIdBigInt,
             blockNumber,
             txIndex,
             logIndex,
@@ -1634,7 +1854,6 @@ export class UniswapV3LedgerService {
         };
 
         // Build ledger event state (includes common financial fields)
-        const tokenIdBigInt = BigInt(nftId);
         const stateBase = {
             poolPrice: sqrtPriceX96,
             token0Amount: decoded.amount0,
