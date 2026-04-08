@@ -18,6 +18,7 @@ import { WithdrawPage } from './pages/WithdrawPage';
 import { RiskTriggersPage } from './pages/RiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
+import { WalletManagementPage } from './pages/WalletManagementPage';
 
 export function App() {
   return (
@@ -89,6 +90,7 @@ function ConfigGate() {
                 path="/positions/triggers/:protocol/:chain/:nftId"
                 element={<RiskTriggersPage />}
               />
+              <Route path="/wallets" element={<WalletManagementPage />} />
               <Route path="/system-config" element={<SystemConfigPage />} />
               <Route path="/setup" element={<SetupWizardPage />} />
             </Routes>

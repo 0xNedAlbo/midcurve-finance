@@ -35,6 +35,7 @@ import {
   JournalBackfillService,
   UniswapV3VaultPositionService,
   UniswapV3VaultLedgerService,
+  UserWalletService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -59,6 +60,7 @@ let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
 let _uniswapV3VaultPositionService: UniswapV3VaultPositionService | null = null;
+let _userWalletService: UserWalletService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -288,6 +290,16 @@ export function getUniswapV3VaultPositionService(): UniswapV3VaultPositionServic
     _uniswapV3VaultPositionService = new UniswapV3VaultPositionService();
   }
   return _uniswapV3VaultPositionService;
+}
+
+/**
+ * Get singleton instance of UserWalletService
+ */
+export function getUserWalletService(): UserWalletService {
+  if (!_userWalletService) {
+    _userWalletService = new UserWalletService();
+  }
+  return _userWalletService;
 }
 
 /**
