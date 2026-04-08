@@ -22,7 +22,6 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3VaultPositionService,
-  getJournalService,
 } from '@/lib/services';
 import type { GetUniswapV3VaultPositionResponse } from '@midcurve/api-shared';
 
@@ -102,12 +101,9 @@ export async function GET(
 
       const { position, ownerWallet } = result;
 
-      const isTrackedInAccounting = (await getJournalService().getTrackedPositionId(user.id, positionHash)) !== null;
-
       const serializedPosition: GetUniswapV3VaultPositionResponse = {
         ...serializeUniswapV3VaultPosition(position),
         ownerWallet,
-        isTrackedInAccounting,
       };
 
       const response = createSuccessResponse(serializedPosition);

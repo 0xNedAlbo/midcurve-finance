@@ -101,42 +101,25 @@ export class JournalService {
   }
 
   // ---------------------------------------------------------------------------
-  // Position Tracking
+  // Position Cleanup
   // ---------------------------------------------------------------------------
 
   /**
-   * Registers a position for journal tracking (idempotent via unique constraint).
-   * Returns the tracked position ID for use as FK in journal entries.
+   * Deletes all journal entries (and their lines via cascade) for a position.
+   * Used when a position is deleted from the system.
    */
-  async trackPosition(userId: string, positionRef: string): Promise<string> {
-    const result = await this.prisma.trackedPosition.upsert({
-      where: { userId_positionRef: { userId, positionRef } },
-      create: { userId, positionRef },
-      update: {},
+  async deleteEntriesByPositionRef(positionRef: string): Promise<number> {
+    // Find journal entry IDs that have lines referencing this position
+    const entries = await this.prisma.journalEntry.findMany({
+      where: { lines: { some: { positionRef } } },
       select: { id: true },
     });
-    return result.id;
-  }
+    if (entries.length === 0) return 0;
 
-  /**
-   * Removes a position from tracking.
-   */
-  async untrackPosition(userId: string, positionRef: string): Promise<void> {
-    await this.prisma.trackedPosition.deleteMany({
-      where: { userId, positionRef },
+    const result = await this.prisma.journalEntry.deleteMany({
+      where: { id: { in: entries.map((e) => e.id) } },
     });
-  }
-
-  /**
-   * Returns the tracked position ID if tracked, null otherwise.
-   * Used as both a tracking check and to obtain the FK for journal entries.
-   */
-  async getTrackedPositionId(userId: string, positionRef: string): Promise<string | null> {
-    const record = await this.prisma.trackedPosition.findUnique({
-      where: { userId_positionRef: { userId, positionRef } },
-      select: { id: true },
-    });
-    return record?.id ?? null;
+    return result.count;
   }
 
   // ---------------------------------------------------------------------------
@@ -200,7 +183,6 @@ export class JournalService {
       const created = await client.journalEntry.create({
         data: {
           userId: entry.userId,
-          trackedPositionId: entry.trackedPositionId,
           domainEventId: entry.domainEventId,
           domainEventType: entry.domainEventType,
           ledgerEventRef: entry.ledgerEventRef,

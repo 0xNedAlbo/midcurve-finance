@@ -33,7 +33,7 @@ import { useIsMutating } from "@tanstack/react-query";
 import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
 import { switchQuoteTokenMutationKey } from "@/hooks/positions/useSwitchQuoteToken";
-import { useToggleAccountingTracking, toggleAccountingTrackingMutationKey } from "@/hooks/positions/useToggleAccountingTracking";
+
 import { useUniswapV3VaultRefreshPosition } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultRefreshPosition";
 import { useUniswapV3VaultAutoRefresh } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultAutoRefresh";
 import { useUniswapV3VaultPosition } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultPosition";
@@ -115,8 +115,6 @@ function UniswapV3VaultPositionCardLoaded({
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
   const isSwitchingQuoteToken = useIsMutating({ mutationKey: switchQuoteTokenMutationKey(position.positionHash) }) > 0;
-  const isTogglingTracking = useIsMutating({ mutationKey: toggleAccountingTrackingMutationKey(position.positionHash) }) > 0;
-  const toggleTrackingMutation = useToggleAccountingTracking(position.positionHash, chainId, vaultAddress);
   const refreshMutation = useUniswapV3VaultRefreshPosition();
   const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
 
@@ -222,13 +220,10 @@ function UniswapV3VaultPositionCardLoaded({
           <PositionActionsMenu
             onReloadHistory={() => setShowReloadHistoryModal(true)}
             onSwitchQuoteToken={() => setShowSwitchQuoteTokenModal(true)}
-            onToggleTracking={() => toggleTrackingMutation.mutate({ positionHash: position.positionHash })}
             onDelete={() => setShowDeleteModal(true)}
-            isTrackedInAccounting={position.isTrackedInAccounting}
             isDeleting={isDeleting}
             isReloadingHistory={isReloadingHistory}
             isSwitchingQuoteToken={isSwitchingQuoteToken}
-            isTogglingTracking={isTogglingTracking}
           />
         </div>
       </div>

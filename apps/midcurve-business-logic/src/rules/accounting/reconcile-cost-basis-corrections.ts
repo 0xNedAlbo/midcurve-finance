@@ -63,23 +63,38 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
 
     const startTime = Date.now();
 
-    // Find all tracked positions where the underlying position is closed
-    const trackedPositions = await prisma.trackedPosition.findMany({
+    // Find all closed positions that have journal entries (i.e., accounting is active)
+    const closedPositions = await prisma.position.findMany({
+      where: {
+        positionHash: { not: null },
+      },
       select: {
         id: true,
         userId: true,
-        positionRef: true,
+        positionHash: true,
+        state: true,
+        protocol: true,
+        config: true,
+        user: { select: { reportingCurrency: true } },
       },
     });
 
-    if (trackedPositions.length === 0) return;
+    // Filter to closed positions only
+    const closed = closedPositions.filter((p) => {
+      const state = p.state as Record<string, unknown>;
+      return state.isClosed === true;
+    });
 
-    // Find which positions are actually closed by joining with Position table
-    // TrackedPosition.positionRef matches Position.positionHash
+    if (closed.length === 0) return;
+
     let correctionCount = 0;
 
-    for (const tracked of trackedPositions) {
-      const corrected = await this.reconcilePosition(tracked);
+    for (const position of closed) {
+      const corrected = await this.reconcilePosition({
+        userId: position.userId,
+        positionRef: position.positionHash!,
+        position,
+      });
       if (corrected) correctionCount++;
     }
 
@@ -87,7 +102,7 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
 
     if (correctionCount > 0) {
       this.logger.info(
-        { correctionCount, checkedCount: trackedPositions.length, durationMs },
+        { correctionCount, checkedCount: closed.length, durationMs },
         'Cost basis reconciliation completed with corrections'
       );
     }
@@ -102,29 +117,17 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
   }
 
   private async reconcilePosition(tracked: {
-    id: string;
     userId: string;
     positionRef: string;
+    position: {
+      id: string;
+      state: unknown;
+      protocol: string;
+      config: unknown;
+      user: { reportingCurrency: string };
+    };
   }): Promise<boolean> {
-    const { id: trackedPositionId, userId, positionRef } = tracked;
-
-    // Find the position by positionHash to check if it's closed
-    const position = await prisma.position.findFirst({
-      where: { userId, positionHash: positionRef },
-      select: {
-        id: true,
-        state: true,
-        protocol: true,
-        config: true,
-        user: { select: { reportingCurrency: true } },
-      },
-    });
-
-    if (!position) return false;
-
-    // Check if position is closed
-    const state = position.state as Record<string, unknown>;
-    if (state.isClosed !== true) return false;
+    const { userId, positionRef, position } = tracked;
 
     // Check if correction already exists (idempotency)
     const correctionEventId = `reconcile:${positionRef}:cost-basis-correction`;
@@ -202,7 +205,6 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
         domainEventId: correctionEventId,
         domainEventType: 'position.closed',
         entryDate: new Date(),

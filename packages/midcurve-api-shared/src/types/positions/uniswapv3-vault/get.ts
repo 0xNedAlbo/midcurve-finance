@@ -25,7 +25,6 @@ export interface GetUniswapV3VaultPositionParams {
  * No close orders — automation is not supported for vault positions in v1.
  */
 export interface GetUniswapV3VaultPositionResponse extends UniswapV3VaultPositionResponse {
-  isTrackedInAccounting: boolean;
 }
 
 // =============================================================================

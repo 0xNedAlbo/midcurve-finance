@@ -32,7 +32,6 @@ import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3CloseOrderService,
-  getJournalService,
 } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
@@ -168,15 +167,11 @@ export async function GET(
         pool: `${position.pool.token0.symbol}/${position.pool.token1.symbol}`,
       });
 
-      // 4. Check accounting tracking status
-      const isTrackedInAccounting = (await getJournalService().getTrackedPositionId(user.id, positionHash)) !== null;
-
-      // 5. Serialize bigints to strings for JSON
+      // 4. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
         ownerWallet,
         closeOrders: closeOrders.map(serializeCloseOrder),
-        isTrackedInAccounting,
       };
 
       const response = createSuccessResponse(serializedPosition);

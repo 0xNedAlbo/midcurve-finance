@@ -104,7 +104,6 @@ model User {
   // Accounting relations
   journalEntries     JournalEntry[]
   navSnapshots       NAVSnapshot[]
-  trackedPositions TrackedPosition[]
 
   // Wallet perimeter relations
   userWallets UserWallet[]
@@ -802,10 +801,6 @@ model JournalEntry {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Position tracking (cascade: deleting TrackedPosition deletes all its entries)
-  trackedPositionId String
-  trackedPosition   TrackedPosition @relation(fields: [trackedPositionId], references: [id], onDelete: Cascade)
-
   // Traceability
   domainEventId   String? @unique // References DomainEvent.id for idempotency
   domainEventType String? // Event type discriminator (e.g., "position.liquidity.increased")
@@ -822,7 +817,6 @@ model JournalEntry {
   lines JournalLine[]
 
   @@index([userId, entryDate])
-  @@index([trackedPositionId])
   @@index([ledgerEventRef])
   @@map("journal_entries")
   @@schema("accounting")
@@ -949,26 +943,6 @@ model SnapshotStateCache {
   @@unique([snapshotId, chainId])
   @@index([snapshotId])
   @@map("snapshot_state_cache")
-  @@schema("accounting")
-}
-
-// TrackedPosition - Explicit registry of positions that should have journal entries.
-// Created when user enables accounting tracking, deleted on untrack or position.deleted.
-model TrackedPosition {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  positionRef String // e.g., "uniswapv3/42161/5334690" (position hash)
-
-  // Cascade: deleting a TrackedPosition deletes all its journal entries
-  journalEntries JournalEntry[]
-
-  @@unique([userId, positionRef])
-  @@index([userId])
-  @@map("tracked_positions")
   @@schema("accounting")
 }
 

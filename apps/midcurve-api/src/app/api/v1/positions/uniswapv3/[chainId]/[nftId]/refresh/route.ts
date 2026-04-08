@@ -25,7 +25,6 @@ import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3CloseOrderService,
-  getJournalService,
 } from '@/lib/services';
 import type { GetUniswapV3PositionResponse } from '@midcurve/api-shared';
 
@@ -154,14 +153,10 @@ export async function POST(
         unrealizedPnl: position.unrealizedPnl.toString(),
       });
 
-      // 4. Check accounting tracking status
-      const isTrackedInAccounting = (await getJournalService().getTrackedPositionId(user.id, positionHash)) !== null;
-
-      // 5. Serialize bigints to strings for JSON
+      // 4. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
         closeOrders: closeOrders.map(serializeCloseOrder),
-        isTrackedInAccounting,
       };
 
       const response = createSuccessResponse(serializedPosition);
