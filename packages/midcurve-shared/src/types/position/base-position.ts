@@ -210,7 +210,7 @@ export abstract class BasePosition implements PositionInterface {
       // Yield fields
       collectedYield: this.collectedYield.toString(),
       unclaimedYield: this.unclaimedYield.toString(),
-      lastYieldClaimedAt: this.lastYieldClaimedAt.toISOString(),
+      lastYieldClaimedAt: this.lastYieldClaimedAt?.toISOString() ?? null,
 
       // APR fields
       baseApr: this.baseApr,

@@ -3890,23 +3890,26 @@ export class UniswapV3PositionService {
             return;
         }
 
-        // Delete the position (cascades ledger events, APR periods, close orders, etc.)
-        log.dbOperation(this.logger, "delete", "Position", { id });
-        await this.prisma.position.delete({
-            where: { id },
-        });
+        // Serialize before deletion (position data needed for event payload)
+        const positionJSON = existing.toJSON();
 
-        // Publish position.deleted domain event for accounting cleanup
-        await this.eventPublisher.createAndPublish<PositionDeletedPayload>(
-            {
-                type: "position.deleted",
-                entityType: "position",
-                entityId: existing.id,
-                userId: existing.userId,
-                payload: existing.toJSON(),
-                source: "api",
-            },
-        );
+        // Delete the position and publish event atomically
+        log.dbOperation(this.logger, "delete", "Position", { id });
+        await this.prisma.$transaction(async (tx) => {
+            await tx.position.delete({ where: { id } });
+
+            await this.eventPublisher.createAndPublish<PositionDeletedPayload>(
+                {
+                    type: "position.deleted",
+                    entityType: "position",
+                    entityId: existing.id,
+                    userId: existing.userId,
+                    payload: positionJSON,
+                    source: "api",
+                },
+                tx,
+            );
+        });
 
         log.methodExit(this.logger, "delete", { id, deleted: true });
     }

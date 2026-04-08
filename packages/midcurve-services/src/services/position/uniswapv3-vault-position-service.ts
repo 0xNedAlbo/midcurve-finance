@@ -197,15 +197,20 @@ export class UniswapV3VaultPositionService {
         const position = await this.findById(id);
         if (!position) return;
 
-        await this.prisma.position.delete({ where: { id } });
+        // Serialize before deletion (position data needed for event payload)
+        const positionJSON = position.toJSON();
 
-        await this.eventPublisher.createAndPublish<PositionDeletedPayload>({
-            type: 'position.deleted',
-            entityType: 'position',
-            entityId: position.id,
-            userId: position.userId,
-            payload: position.toJSON(),
-            source: 'api',
+        await this.prisma.$transaction(async (tx) => {
+            await tx.position.delete({ where: { id } });
+
+            await this.eventPublisher.createAndPublish<PositionDeletedPayload>({
+                type: 'position.deleted',
+                entityType: 'position',
+                entityId: position.id,
+                userId: position.userId,
+                payload: positionJSON,
+                source: 'api',
+            }, tx);
         });
 
         this.logger.info({ positionId: id, vaultAddress: position.vaultAddress }, 'Vault position deleted');
