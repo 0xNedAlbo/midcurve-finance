@@ -7,7 +7,7 @@
 
 import { createElement } from 'react';
 import type { ReactNode } from 'react';
-import { Pickaxe, BookPlus, BookMinus, ArrowRightLeft, Coins, Flame } from 'lucide-react';
+import { Pickaxe, BookPlus, BookMinus, ArrowRightLeft, Coins, Flame, LogIn, LogOut, CircleHelp } from 'lucide-react';
 
 /**
  * Position ledger event types
@@ -95,13 +95,13 @@ const EVENT_TYPE_MAP: Record<EventType, EventTypeInfo> = {
   },
   VAULT_TRANSFER_IN: {
     label: 'Shares Received',
-    icon: '📥',
+    icon: createElement(LogIn, { className: 'w-5 h-5' }),
     color: 'text-blue-400',
     bgColor: 'bg-blue-500/20',
   },
   VAULT_TRANSFER_OUT: {
     label: 'Shares Sent',
-    icon: '📤',
+    icon: createElement(LogOut, { className: 'w-5 h-5' }),
     color: 'text-orange-400',
     bgColor: 'bg-orange-500/20',
   },
@@ -116,7 +116,7 @@ const EVENT_TYPE_MAP: Record<EventType, EventTypeInfo> = {
 export function getEventTypeInfo(eventType: EventType): EventTypeInfo {
   return EVENT_TYPE_MAP[eventType] || {
     label: eventType,
-    icon: '❓',
+    icon: createElement(CircleHelp, { className: 'w-5 h-5' }),
     color: 'text-slate-400',
     bgColor: 'bg-slate-500/20',
   };
