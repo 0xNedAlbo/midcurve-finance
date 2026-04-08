@@ -3,7 +3,8 @@
 import type { LedgerEventData } from "@midcurve/api-shared";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { buildTxUrl, formatBlockNumber, truncateTxHash } from "@/lib/explorer-utils";
-import { getEventTypeInfo, isCollectEvent, type EventType } from "@/lib/event-type-utils";
+import { getEventTypeInfo, isCollectEvent, isLifecycleEvent, type EventType } from "@/lib/event-type-utils";
+import { buildAddressUrl } from "@/lib/explorer-utils";
 import { formatEventDateTime } from "@/lib/date-utils";
 import { ExternalLink, Clock } from "lucide-react";
 
@@ -200,6 +201,65 @@ export function LedgerEventTable({
     return config?.blockNumber?.toString() || "";
   };
 
+  // Truncate address for display: 0xAbCd...eF12
+  const truncateAddress = (address: string): string => {
+    if (!address || address.length < 14) return address;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  // Render clickable address link
+  const renderAddressLink = (address: string) => (
+    <a
+      href={buildAddressUrl(chainId, address)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-mono text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+    >
+      {truncateAddress(address)}
+    </a>
+  );
+
+  // Render lifecycle event details (MINT, BURN, TRANSFER)
+  const renderLifecycleDetails = (event: LedgerEventData) => {
+    const state = event.state as any;
+    const eventType = event.eventType as EventType;
+
+    if (eventType === "TRANSFER") {
+      return (
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500">From:</span>
+            {renderAddressLink(state.from)}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500">To:</span>
+            {renderAddressLink(state.to)}
+          </div>
+        </div>
+      );
+    }
+
+    if (eventType === "MINT") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">Minted to:</span>
+          {renderAddressLink(state.to)}
+        </div>
+      );
+    }
+
+    if (eventType === "BURN") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">Burned by:</span>
+          {renderAddressLink(state.from)}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
       {/* Header */}
@@ -314,7 +374,9 @@ export function LedgerEventTable({
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-400">
                     <div className="space-y-1">
-                      {isCollectEvent(event.eventType as EventType) ? (
+                      {isLifecycleEvent(event.eventType as EventType) ? (
+                        renderLifecycleDetails(event)
+                      ) : isCollectEvent(event.eventType as EventType) ? (
                         <>
                           {/* Show fees first */}
                           {fee0 !== "0" && renderFeeAmount(fee0, token0)}
@@ -436,17 +498,19 @@ export function LedgerEventTable({
                 </a>
               </div>
 
-              {(event.token0Amount !== "0" ||
+              {isLifecycleEvent(event.eventType as EventType) ? (
+                <div className="text-xs text-slate-400">
+                  {renderLifecycleDetails(event)}
+                </div>
+              ) : (event.token0Amount !== "0" ||
                 event.token1Amount !== "0" ||
                 (isCollectEvent(event.eventType as EventType) &&
                   (fee0 !== "0" || fee1 !== "0"))) && (
                 <div className="text-xs text-slate-400 space-y-1">
                   {isCollectEvent(event.eventType as EventType) ? (
                     <>
-                      {/* Show fees first */}
                       {fee0 !== "0" && renderFeeAmount(fee0, token0)}
                       {fee1 !== "0" && renderFeeAmount(fee1, token1)}
-                      {/* Show principal amounts */}
                       {(() => {
                         const principal0 = calculateCollectedPrincipal(event.token0Amount, fee0);
                         const principal1 = calculateCollectedPrincipal(event.token1Amount, fee1);

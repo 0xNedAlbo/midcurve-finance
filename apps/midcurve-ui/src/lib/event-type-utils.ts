@@ -148,3 +148,10 @@ export function isCollectEvent(eventType: EventType): boolean {
   return eventType === 'COLLECT' || eventType === 'VAULT_COLLECT_YIELD';
 }
 
+/**
+ * Check if an event type is a lifecycle event (MINT, BURN, or TRANSFER)
+ */
+export function isLifecycleEvent(eventType: EventType): boolean {
+  return eventType === 'MINT' || eventType === 'BURN' || eventType === 'TRANSFER';
+}
+
