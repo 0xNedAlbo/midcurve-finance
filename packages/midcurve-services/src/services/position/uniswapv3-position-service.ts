@@ -522,6 +522,7 @@ export class UniswapV3PositionService {
             tickUpperFeeGrowthOutside1X128?: string;
             isBurned?: boolean;
             isClosed?: boolean;
+            isOwnedByUser?: boolean;
             // Pool-level state (merged from pool)
             sqrtPriceX96?: string;
             currentTick?: number | string;
@@ -554,6 +555,7 @@ export class UniswapV3PositionService {
             ),
             isBurned: db.isBurned ?? false,
             isClosed: db.isClosed ?? false,
+            isOwnedByUser: db.isOwnedByUser ?? true,
             // Pool-level state (defaults to 0 for backward compat with pre-migration data)
             sqrtPriceX96: BigInt(db.sqrtPriceX96 ?? "0"),
             currentTick: typeof db.currentTick === "number" ? db.currentTick : Number(db.currentTick ?? 0),
@@ -847,6 +849,7 @@ export class UniswapV3PositionService {
                 tickUpperFeeGrowthOutside1X128: 0n,
                 isBurned: false,
                 isClosed: false,
+                isOwnedByUser: true, // Will be recalculated during refresh
                 sqrtPriceX96: pool.sqrtPriceX96,
                 currentTick: pool.currentTick,
                 poolLiquidity: pool.liquidity,
@@ -2265,7 +2268,12 @@ export class UniswapV3PositionService {
             const lastYieldClaimedAt =
                 lastCollectEvent?.timestamp ?? position.positionOpenedAt;
 
-            // 7. Calculate current position value using fetched on-chain data
+            // 7. Check if position is currently owned by the user
+            const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
+            const ownerAddress = position.typedState.ownerAddress;
+            const isOwnedByUser = userWalletAddresses.has(ownerAddress.toLowerCase());
+
+            // 8. Calculate current position value using fetched on-chain data
             const currentValue = calculatePositionValue(
                 liquidity,
                 poolState.sqrtPriceX96,
@@ -2274,10 +2282,7 @@ export class UniswapV3PositionService {
                 !position.isToken0Quote, // baseIsToken0
             );
 
-            // 8. Calculate unrealized PnL
-            const unrealizedPnl = currentValue - costBasis;
-
-            // 9. Calculate unclaimed fees in quote token from fee state
+            // 9. Calculate unclaimed fees (always on-chain truth, shown as informational)
             const unclaimedYield = calculateTokenValueInQuote(
                 feeState.unclaimedFees0,
                 feeState.unclaimedFees1,
@@ -2287,7 +2292,15 @@ export class UniswapV3PositionService {
                 position.pool.token1.decimals,
             );
 
-            // 10. Calculate price range (uses static token decimals from position.pool)
+            // 10. Calculate unrealized PnL from user's perspective
+            // Includes unclaimed fees when owned (they are unrealized profit).
+            // When not owned: 0 (all PnL was realized at transfer-out time).
+            // UI uses totalPnl = realizedPnl + unrealizedPnl — no extra computation needed.
+            const unrealizedPnl = isOwnedByUser
+                ? (currentValue - costBasis) + unclaimedYield
+                : 0n;
+
+            // 11. Calculate price range (uses static token decimals from position.pool)
             const { priceRangeLower, priceRangeUpper } =
                 this.calculatePriceRange(position, position.pool as UniswapV3Pool);
 
@@ -2301,6 +2314,7 @@ export class UniswapV3PositionService {
                 lastYieldClaimedAt,
                 priceRangeLower,
                 priceRangeUpper,
+                isOwnedByUser,
             };
 
             this.logger.info(
@@ -3531,9 +3545,10 @@ export class UniswapV3PositionService {
                 ],
             });
 
-            // Read existing config to merge price range updates
+            // Read existing config and state to merge updates
             const existingPosition = await db.position.findUniqueOrThrow({ where: { id } });
             const existingConfig = existingPosition.config as Record<string, unknown>;
+            const existingState = existingPosition.state as Record<string, unknown>;
 
             await db.position.update({
                 where: { id },
@@ -3551,6 +3566,10 @@ export class UniswapV3PositionService {
                         ...existingConfig,
                         priceRangeLower: metrics.priceRangeLower.toString(),
                         priceRangeUpper: metrics.priceRangeUpper.toString(),
+                    },
+                    state: {
+                        ...existingState,
+                        isOwnedByUser: metrics.isOwnedByUser,
                     },
                     totalApr: persistedApr,
                     baseApr: persistedApr,

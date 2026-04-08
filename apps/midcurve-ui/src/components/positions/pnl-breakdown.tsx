@@ -8,6 +8,8 @@ interface PnLBreakdownProps {
   collectedYield: string;
   unclaimedFees: string;
   realizedPnL: string;
+  unrealizedPnL: string;
+  isOwnedByUser: boolean;
   quoteTokenSymbol: string;
   quoteTokenDecimals: number;
 }
@@ -18,13 +20,14 @@ export function PnLBreakdown({
   collectedYield,
   unclaimedFees,
   realizedPnL,
+  unrealizedPnL,
+  isOwnedByUser,
   quoteTokenSymbol,
   quoteTokenDecimals,
 }: PnLBreakdownProps) {
-  // Calculate breakdown values
+  // Use service-computed values directly (ownership-aware)
   const realizedPnLAmount = BigInt(realizedPnL);
-  const unrealizedPnLAmount =
-    BigInt(unclaimedFees) + (BigInt(currentValue) - BigInt(costBasis));
+  const unrealizedPnLAmount = BigInt(unrealizedPnL);
   const totalPnLAmount = realizedPnLAmount + unrealizedPnLAmount;
 
   const realizedColor =
@@ -102,38 +105,46 @@ export function PnLBreakdown({
           {/* Unrealized PnL Column */}
           <div className="space-y-3">
             <h4 className="text-md font-semibold text-white">Unrealized PnL</h4>
-            <div className="bg-slate-700/30 rounded-lg p-4 space-y-2">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">+ Unclaimed Fees</span>
-                <span className="text-white font-medium">
-                  {formatCompactValue(BigInt(unclaimedFees), quoteTokenDecimals)}{" "}
-                  {quoteTokenSymbol}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">+ Current Position Value</span>
-                <span className="text-white font-medium">
-                  {formatCompactValue(BigInt(currentValue), quoteTokenDecimals)}{" "}
-                  {quoteTokenSymbol}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">- Cost Basis</span>
-                <span className="text-white font-medium">
-                  -{formatCompactValue(BigInt(costBasis), quoteTokenDecimals)}{" "}
-                  {quoteTokenSymbol}
-                </span>
-              </div>
-              <div className="border-t border-slate-600/50 pt-2 mt-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-white font-medium">= Subtotal</span>
-                  <span className={`font-bold ${unrealizedColor}`}>
-                    {formatCompactValue(unrealizedPnLAmount, quoteTokenDecimals)}{" "}
+            {isOwnedByUser ? (
+              <div className="bg-slate-700/30 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-400">+ Unclaimed Fees</span>
+                  <span className="text-white font-medium">
+                    {formatCompactValue(BigInt(unclaimedFees), quoteTokenDecimals)}{" "}
                     {quoteTokenSymbol}
                   </span>
                 </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-400">+ Current Position Value</span>
+                  <span className="text-white font-medium">
+                    {formatCompactValue(BigInt(currentValue), quoteTokenDecimals)}{" "}
+                    {quoteTokenSymbol}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-400">- Cost Basis</span>
+                  <span className="text-white font-medium">
+                    -{formatCompactValue(BigInt(costBasis), quoteTokenDecimals)}{" "}
+                    {quoteTokenSymbol}
+                  </span>
+                </div>
+                <div className="border-t border-slate-600/50 pt-2 mt-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-white font-medium">= Subtotal</span>
+                    <span className={`font-bold ${unrealizedColor}`}>
+                      {formatCompactValue(unrealizedPnLAmount, quoteTokenDecimals)}{" "}
+                      {quoteTokenSymbol}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-slate-700/30 rounded-lg p-4 flex items-center justify-center min-h-[120px]">
+                <p className="text-slate-500 text-sm text-center">
+                  Not owned by any of your wallets
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

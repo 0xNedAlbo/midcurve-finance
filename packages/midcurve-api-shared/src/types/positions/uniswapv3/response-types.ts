@@ -33,6 +33,7 @@ export interface UniswapV3PositionStateResponse {
   unclaimedFees1: string;
   isClosed: boolean;
   isBurned: boolean;
+  isOwnedByUser: boolean;
 }
 
 /**

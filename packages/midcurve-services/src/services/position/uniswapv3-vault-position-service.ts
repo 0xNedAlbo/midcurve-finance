@@ -342,6 +342,7 @@ export class UniswapV3VaultPositionService {
             unclaimedFees0: claimable[0],
             unclaimedFees1: claimable[1],
             isClosed: sharesBalance === 0n,
+            isOwnedByUser: true, // Will be recalculated when vault perimeter is implemented
             sqrtPriceX96: slot0Data[0],
             currentTick: slot0Data[1],
             poolLiquidity: poolLiquidity as bigint,
@@ -660,6 +661,7 @@ export class UniswapV3VaultPositionService {
             unclaimedFees0: onChainState.unclaimedFees0,
             unclaimedFees1: onChainState.unclaimedFees1,
             isClosed,
+            isOwnedByUser: position.typedState.isOwnedByUser ?? true,
             sqrtPriceX96: onChainState.sqrtPriceX96,
             currentTick: onChainState.currentTick,
             poolLiquidity: 0n,

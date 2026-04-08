@@ -567,6 +567,7 @@ export class UniswapV3Position extends BasePosition {
         tickUpperFeeGrowthOutside1X128: 0n,
         isBurned: false,
         isClosed: false,
+        isOwnedByUser: true,
         sqrtPriceX96: params.pool.sqrtPriceX96,
         currentTick: params.pool.currentTick,
         poolLiquidity: params.pool.liquidity,

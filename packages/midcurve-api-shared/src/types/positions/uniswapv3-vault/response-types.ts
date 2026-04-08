@@ -40,6 +40,7 @@ export interface UniswapV3VaultPositionStateResponse {
   unclaimedFees0: string;
   unclaimedFees1: string;
   isClosed: boolean;
+  isOwnedByUser: boolean;
   sqrtPriceX96: string;
   currentTick: number;
   poolLiquidity: string;

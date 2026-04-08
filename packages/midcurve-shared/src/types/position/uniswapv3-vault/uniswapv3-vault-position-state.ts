@@ -45,6 +45,9 @@ export interface UniswapV3VaultPositionState {
    */
   isClosed: boolean;
 
+  /** Whether the position is currently owned by the user */
+  isOwnedByUser: boolean;
+
   // ---- Pool-level state (merged from pool, updated during refresh) ----
 
   /** Current sqrt(price) as Q64.96 fixed-point */
@@ -74,6 +77,7 @@ export interface UniswapV3VaultPositionStateJSON {
   unclaimedFees0: string;
   unclaimedFees1: string;
   isClosed: boolean;
+  isOwnedByUser?: boolean;
   // Pool-level state (optional — present in DB JSON, omitted from API responses)
   sqrtPriceX96?: string;
   currentTick?: number;
@@ -96,6 +100,7 @@ export function vaultPositionStateToJSON(
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
     isClosed: state.isClosed,
+    isOwnedByUser: state.isOwnedByUser,
     // Pool-level fields intentionally omitted from API responses
   };
 }
@@ -110,6 +115,7 @@ export function vaultPositionStateFromJSON(
     unclaimedFees0: BigInt(json.unclaimedFees0),
     unclaimedFees1: BigInt(json.unclaimedFees1),
     isClosed: json.isClosed,
+    isOwnedByUser: json.isOwnedByUser ?? true,
     sqrtPriceX96: BigInt(json.sqrtPriceX96 ?? '0'),
     currentTick: json.currentTick ?? 0,
     poolLiquidity: BigInt(json.poolLiquidity ?? '0'),

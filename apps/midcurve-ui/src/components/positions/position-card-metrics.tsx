@@ -33,7 +33,7 @@ export function PositionCardMetrics({
   realizedPnl,
   unrealizedPnl,
   unclaimedYield,
-  costBasis: _costBasis, // Reserved for future use
+  costBasis: _costBasis, // Available in props but not used in PnL calculation here
   lastYieldClaimedAt: _lastYieldClaimedAt, // Reserved for future use
   positionOpenedAt: _positionOpenedAt, // Reserved for future use
   quoteToken,
@@ -42,14 +42,14 @@ export function PositionCardMetrics({
   totalApr,
   pnlCurveSlot,
 }: PositionCardMetricsProps) {
-  // Calculate total PnL: realizedPnl + unrealizedPnl + unclaimedFees
-  // Note: realizedPnl already includes collectedYield (fees are added to pnlAfter in the ledger)
+  // Total PnL = realizedPnl + unrealizedPnl
+  // The service already includes unclaimed fees in unrealizedPnl when owned,
+  // and zeroes unrealizedPnl when not owned. No branching needed here.
   let totalPnl: string;
   try {
     const realized = BigInt(realizedPnl || '0');
     const unrealized = BigInt(unrealizedPnl || '0');
-    const unclaimed = BigInt(unclaimedYield || '0');
-    totalPnl = (realized + unrealized + unclaimed).toString();
+    totalPnl = (realized + unrealized).toString();
   } catch (error) {
     console.error('Error calculating total PnL:', {
       realizedPnl,

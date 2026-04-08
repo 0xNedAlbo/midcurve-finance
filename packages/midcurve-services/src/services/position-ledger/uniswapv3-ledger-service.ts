@@ -1186,8 +1186,8 @@ export class UniswapV3LedgerService {
                     pnlAfter = previousPnl;
                 }
 
-                // Transfer events are never ignored — they're always visible
-                isIgnored = false;
+                isIgnored = !isOutgoing && !isIncoming;
+                ignoredReason = isIgnored ? "not_owned_by_user" : null;
 
             } else if (state.eventType === "BURN") {
                 // BURN = Transfer to 0x0. Mark ownership as ended.

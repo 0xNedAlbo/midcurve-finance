@@ -35,6 +35,8 @@ export function UniswapV3VaultHistoryTab({ position }: UniswapV3VaultHistoryTabP
         collectedYield={position.collectedYield}
         unclaimedFees={position.unclaimedYield}
         realizedPnL={position.realizedPnl}
+        unrealizedPnL={position.unrealizedPnl}
+        isOwnedByUser={position.state.isOwnedByUser ?? true}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
       />

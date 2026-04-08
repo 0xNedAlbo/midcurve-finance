@@ -33,6 +33,8 @@ export function UniswapV3HistoryTab({ position }: UniswapV3HistoryTabProps) {
         collectedYield={position.collectedYield}
         unclaimedFees={position.unclaimedYield}
         realizedPnL={position.realizedPnl}
+        unrealizedPnL={position.unrealizedPnl}
+        isOwnedByUser={position.state.isOwnedByUser ?? true}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}
       />

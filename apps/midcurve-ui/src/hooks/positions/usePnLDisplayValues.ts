@@ -11,6 +11,7 @@ interface PnlBreakdown {
   currentValue: string;
   costBasis: string;
   realizedPnL: string;
+  unrealizedPnL: string;
   unclaimedFees: string;
 }
 
@@ -46,15 +47,11 @@ export function usePnLDisplayValues(
       };
     }
 
-    // Calculate total PnL including fees
-    // Total PnL = realizedPnL + unrealizedPnL + unclaimedFees
-    // Where unrealizedPnL = currentValue - costBasis
-    // Note: realizedPnL already includes collectedYield (fees are added to pnlAfter in the ledger)
-    const unrealizedPnL = BigInt(pnlData.currentValue) - BigInt(pnlData.costBasis);
-    const totalPnL =
-      BigInt(pnlData.realizedPnL) +
-      unrealizedPnL +
-      BigInt(pnlData.unclaimedFees);
+    // Total PnL = realizedPnL + unrealizedPnL (service-computed, ownership-aware)
+    // The service includes unclaimed fees in unrealizedPnl when owned,
+    // and zeroes unrealizedPnl when not owned.
+    const unrealizedPnL = BigInt(pnlData.unrealizedPnL);
+    const totalPnL = BigInt(pnlData.realizedPnL) + unrealizedPnL;
 
     const isPositive = totalPnL > 0n;
     const isNegative = totalPnL < 0n;

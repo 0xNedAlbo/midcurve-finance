@@ -185,6 +185,7 @@ export function serializeUniswapV3PositionState(state: UniswapV3PositionState) {
     unclaimedFees1: state.unclaimedFees1.toString(),
     isClosed: state.isClosed,
     isBurned: state.isBurned,
+    isOwnedByUser: state.isOwnedByUser,
   };
 }
 
@@ -272,6 +273,7 @@ export function serializeUniswapV3VaultPositionState(state: UniswapV3VaultPositi
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
     isClosed: state.isClosed,
+    isOwnedByUser: state.isOwnedByUser,
     sqrtPriceX96: state.sqrtPriceX96.toString(),
     currentTick: state.currentTick,
     poolLiquidity: state.poolLiquidity.toString(),

@@ -44,6 +44,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
     currentValue: position.currentValue,
     costBasis: position.costBasis,
     realizedPnL: position.realizedPnl,
+    unrealizedPnL: position.unrealizedPnl,
     collectedYield: position.collectedYield,
     unclaimedFees: position.unclaimedYield,
   };

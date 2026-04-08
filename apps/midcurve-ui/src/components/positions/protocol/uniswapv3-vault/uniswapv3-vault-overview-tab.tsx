@@ -61,6 +61,7 @@ export function UniswapV3VaultOverviewTab({ position }: UniswapV3VaultOverviewTa
     currentValue: position.currentValue,
     costBasis: position.costBasis,
     realizedPnL: position.realizedPnl,
+    unrealizedPnL: position.unrealizedPnl,
     collectedYield: position.collectedYield,
     unclaimedFees: position.unclaimedYield,
   };

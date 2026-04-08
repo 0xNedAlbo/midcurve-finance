@@ -84,4 +84,14 @@ export interface UniswapV3PositionMetrics {
    * Converted from tickUpper using pool token decimals.
    */
   priceRangeUpper: bigint;
+
+  // ============================================================================
+  // Ownership
+  // ============================================================================
+
+  /**
+   * Whether the position is currently owned by the user.
+   * Determined by checking the on-chain owner address against the user's registered wallets.
+   */
+  isOwnedByUser: boolean;
 }
