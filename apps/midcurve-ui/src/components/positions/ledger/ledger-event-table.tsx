@@ -247,7 +247,7 @@ export function LedgerEventTable({
               const { fee0, fee1 } = getFeeAmounts(event);
 
               return (
-                <tr key={event.id} className="hover:bg-slate-700/20 transition-colors">
+                <tr key={event.id} className={`hover:bg-slate-700/20 transition-colors ${event.isIgnored ? 'opacity-40' : ''}`}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
                     <div>{date}</div>
                     <div className="text-xs text-slate-500">{time}</div>
@@ -372,7 +372,7 @@ export function LedgerEventTable({
           const { fee0, fee1 } = getFeeAmounts(event);
 
           return (
-            <div key={event.id} className="p-4 space-y-3">
+            <div key={event.id} className={`p-4 space-y-3 ${event.isIgnored ? 'opacity-40' : ''}`}>
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">

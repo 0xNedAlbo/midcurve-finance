@@ -12,6 +12,9 @@ export type EventType =
   | 'INCREASE_POSITION'
   | 'DECREASE_POSITION'
   | 'COLLECT'
+  | 'MINT'
+  | 'BURN'
+  | 'TRANSFER'
   | 'VAULT_MINT'
   | 'VAULT_BURN'
   | 'VAULT_COLLECT_YIELD'
@@ -49,6 +52,24 @@ const EVENT_TYPE_MAP: Record<EventType, EventTypeInfo> = {
     icon: '💰',
     color: 'text-purple-400',
     bgColor: 'bg-purple-500/20',
+  },
+  MINT: {
+    label: 'Position Minted',
+    icon: '🪙',
+    color: 'text-green-400',
+    bgColor: 'bg-green-500/20',
+  },
+  BURN: {
+    label: 'Position Burned',
+    icon: '🔥',
+    color: 'text-red-400',
+    bgColor: 'bg-red-500/20',
+  },
+  TRANSFER: {
+    label: 'Position Transferred',
+    icon: '🔄',
+    color: 'text-cyan-400',
+    bgColor: 'bg-cyan-500/20',
   },
   VAULT_MINT: {
     label: 'Shares Minted',

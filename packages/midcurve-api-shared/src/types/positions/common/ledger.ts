@@ -24,7 +24,7 @@ export interface LedgerEventData {
   protocol: 'uniswapv3';
   previousId: string | null;
   timestamp: string;
-  eventType: 'INCREASE_POSITION' | 'DECREASE_POSITION' | 'COLLECT';
+  eventType: 'INCREASE_POSITION' | 'DECREASE_POSITION' | 'COLLECT' | 'MINT' | 'BURN' | 'TRANSFER';
   inputHash: string;
 
   // Financial data (bigint → string)
@@ -43,6 +43,10 @@ export interface LedgerEventData {
   costBasisAfter: string;
   deltaPnl: string;
   pnlAfter: string;
+
+  // Ownership tracking
+  isIgnored: boolean;
+  ignoredReason: string | null;
 
   // Protocol-specific (JSON fields with bigints serialized)
   config: SerializedValue;
