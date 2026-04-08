@@ -315,7 +315,7 @@ export function LedgerEventTable({
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="space-y-1">
                       <div className="flex items-center space-x-2">
-                        <span className="text-lg">{eventTypeInfo.icon}</span>
+                        <span className={`text-lg ${eventTypeInfo.color}`}>{eventTypeInfo.icon}</span>
                         <span className={`text-sm font-medium ${eventTypeInfo.color}`}>
                           {eventTypeInfo.label}
                         </span>

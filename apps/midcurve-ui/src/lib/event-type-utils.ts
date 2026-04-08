@@ -5,6 +5,10 @@
  * with appropriate icons, colors, and labels.
  */
 
+import { createElement } from 'react';
+import type { ReactNode } from 'react';
+import { Pickaxe, BookPlus, BookMinus, ArrowRightLeft, Coins, Flame } from 'lucide-react';
+
 /**
  * Position ledger event types
  */
@@ -26,7 +30,7 @@ export type EventType =
  */
 export interface EventTypeInfo {
   label: string;        // Human-readable label
-  icon: string;         // Emoji icon
+  icon: ReactNode;      // Emoji string or React component
   color: string;        // Tailwind text color class
   bgColor: string;      // Tailwind background color class
 }
@@ -37,55 +41,55 @@ export interface EventTypeInfo {
 const EVENT_TYPE_MAP: Record<EventType, EventTypeInfo> = {
   INCREASE_POSITION: {
     label: 'Liquidity Added',
-    icon: '📈',
+    icon: createElement(BookPlus, { className: 'w-5 h-5' }),
     color: 'text-blue-400',
     bgColor: 'bg-blue-500/20',
   },
   DECREASE_POSITION: {
     label: 'Liquidity Removed',
-    icon: '📉',
+    icon: createElement(BookMinus, { className: 'w-5 h-5' }),
     color: 'text-orange-400',
     bgColor: 'bg-orange-500/20',
   },
   COLLECT: {
     label: 'Collect',
-    icon: '💰',
+    icon: createElement(Coins, { className: 'w-5 h-5' }),
     color: 'text-purple-400',
     bgColor: 'bg-purple-500/20',
   },
   MINT: {
     label: 'Position Minted',
-    icon: '🪙',
+    icon: createElement(Pickaxe, { className: 'w-5 h-5' }),
     color: 'text-green-400',
     bgColor: 'bg-green-500/20',
   },
   BURN: {
     label: 'Position Burned',
-    icon: '🔥',
+    icon: createElement(Flame, { className: 'w-5 h-5' }),
     color: 'text-red-400',
     bgColor: 'bg-red-500/20',
   },
   TRANSFER: {
     label: 'Position Transferred',
-    icon: '🔄',
+    icon: createElement(ArrowRightLeft, { className: 'w-5 h-5' }),
     color: 'text-cyan-400',
     bgColor: 'bg-cyan-500/20',
   },
   VAULT_MINT: {
     label: 'Shares Minted',
-    icon: '🪙',
+    icon: createElement(Pickaxe, { className: 'w-5 h-5' }),
     color: 'text-green-400',
     bgColor: 'bg-green-500/20',
   },
   VAULT_BURN: {
     label: 'Shares Burned',
-    icon: '🔥',
+    icon: createElement(Flame, { className: 'w-5 h-5' }),
     color: 'text-red-400',
     bgColor: 'bg-red-500/20',
   },
   VAULT_COLLECT_YIELD: {
     label: 'Yield Collected',
-    icon: '💰',
+    icon: createElement(Coins, { className: 'w-5 h-5' }),
     color: 'text-purple-400',
     bgColor: 'bg-purple-500/20',
   },
