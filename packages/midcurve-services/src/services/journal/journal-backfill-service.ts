@@ -5,10 +5,11 @@
  * with historic exchange rates. Called when a user tracks a position
  * in the accounting system.
  *
- * Handles three ledger event types:
+ * Handles four ledger event types:
  * - INCREASE_POSITION → DR 1000 / CR 3000 (capital contribution)
  * - DECREASE_POSITION → CR 1000 / DR 3100 + realized PnL
  * - COLLECT           → DR 3100 / CR 4000 (fee income)
+ * - TRANSFER          → DR 1000 / CR 3000 (in) or CR 1000 / DR 3100 + PnL (out)
  *
  * For closed positions, creates a cost basis remainder correction entry.
  */
@@ -47,10 +48,11 @@ interface LedgerEventRow {
   pnlAfter: string;
   deltaCollectedYield: string;
   collectedYieldAfter: string;
+  isIgnored: boolean;
 }
 
 const FLOAT_TO_BIGINT_SCALE = 1e8;
-const FINANCIAL_EVENT_TYPES = ['INCREASE_POSITION', 'DECREASE_POSITION', 'COLLECT'];
+const FINANCIAL_EVENT_TYPES = ['INCREASE_POSITION', 'DECREASE_POSITION', 'COLLECT', 'TRANSFER'];
 
 // =============================================================================
 // Service
@@ -89,14 +91,12 @@ export class JournalBackfillService {
    * @param userId - Owner user ID
    * @param positionRef - Position hash (e.g., "uniswapv3/42161/5334690")
    * @param instrumentRef - Pool hash (e.g., "uniswapv3/42161/0x8ad5...")
-   * @param trackedPositionId - FK to TrackedPosition row
    */
   async backfillPosition(
     positionId: string,
     userId: string,
     positionRef: string,
     instrumentRef: string,
-    trackedPositionId: string,
   ): Promise<BackfillResult> {
     // Guard: if entries already exist, skip (already backfilled or live events created entries)
     if (await this.journalService.hasEntriesForPosition(positionRef)) {
@@ -109,6 +109,7 @@ export class JournalBackfillService {
       where: { id: positionId },
       select: {
         id: true,
+        protocol: true,
         positionHash: true,
         state: true,
         config: true,
@@ -116,6 +117,15 @@ export class JournalBackfillService {
       },
     });
     if (!position) throw new Error(`Position not found: ${positionId}`);
+
+    // Vault position guard: skip if not owned by user
+    if (position.protocol === 'uniswapv3-vault') {
+      const positionState = position.state as Record<string, unknown>;
+      if (positionState.isOwnedByUser === false) {
+        this.logger.info({ positionRef }, 'Skipping backfill — vault position not owned by user');
+        return { entriesCreated: 0, eventsProcessed: 0 };
+      }
+    }
 
     // Look up token decimals and coingeckoId from position config
     const positionConfig = position.config as Record<string, unknown>;
@@ -151,12 +161,13 @@ export class JournalBackfillService {
         pnlAfter: true,
         deltaCollectedYield: true,
         collectedYieldAfter: true,
+        isIgnored: true,
       },
     });
 
-    // Filter to financial events only
+    // Filter to financial events that are not ignored (within user ownership)
     const financialEvents = allEvents.filter((e) =>
-      FINANCIAL_EVENT_TYPES.includes(e.eventType)
+      FINANCIAL_EVENT_TYPES.includes(e.eventType) && !e.isIgnored
     );
 
     if (financialEvents.length === 0) {
@@ -202,16 +213,28 @@ export class JournalBackfillService {
       switch (event.eventType) {
         case 'INCREASE_POSITION':
           created = await this.backfillLiquidityIncreased(
-            event, ctx, positionRef, instrumentRef, userId, trackedPositionId, isFirstFinancialEvent,
+            event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent,
           );
           isFirstFinancialEvent = false;
           break;
         case 'DECREASE_POSITION':
-          created = await this.backfillLiquidityDecreased(event, ctx, positionRef, instrumentRef, userId, trackedPositionId);
+          created = await this.backfillLiquidityDecreased(event, ctx, positionRef, instrumentRef, userId);
           break;
         case 'COLLECT':
-          created = await this.backfillFeesCollected(event, ctx, positionRef, instrumentRef, userId, trackedPositionId);
+          created = await this.backfillFeesCollected(event, ctx, positionRef, instrumentRef, userId);
           break;
+        case 'TRANSFER': {
+          const deltaCB = BigInt(event.deltaCostBasis);
+          if (deltaCB < 0n) {
+            created = await this.backfillTransferOut(event, ctx, positionRef, instrumentRef, userId);
+          } else if (deltaCB > 0n) {
+            created = await this.backfillTransferIn(
+              event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent,
+            );
+            isFirstFinancialEvent = false;
+          }
+          break;
+        }
       }
 
       if (created) entriesCreated++;
@@ -260,7 +283,7 @@ export class JournalBackfillService {
           await this.journalService.createEntry(
             {
               userId,
-              trackedPositionId,
+
               domainEventId: costBasisCorrectionEventId,
               domainEventType: 'position.closed',
               entryDate: new Date(),
@@ -297,7 +320,7 @@ export class JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-    trackedPositionId: string,
+
     isFoundation: boolean,
   ): Promise<boolean> {
     const domainEventId = isFoundation
@@ -318,7 +341,7 @@ export class JournalBackfillService {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
+
         domainEventId,
         domainEventType: isFoundation ? 'position.created' : 'position.liquidity.increased',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
@@ -345,7 +368,7 @@ export class JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-    trackedPositionId: string,
+
   ): Promise<boolean> {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
@@ -410,7 +433,7 @@ export class JournalBackfillService {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
+
         domainEventId,
         domainEventType: 'position.liquidity.decreased',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
@@ -435,7 +458,7 @@ export class JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-    trackedPositionId: string,
+
   ): Promise<boolean> {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
@@ -452,12 +475,149 @@ export class JournalBackfillService {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
+
         domainEventId,
         domainEventType: 'position.fees.collected',
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
         entryDate: event.timestamp,
         description: `Fees collected (backfill): ${positionRef}`,
+      },
+      lines,
+    );
+
+    return true;
+  }
+
+  /**
+   * TRANSFER (incoming) → DR 1000 / CR 3000
+   *
+   * Creates cost basis at FMV when position is received via transfer.
+   * Mirrors backfillLiquidityIncreased.
+   */
+  private async backfillTransferIn(
+    event: LedgerEventRow,
+    ctx: ReportingContext,
+    positionRef: string,
+    instrumentRef: string,
+    userId: string,
+
+    isFoundation: boolean,
+  ): Promise<boolean> {
+    const domainEventId = isFoundation
+      ? `backfill:${event.id}:foundation`
+      : `backfill:${event.id}`;
+
+    if (await this.journalService.isProcessed(domainEventId)) return false;
+
+    const costBasis = isFoundation ? event.costBasisAfter : event.deltaCostBasis;
+    if (costBasis === '0') return false;
+
+    const lines = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
+      .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, positionRef, instrumentRef)
+      .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, costBasis, positionRef, instrumentRef)
+      .build();
+
+    await this.journalService.createEntry(
+      {
+        userId,
+
+        domainEventId,
+        domainEventType: isFoundation ? 'position.created' : 'position.transferred.in',
+        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        entryDate: event.timestamp,
+        description: isFoundation
+          ? `Position received (backfill): ${positionRef}`
+          : `Transfer in (backfill): ${positionRef}`,
+      },
+      lines,
+    );
+
+    return true;
+  }
+
+  /**
+   * TRANSFER (outgoing) → CR 1000 / DR 3100 + realized gain/loss + FX effect
+   *
+   * Derecognizes remaining cost basis and realizes PnL at FMV.
+   * Mirrors backfillLiquidityDecreased.
+   */
+  private async backfillTransferOut(
+    event: LedgerEventRow,
+    ctx: ReportingContext,
+    positionRef: string,
+    instrumentRef: string,
+    userId: string,
+
+  ): Promise<boolean> {
+    const domainEventId = `backfill:${event.id}`;
+    if (await this.journalService.isProcessed(domainEventId)) return false;
+
+    const absDeltaCostBasis = absBigint(event.deltaCostBasis);
+    const tokenValue = event.tokenValue;
+    const deltaPnl = BigInt(event.deltaPnl);
+
+    const spotRate = BigInt(ctx.exchangeRate);
+    const decimalsScale = 10n ** BigInt(ctx.quoteTokenDecimals);
+
+    // WAC rate for cost basis derecognition
+    const wacRate = await this.journalService.getAccountWacExchangeRate(
+      ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef, ctx.quoteTokenDecimals
+    );
+    const costBasisRate = wacRate ?? spotRate;
+
+    const builder = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
+
+    // CR 1000: Derecognize remaining cost basis
+    builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absDeltaCostBasis, positionRef, instrumentRef);
+
+    // DR 3100: Capital returned at FMV
+    builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, tokenValue, positionRef, instrumentRef);
+
+    // Realized gain or loss
+    if (deltaPnl > 0n) {
+      builder.credit(ACCOUNT_CODES.REALIZED_GAINS, deltaPnl.toString(), positionRef, instrumentRef);
+    } else if (deltaPnl < 0n) {
+      builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
+    }
+
+    const lines = builder.build();
+
+    // Override cost basis line with WAC rate for reporting amounts
+    const costBasisLine = lines.find(
+      (l) => l.accountCode === ACCOUNT_CODES.LP_POSITION_AT_COST
+    )!;
+    const costBasisAtSpot = BigInt(costBasisLine.amountReporting!);
+    const costBasisAtWac = (BigInt(absDeltaCostBasis) * costBasisRate) / decimalsScale;
+    costBasisLine.amountReporting = costBasisAtWac.toString();
+    costBasisLine.exchangeRate = costBasisRate.toString();
+
+    // FX difference
+    const fxDiff = costBasisAtSpot - costBasisAtWac;
+    if (fxDiff !== 0n) {
+      const fxLine: JournalLineInput = {
+        accountCode: ACCOUNT_CODES.FX_GAIN_LOSS,
+        side: fxDiff > 0n ? 'credit' : 'debit',
+        amountQuote: '0',
+        amountReporting: (fxDiff < 0n ? -fxDiff : fxDiff).toString(),
+        reportingCurrency: ctx.reportingCurrency,
+        exchangeRate: ctx.exchangeRate,
+        positionRef,
+        instrumentRef,
+      };
+      lines.push(fxLine);
+    }
+
+    await this.journalService.createEntry(
+      {
+        userId,
+
+        domainEventId,
+        domainEventType: 'position.transferred.out',
+        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        entryDate: event.timestamp,
+        description: `Transfer out (backfill): ${positionRef}`,
       },
       lines,
     );

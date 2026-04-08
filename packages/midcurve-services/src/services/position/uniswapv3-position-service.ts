@@ -40,6 +40,7 @@ import type {
     PositionLiquidityDecreasedPayload,
     PositionFeesCollectedPayload,
     PositionLiquidityRevertedPayload,
+    PositionTransferredPayload,
 } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
@@ -1705,13 +1706,83 @@ export class UniswapV3PositionService {
             );
         }
 
+        // Batch-query ledger events for all inserted results to check isIgnored
+        // and to get real financial data for TRANSFER events (which have zero
+        // values in eventDetail because recalculateAggregates computes them).
+        const insertedHashes = importResult.results
+            .filter((r): r is Extract<typeof r, { action: "inserted" }> => r.action === "inserted")
+            .map((r) => r.inputHash);
+
+        const ledgerEventsByHash = new Map<string, {
+            inputHash: string;
+            isIgnored: boolean;
+            eventType: string;
+            tokenValue: string;
+            deltaCostBasis: string;
+            deltaPnl: string;
+        }>();
+        if (insertedHashes.length > 0) {
+            const db = dbTx ?? this.prisma;
+            const ledgerRows = await db.positionLedgerEvent.findMany({
+                where: { positionId: id, inputHash: { in: insertedHashes } },
+                select: {
+                    inputHash: true,
+                    isIgnored: true,
+                    eventType: true,
+                    tokenValue: true,
+                    deltaCostBasis: true,
+                    deltaPnl: true,
+                },
+            });
+            for (const row of ledgerRows) {
+                ledgerEventsByHash.set(row.inputHash, row);
+            }
+        }
+
         // Emit insert events after all reverts
         for (const result of importResult.results) {
             if (result.action !== "inserted") continue;
+
+            // Skip events that are ignored (outside user's ownership period)
+            const ledgerEvent = ledgerEventsByHash.get(result.inputHash);
+            if (ledgerEvent?.isIgnored) continue;
+
             const { validEventType, amount0, amount1, liquidityDelta, blockTimestamp } =
                 result.eventDetail;
 
-            if (validEventType === "COLLECT") {
+            if (validEventType === "TRANSFER") {
+                // TRANSFER events: emit position.transferred.in or .out
+                // Direction is determined by deltaCostBasis sign from recalculateAggregates
+                if (!ledgerEvent) continue;
+                const deltaCB = BigInt(ledgerEvent.deltaCostBasis);
+                if (deltaCB === 0n) continue;
+
+                const type = deltaCB < 0n
+                    ? ("position.transferred.out" as const)
+                    : ("position.transferred.in" as const);
+
+                await publisher.createAndPublish<PositionTransferredPayload>(
+                    {
+                        type,
+                        entityId: position.id,
+                        entityType: "position",
+                        userId: position.userId,
+                        payload: {
+                            positionId: position.id,
+                            positionHash: position.positionHash,
+                            poolId: position.pool.id,
+                            chainId,
+                            nftId: nftId.toString(),
+                            tokenValue: ledgerEvent.tokenValue,
+                            deltaCostBasis: ledgerEvent.deltaCostBasis,
+                            deltaPnl: ledgerEvent.deltaPnl,
+                            eventTimestamp: blockTimestamp.toISOString(),
+                        },
+                        source: "business-logic",
+                    },
+                    dbTx,
+                );
+            } else if (validEventType === "COLLECT") {
                 const feeDelta =
                     importResult.aggregates.collectedYieldAfter -
                     importResult.preImportAggregates.collectedYieldAfter;

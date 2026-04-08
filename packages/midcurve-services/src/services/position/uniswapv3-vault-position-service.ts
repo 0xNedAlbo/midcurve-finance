@@ -36,6 +36,10 @@ import type {
     PositionClosedPayload,
     PositionDeletedPayload,
     PositionLiquidityRevertedPayload,
+    PositionLiquidityIncreasedPayload,
+    PositionLiquidityDecreasedPayload,
+    PositionFeesCollectedPayload,
+    PositionTransferredPayload,
 } from '../../events/index.js';
 import { EvmConfig } from '../../config/evm.js';
 import { UNISWAP_V3_POSITION_MANAGER_ABI } from '../../config/uniswapv3.js';
@@ -635,6 +639,96 @@ export class UniswapV3VaultPositionService {
                 },
                 source: 'business-logic',
             }, dbTx);
+        }
+
+        // Emit insert events for newly imported ledger entries.
+        // Vault events are all financial — no lifecycle-only events to skip.
+        // The vault ledger fetches only events for the configured ownerAddress,
+        // so all imported events are relevant (no isIgnored check needed).
+        for (const result of importResult.perLogResults) {
+            if (result.action !== 'inserted') continue;
+            const { eventType, shares, blockTimestamp } = result.eventDetail;
+
+            if (eventType === 'VAULT_COLLECT_YIELD') {
+                const feeDelta =
+                    importResult.postImportAggregates.collectedYieldAfter -
+                    importResult.preImportAggregates.collectedYieldAfter;
+                await publisher.createAndPublish<PositionFeesCollectedPayload>({
+                    type: 'position.fees.collected',
+                    entityId: position.id,
+                    entityType: 'position',
+                    userId: position.userId,
+                    payload: {
+                        positionId: position.id,
+                        positionHash: position.positionHash,
+                        poolId: position.pool.id,
+                        chainId,
+                        nftId: position.underlyingTokenId.toString(),
+                        fees0: '0',
+                        fees1: '0',
+                        feesValueInQuote: feeDelta.toString(),
+                        eventTimestamp: blockTimestamp.toISOString(),
+                    },
+                    source: 'business-logic',
+                }, dbTx);
+            } else if (eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT') {
+                // Transfer events: read real financial data from DB (computed by recalculateAggregates)
+                const db = dbTx ?? this.prisma;
+                const ledgerEvent = await db.positionLedgerEvent.findFirst({
+                    where: { positionId: id, inputHash: result.inputHash },
+                    select: { tokenValue: true, deltaCostBasis: true, deltaPnl: true },
+                });
+                if (ledgerEvent) {
+                    const type = eventType === 'VAULT_TRANSFER_IN'
+                        ? ('position.transferred.in' as const)
+                        : ('position.transferred.out' as const);
+                    await publisher.createAndPublish<PositionTransferredPayload>({
+                        type,
+                        entityId: position.id,
+                        entityType: 'position',
+                        userId: position.userId,
+                        payload: {
+                            positionId: position.id,
+                            positionHash: position.positionHash,
+                            poolId: position.pool.id,
+                            chainId,
+                            nftId: position.underlyingTokenId.toString(),
+                            tokenValue: ledgerEvent.tokenValue,
+                            deltaCostBasis: ledgerEvent.deltaCostBasis,
+                            deltaPnl: ledgerEvent.deltaPnl,
+                            eventTimestamp: blockTimestamp.toISOString(),
+                        },
+                        source: 'business-logic',
+                    }, dbTx);
+                }
+            } else {
+                // VAULT_MINT → position.liquidity.increased
+                // VAULT_BURN → position.liquidity.decreased
+                const type = (eventType === 'VAULT_MINT')
+                    ? ('position.liquidity.increased' as const)
+                    : ('position.liquidity.decreased' as const);
+                await publisher.createAndPublish<
+                    PositionLiquidityIncreasedPayload | PositionLiquidityDecreasedPayload
+                >({
+                    type,
+                    entityId: position.id,
+                    entityType: 'position',
+                    userId: position.userId,
+                    payload: {
+                        positionId: position.id,
+                        positionHash: position.positionHash,
+                        poolId: position.pool.id,
+                        chainId,
+                        nftId: position.underlyingTokenId.toString(),
+                        liquidityDelta: shares.toString(),
+                        liquidityAfter: importResult.postImportAggregates.sharesAfter.toString(),
+                        token0Amount: '0',
+                        token1Amount: '0',
+                        eventTimestamp: blockTimestamp.toISOString(),
+                    },
+                    source: 'business-logic',
+                }, dbTx);
+            }
         }
     }
 
