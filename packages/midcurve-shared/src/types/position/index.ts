@@ -16,6 +16,7 @@ export type { PositionInterface } from './position.interface.js';
 // Types
 export type {
   PositionProtocol,
+  PositionType,
   PositionJSON,
   BasePositionParams,
   PositionRow,
@@ -46,6 +47,20 @@ export {
   positionStateFromJSON,
 } from './uniswapv3/index.js';
 
+// UniswapV3 Vault specific
+export {
+  UniswapV3VaultPosition,
+  UniswapV3VaultPositionConfig,
+  type UniswapV3VaultPositionParams,
+  type UniswapV3VaultPositionRow,
+  type UniswapV3VaultPositionConfigData,
+  type UniswapV3VaultPositionConfigJSON,
+  type UniswapV3VaultPositionState,
+  type UniswapV3VaultPositionStateJSON,
+  vaultPositionStateToJSON,
+  vaultPositionStateFromJSON,
+} from './uniswapv3-vault/index.js';
+
 // Simulation overlay
 export {
   CloseOrderSimulationOverlay,
@@ -58,9 +73,10 @@ export {
 
 // Import for use in type alias
 import type { UniswapV3Position as UniswapV3PositionType } from './uniswapv3/index.js';
+import type { UniswapV3VaultPosition as UniswapV3VaultPositionType } from './uniswapv3-vault/index.js';
 
 /**
  * Union type for all position implementations.
  * Extend this as new protocols are added (Orca, Raydium, etc.)
  */
-export type AnyPosition = UniswapV3PositionType;
+export type AnyPosition = UniswapV3PositionType | UniswapV3VaultPositionType;

@@ -21,6 +21,7 @@ import {
   BasicCurrencyToken,
   BasicCurrencyConfig,
   BASIC_CURRENCY_DECIMALS,
+  createBasicCurrencyTokenHash,
 } from '@midcurve/shared';
 import { TokenService } from './token-service.js';
 import type { TokenServiceDependencies } from './token-service.js';
@@ -98,6 +99,7 @@ export class BasicCurrencyTokenService extends TokenService {
     logoUrl: string | null;
     coingeckoId: string | null;
     marketCap: number | null;
+    tokenHash: string;
     config: unknown;
     createdAt: Date;
     updatedAt: Date;
@@ -111,6 +113,7 @@ export class BasicCurrencyTokenService extends TokenService {
       logoUrl: dbResult.logoUrl,
       coingeckoId: dbResult.coingeckoId,
       marketCap: dbResult.marketCap,
+      tokenHash: dbResult.tokenHash,
       config: dbResult.config as Record<string, unknown>,
       createdAt: dbResult.createdAt,
       updatedAt: dbResult.updatedAt,
@@ -185,20 +188,14 @@ export class BasicCurrencyTokenService extends TokenService {
 
     try {
       const normalizedCode = currencyCode.toUpperCase();
+      const tokenHash = createBasicCurrencyTokenHash(normalizedCode);
 
-      log.dbOperation(this.logger, 'findFirst', 'Token', {
-        tokenType: 'basic-currency',
-        currencyCode: normalizedCode,
+      log.dbOperation(this.logger, 'findUnique', 'Token', {
+        tokenHash,
       });
 
-      const result = await this.prisma.token.findFirst({
-        where: {
-          tokenType: 'basic-currency',
-          config: {
-            path: ['currencyCode'],
-            equals: normalizedCode,
-          },
-        },
+      const result = await this.prisma.token.findUnique({
+        where: { tokenHash },
       });
 
       if (!result) {
@@ -355,6 +352,7 @@ export class BasicCurrencyTokenService extends TokenService {
     try {
       // Create config class for serialization
       const config = new BasicCurrencyConfig(input.config);
+      const tokenHash = createBasicCurrencyTokenHash(input.config.currencyCode.toUpperCase());
 
       log.dbOperation(this.logger, 'create', 'Token', {
         tokenType: 'basic-currency',
@@ -370,6 +368,7 @@ export class BasicCurrencyTokenService extends TokenService {
           logoUrl: input.logoUrl,
           coingeckoId: input.coingeckoId,
           marketCap: input.marketCap,
+          tokenHash,
           config: config.toJSON() as object,
         },
       });

@@ -224,7 +224,7 @@ export function WithdrawWizardSummaryPanel({
   // Calculate PnL realized by this withdrawal
   const withdrawalPnl = useMemo(() => {
     if (!position || !withdrawInfo || state.withdrawPercent === 0) return null;
-    const currentCostBasis = BigInt(position.currentCostBasis || '0');
+    const currentCostBasis = BigInt(position.costBasis || '0');
     const positionState = position.state as { liquidity: string };
     const currentLiquidity = BigInt(positionState.liquidity || '0');
     if (currentLiquidity === 0n || currentCostBasis === 0n) return null;

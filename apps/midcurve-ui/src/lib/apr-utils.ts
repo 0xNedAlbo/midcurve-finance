@@ -33,10 +33,16 @@ export interface AprSummary {
   unrealizedActiveDays: number;
   /** Estimated APR from current unclaimed fees (%) */
   unrealizedApr: number;
+  /** Base APR (fee/yield APR) */
+  baseApr: number;
+  /** Reward APR (incentive programs) */
+  rewardApr: number;
   /** Time-weighted total APR combining realized and unrealized (%) */
   totalApr: number;
   /** Total active days (realized + unrealized) */
   totalActiveDays: number;
+  /** Whether below minimum threshold for reliable APR */
+  belowThreshold: boolean;
 }
 
 /**
@@ -73,7 +79,7 @@ export interface AprSummary {
  * - Accounts for different durations of each component
  *
  * @param periods - Array of APR periods (sorted descending by startTimestamp)
- * @param currentCostBasis - Current position cost basis (for unrealized APR)
+ * @param costBasis - Current position cost basis (for unrealized APR)
  * @param unclaimedFees - Current unclaimed fees (for unrealized APR)
  * @returns APR summary with realized, unrealized, and total metrics
  *
@@ -82,8 +88,8 @@ export interface AprSummary {
  * // OLD (deprecated):
  * const summary = calculateAprSummary(
  *   aprPeriods,
- *   BigInt(position.currentCostBasis),
- *   BigInt(position.unClaimedFees)
+ *   BigInt(position.costBasis),
+ *   BigInt(position.unclaimedYield)
  * );
  * console.log(`Total APR: ${summary.totalApr.toFixed(2)}%`);
  *
@@ -113,8 +119,11 @@ export function calculateAprSummary(
       unrealizedCostBasis: currentCostBasis,
       unrealizedActiveDays: 0,
       unrealizedApr: 0,
+      baseApr: 0,
+      rewardApr: 0,
       totalApr: 0,
       totalActiveDays: 0,
+      belowThreshold: true,
     };
   }
 
@@ -125,7 +134,7 @@ export function calculateAprSummary(
 
   for (const period of periods) {
     const durationDays = period.durationSeconds / 86400;
-    realizedFees += BigInt(period.collectedFeeValue);
+    realizedFees += BigInt(period.collectedYieldValue);
     realizedWeightedCostBasisSum +=
       BigInt(period.costBasis) * BigInt(Math.floor(durationDays * 1000)); // Multiply by 1000 for precision
     realizedTotalDays += durationDays;
@@ -184,7 +193,10 @@ export function calculateAprSummary(
     unrealizedCostBasis: currentCostBasis,
     unrealizedActiveDays: Math.floor(unrealizedActiveDays * 10) / 10, // Round to 1 decimal
     unrealizedApr,
+    baseApr: totalApr,
+    rewardApr: 0,
     totalApr,
     totalActiveDays: Math.floor(totalActiveDays * 10) / 10, // Round to 1 decimal
+    belowThreshold: totalActiveDays < 0.00347, // 5 minutes
   };
 }

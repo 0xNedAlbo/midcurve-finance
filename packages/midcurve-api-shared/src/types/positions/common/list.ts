@@ -54,18 +54,22 @@ export interface PositionListItem {
   positionHash: string;
   /** Protocol identifier e.g. "uniswapv3" */
   protocol: string;
+  /** Position type discriminator */
+  type: string;
 
   // Financial (bigint as string) — for sorting/filtering by value
   currentValue: string;
-  currentCostBasis: string;
+  costBasis: string;
   realizedPnl: string;
   unrealizedPnl: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
-  collectedFees: string;
-  unClaimedFees: string;
-  lastFeesCollectedAt: string | null;
+  collectedYield: string;
+  unclaimedYield: string;
+  lastYieldClaimedAt: string | null;
   totalApr: number | null;
+  baseApr: number | null;
+  rewardApr: number | null;
 
   // Price range (bigint as string)
   priceRangeLower: string;

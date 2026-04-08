@@ -62,6 +62,10 @@ export const ROUTING_PATTERNS = {
   POSITION_FEES_COLLECTED: 'positions.fees-collected.#',
   /** All position liquidity reverted events (chain reorgs) */
   POSITION_LIQUIDITY_REVERTED: 'positions.liquidity-reverted.#',
+  /** All position transferred in events (NFT received into user wallet perimeter) */
+  POSITION_TRANSFERRED_IN: 'positions.transferred-in.#',
+  /** All position transferred out events (NFT sent out of user wallet perimeter) */
+  POSITION_TRANSFERRED_OUT: 'positions.transferred-out.#',
   /** All position state refreshed events */
   POSITION_STATE_REFRESHED: 'positions.state-refreshed.#',
   /** All position events */
@@ -108,6 +112,8 @@ const POSITION_EVENT_TO_ACTION: Record<string, string> = {
   'position.liquidity.decreased': 'liquidity-decreased',
   'position.fees.collected': 'fees-collected',
   'position.liquidity.reverted': 'liquidity-reverted',
+  'position.transferred.in': 'transferred-in',
+  'position.transferred.out': 'transferred-out',
   'position.state.refreshed': 'state-refreshed',
 };
 

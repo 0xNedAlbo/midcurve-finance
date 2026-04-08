@@ -82,7 +82,7 @@ export function AprPeriodsTable({
                     </td>
                     <td className="py-3 px-2 text-right text-green-400">
                       {formatCompactValue(
-                        BigInt(period.collectedFeeValue),
+                        BigInt(period.collectedYieldValue),
                         quoteTokenDecimals
                       )}{" "}
                       {quoteTokenSymbol}

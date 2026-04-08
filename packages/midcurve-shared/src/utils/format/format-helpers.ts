@@ -89,13 +89,13 @@ export function formatPercentage(value: number, decimals: number = 1): string {
  * - Caps at 9999% to avoid display issues
  * - Can show inflated APR for short time periods (e.g., 9999% for positions with little history)
  *
- * Formula: APR = (unClaimedFees / costBasis) / timeElapsed * 365 days * 100
+ * Formula: APR = (unclaimedYield / costBasis) / timeElapsed * 365 days * 100
  *
  * Edge cases:
  * - If position is out of range: returns 0%
  * - If costBasis is 0: returns 0%
  * - If timeElapsed < 5 minutes: returns 0% (insufficient data)
- * - If lastFeesCollectedAt is null: uses positionOpenedAt
+ * - If lastYieldClaimedAt is null: uses positionOpenedAt
  *
  * @deprecated Use `calculateAprSummary()` from `@/lib/apr-utils` instead
  * @param params - Position data for APR calculation
@@ -103,16 +103,16 @@ export function formatPercentage(value: number, decimals: number = 1): string {
  */
 export function calculateAPR(params: {
   costBasis: string; // BigInt as string (quote token units)
-  unClaimedFees: string; // BigInt as string (quote token units)
-  lastFeesCollectedAt: string | null; // ISO timestamp or null
+  unclaimedYield: string; // BigInt as string (quote token units)
+  lastYieldClaimedAt: string | null; // ISO timestamp or null
   positionOpenedAt: string; // ISO timestamp
   isInRange: boolean; // Whether position is currently in range
   decimals?: number; // Token decimals (default 18)
 }): { apr: number; belowThreshold: boolean } {
   const {
     costBasis,
-    unClaimedFees,
-    lastFeesCollectedAt,
+    unclaimedYield,
+    lastYieldClaimedAt,
     positionOpenedAt,
     isInRange,
     decimals = 18,
@@ -124,7 +124,7 @@ export function calculateAPR(params: {
   }
 
   const costBasisBigInt = BigInt(costBasis);
-  const feesBigInt = BigInt(unClaimedFees);
+  const yieldBigInt = BigInt(unclaimedYield);
 
   // Can't calculate APR with zero cost basis
   if (costBasisBigInt === 0n) {
@@ -132,8 +132,8 @@ export function calculateAPR(params: {
   }
 
   // Calculate time elapsed since last collection (or position opened)
-  const startTime = lastFeesCollectedAt
-    ? new Date(lastFeesCollectedAt).getTime()
+  const startTime = lastYieldClaimedAt
+    ? new Date(lastYieldClaimedAt).getTime()
     : new Date(positionOpenedAt).getTime();
   const now = Date.now();
   const timeElapsedMs = now - startTime;
@@ -149,14 +149,14 @@ export function calculateAPR(params: {
   // Convert to days
   const timeElapsedDays = timeElapsedMs / (1000 * 60 * 60 * 24);
 
-  // Calculate APR: (unClaimedFees / costBasis) / time * 365 * 100
+  // Calculate APR: (unclaimedYield / costBasis) / time * 365 * 100
   // Use floating point for APR calculation (precision not critical for display)
   const denominator = 10n ** BigInt(decimals);
 
-  const feesFloat = Number(feesBigInt) / Number(denominator);
+  const yieldFloat = Number(yieldBigInt) / Number(denominator);
   const costBasisFloat = Number(costBasisBigInt) / Number(denominator);
 
-  const apr = (feesFloat / costBasisFloat / timeElapsedDays) * 365 * 100;
+  const apr = (yieldFloat / costBasisFloat / timeElapsedDays) * 365 * 100;
 
   // Cap at 9999% to avoid display issues with extreme values
   const cappedApr = Math.min(apr, 9999);

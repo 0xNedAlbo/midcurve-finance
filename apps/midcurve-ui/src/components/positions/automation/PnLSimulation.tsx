@@ -27,7 +27,7 @@ export interface PnLSimulationProps {
   /**
    * Current cost basis (in quote token units, as string)
    */
-  currentCostBasis: string;
+  costBasis: string;
 
   /**
    * Current unclaimed fees (in quote token units, as string)
@@ -88,7 +88,7 @@ export function usePnLSimulation({
   liquidity,
   tickLower,
   tickUpper,
-  currentCostBasis,
+  costBasis,
   unclaimedFees,
   triggerSqrtPriceX96,
   currentSqrtPriceX96,
@@ -143,9 +143,9 @@ export function usePnLSimulation({
       );
 
       // Calculate simulated PnL including fees
-      const costBasis = BigInt(currentCostBasis || '0');
+      const costBasisValue = BigInt(costBasis || '0');
       const fees = BigInt(unclaimedFees || '0');
-      const pnl = valueAtTrigger - costBasis + fees;
+      const pnl = valueAtTrigger - costBasisValue + fees;
 
       // Format the display value
       const displayValue = formatCompactValue(pnl < 0n ? -pnl : pnl, quoteToken.decimals);
@@ -168,7 +168,7 @@ export function usePnLSimulation({
     liquidity,
     tickLower,
     tickUpper,
-    currentCostBasis,
+    costBasis,
     unclaimedFees,
     quoteToken.decimals,
   ]);

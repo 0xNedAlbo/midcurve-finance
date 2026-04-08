@@ -36,7 +36,7 @@ import {
 } from '@midcurve/api-shared';
 import { getDomainEventPublisher } from '@midcurve/services';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getAuthNonceService, getAuthUserService, getSessionService, getUserAllowListService } from '@/lib/services';
+import { getAuthNonceService, getAuthUserService, getSessionService, getUserAllowListService, getUserWalletService } from '@/lib/services';
 import { getCorsHeaders, createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -185,7 +185,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // 6. Create session
+    // 6. Ensure primary wallet exists in user_wallets table
+    try {
+      const existingWallet = await getUserWalletService().findByTypeAndAddress('evm', address);
+      if (!existingWallet) {
+        await getUserWalletService().create({
+          userId: user.id,
+          walletType: 'evm',
+          address,
+          label: 'Primary Wallet',
+          isPrimary: true,
+        });
+        apiLog.businessOperation(apiLogger, requestId, 'created', 'userWallet', user.id, { address, isPrimary: true });
+      }
+    } catch (walletError) {
+      apiLog.methodError(apiLogger, 'POST /api/v1/auth/verify', walletError, {
+        requestId,
+        context: 'Failed to ensure primary wallet registration',
+      });
+    }
+
+    // 7. Create session
     const { sessionId, expiresAt } = await getSessionService().createSession(user.id, {
       userAgent: request.headers.get('user-agent') || undefined,
       ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0] || undefined,
@@ -194,7 +214,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     apiLog.authSuccess(apiLogger, requestId, user.id, 'session');
     apiLog.businessOperation(apiLogger, requestId, 'created', 'session', sessionId.slice(0, 10));
 
-    // 7. Build session user response
+    // 8. Build session user response
     const sessionUser: SessionUser = {
       id: user.id,
       address: user.address,

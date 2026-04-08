@@ -93,7 +93,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.REALIZED_LOSSES, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FEE_INCOME, user.id, previousEnd),
         journalService.getUserAccountBalanceReporting(ACCOUNT_CODES.FX_GAIN_LOSS, user.id, previousEnd),
-        prisma.trackedPosition.count({ where: { userId: user.id } }),
+        prisma.position.count({ where: { userId: user.id } }),
       ]);
 
       // Current period

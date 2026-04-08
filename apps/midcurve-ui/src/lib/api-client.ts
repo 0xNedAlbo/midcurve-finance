@@ -210,6 +210,12 @@ import type {
   TestWebhookResponseData,
   // Notification Types
   NotificationEventType,
+  // Wallets
+  ListUserWalletsResponseData,
+  WalletChallengeResponseData,
+  AddWalletResponseData,
+  AddWalletRequest,
+  DeleteWalletResponseData,
 } from '@midcurve/api-shared';
 
 /**
@@ -411,4 +417,42 @@ export const notificationsApi = {
   },
 };
 
+// =============================================================================
+// WALLETS API
+// =============================================================================
 
+/**
+ * Wallets API client for managing user wallet perimeter
+ */
+export const walletsApi = {
+  /**
+   * List all wallets belonging to the authenticated user
+   */
+  listWallets() {
+    return apiClient.get<ListUserWalletsResponseData>('/api/v1/user/wallets');
+  },
+
+  /**
+   * Request a challenge message for wallet ownership verification
+   */
+  getChallenge(walletType: string, address: string) {
+    return apiClient.post<WalletChallengeResponseData>('/api/v1/user/wallets/challenge', {
+      walletType,
+      address,
+    });
+  },
+
+  /**
+   * Add a wallet after ownership verification
+   */
+  addWallet(body: AddWalletRequest) {
+    return apiClient.post<AddWalletResponseData>('/api/v1/user/wallets', body);
+  },
+
+  /**
+   * Remove a non-primary wallet
+   */
+  deleteWallet(walletId: string) {
+    return apiClient.delete<DeleteWalletResponseData>(`/api/v1/user/wallets/${walletId}`);
+  },
+};

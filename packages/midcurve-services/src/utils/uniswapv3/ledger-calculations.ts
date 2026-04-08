@@ -189,12 +189,12 @@ export function calculateTokenValueInQuote(
  * When liquidity is removed from a position (DECREASE_POSITION event),
  * a proportional amount of the cost basis is also withdrawn.
  *
- * Formula: proportionalCostBasis = (currentCostBasis × deltaLiquidity) / currentLiquidity
+ * Formula: proportionalCostBasis = (costBasis × deltaLiquidity) / currentLiquidity
  *
  * This ensures that the remaining position's cost basis accurately reflects
  * only the portion of capital that remains invested.
  *
- * @param currentCostBasis - Current total cost basis in smallest quote token units
+ * @param costBasis - Current total cost basis in smallest quote token units
  * @param deltaLiquidity - Amount of liquidity being removed (always positive)
  * @param currentLiquidity - Current total liquidity before removal
  * @returns Proportional cost basis being withdrawn in smallest quote token units
@@ -224,7 +224,7 @@ export function calculateTokenValueInQuote(
  * ```
  */
 export function calculateProportionalCostBasis(
-  currentCostBasis: bigint,
+  costBasis: bigint,
   deltaLiquidity: bigint,
   currentLiquidity: bigint
 ): bigint {
@@ -250,7 +250,7 @@ export function calculateProportionalCostBasis(
   }
 
   // Calculate proportional cost basis
-  return (currentCostBasis * deltaLiquidity) / currentLiquidity;
+  return (costBasis * deltaLiquidity) / currentLiquidity;
 }
 
 // ============================================================================

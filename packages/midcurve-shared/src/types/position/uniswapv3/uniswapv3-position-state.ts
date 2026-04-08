@@ -122,6 +122,13 @@ export interface UniswapV3PositionState {
    */
   isClosed: boolean;
 
+  /**
+   * Whether the position is currently owned by the user.
+   * Determined by checking the on-chain owner address against the user's registered wallets.
+   * Defaults to true for backward compatibility (positions without wallet perimeter data).
+   */
+  isOwnedByUser: boolean;
+
   // ---- Pool-level state (merged from pool, updated during refresh) ----
 
   /**
@@ -179,6 +186,7 @@ export interface UniswapV3PositionStateJSON {
   tickUpperFeeGrowthOutside1X128: string;
   isBurned: boolean;
   isClosed: boolean;
+  isOwnedByUser: boolean;
 
   // Pool-level state (optional — present in DB JSON, omitted from API responses)
   sqrtPriceX96?: string;
@@ -222,6 +230,7 @@ export function positionStateToJSON(
       state.tickUpperFeeGrowthOutside1X128.toString(),
     isBurned: state.isBurned,
     isClosed: state.isClosed,
+    isOwnedByUser: state.isOwnedByUser,
     // Pool-level fields intentionally omitted — they appear in pool.state via the computed getter
   };
 }
@@ -252,6 +261,7 @@ export function positionStateFromJSON(
     tickUpperFeeGrowthOutside1X128: BigInt(json.tickUpperFeeGrowthOutside1X128),
     isBurned: json.isBurned,
     isClosed: json.isClosed,
+    isOwnedByUser: json.isOwnedByUser ?? true, // default true for backward compat
 
     // Pool-level state (defaults for backward compat with pre-migration data)
     sqrtPriceX96: BigInt(json.sqrtPriceX96 ?? '0'),

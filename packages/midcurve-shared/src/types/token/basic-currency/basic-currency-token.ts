@@ -25,6 +25,7 @@ export interface BasicCurrencyTokenRow {
   logoUrl: string | null;
   coingeckoId: string | null;
   marketCap: number | null;
+  tokenHash: string;
   config: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
@@ -107,6 +108,7 @@ export class BasicCurrencyToken extends BaseToken {
       logoUrl: row.logoUrl ?? undefined,
       coingeckoId: row.coingeckoId ?? undefined,
       marketCap: row.marketCap ?? undefined,
+      tokenHash: row.tokenHash,
       config: BasicCurrencyConfig.fromJSON(
         row.config as unknown as BasicCurrencyConfigJSON
       ),
@@ -138,6 +140,7 @@ export class BasicCurrencyToken extends BaseToken {
       logoUrl: json.logoUrl,
       coingeckoId: json.coingeckoId,
       marketCap: json.marketCap,
+      tokenHash: json.tokenHash,
       config: BasicCurrencyConfig.fromJSON(json.config as unknown as BasicCurrencyConfigJSON),
       createdAt: new Date(json.createdAt),
       updatedAt: new Date(json.updatedAt),

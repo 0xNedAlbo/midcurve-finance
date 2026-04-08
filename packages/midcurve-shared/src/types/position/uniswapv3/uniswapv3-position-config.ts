@@ -66,6 +66,23 @@ export interface UniswapV3PositionConfigData {
    * The lower tick of the position's price range
    */
   tickLower: number;
+
+  /**
+   * Whether token0 is the quote token
+   * If true: token0 = quote, token1 = base
+   * If false: token0 = base, token1 = quote
+   */
+  isToken0Quote: boolean;
+
+  /**
+   * Lower price range bound in quote token units (bigint)
+   */
+  priceRangeLower: bigint;
+
+  /**
+   * Upper price range bound in quote token units (bigint)
+   */
+  priceRangeUpper: bigint;
 }
 
 // ============================================================================
@@ -82,6 +99,9 @@ export interface UniswapV3PositionConfigJSON {
   poolAddress: string;
   tickUpper: number;
   tickLower: number;
+  isToken0Quote: boolean;
+  priceRangeLower: string; // bigint as string
+  priceRangeUpper: string; // bigint as string
   // Pool-level fields (optional — present in DB JSON, omitted from API responses)
   token0Address?: string;
   token1Address?: string;
@@ -126,6 +146,9 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
   readonly tickSpacing: number;
   readonly tickUpper: number;
   readonly tickLower: number;
+  readonly isToken0Quote: boolean;
+  readonly priceRangeLower: bigint;
+  readonly priceRangeUpper: bigint;
 
   constructor(data: UniswapV3PositionConfigData) {
     this.chainId = data.chainId;
@@ -137,6 +160,9 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
     this.tickSpacing = data.tickSpacing;
     this.tickUpper = data.tickUpper;
     this.tickLower = data.tickLower;
+    this.isToken0Quote = data.isToken0Quote;
+    this.priceRangeLower = data.priceRangeLower;
+    this.priceRangeUpper = data.priceRangeUpper;
   }
 
   /**
@@ -149,6 +175,9 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
       poolAddress: this.poolAddress,
       tickUpper: this.tickUpper,
       tickLower: this.tickLower,
+      isToken0Quote: this.isToken0Quote,
+      priceRangeLower: this.priceRangeLower.toString(),
+      priceRangeUpper: this.priceRangeUpper.toString(),
       // Pool-level fields intentionally omitted — they appear in pool.config via the computed getter
     };
   }
@@ -163,6 +192,8 @@ export class UniswapV3PositionConfig implements UniswapV3PositionConfigData {
       token1Address: json.token1Address ?? '',
       feeBps: json.feeBps ?? 0,
       tickSpacing: json.tickSpacing ?? 0,
+      priceRangeLower: BigInt(json.priceRangeLower),
+      priceRangeUpper: BigInt(json.priceRangeUpper),
     });
   }
 }

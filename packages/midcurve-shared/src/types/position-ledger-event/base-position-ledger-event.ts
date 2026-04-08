@@ -64,9 +64,6 @@ export abstract class BasePositionLedgerEvent
   // FINANCIAL DATA
   // ============================================================================
 
-  readonly poolPrice: bigint;
-  readonly token0Amount: bigint;
-  readonly token1Amount: bigint;
   readonly tokenValue: bigint;
   readonly rewards: Reward[];
 
@@ -85,11 +82,11 @@ export abstract class BasePositionLedgerEvent
   readonly pnlAfter: bigint;
 
   // ============================================================================
-  // COLLECTED FEES TRACKING
+  // COLLECTED YIELD TRACKING
   // ============================================================================
 
-  readonly deltaCollectedFees: bigint;
-  readonly collectedFeesAfter: bigint;
+  readonly deltaCollectedYield: bigint;
+  readonly collectedYieldAfter: bigint;
 
   // ============================================================================
   // REALIZED CASHFLOW TRACKING (for perpetuals, etc. - always 0 for AMM positions)
@@ -97,6 +94,16 @@ export abstract class BasePositionLedgerEvent
 
   readonly deltaRealizedCashflow: bigint;
   readonly realizedCashflowAfter: bigint;
+
+  // ============================================================================
+  // OWNERSHIP TRACKING
+  // ============================================================================
+
+  /** Whether this event is ignored for financial calculations (happened outside user ownership) */
+  readonly isIgnored: boolean;
+
+  /** Reason the event is ignored, e.g. "not_owned_by_user" */
+  readonly ignoredReason: string | null;
 
   // ============================================================================
   // ABSTRACT MEMBERS
@@ -124,19 +131,18 @@ export abstract class BasePositionLedgerEvent
     this.timestamp = params.timestamp;
     this.eventType = params.eventType;
     this.inputHash = params.inputHash;
-    this.poolPrice = params.poolPrice;
-    this.token0Amount = params.token0Amount;
-    this.token1Amount = params.token1Amount;
     this.tokenValue = params.tokenValue;
     this.rewards = params.rewards;
     this.deltaCostBasis = params.deltaCostBasis;
     this.costBasisAfter = params.costBasisAfter;
     this.deltaPnl = params.deltaPnl;
     this.pnlAfter = params.pnlAfter;
-    this.deltaCollectedFees = params.deltaCollectedFees;
-    this.collectedFeesAfter = params.collectedFeesAfter;
+    this.deltaCollectedYield = params.deltaCollectedYield;
+    this.collectedYieldAfter = params.collectedYieldAfter;
     this.deltaRealizedCashflow = params.deltaRealizedCashflow;
     this.realizedCashflowAfter = params.realizedCashflowAfter;
+    this.isIgnored = params.isIgnored;
+    this.ignoredReason = params.ignoredReason;
   }
 
   // ============================================================================
@@ -147,7 +153,7 @@ export abstract class BasePositionLedgerEvent
    * Serialize to JSON for API responses.
    * Converts Date to ISO string and bigint to string.
    */
-  toJSON(): PositionLedgerEventJSON {
+  toJSON(): Omit<PositionLedgerEventJSON, 'poolPrice' | 'token0Amount' | 'token1Amount'> {
     return {
       id: this.id,
       createdAt: this.createdAt.toISOString(),
@@ -158,19 +164,18 @@ export abstract class BasePositionLedgerEvent
       timestamp: this.timestamp.toISOString(),
       eventType: this.eventType,
       inputHash: this.inputHash,
-      poolPrice: this.poolPrice.toString(),
-      token0Amount: this.token0Amount.toString(),
-      token1Amount: this.token1Amount.toString(),
       tokenValue: this.tokenValue.toString(),
       rewards: this.rewards.map(rewardToJSON),
       deltaCostBasis: this.deltaCostBasis.toString(),
       costBasisAfter: this.costBasisAfter.toString(),
       deltaPnl: this.deltaPnl.toString(),
       pnlAfter: this.pnlAfter.toString(),
-      deltaCollectedFees: this.deltaCollectedFees.toString(),
-      collectedFeesAfter: this.collectedFeesAfter.toString(),
+      deltaCollectedYield: this.deltaCollectedYield.toString(),
+      collectedYieldAfter: this.collectedYieldAfter.toString(),
       deltaRealizedCashflow: this.deltaRealizedCashflow.toString(),
       realizedCashflowAfter: this.realizedCashflowAfter.toString(),
+      isIgnored: this.isIgnored,
+      ignoredReason: this.ignoredReason,
       config: this.config,
       state: this.state,
     };

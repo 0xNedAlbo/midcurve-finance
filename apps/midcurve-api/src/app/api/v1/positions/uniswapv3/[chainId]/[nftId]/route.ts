@@ -32,7 +32,6 @@ import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3CloseOrderService,
-  getJournalService,
 } from '@/lib/services';
 import type {
   GetUniswapV3PositionResponse,
@@ -136,7 +135,13 @@ export async function GET(
           tx
         );
 
-        return { position, closeOrders };
+        // 3c. Fetch ownerWallet from DB (not on domain object)
+        const ownerWalletRow = await tx.position.findUnique({
+          where: { id: position.id },
+          select: { ownerWallet: true },
+        });
+
+        return { position, closeOrders, ownerWallet: ownerWalletRow?.ownerWallet ?? null };
       });
 
       // Handle position not found (outside transaction)
@@ -154,7 +159,7 @@ export async function GET(
         });
       }
 
-      const { position, closeOrders } = result;
+      const { position, closeOrders, ownerWallet } = result;
 
       apiLog.businessOperation(apiLogger, requestId, 'fetched', 'position', position.id, {
         chainId,
@@ -162,14 +167,11 @@ export async function GET(
         pool: `${position.pool.token0.symbol}/${position.pool.token1.symbol}`,
       });
 
-      // 4. Check accounting tracking status
-      const isTrackedInAccounting = (await getJournalService().getTrackedPositionId(user.id, positionHash)) !== null;
-
-      // 5. Serialize bigints to strings for JSON
+      // 4. Serialize bigints to strings for JSON
       const serializedPosition: GetUniswapV3PositionResponse = {
         ...serializeUniswapV3Position(position),
+        ownerWallet,
         closeOrders: closeOrders.map(serializeCloseOrder),
-        isTrackedInAccounting,
       };
 
       const response = createSuccessResponse(serializedPosition);

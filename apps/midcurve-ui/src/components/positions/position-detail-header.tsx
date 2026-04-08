@@ -43,6 +43,9 @@ interface PositionDetailHeaderProps {
   feeTierDisplay?: React.ReactNode;
   identifierDisplay?: React.ReactNode;
 
+  // Optional extra status badges (protocol-specific, rendered after range status)
+  extraStatusBadges?: React.ReactNode;
+
   // Optional explorer link (protocol-specific)
   explorerUrl?: string;
   explorerLabel?: string;
@@ -64,6 +67,7 @@ export function PositionDetailHeader({
   isRefreshing,
   feeTierDisplay,
   identifierDisplay,
+  extraStatusBadges,
   explorerUrl,
   explorerLabel = "NFT",
   updatedAt,
@@ -175,6 +179,7 @@ export function PositionDetailHeader({
                     {isInRange ? "In Range" : "Out of Range"}
                   </span>
                 )}
+                {extraStatusBadges}
               </div>
 
               <div className="flex items-center gap-4 text-sm text-slate-400">

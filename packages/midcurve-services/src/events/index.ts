@@ -97,6 +97,7 @@ export type {
   PositionLiquidityDecreasedPayload,
   PositionFeesCollectedPayload,
   PositionLiquidityRevertedPayload,
+  PositionTransferredPayload,
   PositionStateRefreshedPayload,
   // Close order payloads (on-chain state changes)
   CloseOrderCancelReason,
@@ -116,6 +117,8 @@ export type {
   PositionLiquidityDecreasedEvent,
   PositionFeesCollectedEvent,
   PositionLiquidityRevertedEvent,
+  PositionTransferredInEvent,
+  PositionTransferredOutEvent,
   CloseOrderCancelledEvent,
   CloseOrderTriggeredEvent,
   CloseOrderExecutedEvent,

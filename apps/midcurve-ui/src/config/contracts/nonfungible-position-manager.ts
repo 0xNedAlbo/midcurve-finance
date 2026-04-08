@@ -150,6 +150,25 @@ export const NONFUNGIBLE_POSITION_MANAGER_ABI = [
     stateMutability: 'payable',
     type: 'function',
   },
+  // approve() - ERC-721 single-token approval
+  {
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
+    ],
+    name: 'approve',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // getApproved() - Check approved address for a single token (ERC721)
+  {
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    name: 'getApproved',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
   // isApprovedForAll() - Check operator approval (ERC721)
   {
     inputs: [

@@ -25,6 +25,7 @@ export interface Erc20TokenRow {
   logoUrl: string | null;
   coingeckoId: string | null;
   marketCap: number | null;
+  tokenHash: string;
   config: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
@@ -126,6 +127,7 @@ export class Erc20Token extends BaseToken {
       logoUrl: row.logoUrl ?? undefined,
       coingeckoId: row.coingeckoId ?? undefined,
       marketCap: row.marketCap ?? undefined,
+      tokenHash: row.tokenHash,
       config: Erc20TokenConfig.fromJSON(
         row.config as unknown as Erc20TokenConfigJSON
       ),
@@ -165,6 +167,7 @@ export class Erc20Token extends BaseToken {
       logoUrl: json.logoUrl,
       coingeckoId: json.coingeckoId,
       marketCap: json.marketCap,
+      tokenHash: json.tokenHash,
       config: Erc20TokenConfig.fromJSON(json.config as unknown as Erc20TokenConfigJSON),
       createdAt: new Date(json.createdAt),
       updatedAt: new Date(json.updatedAt),

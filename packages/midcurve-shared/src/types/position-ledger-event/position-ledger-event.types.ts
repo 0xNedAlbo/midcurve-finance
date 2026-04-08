@@ -11,7 +11,7 @@
 /**
  * Supported protocols for ledger events
  */
-export type LedgerEventProtocol = 'uniswapv3';
+export type LedgerEventProtocol = 'uniswapv3' | 'uniswapv3-vault';
 
 // ============================================================================
 // EVENT TYPES
@@ -36,7 +36,12 @@ export type EventType =
   | 'COLLECT'
   | 'MINT'
   | 'BURN'
-  | 'TRANSFER';
+  | 'TRANSFER'
+  | 'VAULT_MINT'
+  | 'VAULT_BURN'
+  | 'VAULT_COLLECT_YIELD'
+  | 'VAULT_TRANSFER_IN'
+  | 'VAULT_TRANSFER_OUT';
 
 // ============================================================================
 // REWARD STRUCTURE
@@ -120,10 +125,12 @@ export interface PositionLedgerEventJSON {
   costBasisAfter: string;
   deltaPnl: string;
   pnlAfter: string;
-  deltaCollectedFees: string;
-  collectedFeesAfter: string;
+  deltaCollectedYield: string;
+  collectedYieldAfter: string;
   deltaRealizedCashflow: string;
   realizedCashflowAfter: string;
+  isIgnored: boolean;
+  ignoredReason: string | null;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
 }
@@ -146,19 +153,18 @@ export interface BasePositionLedgerEventParams {
   timestamp: Date;
   eventType: EventType;
   inputHash: string;
-  poolPrice: bigint;
-  token0Amount: bigint;
-  token1Amount: bigint;
   tokenValue: bigint;
   rewards: Reward[];
   deltaCostBasis: bigint;
   costBasisAfter: bigint;
   deltaPnl: bigint;
   pnlAfter: bigint;
-  deltaCollectedFees: bigint;
-  collectedFeesAfter: bigint;
+  deltaCollectedYield: bigint;
+  collectedYieldAfter: bigint;
   deltaRealizedCashflow: bigint;
   realizedCashflowAfter: bigint;
+  isIgnored: boolean;
+  ignoredReason: string | null;
 }
 
 // ============================================================================
@@ -180,19 +186,18 @@ export interface PositionLedgerEventRow {
   timestamp: Date;
   eventType: string;
   inputHash: string;
-  poolPrice: bigint;
-  token0Amount: bigint;
-  token1Amount: bigint;
   tokenValue: bigint;
   rewards: unknown[];
   deltaCostBasis: bigint;
   costBasisAfter: bigint;
   deltaPnl: bigint;
   pnlAfter: bigint;
-  deltaCollectedFees: bigint;
-  collectedFeesAfter: bigint;
+  deltaCollectedYield: bigint;
+  collectedYieldAfter: bigint;
   deltaRealizedCashflow: bigint;
   realizedCashflowAfter: bigint;
+  isIgnored: boolean;
+  ignoredReason: string | null;
   config: Record<string, unknown>;
   state: Record<string, unknown>;
 }

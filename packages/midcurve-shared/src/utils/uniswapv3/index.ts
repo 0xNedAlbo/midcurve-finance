@@ -59,6 +59,7 @@ export {
   computeFeeGrowthInside,
   calculateIncrementalFees,
   calculateUnclaimedFeeAmounts,
+  calculateVaultClaimableFees,
 } from './fees.js';
 
 export type {
@@ -68,6 +69,8 @@ export type {
   UnclaimedFeesWithMetadata,
   UnclaimedFeeAmountsInput,
   UnclaimedFeeAmountsResult,
+  VaultClaimableFeesInput,
+  VaultClaimableFeesResult,
 } from './fees.js';
 
 export {

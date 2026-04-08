@@ -138,6 +138,24 @@ export function buildMidcurveSwapRouterHash(
 }
 
 /**
+ * Build hash for UniswapV3VaultFactory on EVM
+ * Convenience function for vault factory lookups
+ */
+export function buildUniswapV3VaultFactoryHash(
+  major: number,
+  minor: number,
+  chainId: number
+): string {
+  return buildSharedContractHash(
+    SharedContractType.EVM_SMART_CONTRACT,
+    SharedContractName.UNISWAP_V3_VAULT_FACTORY,
+    major,
+    minor,
+    chainId
+  );
+}
+
+/**
  * Parse interface version from uint32 format used by smart contracts
  *
  * The on-chain version format is: major * 100 + minor

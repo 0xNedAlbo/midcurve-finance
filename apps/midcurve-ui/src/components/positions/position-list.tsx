@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { RotateCcw, ArrowDownAZ, ArrowUpAZ } from "lucide-react";
 import { parsePositionHash } from "@midcurve/shared";
 import { UniswapV3PositionCard } from "./protocol/uniswapv3/uniswapv3-position-card";
+import { UniswapV3VaultPositionCard } from "./protocol/uniswapv3-vault/uniswapv3-vault-position-card";
 import { EmptyStateActions } from "./empty-state-actions";
 import { usePositionsList } from "@/hooks/positions/usePositionsList";
 import type { ListPositionsParams } from "@midcurve/api-shared";
@@ -13,7 +14,7 @@ interface PositionListProps {
 
 // Valid filter values for validation
 const VALID_STATUS_VALUES = ["all", "active", "closed"] as const;
-const VALID_PROTOCOL_VALUES = ["all", "uniswapv3"] as const;
+const VALID_PROTOCOL_VALUES = ["all", "uniswapv3", "uniswapv3-vault"] as const;
 const VALID_SORT_VALUES = ["positionOpenedAt", "totalApr", "currentValue"] as const;
 
 export function PositionList({ className }: PositionListProps) {
@@ -166,6 +167,7 @@ export function PositionList({ className }: PositionListProps) {
         >
           <option value="all">All Protocols</option>
           <option value="uniswapv3">Uniswap V3</option>
+          <option value="uniswapv3-vault">Vault Shares</option>
         </select>
 
         {/* Sort By and Direction */}
@@ -254,6 +256,15 @@ export function PositionList({ className }: PositionListProps) {
                         key={item.positionHash}
                         chainId={parsed.chainId}
                         nftId={parsed.nftId}
+                        index={index}
+                      />
+                    );
+                  case "uniswapv3-vault":
+                    return (
+                      <UniswapV3VaultPositionCard
+                        key={item.positionHash}
+                        chainId={parsed.chainId}
+                        vaultAddress={parsed.vaultAddress}
                         index={index}
                       />
                     );

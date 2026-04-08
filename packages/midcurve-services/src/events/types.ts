@@ -23,6 +23,8 @@ export type PositionEventType =
   | 'position.liquidity.decreased'
   | 'position.liquidity.reverted'
   | 'position.fees.collected'
+  | 'position.transferred.in'
+  | 'position.transferred.out'
   | 'position.state.refreshed';
 
 /**
@@ -222,6 +224,26 @@ export interface PositionLiquidityRevertedPayload {
 }
 
 /**
+ * Payload for position.transferred.in / position.transferred.out events
+ * Emitted when an NFT position is transferred to or from the user's wallet perimeter
+ */
+export interface PositionTransferredPayload {
+  positionId: string;
+  positionHash: string;
+  poolId: string;
+  chainId: number;
+  nftId: string;
+  /** Fair market value at time of transfer (quote token units, bigint as string) */
+  tokenValue: string;
+  /** Cost basis change: positive for transfer-in, negative for transfer-out (bigint as string) */
+  deltaCostBasis: string;
+  /** Realized PnL at transfer (only meaningful for transfer-out) (bigint as string) */
+  deltaPnl: string;
+  /** Block timestamp of the transfer */
+  eventTimestamp: string;
+}
+
+/**
  * Payload for position.state.refreshed event
  */
 export interface PositionStateRefreshedPayload {
@@ -236,8 +258,8 @@ export interface PositionStateRefreshedPayload {
   currentValue: string;
   /** Unrealized PnL (as string for bigint) */
   unrealizedPnl: string;
-  /** Unclaimed fees in quote token (as string for bigint) */
-  unClaimedFees: string;
+  /** Unclaimed yield in quote token (as string for bigint) */
+  unclaimedYield: string;
 }
 
 // ============================================================
@@ -385,6 +407,16 @@ export type PositionFeesCollectedEvent = DomainEvent<PositionFeesCollectedPayloa
  * Position liquidity reverted event with typed payload
  */
 export type PositionLiquidityRevertedEvent = DomainEvent<PositionLiquidityRevertedPayload>;
+
+/**
+ * Position transferred in event with typed payload
+ */
+export type PositionTransferredInEvent = DomainEvent<PositionTransferredPayload>;
+
+/**
+ * Position transferred out event with typed payload
+ */
+export type PositionTransferredOutEvent = DomainEvent<PositionTransferredPayload>;
 
 /**
  * Close order cancelled event with typed payload

@@ -3,3 +3,4 @@
 // ============================================================================
 
 export * from './uniswap-v3-position-closer';
+export * from './uniswapv3-vault';

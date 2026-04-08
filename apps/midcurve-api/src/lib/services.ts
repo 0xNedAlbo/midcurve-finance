@@ -33,6 +33,9 @@ import {
   SwapRouterService,
   JournalService,
   JournalBackfillService,
+  UniswapV3VaultPositionService,
+  UniswapV3VaultLedgerService,
+  UserWalletService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -56,6 +59,8 @@ let _automationLogService: AutomationLogService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
+let _uniswapV3VaultPositionService: UniswapV3VaultPositionService | null = null;
+let _userWalletService: UserWalletService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -267,6 +272,34 @@ export function getUniswapV3PositionLedgerService(positionId: string): UniswapV3
  */
 export function getUniswapV3AprService(positionId: string): UniswapV3AprService {
   return new UniswapV3AprService({ positionId });
+}
+
+/**
+ * Create a UniswapV3VaultLedgerService instance for a specific position.
+ * Not a singleton — each position requires its own scoped instance.
+ */
+export function getUniswapV3VaultLedgerService(positionId: string): UniswapV3VaultLedgerService {
+  return new UniswapV3VaultLedgerService({ positionId });
+}
+
+/**
+ * Get singleton instance of UniswapV3VaultPositionService
+ */
+export function getUniswapV3VaultPositionService(): UniswapV3VaultPositionService {
+  if (!_uniswapV3VaultPositionService) {
+    _uniswapV3VaultPositionService = new UniswapV3VaultPositionService();
+  }
+  return _uniswapV3VaultPositionService;
+}
+
+/**
+ * Get singleton instance of UserWalletService
+ */
+export function getUserWalletService(): UserWalletService {
+  if (!_userWalletService) {
+    _userWalletService = new UserWalletService();
+  }
+  return _userWalletService;
 }
 
 /**

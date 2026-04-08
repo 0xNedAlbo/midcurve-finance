@@ -27,8 +27,8 @@ describe("updatePositionInListCache", () => {
           currentValue: "1000",
           realizedPnl: "100",
           unrealizedPnl: "50",
-          collectedFees: "25",
-          unClaimedFees: "10",
+          collectedYield: "25",
+          unclaimedYield: "10",
           config: { chainId: 1, nftId: 123456 },
         } as any,
         {
@@ -63,8 +63,8 @@ describe("updatePositionInListCache", () => {
       currentValue: "1500", // Changed
       realizedPnl: "150", // Changed
       unrealizedPnl: "75", // Changed
-      collectedFees: "50", // Changed
-      unClaimedFees: "20", // Changed
+      collectedYield: "50", // Changed
+      unclaimedYield: "20", // Changed
       config: { chainId: 1, nftId: 123456 },
     } as any;
 
@@ -79,7 +79,7 @@ describe("updatePositionInListCache", () => {
     ]);
     expect(updated?.data[0].currentValue).toBe("1500");
     expect(updated?.data[0].realizedPnl).toBe("150");
-    expect(updated?.data[0].collectedFees).toBe("50");
+    expect(updated?.data[0].collectedYield).toBe("50");
     // Other position unchanged
     expect(updated?.data[1].id).toBe("pos-2");
     expect(updated?.data[1].currentValue).toBe("2000");

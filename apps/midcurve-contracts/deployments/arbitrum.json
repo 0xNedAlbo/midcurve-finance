@@ -4,6 +4,9 @@
   "deployedAt": "2026-03-12T00:00:00Z",
   "contracts": {
     "UniswapV3PositionCloser": "0xA28ec2Bd1b24B6DB85550854Cc326857e2D30C2D",
-    "MidcurveSwapRouter": "0x5aE412a2105345f770FC6862Be7e8Fb90245C50a"
+    "MidcurveSwapRouter": "0x5aE412a2105345f770FC6862Be7e8Fb90245C50a",
+    "UniswapV3Vault": "0xcaa32179370da66714D978DF7dD0eC37dA663f9b",
+    "AllowlistedUniswapV3Vault": "0x1Bf8D318D6bE36D1E13294Dd42e126aC38e75D56",
+    "UniswapV3VaultFactory": "0xfe861860F11C61F70d1c62E18907C47a450Cd622"
   }
 }

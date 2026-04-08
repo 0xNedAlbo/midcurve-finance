@@ -519,9 +519,12 @@ export class EvmTxStatusSubscriber {
       const config = sub.config as unknown as EvmTxStatusSubscriptionConfig;
       const state = sub.state as unknown as EvmTxStatusSubscriptionState;
 
-      // Completed subscriptions still marked active — delete immediately
+      // Completed subscriptions still marked active — delete after retention period
       if (state.isComplete) {
-        staleIds.push(sub.subscriptionId);
+        const completedAt = state.completedAt ? new Date(state.completedAt).getTime() : Date.now();
+        if (Date.now() - completedAt > COMPLETED_RETENTION_MS) {
+          staleIds.push(sub.subscriptionId);
+        }
         continue;
       }
 

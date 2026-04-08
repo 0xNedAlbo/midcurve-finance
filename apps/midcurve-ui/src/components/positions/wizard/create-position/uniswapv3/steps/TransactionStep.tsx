@@ -35,6 +35,7 @@ import { useChainSharedContract } from '@/hooks/automation/useChainSharedContrac
 import { getChainSlugByChainId } from '@/config/chains';
 import { apiClientFn } from '@/lib/api-client';
 import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
+import { TokenizePrompt } from '../shared/TokenizePrompt';
 import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnectionPrompt';
 import { useErc20TokenApprovalPrompt } from '@/components/common/Erc20TokenApprovalPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
@@ -70,6 +71,9 @@ export function TransactionStep() {
 
   // Track if mint was successful (used to show success state on all pre-mint items after canceling subscriptions)
   const [mintSucceeded, setMintSucceeded] = useState(false);
+
+  // Track tokenize step (dummy for now)
+  const [tokenizeHandled, setTokenizeHandled] = useState(false);
 
   // Track close order confirm API call status
   const [confirmStatus, setConfirmStatus] = useState<'pending' | 'active' | 'success' | 'warning'>('pending');
@@ -873,6 +877,19 @@ export function TransactionStep() {
                   }
                 }
               }}
+            />
+          )}
+
+          {/* Tokenize position (optional) */}
+          {mintSucceeded && (
+            <TokenizePrompt
+              enabled={mintSucceeded && (createPositionAPI.isSuccess || createPositionAPI.isError)}
+              showActionButton={!tokenizeHandled}
+              nftId={state.nftId ?? '0'}
+              chainId={chainId ?? 0}
+              liquidity={state.adjustedLiquidity && state.adjustedLiquidity !== '0' ? state.adjustedLiquidity : state.liquidity}
+              onTokenize={() => setTokenizeHandled(true)}
+              onSkip={() => setTokenizeHandled(true)}
             />
           )}
 

@@ -11,6 +11,7 @@ import type {
   EventType,
   BasePositionLedgerEventParams,
   PositionLedgerEventRow,
+  PositionLedgerEventJSON,
   RewardJSON,
 } from '../position-ledger-event.types.js';
 import { rewardFromJSON } from '../position-ledger-event.types.js';
@@ -207,6 +208,42 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
   }
 
   // ============================================================================
+  // UniswapV3-Specific Event Properties (from state)
+  // ============================================================================
+
+  /** Pool price at event time in quote token units */
+  get poolPrice(): bigint {
+    return this._state.poolPrice;
+  }
+
+  /** Token0 amount involved in this event */
+  get token0Amount(): bigint {
+    return this._state.token0Amount;
+  }
+
+  /** Token1 amount involved in this event */
+  get token1Amount(): bigint {
+    return this._state.token1Amount;
+  }
+
+  // ============================================================================
+  // Serialization
+  // ============================================================================
+
+  /**
+   * Serialize to JSON for API responses.
+   * Extends base serialization with UniswapV3-specific fields.
+   */
+  override toJSON(): PositionLedgerEventJSON {
+    return {
+      ...super.toJSON(),
+      poolPrice: this.poolPrice.toString(),
+      token0Amount: this.token0Amount.toString(),
+      token1Amount: this.token1Amount.toString(),
+    };
+  }
+
+  // ============================================================================
   // Factory Methods
   // ============================================================================
 
@@ -239,9 +276,6 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       inputHash: row.inputHash,
 
       // Financial data (convert from string stored in DB to bigint)
-      poolPrice: typeof row.poolPrice === 'bigint' ? row.poolPrice : BigInt(row.poolPrice),
-      token0Amount: typeof row.token0Amount === 'bigint' ? row.token0Amount : BigInt(row.token0Amount),
-      token1Amount: typeof row.token1Amount === 'bigint' ? row.token1Amount : BigInt(row.token1Amount),
       tokenValue: typeof row.tokenValue === 'bigint' ? row.tokenValue : BigInt(row.tokenValue),
       rewards: rewardsJSON.map(rewardFromJSON),
 
@@ -253,13 +287,17 @@ export class UniswapV3PositionLedgerEvent extends BasePositionLedgerEvent {
       deltaPnl: typeof row.deltaPnl === 'bigint' ? row.deltaPnl : BigInt(row.deltaPnl),
       pnlAfter: typeof row.pnlAfter === 'bigint' ? row.pnlAfter : BigInt(row.pnlAfter),
 
-      // Collected fees tracking (convert from string stored in DB to bigint)
-      deltaCollectedFees: typeof row.deltaCollectedFees === 'bigint' ? row.deltaCollectedFees : BigInt(row.deltaCollectedFees),
-      collectedFeesAfter: typeof row.collectedFeesAfter === 'bigint' ? row.collectedFeesAfter : BigInt(row.collectedFeesAfter),
+      // Collected yield tracking (convert from string stored in DB to bigint)
+      deltaCollectedYield: typeof row.deltaCollectedYield === 'bigint' ? row.deltaCollectedYield : BigInt(row.deltaCollectedYield),
+      collectedYieldAfter: typeof row.collectedYieldAfter === 'bigint' ? row.collectedYieldAfter : BigInt(row.collectedYieldAfter),
 
       // Realized cashflow tracking (always 0 for AMM positions)
       deltaRealizedCashflow: typeof row.deltaRealizedCashflow === 'bigint' ? row.deltaRealizedCashflow : BigInt(row.deltaRealizedCashflow),
       realizedCashflowAfter: typeof row.realizedCashflowAfter === 'bigint' ? row.realizedCashflowAfter : BigInt(row.realizedCashflowAfter),
+
+      // Ownership tracking
+      isIgnored: row.isIgnored ?? false,
+      ignoredReason: row.ignoredReason ?? null,
 
       // Protocol-specific
       config: ledgerEventConfigFromJSON(configJSON),

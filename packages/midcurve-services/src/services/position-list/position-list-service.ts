@@ -31,17 +31,19 @@ const POSITION_LIST_SELECT = {
   positionHash: true,
   protocol: true,
   currentValue: true,
-  currentCostBasis: true,
+  costBasis: true,
   realizedPnl: true,
   unrealizedPnl: true,
   realizedCashflow: true,
   unrealizedCashflow: true,
-  collectedFees: true,
-  unClaimedFees: true,
-  lastFeesCollectedAt: true,
+  collectedYield: true,
+  unclaimedYield: true,
+  lastYieldClaimedAt: true,
+  type: true,
   totalApr: true,
-  priceRangeLower: true,
-  priceRangeUpper: true,
+  baseApr: true,
+  rewardApr: true,
+  config: true,
   positionOpenedAt: true,
   positionClosedAt: true,
   isActive: true,
@@ -155,11 +157,17 @@ export class PositionListService {
         this.prisma.position.count({ where }),
       ]);
 
-      // Cast positionHash from string | null to string (filtered by where clause)
-      const positions: PositionListRow[] = results.map((row) => ({
-        ...row,
-        positionHash: row.positionHash as string,
-      }));
+      // Map DB results to PositionListRow, extracting priceRange from config JSON
+      const positions: PositionListRow[] = results.map((row) => {
+        const config = row.config as Record<string, unknown>;
+        const { config: _config, ...rest } = row;
+        return {
+          ...rest,
+          positionHash: row.positionHash as string,
+          priceRangeLower: (config.priceRangeLower as string) ?? '0',
+          priceRangeUpper: (config.priceRangeUpper as string) ?? '0',
+        };
+      });
 
       this.logger.info(
         {

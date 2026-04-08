@@ -18,3 +18,6 @@ export * from './factory.js';
 
 // Uniswap V3
 export * from './uniswapv3/index.js';
+
+// UniswapV3 Vault
+export * from './uniswapv3-vault/index.js';

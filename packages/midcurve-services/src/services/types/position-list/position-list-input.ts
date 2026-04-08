@@ -91,17 +91,20 @@ export interface PositionListRow {
   id: string;
   positionHash: string;
   protocol: string;
+  type: string;
 
   // Financial (stored as string in Prisma Decimal columns)
   currentValue: string;
-  currentCostBasis: string;
+  costBasis: string;
   realizedPnl: string;
   unrealizedPnl: string;
   realizedCashflow: string;
   unrealizedCashflow: string;
-  collectedFees: string;
-  unClaimedFees: string;
-  lastFeesCollectedAt: Date | null;
+  collectedYield: string;
+  unclaimedYield: string;
+  lastYieldClaimedAt: Date | null;
+  baseApr: number | null;
+  rewardApr: number | null;
   totalApr: number | null;
 
   // Price range (stored as string in Prisma Decimal columns)

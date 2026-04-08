@@ -13,6 +13,7 @@ import type { PoolInterface } from '../pool/index.js';
 import type { PositionInterface } from './position.interface.js';
 import type {
   PositionProtocol,
+  PositionType,
   PositionJSON,
   BasePositionParams,
   PnLSimulationResult,
@@ -47,34 +48,33 @@ export abstract class BasePosition implements PositionInterface {
 
   readonly token0: TokenInterface;
   readonly token1: TokenInterface;
-  readonly isToken0Quote: boolean;
 
   // ============================================================================
   // PnL Fields
   // ============================================================================
 
   readonly currentValue: bigint;
-  readonly currentCostBasis: bigint;
+  readonly costBasis: bigint;
   readonly realizedPnl: bigint;
   readonly unrealizedPnl: bigint;
   readonly realizedCashflow: bigint;
   readonly unrealizedCashflow: bigint;
 
   // ============================================================================
-  // Fee Fields
+  // Yield Fields
   // ============================================================================
 
-  readonly collectedFees: bigint;
-  readonly unClaimedFees: bigint;
-  readonly lastFeesCollectedAt: Date;
+  readonly collectedYield: bigint;
+  readonly unclaimedYield: bigint;
+  readonly lastYieldClaimedAt: Date;
+
+  // ============================================================================
+  // APR Fields
+  // ============================================================================
+
+  readonly baseApr: number | null;
+  readonly rewardApr: number | null;
   readonly totalApr: number | null;
-
-  // ============================================================================
-  // Price Range
-  // ============================================================================
-
-  readonly priceRangeLower: bigint;
-  readonly priceRangeUpper: bigint;
 
   // ============================================================================
   // Lifecycle
@@ -99,6 +99,7 @@ export abstract class BasePosition implements PositionInterface {
    * Protocol identifier - must be implemented by subclass.
    */
   abstract readonly protocol: PositionProtocol;
+  readonly type: PositionType;
 
   /**
    * Virtual pool constructed from position data.
@@ -141,29 +142,29 @@ export abstract class BasePosition implements PositionInterface {
     this.id = params.id;
     this.positionHash = params.positionHash;
     this.userId = params.userId;
+    this.type = params.type as PositionType;
 
     // Token & pool reference
     this.token0 = params.token0;
     this.token1 = params.token1;
-    this.isToken0Quote = params.isToken0Quote;
 
     // PnL fields
     this.currentValue = params.currentValue;
-    this.currentCostBasis = params.currentCostBasis;
+    this.costBasis = params.costBasis;
     this.realizedPnl = params.realizedPnl;
     this.unrealizedPnl = params.unrealizedPnl;
     this.realizedCashflow = params.realizedCashflow;
     this.unrealizedCashflow = params.unrealizedCashflow;
 
-    // Fee fields
-    this.collectedFees = params.collectedFees;
-    this.unClaimedFees = params.unClaimedFees;
-    this.lastFeesCollectedAt = params.lastFeesCollectedAt;
-    this.totalApr = params.totalApr;
+    // Yield fields
+    this.collectedYield = params.collectedYield;
+    this.unclaimedYield = params.unclaimedYield;
+    this.lastYieldClaimedAt = params.lastYieldClaimedAt;
 
-    // Price range
-    this.priceRangeLower = params.priceRangeLower;
-    this.priceRangeUpper = params.priceRangeUpper;
+    // APR fields
+    this.baseApr = params.baseApr;
+    this.rewardApr = params.rewardApr;
+    this.totalApr = params.totalApr;
 
     // Lifecycle
     this.positionOpenedAt = params.positionOpenedAt;
@@ -189,32 +190,32 @@ export abstract class BasePosition implements PositionInterface {
    *
    * @returns PositionJSON ready for API response
    */
-  toJSON(): PositionJSON {
+  toJSON(): Omit<PositionJSON, 'isToken0Quote' | 'priceRangeLower' | 'priceRangeUpper'> {
     return {
       id: this.id,
       positionHash: this.positionHash,
       userId: this.userId,
       protocol: this.protocol,
+      type: this.type,
       pool: this.pool.toJSON(),
-      isToken0Quote: this.isToken0Quote,
 
       // PnL fields (bigint → string)
       currentValue: this.currentValue.toString(),
-      currentCostBasis: this.currentCostBasis.toString(),
+      costBasis: this.costBasis.toString(),
       realizedPnl: this.realizedPnl.toString(),
       unrealizedPnl: this.unrealizedPnl.toString(),
       realizedCashflow: this.realizedCashflow.toString(),
       unrealizedCashflow: this.unrealizedCashflow.toString(),
 
-      // Fee fields
-      collectedFees: this.collectedFees.toString(),
-      unClaimedFees: this.unClaimedFees.toString(),
-      lastFeesCollectedAt: this.lastFeesCollectedAt.toISOString(),
-      totalApr: this.totalApr,
+      // Yield fields
+      collectedYield: this.collectedYield.toString(),
+      unclaimedYield: this.unclaimedYield.toString(),
+      lastYieldClaimedAt: this.lastYieldClaimedAt?.toISOString() ?? null,
 
-      // Price range (bigint → string)
-      priceRangeLower: this.priceRangeLower.toString(),
-      priceRangeUpper: this.priceRangeUpper.toString(),
+      // APR fields
+      baseApr: this.baseApr,
+      rewardApr: this.rewardApr,
+      totalApr: this.totalApr,
 
       // Lifecycle
       positionOpenedAt: this.positionOpenedAt.toISOString(),
@@ -234,28 +235,6 @@ export abstract class BasePosition implements PositionInterface {
   // ============================================================================
   // Helper Methods
   // ============================================================================
-
-  /**
-   * Get the base token (the token with price risk exposure).
-   *
-   * In quote/base terminology:
-   * - Quote token = reference currency (what you measure value in)
-   * - Base token = asset being priced (what you have exposure to)
-   *
-   * @returns The base token
-   */
-  getBaseToken(): TokenInterface {
-    return this.isToken0Quote ? this.token1 : this.token0;
-  }
-
-  /**
-   * Get the quote token (the reference/numeraire token).
-   *
-   * @returns The quote token
-   */
-  getQuoteToken(): TokenInterface {
-    return this.isToken0Quote ? this.token0 : this.token1;
-  }
 
   /**
    * Get total realized PnL including cashflow.

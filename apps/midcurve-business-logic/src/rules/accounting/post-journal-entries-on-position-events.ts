@@ -35,8 +35,9 @@ import {
   type PositionLiquidityDecreasedPayload,
   type PositionFeesCollectedPayload,
   type PositionLiquidityRevertedPayload,
+  type PositionTransferredPayload,
 } from '@midcurve/services';
-import type { JournalLineInput } from '@midcurve/shared';
+import { createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
 import { BusinessRule } from '../base';
 
 // =============================================================================
@@ -144,6 +145,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         return this.handleLiquidityDecreased(event as DomainEvent<PositionLiquidityDecreasedPayload>);
       case 'position.fees.collected':
         return this.handleFeesCollected(event as DomainEvent<PositionFeesCollectedPayload>);
+      case 'position.transferred.in':
+        return this.handleTransferredIn(event as DomainEvent<PositionTransferredPayload>);
+      case 'position.transferred.out':
+        return this.handleTransferredOut(event as DomainEvent<PositionTransferredPayload>);
       case 'position.state.refreshed':
         // No-op: unrealized journal entries (M2M, fee accrual) no longer created
         return;
@@ -166,23 +171,20 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * position.created → Track position + DR 1000 / CR 3000 (if cost basis available)
+   * position.created → DR 1000 / CR 3000 (if cost basis available)
    *
-   * Always registers the position for tracking. Creates the foundation entry
-   * only if costBasis > 0 (which may not be the case for MINT-then-increase flows).
+   * Creates the foundation entry only if costBasis > 0
+   * (which may not be the case for MINT-then-increase flows).
    */
   private async handlePositionCreated(
     event: DomainEvent<PositionCreatedPayload>
   ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
     const position = event.payload;
     const positionRef = position.positionHash;
 
-    // Always track — even if costBasis is 0
-    const trackedPositionId = await this.journalService.trackPosition(position.userId, positionRef);
-
-    if (await this.journalService.isProcessed(event.id)) return;
-
-    const costBasis = position.currentCostBasis;
+    const costBasis = position.costBasis;
     if (!costBasis || costBasis === '0') return;
 
     const ctx = await this.getReportingContext(position.id);
@@ -196,7 +198,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId: position.userId,
-        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         entryDate: new Date(event.timestamp),
@@ -220,23 +221,20 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
-    if (!trackedPositionId) return;
-
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
 
-    // If tracked but no journal entries exist yet, the foundation entry was missed
+    // If no journal entries exist yet, the foundation entry was missed
     // (costBasis was 0 at position.created time). Create it now.
     const foundationEventId = `${event.id}:foundation`;
     if (!(await this.journalService.hasEntriesForPosition(positionRef))) {
       if (!(await this.journalService.isProcessed(foundationEventId))) {
         const position = await prisma.position.findUnique({
           where: { id: positionId },
-          select: { currentCostBasis: true },
+          select: { costBasis: true },
         });
 
-        const costBasis = position?.currentCostBasis ?? '0';
+        const costBasis = position?.costBasis ?? '0';
         if (costBasis !== '0') {
           const lines = new JournalLineBuilder()
             .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
@@ -247,7 +245,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
           await this.journalService.createEntry(
             {
               userId,
-              trackedPositionId,
               domainEventId: foundationEventId,
               domainEventType: 'position.created',
               entryDate: new Date(event.payload.eventTimestamp),
@@ -283,7 +280,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
         domainEventId: event.id,
         domainEventType: event.type,
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
@@ -312,8 +308,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
-    if (!trackedPositionId) return;
+
 
     const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'DECREASE_POSITION', event.payload.eventTimestamp);
     if (!ledgerEvent) {
@@ -384,7 +379,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
+
         domainEventId: event.id,
         domainEventType: event.type,
         ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
@@ -409,8 +404,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-    const trackedPositionId = await this.journalService.getTrackedPositionId(userId, positionRef);
-    if (!trackedPositionId) return;
+
 
     const totalFees = BigInt(feesValueInQuote);
     if (totalFees <= 0n) return;
@@ -428,7 +422,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     await this.journalService.createEntry(
       {
         userId,
-        trackedPositionId,
+
         domainEventId: event.id,
         domainEventType: event.type,
         ledgerEventRef: ledgerEvent ? `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}` : undefined,
@@ -451,9 +445,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   ): Promise<void> {
     const position = event.payload;
     const positionRef = position.positionHash;
-
-    const trackedPositionId = await this.journalService.getTrackedPositionId(position.userId, positionRef);
-    if (!trackedPositionId) return;
 
     // Cost basis remainder correction (Account 1000)
     // The quote token balance may be 0 while the reporting currency balance is not,
@@ -497,7 +488,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         await this.journalService.createEntry(
           {
             userId: position.userId,
-            trackedPositionId,
+    
             domainEventId: costBasisCorrectionEventId,
             domainEventType: event.type,
             entryDate: new Date(event.timestamp),
@@ -510,7 +501,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   /**
-   * position.deleted → Untrack position (cascade deletes all journal entries)
+   * position.deleted → Delete all journal entries for the position
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionDeletedPayload>
@@ -519,11 +510,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const positionRef = position.positionHash;
     if (!positionRef) return;
 
-    // Deleting the TrackedPosition cascades to all JournalEntries and JournalLines
-    await this.journalService.untrackPosition(position.userId, positionRef);
+    const count = await this.journalService.deleteEntriesByPositionRef(positionRef);
     this.logger.info(
-      { positionRef },
-      'Untracked position (cascade deleted journal entries)'
+      { positionRef, deletedCount: count },
+      'Deleted journal entries for deleted position'
     );
   }
 
@@ -586,6 +576,136 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   }
 
   // ===========================================================================
+  // Transfer Handlers
+  // ===========================================================================
+
+  /**
+   * position.transferred.in → DR 1000 / CR 3000
+   *
+   * Creates cost basis at FMV when position is received via transfer.
+   */
+  private async handleTransferredIn(
+    event: DomainEvent<PositionTransferredPayload>
+  ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
+    const { positionId, positionHash, deltaCostBasis } = event.payload;
+    const positionRef = positionHash;
+    const userId = await this.getPositionUserId(positionId);
+
+
+
+    const costBasis = deltaCostBasis;
+    if (costBasis === '0') return;
+
+    const ctx = await this.getReportingContext(positionId);
+    const instrumentRef = ctx.poolHash;
+    const lines = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
+      .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, positionRef, instrumentRef)
+      .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, costBasis, positionRef, instrumentRef)
+      .build();
+
+    await this.journalService.createEntry(
+      {
+        userId,
+
+        domainEventId: event.id,
+        domainEventType: event.type,
+        entryDate: new Date(event.payload.eventTimestamp),
+        description: `Transfer in: ${positionRef}`,
+      },
+      lines
+    );
+  }
+
+  /**
+   * position.transferred.out → CR 1000 / DR 3100 + realized gain/loss + FX effect
+   *
+   * Derecognizes remaining cost basis and realizes PnL at FMV.
+   */
+  private async handleTransferredOut(
+    event: DomainEvent<PositionTransferredPayload>
+  ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
+    const { positionId, positionHash, tokenValue, deltaCostBasis, deltaPnl: deltaPnlStr } = event.payload;
+    const positionRef = positionHash;
+    const userId = await this.getPositionUserId(positionId);
+
+
+
+    const absDeltaCostBasis = absBigint(deltaCostBasis);
+    const deltaPnl = BigInt(deltaPnlStr);
+
+    const ctx = await this.getReportingContext(positionId);
+    const instrumentRef = ctx.poolHash;
+    const spotRate = BigInt(ctx.exchangeRate);
+    const decimalsScale = 10n ** BigInt(ctx.quoteTokenDecimals);
+
+    // WAC rate for cost basis derecognition (same pattern as handleLiquidityDecreased)
+    const wacRate = await this.journalService.getAccountWacExchangeRate(
+      ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef, ctx.quoteTokenDecimals
+    );
+    const costBasisRate = wacRate ?? spotRate;
+
+    const builder = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals);
+
+    // CR 1000: Derecognize remaining cost basis
+    builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absDeltaCostBasis, positionRef, instrumentRef);
+
+    // DR 3100: Capital returned at FMV
+    builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, tokenValue, positionRef, instrumentRef);
+
+    // Realized gain or loss
+    if (deltaPnl > 0n) {
+      builder.credit(ACCOUNT_CODES.REALIZED_GAINS, deltaPnl.toString(), positionRef, instrumentRef);
+    } else if (deltaPnl < 0n) {
+      builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
+    }
+
+    const lines = builder.build();
+
+    // Override cost basis line with WAC rate for reporting amounts
+    const costBasisLine = lines.find(
+      (l) => l.accountCode === ACCOUNT_CODES.LP_POSITION_AT_COST
+    )!;
+    const costBasisAtSpot = BigInt(costBasisLine.amountReporting!);
+    const costBasisAtWac = (BigInt(absDeltaCostBasis) * costBasisRate) / decimalsScale;
+    costBasisLine.amountReporting = costBasisAtWac.toString();
+    costBasisLine.exchangeRate = costBasisRate.toString();
+
+    // FX difference
+    const fxDiff = costBasisAtSpot - costBasisAtWac;
+    if (fxDiff !== 0n) {
+      const fxLine: JournalLineInput = {
+        accountCode: ACCOUNT_CODES.FX_GAIN_LOSS,
+        side: fxDiff > 0n ? 'credit' : 'debit',
+        amountQuote: '0',
+        amountReporting: (fxDiff < 0n ? -fxDiff : fxDiff).toString(),
+        reportingCurrency: ctx.reportingCurrency,
+        exchangeRate: ctx.exchangeRate,
+        positionRef,
+        instrumentRef,
+      };
+      lines.push(fxLine);
+    }
+
+    await this.journalService.createEntry(
+      {
+        userId,
+
+        domainEventId: event.id,
+        domainEventType: event.type,
+        entryDate: new Date(event.payload.eventTimestamp),
+        description: `Transfer out: ${positionRef}`,
+      },
+      lines
+    );
+  }
+
+  // ===========================================================================
   // Helpers
   // ===========================================================================
 
@@ -603,6 +723,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         positionId,
         eventType,
         timestamp: new Date(eventTimestamp),
+        isIgnored: false,
       },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -611,11 +732,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         costBasisAfter: true,
         deltaPnl: true,
         pnlAfter: true,
-        deltaCollectedFees: true,
-        collectedFeesAfter: true,
+        deltaCollectedYield: true,
+        collectedYieldAfter: true,
         tokenValue: true,
-        token0Amount: true,
-        token1Amount: true,
+        state: true,
       },
     });
   }
@@ -641,7 +761,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const position = await prisma.position.findUnique({
       where: { id: positionId },
       select: {
-        isToken0Quote: true,
         protocol: true,
         config: true,
         user: { select: { reportingCurrency: true } },
@@ -656,19 +775,20 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const poolAddress = positionConfig.poolAddress as string;
 
     const [token0Row, token1Row] = await Promise.all([
-      prisma.token.findFirst({
-        where: { config: { path: ['address'], equals: token0Address } },
+      prisma.token.findUnique({
+        where: { tokenHash: createErc20TokenHash(chainId, token0Address) },
         select: { decimals: true, coingeckoId: true },
       }),
-      prisma.token.findFirst({
-        where: { config: { path: ['address'], equals: token1Address } },
+      prisma.token.findUnique({
+        where: { tokenHash: createErc20TokenHash(chainId, token1Address) },
         select: { decimals: true, coingeckoId: true },
       }),
     ]);
     if (!token0Row) throw new Error(`Token not found for address ${token0Address} on chain ${chainId}`);
     if (!token1Row) throw new Error(`Token not found for address ${token1Address} on chain ${chainId}`);
 
-    const quoteToken = position.isToken0Quote ? token0Row : token1Row;
+    const isToken0Quote = positionConfig.isToken0Quote as boolean;
+    const quoteToken = isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
 
     // Phase 1: only USD supported. For non-USD, falls back to 1.0.

@@ -7,7 +7,7 @@
 
 import type { TokenInterface } from '../token/index.js';
 import type { PoolInterface } from '../pool/index.js';
-import type { PositionProtocol, PositionJSON, PnLSimulationResult } from './position.types.js';
+import type { PositionProtocol, PositionType, PnLSimulationResult } from './position.types.js';
 
 /**
  * PositionInterface
@@ -41,6 +41,12 @@ export interface PositionInterface {
   readonly protocol: PositionProtocol;
 
   /**
+   * Position type classification
+   * @example 'LP_CONCENTRATED'
+   */
+  readonly type: PositionType;
+
+  /**
    * Token0 of the position's pool
    */
   readonly token0: TokenInterface;
@@ -56,13 +62,6 @@ export interface PositionInterface {
    */
   readonly pool: PoolInterface;
 
-  /**
-   * Whether token0 is the quote token
-   * If true: token0 = quote, token1 = base
-   * If false: token0 = base, token1 = quote
-   */
-  readonly isToken0Quote: boolean;
-
   // ============================================================================
   // PnL Fields (all in quote token units)
   // ============================================================================
@@ -73,9 +72,9 @@ export interface PositionInterface {
   readonly currentValue: bigint;
 
   /**
-   * Current cost basis (total invested) in quote token units
+   * Cost basis (total invested) in quote token units
    */
-  readonly currentCostBasis: bigint;
+  readonly costBasis: bigint;
 
   /**
    * Realized PnL from position changes
@@ -98,42 +97,42 @@ export interface PositionInterface {
   readonly unrealizedCashflow: bigint;
 
   // ============================================================================
-  // Fee Fields
+  // Yield Fields
   // ============================================================================
 
   /**
-   * Total fees collected over position lifetime
+   * Total yield collected over position lifetime
    */
-  readonly collectedFees: bigint;
+  readonly collectedYield: bigint;
 
   /**
-   * Unclaimed fees (available to collect)
+   * Unclaimed yield (available to collect)
    */
-  readonly unClaimedFees: bigint;
+  readonly unclaimedYield: bigint;
 
   /**
-   * Timestamp of last fee collection
+   * Timestamp of last yield claim
    */
-  readonly lastFeesCollectedAt: Date;
+  readonly lastYieldClaimedAt: Date;
+
+  // ============================================================================
+  // APR Fields
+  // ============================================================================
 
   /**
-   * Calculated total APR (null if not calculated)
+   * Base APR (fee/yield APR), null if not calculated
+   */
+  readonly baseApr: number | null;
+
+  /**
+   * Reward APR (incentive programs), null if not applicable
+   */
+  readonly rewardApr: number | null;
+
+  /**
+   * Total APR (baseApr + rewardApr), null if not calculated
    */
   readonly totalApr: number | null;
-
-  // ============================================================================
-  // Price Range
-  // ============================================================================
-
-  /**
-   * Lower price bound (quote per base token)
-   */
-  readonly priceRangeLower: bigint;
-
-  /**
-   * Upper price bound (quote per base token)
-   */
-  readonly priceRangeUpper: bigint;
 
   // ============================================================================
   // Lifecycle
@@ -181,21 +180,6 @@ export interface PositionInterface {
   // Methods
   // ============================================================================
 
-  /**
-   * Serialize position to JSON format for API responses.
-   * Converts Date objects to ISO strings and bigint to strings.
-   */
-  toJSON(): PositionJSON;
-
-  /**
-   * Get the base token (the token with price risk exposure)
-   */
-  getBaseToken(): TokenInterface;
-
-  /**
-   * Get the quote token (the reference/numeraire token)
-   */
-  getQuoteToken(): TokenInterface;
 
   /**
    * Get total realized PnL including cashflow

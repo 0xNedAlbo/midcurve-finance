@@ -277,6 +277,56 @@ export class UniswapV3Position extends BasePosition {
   }
 
   // ============================================================================
+  // UniswapV3-Specific Position Properties (from config)
+  // ============================================================================
+
+  /** Whether token0 is the quote token */
+  get isToken0Quote(): boolean {
+    return this._config.isToken0Quote;
+  }
+
+  /** Lower price range bound in quote token units */
+  get priceRangeLower(): bigint {
+    return this._config.priceRangeLower;
+  }
+
+  /** Upper price range bound in quote token units */
+  get priceRangeUpper(): bigint {
+    return this._config.priceRangeUpper;
+  }
+
+  /**
+   * Get the base token (the token with price risk exposure).
+   */
+  getBaseToken(): TokenInterface {
+    return this.isToken0Quote ? this.token1 : this.token0;
+  }
+
+  /**
+   * Get the quote token (the reference/numeraire token).
+   */
+  getQuoteToken(): TokenInterface {
+    return this.isToken0Quote ? this.token0 : this.token1;
+  }
+
+  // ============================================================================
+  // Serialization
+  // ============================================================================
+
+  /**
+   * Serialize position to JSON for API responses.
+   * Extends base serialization with UniswapV3-specific fields.
+   */
+  override toJSON(): PositionJSON {
+    return {
+      ...super.toJSON(),
+      isToken0Quote: this.isToken0Quote,
+      priceRangeLower: this.priceRangeLower.toString(),
+      priceRangeUpper: this.priceRangeUpper.toString(),
+    };
+  }
+
+  // ============================================================================
   // PnL Simulation
   // ============================================================================
 
@@ -312,9 +362,9 @@ export class UniswapV3Position extends BasePosition {
     );
 
     // Calculate PnL with higher precision (0.0001% resolution instead of 0.01%)
-    const pnlValue = positionValue - this.currentCostBasis;
-    const pnlPercent = this.currentCostBasis > 0n
-      ? Number((pnlValue * 1000000n) / this.currentCostBasis) / 10000
+    const pnlValue = positionValue - this.costBasis;
+    const pnlPercent = this.costBasis > 0n
+      ? Number((pnlValue * 1000000n) / this.costBasis) / 10000
       : 0;
 
     // Get tick-boundary sqrtPrices for token amounts and phase detection
@@ -378,29 +428,29 @@ export class UniswapV3Position extends BasePosition {
       id: row.id,
       positionHash: row.positionHash,
       userId: row.userId,
+      type: row.type,
 
       // Token references
       token0,
       token1,
-      isToken0Quote: row.isToken0Quote,
 
       // PnL fields
       currentValue: row.currentValue,
-      currentCostBasis: row.currentCostBasis,
+      costBasis: row.costBasis,
       realizedPnl: row.realizedPnl,
       unrealizedPnl: row.unrealizedPnl,
       realizedCashflow: row.realizedCashflow,
       unrealizedCashflow: row.unrealizedCashflow,
 
-      // Fee fields
-      collectedFees: row.collectedFees,
-      unClaimedFees: row.unClaimedFees,
-      lastFeesCollectedAt: row.lastFeesCollectedAt,
-      totalApr: row.totalApr,
+      // Yield fields
+      collectedYield: row.collectedYield,
+      unclaimedYield: row.unclaimedYield,
+      lastYieldClaimedAt: row.lastYieldClaimedAt,
 
-      // Price range
-      priceRangeLower: row.priceRangeLower,
-      priceRangeUpper: row.priceRangeUpper,
+      // APR fields
+      baseApr: row.baseApr,
+      rewardApr: row.rewardApr,
+      totalApr: row.totalApr,
 
       // Lifecycle
       positionOpenedAt: row.positionOpenedAt,
@@ -457,29 +507,29 @@ export class UniswapV3Position extends BasePosition {
       id: 'simulation',
       positionHash: 'simulation',
       userId: 'simulation',
+      type: 'LP_CONCENTRATED',
 
       // Token references
       token0: params.pool.token0,
       token1: params.pool.token1,
-      isToken0Quote: params.isToken0Quote,
 
       // PnL fields (costBasis is the key input)
       currentValue: params.costBasis, // At creation, value equals cost
-      currentCostBasis: params.costBasis,
+      costBasis: params.costBasis,
       realizedPnl: 0n,
       unrealizedPnl: 0n,
       realizedCashflow: 0n,
       unrealizedCashflow: 0n,
 
-      // Fee fields (not used in simulation)
-      collectedFees: 0n,
-      unClaimedFees: 0n,
-      lastFeesCollectedAt: now,
-      totalApr: null,
+      // Yield fields (not used in simulation)
+      collectedYield: 0n,
+      unclaimedYield: 0n,
+      lastYieldClaimedAt: now,
 
-      // Price range (computed from ticks)
-      priceRangeLower,
-      priceRangeUpper,
+      // APR fields (not used in simulation)
+      baseApr: null,
+      rewardApr: null,
+      totalApr: null,
 
       // Lifecycle
       positionOpenedAt: now,
@@ -497,6 +547,9 @@ export class UniswapV3Position extends BasePosition {
         tickSpacing: params.pool.tickSpacing,
         tickLower: params.tickLower,
         tickUpper: params.tickUpper,
+        isToken0Quote: params.isToken0Quote,
+        priceRangeLower,
+        priceRangeUpper,
       }),
       state: {
         ownerAddress: '0x0000000000000000000000000000000000000000',
@@ -514,6 +567,7 @@ export class UniswapV3Position extends BasePosition {
         tickUpperFeeGrowthOutside1X128: 0n,
         isBurned: false,
         isClosed: false,
+        isOwnedByUser: true,
         sqrtPriceX96: params.pool.sqrtPriceX96,
         currentTick: params.pool.currentTick,
         poolLiquidity: params.pool.liquidity,
@@ -557,34 +611,43 @@ export class UniswapV3Position extends BasePosition {
     // Reconstruct tokens from pool JSON (backward compat for API responses)
     const pool = UniswapV3Pool.fromJSON(json.pool);
 
+    // Build config from both the nested config JSON and top-level position fields
+    const configJSON = json.config as unknown as UniswapV3PositionConfigJSON;
+    const config = UniswapV3PositionConfig.fromJSON({
+      ...configJSON,
+      isToken0Quote: json.isToken0Quote,
+      priceRangeLower: json.priceRangeLower,
+      priceRangeUpper: json.priceRangeUpper,
+    });
+
     return new UniswapV3Position({
       // Identity
       id: json.id,
       positionHash: json.positionHash,
       userId: json.userId,
+      type: json.type,
 
       // Token references (extracted from pool JSON)
       token0: pool.token0,
       token1: pool.token1,
-      isToken0Quote: json.isToken0Quote,
 
       // PnL fields (string → bigint)
       currentValue: BigInt(json.currentValue),
-      currentCostBasis: BigInt(json.currentCostBasis),
+      costBasis: BigInt(json.costBasis),
       realizedPnl: BigInt(json.realizedPnl),
       unrealizedPnl: BigInt(json.unrealizedPnl),
       realizedCashflow: BigInt(json.realizedCashflow),
       unrealizedCashflow: BigInt(json.unrealizedCashflow),
 
-      // Fee fields
-      collectedFees: BigInt(json.collectedFees),
-      unClaimedFees: BigInt(json.unClaimedFees),
-      lastFeesCollectedAt: new Date(json.lastFeesCollectedAt),
-      totalApr: json.totalApr,
+      // Yield fields
+      collectedYield: BigInt(json.collectedYield),
+      unclaimedYield: BigInt(json.unclaimedYield),
+      lastYieldClaimedAt: new Date(json.lastYieldClaimedAt),
 
-      // Price range (string → bigint)
-      priceRangeLower: BigInt(json.priceRangeLower),
-      priceRangeUpper: BigInt(json.priceRangeUpper),
+      // APR fields
+      baseApr: json.baseApr,
+      rewardApr: json.rewardApr,
+      totalApr: json.totalApr,
 
       // Lifecycle
       positionOpenedAt: new Date(json.positionOpenedAt),
@@ -592,7 +655,7 @@ export class UniswapV3Position extends BasePosition {
       isActive: json.isActive,
 
       // Protocol-specific
-      config: UniswapV3PositionConfig.fromJSON(json.config as unknown as UniswapV3PositionConfigJSON),
+      config,
       state: positionStateFromJSON(json.state as unknown as UniswapV3PositionStateJSON),
 
       // Timestamps

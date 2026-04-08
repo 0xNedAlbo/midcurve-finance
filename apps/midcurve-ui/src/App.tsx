@@ -9,6 +9,7 @@ import { Erc20TransferEventProvider } from './lib/events/erc20-transfer-event-co
 import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
+import { VaultPositionDetailPage } from './pages/VaultPositionDetailPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
@@ -17,6 +18,7 @@ import { WithdrawPage } from './pages/WithdrawPage';
 import { RiskTriggersPage } from './pages/RiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
+import { WalletManagementPage } from './pages/WalletManagementPage';
 
 export function App() {
   return (
@@ -61,6 +63,10 @@ function ConfigGate() {
                 element={<PositionDetailPage />}
               />
               <Route
+                path="/positions/uniswapv3-vault/:chain/:vaultAddress"
+                element={<VaultPositionDetailPage />}
+              />
+              <Route
                 path="/notifications"
                 element={<NotificationsPage />}
               />
@@ -84,6 +90,7 @@ function ConfigGate() {
                 path="/positions/triggers/:protocol/:chain/:nftId"
                 element={<RiskTriggersPage />}
               />
+              <Route path="/wallets" element={<WalletManagementPage />} />
               <Route path="/system-config" element={<SystemConfigPage />} />
               <Route path="/setup" element={<SetupWizardPage />} />
             </Routes>

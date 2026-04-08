@@ -10,7 +10,6 @@ import type {
   LedgerEventProtocol,
   EventType,
   Reward,
-  PositionLedgerEventJSON,
 } from './position-ledger-event.types.js';
 
 /**
@@ -71,15 +70,6 @@ export interface PositionLedgerEventInterface {
   // FINANCIAL DATA
   // ============================================================================
 
-  /** Pool price at time of event (quote token units per 1 base token) */
-  readonly poolPrice: bigint;
-
-  /** Amount of token0 involved in event */
-  readonly token0Amount: bigint;
-
-  /** Amount of token1 involved in event */
-  readonly token1Amount: bigint;
-
   /** Total value of tokens in quote currency */
   readonly tokenValue: bigint;
 
@@ -107,6 +97,16 @@ export interface PositionLedgerEventInterface {
   readonly pnlAfter: bigint;
 
   // ============================================================================
+  // OWNERSHIP TRACKING
+  // ============================================================================
+
+  /** Whether this event is ignored for financial calculations */
+  readonly isIgnored: boolean;
+
+  /** Reason the event is ignored */
+  readonly ignoredReason: string | null;
+
+  // ============================================================================
   // PROTOCOL-SPECIFIC DATA
   // ============================================================================
 
@@ -120,9 +120,4 @@ export interface PositionLedgerEventInterface {
   // METHODS
   // ============================================================================
 
-  /**
-   * Serialize to JSON for API responses.
-   * Converts Date to ISO string and bigint to string.
-   */
-  toJSON(): PositionLedgerEventJSON;
 }

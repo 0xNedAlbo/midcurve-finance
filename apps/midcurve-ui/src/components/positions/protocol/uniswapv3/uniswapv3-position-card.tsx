@@ -20,17 +20,19 @@ import { PositionCardMetrics } from "../../position-card-metrics";
 import { UniswapV3Identifier } from "./uniswapv3-identifier";
 import { UniswapV3RangeStatus } from "./uniswapv3-range-status";
 import { UniswapV3ChainBadge } from "./uniswapv3-chain-badge";
+import { UniswapV3OwnerBadge } from "./uniswapv3-owner-badge";
 import { UniswapV3Actions } from "./uniswapv3-actions";
 import { UniswapV3MiniPnLCurve } from "./uniswapv3-mini-pnl-curve";
 import { PositionActionsMenu } from "../../position-actions-menu";
 import { UniswapV3DeletePositionModal } from "./uniswapv3-delete-position-modal";
+
 import { UniswapV3ReloadHistoryModal } from "./uniswapv3-reload-history-modal";
 import { UniswapV3SwitchQuoteTokenModal } from "./uniswapv3-switch-quote-token-modal";
 import { useIsMutating } from "@tanstack/react-query";
 import { deletePositionMutationKey } from "@/hooks/positions/useDeletePosition";
 import { reloadPositionHistoryMutationKey } from "@/hooks/positions/useReloadPositionHistory";
 import { switchQuoteTokenMutationKey } from "@/hooks/positions/useSwitchQuoteToken";
-import { useToggleAccountingTracking, toggleAccountingTrackingMutationKey } from "@/hooks/positions/useToggleAccountingTracking";
+
 import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
 import { useUniswapV3AutoRefresh } from "@/hooks/positions/uniswapv3/useUniswapV3AutoRefresh";
 import { useUniswapV3Position } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
@@ -47,7 +49,6 @@ export function UniswapV3PositionCard({ chainId, nftId, index = 0 }: UniswapV3Po
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
   const [showSwitchQuoteTokenModal, setShowSwitchQuoteTokenModal] = useState(false);
-
   const isAlt = index % 2 === 1;
 
   // Fetch position detail (auto-refreshes every 60s)
@@ -112,8 +113,6 @@ function UniswapV3PositionCardLoaded({
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
   const isSwitchingQuoteToken = useIsMutating({ mutationKey: switchQuoteTokenMutationKey(position.positionHash) }) > 0;
-  const isTogglingTracking = useIsMutating({ mutationKey: toggleAccountingTrackingMutationKey(position.positionHash) }) > 0;
-  const toggleTrackingMutation = useToggleAccountingTracking(position.positionHash, chainId, String(nftId));
   const refreshMutation = useUniswapV3RefreshPosition();
   const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
 
@@ -161,6 +160,7 @@ function UniswapV3PositionCardLoaded({
             <>
               <UniswapV3ChainBadge position={position} />
               <UniswapV3Identifier position={position} />
+              <UniswapV3OwnerBadge position={position} />
             </>
           }
         />
@@ -170,9 +170,9 @@ function UniswapV3PositionCardLoaded({
           currentValue={position.currentValue}
           realizedPnl={position.realizedPnl}
           unrealizedPnl={position.unrealizedPnl}
-          unClaimedFees={position.unClaimedFees}
-          currentCostBasis={position.currentCostBasis}
-          lastFeesCollectedAt={position.lastFeesCollectedAt}
+          unclaimedYield={position.unclaimedYield}
+          costBasis={position.costBasis}
+          lastYieldClaimedAt={position.lastYieldClaimedAt}
           positionOpenedAt={position.positionOpenedAt}
           quoteToken={quoteToken}
           isActive={position.isActive}
@@ -211,13 +211,10 @@ function UniswapV3PositionCardLoaded({
           <PositionActionsMenu
             onReloadHistory={() => setShowReloadHistoryModal(true)}
             onSwitchQuoteToken={() => setShowSwitchQuoteTokenModal(true)}
-            onToggleTracking={() => toggleTrackingMutation.mutate({ positionHash: position.positionHash })}
             onDelete={() => setShowDeleteModal(true)}
-            isTrackedInAccounting={position.isTrackedInAccounting}
             isDeleting={isDeleting}
             isReloadingHistory={isReloadingHistory}
             isSwitchingQuoteToken={isSwitchingQuoteToken}
-            isTogglingTracking={isTogglingTracking}
           />
         </div>
       </div>
@@ -264,6 +261,7 @@ function UniswapV3PositionCardLoaded({
         token1Symbol={position.pool.token1.symbol}
         feeBps={position.pool.feeBps}
       />
+
     </div>
   );
 }

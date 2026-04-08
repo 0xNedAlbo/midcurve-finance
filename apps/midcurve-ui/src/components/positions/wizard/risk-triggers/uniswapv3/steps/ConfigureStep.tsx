@@ -218,8 +218,8 @@ export function ConfigureStep() {
         tickLower: positionConfig.tickLower,
         tickUpper: positionConfig.tickUpper,
         liquidity: positionConfig.liquidity,
-        costBasis: position?.currentCostBasis
-          ? BigInt(position.currentCostBasis)
+        costBasis: position?.costBasis
+          ? BigInt(position.costBasis)
           : costBasis,
       });
       // Build SwapConfig objects from wizard state

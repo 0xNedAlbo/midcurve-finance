@@ -24,9 +24,6 @@ interface BaseCreatePositionLedgerEventInput {
   previousId: string | null;
   timestamp: Date;
   eventType: EventType;
-  poolPrice: bigint;
-  token0Amount: bigint;
-  token1Amount: bigint;
   tokenValue: bigint;
   rewards: Reward[];
   deltaCostBasis: bigint;

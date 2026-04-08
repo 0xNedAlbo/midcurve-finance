@@ -68,7 +68,7 @@ export function createUniswapV3SimulationEngine(
     components: [lpComponent],
     activeInstruments: instruments,
     triggeredEvents: [],
-    costBasis: params.position.currentCostBasis,
+    costBasis: params.position.costBasis,
     baseDecimals,
     quoteDecimals,
   };

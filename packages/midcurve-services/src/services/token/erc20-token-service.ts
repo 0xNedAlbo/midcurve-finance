@@ -11,6 +11,8 @@ import {
     Erc20TokenConfig,
     isValidAddress,
     normalizeAddress,
+    createErc20TokenHash,
+    createBasicCurrencyTokenHash,
     CHAIN_TO_COINGECKO_PLATFORM,
 } from '@midcurve/shared';
 import type { Erc20TokenConfigData } from '@midcurve/shared';
@@ -131,6 +133,7 @@ export class Erc20TokenService extends TokenService {
         logoUrl: string | null;
         coingeckoId: string | null;
         marketCap: number | null;
+        tokenHash: string;
         config: unknown;
         createdAt: Date;
         updatedAt: Date;
@@ -144,10 +147,15 @@ export class Erc20TokenService extends TokenService {
             logoUrl: dbResult.logoUrl,
             coingeckoId: dbResult.coingeckoId,
             marketCap: dbResult.marketCap,
+            tokenHash: dbResult.tokenHash,
             config: dbResult.config as Record<string, unknown>,
             createdAt: dbResult.createdAt,
             updatedAt: dbResult.updatedAt,
         });
+    }
+
+    private createHash(chainId: number, address: string): string {
+        return createErc20TokenHash(chainId, normalizeAddress(address));
     }
 
     // ============================================================================
@@ -548,25 +556,13 @@ export class Erc20TokenService extends TokenService {
             );
 
             // Check if token already exists with same address and chainId
-            log.dbOperation(this.logger, "findFirst", "Token", {
-                address: normalizedAddress,
-                chainId: input.config.chainId,
+            const tokenHash = this.createHash(input.config.chainId, normalizedAddress);
+            log.dbOperation(this.logger, "findUnique", "Token", {
+                tokenHash,
             });
 
-            const existing = await this.prisma.token.findFirst({
-                where: {
-                    tokenType: "erc20",
-                    config: {
-                        path: ["address"],
-                        equals: normalizedAddress,
-                    },
-                    AND: {
-                        config: {
-                            path: ["chainId"],
-                            equals: input.config.chainId,
-                        },
-                    },
-                },
+            const existing = await this.prisma.token.findUnique({
+                where: { tokenHash },
             });
 
             // If token exists, return it
@@ -609,6 +605,7 @@ export class Erc20TokenService extends TokenService {
                     logoUrl: input.logoUrl,
                     coingeckoId: input.coingeckoId,
                     marketCap: input.marketCap,
+                    tokenHash,
                     config: config.toJSON() as object,
                 },
             });
@@ -859,26 +856,14 @@ export class Erc20TokenService extends TokenService {
             }
             const normalizedAddress = normalizeAddress(address);
 
-            // Query database with JSON path
-            log.dbOperation(this.logger, "findFirst", "Token", {
-                address: normalizedAddress,
-                chainId,
+            // Query database with tokenHash index
+            const tokenHash = this.createHash(chainId, normalizedAddress);
+            log.dbOperation(this.logger, "findUnique", "Token", {
+                tokenHash,
             });
 
-            const result = await this.prisma.token.findFirst({
-                where: {
-                    tokenType: "erc20",
-                    config: {
-                        path: ["address"],
-                        equals: normalizedAddress,
-                    },
-                    AND: {
-                        config: {
-                            path: ["chainId"],
-                            equals: chainId,
-                        },
-                    },
-                },
+            const result = await this.prisma.token.findUnique({
+                where: { tokenHash },
             });
 
             if (!result) {
@@ -1618,6 +1603,7 @@ export class Erc20TokenService extends TokenService {
                 name: currencyDef.name,
                 symbol: currencyDef.symbol,
                 decimals: 18, // All basic currencies use 18 decimals
+                tokenHash: createBasicCurrencyTokenHash(currencyCode),
                 config: {
                     currencyCode,
                 },

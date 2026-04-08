@@ -135,7 +135,7 @@ export interface CloseOrderModalProps {
   /**
    * Current cost basis of the position (in quote token units, as string)
    */
-  currentCostBasis: string;
+  costBasis: string;
 
   /**
    * Current unclaimed fees (in quote token units, as string)
@@ -190,7 +190,7 @@ export function CloseOrderModal({
   liquidity,
   tickLower,
   tickUpper,
-  currentCostBasis,
+  costBasis,
   unclaimedFees,
 }: CloseOrderModalProps) {
   // Determine initial trigger mode based on orderType prop
@@ -525,7 +525,7 @@ export function CloseOrderModal({
                 liquidity={liquidity}
                 tickLower={tickLower}
                 tickUpper={tickUpper}
-                currentCostBasis={currentCostBasis}
+                costBasis={costBasis}
                 unclaimedFees={unclaimedFees}
               />
             )}

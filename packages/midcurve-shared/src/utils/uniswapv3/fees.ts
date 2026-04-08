@@ -321,3 +321,92 @@ export function calculateUnclaimedFeeAmounts(
     unclaimedFees1: pureCheckpointedFees1 + incremental1,
   };
 }
+
+// ============================================================================
+// Vault fee calculation
+// ============================================================================
+
+const FEE_PRECISION = 10n ** 18n;
+
+/**
+ * Input parameters for vault claimable fee calculation.
+ *
+ * Components:
+ * 1+2. Accumulator delta (feePerShare - feeDebt) × userShares
+ * 3.   Snapshotted in NFPM (tokensOwed, pro-rata by share)
+ * 4.   Unsnapshotted fees still in pool (feeGrowthInside reconstruction, pro-rata)
+ *
+ * Note: Pending fees (component 1) are private in the vault contract and included
+ * in the on-chain claimableFees() view. This utility covers the publicly readable
+ * components for off-chain caching scenarios.
+ */
+export interface VaultClaimableFeesInput {
+  // Accumulator state (from vault public getters)
+  feePerShare0: bigint;
+  feePerShare1: bigint;
+  feeDebt0: bigint;
+  feeDebt1: bigint;
+  userShares: bigint;
+
+  // Component 3: NFPM tokensOwed (from positionManager.positions(tokenId))
+  tokensOwed0: bigint;
+  tokensOwed1: bigint;
+  totalSupply: bigint;
+
+  // Component 4: pre-computed via computeFeeGrowthInside + calculateIncrementalFees
+  // These represent the full NFT-level unsnapshotted fees (before share scaling)
+  unsnapshottedFees0: bigint;
+  unsnapshottedFees1: bigint;
+}
+
+/**
+ * Result of vault claimable fee calculation.
+ */
+export interface VaultClaimableFeesResult {
+  fee0: bigint;
+  fee1: bigint;
+}
+
+/**
+ * Calculate the full claimable fee amounts for a vault share holder.
+ *
+ * Mirrors the on-chain `claimableFees()` view function but operates on
+ * pre-fetched data. Component 4 inputs (unsnapshottedFees) should be
+ * computed by the caller using `computeFeeGrowthInside()` and
+ * `calculateIncrementalFees()`.
+ *
+ * @param input - Pre-fetched vault and pool state
+ * @returns Total claimable fees for both tokens
+ */
+export function calculateVaultClaimableFees(
+  input: VaultClaimableFeesInput
+): VaultClaimableFeesResult {
+  const {
+    feePerShare0,
+    feePerShare1,
+    feeDebt0,
+    feeDebt1,
+    userShares,
+    tokensOwed0,
+    tokensOwed1,
+    totalSupply,
+    unsnapshottedFees0,
+    unsnapshottedFees1,
+  } = input;
+
+  // Accumulator delta
+  let fee0 = ((feePerShare0 - feeDebt0) * userShares) / FEE_PRECISION;
+  let fee1 = ((feePerShare1 - feeDebt1) * userShares) / FEE_PRECISION;
+
+  if (totalSupply > 0n) {
+    // Component 3: tokensOwed scaled by user's share proportion
+    fee0 += (tokensOwed0 * userShares) / totalSupply;
+    fee1 += (tokensOwed1 * userShares) / totalSupply;
+
+    // Component 4: unsnapshotted fees scaled by user's share proportion
+    fee0 += (unsnapshottedFees0 * userShares) / totalSupply;
+    fee1 += (unsnapshottedFees1 * userShares) / totalSupply;
+  }
+
+  return { fee0, fee1 };
+}

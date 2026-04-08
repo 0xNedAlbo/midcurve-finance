@@ -13,8 +13,3 @@ export {
   type PnlPositionItem,
 } from './pnl.js';
 
-export {
-  ToggleTrackingRequestSchema,
-  type ToggleTrackingRequest,
-  type ToggleTrackingResponse,
-} from './tracked-instruments.js';

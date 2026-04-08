@@ -22,6 +22,7 @@ export const SharedContractName = {
   UNISWAP_V3_FEE_COLLECTOR: 'UniswapV3FeeCollector',
   MIDCURVE_SWAP_ROUTER: 'MidcurveSwapRouter',
   MIDCURVE_TREASURY: 'MidcurveTreasury',
+  UNISWAP_V3_VAULT_FACTORY: 'UniswapV3VaultFactory',
 } as const;
 
 export type SharedContractName =

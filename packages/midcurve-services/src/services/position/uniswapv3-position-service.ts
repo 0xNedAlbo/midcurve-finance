@@ -40,6 +40,7 @@ import type {
     PositionLiquidityDecreasedPayload,
     PositionFeesCollectedPayload,
     PositionLiquidityRevertedPayload,
+    PositionTransferredPayload,
 } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
@@ -49,7 +50,7 @@ import {
     UNISWAP_V3_POSITION_MANAGER_ABI,
     UNISWAP_V3_FACTORY_ABI,
 } from "../../config/uniswapv3.js";
-import { normalizeAddress } from "@midcurve/shared";
+import { normalizeAddress, createErc20TokenHash, createEvmOwnerWallet } from "@midcurve/shared";
 import { UniswapV3PoolService } from "../pool/uniswapv3-pool-service.js";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token-service.js";
@@ -73,13 +74,14 @@ import {
 import { SupportedChainId } from "../../config/evm.js";
 import { CacheService } from "../cache/cache-service.js";
 import { UniswapV3CloseOrderService } from "../close-order/uniswapv3-close-order-service.js";
+import { UserWalletService } from "../wallet-perimeter/user-wallet-service.js";
 
 /**
- * Fee state for a position
+ * Yield state for a position
  *
- * Contains all fee-related fields that can be refreshed independently.
+ * Contains all yield-related fields that can be refreshed independently.
  */
-export interface PositionFeeState {
+export interface PositionYieldState {
     /** Fee growth inside the position's tick range for token0 */
     feeGrowthInside0LastX128: bigint;
     /** Fee growth inside the position's tick range for token1 */
@@ -205,21 +207,21 @@ export interface PositionDbResult {
     positionHash: string | null;
     createdAt: Date;
     updatedAt: Date;
+    type: string;
     protocol: string;
     userId: string;
     currentValue: string; // Prisma returns bigint as string
-    currentCostBasis: string;
+    costBasis: string;
     realizedPnl: string;
     unrealizedPnl: string;
     realizedCashflow: string;
     unrealizedCashflow: string;
-    collectedFees: string;
-    unClaimedFees: string;
-    lastFeesCollectedAt: Date;
+    collectedYield: string;
+    unclaimedYield: string;
+    lastYieldClaimedAt: Date;
+    baseApr: number | null;
+    rewardApr: number | null;
     totalApr: number | null;
-    priceRangeLower: string;
-    priceRangeUpper: string;
-    isToken0Quote: boolean;
     positionOpenedAt: Date;
     positionClosedAt: Date | null;
     isActive: boolean;
@@ -285,6 +287,13 @@ export interface UniswapV3PositionServiceDependencies {
      * If not provided, a new UniswapV3CloseOrderService instance will be created
      */
     closeOrderService?: UniswapV3CloseOrderService;
+
+    /**
+     * User wallet service for building the user's wallet address set
+     * Used by ledger service for ownership tracking during event processing
+     * If not provided, a new UserWalletService instance will be created
+     */
+    userWalletService?: UserWalletService;
 }
 
 /**
@@ -305,6 +314,7 @@ export class UniswapV3PositionService {
     private readonly _poolPriceService: UniswapV3PoolPriceService;
     private readonly _cacheService: CacheService;
     private readonly _closeOrderService: UniswapV3CloseOrderService;
+    private readonly _userWalletService: UserWalletService;
 
     /**
      * Creates a new UniswapV3PositionService instance
@@ -341,6 +351,8 @@ export class UniswapV3PositionService {
             dependencies.cacheService ?? CacheService.getInstance();
         this._closeOrderService =
             dependencies.closeOrderService ?? new UniswapV3CloseOrderService();
+        this._userWalletService =
+            dependencies.userWalletService ?? new UserWalletService({ prisma: this._prisma });
     }
 
     /**
@@ -348,6 +360,19 @@ export class UniswapV3PositionService {
      */
     protected get prisma(): PrismaClient {
         return this._prisma;
+    }
+
+    /**
+     * Build the set of normalized EVM wallet addresses for a user.
+     * Used by ledger service for ownership tracking during event processing.
+     */
+    private async buildUserWalletAddresses(userId: string): Promise<Set<string>> {
+        const wallets = await this._userWalletService.findByUserId(userId);
+        return new Set(
+            wallets
+                .filter(w => w.walletType === "evm")
+                .map(w => (w.config as { address: string }).address.toLowerCase()),
+        );
     }
 
     /**
@@ -409,6 +434,9 @@ export class UniswapV3PositionService {
             tickSpacing: number | string;
             tickUpper: number | string;
             tickLower: number | string;
+            isToken0Quote?: boolean;
+            priceRangeLower?: string;
+            priceRangeUpper?: string;
         };
 
         // Defensive type conversion for JSON deserialization
@@ -440,6 +468,9 @@ export class UniswapV3PositionService {
             tickSpacing,
             tickUpper,
             tickLower,
+            isToken0Quote: db.isToken0Quote ?? false,
+            priceRangeLower: db.priceRangeLower ? BigInt(db.priceRangeLower) : 0n,
+            priceRangeUpper: db.priceRangeUpper ? BigInt(db.priceRangeUpper) : 0n,
         };
     }
 
@@ -492,6 +523,7 @@ export class UniswapV3PositionService {
             tickUpperFeeGrowthOutside1X128?: string;
             isBurned?: boolean;
             isClosed?: boolean;
+            isOwnedByUser?: boolean;
             // Pool-level state (merged from pool)
             sqrtPriceX96?: string;
             currentTick?: number | string;
@@ -524,6 +556,7 @@ export class UniswapV3PositionService {
             ),
             isBurned: db.isBurned ?? false,
             isClosed: db.isClosed ?? false,
+            isOwnedByUser: db.isOwnedByUser ?? true,
             // Pool-level state (defaults to 0 for backward compat with pre-migration data)
             sqrtPriceX96: BigInt(db.sqrtPriceX96 ?? "0"),
             currentTick: typeof db.currentTick === "number" ? db.currentTick : Number(db.currentTick ?? 0),
@@ -796,6 +829,9 @@ export class UniswapV3PositionService {
                 tickSpacing: pool.tickSpacing,
                 tickLower: positionConfig.tickLower,
                 tickUpper: positionConfig.tickUpper,
+                isToken0Quote,
+                priceRangeLower: 0n, // Will be computed during refresh
+                priceRangeUpper: 0n, // Will be computed during refresh
             };
 
             const state: UniswapV3PositionState = {
@@ -814,6 +850,7 @@ export class UniswapV3PositionService {
                 tickUpperFeeGrowthOutside1X128: 0n,
                 isBurned: false,
                 isClosed: false,
+                isOwnedByUser: true, // Will be recalculated during refresh
                 sqrtPriceX96: pool.sqrtPriceX96,
                 currentTick: pool.currentTick,
                 poolLiquidity: pool.liquidity,
@@ -854,11 +891,13 @@ export class UniswapV3PositionService {
                 { positionId: position.id },
                 { prisma: this.prisma },
             );
+            const userWalletAddresses = await this.buildUserWalletAddresses(userId);
             await ledgerService.importLogsForPosition(
                 position,
                 chainId,
                 logs,
                 this._poolPriceService,
+                userWalletAddresses,
                 dbTx,
             );
 
@@ -1166,12 +1205,12 @@ export class UniswapV3PositionService {
      *
      * Updates (common fields via refreshMetrics):
      * - currentValue (from pool price + position amounts)
-     * - currentCostBasis (from ledger events)
+     * - costBasis (from ledger events)
      * - realizedPnl (from ledger events)
      * - unrealizedPnl (currentValue - costBasis)
-     * - collectedFees (from ledger events)
-     * - unClaimedFees (from on-chain state, converted to quote)
-     * - lastFeesCollectedAt (from most recent COLLECT event)
+     * - collectedYield (from ledger events)
+     * - unclaimedYield (from on-chain state, converted to quote)
+     * - lastYieldClaimedAt (from most recent COLLECT event)
      * - priceRangeLower/Upper (from tick bounds)
      * - Pool state (sqrtPriceX96, currentTick, etc.)
      *
@@ -1280,7 +1319,26 @@ export class UniswapV3PositionService {
             const resolvedBlockNumber = Number(onChainState.blockNumber);
 
             // 3. Refresh owner address (may have been transferred)
-            await this.refreshOwnerAddress(id, resolvedBlockNumber, dbTx);
+            const currentOwner = await this.refreshOwnerAddress(id, resolvedBlockNumber, dbTx);
+
+            // 3.1 Check if position is still owned by user (wallet perimeter check)
+            const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
+            if (!userWalletAddresses.has(currentOwner.toLowerCase())) {
+                // Position has left the user's perimeter — mark inactive
+                this.logger.info(
+                    { id, currentOwner, userId: position.userId },
+                    "Position transferred outside user perimeter, marking inactive",
+                );
+                const db = dbTx ?? this.prisma;
+                await db.position.update({
+                    where: { id },
+                    data: {
+                        isActive: false,
+                        positionClosedAt: new Date(),
+                    },
+                });
+                // Still continue refresh to update metrics for display
+            }
 
             // 4. Refresh liquidity
             await this.refreshLiquidity(id, resolvedBlockNumber, dbTx);
@@ -1499,7 +1557,7 @@ export class UniswapV3PositionService {
                 {
                     positionId: id,
                     currentValue: refreshedPosition.currentValue.toString(),
-                    costBasis: refreshedPosition.currentCostBasis.toString(),
+                    costBasis: refreshedPosition.costBasis.toString(),
                     realizedPnl: refreshedPosition.realizedPnl.toString(),
                     unrealizedPnl: refreshedPosition.unrealizedPnl.toString(),
                 },
@@ -1608,11 +1666,13 @@ export class UniswapV3PositionService {
             toBlock,
         );
 
+        const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
         const importResult = await ledgerService.importLogsForPosition(
             position,
             chainId,
             logs,
             this.poolPriceService,
+            userWalletAddresses,
             dbTx,
         );
 
@@ -1646,16 +1706,86 @@ export class UniswapV3PositionService {
             );
         }
 
+        // Batch-query ledger events for all inserted results to check isIgnored
+        // and to get real financial data for TRANSFER events (which have zero
+        // values in eventDetail because recalculateAggregates computes them).
+        const insertedHashes = importResult.results
+            .filter((r): r is Extract<typeof r, { action: "inserted" }> => r.action === "inserted")
+            .map((r) => r.inputHash);
+
+        const ledgerEventsByHash = new Map<string, {
+            inputHash: string;
+            isIgnored: boolean;
+            eventType: string;
+            tokenValue: string;
+            deltaCostBasis: string;
+            deltaPnl: string;
+        }>();
+        if (insertedHashes.length > 0) {
+            const db = dbTx ?? this.prisma;
+            const ledgerRows = await db.positionLedgerEvent.findMany({
+                where: { positionId: id, inputHash: { in: insertedHashes } },
+                select: {
+                    inputHash: true,
+                    isIgnored: true,
+                    eventType: true,
+                    tokenValue: true,
+                    deltaCostBasis: true,
+                    deltaPnl: true,
+                },
+            });
+            for (const row of ledgerRows) {
+                ledgerEventsByHash.set(row.inputHash, row);
+            }
+        }
+
         // Emit insert events after all reverts
         for (const result of importResult.results) {
             if (result.action !== "inserted") continue;
+
+            // Skip events that are ignored (outside user's ownership period)
+            const ledgerEvent = ledgerEventsByHash.get(result.inputHash);
+            if (ledgerEvent?.isIgnored) continue;
+
             const { validEventType, amount0, amount1, liquidityDelta, blockTimestamp } =
                 result.eventDetail;
 
-            if (validEventType === "COLLECT") {
+            if (validEventType === "TRANSFER") {
+                // TRANSFER events: emit position.transferred.in or .out
+                // Direction is determined by deltaCostBasis sign from recalculateAggregates
+                if (!ledgerEvent) continue;
+                const deltaCB = BigInt(ledgerEvent.deltaCostBasis);
+                if (deltaCB === 0n) continue;
+
+                const type = deltaCB < 0n
+                    ? ("position.transferred.out" as const)
+                    : ("position.transferred.in" as const);
+
+                await publisher.createAndPublish<PositionTransferredPayload>(
+                    {
+                        type,
+                        entityId: position.id,
+                        entityType: "position",
+                        userId: position.userId,
+                        payload: {
+                            positionId: position.id,
+                            positionHash: position.positionHash,
+                            poolId: position.pool.id,
+                            chainId,
+                            nftId: nftId.toString(),
+                            tokenValue: ledgerEvent.tokenValue,
+                            deltaCostBasis: ledgerEvent.deltaCostBasis,
+                            deltaPnl: ledgerEvent.deltaPnl,
+                            eventTimestamp: blockTimestamp.toISOString(),
+                        },
+                        source: "business-logic",
+                    },
+                    dbTx,
+                );
+            } else if (validEventType === "COLLECT") {
                 const feeDelta =
-                    importResult.aggregates.collectedFeesAfter -
-                    importResult.preImportAggregates.collectedFeesAfter;
+                    importResult.aggregates.collectedYieldAfter -
+                    importResult.preImportAggregates.collectedYieldAfter;
                 await publisher.createAndPublish<PositionFeesCollectedPayload>(
                     {
                         type: "position.fees.collected",
@@ -1739,21 +1869,23 @@ export class UniswapV3PositionService {
                 throw error;
             }
 
-            // 2. Flip isToken0Quote in the database
-            const newIsToken0Quote = !existingPosition.isToken0Quote;
+            // 2. Flip isToken0Quote in the config JSON
+            const existingConfig = existingPosition.typedConfig;
+            const newIsToken0Quote = !existingConfig.isToken0Quote;
 
             this.logger.info(
                 {
                     positionId: id,
-                    previousIsToken0Quote: existingPosition.isToken0Quote,
+                    previousIsToken0Quote: existingConfig.isToken0Quote,
                     newIsToken0Quote,
                 },
                 "Flipping isToken0Quote before reset",
             );
 
+            const dbConfig = (await this._prisma.position.findUniqueOrThrow({ where: { id } })).config as Record<string, unknown>;
             await this._prisma.position.update({
                 where: { id },
-                data: { isToken0Quote: newIsToken0Quote },
+                data: { config: { ...dbConfig, isToken0Quote: newIsToken0Quote } },
             });
 
             // 3. Call reset() to rebuild the entire ledger with new orientation
@@ -2139,12 +2271,12 @@ export class UniswapV3PositionService {
      *
      * Calculates metrics at a specific block number using on-chain data:
      * - currentValue: Position value in quote token (from on-chain liquidity + pool price)
-     * - currentCostBasis: Cost basis from ledger events up to block
+     * - costBasis: Cost basis from ledger events up to block
      * - realizedPnl: Realized PnL from ledger events up to block
      * - unrealizedPnl: currentValue - costBasis
-     * - collectedFees: Total collected fees from ledger events up to block
-     * - unClaimedFees: Unclaimed fee value from on-chain fee state
-     * - lastFeesCollectedAt: Timestamp of last fee collection up to block
+     * - collectedYield: Total collected fees from ledger events up to block
+     * - unclaimedYield: Unclaimed fee value from on-chain fee state
+     * - lastYieldClaimedAt: Timestamp of last fee collection up to block
      * - priceRangeLower/Upper: Position bounds in quote token price
      *
      * @param id - Position ID
@@ -2201,13 +2333,18 @@ export class UniswapV3PositionService {
             );
 
             // 6. Extract values from ledger events (or defaults)
-            const currentCostBasis = latestEvent?.costBasisAfter ?? 0n;
+            const costBasis = latestEvent?.costBasisAfter ?? 0n;
             const realizedPnl = latestEvent?.pnlAfter ?? 0n;
-            const collectedFees = latestEvent?.collectedFeesAfter ?? 0n;
-            const lastFeesCollectedAt =
+            const collectedYield = latestEvent?.collectedYieldAfter ?? 0n;
+            const lastYieldClaimedAt =
                 lastCollectEvent?.timestamp ?? position.positionOpenedAt;
 
-            // 7. Calculate current position value using fetched on-chain data
+            // 7. Check if position is currently owned by the user
+            const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
+            const ownerAddress = position.typedState.ownerAddress;
+            const isOwnedByUser = userWalletAddresses.has(ownerAddress.toLowerCase());
+
+            // 8. Calculate current position value using fetched on-chain data
             const currentValue = calculatePositionValue(
                 liquidity,
                 poolState.sqrtPriceX96,
@@ -2216,11 +2353,8 @@ export class UniswapV3PositionService {
                 !position.isToken0Quote, // baseIsToken0
             );
 
-            // 8. Calculate unrealized PnL
-            const unrealizedPnl = currentValue - currentCostBasis;
-
-            // 9. Calculate unclaimed fees in quote token from fee state
-            const unClaimedFees = calculateTokenValueInQuote(
+            // 9. Calculate unclaimed fees (always on-chain truth, shown as informational)
+            const unclaimedYield = calculateTokenValueInQuote(
                 feeState.unclaimedFees0,
                 feeState.unclaimedFees1,
                 poolState.sqrtPriceX96,
@@ -2229,20 +2363,29 @@ export class UniswapV3PositionService {
                 position.pool.token1.decimals,
             );
 
-            // 10. Calculate price range (uses static token decimals from position.pool)
+            // 10. Calculate unrealized PnL from user's perspective
+            // Includes unclaimed fees when owned (they are unrealized profit).
+            // When not owned: 0 (all PnL was realized at transfer-out time).
+            // UI uses totalPnl = realizedPnl + unrealizedPnl — no extra computation needed.
+            const unrealizedPnl = isOwnedByUser
+                ? (currentValue - costBasis) + unclaimedYield
+                : 0n;
+
+            // 11. Calculate price range (uses static token decimals from position.pool)
             const { priceRangeLower, priceRangeUpper } =
                 this.calculatePriceRange(position, position.pool as UniswapV3Pool);
 
             const metrics: UniswapV3PositionMetrics = {
                 currentValue,
-                currentCostBasis,
+                costBasis,
                 realizedPnl,
                 unrealizedPnl,
-                collectedFees,
-                unClaimedFees,
-                lastFeesCollectedAt,
+                collectedYield,
+                unclaimedYield,
+                lastYieldClaimedAt,
                 priceRangeLower,
                 priceRangeUpper,
+                isOwnedByUser,
             };
 
             this.logger.info(
@@ -2250,9 +2393,9 @@ export class UniswapV3PositionService {
                     id,
                     blockNumber,
                     currentValue: currentValue.toString(),
-                    currentCostBasis: currentCostBasis.toString(),
+                    costBasis: costBasis.toString(),
                     unrealizedPnl: unrealizedPnl.toString(),
-                    unClaimedFees: unClaimedFees.toString(),
+                    unclaimedYield: unclaimedYield.toString(),
                 },
                 "Position metrics fetched",
             );
@@ -2275,8 +2418,8 @@ export class UniswapV3PositionService {
      * Fetch PnL summary breakdown without persisting to database.
      *
      * Returns:
-     * - Realized PnL: collectedFees + realizedPnl (from withdrawn assets)
-     * - Unrealized PnL: unClaimedFees + currentValue - currentCostBasis
+     * - Realized PnL: collectedYield + realizedPnl (from withdrawn assets)
+     * - Unrealized PnL: unclaimedYield + currentValue - costBasis
      * - Total PnL: realized + unrealized
      *
      * @param id - Position ID
@@ -2297,22 +2440,22 @@ export class UniswapV3PositionService {
             const metrics = await this.fetchMetrics(id, blockNumber, tx);
 
             // 2. Calculate subtotals
-            const realizedSubtotal = metrics.collectedFees + metrics.realizedPnl;
+            const realizedSubtotal = metrics.collectedYield + metrics.realizedPnl;
             const unrealizedSubtotal =
-                metrics.unClaimedFees +
+                metrics.unclaimedYield +
                 metrics.currentValue -
-                metrics.currentCostBasis;
+                metrics.costBasis;
             const totalPnl = realizedSubtotal + unrealizedSubtotal;
 
             const summary: UniswapV3PositionPnLSummary = {
                 // Realized
-                collectedFees: metrics.collectedFees,
+                collectedYield: metrics.collectedYield,
                 realizedPnl: metrics.realizedPnl,
                 realizedSubtotal,
                 // Unrealized
-                unClaimedFees: metrics.unClaimedFees,
+                unclaimedYield: metrics.unclaimedYield,
                 currentValue: metrics.currentValue,
-                currentCostBasis: metrics.currentCostBasis,
+                costBasis: metrics.costBasis,
                 unrealizedSubtotal,
                 // Total
                 totalPnl,
@@ -2378,8 +2521,8 @@ export class UniswapV3PositionService {
             const summary = await aprService.calculateSummary(
                 {
                     positionOpenedAt: position.positionOpenedAt,
-                    currentCostBasis: metrics.currentCostBasis,
-                    unClaimedFees: metrics.unClaimedFees,
+                    costBasis: metrics.costBasis,
+                    unclaimedYield: metrics.unclaimedYield,
                 },
                 blockNumber,
                 tx,
@@ -2439,6 +2582,9 @@ export class UniswapV3PositionService {
         const collectEvent = parseAbiItem(
             "event Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)",
         );
+        const transferEvent = parseAbiItem(
+            "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+        );
 
         const commonParams = {
             address: nfpmAddress,
@@ -2447,15 +2593,16 @@ export class UniswapV3PositionService {
             toBlock,
         };
 
-        // 3 parallel calls instead of thousands of sequential batches
-        const [increaseLogs, decreaseLogs, collectLogs] = await Promise.all([
+        // 4 parallel calls — Transfer events include mint (from=0x0) and burn (to=0x0)
+        const [increaseLogs, decreaseLogs, collectLogs, transferLogs] = await Promise.all([
             client.getLogs({ ...commonParams, event: increaseLiquidityEvent }),
             client.getLogs({ ...commonParams, event: decreaseLiquidityEvent }),
             client.getLogs({ ...commonParams, event: collectEvent }),
+            client.getLogs({ ...commonParams, event: transferEvent }),
         ]);
 
         // Merge and sort by block number (then log index for same-block ordering)
-        const allLogs = [...increaseLogs, ...decreaseLogs, ...collectLogs];
+        const allLogs = [...increaseLogs, ...decreaseLogs, ...collectLogs, ...transferLogs];
         allLogs.sort((a, b) => {
             const blockDiff = Number(a.blockNumber! - b.blockNumber!);
             if (blockDiff !== 0) return blockDiff;
@@ -2493,7 +2640,7 @@ export class UniswapV3PositionService {
         id: string,
         blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
-    ): Promise<PositionFeeState> {
+    ): Promise<PositionYieldState> {
         log.methodEntry(this.logger, "fetchFeeState", { id, blockNumber });
 
         try {
@@ -2632,7 +2779,7 @@ export class UniswapV3PositionService {
             );
 
             // 7. Create and return fee state (no persistence)
-            const feeState: PositionFeeState = {
+            const feeState: PositionYieldState = {
                 feeGrowthInside0LastX128,
                 feeGrowthInside1LastX128,
                 tokensOwed0,
@@ -2709,7 +2856,10 @@ export class UniswapV3PositionService {
 
             const result = await db.position.update({
                 where: { id },
-                data: { state: stateDB as object },
+                data: {
+                    state: stateDB as object,
+                    ownerWallet: createEvmOwnerWallet(ownerAddress),
+                },
             });
 
             const position = await this.mapToPosition(
@@ -2823,7 +2973,7 @@ export class UniswapV3PositionService {
      */
     async updateFeeState(
         id: string,
-        feeState: PositionFeeState,
+        feeState: PositionYieldState,
         tx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "updateFeeState", {
@@ -3355,7 +3505,7 @@ export class UniswapV3PositionService {
         id: string,
         blockNumber: number | "latest" = "latest",
         tx?: PrismaTransactionClient,
-    ): Promise<PositionFeeState> {
+    ): Promise<PositionYieldState> {
         log.methodEntry(this.logger, "refreshFeeState", { id, blockNumber });
 
         try {
@@ -3398,12 +3548,12 @@ export class UniswapV3PositionService {
      *
      * Calculates and persists all financial metrics:
      * - currentValue (from pool price + position liquidity)
-     * - currentCostBasis (from ledger)
+     * - costBasis (from ledger)
      * - realizedPnl (from ledger)
      * - unrealizedPnl (currentValue - costBasis)
-     * - collectedFees (from ledger)
-     * - unClaimedFees (from on-chain state)
-     * - lastFeesCollectedAt (from ledger)
+     * - collectedYield (from ledger)
+     * - unclaimedYield (from on-chain state)
+     * - lastYieldClaimedAt (from ledger)
      * - priceRangeLower/Upper (from ticks)
      *
      * Also refreshes pool state to ensure accurate price data.
@@ -3439,8 +3589,8 @@ export class UniswapV3PositionService {
             const aprSummary = await aprService.calculateSummary(
                 {
                     positionOpenedAt: position.positionOpenedAt,
-                    currentCostBasis: metrics.currentCostBasis,
-                    unClaimedFees: metrics.unClaimedFees,
+                    costBasis: metrics.costBasis,
+                    unclaimedYield: metrics.unclaimedYield,
                 },
                 blockNumber,
                 tx,
@@ -3454,33 +3604,47 @@ export class UniswapV3PositionService {
                 id,
                 fields: [
                     "currentValue",
-                    "currentCostBasis",
+                    "costBasis",
                     "realizedPnl",
                     "unrealizedPnl",
-                    "collectedFees",
-                    "unClaimedFees",
-                    "lastFeesCollectedAt",
-                    "priceRangeLower",
-                    "priceRangeUpper",
+                    "collectedYield",
+                    "unclaimedYield",
+                    "lastYieldClaimedAt",
+                    "config.priceRangeLower",
+                    "config.priceRangeUpper",
                     "totalApr",
                 ],
             });
+
+            // Read existing config and state to merge updates
+            const existingPosition = await db.position.findUniqueOrThrow({ where: { id } });
+            const existingConfig = existingPosition.config as Record<string, unknown>;
+            const existingState = existingPosition.state as Record<string, unknown>;
 
             await db.position.update({
                 where: { id },
                 data: {
                     currentValue: metrics.currentValue.toString(),
-                    currentCostBasis: metrics.currentCostBasis.toString(),
+                    costBasis: metrics.costBasis.toString(),
                     realizedPnl: metrics.realizedPnl.toString(),
                     unrealizedPnl: metrics.unrealizedPnl.toString(),
                     realizedCashflow: "0",
                     unrealizedCashflow: "0",
-                    collectedFees: metrics.collectedFees.toString(),
-                    unClaimedFees: metrics.unClaimedFees.toString(),
-                    lastFeesCollectedAt: metrics.lastFeesCollectedAt,
-                    priceRangeLower: metrics.priceRangeLower.toString(),
-                    priceRangeUpper: metrics.priceRangeUpper.toString(),
+                    collectedYield: metrics.collectedYield.toString(),
+                    unclaimedYield: metrics.unclaimedYield.toString(),
+                    lastYieldClaimedAt: metrics.lastYieldClaimedAt,
+                    config: {
+                        ...existingConfig,
+                        priceRangeLower: metrics.priceRangeLower.toString(),
+                        priceRangeUpper: metrics.priceRangeUpper.toString(),
+                    },
+                    state: {
+                        ...existingState,
+                        isOwnedByUser: metrics.isOwnedByUser,
+                    },
                     totalApr: persistedApr,
+                    baseApr: persistedApr,
+                    rewardApr: 0,
                 },
             });
 
@@ -3488,9 +3652,9 @@ export class UniswapV3PositionService {
                 {
                     id,
                     currentValue: metrics.currentValue.toString(),
-                    currentCostBasis: metrics.currentCostBasis.toString(),
+                    costBasis: metrics.costBasis.toString(),
                     unrealizedPnl: metrics.unrealizedPnl.toString(),
-                    unClaimedFees: metrics.unClaimedFees.toString(),
+                    unclaimedYield: metrics.unclaimedYield.toString(),
                     totalApr: persistedApr?.toFixed(2) ?? null,
                 },
                 "Position metrics refreshed",
@@ -3584,27 +3748,36 @@ export class UniswapV3PositionService {
                 positionHash,
             });
 
+            // Merge isToken0Quote and initial price range into config JSON
+            const configWithQuoteToken = {
+                ...(configDB as object as Record<string, unknown>),
+                isToken0Quote: input.isToken0Quote,
+                priceRangeLower: zeroValue,
+                priceRangeUpper: zeroValue,
+            };
+
+            const ownerAddr = (stateDB as Record<string, unknown>).ownerAddress as string;
+
             const result = await db.position.create({
                 data: {
+                    type: "LP_CONCENTRATED",
                     protocol: input.protocol,
                     userId: input.userId,
-                    isToken0Quote: input.isToken0Quote,
                     positionHash,
-                    config: configDB as object,
+                    ownerWallet: ownerAddr ? createEvmOwnerWallet(ownerAddr) : undefined,
+                    config: configWithQuoteToken as object,
                     state: stateDB as object,
                     // Default calculated values
                     currentValue: zeroValue,
-                    currentCostBasis: zeroValue,
+                    costBasis: zeroValue,
                     realizedPnl: zeroValue,
                     unrealizedPnl: zeroValue,
                     // Cash flow fields for non-AMM protocols (always 0 for UniswapV3)
                     realizedCashflow: zeroValue,
                     unrealizedCashflow: zeroValue,
-                    collectedFees: zeroValue,
-                    unClaimedFees: zeroValue,
-                    lastFeesCollectedAt: now,
-                    priceRangeLower: zeroValue,
-                    priceRangeUpper: zeroValue,
+                    collectedYield: zeroValue,
+                    unclaimedYield: zeroValue,
+                    lastYieldClaimedAt: now,
                     positionOpenedAt: input.positionOpenedAt ?? now,
                     positionClosedAt: null,
                     isActive: true,
@@ -3717,23 +3890,26 @@ export class UniswapV3PositionService {
             return;
         }
 
-        // Delete the position (cascades ledger events, APR periods, close orders, etc.)
-        log.dbOperation(this.logger, "delete", "Position", { id });
-        await this.prisma.position.delete({
-            where: { id },
-        });
+        // Serialize before deletion (position data needed for event payload)
+        const positionJSON = existing.toJSON();
 
-        // Publish position.deleted domain event for accounting cleanup
-        await this.eventPublisher.createAndPublish<PositionDeletedPayload>(
-            {
-                type: "position.deleted",
-                entityType: "position",
-                entityId: existing.id,
-                userId: existing.userId,
-                payload: existing.toJSON(),
-                source: "api",
-            },
-        );
+        // Delete the position and publish event atomically
+        log.dbOperation(this.logger, "delete", "Position", { id });
+        await this.prisma.$transaction(async (tx) => {
+            await tx.position.delete({ where: { id } });
+
+            await this.eventPublisher.createAndPublish<PositionDeletedPayload>(
+                {
+                    type: "position.deleted",
+                    entityType: "position",
+                    entityId: existing.id,
+                    userId: existing.userId,
+                    payload: positionJSON,
+                    source: "api",
+                },
+                tx,
+            );
+        });
 
         log.methodExit(this.logger, "delete", { id, deleted: true });
     }
@@ -3917,19 +4093,11 @@ export class UniswapV3PositionService {
         const chainId = config.chainId as number;
 
         const [token0Row, token1Row] = await Promise.all([
-            this.prisma.token.findFirst({
-                where: {
-                    tokenType: "erc20",
-                    config: { path: ["address"], equals: token0Address },
-                    AND: { config: { path: ["chainId"], equals: chainId } },
-                },
+            this.prisma.token.findUnique({
+                where: { tokenHash: createErc20TokenHash(chainId, token0Address) },
             }),
-            this.prisma.token.findFirst({
-                where: {
-                    tokenType: "erc20",
-                    config: { path: ["address"], equals: token1Address },
-                    AND: { config: { path: ["chainId"], equals: chainId } },
-                },
+            this.prisma.token.findUnique({
+                where: { tokenHash: createErc20TokenHash(chainId, token1Address) },
             }),
         ]);
 
@@ -3948,21 +4116,20 @@ export class UniswapV3PositionService {
             id: dbResult.id,
             positionHash: dbResult.positionHash ?? "",
             userId: dbResult.userId,
+            type: dbResult.type,
             protocol: dbResult.protocol,
-            poolId: "",
-            isToken0Quote: dbResult.isToken0Quote,
             currentValue: BigInt(dbResult.currentValue),
-            currentCostBasis: BigInt(dbResult.currentCostBasis),
+            costBasis: BigInt(dbResult.costBasis),
             realizedPnl: BigInt(dbResult.realizedPnl),
             unrealizedPnl: BigInt(dbResult.unrealizedPnl),
             realizedCashflow: BigInt(dbResult.realizedCashflow),
             unrealizedCashflow: BigInt(dbResult.unrealizedCashflow),
-            collectedFees: BigInt(dbResult.collectedFees),
-            unClaimedFees: BigInt(dbResult.unClaimedFees),
-            lastFeesCollectedAt: dbResult.lastFeesCollectedAt,
+            collectedYield: BigInt(dbResult.collectedYield),
+            unclaimedYield: BigInt(dbResult.unclaimedYield),
+            lastYieldClaimedAt: dbResult.lastYieldClaimedAt,
+            baseApr: dbResult.baseApr,
+            rewardApr: dbResult.rewardApr,
             totalApr: dbResult.totalApr,
-            priceRangeLower: BigInt(dbResult.priceRangeLower),
-            priceRangeUpper: BigInt(dbResult.priceRangeUpper),
             positionOpenedAt: dbResult.positionOpenedAt,
             positionClosedAt: dbResult.positionClosedAt,
             isActive: dbResult.isActive,

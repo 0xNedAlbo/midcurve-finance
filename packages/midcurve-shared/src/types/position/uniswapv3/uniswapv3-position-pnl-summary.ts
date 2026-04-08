@@ -25,10 +25,10 @@ export interface UniswapV3PositionPnLSummary {
   // ============================================================================
 
   /**
-   * Total fees collected in quote token units.
-   * Sum of all COLLECT event fee values converted to quote token.
+   * Total yield collected in quote token units.
+   * Sum of all COLLECT event yield values converted to quote token.
    */
-  collectedFees: bigint;
+  collectedYield: bigint;
 
   /**
    * Realized PnL from withdrawn assets in quote token units.
@@ -37,7 +37,7 @@ export interface UniswapV3PositionPnLSummary {
   realizedPnl: bigint;
 
   /**
-   * Subtotal of realized PnL = collectedFees + realizedPnl
+   * Subtotal of realized PnL = collectedYield + realizedPnl
    * This is the profit/loss that has been "locked in" through actual transactions.
    */
   realizedSubtotal: bigint;
@@ -47,10 +47,10 @@ export interface UniswapV3PositionPnLSummary {
   // ============================================================================
 
   /**
-   * Current unclaimed fees in quote token units.
-   * Fees that have accrued but not yet collected.
+   * Current unclaimed yield in quote token units.
+   * Yield that has accrued but not yet collected.
    */
-  unClaimedFees: bigint;
+  unclaimedYield: bigint;
 
   /**
    * Current position value in quote token units.
@@ -59,13 +59,13 @@ export interface UniswapV3PositionPnLSummary {
   currentValue: bigint;
 
   /**
-   * Current cost basis in quote token units.
+   * Cost basis in quote token units.
    * The capital invested in the current position.
    */
-  currentCostBasis: bigint;
+  costBasis: bigint;
 
   /**
-   * Subtotal of unrealized PnL = unClaimedFees + currentValue - currentCostBasis
+   * Subtotal of unrealized PnL = unclaimedYield + currentValue - costBasis
    * This is the profit/loss that would be realized if position were closed now.
    */
   unrealizedSubtotal: bigint;

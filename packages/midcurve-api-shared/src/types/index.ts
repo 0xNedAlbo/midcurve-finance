@@ -19,3 +19,4 @@ export * from './swap/index.js';
 export * from './shared-contracts/index.js';
 export * from './transactions/index.js';
 export * from './accounting/index.js';
+export * from './wallets/index.js';
