@@ -364,19 +364,7 @@ export class UniswapV3VaultPositionService {
             userId, positionHash, configData, stateData, token0, token1, dbTx,
         );
 
-        // Import ledger events
-        const ledgerService = new UniswapV3VaultLedgerService(
-            { positionId: position.id },
-            { prisma: this.prisma },
-        );
-        const logs = await this.fetchAllVaultLogs(
-            client, vaultAddress as Address, ownerAddress as Address, 0n,
-        );
-        await ledgerService.importLogsForPosition(
-            position, chainId, ownerAddress, logs, this._poolPriceService, dbTx,
-        );
-
-        // Refresh to finalize metrics
+        // Refresh imports ledger events, emits domain events, and finalizes metrics
         return this.refresh(position.id, 'latest', dbTx);
     }
 
