@@ -3,6 +3,7 @@
  *
  * Modal for tokenizing a UniswapV3 position into an ERC-20 vault.
  * Shows vault token parameters (editable), then executes:
+ * 0. (Optional) Collect outstanding fees — prevents fee loss during vault init
  * 1. NFT approval for VaultFactory
  * 2. createVault() on VaultFactory
  * 3. Backend discovery of the new vault position
@@ -10,24 +11,25 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Pencil, Check, Circle, Loader2, AlertCircle } from 'lucide-react';
+import { X, Pencil, Check, Circle, Loader2, AlertCircle, SkipForward } from 'lucide-react';
 import type { Address } from 'viem';
 import { useAccount } from 'wagmi';
 import { formatCompactValue } from '@midcurve/shared';
+import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { useNftApproval } from '@/hooks/positions/uniswapv3/vault/useNftApproval';
 import { useCreateVault } from '@/hooks/positions/uniswapv3/vault/useCreateVault';
 import { useDiscoverVaultPosition } from '@/hooks/positions/uniswapv3/vault/useDiscoverVaultPosition';
+import { useCollectFees } from '@/hooks/positions/uniswapv3/useCollectFees';
+import { normalizeAddress } from '@midcurve/shared';
 
 interface UniswapV3TokenizePositionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  chainId: number;
-  nftId: number;
-  liquidity: string;
+  position: UniswapV3PositionData;
 }
 
 type EditingField = 'name' | 'symbol' | 'decimals' | null;
@@ -46,10 +48,12 @@ function computeDefaultDecimals(liquidity: string): number {
 export function UniswapV3TokenizePositionModal({
   isOpen,
   onClose,
-  chainId,
-  nftId,
-  liquidity,
+  position,
 }: UniswapV3TokenizePositionModalProps) {
+  const chainId = position.config.chainId;
+  const nftId = position.config.nftId;
+  const liquidity = position.state.liquidity;
+
   const [mounted, setMounted] = useState(false);
 
   // Editable vault token parameters
@@ -62,6 +66,9 @@ export function UniswapV3TokenizePositionModal({
   const [editingField, setEditingField] = useState<EditingField>(null);
   const [editValue, setEditValue] = useState('');
 
+  // Track collect step
+  const [collectStatus, setCollectStatus] = useState<'pending' | 'skipped' | 'collecting' | 'confirming' | 'done'>('pending');
+
   // Track discover step
   const [discoverStatus, setDiscoverStatus] = useState<'idle' | 'active' | 'success' | 'error'>('idle');
 
@@ -69,9 +76,51 @@ export function UniswapV3TokenizePositionModal({
     setMounted(true);
   }, []);
 
+  // Fee amounts
+  const token0Amount = BigInt(position.state.unclaimedFees0 || position.state.tokensOwed0 || '0');
+  const token1Amount = BigInt(position.state.unclaimedFees1 || position.state.tokensOwed1 || '0');
+  const unclaimedFees = BigInt(position.unclaimedYield || '0');
+  const hasFees = unclaimedFees > 0n;
+
+  // Token display info
+  const baseToken = position.isToken0Quote ? position.pool.token1 : position.pool.token0;
+  const quoteToken = position.isToken0Quote ? position.pool.token0 : position.pool.token1;
+  const baseTokenAmount = position.isToken0Quote ? token1Amount : token0Amount;
+  const quoteTokenAmount = position.isToken0Quote ? token0Amount : token1Amount;
+
   // Get factory address from shared contracts
   const { data: sharedContract } = useChainSharedContract(chainId);
   const factoryAddress = sharedContract?.contracts['UniswapV3VaultFactory']?.contractAddress as Address | undefined;
+
+  const { address: connectedAddress } = useAccount();
+
+  // Collect fees hook
+  const collectParams = useMemo(() => {
+    if (!connectedAddress || !hasFees || collectStatus !== 'pending') return null;
+    return {
+      tokenId: BigInt(nftId),
+      recipient: normalizeAddress(connectedAddress) as Address,
+      chainId,
+    };
+  }, [connectedAddress, hasFees, collectStatus, nftId, chainId]);
+
+  const collectFees = useCollectFees(collectParams);
+
+  // Track collect transaction lifecycle
+  useEffect(() => {
+    if (collectFees.isCollecting && collectStatus === 'pending') {
+      setCollectStatus('collecting');
+    }
+    if (collectFees.isWaitingForConfirmation && collectStatus === 'collecting') {
+      setCollectStatus('confirming');
+    }
+    if (collectFees.isSuccess && (collectStatus === 'collecting' || collectStatus === 'confirming')) {
+      setCollectStatus('done');
+    }
+  }, [collectFees.isCollecting, collectFees.isWaitingForConfirmation, collectFees.isSuccess, collectStatus]);
+
+  // Collect step is resolved (done or skipped or no fees)
+  const collectResolved = !hasFees || collectStatus === 'done' || collectStatus === 'skipped';
 
   // NFT approval hook
   const nftApproval = useNftApproval(chainId, BigInt(nftId), factoryAddress);
@@ -86,8 +135,6 @@ export function UniswapV3TokenizePositionModal({
     decimals,
   });
 
-  const { address: connectedAddress } = useAccount();
-
   // Discover vault hook
   const discoverVault = useDiscoverVaultPosition();
 
@@ -96,8 +143,8 @@ export function UniswapV3TokenizePositionModal({
     label: 'Approve NFT Transfer',
     buttonLabel: 'Approve',
     chainId,
-    enabled: !!factoryAddress,
-    showActionButton: !nftApproval.isApproved && !nftApproval.isApproving && !nftApproval.isWaitingForConfirmation,
+    enabled: collectResolved && !!factoryAddress,
+    showActionButton: collectResolved && !nftApproval.isApproved && !nftApproval.isApproving && !nftApproval.isWaitingForConfirmation,
     txHash: nftApproval.txHash,
     isSubmitting: nftApproval.isApproving,
     isWaitingForConfirmation: nftApproval.isWaitingForConfirmation,
@@ -144,9 +191,11 @@ export function UniswapV3TokenizePositionModal({
       setTokenSymbol(`uv3-${chainId}-${nftId}`);
       setDecimals(computeDefaultDecimals(liquidity));
       setEditingField(null);
+      setCollectStatus('pending');
       setDiscoverStatus('idle');
       nftApproval.reset();
       createVault.reset();
+      collectFees.reset();
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -160,7 +209,8 @@ export function UniswapV3TokenizePositionModal({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  const isProcessing = nftApproval.isApproving || nftApproval.isWaitingForConfirmation ||
+  const isProcessing = collectStatus === 'collecting' || collectStatus === 'confirming' ||
+    nftApproval.isApproving || nftApproval.isWaitingForConfirmation ||
     createVault.isCreating || createVault.isWaitingForConfirmation ||
     discoverStatus === 'active';
 
@@ -251,6 +301,11 @@ export function UniswapV3TokenizePositionModal({
     );
   };
 
+  const collectStepActive = hasFees && collectStatus === 'pending';
+  const collectStepProcessing = collectStatus === 'collecting' || collectStatus === 'confirming';
+  const collectStepDone = collectStatus === 'done';
+  const collectStepSkipped = collectStatus === 'skipped';
+
   const content = (
     <>
       {/* Backdrop */}
@@ -284,6 +339,98 @@ export function UniswapV3TokenizePositionModal({
               {renderFieldRow('Decimals', String(decimals), 'decimals')}
               {renderFieldRow('Initial Shares', formatCompactValue(BigInt(liquidity), decimals), null, true)}
             </div>
+
+            {/* Collect Fees Section — only shown when position has unclaimed fees */}
+            {hasFees && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-slate-300 mb-3">Collect Outstanding Fees</h3>
+                <p className="text-xs text-slate-400 -mt-2 mb-3">
+                  Fees accrued on the NFT will be lost during vault initialization if not collected first.
+                </p>
+
+                {/* Fee preview */}
+                <div className="bg-slate-700/20 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-400">{baseToken.symbol}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-white font-medium">
+                        {formatCompactValue(baseTokenAmount, baseToken.decimals)}
+                      </span>
+                      {baseToken.logoUrl && (
+                        <img src={baseToken.logoUrl} alt={baseToken.symbol} className="w-4 h-4 rounded-full" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-400">{quoteToken.symbol}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-white font-medium">
+                        {formatCompactValue(quoteTokenAmount, quoteToken.decimals)}
+                      </span>
+                      {quoteToken.logoUrl && (
+                        <img src={quoteToken.logoUrl} alt={quoteToken.symbol} className="w-4 h-4 rounded-full" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-700/50">
+                    <span className="text-slate-300 font-medium">Total Value</span>
+                    <span className="text-amber-400 font-semibold">
+                      {formatCompactValue(unclaimedFees, quoteToken.decimals)} {quoteToken.symbol}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Collect / Skip buttons */}
+                {collectStepActive && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => collectFees.collect()}
+                      className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-amber-600/80 hover:bg-amber-600 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Collect Fees
+                    </button>
+                    <button
+                      onClick={() => setCollectStatus('skipped')}
+                      className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-slate-300 bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <SkipForward className="w-3.5 h-3.5" />
+                      Skip
+                    </button>
+                  </div>
+                )}
+
+                {/* Collect step status */}
+                {collectStepProcessing && (
+                  <div className="flex items-center gap-3 py-3 px-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                    <span className="text-white text-sm">
+                      {collectStatus === 'collecting' ? 'Collecting fees...' : 'Waiting for confirmation...'}
+                    </span>
+                  </div>
+                )}
+
+                {collectStepDone && (
+                  <div className="flex items-center gap-3 py-3 px-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                    <Check className="w-5 h-5 text-green-400" />
+                    <span className="text-slate-400 text-sm">Fees collected</span>
+                  </div>
+                )}
+
+                {collectStepSkipped && (
+                  <div className="flex items-center gap-3 py-3 px-4 bg-slate-700/30 border border-slate-600/20 rounded-lg">
+                    <SkipForward className="w-5 h-5 text-slate-500" />
+                    <span className="text-slate-400 text-sm">Skipped — contract will sweep remaining fees to you</span>
+                  </div>
+                )}
+
+                {collectFees.error && collectStatus === 'pending' && (
+                  <div className="flex items-center gap-3 py-3 px-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                    <AlertCircle className="w-5 h-5 text-red-400" />
+                    <span className="text-red-300 text-sm">{collectFees.error.message}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Transaction Section */}
             <div className="space-y-3">

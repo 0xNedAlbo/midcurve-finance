@@ -160,6 +160,19 @@ contract UniswapV3Vault is ERC20 {
         require(success && data.length >= 32, "getPool() failed");
         pool = abi.decode(data, (address));
 
+        // Collect any outstanding NFPM fees and send them directly to the initial
+        // share recipient. This must happen before _mint() because the mint triggers
+        // _beforeTokenTransfer → _collectAndUpdateAccumulator(), which would drain
+        // the fees into the vault while totalSupply == 0, orphaning them. (See #33)
+        positionManager.collect(
+            INonfungiblePositionManagerMinimal.CollectParams({
+                tokenId: tokenId_,
+                recipient: initialShareRecipient_,
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
+
         // Mint initial shares == liquidity
         if (liquidity > 0) {
             _mint(initialShareRecipient_, uint256(liquidity));

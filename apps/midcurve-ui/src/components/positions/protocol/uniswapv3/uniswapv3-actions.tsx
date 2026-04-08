@@ -271,9 +271,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
       <UniswapV3TokenizePositionModal
         isOpen={showTokenizeModal}
         onClose={() => setShowTokenizeModal(false)}
-        chainId={positionConfig.chainId}
-        nftId={positionConfig.nftId}
-        liquidity={(position.state as { liquidity: string }).liquidity}
+        position={position}
       />
 
     </>
