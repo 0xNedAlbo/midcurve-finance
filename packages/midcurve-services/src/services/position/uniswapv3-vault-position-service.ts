@@ -54,6 +54,7 @@ import { SharedContractService } from '../automation/shared-contract-service.js'
 import { Erc20TokenService } from '../token/erc20-token-service.js';
 import { tickToPrice, createErc20TokenHash, createEvmOwnerWallet, calculatePositionValue } from '@midcurve/shared';
 import { calculateTokenValueInQuote } from '../../utils/uniswapv3/ledger-calculations.js';
+import { UniswapV3AprService } from '../position-apr/uniswapv3-apr-service.js';
 
 // ============================================================================
 // CACHE TYPES
@@ -791,6 +792,22 @@ export class UniswapV3VaultPositionService {
 
         const unrealizedPnl = currentValue - aggregates.costBasisAfter;
 
+        // Calculate APR from ledger events
+        const aprService = new UniswapV3AprService(
+            { positionId: id },
+            { prisma: this.prisma },
+        );
+        const aprSummary = await aprService.calculateSummary(
+            {
+                positionOpenedAt: position.positionOpenedAt,
+                costBasis: aggregates.costBasisAfter,
+                unclaimedYield,
+            },
+            blockNumber,
+            dbTx,
+        );
+        const persistedApr = aprSummary.belowThreshold ? null : aprSummary.totalApr;
+
         // Update position in DB
         const db = dbTx ?? this.prisma;
         await db.position.update({
@@ -803,6 +820,9 @@ export class UniswapV3VaultPositionService {
                 unrealizedPnl: unrealizedPnl.toString(),
                 collectedYield: aggregates.collectedYieldAfter.toString(),
                 unclaimedYield: unclaimedYield.toString(),
+                totalApr: persistedApr,
+                baseApr: persistedApr,
+                rewardApr: 0,
                 isActive: true,
                 ...(isClosed && !position.positionClosedAt
                     ? { positionClosedAt: new Date() }
