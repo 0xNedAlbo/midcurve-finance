@@ -360,9 +360,23 @@ export class UniswapV3VaultPositionService {
             feeGrowthGlobal1: 0n,
         };
 
+        // Get vault creation timestamp from first mint Transfer log
+        const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
+        const mintLogs = await client.getLogs({
+            address: vaultAddress as Address,
+            event: transferEvent,
+            args: { from: '0x0000000000000000000000000000000000000000' as Address, to: ownerAddress as Address },
+            fromBlock: 'earliest',
+            toBlock: 'latest',
+        });
+        const firstMintBlock = mintLogs[0]?.blockNumber;
+        const positionOpenedAt = firstMintBlock
+            ? new Date(Number((await client.getBlock({ blockNumber: firstMintBlock })).timestamp) * 1000)
+            : new Date();
+
         // Create position in DB
         const position = await this.createPosition(
-            userId, positionHash, configData, stateData, token0, token1, dbTx,
+            userId, positionHash, configData, stateData, token0, token1, positionOpenedAt, dbTx,
         );
 
         // Refresh imports ledger events, emits domain events, and finalizes metrics
@@ -792,6 +806,15 @@ export class UniswapV3VaultPositionService {
 
         const unrealizedPnl = currentValue - aggregates.costBasisAfter;
 
+        // Backfill positionOpenedAt from first ledger event if it differs
+        const db = dbTx ?? this.prisma;
+        const firstEvent = await db.positionLedgerEvent.findFirst({
+            where: { positionId: id },
+            orderBy: { timestamp: 'asc' },
+            select: { timestamp: true },
+        });
+        const correctedOpenedAt = firstEvent?.timestamp ?? position.positionOpenedAt;
+
         // Calculate APR from ledger events
         const aprService = new UniswapV3AprService(
             { positionId: id },
@@ -799,7 +822,7 @@ export class UniswapV3VaultPositionService {
         );
         const aprSummary = await aprService.calculateSummary(
             {
-                positionOpenedAt: position.positionOpenedAt,
+                positionOpenedAt: correctedOpenedAt,
                 costBasis: aggregates.costBasisAfter,
                 unclaimedYield,
             },
@@ -809,7 +832,6 @@ export class UniswapV3VaultPositionService {
         const persistedApr = aprSummary.belowThreshold ? null : aprSummary.totalApr;
 
         // Update position in DB
-        const db = dbTx ?? this.prisma;
         await db.position.update({
             where: { id },
             data: {
@@ -824,6 +846,7 @@ export class UniswapV3VaultPositionService {
                 baseApr: persistedApr,
                 rewardApr: 0,
                 isActive: true,
+                positionOpenedAt: correctedOpenedAt,
                 ...(isClosed && !position.positionClosedAt
                     ? { positionClosedAt: new Date() }
                     : {}),
@@ -975,6 +998,7 @@ export class UniswapV3VaultPositionService {
         stateData: UniswapV3VaultPositionState,
         token0: TokenInterface,
         token1: TokenInterface,
+        positionOpenedAt: Date,
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
         const db = dbTx ?? this.prisma;
@@ -997,7 +1021,7 @@ export class UniswapV3VaultPositionService {
                 unrealizedCashflow: '0',
                 collectedYield: '0',
                 unclaimedYield: '0',
-                positionOpenedAt: new Date(),
+                positionOpenedAt,
                 isActive: true,
             },
         });
