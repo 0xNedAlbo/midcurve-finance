@@ -8,7 +8,10 @@ import os
 import subprocess
 import urllib.request
 import urllib.parse
+from dotenv import load_dotenv
 from fastmcp import FastMCP
+
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 mcp = FastMCP("blockchain")
 
