@@ -20,6 +20,7 @@ import { serializeUniswapV3Position } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { ImportUniswapV3PositionData } from '@midcurve/api-shared';
 import { getUniswapV3PositionService } from '@/lib/services';
+import { getDomainEventPublisher, type PositionCreatedPayload } from '@midcurve/services';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -100,6 +101,17 @@ export async function POST(request: NextRequest): Promise<Response> {
         chainId,
         nftId,
         // quoteTokenAddress omitted → service uses chain defaults → token0 fallback
+      });
+
+      // 3. Publish position.created domain event for downstream processing (journal backfill, etc.)
+      const eventPublisher = getDomainEventPublisher();
+      await eventPublisher.createAndPublish<PositionCreatedPayload>({
+        type: 'position.created',
+        entityType: 'position',
+        entityId: position.id,
+        userId: position.userId,
+        payload: position.toJSON(),
+        source: 'api',
       });
 
       apiLog.businessOperation(apiLogger, requestId, 'imported', 'position', position.id, {
