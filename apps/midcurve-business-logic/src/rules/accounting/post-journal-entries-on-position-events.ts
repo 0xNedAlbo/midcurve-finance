@@ -24,6 +24,7 @@ import {
   ACCOUNT_CODES,
   LEDGER_REF_PREFIX,
   JournalService,
+  JournalBackfillService,
   JournalLineBuilder,
   CoinGeckoClient,
   type DomainEvent,
@@ -70,10 +71,12 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
   private consumerTag: string | null = null;
   private readonly journalService: JournalService;
+  private readonly backfillService: JournalBackfillService;
 
   constructor() {
     super();
     this.journalService = JournalService.getInstance();
+    this.backfillService = JournalBackfillService.getInstance();
   }
 
   // ===========================================================================
@@ -171,10 +174,14 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * position.created → DR 1000 / CR 3000 (if cost basis available)
+   * position.created → Backfill journal entries from ledger event history
    *
-   * Creates the foundation entry only if costBasis > 0
-   * (which may not be the case for MINT-then-increase flows).
+   * Uses JournalBackfillService to replay all ledger events chronologically,
+   * creating journal entries with historic exchange rates. This correctly handles
+   * positions imported after ownership changes (e.g., NFT tokenized into a vault)
+   * by respecting per-event ownership flags (isIgnored) set during ledger import.
+   *
+   * Falls back to a simple foundation entry if no ledger events exist yet.
    */
   private async handlePositionCreated(
     event: DomainEvent<PositionCreatedPayload>
@@ -184,11 +191,34 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     const position = event.payload;
     const positionRef = position.positionHash;
 
+    // Build instrumentRef for backfill
+    const positionConfig = position.config as Record<string, unknown>;
+    const poolAddress = positionConfig.poolAddress as string;
+    const chainId = positionConfig.chainId as number;
+    const instrumentRef = `${position.protocol}/${chainId}/${poolAddress}`;
+
+    // Backfill from ledger history (idempotent — skips if entries exist).
+    const backfillResult = await this.backfillService.backfillPosition(
+      position.id,
+      position.userId,
+      positionRef,
+      instrumentRef,
+    );
+
+    if (backfillResult.entriesCreated > 0) {
+      this.logger.info(
+        { positionRef, entriesCreated: backfillResult.entriesCreated },
+        'Journal entries created via backfill on position.created',
+      );
+      return;
+    }
+
+    // Backfill found no financial events — try simple foundation entry
+    // (covers edge case where ledger events aren't imported yet)
     const costBasis = position.costBasis;
     if (!costBasis || costBasis === '0') return;
 
     const ctx = await this.getReportingContext(position.id);
-    const instrumentRef = ctx.poolHash;
     const lines = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
       .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, costBasis, positionRef, instrumentRef)
@@ -203,7 +233,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         entryDate: new Date(event.timestamp),
         description: `Position created: ${positionRef}`,
       },
-      lines
+      lines,
     );
   }
 
