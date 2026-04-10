@@ -429,34 +429,21 @@ export class UniswapV3VaultPositionService {
 
             const vaultAddresses = vaultCreatedLogs.map((l) => l.args.vault as Address);
 
-            // Batch scan for user involvement: Minted(recipient=user) + Transfer(to=user)
-            const mintedEvent = parseAbiItem(
-                'event Minted(address indexed minter, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
-            );
+            // Batch scan for user involvement: Transfer(to=user) covers mints and transfers
             const transferEvent = parseAbiItem(
                 'event Transfer(address indexed from, address indexed to, uint256 value)',
             );
 
-            const [mintLogs, transferLogs] = await Promise.all([
-                client.getLogs({
-                    address: vaultAddresses,
-                    event: mintedEvent,
-                    args: { recipient: walletAddress as Address },
-                    fromBlock: 0n,
-                    toBlock: 'latest' as any,
-                }),
-                client.getLogs({
-                    address: vaultAddresses,
-                    event: transferEvent,
-                    args: { to: walletAddress as Address },
-                    fromBlock: 0n,
-                    toBlock: 'latest' as any,
-                }),
-            ]);
+            const transferLogs = await client.getLogs({
+                address: vaultAddresses,
+                event: transferEvent,
+                args: { to: walletAddress as Address },
+                fromBlock: 0n,
+                toBlock: 'latest' as any,
+            });
 
             // Collect unique vault addresses where user received shares
             const matchedVaults = new Set<string>();
-            for (const l of mintLogs) matchedVaults.add(normalizeAddress(l.address));
             for (const l of transferLogs) matchedVaults.add(normalizeAddress(l.address));
 
             found += matchedVaults.size;
@@ -962,12 +949,6 @@ export class UniswapV3VaultPositionService {
         fromBlock: bigint,
         toBlock: bigint | 'latest' = 'latest',
     ): Promise<VaultRawLogInput[]> {
-        const mintedEvent = parseAbiItem(
-            'event Minted(address indexed minter, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
-        );
-        const burnedEvent = parseAbiItem(
-            'event Burned(address indexed burner, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
-        );
         const yieldCollectedEvent = parseAbiItem(
             'event YieldCollected(address indexed user, address indexed recipient, uint256[] tokenAmounts)',
         );
@@ -977,15 +958,13 @@ export class UniswapV3VaultPositionService {
 
         const commonParams = { address: vaultAddress, fromBlock, toBlock };
 
-        const [mintLogs, burnLogs, yieldLogs, transferInLogs, transferOutLogs] = await Promise.all([
-            client.getLogs({ ...commonParams, event: mintedEvent, args: { recipient: ownerAddress } }),
-            client.getLogs({ ...commonParams, event: burnedEvent, args: { burner: ownerAddress } }),
+        const [yieldLogs, transferInLogs, transferOutLogs] = await Promise.all([
             client.getLogs({ ...commonParams, event: yieldCollectedEvent, args: { user: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { to: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { from: ownerAddress } }),
         ]);
 
-        const allLogs = [...mintLogs, ...burnLogs, ...yieldLogs, ...transferInLogs, ...transferOutLogs];
+        const allLogs = [...yieldLogs, ...transferInLogs, ...transferOutLogs];
         allLogs.sort((a, b) => {
             const blockDiff = Number(a.blockNumber! - b.blockNumber!);
             if (blockDiff !== 0) return blockDiff;
