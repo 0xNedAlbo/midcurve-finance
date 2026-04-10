@@ -256,6 +256,7 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
     /// @inheritdoc IMultiTokenVault
     /// @dev No operations are supported for this vault type. Always reverts.
     function tend(bytes32, bytes calldata) external onlyOperator returns (bytes memory) {
+        _reentrancyStatus = _reentrancyStatus; // solc: prevent "can be restricted to view" (2018)
         revert UnsupportedTendOperation();
     }
 
