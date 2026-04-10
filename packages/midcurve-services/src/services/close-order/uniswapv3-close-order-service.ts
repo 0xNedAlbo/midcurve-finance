@@ -2,13 +2,17 @@
  * UniswapV3 Close Order Service
  *
  * Provides CRUD operations, lifecycle management, and on-chain integration
- * for UniswapV3 close orders.
+ * for UniswapV3 close orders (both NFT and vault positions).
  *
  * Key concepts:
- * - protocol: 'uniswapv3'
- * - config: immutable identity data (JSON) — chainId, nftId, contractAddress, etc.
+ * - protocol: 'uniswapv3' (NFT) or 'uniswapv3-vault' (vault shares)
+ * - config: immutable identity data (JSON)
+ *     NFT:   { chainId, nftId, triggerMode, contractAddress }
+ *     Vault: { chainId, vaultAddress, ownerAddress, triggerMode, contractAddress }
  * - state: mutable on-chain state (JSON) — triggerTick, pool, slippage, etc.
- * - orderIdentityHash: unique identifier, e.g. "uniswapv3/{chainId}/{nftId}/{triggerMode}"
+ * - orderIdentityHash: unique identifier
+ *     NFT:   "uniswapv3/{chainId}/{nftId}/{triggerMode}"
+ *     Vault: "uniswapv3-vault/{chainId}/{vaultAddress}/{ownerAddress}/{triggerMode}"
  * - automationState: single lifecycle field (inactive|monitoring|executing|retrying|failed|executed)
  *     inactive = stored for display only, operator is not our automation wallet
  * - executionAttempts: retry counter, resets when price moves away from trigger
@@ -72,6 +76,45 @@ const POSITION_CLOSER_GET_ORDER_ABI = [
   },
 ] as const;
 
+/**
+ * VaultPositionCloser ABI (minimal — only getOrder for vault orders)
+ *
+ * getOrder(address vault, address owner, uint8 triggerMode) → VaultCloseOrder
+ */
+const VAULT_POSITION_CLOSER_GET_ORDER_ABI = [
+  {
+    inputs: [
+      { internalType: 'address', name: 'vault', type: 'address' },
+      { internalType: 'address', name: 'owner', type: 'address' },
+      { internalType: 'uint8', name: 'triggerMode', type: 'uint8' },
+    ],
+    name: 'getOrder',
+    outputs: [
+      {
+        internalType: 'struct VaultCloseOrder',
+        name: 'order',
+        type: 'tuple',
+        components: [
+          { internalType: 'enum OrderStatus', name: 'status', type: 'uint8' },
+          { internalType: 'address', name: 'vault', type: 'address' },
+          { internalType: 'address', name: 'owner', type: 'address' },
+          { internalType: 'address', name: 'pool', type: 'address' },
+          { internalType: 'uint256', name: 'shares', type: 'uint256' },
+          { internalType: 'int24', name: 'triggerTick', type: 'int24' },
+          { internalType: 'address', name: 'payout', type: 'address' },
+          { internalType: 'address', name: 'operator', type: 'address' },
+          { internalType: 'uint256', name: 'validUntil', type: 'uint256' },
+          { internalType: 'uint16', name: 'slippageBps', type: 'uint16' },
+          { internalType: 'enum SwapDirection', name: 'swapDirection', type: 'uint8' },
+          { internalType: 'uint16', name: 'swapSlippageBps', type: 'uint16' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -82,7 +125,6 @@ const POSITION_CLOSER_GET_ORDER_ABI = [
  */
 interface OnChainOrder {
   status: number;
-  nftId: bigint;
   owner: string;
   pool: string;
   triggerTick: number;
@@ -92,6 +134,11 @@ interface OnChainOrder {
   slippageBps: number;
   swapDirection: ContractSwapDirection;
   swapSlippageBps: number;
+  // NFT-specific
+  nftId?: bigint;
+  // Vault-specific
+  vault?: string;
+  shares?: bigint;
 }
 
 /**
@@ -149,7 +196,8 @@ export class UniswapV3CloseOrderService {
   private readonly sharedContractService: SharedContractService;
   private readonly logger: ServiceLogger;
 
-  readonly protocol = 'uniswapv3' as const;
+  /** Supported protocols: 'uniswapv3' (NFT) and 'uniswapv3-vault' (vault shares) */
+  static readonly SUPPORTED_PROTOCOLS = ['uniswapv3', 'uniswapv3-vault'] as const;
 
   constructor(dependencies: UniswapV3CloseOrderServiceDependencies = {}) {
     this.prisma = dependencies.prisma ?? prismaClient;
@@ -202,14 +250,28 @@ export class UniswapV3CloseOrderService {
     try {
       const db = tx ?? this.prisma;
 
-      // 1. Fetch position to get chainId and nftId
+      // 1. Fetch position to determine protocol and extract identifiers
       const position = await db.position.findUnique({ where: { id: positionId } });
       if (!position) {
         throw new Error(`Position not found: ${positionId}`);
       }
       const posConfig = position.config as Record<string, unknown>;
+      const posState = position.state as Record<string, unknown>;
       const chainId = posConfig.chainId as number;
-      const nftId = String(posConfig.nftId);
+      const protocol = position.protocol; // 'uniswapv3' or 'uniswapv3-vault'
+      const isVault = protocol === 'uniswapv3-vault';
+
+      // Protocol-specific identifiers
+      const nftId = isVault ? undefined : String(posConfig.nftId);
+      const vaultAddress = isVault ? (posConfig.vaultAddress as string) : undefined;
+      const ownerAddress = isVault ? (posState.ownerAddress as string) : undefined;
+
+      if (isVault && (!vaultAddress || !ownerAddress)) {
+        throw new Error(`Vault position missing vaultAddress or ownerAddress: ${positionId}`);
+      }
+      if (!isVault && !nftId) {
+        throw new Error(`NFT position missing nftId: ${positionId}`);
+      }
 
       // 2. Look up operator key + address from system config (single operator key)
       const operatorKeyId = await db.systemConfig.findUnique({ where: { key: 'operator.kms.keyId' } });
@@ -217,14 +279,15 @@ export class UniswapV3CloseOrderService {
       const hasOperator = operatorKeyId !== null;
       const ourOperatorAddress = operatorAddressEntry?.value ?? null;
 
-      // 3. Find the PositionCloser contract for this chain
+      // 3. Find the closer contract for this chain (protocol-specific)
+      const contractName = isVault ? 'UniswapV3VaultPositionCloser' : 'UniswapV3PositionCloser';
       const sharedContract = await this.sharedContractService.findLatestByChainAndName(
         chainId,
-        'UniswapV3PositionCloser',
+        contractName,
       );
       if (!sharedContract) {
         throw new Error(
-          `No UniswapV3PositionCloser contract found for chain ${chainId}`,
+          `No ${contractName} contract found for chain ${chainId}`,
         );
       }
       const contractAddress = sharedContract.config.address;
@@ -238,15 +301,19 @@ export class UniswapV3CloseOrderService {
       const triggerModes = [ContractTriggerMode.LOWER, ContractTriggerMode.UPPER] as const;
 
       for (const triggerMode of triggerModes) {
-        const onChain = await this.readOnChainOrder(
-          chainId,
-          contractAddress,
-          BigInt(nftId),
-          triggerMode,
-          blockNumber,
-        );
+        // Read on-chain order using protocol-specific ABI
+        const onChain = isVault
+          ? await this.readVaultOnChainOrder(
+              chainId, contractAddress, vaultAddress!, ownerAddress!, triggerMode, blockNumber,
+            )
+          : await this.readOnChainOrder(
+              chainId, contractAddress, BigInt(nftId!), triggerMode, blockNumber,
+            );
 
-        const orderIdentityHash = `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
+        // Protocol-specific identity hash
+        const orderIdentityHash = isVault
+          ? `uniswapv3-vault/${chainId}/${vaultAddress!.toLowerCase()}/${ownerAddress!.toLowerCase()}/${triggerMode}`
+          : `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
         const existingOrder = await this.findByOrderIdentityHash(orderIdentityHash, tx);
         const isActive = onChain !== null && onChain.status === OnChainOrderStatus.ACTIVE;
 
@@ -261,32 +328,35 @@ export class UniswapV3CloseOrderService {
           const isOurOrder = hasOperator && ourOperatorAddress !== null
             && compareAddresses(onChain.operator, ourOperatorAddress) === 0;
 
+          // Build protocol-specific config and state
+          const orderConfig = isVault
+            ? { chainId, vaultAddress, ownerAddress, triggerMode, contractAddress }
+            : { chainId, nftId, triggerMode, contractAddress };
+
+          const orderState: Record<string, unknown> = {
+            triggerTick: onChain.triggerTick,
+            slippageBps: onChain.slippageBps,
+            payoutAddress: onChain.payout,
+            operatorAddress: onChain.operator,
+            owner: onChain.owner,
+            pool: onChain.pool,
+            validUntil: new Date(Number(onChain.validUntil) * 1000).toISOString(),
+            swapDirection: onChain.swapDirection,
+            swapSlippageBps: onChain.swapSlippageBps,
+            discoveredAt: new Date().toISOString(),
+            ...(isVault && onChain.shares !== undefined ? { shares: onChain.shares.toString() } : {}),
+          };
+
           const newOrder = await this.create(
             {
-              protocol: this.protocol,
+              protocol,
               positionId,
               sharedContractId: sharedContract.id,
               orderIdentityHash,
               closeOrderHash,
               automationState: isOurOrder ? 'monitoring' : 'inactive',
-              config: {
-                chainId,
-                nftId,
-                triggerMode,
-                contractAddress,
-              },
-              state: {
-                triggerTick: onChain.triggerTick,
-                slippageBps: onChain.slippageBps,
-                payoutAddress: onChain.payout,
-                operatorAddress: onChain.operator,
-                owner: onChain.owner,
-                pool: onChain.pool,
-                validUntil: new Date(Number(onChain.validUntil) * 1000).toISOString(),
-                swapDirection: onChain.swapDirection,
-                swapSlippageBps: onChain.swapSlippageBps,
-                discoveredAt: new Date().toISOString(),
-              },
+              config: orderConfig,
+              state: orderState,
             },
             tx,
           );
@@ -305,6 +375,7 @@ export class UniswapV3CloseOrderService {
             validUntil: new Date(Number(onChain.validUntil) * 1000).toISOString(),
             swapDirection: onChain.swapDirection,
             swapSlippageBps: onChain.swapSlippageBps,
+            ...(isVault && onChain.shares !== undefined ? { shares: onChain.shares.toString() } : {}),
           };
 
           const synced = await this.syncFromChain(existingOrder.id, { state: updatedState }, tx);
@@ -504,6 +575,7 @@ export class UniswapV3CloseOrderService {
    * Pool data (chainId, poolAddress) is extracted from position.config JSON.
    */
   async getPoolsWithMonitoringOrders(
+    options?: { protocols?: string[] },
     tx?: PrismaTransactionClient,
   ): Promise<Array<{ chainId: number; poolAddress: string }>> {
     log.methodEntry(this.logger, 'getPoolsWithMonitoringOrders', {});
@@ -513,6 +585,7 @@ export class UniswapV3CloseOrderService {
       const orders = await db.closeOrder.findMany({
         where: {
           automationState: 'monitoring',
+          ...(options?.protocols && { protocol: { in: options.protocols } }),
         },
         select: {
           position: {
@@ -1000,6 +1073,49 @@ export class UniswapV3CloseOrderService {
       nftId: result.nftId,
       owner: result.owner,
       pool: result.pool,
+      triggerTick: result.triggerTick,
+      payout: result.payout,
+      operator: result.operator,
+      validUntil: result.validUntil,
+      slippageBps: result.slippageBps,
+      swapDirection: result.swapDirection as ContractSwapDirection,
+      swapSlippageBps: result.swapSlippageBps,
+    };
+  }
+
+  /**
+   * Reads a single vault on-chain order via getOrder(vault, owner, triggerMode).
+   * Returns the full order struct, or null if status is NONE.
+   */
+  private async readVaultOnChainOrder(
+    chainId: number,
+    contractAddress: string,
+    vaultAddress: string,
+    ownerAddress: string,
+    triggerMode: ContractTriggerMode,
+    blockNumber: number | 'latest' = 'latest',
+  ): Promise<OnChainOrder | null> {
+    const client = EvmConfig.getInstance().getPublicClient(chainId);
+    const blockNumberParam = blockNumber === 'latest' ? undefined : BigInt(blockNumber);
+
+    const result = await client.readContract({
+      address: contractAddress as `0x${string}`,
+      abi: VAULT_POSITION_CLOSER_GET_ORDER_ABI,
+      functionName: 'getOrder',
+      args: [vaultAddress as `0x${string}`, ownerAddress as `0x${string}`, triggerMode],
+      blockNumber: blockNumberParam,
+    });
+
+    if (result.status === OnChainOrderStatus.NONE) {
+      return null;
+    }
+
+    return {
+      status: result.status,
+      vault: result.vault,
+      owner: result.owner,
+      pool: result.pool,
+      shares: result.shares,
       triggerTick: result.triggerTick,
       payout: result.payout,
       operator: result.operator,

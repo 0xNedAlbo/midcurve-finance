@@ -12,7 +12,7 @@
  */
 
 import { decodeEventLog } from 'viem';
-import { UniswapV3PositionCloserV100Abi } from '@midcurve/shared';
+import { UniswapV3PositionCloserV100Abi, UniswapV3VaultPositionCloserV100Abi } from '@midcurve/shared';
 
 // ============================================================
 // Enum Helpers
@@ -46,7 +46,17 @@ export type CloseOrderOnChainEventType =
   | 'close-order.uniswapv3.trigger-tick-updated'
   | 'close-order.uniswapv3.valid-until-updated'
   | 'close-order.uniswapv3.slippage-updated'
-  | 'close-order.uniswapv3.swap-intent-updated';
+  | 'close-order.uniswapv3.swap-intent-updated'
+  | 'close-order.uniswapv3-vault.registered'
+  | 'close-order.uniswapv3-vault.cancelled'
+  | 'close-order.uniswapv3-vault.executed'
+  | 'close-order.uniswapv3-vault.operator-updated'
+  | 'close-order.uniswapv3-vault.payout-updated'
+  | 'close-order.uniswapv3-vault.trigger-tick-updated'
+  | 'close-order.uniswapv3-vault.valid-until-updated'
+  | 'close-order.uniswapv3-vault.slippage-updated'
+  | 'close-order.uniswapv3-vault.swap-intent-updated'
+  | 'close-order.uniswapv3-vault.shares-updated';
 
 /**
  * Lifecycle event names from the contract (used for discrimination after decodeEventLog)
@@ -61,14 +71,15 @@ const LIFECYCLE_EVENT_NAMES = [
   'OrderValidUntilUpdated',
   'OrderSlippageUpdated',
   'OrderSwapIntentUpdated',
+  'OrderSharesUpdated',
 ] as const;
 
 type LifecycleEventName = (typeof LIFECYCLE_EVENT_NAMES)[number];
 
 /**
- * Map contract event name to domain event type
+ * Map contract event name to domain event type (NFT variant)
  */
-const EVENT_NAME_TO_DOMAIN_TYPE: Record<LifecycleEventName, CloseOrderOnChainEventType> = {
+const NFT_EVENT_NAME_TO_DOMAIN_TYPE: Record<string, CloseOrderOnChainEventType> = {
   OrderRegistered: 'close-order.uniswapv3.registered',
   OrderCancelled: 'close-order.uniswapv3.cancelled',
   OrderExecuted: 'close-order.uniswapv3.executed',
@@ -78,6 +89,22 @@ const EVENT_NAME_TO_DOMAIN_TYPE: Record<LifecycleEventName, CloseOrderOnChainEve
   OrderValidUntilUpdated: 'close-order.uniswapv3.valid-until-updated',
   OrderSlippageUpdated: 'close-order.uniswapv3.slippage-updated',
   OrderSwapIntentUpdated: 'close-order.uniswapv3.swap-intent-updated',
+};
+
+/**
+ * Map contract event name to domain event type (vault variant)
+ */
+const VAULT_EVENT_NAME_TO_DOMAIN_TYPE: Record<string, CloseOrderOnChainEventType> = {
+  OrderRegistered: 'close-order.uniswapv3-vault.registered',
+  OrderCancelled: 'close-order.uniswapv3-vault.cancelled',
+  OrderExecuted: 'close-order.uniswapv3-vault.executed',
+  OrderOperatorUpdated: 'close-order.uniswapv3-vault.operator-updated',
+  OrderPayoutUpdated: 'close-order.uniswapv3-vault.payout-updated',
+  OrderTriggerTickUpdated: 'close-order.uniswapv3-vault.trigger-tick-updated',
+  OrderValidUntilUpdated: 'close-order.uniswapv3-vault.valid-until-updated',
+  OrderSlippageUpdated: 'close-order.uniswapv3-vault.slippage-updated',
+  OrderSwapIntentUpdated: 'close-order.uniswapv3-vault.swap-intent-updated',
+  OrderSharesUpdated: 'close-order.uniswapv3-vault.shares-updated',
 };
 
 function isLifecycleEventName(name: string): name is LifecycleEventName {
@@ -92,7 +119,12 @@ export interface CloseOrderDomainEvent<T extends CloseOrderOnChainEventType, P> 
   type: T;
   chainId: number;
   contractAddress: string;
-  nftId: string;
+  /** NFT position identifier (present for protocol='uniswapv3') */
+  nftId?: string;
+  /** Vault address (present for protocol='uniswapv3-vault') */
+  vaultAddress?: string;
+  /** Share holder address (present for protocol='uniswapv3-vault') */
+  ownerAddress?: string;
   triggerMode: TriggerModeString;
   payload: P;
   blockNumber: string;
@@ -162,6 +194,11 @@ export interface OrderSwapIntentUpdatedPayload {
   swapSlippageBps: number;
 }
 
+export interface OrderSharesUpdatedPayload {
+  oldShares: string;
+  newShares: string;
+}
+
 // ============================================================
 // Typed Event Aliases
 // ============================================================
@@ -176,6 +213,18 @@ export type OrderValidUntilUpdatedEvent = CloseOrderDomainEvent<'close-order.uni
 export type OrderSlippageUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.slippage-updated', OrderSlippageUpdatedPayload>;
 export type OrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.swap-intent-updated', OrderSwapIntentUpdatedPayload>;
 
+// Vault event aliases
+export type VaultOrderRegisteredEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.registered', OrderRegisteredPayload>;
+export type VaultOrderCancelledEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.cancelled', OrderCancelledPayload>;
+export type VaultOrderExecutedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.executed', OrderExecutedPayload>;
+export type VaultOrderOperatorUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.operator-updated', OrderOperatorUpdatedPayload>;
+export type VaultOrderPayoutUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.payout-updated', OrderPayoutUpdatedPayload>;
+export type VaultOrderTriggerTickUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.trigger-tick-updated', OrderTriggerTickUpdatedPayload>;
+export type VaultOrderValidUntilUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.valid-until-updated', OrderValidUntilUpdatedPayload>;
+export type VaultOrderSlippageUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.slippage-updated', OrderSlippageUpdatedPayload>;
+export type VaultOrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.swap-intent-updated', OrderSwapIntentUpdatedPayload>;
+export type VaultOrderSharesUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.shares-updated', OrderSharesUpdatedPayload>;
+
 export type AnyCloseOrderEvent =
   | OrderRegisteredEvent
   | OrderCancelledEvent
@@ -185,7 +234,17 @@ export type AnyCloseOrderEvent =
   | OrderTriggerTickUpdatedEvent
   | OrderValidUntilUpdatedEvent
   | OrderSlippageUpdatedEvent
-  | OrderSwapIntentUpdatedEvent;
+  | OrderSwapIntentUpdatedEvent
+  | VaultOrderRegisteredEvent
+  | VaultOrderCancelledEvent
+  | VaultOrderExecutedEvent
+  | VaultOrderOperatorUpdatedEvent
+  | VaultOrderPayoutUpdatedEvent
+  | VaultOrderTriggerTickUpdatedEvent
+  | VaultOrderValidUntilUpdatedEvent
+  | VaultOrderSlippageUpdatedEvent
+  | VaultOrderSwapIntentUpdatedEvent
+  | VaultOrderSharesUpdatedEvent;
 
 // ============================================================
 // Extract Lifecycle Event ABIs
@@ -196,6 +255,10 @@ export type AnyCloseOrderEvent =
  * Used for watchEvent subscriptions and decodeEventLog.
  */
 export const CLOSER_LIFECYCLE_EVENT_ABIS = UniswapV3PositionCloserV100Abi.filter(
+  (item) => item.type === 'event' && isLifecycleEventName(item.name)
+);
+
+export const VAULT_CLOSER_LIFECYCLE_EVENT_ABIS = UniswapV3VaultPositionCloserV100Abi.filter(
   (item) => item.type === 'event' && isLifecycleEventName(item.name)
 );
 
@@ -231,32 +294,52 @@ export function buildCloseOrderEvent(
   // Skip removed/reorged logs
   if (rawLog.removed) return null;
 
-  let decoded;
+  // Try decoding with NFT ABI first, then vault ABI.
+  // The topic0 (event signature hash) differs because the event parameter types differ,
+  // so only one will succeed.
+  let decoded: { eventName: string; args: Record<string, unknown> } | null = null;
+  let isVault = false;
+
   try {
     decoded = decodeEventLog({
       abi: UniswapV3PositionCloserV100Abi,
       data: rawLog.data,
       topics: rawLog.topics as [`0x${string}`, ...`0x${string}`[]],
-    });
+    }) as { eventName: string; args: Record<string, unknown> };
   } catch {
-    // Not a recognized event from our ABI
-    return null;
+    // Not an NFT closer event — try vault
+    try {
+      decoded = decodeEventLog({
+        abi: UniswapV3VaultPositionCloserV100Abi,
+        data: rawLog.data,
+        topics: rawLog.topics as [`0x${string}`, ...`0x${string}`[]],
+      }) as { eventName: string; args: Record<string, unknown> };
+      isVault = true;
+    } catch {
+      // Not a recognized event from either ABI
+      return null;
+    }
   }
+
+  if (!decoded) return null;
 
   const eventName = decoded.eventName;
   if (!isLifecycleEventName(eventName)) return null;
 
-  const domainType = EVENT_NAME_TO_DOMAIN_TYPE[eventName];
-  const args = decoded.args as Record<string, unknown>;
+  const eventNameMap = isVault ? VAULT_EVENT_NAME_TO_DOMAIN_TYPE : NFT_EVENT_NAME_TO_DOMAIN_TYPE;
+  const domainType = eventNameMap[eventName];
+  if (!domainType) return null;
 
-  // All lifecycle events have nftId (topics[1]) and triggerMode (topics[2])
-  const nftId = String(args.nftId);
+  const args = decoded.args;
   const triggerMode = triggerModeToString(args.triggerMode as number);
 
+  // Build envelope with protocol-specific identifiers
   const envelope = {
     chainId,
     contractAddress,
-    nftId,
+    ...(isVault
+      ? { vaultAddress: String(args.vault), ownerAddress: String(args.owner) }
+      : { nftId: String(args.nftId) }),
     triggerMode,
     blockNumber: rawLog.blockNumber.toString(),
     transactionHash: rawLog.transactionHash,
@@ -267,7 +350,7 @@ export function buildCloseOrderEvent(
   switch (eventName) {
     case 'OrderRegistered':
       return {
-        type: domainType as 'close-order.uniswapv3.registered',
+        type: domainType as any,
         ...envelope,
         payload: {
           owner: args.owner as string,
@@ -279,91 +362,103 @@ export function buildCloseOrderEvent(
           slippageBps: Number(args.slippageBps),
           swapDirection: swapDirectionToString(args.swapDirection as number),
           swapSlippageBps: Number(args.swapSlippageBps),
+          ...(isVault && args.shares !== undefined ? { shares: String(args.shares) } : {}),
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderCancelled':
       return {
-        type: domainType as 'close-order.uniswapv3.cancelled',
+        type: domainType as any,
         ...envelope,
         payload: {
           owner: args.owner as string,
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderExecuted':
       return {
-        type: domainType as 'close-order.uniswapv3.executed',
+        type: domainType as any,
         ...envelope,
         payload: {
           owner: args.owner as string,
           payout: args.payout as string,
           executionTick: Number(args.executionTick),
+          ...(isVault ? { sharesClosed: String(args.sharesClosed) } : {}),
           amount0Out: String(args.amount0Out),
           amount1Out: String(args.amount1Out),
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderOperatorUpdated':
       return {
-        type: domainType as 'close-order.uniswapv3.operator-updated',
+        type: domainType as any,
         ...envelope,
         payload: {
           oldOperator: args.oldOperator as string,
           newOperator: args.newOperator as string,
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderPayoutUpdated':
       return {
-        type: domainType as 'close-order.uniswapv3.payout-updated',
+        type: domainType as any,
         ...envelope,
         payload: {
           oldPayout: args.oldPayout as string,
           newPayout: args.newPayout as string,
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderTriggerTickUpdated':
       return {
-        type: domainType as 'close-order.uniswapv3.trigger-tick-updated',
+        type: domainType as any,
         ...envelope,
         payload: {
           oldTick: Number(args.oldTick),
           newTick: Number(args.newTick),
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderValidUntilUpdated':
       return {
-        type: domainType as 'close-order.uniswapv3.valid-until-updated',
+        type: domainType as any,
         ...envelope,
         payload: {
           oldValidUntil: String(args.oldValidUntil),
           newValidUntil: String(args.newValidUntil),
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderSlippageUpdated':
       return {
-        type: domainType as 'close-order.uniswapv3.slippage-updated',
+        type: domainType as any,
         ...envelope,
         payload: {
           oldSlippageBps: Number(args.oldSlippageBps),
           newSlippageBps: Number(args.newSlippageBps),
         },
-      };
+      } as AnyCloseOrderEvent;
 
     case 'OrderSwapIntentUpdated':
       return {
-        type: domainType as 'close-order.uniswapv3.swap-intent-updated',
+        type: domainType as any,
         ...envelope,
         payload: {
           oldDirection: swapDirectionToString(args.oldDirection as number),
           newDirection: swapDirectionToString(args.newDirection as number),
           swapSlippageBps: Number(args.swapSlippageBps),
         },
-      };
+      } as AnyCloseOrderEvent;
+
+    case 'OrderSharesUpdated':
+      return {
+        type: domainType as any,
+        ...envelope,
+        payload: {
+          oldShares: String(args.oldShares),
+          newShares: String(args.newShares),
+        },
+      } as AnyCloseOrderEvent;
 
     default:
       return null;
@@ -379,10 +474,19 @@ export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
 
 /**
  * Build a routing key for close order lifecycle events.
- * Format: closer.{chainId}.{nftId}.{triggerMode}
+ * NFT format:   closer.{chainId}.{nftId}.{triggerMode}
+ * Vault format:  closer.vault.{chainId}.{vaultAddress}.{triggerMode}
  */
-export function buildCloseOrderRoutingKey(chainId: number, nftId: string, triggerMode: string): string {
-  return `closer.${chainId}.${nftId}.${triggerMode}`;
+export function buildCloseOrderRoutingKey(
+  chainId: number,
+  identifier: string,
+  triggerMode: string,
+  variant?: 'vault'
+): string {
+  if (variant === 'vault') {
+    return `closer.vault.${chainId}.${identifier}.${triggerMode}`;
+  }
+  return `closer.${chainId}.${identifier}.${triggerMode}`;
 }
 
 // ============================================================

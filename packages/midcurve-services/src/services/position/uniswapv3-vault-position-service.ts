@@ -52,6 +52,7 @@ import { UniswapV3VaultLedgerService, type VaultRawLogInput } from '../position-
 import { CacheService } from '../cache/index.js';
 import { SharedContractService } from '../automation/shared-contract-service.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
+import { UniswapV3CloseOrderService } from '../close-order/uniswapv3-close-order-service.js';
 import { tickToPrice, createErc20TokenHash, createEvmOwnerWallet, calculatePositionValue } from '@midcurve/shared';
 import { calculateTokenValueInQuote } from '../../utils/uniswapv3/ledger-calculations.js';
 import { UniswapV3AprService } from '../position-apr/uniswapv3-apr-service.js';
@@ -136,6 +137,7 @@ export interface UniswapV3VaultPositionServiceDependencies {
     cacheService?: CacheService;
     sharedContractService?: SharedContractService;
     erc20TokenService?: Erc20TokenService;
+    closeOrderService?: UniswapV3CloseOrderService;
 }
 
 // ============================================================================
@@ -154,6 +156,7 @@ export class UniswapV3VaultPositionService {
     private readonly _cacheService: CacheService;
     private readonly _sharedContractService: SharedContractService;
     private readonly _erc20TokenService: Erc20TokenService;
+    private readonly _closeOrderService: UniswapV3CloseOrderService;
 
     constructor(deps: UniswapV3VaultPositionServiceDependencies = {}) {
         this.prisma = deps.prisma ?? prismaClient;
@@ -167,6 +170,7 @@ export class UniswapV3VaultPositionService {
         this._cacheService = deps.cacheService ?? CacheService.getInstance();
         this._sharedContractService = deps.sharedContractService ?? new SharedContractService();
         this._erc20TokenService = deps.erc20TokenService ?? new Erc20TokenService();
+        this._closeOrderService = deps.closeOrderService ?? new UniswapV3CloseOrderService();
     }
 
     // ============================================================================
@@ -483,7 +487,19 @@ export class UniswapV3VaultPositionService {
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
         await this.refreshAllPositionLogs(id, blockNumber, dbTx);
-        return this.refreshOnChainState(id, blockNumber, dbTx);
+        const result = await this.refreshOnChainState(id, blockNumber, dbTx);
+
+        // Reconcile close orders from on-chain (best-effort, non-fatal)
+        try {
+            await this._closeOrderService.refresh(id, blockNumber, dbTx);
+        } catch (closeOrderError) {
+            this.logger.warn(
+                { positionId: id, error: (closeOrderError as Error).message },
+                'Close order reconciliation failed (non-fatal)',
+            );
+        }
+
+        return result;
     }
 
     // ============================================================================

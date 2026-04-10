@@ -72,7 +72,10 @@ export async function publishCloseOrderEventsFromReceipt(
     const event = buildCloseOrderEvent(chainId, contractAddress, rawLog);
     if (!event) continue;
 
-    const routingKey = buildCloseOrderRoutingKey(chainId, event.nftId, event.triggerMode);
+    const isVaultEvent = event.vaultAddress !== undefined;
+    const routingKey = isVaultEvent
+      ? buildCloseOrderRoutingKey(chainId, event.vaultAddress!, event.triggerMode, 'vault')
+      : buildCloseOrderRoutingKey(chainId, event.nftId!, event.triggerMode);
     const content = serializeCloseOrderEvent(event);
 
     channel.publish(EXCHANGE_CLOSE_ORDER_EVENTS, routingKey, content, {
@@ -86,7 +89,7 @@ export async function publishCloseOrderEventsFromReceipt(
       chainId,
       txHash,
       eventType: event.type,
-      nftId: event.nftId,
+      nftId: event.nftId ?? event.vaultAddress,
       triggerMode: event.triggerMode,
       routingKey,
       msg: 'Published close order event from receipt',
