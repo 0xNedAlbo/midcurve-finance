@@ -180,6 +180,12 @@ export function LedgerEventTable({
     return principal0 !== "0" || principal1 !== "0";
   };
 
+  // Get fee recipient from event config
+  const getFeeRecipient = (event: LedgerEventData): string => {
+    const config = event.config as any;
+    return config?.feeRecipient || "";
+  };
+
   // Get fee amounts from event config
   const getFeeAmounts = (event: LedgerEventData): { fee0: string; fee1: string } => {
     const config = event.config as any;
@@ -305,6 +311,7 @@ export function LedgerEventTable({
               const txHash = getTxHash(event);
               const blockNumber = getBlockNumber(event);
               const { fee0, fee1 } = getFeeAmounts(event);
+              const feeRecipient = getFeeRecipient(event);
 
               return (
                 <tr key={event.id} className={`hover:bg-slate-700/20 transition-colors ${event.isIgnored ? 'opacity-40' : ''}`}>
@@ -378,6 +385,13 @@ export function LedgerEventTable({
                         renderLifecycleDetails(event)
                       ) : isCollectEvent(event.eventType as EventType) ? (
                         <>
+                          {/* Show fee recipient */}
+                          {feeRecipient && (
+                            <div className="flex items-center gap-1.5 text-xs mb-1">
+                              <span className="text-slate-500">Recipient:</span>
+                              {renderAddressLink(feeRecipient)}
+                            </div>
+                          )}
                           {/* Show fees first */}
                           {fee0 !== "0" && renderFeeAmount(fee0, token0)}
                           {fee1 !== "0" && renderFeeAmount(fee1, token1)}
@@ -432,6 +446,7 @@ export function LedgerEventTable({
           const txHash = getTxHash(event);
           const blockNumber = getBlockNumber(event);
           const { fee0, fee1 } = getFeeAmounts(event);
+          const feeRecipient = getFeeRecipient(event);
 
           return (
             <div key={event.id} className={`p-4 space-y-3 ${event.isIgnored ? 'opacity-40' : ''}`}>
@@ -509,6 +524,12 @@ export function LedgerEventTable({
                 <div className="text-xs text-slate-400 space-y-1">
                   {isCollectEvent(event.eventType as EventType) ? (
                     <>
+                      {feeRecipient && (
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-slate-500">Recipient:</span>
+                          {renderAddressLink(feeRecipient)}
+                        </div>
+                      )}
                       {fee0 !== "0" && renderFeeAmount(fee0, token0)}
                       {fee1 !== "0" && renderFeeAmount(fee1, token1)}
                       {(() => {
