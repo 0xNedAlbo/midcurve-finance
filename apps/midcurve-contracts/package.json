@@ -19,6 +19,7 @@
     "local:deploy": "forge script script/DeployPositionCloser.s.sol --rpc-url local --broadcast --unlocked --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "sepolia:deploy": "forge script script/DeploySepolia.s.sol --rpc-url sepolia --account deployer --sender 0x670A843229Fb0B7B86E74E74fAE41383314448Cf --broadcast --verify -vvvv",
     "deploy:diamond": "tsx scripts/deploy-diamond.ts",
+    "deploy:vault-diamond": "tsx scripts/deploy-vault-diamond.ts",
     "deploy:swap-router": "tsx scripts/deploy-swap-router.ts",
     "db:reset-local": "tsx scripts/reset-local-chain-db.ts",
     "db:upsert-contract": "tsx scripts/upsert-shared-contract.ts"
