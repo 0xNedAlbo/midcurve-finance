@@ -21,7 +21,9 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3VaultPositionService,
+  getUniswapV3CloseOrderService,
 } from '@/lib/services';
+import { serializeCloseOrder } from '@/lib/serializers';
 import type { GetUniswapV3VaultPositionResponse } from '@midcurve/api-shared';
 
 export const runtime = 'nodejs';
@@ -58,7 +60,14 @@ export async function POST(
         if (!dbPosition) return null;
 
         const refreshedPosition = await getUniswapV3VaultPositionService().refresh(dbPosition.id, 'latest', tx);
-        return { position: refreshedPosition };
+
+        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
+          refreshedPosition.id,
+          {},
+          tx
+        );
+
+        return { position: refreshedPosition, closeOrders };
       });
 
       if (!result) {
@@ -68,9 +77,10 @@ export async function POST(
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND] });
       }
 
-      const { position } = result;
+      const { position, closeOrders } = result;
       const serializedPosition: GetUniswapV3VaultPositionResponse = {
         ...serializeUniswapV3VaultPosition(position),
+        closeOrders: closeOrders.map(serializeCloseOrder),
       };
 
       const response = createSuccessResponse(serializedPosition);

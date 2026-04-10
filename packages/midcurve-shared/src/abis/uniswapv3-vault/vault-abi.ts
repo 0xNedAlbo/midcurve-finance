@@ -4,8 +4,9 @@
 // ============================================================================
 
 /**
- * Vault contract ABI — view functions and events used by the service layer.
+ * Vault contract ABI — view functions, write functions, and events.
  * Covers both IMultiTokenVault interface functions and UniswapV3-specific getters.
+ * Write functions (mint) are called by the frontend via wagmi.
  */
 export const UniswapV3VaultAbi = [
   // ============ ERC-20 views ============
@@ -178,6 +179,30 @@ export const UniswapV3VaultAbi = [
     inputs: [{ name: 'account', type: 'address' }],
     outputs: [{ name: '', type: 'bool' }],
     stateMutability: 'view',
+  },
+
+  // ============ Write functions ============
+  {
+    type: 'function',
+    name: 'mint',
+    inputs: [
+      { name: 'minShares', type: 'uint256' },
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'maxAmounts', type: 'uint256[]' },
+          { name: 'minAmounts', type: 'uint256[]' },
+          { name: 'recipient', type: 'address' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
+    ],
+    outputs: [
+      { name: 'shares', type: 'uint256' },
+      { name: 'tokenAmounts', type: 'uint256[]' },
+    ],
+    stateMutability: 'nonpayable',
   },
 
   // ============ IMultiTokenVault events ============

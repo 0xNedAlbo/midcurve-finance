@@ -22,7 +22,9 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3VaultPositionService,
+  getUniswapV3CloseOrderService,
 } from '@/lib/services';
+import { serializeCloseOrder } from '@/lib/serializers';
 import type { GetUniswapV3VaultPositionResponse } from '@midcurve/api-shared';
 
 export const runtime = 'nodejs';
@@ -79,12 +81,18 @@ export async function GET(
 
         if (!position) return null;
 
+        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
+          position.id,
+          {},
+          tx
+        );
+
         const ownerWalletRow = await tx.position.findUnique({
           where: { id: position.id },
           select: { ownerWallet: true },
         });
 
-        return { position, ownerWallet: ownerWalletRow?.ownerWallet ?? null };
+        return { position, closeOrders, ownerWallet: ownerWalletRow?.ownerWallet ?? null };
       });
 
       if (!result) {
@@ -99,11 +107,12 @@ export async function GET(
         });
       }
 
-      const { position, ownerWallet } = result;
+      const { position, closeOrders, ownerWallet } = result;
 
       const serializedPosition: GetUniswapV3VaultPositionResponse = {
         ...serializeUniswapV3VaultPosition(position),
         ownerWallet,
+        closeOrders: closeOrders.map(serializeCloseOrder),
       };
 
       const response = createSuccessResponse(serializedPosition);

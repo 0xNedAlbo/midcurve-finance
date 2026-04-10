@@ -6,6 +6,7 @@
  */
 
 import type { UniswapV3VaultPositionResponse } from './typed-response.js';
+import type { SerializedCloseOrder } from '../../automation/close-orders.js';
 import { z } from 'zod';
 
 /**
@@ -22,9 +23,10 @@ export interface GetUniswapV3VaultPositionParams {
  * Success response for GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress
  *
  * Returns the complete vault position data with all bigint fields converted to strings.
- * No close orders — automation is not supported for vault positions in v1.
+ * Includes all close orders for the position (all automation states).
  */
 export interface GetUniswapV3VaultPositionResponse extends UniswapV3VaultPositionResponse {
+  closeOrders: SerializedCloseOrder[];
 }
 
 // =============================================================================
