@@ -6,7 +6,7 @@
  * 2. Fetches detail data via useUniswapV3VaultPosition hook (3s DB polling)
  * 3. Triggers on-chain refresh via useUniswapV3VaultAutoRefresh (60s)
  * 4. Patches live pool price via useUniswapV3VaultLiveMetrics (5s)
- * 5. Renders header, metrics, PnL curve (no action buttons for v1)
+ * 5. Renders header, metrics, PnL curve, and action buttons
  *
  * Props are just chainId + vaultAddress — all other data is fetched internally.
  */
@@ -25,6 +25,7 @@ import { UniswapV3VaultRangeStatus } from "./uniswapv3-vault-range-status";
 import { UniswapV3VaultChainBadge } from "./uniswapv3-vault-chain-badge";
 import { UniswapV3VaultShareOwnerBadge } from "./uniswapv3-vault-share-owner-badge";
 import { UniswapV3VaultMiniPnLCurve } from "./uniswapv3-vault-mini-pnl-curve";
+import { UniswapV3VaultActions } from "./uniswapv3-vault-actions";
 import { PositionActionsMenu } from "../../position-actions-menu";
 import { UniswapV3VaultDeletePositionModal } from "./uniswapv3-vault-delete-position-modal";
 import { UniswapV3VaultReloadHistoryModal } from "./uniswapv3-vault-reload-history-modal";
@@ -227,6 +228,9 @@ function UniswapV3VaultPositionCardLoaded({
           />
         </div>
       </div>
+
+      {/* Action Buttons Row */}
+      <UniswapV3VaultActions position={position} isInRange={isInRange} />
 
       {/* Reload History Modal */}
       <UniswapV3VaultReloadHistoryModal

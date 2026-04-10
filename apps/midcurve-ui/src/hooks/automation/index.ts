@@ -71,6 +71,7 @@ export {
 
 // Shared Contracts
 export { useSharedContract } from './useSharedContract';
+export { useVaultSharedContract } from './useVaultSharedContract';
 
 // Operator Approval (setApprovalForAll on NFPM)
 export { useOperatorApproval, type UseOperatorApprovalResult } from './useOperatorApproval';

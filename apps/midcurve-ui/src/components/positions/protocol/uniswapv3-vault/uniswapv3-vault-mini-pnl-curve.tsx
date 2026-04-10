@@ -10,7 +10,7 @@
  * - Zero line (gray horizontal)
  *
  * Uses UniswapV3Position.forSimulation() with DERIVED user liquidity
- * (vaultLiquidity * sharesBalance / totalSupply). No close orders for vaults.
+ * (vaultLiquidity * sharesBalance / totalSupply). Close orders applied via overlay.
  */
 
 "use client";
@@ -29,6 +29,7 @@ import {
   CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
 import type { PoolJSON } from "@midcurve/shared";
+import { extractCloseOrderData } from "@/lib/position-states";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
 interface UniswapV3VaultMiniPnLCurveProps {
@@ -77,7 +78,22 @@ export function UniswapV3VaultMiniPnLCurve({
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
 
-  // Create simulation position using derived user liquidity (no close orders for vaults)
+  // Extract SL/TP prices and swap configs from close orders
+  const closeOrderData = useMemo(() => {
+    if (!position.closeOrders?.length) {
+      return { stopLossPrice: null, takeProfitPrice: null, slSwapConfig: null, tpSwapConfig: null };
+    }
+
+    return extractCloseOrderData(
+      position.closeOrders,
+      position.isToken0Quote,
+      position.pool.token0.decimals,
+      position.pool.token1.decimals,
+      quoteToken.decimals,
+    );
+  }, [position.closeOrders, position.isToken0Quote, position.pool.token0.decimals, position.pool.token1.decimals, quoteToken.decimals]);
+
+  // Create simulation position using derived user liquidity with close order overlay
   const simulationPosition = useMemo(() => {
     const config = position.config as UniswapV3VaultPositionConfigResponse;
     const state = position.state as UniswapV3VaultPositionStateResponse;
@@ -105,15 +121,14 @@ export function UniswapV3VaultMiniPnLCurve({
       costBasis,
     });
 
-    // No close orders for vault positions
     return new CloseOrderSimulationOverlay({
       underlyingPosition: basePosition,
-      stopLossPrice: null,
-      takeProfitPrice: null,
-      stopLossSwapConfig: null,
-      takeProfitSwapConfig: null,
+      stopLossPrice: closeOrderData.stopLossPrice,
+      takeProfitPrice: closeOrderData.takeProfitPrice,
+      stopLossSwapConfig: closeOrderData.slSwapConfig,
+      takeProfitSwapConfig: closeOrderData.tpSwapConfig,
     });
-  }, [position.pool, position.config, position.state, position.isToken0Quote, position.costBasis]);
+  }, [position.pool, position.config, position.state, position.isToken0Quote, position.costBasis, closeOrderData]);
 
   // Generate PnL curve data locally
   const curveData = useMemo(() => {
