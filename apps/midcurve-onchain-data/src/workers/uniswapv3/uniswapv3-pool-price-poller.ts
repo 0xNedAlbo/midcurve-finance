@@ -9,17 +9,17 @@
 import { prisma } from '@midcurve/database';
 import type { PositionJSON } from '@midcurve/shared';
 import { getEvmConfig } from '@midcurve/services';
-import { onchainDataLogger, priceLog } from '../lib/logger';
+import { onchainDataLogger, priceLog } from '../../lib/logger';
 import {
   getWorkerConfig,
   isSupportedChain,
   SUPPORTED_CHAIN_IDS,
-} from '../lib/config';
+} from '../../lib/config';
 import {
   UniswapV3PoolSubscriptionBatch,
   createSubscriptionBatches,
   type PoolInfo,
-} from '../polling/uniswap-v3-pools';
+} from '../../polling/uniswap-v3-pools';
 
 const log = onchainDataLogger.child({ component: 'PoolPriceSubscriber' });
 
@@ -194,10 +194,11 @@ export class PoolPriceSubscriber {
     priceLog.methodEntry(log, 'loadActiveSubscriptions');
 
     // Query active positions and deduplicate by pool address
+    // Includes both NFT and vault positions — they share the same UniswapV3 pools
     const activePositions = await prisma.position.findMany({
       where: {
         isActive: true,
-        protocol: 'uniswapv3',
+        protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
       },
       select: {
         config: true,
@@ -269,8 +270,8 @@ export class PoolPriceSubscriber {
    * @param payload - Position data from the domain event
    */
   async handlePositionCreated(payload: PositionJSON): Promise<void> {
-    // 1. Filter by protocol - only handle UniswapV3 positions
-    if (payload.protocol !== 'uniswapv3') {
+    // 1. Filter by protocol — handle both UniswapV3 NFT and vault positions (same pools)
+    if (!['uniswapv3', 'uniswapv3-vault'].includes(payload.protocol)) {
       log.debug({ protocol: payload.protocol, positionId: payload.id }, 'Ignoring non-UniswapV3 position');
       return;
     }
@@ -317,49 +318,20 @@ export class PoolPriceSubscriber {
   }
 
   /**
-   * Handle position.closed domain event.
+   * Handle position.deleted or position.burned domain event.
    * Removes the pool from subscriptions if no other active positions use it.
+   * Works for both NFT and vault positions by looking up position by DB ID.
    *
-   * @param chainId - Chain ID from routing key
-   * @param nftId - NFT ID from routing key
+   * @param positionId - Position database ID (from event.entityId)
+   * @param reason - Why the position was removed
    */
-  async handlePositionClosed(chainId: number, nftId: string): Promise<void> {
-    await this.handlePositionRemoved(chainId, nftId, 'closed');
-  }
-
-  /**
-   * Handle position.deleted domain event.
-   * Removes the pool from subscriptions if no other active positions use it.
-   *
-   * @param chainId - Chain ID from routing key
-   * @param nftId - NFT ID from routing key
-   */
-  async handlePositionDeleted(chainId: number, nftId: string): Promise<void> {
-    await this.handlePositionRemoved(chainId, nftId, 'deleted');
-  }
-
-  /**
-   * Private helper for position removal (closed or deleted).
-   * Checks if any other active positions use the same pool before unsubscribing.
-   */
-  private async handlePositionRemoved(
-    chainId: number,
-    nftId: string,
-    reason: 'closed' | 'deleted'
+  async handlePositionRemoved(
+    positionId: string,
+    reason: 'closed' | 'deleted' | 'burned'
   ): Promise<void> {
-    // 1. Validate chain support
-    if (!isSupportedChain(chainId)) {
-      log.debug({ chainId, nftId }, 'Unsupported chain, ignoring');
-      return;
-    }
-
-    // 2. Find the position by positionHash to get pool address from config
-    const positionHash = `uniswapv3/${chainId}/${nftId}`;
-    const position = await prisma.position.findFirst({
-      where: {
-        positionHash,
-        protocol: 'uniswapv3',
-      },
+    // 1. Find position by database ID (works for any protocol)
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
       select: {
         id: true,
         config: true,
@@ -367,30 +339,36 @@ export class PoolPriceSubscriber {
     });
 
     if (!position) {
-      log.debug({ chainId, nftId, reason }, 'Position not found in database');
+      log.debug({ positionId, reason }, 'Position not found in database');
       return;
     }
 
-    // 3. Get pool address from position config
+    // 2. Get pool address from position config
     const posConfig = position.config as unknown as { poolAddress: string; chainId: number };
     const poolAddress = posConfig.poolAddress?.toLowerCase();
+    const chainId = posConfig.chainId;
 
-    if (!poolAddress) {
-      log.warn({ positionId: position.id, reason }, 'Pool address not found in position config');
+    if (!poolAddress || !chainId) {
+      log.warn({ positionId, reason }, 'Pool address or chainId not found in position config');
       return;
     }
 
-    // 4. Check if pool is tracked
+    if (!isSupportedChain(chainId)) {
+      log.debug({ chainId, positionId }, 'Unsupported chain, ignoring');
+      return;
+    }
+
+    // 3. Check if pool is tracked
     if (!this.subscribedPools.has(poolAddress)) {
       log.debug({ poolAddress, reason }, 'Pool not subscribed, skipping');
       return;
     }
 
-    // 5. Check if other active positions still use this pool
+    // 4. Check if other active positions (NFT or vault) still use this pool
     const otherActivePositions = await prisma.position.count({
       where: {
         isActive: true,
-        protocol: 'uniswapv3',
+        protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
         id: { not: position.id },
         config: { path: ['poolAddress'], string_contains: posConfig.poolAddress },
       },
@@ -508,7 +486,7 @@ export class PoolPriceSubscriber {
     const activePositions = await prisma.position.findMany({
       where: {
         isActive: true,
-        protocol: 'uniswapv3',
+        protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
       },
       select: { config: true },
     });

@@ -13,20 +13,20 @@
 
 import { SharedContractService, EvmConfig } from '@midcurve/services';
 import { SharedContractNameEnum, type EvmSmartContractConfigData } from '@midcurve/shared';
-import { onchainDataLogger, priceLog } from '../lib/logger';
+import { onchainDataLogger, priceLog } from '../../lib/logger';
 import {
   getCatchUpConfig,
   isSupportedChain,
   SUPPORTED_CHAIN_IDS,
-} from '../lib/config';
+} from '../../lib/config';
 import {
   UniswapV3CloserPollingBatch,
   type CloserContractInfo,
-} from '../polling/uniswap-v3-closer';
+} from '../../polling/uniswap-v3-closer';
 import {
   executeCloseOrderCatchUpFinalizedForChains,
   setCloseOrderLastProcessedBlock,
-} from '../catchup/close-order-catchup';
+} from '../../catchup/close-order-catchup';
 
 const log = onchainDataLogger.child({ component: 'CloseOrderSubscriber' });
 

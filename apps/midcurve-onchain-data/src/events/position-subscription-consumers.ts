@@ -14,10 +14,9 @@ import {
   DomainEventConsumer,
   ROUTING_PATTERNS,
   DOMAIN_EVENTS_EXCHANGE,
-  parsePositionRoutingKey,
   type DomainEvent,
 } from '@midcurve/services';
-import type { PoolPriceSubscriber } from '../workers/pool-price-subscriber';
+import type { PoolPriceSubscriber } from '../workers/uniswapv3/uniswapv3-pool-price-poller';
 
 /**
  * Handles position.created, position.closed, position.burned, and position.deleted events
@@ -101,13 +100,10 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
         'Position closed, keeping subscriptions active (may be reopened)'
       );
     } else if (event.type === 'position.burned' || event.type === 'position.deleted') {
-      // For burned/deleted events, extract coordinates from routing key and unsubscribe
-      const coords = parsePositionRoutingKey(routingKey);
-      if (!coords) {
-        this.logger.error({ routingKey }, `Invalid routing key for ${event.type} event`);
-        return;
-      }
-      await this.poolPriceSubscriber.handlePositionDeleted(coords.chainId, coords.nftId);
+      // Use positionId (DB primary key) to look up the position directly.
+      // Works for all protocols (NFT, vault, future) without needing to reconstruct positionHash.
+      const reason = event.type === 'position.burned' ? 'burned' : 'deleted';
+      await this.poolPriceSubscriber.handlePositionRemoved(event.entityId, reason);
     } else {
       this.logger.warn({ eventType: event.type }, 'Unknown position event type');
     }

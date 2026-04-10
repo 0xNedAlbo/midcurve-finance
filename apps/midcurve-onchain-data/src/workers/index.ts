@@ -18,12 +18,12 @@
 import { onchainDataLogger, priceLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
 import { PositionEventHandler } from '../events';
-import { PoolPriceSubscriber } from './pool-price-subscriber';
+import { PoolPriceSubscriber } from './uniswapv3/uniswapv3-pool-price-poller';
 import { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 import { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 import { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
-import { UniswapV3PoolPriceSubscriber } from './uniswapv3-pool-price-subscriber';
-import { CloseOrderSubscriber } from './close-order-subscriber';
+import { UniswapV3PoolPriceSubscriber } from './uniswapv3/uniswapv3-pool-price-consumer';
+import { CloseOrderSubscriber } from './uniswapv3/uniswapv3-close-order-poller';
 
 const log = onchainDataLogger.child({ component: 'WorkerManager' });
 
@@ -188,9 +188,9 @@ export class WorkerManager {
 /**
  * Export subscribers for direct usage if needed.
  */
-export { PoolPriceSubscriber } from './pool-price-subscriber';
+export { PoolPriceSubscriber } from './uniswapv3/uniswapv3-pool-price-poller';
 export { Erc20ApprovalSubscriber } from './erc20-approval-subscriber';
 export { Erc20BalanceSubscriber } from './erc20-balance-subscriber';
 export { EvmTxStatusSubscriber } from './evm-tx-status-subscriber';
-export { UniswapV3PoolPriceSubscriber } from './uniswapv3-pool-price-subscriber';
-export { CloseOrderSubscriber } from './close-order-subscriber';
+export { UniswapV3PoolPriceSubscriber } from './uniswapv3/uniswapv3-pool-price-consumer';
+export { CloseOrderSubscriber } from './uniswapv3/uniswapv3-close-order-poller';

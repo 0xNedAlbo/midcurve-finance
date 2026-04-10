@@ -20,14 +20,14 @@
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { prisma, Prisma } from '@midcurve/database';
 import { getEvmConfig } from '@midcurve/services';
-import { onchainDataLogger, priceLog } from '../lib/logger.js';
+import { onchainDataLogger, priceLog } from '../../lib/logger.js';
 import {
   isSupportedChain,
   type SupportedChainId,
-} from '../lib/config.js';
-import { getRabbitMQConnection } from '../mq/connection-manager.js';
-import { EXCHANGE_POOL_PRICES } from '../mq/topology.js';
-import type { RawSwapEventWrapper } from '../mq/messages.js';
+} from '../../lib/config.js';
+import { getRabbitMQConnection } from '../../mq/connection-manager.js';
+import { EXCHANGE_POOL_PRICES } from '../../mq/topology.js';
+import type { RawSwapEventWrapper } from '../../mq/messages.js';
 import type {
   UniswapV3PoolPriceSubscriptionConfig,
   UniswapV3PoolPriceSubscriptionState,
