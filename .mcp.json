@@ -3,15 +3,7 @@
     "blockchain": {
       "type": "stdio",
       "command": "python3",
-      "args": ["mcp/blockchain/server.py"],
-      "env": {
-        "ETHERSCAN_API_KEY": "${ETHERSCAN_API_KEY}",
-        "RPC_URL_ETHEREUM": "${RPC_URL_ETHEREUM}",
-        "RPC_URL_ARBITRUM": "${RPC_URL_ARBITRUM}",
-        "RPC_URL_BASE": "${RPC_URL_BASE}",
-        "RPC_URL_SEPOLIA": "${RPC_URL_SEPOLIA}",
-        "RPC_URL_LOCAL": "${RPC_URL_LOCAL}"
-      }
+      "args": ["mcp/blockchain/server.py"]
     }
   }
 }
