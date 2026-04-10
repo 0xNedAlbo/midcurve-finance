@@ -5,8 +5,7 @@
  * Tracks the user's share balance, vault-level liquidity, and claimable fees.
  *
  * Key differences from UniswapV3PositionState:
- * - No ownerAddress/operator (ERC-20 ownership, not NFT)
- * - No fee accumulator internals (feePerShare, feeDebt) — the on-chain claimableFees()
+ * - No fee accumulator internals (feePerShare, feeDebt) — the on-chain claimableYield()
  *   computes the full fee picture including all 4 components
  * - No isBurned (vault positions are always reopenable)
  * - User's liquidity is derived: liquidity * sharesBalance / totalSupply
@@ -27,17 +26,20 @@ export interface UniswapV3VaultPositionState {
   liquidity: bigint;
 
   /**
-   * User's claimable fees for token0.
-   * Populated from vault.claimableFees(user) which computes the full picture on-chain:
+   * User's claimable yield for token0.
+   * Populated from vault.claimableYield(user) which computes the full picture on-chain:
    * pending + accumulator delta + tokensOwed (pro-rata) + unsnapshotted pool fees (pro-rata).
    */
   unclaimedFees0: bigint;
 
   /**
-   * User's claimable fees for token1.
-   * Populated from vault.claimableFees(user) — same 4-component calculation.
+   * User's claimable yield for token1.
+   * Populated from vault.claimableYield(user) — same 4-component calculation.
    */
   unclaimedFees1: bigint;
+
+  /** Vault operator address (authorized to call tend/setOperator) */
+  operatorAddress: string;
 
   /**
    * Whether the position is closed (sharesBalance == 0).
@@ -76,6 +78,7 @@ export interface UniswapV3VaultPositionStateJSON {
   liquidity: string;
   unclaimedFees0: string;
   unclaimedFees1: string;
+  operatorAddress: string;
   isClosed: boolean;
   isOwnedByUser?: boolean;
   // Pool-level state (optional — present in DB JSON, omitted from API responses)
@@ -99,6 +102,7 @@ export function vaultPositionStateToJSON(
     liquidity: state.liquidity.toString(),
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
+    operatorAddress: state.operatorAddress,
     isClosed: state.isClosed,
     isOwnedByUser: state.isOwnedByUser,
     // Pool-level fields intentionally omitted from API responses
@@ -114,6 +118,7 @@ export function vaultPositionStateFromJSON(
     liquidity: BigInt(json.liquidity),
     unclaimedFees0: BigInt(json.unclaimedFees0),
     unclaimedFees1: BigInt(json.unclaimedFees1),
+    operatorAddress: json.operatorAddress,
     isClosed: json.isClosed,
     isOwnedByUser: json.isOwnedByUser ?? true,
     sqrtPriceX96: BigInt(json.sqrtPriceX96 ?? '0'),

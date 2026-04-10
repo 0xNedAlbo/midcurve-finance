@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IMultiTokenVault, MintParams, BurnParams} from "./interfaces/IMultiTokenVault.sol";
 import {INonfungiblePositionManagerMinimal} from "../position-closer/interfaces/INonfungiblePositionManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../position-closer/interfaces/IUniswapV3PoolMinimal.sol";
 import {LiquidityAmounts} from "../position-closer/libraries/LiquidityAmounts.sol";
@@ -12,10 +13,11 @@ import {TickMath} from "../position-closer/libraries/TickMath.sol";
 /// @title UniswapV3Vault
 /// @notice Wraps a single Uniswap V3 NFT position into fungible ERC-20 shares.
 /// @dev Deployed as an EIP-1167 clone via UniswapV3VaultFactory.
+///      Implements {IMultiTokenVault} with tokenCount() == 2 (token0, token1).
 ///      Shares represent proportional claims on the vault's total liquidity L.
 ///      Invariant: totalSupply == L (so shares == deltaL at all times).
 ///      Fee tracking uses the Synthetix accumulator pattern.
-contract UniswapV3Vault is ERC20 {
+contract UniswapV3Vault is ERC20, IMultiTokenVault {
     using SafeERC20 for IERC20;
 
     // ============ Constants ============
@@ -23,6 +25,7 @@ contract UniswapV3Vault is ERC20 {
     uint256 private constant _NOT_ENTERED = 1;
     uint256 private constant _ENTERED = 2;
     uint256 private constant FEE_PRECISION = 1e18;
+    bytes32 public constant VAULT_TYPE = keccak256("uniswap-v3-concentrated-liquidity");
 
     // ============ Clone-initialized storage ============
 
@@ -40,6 +43,8 @@ contract UniswapV3Vault is ERC20 {
     address public pool;
     int24 private _tickLower;
     int24 private _tickUpper;
+
+    address private _operator;
 
     // ============ Fee accumulator (Synthetix pattern) ============
 
@@ -74,6 +79,16 @@ contract UniswapV3Vault is ERC20 {
         _;
     }
 
+    modifier onlyOperator() {
+        if (msg.sender != _operator) revert NotOperator();
+        _;
+    }
+
+    modifier checkDeadline(uint256 deadline) {
+        if (block.timestamp > deadline) revert DeadlineExpired();
+        _;
+    }
+
     // ============ Errors ============
 
     error AlreadyInitialized();
@@ -82,6 +97,11 @@ contract UniswapV3Vault is ERC20 {
     error NFTNotReceived();
     error ZeroShares();
     error InsufficientBalance();
+    error InvalidTokenCount();
+    error NotOperator();
+    error DeadlineExpired();
+    error UnsupportedTendOperation();
+    error InvalidTokenIndex();
 
     // ============ Events ============
 
@@ -91,10 +111,6 @@ contract UniswapV3Vault is ERC20 {
         address indexed initialShareRecipient,
         uint128 initialLiquidity
     );
-
-    event Minted(address indexed to, uint256 shares, uint128 deltaL, uint256 amount0, uint256 amount1);
-    event Burned(address indexed from, uint256 shares, uint128 deltaL, uint256 amount0, uint256 amount1);
-    event FeesCollected(address indexed user, uint256 fee0, uint256 fee1);
 
     // ============ Constructor (implementation contract only — clones skip this) ============
 
@@ -109,15 +125,17 @@ contract UniswapV3Vault is ERC20 {
     /// @param symbol_ ERC-20 token symbol
     /// @param decimals_ ERC-20 decimals
     /// @param initialShareRecipient_ Receives initial shares equal to current liquidity
+    /// @param operator_ Address authorized to call tend() and setOperator()
     function initialize(
         address positionManager_,
         uint256 tokenId_,
         string calldata name_,
         string calldata symbol_,
         uint8 decimals_,
-        address initialShareRecipient_
+        address initialShareRecipient_,
+        address operator_
     ) external virtual initializer {
-        _initializeVault(positionManager_, tokenId_, name_, symbol_, decimals_, initialShareRecipient_);
+        _initializeVault(positionManager_, tokenId_, name_, symbol_, decimals_, initialShareRecipient_, operator_);
     }
 
     function _initializeVault(
@@ -126,7 +144,8 @@ contract UniswapV3Vault is ERC20 {
         string calldata name_,
         string calldata symbol_,
         uint8 decimals_,
-        address initialShareRecipient_
+        address initialShareRecipient_,
+        address operator_
     ) internal {
         _reentrancyStatus = _NOT_ENTERED;
 
@@ -159,6 +178,10 @@ contract UniswapV3Vault is ERC20 {
             uniFactory.staticcall(abi.encodeWithSignature("getPool(address,address,uint24)", t0, t1, fee));
         require(success && data.length >= 32, "getPool() failed");
         pool = abi.decode(data, (address));
+
+        // Set operator
+        _operator = operator_;
+        emit OperatorUpdated(address(0), operator_);
 
         // Collect any outstanding NFPM fees and send them directly to the initial
         // share recipient. This must happen before _mint() because the mint triggers
@@ -195,20 +218,64 @@ contract UniswapV3Vault is ERC20 {
         return _vaultDecimals;
     }
 
-    // ============ Core functions ============
+    // ============ IMultiTokenVault — Identification ============
 
-    /// @notice Mint new shares by adding proportional liquidity.
-    /// @dev Since totalSupply == L (invariant), minted shares == addedLiquidity.
-    ///      Token amounts for deltaL are computed by the NFPM from the provided amounts.
-    /// @param minShares Minimum shares the caller expects (slippage protection, 0 to skip)
-    /// @param maxAmount0 Maximum token0 the caller is willing to provide
-    /// @param maxAmount1 Maximum token1 the caller is willing to provide
-    function mint(uint256 minShares, uint256 maxAmount0, uint256 maxAmount1)
+    /// @inheritdoc IMultiTokenVault
+    function vaultType() external pure returns (bytes32) {
+        return VAULT_TYPE;
+    }
+
+    // ============ IMultiTokenVault — Token set ============
+
+    /// @inheritdoc IMultiTokenVault
+    function tokenCount() external pure returns (uint256) {
+        return 2;
+    }
+
+    /// @inheritdoc IMultiTokenVault
+    function tokens(uint256 index) external view returns (address) {
+        if (index == 0) return token0;
+        if (index == 1) return token1;
+        revert InvalidTokenIndex();
+    }
+
+    // ============ IMultiTokenVault — Operator ============
+
+    /// @inheritdoc IMultiTokenVault
+    function operator() external view returns (address) {
+        return _operator;
+    }
+
+    /// @inheritdoc IMultiTokenVault
+    function setOperator(address newOperator) external onlyOperator {
+        address prev = _operator;
+        _operator = newOperator;
+        emit OperatorUpdated(prev, newOperator);
+    }
+
+    /// @inheritdoc IMultiTokenVault
+    /// @dev No operations are supported for this vault type. Always reverts.
+    function tend(bytes32, bytes calldata) external onlyOperator returns (bytes memory) {
+        revert UnsupportedTendOperation();
+    }
+
+    // ============ IMultiTokenVault — Core functions ============
+
+    /// @inheritdoc IMultiTokenVault
+    function mint(uint256 minShares, MintParams calldata params)
         external
         whenInitialized
         nonReentrant
+        checkDeadline(params.deadline)
+        returns (uint256 shares, uint256[] memory tokenAmounts)
     {
+        if (params.maxAmounts.length != 2) revert InvalidTokenCount();
+        if (params.minAmounts.length != 2) revert InvalidTokenCount();
+
         _collectAndUpdateAccumulator();
+
+        uint256 maxAmount0 = params.maxAmounts[0];
+        uint256 maxAmount1 = params.maxAmounts[1];
 
         // Pull max amounts from caller
         IERC20(token0).safeTransferFrom(msg.sender, address(this), maxAmount0);
@@ -224,40 +291,46 @@ contract UniswapV3Vault is ERC20 {
                 tokenId: tokenId,
                 amount0Desired: maxAmount0,
                 amount1Desired: maxAmount1,
-                amount0Min: 0,
-                amount1Min: 0,
-                deadline: block.timestamp
+                amount0Min: params.minAmounts[0],
+                amount1Min: params.minAmounts[1],
+                deadline: params.deadline
             })
         );
 
         require(addedLiquidity > 0, "No liquidity added");
-        require(uint256(addedLiquidity) >= minShares, "Slippage: insufficient shares");
+
+        shares = uint256(addedLiquidity);
+        require(shares >= minShares, "Slippage: insufficient shares");
 
         // Clear remaining approvals
         IERC20(token0).forceApprove(address(positionManager), 0);
         IERC20(token1).forceApprove(address(positionManager), 0);
 
-        // Return dust (maxAmount - consumed) — NOT a balance sweep
+        // Return dust (maxAmount - consumed) to the caller (token provider)
         uint256 dust0 = maxAmount0 - amount0;
         uint256 dust1 = maxAmount1 - amount1;
         if (dust0 > 0) IERC20(token0).safeTransfer(msg.sender, dust0);
         if (dust1 > 0) IERC20(token1).safeTransfer(msg.sender, dust1);
 
-        // Mint shares == addedLiquidity to preserve the totalSupply == L invariant
-        _mint(msg.sender, uint256(addedLiquidity));
+        // Mint shares to recipient (may differ from msg.sender)
+        _mint(params.recipient, shares);
 
-        emit Minted(msg.sender, uint256(addedLiquidity), addedLiquidity, amount0, amount1);
+        tokenAmounts = new uint256[](2);
+        tokenAmounts[0] = amount0;
+        tokenAmounts[1] = amount1;
+
+        emit Minted(msg.sender, params.recipient, shares, tokenAmounts);
     }
 
-    /// @notice Burn shares and withdraw proportional liquidity + settle fees.
-    /// @param shares Number of shares to burn
-    /// @param minAmount0 Minimum token0 expected (slippage protection)
-    /// @param minAmount1 Minimum token1 expected (slippage protection)
-    function burn(uint256 shares, uint256 minAmount0, uint256 minAmount1)
+    /// @inheritdoc IMultiTokenVault
+    function burn(uint256 shares, BurnParams calldata params)
         external
         whenInitialized
         nonReentrant
+        checkDeadline(params.deadline)
+        returns (uint256[] memory tokenAmounts)
     {
+        if (params.minAmounts.length != 2) revert InvalidTokenCount();
         if (shares == 0) revert ZeroShares();
         if (balanceOf(msg.sender) < shares) revert InsufficientBalance();
 
@@ -272,21 +345,17 @@ contract UniswapV3Vault is ERC20 {
             INonfungiblePositionManagerMinimal.DecreaseLiquidityParams({
                 tokenId: tokenId,
                 liquidity: deltaL,
-                amount0Min: minAmount0,
-                amount1Min: minAmount1,
-                deadline: block.timestamp
+                amount0Min: params.minAmounts[0],
+                amount1Min: params.minAmounts[1],
+                deadline: params.deadline
             })
         );
 
-        // Collect the withdrawn principal to the caller.
-        // This collect() returns exclusively principal — not fees. Fees were already
-        // drained by _collectAndUpdateAccumulator() above (which zeroed tokensOwed),
-        // and no new fees can accrue within the same transaction since no swaps have
-        // crossed the position's tick range between the two collect() calls.
+        // Collect the withdrawn principal to the recipient.
         (uint256 amount0, uint256 amount1) = positionManager.collect(
             INonfungiblePositionManagerMinimal.CollectParams({
                 tokenId: tokenId,
-                recipient: msg.sender,
+                recipient: params.recipient,
                 amount0Max: type(uint128).max,
                 amount1Max: type(uint128).max
             })
@@ -295,20 +364,29 @@ contract UniswapV3Vault is ERC20 {
         // Burn shares — _beforeTokenTransfer settles fees into _pendingFees
         _burn(msg.sender, shares);
 
-        // Transfer settled fees to the caller
-        _transferPendingFees(msg.sender);
+        // Transfer settled fees to the recipient
+        _transferPendingFees(msg.sender, params.recipient);
 
-        emit Burned(msg.sender, shares, deltaL, amount0, amount1);
+        tokenAmounts = new uint256[](2);
+        tokenAmounts[0] = amount0;
+        tokenAmounts[1] = amount1;
+
+        emit Burned(msg.sender, params.recipient, shares, tokenAmounts);
     }
 
-    /// @notice Claim accumulated fee entitlement without affecting shares or liquidity.
-    function collectFees() external whenInitialized nonReentrant {
+    /// @inheritdoc IMultiTokenVault
+    function collectYield(address recipient)
+        external
+        whenInitialized
+        nonReentrant
+        returns (uint256[] memory tokenAmounts)
+    {
         _collectAndUpdateAccumulator();
         _settleFees(msg.sender);
-        _transferPendingFees(msg.sender);
+        tokenAmounts = _transferPendingFees(msg.sender, recipient);
     }
 
-    // ============ View functions ============
+    // ============ IMultiTokenVault — View functions ============
 
     /// @notice Lower tick bound of the underlying position
     function tickLower() external view returns (int24) {
@@ -320,21 +398,18 @@ contract UniswapV3Vault is ERC20 {
         return _tickUpper;
     }
 
-    /// @notice Returns the full claimable fee amounts for a user.
-    /// @dev Computes all four fee components:
-    ///      1. Pending (settled, not yet transferred)
-    ///      2. Accumulated since last settlement (accumulator delta)
-    ///      3. Snapshotted in NFPM but not yet harvested (tokensOwed, pro-rata)
-    ///      4. Unsnapshotted fees still in pool (feeGrowthInside reconstruction, pro-rata)
-    function claimableFees(address user) external view returns (uint256 fee0, uint256 fee1) {
+    /// @inheritdoc IMultiTokenVault
+    function claimableYield(address user) external view returns (uint256[] memory tokenAmounts) {
+        tokenAmounts = new uint256[](2);
+
         uint256 balance = balanceOf(user);
         uint256 supply = totalSupply();
 
         // Components 1+2: pending + accumulator delta
-        fee0 = _pendingFees0[user] + (feePerShare0 - feeDebt0[user]) * balance / FEE_PRECISION;
-        fee1 = _pendingFees1[user] + (feePerShare1 - feeDebt1[user]) * balance / FEE_PRECISION;
+        tokenAmounts[0] = _pendingFees0[user] + (feePerShare0 - feeDebt0[user]) * balance / FEE_PRECISION;
+        tokenAmounts[1] = _pendingFees1[user] + (feePerShare1 - feeDebt1[user]) * balance / FEE_PRECISION;
 
-        if (supply == 0) return (fee0, fee1);
+        if (supply == 0) return tokenAmounts;
 
         // Read NFPM position state
         (,,,,,,,uint128 L_total,
@@ -342,8 +417,8 @@ contract UniswapV3Vault is ERC20 {
          uint128 owed0, uint128 owed1) = positionManager.positions(tokenId);
 
         // Component 3: tokensOwed snapshotted in NFPM, scaled by user's share
-        fee0 += uint256(owed0) * balance / supply;
-        fee1 += uint256(owed1) * balance / supply;
+        tokenAmounts[0] += uint256(owed0) * balance / supply;
+        tokenAmounts[1] += uint256(owed1) * balance / supply;
 
         // Component 4: unsnapshotted fees still in pool
         if (L_total > 0) {
@@ -357,7 +432,6 @@ contract UniswapV3Vault is ERC20 {
             (,, uint256 feeGrowthOutsideUpper0, uint256 feeGrowthOutsideUpper1,,,,)
                 = IUniswapV3PoolMinimal(pool).ticks(_tickUpper);
 
-            // Reconstruct feeGrowthInside using unchecked arithmetic (uint256 overflow semantics)
             unchecked {
                 uint256 below0 = currentTick >= _tickLower
                     ? feeGrowthOutsideLower0
@@ -376,10 +450,9 @@ contract UniswapV3Vault is ERC20 {
                 uint256 inside0 = feeGrowthGlobal0 - below0 - above0;
                 uint256 inside1 = feeGrowthGlobal1 - below1 - above1;
 
-                // Unsnapshotted fees: (delta × L_total × balance) / Q128 / supply
                 uint256 Q128 = 1 << 128;
-                fee0 += (inside0 - feeGrowthInside0LastX128) * uint256(L_total) * balance / Q128 / supply;
-                fee1 += (inside1 - feeGrowthInside1LastX128) * uint256(L_total) * balance / Q128 / supply;
+                tokenAmounts[0] += (inside0 - feeGrowthInside0LastX128) * uint256(L_total) * balance / Q128 / supply;
+                tokenAmounts[1] += (inside1 - feeGrowthInside1LastX128) * uint256(L_total) * balance / Q128 / supply;
             }
         }
     }
@@ -389,40 +462,41 @@ contract UniswapV3Vault is ERC20 {
     // Both directions convert the same number of shares to the same liquidity delta,
     // which maps to the same token amounts at a given price.
 
-    /// @notice Quote the token amounts for burning a given number of shares
-    function quoteBurn(uint256 shares) external view returns (uint256 amount0, uint256 amount1, uint128 deltaL) {
+    /// @inheritdoc IMultiTokenVault
+    function quoteBurn(uint256 shares) external view returns (uint256[] memory tokenAmounts) {
+        tokenAmounts = new uint256[](2);
         uint256 supply = totalSupply();
-        if (supply == 0) return (0, 0, 0);
+        if (supply == 0) return tokenAmounts;
 
-        deltaL = uint128(shares);
+        uint128 deltaL = uint128(shares);
 
         (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
         uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(_tickLower);
         uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(_tickUpper);
 
-        (amount0, amount1) =
+        (tokenAmounts[0], tokenAmounts[1]) =
             LiquidityAmounts.getAmountsForLiquidity(sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, deltaL);
     }
 
-    /// @notice Quote the token amounts required to mint a given number of shares
-    function quoteMint(uint256 shares) external view returns (uint256 amount0, uint256 amount1, uint128 deltaL) {
+    /// @inheritdoc IMultiTokenVault
+    function quoteMint(uint256 shares) external view returns (uint256[] memory tokenAmounts) {
+        tokenAmounts = new uint256[](2);
         uint256 supply = totalSupply();
-        if (supply == 0) return (0, 0, 0);
+        if (supply == 0) return tokenAmounts;
 
-        deltaL = uint128(shares);
+        uint128 deltaL = uint128(shares);
 
         (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
         uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(_tickLower);
         uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(_tickUpper);
 
-        (amount0, amount1) =
+        (tokenAmounts[0], tokenAmounts[1]) =
             LiquidityAmounts.getAmountsForLiquidity(sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, deltaL);
     }
 
     // ============ Fee accumulator internals ============
 
     /// @dev Collect all outstanding fees from the NFT and update the global accumulators.
-    ///      collect() returns exclusively accumulated fees — principal stays in the pool.
     function _collectAndUpdateAccumulator() internal {
         (uint256 collected0, uint256 collected1) = positionManager.collect(
             INonfungiblePositionManagerMinimal.CollectParams({
@@ -451,30 +525,39 @@ contract UniswapV3Vault is ERC20 {
         feeDebt1[user] = feePerShare1;
     }
 
-    /// @dev Transfer all pending fees to the user and reset
-    function _transferPendingFees(address user) internal {
+    /// @dev Transfer all pending fees to a recipient and reset the user's pending balances.
+    /// @param user The user whose pending fees to transfer.
+    /// @param recipient The address that receives the fee tokens.
+    /// @return tokenAmounts The amounts transferred [token0, token1].
+    function _transferPendingFees(address user, address recipient)
+        internal
+        returns (uint256[] memory tokenAmounts)
+    {
+        tokenAmounts = new uint256[](2);
+
         uint256 pending0 = _pendingFees0[user];
         uint256 pending1 = _pendingFees1[user];
 
         if (pending0 > 0) {
             _pendingFees0[user] = 0;
-            IERC20(token0).safeTransfer(user, pending0);
+            IERC20(token0).safeTransfer(recipient, pending0);
         }
         if (pending1 > 0) {
             _pendingFees1[user] = 0;
-            IERC20(token1).safeTransfer(user, pending1);
+            IERC20(token1).safeTransfer(recipient, pending1);
         }
 
+        tokenAmounts[0] = pending0;
+        tokenAmounts[1] = pending1;
+
         if (pending0 > 0 || pending1 > 0) {
-            emit FeesCollected(user, pending0, pending1);
+            emit YieldCollected(user, recipient, tokenAmounts);
         }
     }
 
     // ============ Transfer hooks ============
 
     /// @dev Collect outstanding NFPM fees and settle for both parties before any balance change.
-    ///      Called on every transfer, mint, and burn. When called from mint()/burn() the
-    ///      accumulator was already updated (the second collect returns 0 — harmless).
     function _beforeTokenTransfer(address from, address to, uint256 /* amount */ ) internal virtual override {
         if (_initialized) _collectAndUpdateAccumulator();
         if (from != address(0)) _settleFees(from);

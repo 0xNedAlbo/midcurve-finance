@@ -51,12 +51,14 @@ contract UniswapV3VaultFactory {
     /// @param name_ ERC-20 token name
     /// @param symbol_ ERC-20 token symbol
     /// @param decimals_ ERC-20 decimals (suggested by UI based on liquidity)
+    /// @param operator_ Address authorized to call tend() and setOperator()
     /// @return vault The deployed vault clone address
     function createVault(
         uint256 tokenId_,
         string calldata name_,
         string calldata symbol_,
-        uint8 decimals_
+        uint8 decimals_,
+        address operator_
     ) external returns (address vault) {
         vault = Clones.clone(baseVaultImplementation);
 
@@ -64,7 +66,7 @@ contract UniswapV3VaultFactory {
         INonfungiblePositionManagerMinimal(positionManager).transferFrom(msg.sender, vault, tokenId_);
 
         // Initialize the clone
-        UniswapV3Vault(vault).initialize(positionManager, tokenId_, name_, symbol_, decimals_, msg.sender);
+        UniswapV3Vault(vault).initialize(positionManager, tokenId_, name_, symbol_, decimals_, msg.sender, operator_);
 
         emit VaultCreated(vault, msg.sender, tokenId_, false);
     }
@@ -75,6 +77,7 @@ contract UniswapV3VaultFactory {
     /// @param name_ ERC-20 token name
     /// @param symbol_ ERC-20 token symbol
     /// @param decimals_ ERC-20 decimals
+    /// @param operator_ Address authorized to call tend() and setOperator()
     /// @param allowlistAdmin_ Address that manages the shareholder allowlist
     /// @return vault The deployed vault clone address
     function createAllowlistedVault(
@@ -82,6 +85,7 @@ contract UniswapV3VaultFactory {
         string calldata name_,
         string calldata symbol_,
         uint8 decimals_,
+        address operator_,
         address allowlistAdmin_
     ) external returns (address vault) {
         vault = Clones.clone(allowlistedVaultImplementation);
@@ -91,7 +95,7 @@ contract UniswapV3VaultFactory {
 
         // Initialize the allowlisted clone
         AllowlistedUniswapV3Vault(vault).initialize(
-            positionManager, tokenId_, name_, symbol_, decimals_, msg.sender, allowlistAdmin_
+            positionManager, tokenId_, name_, symbol_, decimals_, msg.sender, operator_, allowlistAdmin_
         );
 
         emit VaultCreated(vault, msg.sender, tokenId_, true);

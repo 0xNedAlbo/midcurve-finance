@@ -32,6 +32,7 @@ contract UniswapV3VaultFactoryTest is Test {
     MockERC20F public tokenB;
 
     address public alice = makeAddr("alice");
+    address public operator_ = makeAddr("operator");
 
     uint256 public constant TOKEN_ID_1 = 42;
     uint256 public constant TOKEN_ID_2 = 43;
@@ -53,7 +54,6 @@ contract UniswapV3VaultFactoryTest is Test {
         tokenA.mint(address(nfpm), 100_000_000e18);
         tokenB.mint(address(nfpm), 100_000_000e18);
 
-        // Create two positions for alice
         nfpm.createPosition(
             TOKEN_ID_1, alice, address(tokenA), address(tokenB), FEE, TICK_LOWER, TICK_UPPER, INITIAL_LIQUIDITY
         );
@@ -61,7 +61,6 @@ contract UniswapV3VaultFactoryTest is Test {
             TOKEN_ID_2, alice, address(tokenA), address(tokenB), FEE, TICK_LOWER, TICK_UPPER, INITIAL_LIQUIDITY
         );
 
-        // Deploy implementations and factory
         baseImpl = new UniswapV3Vault();
         allowlistedImpl = new AllowlistedUniswapV3Vault();
         factory = new UniswapV3VaultFactory(address(baseImpl), address(allowlistedImpl), address(nfpm));
@@ -92,7 +91,7 @@ contract UniswapV3VaultFactoryTest is Test {
         vm.startPrank(alice);
         nfpm.approve(address(factory), TOKEN_ID_1);
 
-        address vault = factory.createVault(TOKEN_ID_1, "Test Vault", "TV", 6);
+        address vault = factory.createVault(TOKEN_ID_1, "Test Vault", "TV", 6, operator_);
         vm.stopPrank();
 
         UniswapV3Vault v = UniswapV3Vault(vault);
@@ -102,6 +101,7 @@ contract UniswapV3VaultFactoryTest is Test {
         assertEq(v.tokenId(), TOKEN_ID_1);
         assertEq(v.totalSupply(), INITIAL_LIQUIDITY);
         assertEq(v.balanceOf(alice), INITIAL_LIQUIDITY);
+        assertEq(v.operator(), operator_);
         assertEq(nfpm.ownerOf(TOKEN_ID_1), vault);
     }
 
@@ -112,14 +112,14 @@ contract UniswapV3VaultFactoryTest is Test {
         vm.expectEmit(false, true, true, true);
         emit UniswapV3VaultFactory.VaultCreated(address(0), alice, TOKEN_ID_1, false);
 
-        factory.createVault(TOKEN_ID_1, "Test Vault", "TV", 6);
+        factory.createVault(TOKEN_ID_1, "Test Vault", "TV", 6, operator_);
         vm.stopPrank();
     }
 
     function test_createVault_revertsWithoutApproval() public {
         vm.prank(alice);
         vm.expectRevert("Not authorized");
-        factory.createVault(TOKEN_ID_1, "Test Vault", "TV", 6);
+        factory.createVault(TOKEN_ID_1, "Test Vault", "TV", 6, operator_);
     }
 
     // ============ createAllowlistedVault ============
@@ -128,14 +128,16 @@ contract UniswapV3VaultFactoryTest is Test {
         vm.startPrank(alice);
         nfpm.approve(address(factory), TOKEN_ID_2);
 
-        address vault = factory.createAllowlistedVault(TOKEN_ID_2, "AL Vault", "ALV", 6, alice);
+        address vault = factory.createAllowlistedVault(TOKEN_ID_2, "AL Vault", "ALV", 6, operator_, alice);
         vm.stopPrank();
 
         AllowlistedUniswapV3Vault v = AllowlistedUniswapV3Vault(vault);
         assertEq(v.name(), "AL Vault");
         assertEq(v.symbol(), "ALV");
         assertEq(v.allowlistAdmin(), alice);
-        assertTrue(v.allowlisted(alice));
+        assertTrue(v.isAllowlisted(alice));
+        assertTrue(v.allowlistEnabled());
+        assertEq(v.operator(), operator_);
         assertEq(v.totalSupply(), INITIAL_LIQUIDITY);
         assertEq(v.balanceOf(alice), INITIAL_LIQUIDITY);
     }
@@ -147,7 +149,7 @@ contract UniswapV3VaultFactoryTest is Test {
         vm.expectEmit(false, true, true, true);
         emit UniswapV3VaultFactory.VaultCreated(address(0), alice, TOKEN_ID_2, true);
 
-        factory.createAllowlistedVault(TOKEN_ID_2, "AL Vault", "ALV", 6, alice);
+        factory.createAllowlistedVault(TOKEN_ID_2, "AL Vault", "ALV", 6, operator_, alice);
         vm.stopPrank();
     }
 
@@ -158,8 +160,8 @@ contract UniswapV3VaultFactoryTest is Test {
         nfpm.approve(address(factory), TOKEN_ID_1);
         nfpm.approve(address(factory), TOKEN_ID_2);
 
-        address vault1 = factory.createVault(TOKEN_ID_1, "Vault 1", "V1", 6);
-        address vault2 = factory.createVault(TOKEN_ID_2, "Vault 2", "V2", 12);
+        address vault1 = factory.createVault(TOKEN_ID_1, "Vault 1", "V1", 6, operator_);
+        address vault2 = factory.createVault(TOKEN_ID_2, "Vault 2", "V2", 12, operator_);
         vm.stopPrank();
 
         assertTrue(vault1 != vault2);

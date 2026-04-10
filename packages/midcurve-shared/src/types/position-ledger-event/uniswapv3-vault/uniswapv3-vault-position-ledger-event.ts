@@ -131,12 +131,16 @@ export class UniswapV3VaultPositionLedgerEvent extends BasePositionLedgerEvent {
     return this._state.poolPrice;
   }
 
+  get tokenAmounts(): bigint[] {
+    return this._state.tokenAmounts;
+  }
+
   get token0Amount(): bigint {
-    return this._state.token0Amount;
+    return this._state.tokenAmounts[0] ?? 0n;
   }
 
   get token1Amount(): bigint {
-    return this._state.token1Amount;
+    return this._state.tokenAmounts[1] ?? 0n;
   }
 
   // ============================================================================

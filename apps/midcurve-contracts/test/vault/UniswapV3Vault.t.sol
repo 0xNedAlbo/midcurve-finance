@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {UniswapV3Vault} from "../../contracts/vault/UniswapV3Vault.sol";
+import {MintParams, BurnParams} from "../../contracts/vault/interfaces/IMultiTokenVault.sol";
 import {
     MockNonfungiblePositionManager,
     MockUniswapV3Factory,
@@ -31,6 +32,7 @@ contract UniswapV3VaultTest is Test {
 
     address public alice = makeAddr("alice");
     address public bob = makeAddr("bob");
+    address public operator_ = makeAddr("operator");
 
     uint256 public constant TOKEN_ID = 42;
     uint128 public constant INITIAL_LIQUIDITY = 1_000_000;
@@ -71,8 +73,33 @@ contract UniswapV3VaultTest is Test {
         nfpm.transferFrom(alice, address(vault), TOKEN_ID);
 
         vault.initialize(
-            address(nfpm), TOKEN_ID, "Vault Token", "VLT", 6, alice
+            address(nfpm), TOKEN_ID, "Vault Token", "VLT", 6, alice, operator_
         );
+    }
+
+    // ============ Helpers ============
+
+    function _mintParams(uint256 maxAmount0, uint256 maxAmount1, address recipient)
+        internal
+        view
+        returns (MintParams memory)
+    {
+        uint256[] memory maxAmounts = new uint256[](2);
+        maxAmounts[0] = maxAmount0;
+        maxAmounts[1] = maxAmount1;
+        uint256[] memory minAmounts = new uint256[](2);
+        return MintParams({maxAmounts: maxAmounts, minAmounts: minAmounts, recipient: recipient, deadline: block.timestamp});
+    }
+
+    function _burnParams(uint256 minAmount0, uint256 minAmount1, address recipient)
+        internal
+        view
+        returns (BurnParams memory)
+    {
+        uint256[] memory minAmounts = new uint256[](2);
+        minAmounts[0] = minAmount0;
+        minAmounts[1] = minAmount1;
+        return BurnParams({minAmounts: minAmounts, recipient: recipient, deadline: block.timestamp});
     }
 
     // ============ Initialization ============
@@ -100,9 +127,13 @@ contract UniswapV3VaultTest is Test {
         assertEq(nfpm.ownerOf(TOKEN_ID), address(vault));
     }
 
+    function test_initialize_setsOperator() public view {
+        assertEq(vault.operator(), operator_);
+    }
+
     function test_initialize_revertsIfAlreadyInitialized() public {
         vm.expectRevert(UniswapV3Vault.AlreadyInitialized.selector);
-        vault.initialize(address(nfpm), TOKEN_ID, "X", "Y", 18, alice);
+        vault.initialize(address(nfpm), TOKEN_ID, "X", "Y", 18, alice, operator_);
     }
 
     function test_initialize_zeroLiquidityMintsNoShares() public {
@@ -116,7 +147,7 @@ contract UniswapV3VaultTest is Test {
         nfpm.approve(address(this), emptyTokenId);
         nfpm.transferFrom(alice, address(emptyVault), emptyTokenId);
 
-        emptyVault.initialize(address(nfpm), emptyTokenId, "Empty", "EMPTY", 18, alice);
+        emptyVault.initialize(address(nfpm), emptyTokenId, "Empty", "EMPTY", 18, alice, operator_);
 
         assertEq(emptyVault.totalSupply(), 0);
         assertEq(emptyVault.balanceOf(alice), 0);
@@ -129,9 +160,54 @@ contract UniswapV3VaultTest is Test {
         );
 
         UniswapV3Vault badVault = UniswapV3Vault(Clones.clone(address(implementation)));
-        // Don't transfer NFT to vault
         vm.expectRevert(UniswapV3Vault.NFTNotReceived.selector);
-        badVault.initialize(address(nfpm), otherTokenId, "Bad", "BAD", 18, alice);
+        badVault.initialize(address(nfpm), otherTokenId, "Bad", "BAD", 18, alice, operator_);
+    }
+
+    // ============ IMultiTokenVault — Identification ============
+
+    function test_vaultType() public view {
+        assertEq(vault.vaultType(), keccak256("uniswap-v3-concentrated-liquidity"));
+    }
+
+    function test_tokenCount() public view {
+        assertEq(vault.tokenCount(), 2);
+    }
+
+    function test_tokens() public view {
+        assertEq(vault.tokens(0), address(tokenA));
+        assertEq(vault.tokens(1), address(tokenB));
+    }
+
+    function test_tokens_revertsOnInvalidIndex() public {
+        vm.expectRevert(UniswapV3Vault.InvalidTokenIndex.selector);
+        vault.tokens(2);
+    }
+
+    // ============ Operator ============
+
+    function test_setOperator() public {
+        vm.prank(operator_);
+        vault.setOperator(bob);
+        assertEq(vault.operator(), bob);
+    }
+
+    function test_setOperator_revertsIfNotOperator() public {
+        vm.prank(alice);
+        vm.expectRevert(UniswapV3Vault.NotOperator.selector);
+        vault.setOperator(bob);
+    }
+
+    function test_tend_reverts() public {
+        vm.prank(operator_);
+        vm.expectRevert(UniswapV3Vault.UnsupportedTendOperation.selector);
+        vault.tend(bytes32(0), "");
+    }
+
+    function test_tend_revertsIfNotOperator() public {
+        vm.prank(alice);
+        vm.expectRevert(UniswapV3Vault.NotOperator.selector);
+        vault.tend(bytes32(0), "");
     }
 
     // ============ Burn ============
@@ -140,33 +216,55 @@ contract UniswapV3VaultTest is Test {
         uint256 shares = 500_000;
 
         vm.prank(alice);
-        vault.burn(shares, 0, 0);
+        vault.burn(shares, _burnParams(0, 0, alice));
 
-        // Alice should have fewer shares
         assertEq(vault.balanceOf(alice), INITIAL_LIQUIDITY - shares);
         assertEq(vault.totalSupply(), INITIAL_LIQUIDITY - shares);
     }
 
     function test_burn_fullBurn() public {
         vm.prank(alice);
-        vault.burn(INITIAL_LIQUIDITY, 0, 0);
+        vault.burn(INITIAL_LIQUIDITY, _burnParams(0, 0, alice));
 
         assertEq(vault.balanceOf(alice), 0);
         assertEq(vault.totalSupply(), 0);
-        // NFT still owned by vault
         assertEq(nfpm.ownerOf(TOKEN_ID), address(vault));
     }
 
     function test_burn_revertsOnZeroShares() public {
         vm.prank(alice);
         vm.expectRevert(UniswapV3Vault.ZeroShares.selector);
-        vault.burn(0, 0, 0);
+        vault.burn(0, _burnParams(0, 0, alice));
     }
 
     function test_burn_revertsOnInsufficientBalance() public {
         vm.prank(alice);
         vm.expectRevert(UniswapV3Vault.InsufficientBalance.selector);
-        vault.burn(INITIAL_LIQUIDITY + 1, 0, 0);
+        vault.burn(INITIAL_LIQUIDITY + 1, _burnParams(0, 0, alice));
+    }
+
+    function test_burn_sendsTokensToRecipient() public {
+        uint256 balA_before = tokenA.balanceOf(bob);
+        uint256 balB_before = tokenB.balanceOf(bob);
+
+        vm.prank(alice);
+        vault.burn(INITIAL_LIQUIDITY / 2, _burnParams(0, 0, bob));
+
+        // Tokens should go to bob (recipient), not alice (burner)
+        assertTrue(tokenA.balanceOf(bob) > balA_before || tokenB.balanceOf(bob) > balB_before);
+    }
+
+    function test_burn_revertsOnExpiredDeadline() public {
+        uint256[] memory minAmounts = new uint256[](2);
+        BurnParams memory params = BurnParams({
+            minAmounts: minAmounts,
+            recipient: alice,
+            deadline: block.timestamp - 1
+        });
+
+        vm.prank(alice);
+        vm.expectRevert(UniswapV3Vault.DeadlineExpired.selector);
+        vault.burn(100, params);
     }
 
     // ============ Mint ============
@@ -181,48 +279,107 @@ contract UniswapV3VaultTest is Test {
         vm.startPrank(bob);
         tokenA.approve(address(vault), amount0);
         tokenB.approve(address(vault), amount1);
-        vault.mint(0, amount0, amount1); // shares param is informational; actual shares = addedLiquidity
+        vault.mint(0, _mintParams(amount0, amount1, bob));
         vm.stopPrank();
 
-        // Bob should have received shares equal to added liquidity
         assertTrue(vault.balanceOf(bob) > 0);
         assertTrue(vault.totalSupply() > INITIAL_LIQUIDITY);
     }
 
+    function test_mint_sharesToRecipient() public {
+        uint256 amount0 = 1000e18;
+        uint256 amount1 = 1000e18;
+
+        tokenA.mint(bob, amount0);
+        tokenB.mint(bob, amount1);
+
+        vm.startPrank(bob);
+        tokenA.approve(address(vault), amount0);
+        tokenB.approve(address(vault), amount1);
+        // Bob mints but alice receives shares
+        vault.mint(0, _mintParams(amount0, amount1, alice));
+        vm.stopPrank();
+
+        // Alice should have received the new shares
+        assertTrue(vault.balanceOf(alice) > INITIAL_LIQUIDITY);
+        // Bob should have no shares (he only provided tokens)
+        assertEq(vault.balanceOf(bob), 0);
+    }
+
+    function test_mint_revertsOnExpiredDeadline() public {
+        uint256[] memory maxAmounts = new uint256[](2);
+        maxAmounts[0] = 100;
+        maxAmounts[1] = 100;
+        uint256[] memory minAmounts = new uint256[](2);
+        MintParams memory params = MintParams({
+            maxAmounts: maxAmounts,
+            minAmounts: minAmounts,
+            recipient: alice,
+            deadline: block.timestamp - 1
+        });
+
+        vm.prank(alice);
+        vm.expectRevert(UniswapV3Vault.DeadlineExpired.selector);
+        vault.mint(0, params);
+    }
+
+    function test_mint_revertsOnInvalidTokenCount() public {
+        uint256[] memory maxAmounts = new uint256[](3);
+        uint256[] memory minAmounts = new uint256[](3);
+        MintParams memory params = MintParams({
+            maxAmounts: maxAmounts,
+            minAmounts: minAmounts,
+            recipient: alice,
+            deadline: block.timestamp
+        });
+
+        vm.prank(alice);
+        vm.expectRevert(UniswapV3Vault.InvalidTokenCount.selector);
+        vault.mint(0, params);
+    }
+
     // ============ Fee accumulator ============
 
-    function test_collectFees_distributesAccumulatedFees() public {
-        // Accrue some fees
+    function test_collectYield_distributesAccumulatedFees() public {
         nfpm.accrueFeesForTesting(TOKEN_ID, 1000, 2000);
 
         uint256 balA_before = tokenA.balanceOf(alice);
         uint256 balB_before = tokenB.balanceOf(alice);
 
         vm.prank(alice);
-        vault.collectFees();
+        vault.collectYield(alice);
 
-        // Alice holds 100% of shares, should get 100% of fees
         assertEq(tokenA.balanceOf(alice) - balA_before, 1000);
         assertEq(tokenB.balanceOf(alice) - balB_before, 2000);
     }
 
-    function test_collectFees_proportionalDistribution() public {
-        // Transfer half the shares to bob
+    function test_collectYield_sendsToRecipient() public {
+        nfpm.accrueFeesForTesting(TOKEN_ID, 1000, 2000);
+
+        uint256 balA_before = tokenA.balanceOf(bob);
+        uint256 balB_before = tokenB.balanceOf(bob);
+
+        vm.prank(alice);
+        vault.collectYield(bob);
+
+        assertEq(tokenA.balanceOf(bob) - balA_before, 1000);
+        assertEq(tokenB.balanceOf(bob) - balB_before, 2000);
+    }
+
+    function test_collectYield_proportionalDistribution() public {
         vm.prank(alice);
         vault.transfer(bob, INITIAL_LIQUIDITY / 2);
 
-        // Accrue fees after the transfer
         nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 20_000);
 
         uint256 aliceA_before = tokenA.balanceOf(alice);
         uint256 bobA_before = tokenA.balanceOf(bob);
 
         vm.prank(alice);
-        vault.collectFees();
+        vault.collectYield(alice);
         vm.prank(bob);
-        vault.collectFees();
+        vault.collectYield(bob);
 
-        // Each should get ~50%
         uint256 aliceFee0 = tokenA.balanceOf(alice) - aliceA_before;
         uint256 bobFee0 = tokenA.balanceOf(bob) - bobA_before;
 
@@ -231,127 +388,93 @@ contract UniswapV3VaultTest is Test {
     }
 
     function test_feeAccumulator_settlesOnTransfer() public {
-        // Accrue fees while alice holds 100%
         nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 0);
 
-        // Transfer to bob — alice's fees should be settled (stored in pending)
         vm.prank(alice);
         vault.transfer(bob, INITIAL_LIQUIDITY / 2);
 
-        // Alice collects — should get 100% of fees accrued before transfer
         uint256 balA_before = tokenA.balanceOf(alice);
         vm.prank(alice);
-        vault.collectFees();
+        vault.collectYield(alice);
         assertEq(tokenA.balanceOf(alice) - balA_before, 10_000);
 
-        // Bob collects — should get 0 (fees accrued before he had shares)
         uint256 bobA_before = tokenA.balanceOf(bob);
         vm.prank(bob);
-        vault.collectFees();
+        vault.collectYield(bob);
         assertEq(tokenA.balanceOf(bob) - bobA_before, 0);
     }
 
     function test_burn_settlesFeesForBurner() public {
-        // Accrue fees
         nfpm.accrueFeesForTesting(TOKEN_ID, 5000, 5000);
 
         uint256 balA_before = tokenA.balanceOf(alice);
         uint256 balB_before = tokenB.balanceOf(alice);
 
-        // Burn half — should get principal + fees
         vm.prank(alice);
-        vault.burn(INITIAL_LIQUIDITY / 2, 0, 0);
+        vault.burn(INITIAL_LIQUIDITY / 2, _burnParams(0, 0, alice));
 
-        // Alice should have received fees (from collectFees settlement in burn)
         assertTrue(tokenA.balanceOf(alice) > balA_before);
         assertTrue(tokenB.balanceOf(alice) > balB_before);
     }
 
     // ============ View functions ============
 
-    function test_claimableFees_includesTokensOwed() public {
-        // Accrue fees in NFPM (component 3: tokensOwed)
+    function test_claimableYield_includesTokensOwed() public {
         nfpm.accrueFeesForTesting(TOKEN_ID, 1000, 2000);
 
-        // claimableFees now reads tokensOwed directly from NFPM — no state change needed
-        (uint256 fee0, uint256 fee1) = vault.claimableFees(alice);
-        assertEq(fee0, 1000);
-        assertEq(fee1, 2000);
+        uint256[] memory fees = vault.claimableYield(alice);
+        assertEq(fees[0], 1000);
+        assertEq(fees[1], 2000);
 
-        // After collecting, claimable should be 0
         vm.prank(alice);
-        vault.collectFees();
+        vault.collectYield(alice);
 
-        (fee0, fee1) = vault.claimableFees(alice);
-        assertEq(fee0, 0);
-        assertEq(fee1, 0);
+        fees = vault.claimableYield(alice);
+        assertEq(fees[0], 0);
+        assertEq(fees[1], 0);
     }
 
-    function test_claimableFees_proportionalSplit() public {
-        // Transfer half the shares to bob
+    function test_claimableYield_proportionalSplit() public {
         vm.prank(alice);
         vault.transfer(bob, INITIAL_LIQUIDITY / 2);
 
-        // Accrue fees in NFPM
         nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 20_000);
 
-        (uint256 aliceFee0, uint256 aliceFee1) = vault.claimableFees(alice);
-        (uint256 bobFee0, uint256 bobFee1) = vault.claimableFees(bob);
+        uint256[] memory aliceFees = vault.claimableYield(alice);
+        uint256[] memory bobFees = vault.claimableYield(bob);
 
-        // Each holds 50% of shares — should see ~50% of tokensOwed
-        assertApproxEqAbs(aliceFee0, 5000, 1);
-        assertApproxEqAbs(aliceFee1, 10_000, 1);
-        assertApproxEqAbs(bobFee0, 5000, 1);
-        assertApproxEqAbs(bobFee1, 10_000, 1);
+        assertApproxEqAbs(aliceFees[0], 5000, 1);
+        assertApproxEqAbs(aliceFees[1], 10_000, 1);
+        assertApproxEqAbs(bobFees[0], 5000, 1);
+        assertApproxEqAbs(bobFees[1], 10_000, 1);
     }
 
-    function test_claimableFees_includesUnsnapshottedPoolFees() public {
-        // Set up pool-level fee growth (component 4)
-        // Current tick is 0 (within range TICK_LOWER..TICK_UPPER)
-        // feeGrowthOutside for lower tick = 0 (default, since tick is above lower)
-        // feeGrowthOutside for upper tick = 0 (default, since tick is below upper)
-        // So feeGrowthInside = feeGrowthGlobal - 0 - 0 = feeGrowthGlobal
-        // feeGrowthInsideLast from NFPM = 0 (mock default)
-        // delta = feeGrowthGlobal
-        // unsnapshottedFees = delta * L_total / Q128
-
+    function test_claimableYield_includesUnsnapshottedPoolFees() public {
         uint256 Q128 = 1 << 128;
-        // Set fee growth so that L_total * feeGrowth / Q128 = 1000 for token0
-        // L_total = INITIAL_LIQUIDITY = 1_000_000
-        // feeGrowth = 1000 * Q128 / 1_000_000
         uint256 feeGrowth0 = 1000 * Q128 / INITIAL_LIQUIDITY;
         uint256 feeGrowth1 = 2000 * Q128 / INITIAL_LIQUIDITY;
         pool.setFeeGrowthGlobal(feeGrowth0, feeGrowth1);
 
-        (uint256 fee0, uint256 fee1) = vault.claimableFees(alice);
-        // Alice holds 100% of shares, so she gets full unsnapshotted fees
-        // Allow ±1 for integer division truncation in feeGrowth encoding
-        assertApproxEqAbs(fee0, 1000, 1);
-        assertApproxEqAbs(fee1, 2000, 1);
+        uint256[] memory fees = vault.claimableYield(alice);
+        assertApproxEqAbs(fees[0], 1000, 1);
+        assertApproxEqAbs(fees[1], 2000, 1);
     }
 
-    function test_claimableFees_allFourComponents() public {
-        // Component 1+2: accrue and settle fees via a collectFees then accrue more
+    function test_claimableYield_allFourComponents() public {
         nfpm.accrueFeesForTesting(TOKEN_ID, 500, 500);
         vm.prank(alice);
-        vault.collectFees();
+        vault.collectYield(alice);
 
-        // Accrue more fees in NFPM but don't collect — creates fresh tokensOwed (component 3)
         nfpm.accrueFeesForTesting(TOKEN_ID, 300, 300);
 
-        // Set pool fee growth for component 4
         uint256 Q128 = 1 << 128;
         uint256 feeGrowth0 = 200 * Q128 / INITIAL_LIQUIDITY;
         uint256 feeGrowth1 = 200 * Q128 / INITIAL_LIQUIDITY;
         pool.setFeeGrowthGlobal(feeGrowth0, feeGrowth1);
 
-        (uint256 fee0, uint256 fee1) = vault.claimableFees(alice);
-        // Component 1+2: 0 (just collected)
-        // Component 3: 300 (tokensOwed from NFPM)
-        // Component 4: 200 (unsnapshotted pool fees, ±1 truncation)
-        // Total: ~500
-        assertApproxEqAbs(fee0, 500, 1);
-        assertApproxEqAbs(fee1, 500, 1);
+        uint256[] memory fees = vault.claimableYield(alice);
+        assertApproxEqAbs(fees[0], 500, 1);
+        assertApproxEqAbs(fees[1], 500, 1);
     }
 
     function test_tickBounds_exposed() public view {
@@ -363,9 +486,6 @@ contract UniswapV3VaultTest is Test {
 
     function test_burn_revertsOnReentrancy() public {
         // The nonReentrant modifier should prevent reentrancy
-        // This is implicitly tested by the modifier — a direct reentrancy
-        // test would require a malicious token contract, which is out of scope
-        // for unit tests. The modifier's correctness is verified by its presence.
     }
 
     // ============ Edge cases ============
@@ -374,12 +494,12 @@ contract UniswapV3VaultTest is Test {
         UniswapV3Vault uninit = UniswapV3Vault(Clones.clone(address(implementation)));
 
         vm.expectRevert(UniswapV3Vault.NotInitialized.selector);
-        uninit.mint(100, 100, 100);
+        uninit.mint(0, _mintParams(100, 100, alice));
 
         vm.expectRevert(UniswapV3Vault.NotInitialized.selector);
-        uninit.burn(100, 0, 0);
+        uninit.burn(100, _burnParams(0, 0, alice));
 
         vm.expectRevert(UniswapV3Vault.NotInitialized.selector);
-        uninit.collectFees();
+        uninit.collectYield(alice);
     }
 }

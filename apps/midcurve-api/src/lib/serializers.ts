@@ -272,6 +272,7 @@ export function serializeUniswapV3VaultPositionState(state: UniswapV3VaultPositi
     liquidity: state.liquidity.toString(),
     unclaimedFees0: state.unclaimedFees0.toString(),
     unclaimedFees1: state.unclaimedFees1.toString(),
+    operatorAddress: state.operatorAddress,
     isClosed: state.isClosed,
     isOwnedByUser: state.isOwnedByUser,
     sqrtPriceX96: state.sqrtPriceX96.toString(),

@@ -1,12 +1,11 @@
 // ============================================================================
-// UniswapV3Vault ABI
+// UniswapV3Vault ABI — implements IMultiTokenVault / IMultiTokenVaultAllowlisted
 // Minimal ABI for service layer reads + event log filtering.
 // ============================================================================
 
 /**
  * Vault contract ABI — view functions and events used by the service layer.
- * Does not include write functions (mint, burn, collectFees) — those are
- * called by the frontend via wagmi, not by the service layer.
+ * Covers both IMultiTokenVault interface functions and UniswapV3-specific getters.
  */
 export const UniswapV3VaultAbi = [
   // ============ ERC-20 views ============
@@ -46,7 +45,39 @@ export const UniswapV3VaultAbi = [
     stateMutability: 'view',
   },
 
-  // ============ Vault identity views ============
+  // ============ IMultiTokenVault — Identification ============
+  {
+    type: 'function',
+    name: 'vaultType',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'tokenCount',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'tokens',
+    inputs: [{ name: 'index', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+
+  // ============ IMultiTokenVault — Operator ============
+  {
+    type: 'function',
+    name: 'operator',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+
+  // ============ UniswapV3-specific views ============
   {
     type: 'function',
     name: 'positionManager',
@@ -97,14 +128,13 @@ export const UniswapV3VaultAbi = [
     stateMutability: 'view',
   },
 
-  // ============ Fee + quote views ============
+  // ============ IMultiTokenVault — Yield + quote views ============
   {
     type: 'function',
-    name: 'claimableFees',
+    name: 'claimableYield',
     inputs: [{ name: 'user', type: 'address' }],
     outputs: [
-      { name: 'fee0', type: 'uint256' },
-      { name: 'fee1', type: 'uint256' },
+      { name: 'tokenAmounts', type: 'uint256[]' },
     ],
     stateMutability: 'view',
   },
@@ -113,9 +143,7 @@ export const UniswapV3VaultAbi = [
     name: 'quoteBurn',
     inputs: [{ name: 'shares', type: 'uint256' }],
     outputs: [
-      { name: 'amount0', type: 'uint256' },
-      { name: 'amount1', type: 'uint256' },
-      { name: 'deltaL', type: 'uint128' },
+      { name: 'tokenAmounts', type: 'uint256[]' },
     ],
     stateMutability: 'view',
   },
@@ -124,14 +152,35 @@ export const UniswapV3VaultAbi = [
     name: 'quoteMint',
     inputs: [{ name: 'shares', type: 'uint256' }],
     outputs: [
-      { name: 'amount0', type: 'uint256' },
-      { name: 'amount1', type: 'uint256' },
-      { name: 'deltaL', type: 'uint128' },
+      { name: 'tokenAmounts', type: 'uint256[]' },
     ],
     stateMutability: 'view',
   },
 
-  // ============ Vault events ============
+  // ============ IMultiTokenVaultAllowlisted views ============
+  {
+    type: 'function',
+    name: 'allowlistEnabled',
+    inputs: [],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'allowlistAdmin',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'isAllowlisted',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+
+  // ============ IMultiTokenVault events ============
   {
     type: 'event',
     name: 'VaultInitialized',
@@ -146,31 +195,75 @@ export const UniswapV3VaultAbi = [
     type: 'event',
     name: 'Minted',
     inputs: [
-      { name: 'to', type: 'address', indexed: true },
+      { name: 'minter', type: 'address', indexed: true },
+      { name: 'recipient', type: 'address', indexed: true },
       { name: 'shares', type: 'uint256', indexed: false },
-      { name: 'deltaL', type: 'uint128', indexed: false },
-      { name: 'amount0', type: 'uint256', indexed: false },
-      { name: 'amount1', type: 'uint256', indexed: false },
+      { name: 'tokenAmounts', type: 'uint256[]', indexed: false },
     ],
   },
   {
     type: 'event',
     name: 'Burned',
     inputs: [
-      { name: 'from', type: 'address', indexed: true },
+      { name: 'burner', type: 'address', indexed: true },
+      { name: 'recipient', type: 'address', indexed: true },
       { name: 'shares', type: 'uint256', indexed: false },
-      { name: 'deltaL', type: 'uint128', indexed: false },
-      { name: 'amount0', type: 'uint256', indexed: false },
-      { name: 'amount1', type: 'uint256', indexed: false },
+      { name: 'tokenAmounts', type: 'uint256[]', indexed: false },
     ],
   },
   {
     type: 'event',
-    name: 'FeesCollected',
+    name: 'YieldCollected',
     inputs: [
       { name: 'user', type: 'address', indexed: true },
-      { name: 'fee0', type: 'uint256', indexed: false },
-      { name: 'fee1', type: 'uint256', indexed: false },
+      { name: 'recipient', type: 'address', indexed: true },
+      { name: 'tokenAmounts', type: 'uint256[]', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'TendExecuted',
+    inputs: [
+      { name: 'operationDiscriminator', type: 'bytes32', indexed: true },
+      { name: 'tendParams', type: 'bytes', indexed: false },
+      { name: 'tendResults', type: 'bytes', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'OperatorUpdated',
+    inputs: [
+      { name: 'prevOperator', type: 'address', indexed: true },
+      { name: 'newOperator', type: 'address', indexed: true },
+    ],
+  },
+
+  // ============ IMultiTokenVaultAllowlisted events ============
+  {
+    type: 'event',
+    name: 'AllowlistMemberAdded',
+    inputs: [
+      { name: 'account', type: 'address', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'AllowlistMemberRemoved',
+    inputs: [
+      { name: 'account', type: 'address', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'AllowlistDisabled',
+    inputs: [],
+  },
+  {
+    type: 'event',
+    name: 'AllowlistAdminTransferred',
+    inputs: [
+      { name: 'prevAdmin', type: 'address', indexed: true },
+      { name: 'newAdmin', type: 'address', indexed: true },
     ],
   },
 
@@ -187,7 +280,7 @@ export const UniswapV3VaultAbi = [
 ] as const;
 
 /**
- * Factory contract ABI — VaultCreated event for wallet discovery.
+ * Factory contract ABI — createVault/createAllowlistedVault + VaultCreated event.
  */
 export const UniswapV3VaultFactoryAbi = [
   // ============ Factory functions ============
@@ -199,6 +292,21 @@ export const UniswapV3VaultFactoryAbi = [
       { name: 'name_', type: 'string' },
       { name: 'symbol_', type: 'string' },
       { name: 'decimals_', type: 'uint8' },
+      { name: 'operator_', type: 'address' },
+    ],
+    outputs: [{ name: 'vault', type: 'address' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'createAllowlistedVault',
+    inputs: [
+      { name: 'tokenId_', type: 'uint256' },
+      { name: 'name_', type: 'string' },
+      { name: 'symbol_', type: 'string' },
+      { name: 'decimals_', type: 'uint8' },
+      { name: 'operator_', type: 'address' },
+      { name: 'allowlistAdmin_', type: 'address' },
     ],
     outputs: [{ name: 'vault', type: 'address' }],
     stateMutability: 'nonpayable',

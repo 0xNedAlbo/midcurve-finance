@@ -3,6 +3,9 @@
  *
  * Discriminated union of vault-specific event data.
  * Each event type carries its own fields alongside the common base.
+ *
+ * Uses tokenAmounts[] arrays to align with the IMultiTokenVault interface
+ * where tokenAmounts[0] = token0 amount, tokenAmounts[1] = token1 amount.
  */
 
 // ============================================================================
@@ -12,10 +15,8 @@
 export interface UniswapV3VaultLedgerEventStateBase {
   /** Pool price in quote token units at event time */
   poolPrice: bigint;
-  /** Token0 amount involved in this event */
-  token0Amount: bigint;
-  /** Token1 amount involved in this event */
-  token1Amount: bigint;
+  /** Token amounts involved in this event, indexed by token position (0=token0, 1=token1) */
+  tokenAmounts: bigint[];
 }
 
 // ============================================================================
@@ -24,20 +25,30 @@ export interface UniswapV3VaultLedgerEventStateBase {
 
 export interface UniswapV3VaultMintEvent extends UniswapV3VaultLedgerEventStateBase {
   eventType: 'VAULT_MINT';
-  /** Shares minted (Transfer value from 0x0 → owner) */
+  /** Shares minted */
   shares: bigint;
+  /** Address that initiated the mint and provided the tokens */
+  minter: string;
+  /** Address that received the minted shares */
+  recipient: string;
 }
 
 export interface UniswapV3VaultBurnEvent extends UniswapV3VaultLedgerEventStateBase {
   eventType: 'VAULT_BURN';
-  /** Shares burned (Transfer value from owner → 0x0) */
+  /** Shares burned */
   shares: bigint;
+  /** Address that burned the shares */
+  burner: string;
+  /** Address that received the redeemed token amounts */
+  recipient: string;
 }
 
 export interface UniswapV3VaultCollectYieldEvent extends UniswapV3VaultLedgerEventStateBase {
   eventType: 'VAULT_COLLECT_YIELD';
-  fee0: bigint;
-  fee1: bigint;
+  /** Address whose yield entitlement was collected */
+  user: string;
+  /** Address that received the yield tokens */
+  recipient: string;
 }
 
 export interface UniswapV3VaultTransferInEvent extends UniswapV3VaultLedgerEventStateBase {
@@ -69,23 +80,26 @@ export type UniswapV3VaultLedgerEventState =
 
 export interface UniswapV3VaultLedgerEventStateBaseJSON {
   poolPrice: string;
-  token0Amount: string;
-  token1Amount: string;
+  tokenAmounts: string[];
 }
 
 export type UniswapV3VaultLedgerEventStateJSON =
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_MINT';
       shares: string;
+      minter: string;
+      recipient: string;
     })
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_BURN';
       shares: string;
+      burner: string;
+      recipient: string;
     })
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_COLLECT_YIELD';
-      fee0: string;
-      fee1: string;
+      user: string;
+      recipient: string;
     })
   | (UniswapV3VaultLedgerEventStateBaseJSON & {
       eventType: 'VAULT_TRANSFER_IN';
@@ -105,16 +119,14 @@ export type UniswapV3VaultLedgerEventStateJSON =
 function baseToJSON(state: UniswapV3VaultLedgerEventStateBase): UniswapV3VaultLedgerEventStateBaseJSON {
   return {
     poolPrice: state.poolPrice.toString(),
-    token0Amount: state.token0Amount.toString(),
-    token1Amount: state.token1Amount.toString(),
+    tokenAmounts: state.tokenAmounts.map((a) => a.toString()),
   };
 }
 
 function baseFromJSON(json: UniswapV3VaultLedgerEventStateBaseJSON): UniswapV3VaultLedgerEventStateBase {
   return {
     poolPrice: BigInt(json.poolPrice),
-    token0Amount: BigInt(json.token0Amount),
-    token1Amount: BigInt(json.token1Amount),
+    tokenAmounts: json.tokenAmounts.map((a) => BigInt(a)),
   };
 }
 
@@ -124,11 +136,11 @@ export function vaultLedgerEventStateToJSON(
   const base = baseToJSON(state);
   switch (state.eventType) {
     case 'VAULT_MINT':
-      return { ...base, eventType: 'VAULT_MINT', shares: state.shares.toString() };
+      return { ...base, eventType: 'VAULT_MINT', shares: state.shares.toString(), minter: state.minter, recipient: state.recipient };
     case 'VAULT_BURN':
-      return { ...base, eventType: 'VAULT_BURN', shares: state.shares.toString() };
+      return { ...base, eventType: 'VAULT_BURN', shares: state.shares.toString(), burner: state.burner, recipient: state.recipient };
     case 'VAULT_COLLECT_YIELD':
-      return { ...base, eventType: 'VAULT_COLLECT_YIELD', fee0: state.fee0.toString(), fee1: state.fee1.toString() };
+      return { ...base, eventType: 'VAULT_COLLECT_YIELD', user: state.user, recipient: state.recipient };
     case 'VAULT_TRANSFER_IN':
       return { ...base, eventType: 'VAULT_TRANSFER_IN', shares: state.shares.toString(), from: state.from };
     case 'VAULT_TRANSFER_OUT':
@@ -142,11 +154,11 @@ export function vaultLedgerEventStateFromJSON(
   const base = baseFromJSON(json);
   switch (json.eventType) {
     case 'VAULT_MINT':
-      return { ...base, eventType: 'VAULT_MINT', shares: BigInt(json.shares) };
+      return { ...base, eventType: 'VAULT_MINT', shares: BigInt(json.shares), minter: json.minter, recipient: json.recipient };
     case 'VAULT_BURN':
-      return { ...base, eventType: 'VAULT_BURN', shares: BigInt(json.shares) };
+      return { ...base, eventType: 'VAULT_BURN', shares: BigInt(json.shares), burner: json.burner, recipient: json.recipient };
     case 'VAULT_COLLECT_YIELD':
-      return { ...base, eventType: 'VAULT_COLLECT_YIELD', fee0: BigInt(json.fee0), fee1: BigInt(json.fee1) };
+      return { ...base, eventType: 'VAULT_COLLECT_YIELD', user: json.user, recipient: json.recipient };
     case 'VAULT_TRANSFER_IN':
       return { ...base, eventType: 'VAULT_TRANSFER_IN', shares: BigInt(json.shares), from: json.from };
     case 'VAULT_TRANSFER_OUT':

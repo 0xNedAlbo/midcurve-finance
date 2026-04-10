@@ -12,6 +12,7 @@
  * Event types: VAULT_COLLECT_YIELD, VAULT_TRANSFER_IN, VAULT_TRANSFER_OUT
  */
 
+import { decodeAbiParameters } from 'viem';
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
     UniswapV3VaultPositionLedgerEvent,
@@ -49,7 +50,9 @@ import type { AprPeriodData } from '../types/position-apr/index.js';
  * Computed via cast sig-event from the Solidity event definitions.
  */
 export const VAULT_EVENT_SIGNATURES = {
-    FEES_COLLECTED: '0x2e4fb6077d4acf86e12bb7411fb82b2b3eaa6a49787f4b1e17b423e7ea841169',
+    MINTED: '0x09a6b7fc897b2b2cb269f200c545ec63a2e2e2333c6c67a401474f3e769d2d5c',
+    BURNED: '0x9c1f1198afd378491520e2f7dc5adff4ae935658c101093cf24dfce2ed379089',
+    YIELD_COLLECTED: '0x18898ecacb8287585d905259ceebe4f692ca4a958d7e2c1383dc9e9f493a053f',
     TRANSFER: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
 } as const;
 
@@ -129,10 +132,25 @@ export function validateVaultEvent(
         if (from !== userHex && to !== userHex) {
             return { valid: false, reason: 'wrong_user' };
         }
-    } else {
-        // FeesCollected(user) — topic1 is the user
-        const indexedUser = log.topics[1]?.toLowerCase();
-        if (indexedUser !== userHex) {
+    } else if (eventType === 'MINTED') {
+        // Minted(minter indexed, recipient indexed, ...) — match user as recipient (topic2)
+        if (log.topics.length < 3) return { valid: false, reason: 'missing_topics' };
+        const recipient = log.topics[2]?.toLowerCase();
+        if (recipient !== userHex) {
+            return { valid: false, reason: 'wrong_user' };
+        }
+    } else if (eventType === 'BURNED') {
+        // Burned(burner indexed, recipient indexed, ...) — match user as burner (topic1)
+        if (log.topics.length < 3) return { valid: false, reason: 'missing_topics' };
+        const burner = log.topics[1]?.toLowerCase();
+        if (burner !== userHex) {
+            return { valid: false, reason: 'wrong_user' };
+        }
+    } else if (eventType === 'YIELD_COLLECTED') {
+        // YieldCollected(user indexed, recipient indexed, ...) — match user (topic1)
+        if (log.topics.length < 3) return { valid: false, reason: 'missing_topics' };
+        const user = log.topics[1]?.toLowerCase();
+        if (user !== userHex) {
             return { valid: false, reason: 'wrong_user' };
         }
     }
@@ -144,10 +162,27 @@ export function validateVaultEvent(
 // DECODING
 // ============================================================================
 
-export interface DecodedVaultFeesCollectedData {
-    eventType: 'FEES_COLLECTED';
-    fee0: bigint;
-    fee1: bigint;
+export interface DecodedVaultMintedData {
+    eventType: 'MINTED';
+    minter: string;
+    recipient: string;
+    shares: bigint;
+    tokenAmounts: bigint[];
+}
+
+export interface DecodedVaultBurnedData {
+    eventType: 'BURNED';
+    burner: string;
+    recipient: string;
+    shares: bigint;
+    tokenAmounts: bigint[];
+}
+
+export interface DecodedVaultYieldCollectedData {
+    eventType: 'YIELD_COLLECTED';
+    user: string;
+    recipient: string;
+    tokenAmounts: bigint[];
 }
 
 export interface DecodedVaultTransferData {
@@ -156,31 +191,76 @@ export interface DecodedVaultTransferData {
 }
 
 export type DecodedVaultLogData =
-    | DecodedVaultFeesCollectedData
+    | DecodedVaultMintedData
+    | DecodedVaultBurnedData
+    | DecodedVaultYieldCollectedData
     | DecodedVaultTransferData;
 
 /**
  * Decode ABI-encoded log data for vault events.
+ * Uses viem's decodeAbiParameters for dynamic array decoding (Minted, Burned, YieldCollected).
  */
 export function decodeVaultLogData(
     eventType: ValidVaultEventType,
     data: string,
+    topics: readonly string[],
 ): DecodedVaultLogData {
     const hex = data.startsWith('0x') ? data.slice(2) : data;
-    const chunks = hex.match(/.{64}/g) || [];
 
     switch (eventType) {
-        case 'FEES_COLLECTED': {
-            // (uint256 fee0, uint256 fee1)
-            if (chunks.length < 2) throw new Error(`Invalid FEES_COLLECTED data: expected 2 chunks, got ${chunks.length}`);
+        case 'MINTED': {
+            // Indexed: minter (topic1), recipient (topic2)
+            // Data: (uint256 shares, uint256[] tokenAmounts)
+            const minter = '0x' + (topics[1]?.slice(26) ?? '');
+            const recipient = '0x' + (topics[2]?.slice(26) ?? '');
+            const decoded = decodeAbiParameters(
+                [{ name: 'shares', type: 'uint256' }, { name: 'tokenAmounts', type: 'uint256[]' }],
+                `0x${hex}` as `0x${string}`,
+            );
             return {
-                eventType: 'FEES_COLLECTED',
-                fee0: BigInt('0x' + chunks[0]!),
-                fee1: BigInt('0x' + chunks[1]!),
+                eventType: 'MINTED',
+                minter,
+                recipient,
+                shares: decoded[0],
+                tokenAmounts: [...decoded[1]],
+            };
+        }
+        case 'BURNED': {
+            // Indexed: burner (topic1), recipient (topic2)
+            // Data: (uint256 shares, uint256[] tokenAmounts)
+            const burner = '0x' + (topics[1]?.slice(26) ?? '');
+            const recipient = '0x' + (topics[2]?.slice(26) ?? '');
+            const decoded = decodeAbiParameters(
+                [{ name: 'shares', type: 'uint256' }, { name: 'tokenAmounts', type: 'uint256[]' }],
+                `0x${hex}` as `0x${string}`,
+            );
+            return {
+                eventType: 'BURNED',
+                burner,
+                recipient,
+                shares: decoded[0],
+                tokenAmounts: [...decoded[1]],
+            };
+        }
+        case 'YIELD_COLLECTED': {
+            // Indexed: user (topic1), recipient (topic2)
+            // Data: (uint256[] tokenAmounts)
+            const user = '0x' + (topics[1]?.slice(26) ?? '');
+            const recipient = '0x' + (topics[2]?.slice(26) ?? '');
+            const decoded = decodeAbiParameters(
+                [{ name: 'tokenAmounts', type: 'uint256[]' }],
+                `0x${hex}` as `0x${string}`,
+            );
+            return {
+                eventType: 'YIELD_COLLECTED',
+                user,
+                recipient,
+                tokenAmounts: [...decoded[0]],
             };
         }
         case 'TRANSFER': {
             // (uint256 value)
+            const chunks = hex.match(/.{64}/g) || [];
             if (chunks.length < 1) throw new Error(`Invalid TRANSFER data: expected 1 chunk, got ${chunks.length}`);
             return {
                 eventType: 'TRANSFER',
@@ -588,7 +668,7 @@ export class UniswapV3VaultLedgerService {
         const blockTimestamp = poolPrice.timestamp;
 
         // 8. Decode log data
-        const decoded = decodeVaultLogData(validation.eventType, log.data);
+        const decoded = decodeVaultLogData(validation.eventType, log.data, log.topics);
 
         // 9. Determine event type + calculate tokenValue + build state
         let eventType: EventType;
@@ -598,25 +678,51 @@ export class UniswapV3VaultLedgerService {
 
         const userHex = '0x' + userAddress.toLowerCase().slice(2).padStart(64, '0');
 
-        if (decoded.eventType === 'FEES_COLLECTED') {
+        if (decoded.eventType === 'MINTED') {
+            eventType = 'VAULT_MINT';
+            shares = decoded.shares;
+            const token0Amount = decoded.tokenAmounts[0] ?? 0n;
+            const token1Amount = decoded.tokenAmounts[1] ?? 0n;
+            tokenValue = this.calculateTokenValue(token0Amount, token1Amount, sqrtPriceX96, position.typedConfig.isToken0Quote);
+            ledgerState = {
+                eventType: 'VAULT_MINT',
+                shares: decoded.shares,
+                minter: decoded.minter,
+                recipient: decoded.recipient,
+                poolPrice: sqrtPriceX96,
+                tokenAmounts: [token0Amount, token1Amount],
+            };
+        } else if (decoded.eventType === 'BURNED') {
+            eventType = 'VAULT_BURN';
+            shares = decoded.shares;
+            const token0Amount = decoded.tokenAmounts[0] ?? 0n;
+            const token1Amount = decoded.tokenAmounts[1] ?? 0n;
+            tokenValue = this.calculateTokenValue(token0Amount, token1Amount, sqrtPriceX96, position.typedConfig.isToken0Quote);
+            ledgerState = {
+                eventType: 'VAULT_BURN',
+                shares: decoded.shares,
+                burner: decoded.burner,
+                recipient: decoded.recipient,
+                poolPrice: sqrtPriceX96,
+                tokenAmounts: [token0Amount, token1Amount],
+            };
+        } else if (decoded.eventType === 'YIELD_COLLECTED') {
             eventType = 'VAULT_COLLECT_YIELD';
             shares = 0n;
-            tokenValue = this.calculateTokenValue(decoded.fee0, decoded.fee1, sqrtPriceX96, position.typedConfig.isToken0Quote);
+            const token0Amount = decoded.tokenAmounts[0] ?? 0n;
+            const token1Amount = decoded.tokenAmounts[1] ?? 0n;
+            tokenValue = this.calculateTokenValue(token0Amount, token1Amount, sqrtPriceX96, position.typedConfig.isToken0Quote);
             ledgerState = {
                 eventType: 'VAULT_COLLECT_YIELD',
-                fee0: decoded.fee0,
-                fee1: decoded.fee1,
+                user: decoded.user,
+                recipient: decoded.recipient,
                 poolPrice: sqrtPriceX96,
-                token0Amount: decoded.fee0,
-                token1Amount: decoded.fee1,
+                tokenAmounts: [token0Amount, token1Amount],
             };
         } else {
-            // TRANSFER — single source of truth for all share movements.
-            // Classify as VAULT_MINT (from 0x0), VAULT_BURN (to 0x0),
-            // VAULT_TRANSFER_IN (from !0x0 to owner), or VAULT_TRANSFER_OUT (from owner to !0x0).
+            // TRANSFER — only used for TRANSFER_IN / TRANSFER_OUT (non-zero to non-zero)
             // Since totalSupply == liquidity (vault invariant), shares == liquidity delta,
             // so we can use calculatePositionValue with shares as liquidity.
-            const ZERO_TOPIC = '0x' + '0'.repeat(64);
             const from = log.topics[1]?.toLowerCase();
             const to = log.topics[2]?.toLowerCase();
             shares = decoded.value;
@@ -628,27 +734,7 @@ export class UniswapV3VaultLedgerService {
                 !position.typedConfig.isToken0Quote, // baseIsToken0
             );
 
-            if (from === ZERO_TOPIC && to === userHex) {
-                // Mint: from 0x0 → owner
-                eventType = 'VAULT_MINT';
-                ledgerState = {
-                    eventType: 'VAULT_MINT',
-                    shares: decoded.value,
-                    poolPrice: sqrtPriceX96,
-                    token0Amount: 0n,
-                    token1Amount: 0n,
-                };
-            } else if (from === userHex && to === ZERO_TOPIC) {
-                // Burn: from owner → 0x0
-                eventType = 'VAULT_BURN';
-                ledgerState = {
-                    eventType: 'VAULT_BURN',
-                    shares: decoded.value,
-                    poolPrice: sqrtPriceX96,
-                    token0Amount: 0n,
-                    token1Amount: 0n,
-                };
-            } else if (from === userHex) {
+            if (from === userHex) {
                 // Transfer OUT: from owner → another address
                 eventType = 'VAULT_TRANSFER_OUT';
                 const toAddress = '0x' + to!.slice(26);
@@ -657,8 +743,7 @@ export class UniswapV3VaultLedgerService {
                     shares: decoded.value,
                     to: toAddress,
                     poolPrice: sqrtPriceX96,
-                    token0Amount: 0n,
-                    token1Amount: 0n,
+                    tokenAmounts: [0n, 0n],
                 };
             } else {
                 // Transfer IN: from another address → owner
@@ -669,8 +754,7 @@ export class UniswapV3VaultLedgerService {
                     shares: decoded.value,
                     from: fromAddress,
                     poolPrice: sqrtPriceX96,
-                    token0Amount: 0n,
-                    token1Amount: 0n,
+                    tokenAmounts: [0n, 0n],
                 };
             }
         }
@@ -776,7 +860,7 @@ export class UniswapV3VaultLedgerService {
                     sharesAfter = previousShares;
                     costBasisAfter = previousCostBasis;
                     const feeValue = this.calculateTokenValue(
-                        state.fee0, state.fee1, sqrtPriceX96, isToken0Quote,
+                        state.tokenAmounts[0] ?? 0n, state.tokenAmounts[1] ?? 0n, sqrtPriceX96, isToken0Quote,
                     );
                     deltaPnl = feeValue;
                     pnlAfter = previousPnl + deltaPnl;

@@ -74,6 +74,7 @@ interface OnChainVaultState {
     sqrtPriceX96: bigint;
     currentTick: number;
     positionManagerAddress: string;
+    operatorAddress: string;
 }
 
 /** Serialized version for CacheService (bigints as strings) */
@@ -87,6 +88,7 @@ interface OnChainVaultStateCached {
     sqrtPriceX96: string;
     currentTick: number;
     positionManagerAddress: string;
+    operatorAddress: string;
 }
 
 function serializeVaultState(state: OnChainVaultState): OnChainVaultStateCached {
@@ -100,6 +102,7 @@ function serializeVaultState(state: OnChainVaultState): OnChainVaultStateCached 
         sqrtPriceX96: state.sqrtPriceX96.toString(),
         currentTick: state.currentTick,
         positionManagerAddress: state.positionManagerAddress,
+        operatorAddress: state.operatorAddress,
     };
 }
 
@@ -114,6 +117,7 @@ function deserializeVaultState(cached: OnChainVaultStateCached): OnChainVaultSta
         sqrtPriceX96: BigInt(cached.sqrtPriceX96),
         currentTick: cached.currentTick,
         positionManagerAddress: cached.positionManagerAddress,
+        operatorAddress: cached.operatorAddress,
     };
 }
 
@@ -262,12 +266,13 @@ export class UniswapV3VaultPositionService {
             throw new Error(`INVALID_VAULT_CONTRACT: The address ${vaultAddress} is not a valid vault contract on chain ${chainId}`);
         }
 
-        // Read user state
-        const [sharesBalance, totalSupply, claimable] = await Promise.all([
+        // Read user state + operator
+        const [sharesBalance, totalSupply, claimable, operatorAddr] = await Promise.all([
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address] }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply' }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [ownerAddress as Address] }),
-        ]) as [bigint, bigint, readonly [bigint, bigint]];
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableYield', args: [ownerAddress as Address] }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'operator' }),
+        ]) as [bigint, bigint, readonly bigint[], string];
 
         // Read liquidity from NFPM
         const positionData = await client.readContract({
@@ -349,8 +354,9 @@ export class UniswapV3VaultPositionService {
             sharesBalance: sharesBalance as bigint,
             totalSupply: totalSupply as bigint,
             liquidity,
-            unclaimedFees0: claimable[0],
-            unclaimedFees1: claimable[1],
+            unclaimedFees0: claimable[0] ?? 0n,
+            unclaimedFees1: claimable[1] ?? 0n,
+            operatorAddress: normalizeAddress(operatorAddr as string),
             isClosed: sharesBalance === 0n,
             isOwnedByUser: true, // Will be recalculated when vault perimeter is implemented
             sqrtPriceX96: slot0Data[0],
@@ -423,9 +429,9 @@ export class UniswapV3VaultPositionService {
 
             const vaultAddresses = vaultCreatedLogs.map((l) => l.args.vault as Address);
 
-            // Batch scan for user involvement: Minted(to=user) + Transfer(to=user)
+            // Batch scan for user involvement: Minted(recipient=user) + Transfer(to=user)
             const mintedEvent = parseAbiItem(
-                'event Minted(address indexed to, uint256 shares, uint128 deltaL, uint256 amount0, uint256 amount1)',
+                'event Minted(address indexed minter, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
             );
             const transferEvent = parseAbiItem(
                 'event Transfer(address indexed from, address indexed to, uint256 value)',
@@ -435,7 +441,7 @@ export class UniswapV3VaultPositionService {
                 client.getLogs({
                     address: vaultAddresses,
                     event: mintedEvent,
-                    args: { to: walletAddress as Address },
+                    args: { recipient: walletAddress as Address },
                     fromBlock: 0n,
                     toBlock: 'latest' as any,
                 }),
@@ -762,6 +768,7 @@ export class UniswapV3VaultPositionService {
             liquidity: onChainState.liquidity,
             unclaimedFees0: onChainState.unclaimedFees0,
             unclaimedFees1: onChainState.unclaimedFees1,
+            operatorAddress: onChainState.operatorAddress,
             isClosed,
             isOwnedByUser: position.typedState.isOwnedByUser ?? true,
             sqrtPriceX96: onChainState.sqrtPriceX96,
@@ -905,13 +912,14 @@ export class UniswapV3VaultPositionService {
         // 3. Cache miss — fetch from chain
         const client = this._evmConfig.getPublicClient(chainId);
 
-        const [sharesBalance, totalSupply, claimable, slot0Data, positionManagerAddr] = await Promise.all([
+        const [sharesBalance, totalSupply, claimable, slot0Data, positionManagerAddr, operatorAddr] = await Promise.all([
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply', blockNumber: resolvedBlockNumber }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableFees', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableYield', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
             client.readContract({ address: position.typedConfig.poolAddress as Address, abi: [{ type: 'function', name: 'slot0', inputs: [], outputs: [{ name: '', type: 'uint160' }, { name: '', type: 'int24' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint8' }, { name: '', type: 'bool' }], stateMutability: 'view' }], functionName: 'slot0', blockNumber: resolvedBlockNumber }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
-        ]) as [bigint, bigint, readonly [bigint, bigint], readonly [bigint, number, ...unknown[]], string];
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'operator' }),
+        ]) as [bigint, bigint, readonly bigint[], readonly [bigint, number, ...unknown[]], string, string];
 
         // Read NFPM liquidity
         const nfpmData = await client.readContract({
@@ -927,11 +935,12 @@ export class UniswapV3VaultPositionService {
             sharesBalance: sharesBalance as bigint,
             totalSupply: totalSupply as bigint,
             liquidity: nfpmData[7] as bigint,
-            unclaimedFees0: claimable[0],
-            unclaimedFees1: claimable[1],
+            unclaimedFees0: claimable[0] ?? 0n,
+            unclaimedFees1: claimable[1] ?? 0n,
             sqrtPriceX96: slot0Data[0],
             currentTick: slot0Data[1],
             positionManagerAddress: positionManagerAddr as string,
+            operatorAddress: normalizeAddress(operatorAddr as string),
         };
 
         // 4. Cache with 60s TTL
@@ -953,8 +962,14 @@ export class UniswapV3VaultPositionService {
         fromBlock: bigint,
         toBlock: bigint | 'latest' = 'latest',
     ): Promise<VaultRawLogInput[]> {
-        const feesCollectedEvent = parseAbiItem(
-            'event FeesCollected(address indexed user, uint256 fee0, uint256 fee1)',
+        const mintedEvent = parseAbiItem(
+            'event Minted(address indexed minter, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
+        );
+        const burnedEvent = parseAbiItem(
+            'event Burned(address indexed burner, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
+        );
+        const yieldCollectedEvent = parseAbiItem(
+            'event YieldCollected(address indexed user, address indexed recipient, uint256[] tokenAmounts)',
         );
         const transferEvent = parseAbiItem(
             'event Transfer(address indexed from, address indexed to, uint256 value)',
@@ -962,13 +977,15 @@ export class UniswapV3VaultPositionService {
 
         const commonParams = { address: vaultAddress, fromBlock, toBlock };
 
-        const [feeLogs, transferInLogs, transferOutLogs] = await Promise.all([
-            client.getLogs({ ...commonParams, event: feesCollectedEvent, args: { user: ownerAddress } }),
+        const [mintLogs, burnLogs, yieldLogs, transferInLogs, transferOutLogs] = await Promise.all([
+            client.getLogs({ ...commonParams, event: mintedEvent, args: { recipient: ownerAddress } }),
+            client.getLogs({ ...commonParams, event: burnedEvent, args: { burner: ownerAddress } }),
+            client.getLogs({ ...commonParams, event: yieldCollectedEvent, args: { user: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { to: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { from: ownerAddress } }),
         ]);
 
-        const allLogs = [...feeLogs, ...transferInLogs, ...transferOutLogs];
+        const allLogs = [...mintLogs, ...burnLogs, ...yieldLogs, ...transferInLogs, ...transferOutLogs];
         allLogs.sort((a, b) => {
             const blockDiff = Number(a.blockNumber! - b.blockNumber!);
             if (blockDiff !== 0) return blockDiff;

@@ -2,35 +2,30 @@
 pragma solidity ^0.8.20;
 
 import {UniswapV3Vault} from "./UniswapV3Vault.sol";
+import {IMultiTokenVaultAllowlisted} from "./interfaces/IMultiTokenVaultAllowlisted.sol";
 
 /// @title AllowlistedUniswapV3Vault
-/// @notice Extends UniswapV3Vault with a shareholder allowlist restricting who may receive shares.
-/// @dev Burns are always permitted. Mints and transfers require the recipient to be on the allowlist.
-///      The allowlistAdmin role uses a two-step commit/accept transfer pattern.
-contract AllowlistedUniswapV3Vault is UniswapV3Vault {
+/// @notice Extends UniswapV3Vault with an admin-controlled allowlist restricting who may receive shares.
+/// @dev Implements {IMultiTokenVaultAllowlisted}. Burns are always permitted.
+///      Mints and transfers require the recipient to be on the allowlist (when enabled).
+///      The allowlist can be permanently disabled via disableAllowlist().
+contract AllowlistedUniswapV3Vault is UniswapV3Vault, IMultiTokenVaultAllowlisted {
     // ============ Storage ============
 
-    address public allowlistAdmin;
-    address public pendingAllowlistAdmin;
-    mapping(address => bool) public allowlisted;
-
-    // ============ Events ============
-
-    event AllowlistUpdated(address indexed account, bool allowed);
-    event AllowlistAdminTransferInitiated(address indexed currentAdmin, address indexed pendingAdmin);
-    event AllowlistAdminTransferCancelled(address indexed currentAdmin);
-    event AllowlistAdminTransferred(address indexed previousAdmin, address indexed newAdmin);
+    bool private _allowlistEnabled;
+    address private _allowlistAdmin;
+    mapping(address => bool) private _allowlisted;
 
     // ============ Errors ============
 
     error OnlyAllowlistAdmin();
-    error OnlyPendingAdmin();
+    error AllowlistAlreadyDisabled();
     error RecipientNotAllowlisted();
 
     // ============ Modifiers ============
 
     modifier onlyAllowlistAdmin() {
-        if (msg.sender != allowlistAdmin) revert OnlyAllowlistAdmin();
+        if (msg.sender != _allowlistAdmin) revert OnlyAllowlistAdmin();
         _;
     }
 
@@ -43,6 +38,7 @@ contract AllowlistedUniswapV3Vault is UniswapV3Vault {
     /// @param symbol_ ERC-20 token symbol
     /// @param decimals_ ERC-20 decimals
     /// @param initialShareRecipient_ Receives initial shares equal to current liquidity
+    /// @param operator_ Address authorized to call tend() and setOperator()
     /// @param allowlistAdmin_ Address that manages the allowlist
     function initialize(
         address positionManager_,
@@ -51,21 +47,23 @@ contract AllowlistedUniswapV3Vault is UniswapV3Vault {
         string calldata symbol_,
         uint8 decimals_,
         address initialShareRecipient_,
+        address operator_,
         address allowlistAdmin_
     ) external initializer {
         // Set allowlist BEFORE _initializeVault, because _mint() triggers
         // _checkTransferAllowed via _beforeTokenTransfer
-        allowlistAdmin = allowlistAdmin_;
-        allowlisted[allowlistAdmin_] = true;
-        emit AllowlistUpdated(allowlistAdmin_, true);
+        _allowlistEnabled = true;
+        _allowlistAdmin = allowlistAdmin_;
+        _allowlisted[allowlistAdmin_] = true;
+        emit AllowlistMemberAdded(allowlistAdmin_);
 
         if (initialShareRecipient_ != allowlistAdmin_) {
-            allowlisted[initialShareRecipient_] = true;
-            emit AllowlistUpdated(initialShareRecipient_, true);
+            _allowlisted[initialShareRecipient_] = true;
+            emit AllowlistMemberAdded(initialShareRecipient_);
         }
 
         // Initialize the base vault (calls _mint which needs allowlist to be set)
-        _initializeVault(positionManager_, tokenId_, name_, symbol_, decimals_, initialShareRecipient_);
+        _initializeVault(positionManager_, tokenId_, name_, symbol_, decimals_, initialShareRecipient_, operator_);
     }
 
     /// @dev Disable the base initialize to force using the allowlisted version
@@ -75,53 +73,73 @@ contract AllowlistedUniswapV3Vault is UniswapV3Vault {
         string calldata,
         string calldata,
         uint8,
+        address,
         address
     ) external pure override {
         revert("Use allowlisted initialize");
     }
 
-    // ============ Allowlist admin functions ============
+    // ============ IMultiTokenVaultAllowlisted — Views ============
 
-    /// @notice Add or remove an address from the allowlist
-    function setAllowlisted(address account, bool allowed) external onlyAllowlistAdmin {
-        allowlisted[account] = allowed;
-        emit AllowlistUpdated(account, allowed);
+    /// @inheritdoc IMultiTokenVaultAllowlisted
+    function allowlistEnabled() external view returns (bool) {
+        return _allowlistEnabled;
     }
 
-    /// @notice Batch add or remove addresses from the allowlist
-    function setAllowlistedBatch(address[] calldata accounts, bool allowed) external onlyAllowlistAdmin {
-        for (uint256 i = 0; i < accounts.length; i++) {
-            allowlisted[accounts[i]] = allowed;
-            emit AllowlistUpdated(accounts[i], allowed);
+    /// @inheritdoc IMultiTokenVaultAllowlisted
+    function allowlistAdmin() external view returns (address) {
+        return _allowlistAdmin;
+    }
+
+    /// @inheritdoc IMultiTokenVaultAllowlisted
+    function isAllowlisted(address account) external view returns (bool) {
+        if (!_allowlistEnabled) return true;
+        if (account == address(0)) return true;
+        return _allowlisted[account];
+    }
+
+    // ============ IMultiTokenVaultAllowlisted — Management ============
+
+    /// @inheritdoc IMultiTokenVaultAllowlisted
+    function addToAllowlist(address account) external onlyAllowlistAdmin {
+        if (!_allowlistEnabled) revert AllowlistAlreadyDisabled();
+        if (!_allowlisted[account]) {
+            _allowlisted[account] = true;
+            emit AllowlistMemberAdded(account);
         }
     }
 
-    /// @notice Initiate admin role transfer (two-step pattern)
-    /// @param newAdmin Address to transfer admin role to. Use address(0) to cancel.
+    /// @inheritdoc IMultiTokenVaultAllowlisted
+    function removeFromAllowlist(address account) external onlyAllowlistAdmin {
+        if (!_allowlistEnabled) revert AllowlistAlreadyDisabled();
+        if (_allowlisted[account]) {
+            _allowlisted[account] = false;
+            emit AllowlistMemberRemoved(account);
+        }
+    }
+
+    /// @inheritdoc IMultiTokenVaultAllowlisted
+    function disableAllowlist() external onlyAllowlistAdmin {
+        if (!_allowlistEnabled) revert AllowlistAlreadyDisabled();
+        _allowlistEnabled = false;
+        emit AllowlistDisabled();
+    }
+
+    /// @inheritdoc IMultiTokenVaultAllowlisted
     function transferAllowlistAdmin(address newAdmin) external onlyAllowlistAdmin {
-        pendingAllowlistAdmin = newAdmin;
-        if (newAdmin == address(0)) {
-            emit AllowlistAdminTransferCancelled(msg.sender);
-        } else {
-            emit AllowlistAdminTransferInitiated(msg.sender, newAdmin);
-        }
-    }
-
-    /// @notice Accept the admin role transfer
-    function acceptAllowlistAdmin() external {
-        if (msg.sender != pendingAllowlistAdmin) revert OnlyPendingAdmin();
-        address previous = allowlistAdmin;
-        allowlistAdmin = msg.sender;
-        pendingAllowlistAdmin = address(0);
-        emit AllowlistAdminTransferred(previous, msg.sender);
+        address prev = _allowlistAdmin;
+        _allowlistAdmin = newAdmin;
+        emit AllowlistAdminTransferred(prev, newAdmin);
     }
 
     // ============ Transfer restriction ============
 
     /// @dev Burns (to == address(0)) are always permitted.
-    ///      Mints and transfers require the recipient to be on the allowlist.
+    ///      When allowlist is disabled, all transfers are permitted.
+    ///      When enabled, mints and transfers require the recipient to be allowlisted.
     function _checkTransferAllowed(address, /* from */ address to) internal view override {
+        if (!_allowlistEnabled) return;
         if (to == address(0)) return;
-        if (!allowlisted[to]) revert RecipientNotAllowlisted();
+        if (!_allowlisted[to]) revert RecipientNotAllowlisted();
     }
 }

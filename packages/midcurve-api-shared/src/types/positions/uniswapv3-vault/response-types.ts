@@ -39,6 +39,7 @@ export interface UniswapV3VaultPositionStateResponse {
   liquidity: string;
   unclaimedFees0: string;
   unclaimedFees1: string;
+  operatorAddress: string;
   isClosed: boolean;
   isOwnedByUser: boolean;
   sqrtPriceX96: string;
