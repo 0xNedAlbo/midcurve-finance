@@ -15,16 +15,13 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { ParaswapSwapService, isParaswapSupportedChain, publishCloseOrderEventsFromReceipt } from '@midcurve/services';
-import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../lib/services';
+import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
   getRevertReason,
-  validatePositionForClose,
-  simulateExecuteOrder,
   checkContractTokenBalances,
   getOnChainNonce,
-  getOnChainOrder,
   readPoolPrice,
   readSwapRouterAddress,
   readParaswapAdapterAddress,
@@ -32,23 +29,38 @@ import {
   EMPTY_SWAP_PARAMS,
   getPublicClient,
   type SupportedChainId,
-  type PreflightValidation,
   type SimulationSwapParams,
   type SimulationFeeParams,
-} from '../lib/evm';
-import { isSupportedChain, getWorkerConfig } from '../lib/config';
-import { computeDynamicFeeBps } from '../lib/dynamic-fee';
-import { resolveFeeRecipient } from '../lib/fee-recipient';
-import { automationLogger, autoLog } from '../lib/logger';
-import { getRabbitMQConnection, type ConsumeMessage } from '../mq/connection-manager';
-import { QUEUES, EXCHANGES, ROUTING_KEYS, ORDER_RETRY_DELAY_MS } from '../mq/topology';
+} from '../../lib/evm';
+import {
+  validateNftPosition,
+  simulateNftExecution,
+  getNftOnChainOrder,
+  encodeNftExecuteOrderCalldata,
+  type NftPreflightValidation,
+  type OnChainOrderConfig,
+} from './uniswapv3-nft-execution';
+import {
+  validateVaultPosition,
+  simulateVaultExecution,
+  getVaultOnChainOrder,
+  computeVaultWithdrawMinAmounts,
+  encodeVaultExecuteOrderCalldata,
+  type VaultPreflightValidation,
+} from './uniswapv3-vault-execution';
+import { isSupportedChain, getWorkerConfig } from '../../lib/config';
+import { computeDynamicFeeBps } from '../../lib/dynamic-fee';
+import { resolveFeeRecipient } from '../../lib/fee-recipient';
+import { automationLogger, autoLog } from '../../lib/logger';
+import { getRabbitMQConnection, type ConsumeMessage } from '../../mq/connection-manager';
+import { QUEUES, EXCHANGES, ROUTING_KEYS, ORDER_RETRY_DELAY_MS } from '../../mq/topology';
 import {
   deserializeMessage,
   serializeMessage,
   type OrderTriggerMessage,
-} from '../mq/messages';
-import { getSignerClient } from '../clients/signer-client';
-import type { WithdrawParamsInput, SwapParamsInput, FeeParamsInput } from '../clients/signer-client';
+} from '../../mq/messages';
+import { getSignerClient } from '../../clients/signer-client';
+import type { WithdrawParamsInput, SwapParamsInput, FeeParamsInput } from '../../clients/signer-client';
 
 const log = automationLogger.child({ component: 'CloseOrderExecutor' });
 
@@ -510,32 +522,60 @@ export class CloseOrderExecutor {
     if (!positionData) {
       throw new Error(`Position not found: ${positionId}`);
     }
-    // Cast to UniswapV3Position for typed config/state access
+    // Position is protocol-agnostic at this level — cast to UniswapV3Position
+    // for shared fields (pool, tokens, userId). Protocol-specific access is
+    // handled by the NFT/vault execution modules below.
     const position = positionData as UniswapV3Position;
     const userId = position.userId;
+    const protocol = position.protocol; // 'uniswapv3' or 'uniswapv3-vault'
+    const isVault = protocol === 'uniswapv3-vault';
 
     // Get quote token decimals for human-readable price formatting
     const quoteTokenDecimals = position.isToken0Quote
       ? position.pool.token0.decimals
       : position.pool.token1.decimals;
 
-    // Get nftId from position config (required for executeOrder contract call)
-    if (!position.typedConfig.nftId) {
-      throw new Error(`Position has no nftId: ${positionId}`);
-    }
-    const nftId = BigInt(position.typedConfig.nftId);
-
     // =========================================================================
     // ON-CHAIN SWAP STATE: Read swap configuration from on-chain order
     // IMPORTANT: The contract decides whether to swap based on on-chain swapDirection,
     // not database config. We MUST use on-chain state to determine if swap params are needed.
     // =========================================================================
-    const onChainOrder = await getOnChainOrder(
-      chainId as SupportedChainId,
-      contractAddress as `0x${string}`,
-      nftId,
-      triggerMode
-    );
+    let onChainOrder: OnChainOrderConfig;
+    let nftId: bigint | undefined;
+    let vaultAddress: `0x${string}` | undefined;
+    let ownerAddress: `0x${string}` | undefined;
+    let onChainShares: bigint | undefined;
+
+    if (isVault) {
+      // Vault: position identifier is vault address + owner
+      const posConfig = position.config as Record<string, unknown>;
+      vaultAddress = posConfig.vaultAddress as `0x${string}`;
+      ownerAddress = (position.state as Record<string, unknown>).ownerAddress as `0x${string}`;
+      if (!vaultAddress || !ownerAddress) {
+        throw new Error(`Vault position missing vaultAddress or ownerAddress: ${positionId}`);
+      }
+      const vaultOrder = await getVaultOnChainOrder(
+        chainId as SupportedChainId,
+        contractAddress as `0x${string}`,
+        vaultAddress,
+        ownerAddress,
+        triggerMode
+      );
+      onChainOrder = vaultOrder;
+      onChainShares = vaultOrder.shares;
+    } else {
+      // NFT: position identifier is nftId
+      if (!position.typedConfig.nftId) {
+        throw new Error(`Position has no nftId: ${positionId}`);
+      }
+      nftId = BigInt(position.typedConfig.nftId);
+      onChainOrder = await getNftOnChainOrder(
+        chainId as SupportedChainId,
+        contractAddress as `0x${string}`,
+        nftId,
+        triggerMode
+      );
+    }
 
     // SwapDirection enum: 0=NONE, 1=TOKEN0_TO_1, 2=TOKEN1_TO_0
     const swapEnabled = onChainOrder.swapDirection !== 0;
@@ -552,48 +592,77 @@ export class CloseOrderExecutor {
       msg: 'On-chain swap configuration',
     });
 
-    // Declare preflight outside if block so it's accessible in swap params section
-    let preflight: PreflightValidation | undefined;
-
     // =========================================================================
     // PRE-FLIGHT VALIDATION: Check position state before execution
     // =========================================================================
-    {
-      log.info({
-        orderId,
-        positionId,
-        nftId: nftId.toString(),
-        contractAddress,
-        msg: 'Running pre-flight validation',
-      });
+    let nftPreflight: NftPreflightValidation | undefined;
+    let vaultPreflight: VaultPreflightValidation | undefined;
 
-      preflight = await validatePositionForClose(
+    log.info({
+      orderId,
+      positionId,
+      protocol,
+      contractAddress,
+      msg: 'Running pre-flight validation',
+    });
+
+    if (isVault) {
+      vaultPreflight = await validateVaultPosition(
         chainId as SupportedChainId,
-        nftId,
-        position.typedState.ownerAddress as `0x${string}`,
-        contractAddress as `0x${string}`
+        vaultAddress!,
+        ownerAddress!,
+        contractAddress as `0x${string}`,
+        onChainShares ?? 0n
       );
 
-      // Log preflight result for diagnostics (console + database)
-      if (preflight.positionData) {
+      if (vaultPreflight.vaultData) {
         log.info({
           orderId,
           positionId,
           preflight: {
-            isValid: preflight.isValid,
-            reason: preflight.reason,
-            liquidity: preflight.positionData.liquidity.toString(),
-            token0: preflight.positionData.token0,
-            token1: preflight.positionData.token1,
-            tickLower: preflight.positionData.tickLower,
-            tickUpper: preflight.positionData.tickUpper,
-            tokensOwed0: preflight.positionData.tokensOwed0.toString(),
-            tokensOwed1: preflight.positionData.tokensOwed1.toString(),
-            owner: preflight.owner,
-            isApproved: preflight.isApproved,
-            isApprovedForAll: preflight.isApprovedForAll,
+            isValid: vaultPreflight.isValid,
+            reason: vaultPreflight.reason,
+            sharesBalance: vaultPreflight.vaultData.sharesBalance.toString(),
+            sharesToClose: vaultPreflight.vaultData.sharesToClose.toString(),
+            totalSupply: vaultPreflight.vaultData.totalSupply.toString(),
+            vaultLiquidity: vaultPreflight.vaultData.vaultLiquidity.toString(),
+            owner: vaultPreflight.owner,
+            isApproved: vaultPreflight.isApproved,
           },
-          msg: 'Pre-flight validation result',
+          msg: 'Vault pre-flight validation result',
+        });
+      }
+
+      if (!vaultPreflight.isValid) {
+        throw new Error(`Pre-flight validation failed: ${vaultPreflight.reason}`);
+      }
+    } else {
+      nftPreflight = await validateNftPosition(
+        chainId as SupportedChainId,
+        nftId!,
+        position.typedState.ownerAddress as `0x${string}`,
+        contractAddress as `0x${string}`
+      );
+
+      if (nftPreflight.positionData) {
+        log.info({
+          orderId,
+          positionId,
+          preflight: {
+            isValid: nftPreflight.isValid,
+            reason: nftPreflight.reason,
+            liquidity: nftPreflight.positionData.liquidity.toString(),
+            token0: nftPreflight.positionData.token0,
+            token1: nftPreflight.positionData.token1,
+            tickLower: nftPreflight.positionData.tickLower,
+            tickUpper: nftPreflight.positionData.tickUpper,
+            tokensOwed0: nftPreflight.positionData.tokensOwed0.toString(),
+            tokensOwed1: nftPreflight.positionData.tokensOwed1.toString(),
+            owner: nftPreflight.owner,
+            isApproved: nftPreflight.isApproved,
+            isApprovedForAll: nftPreflight.isApprovedForAll,
+          },
+          msg: 'NFT pre-flight validation result',
         });
 
         // Log to database for UI visibility
@@ -603,23 +672,23 @@ export class CloseOrderExecutor {
           platform: 'evm',
           chainId,
           orderTag,
-          isValid: preflight.isValid,
-          reason: preflight.reason,
-          liquidity: preflight.positionData.liquidity.toString(),
-          token0: preflight.positionData.token0,
-          token1: preflight.positionData.token1,
-          tickLower: preflight.positionData.tickLower,
-          tickUpper: preflight.positionData.tickUpper,
-          tokensOwed0: preflight.positionData.tokensOwed0.toString(),
-          tokensOwed1: preflight.positionData.tokensOwed1.toString(),
-          owner: preflight.owner,
-          isApproved: preflight.isApproved,
-          isApprovedForAll: preflight.isApprovedForAll,
+          isValid: nftPreflight.isValid,
+          reason: nftPreflight.reason,
+          liquidity: nftPreflight.positionData.liquidity.toString(),
+          token0: nftPreflight.positionData.token0,
+          token1: nftPreflight.positionData.token1,
+          tickLower: nftPreflight.positionData.tickLower,
+          tickUpper: nftPreflight.positionData.tickUpper,
+          tokensOwed0: nftPreflight.positionData.tokensOwed0.toString(),
+          tokensOwed1: nftPreflight.positionData.tokensOwed1.toString(),
+          owner: nftPreflight.owner,
+          isApproved: nftPreflight.isApproved,
+          isApprovedForAll: nftPreflight.isApprovedForAll,
         });
       }
 
-      if (!preflight.isValid) {
-        throw new Error(`Pre-flight validation failed: ${preflight.reason}`);
+      if (!nftPreflight.isValid) {
+        throw new Error(`Pre-flight validation failed: ${nftPreflight.reason}`);
       }
     }
 
@@ -654,20 +723,31 @@ export class CloseOrderExecutor {
     // =========================================================================
     // WITHDRAW PARAMS: Compute off-chain withdrawal mins (amount0Min, amount1Min)
     // =========================================================================
-    if (!preflight?.positionData) {
-      throw new Error(
-        `Cannot compute withdraw params: preflight position data unavailable for order ${orderId}`
+    let withdrawParams;
+
+    if (isVault) {
+      if (!vaultPreflight?.vaultData) {
+        throw new Error(`Cannot compute withdraw params: vault preflight data unavailable for order ${orderId}`);
+      }
+      withdrawParams = await computeVaultWithdrawMinAmounts(
+        chainId as SupportedChainId,
+        poolAddress as `0x${string}`,
+        vaultPreflight.vaultData,
+        onChainOrder.slippageBps
+      );
+    } else {
+      if (!nftPreflight?.positionData) {
+        throw new Error(`Cannot compute withdraw params: NFT preflight data unavailable for order ${orderId}`);
+      }
+      withdrawParams = await computeWithdrawMinAmounts(
+        chainId as SupportedChainId,
+        poolAddress as `0x${string}`,
+        nftPreflight.positionData.liquidity,
+        nftPreflight.positionData.tickLower,
+        nftPreflight.positionData.tickUpper,
+        onChainOrder.slippageBps
       );
     }
-
-    const withdrawParams = await computeWithdrawMinAmounts(
-      chainId as SupportedChainId,
-      poolAddress as `0x${string}`,
-      preflight.positionData.liquidity,
-      preflight.positionData.tickLower,
-      preflight.positionData.tickUpper,
-      onChainOrder.slippageBps
-    );
 
     log.info({
       orderId,
@@ -782,13 +862,13 @@ export class CloseOrderExecutor {
             swapRouterAddress
           );
 
-          // Determine tokenIn/tokenOut from swap direction
+          // Determine tokenIn/tokenOut from swap direction (use pool token addresses)
           const tokenIn = onChainOrder.swapDirection === 1
-            ? preflight.positionData.token0
-            : preflight.positionData.token1;
+            ? (position.pool.token0.config as Record<string, unknown>).address as string
+            : (position.pool.token1.config as Record<string, unknown>).address as string;
           const tokenOut = onChainOrder.swapDirection === 1
-            ? preflight.positionData.token1
-            : preflight.positionData.token0;
+            ? (position.pool.token1.config as Record<string, unknown>).address as string
+            : (position.pool.token0.config as Record<string, unknown>).address as string;
 
           // Get token decimals from the pool tokens
           const tokenInDecimals = onChainOrder.swapDirection === 1
@@ -872,29 +952,41 @@ export class CloseOrderExecutor {
     log.info({
       orderId,
       positionId,
-      nftId: nftId.toString(),
+      protocol,
       triggerMode,
       contractAddress,
       operatorAddress,
       msg: 'Simulating executeOrder transaction',
     });
 
-    const simulation = await simulateExecuteOrder(
-      chainId as SupportedChainId,
-      contractAddress as `0x${string}`,
-      nftId,
-      triggerMode,
-      withdrawParams,
-      simulationSwapParams,
-      simulationFeeParams,
-      operatorAddress as `0x${string}`
-    );
+    const simulation = isVault
+      ? await simulateVaultExecution(
+          chainId as SupportedChainId,
+          contractAddress as `0x${string}`,
+          vaultAddress!,
+          ownerAddress!,
+          triggerMode,
+          withdrawParams,
+          simulationSwapParams,
+          simulationFeeParams,
+          operatorAddress as `0x${string}`
+        )
+      : await simulateNftExecution(
+          chainId as SupportedChainId,
+          contractAddress as `0x${string}`,
+          nftId!,
+          triggerMode,
+          withdrawParams,
+          simulationSwapParams,
+          simulationFeeParams,
+          operatorAddress as `0x${string}`
+        );
 
     if (!simulation.success) {
       log.error({
         orderId,
         positionId,
-        nftId: nftId.toString(),
+        protocol,
         triggerMode,
         simulation,
         msg: 'Transaction simulation failed',
@@ -907,37 +999,29 @@ export class CloseOrderExecutor {
         token1Balance: string;
       } | undefined;
 
-      if (nftId) {
+      // Diagnostic: check contract token balances on simulation failure
+      {
         try {
-          const simDiagPreflight = await validatePositionForClose(
+          const balances = await checkContractTokenBalances(
             chainId as SupportedChainId,
-            nftId,
-            position.typedState.ownerAddress as `0x${string}`,
+            (position.pool.token0.config as Record<string, unknown>).address as string as `0x${string}`,
+            (position.pool.token1.config as Record<string, unknown>).address as string as `0x${string}`,
             contractAddress as `0x${string}`
           );
 
-          if (simDiagPreflight.positionData) {
-            const balances = await checkContractTokenBalances(
-              chainId as SupportedChainId,
-              simDiagPreflight.positionData.token0,
-              simDiagPreflight.positionData.token1,
-              contractAddress as `0x${string}`
-            );
+          contractBalances = {
+            token0Symbol: balances.token0Symbol,
+            token0Balance: balances.token0Balance.toString(),
+            token1Symbol: balances.token1Symbol,
+            token1Balance: balances.token1Balance.toString(),
+          };
 
-            contractBalances = {
-              token0Symbol: balances.token0Symbol,
-              token0Balance: balances.token0Balance.toString(),
-              token1Symbol: balances.token1Symbol,
-              token1Balance: balances.token1Balance.toString(),
-            };
-
-            log.error({
-              orderId,
-              positionId,
-              contractBalances,
-              msg: 'Contract token balances at simulation failure',
-            });
-          }
+          log.error({
+            orderId,
+            positionId,
+            contractBalances,
+            msg: 'Contract token balances at simulation failure',
+          });
         } catch (balanceErr) {
           log.warn({
             orderId,
@@ -955,7 +1039,7 @@ export class CloseOrderExecutor {
         orderTag: orderTagSim,
         error: simulation.error || 'Unknown simulation error',
         decodedError: simulation.decodedError,
-        nftId: nftId.toString(),
+        nftId: nftId?.toString() ?? vaultAddress ?? '',
         triggerMode,
         contractAddress,
         feeRecipient: operatorAddress,
@@ -985,17 +1069,45 @@ export class CloseOrderExecutor {
       amount1Min: withdrawParams.amount1Min.toString(),
     };
 
-    const signedTx = await signerClient.signExecuteOrder({
+    // Encode calldata and sign using the protocol-appropriate ABI and endpoint
+    const callData = isVault
+      ? encodeVaultExecuteOrderCalldata({
+          vaultAddress: vaultAddress!,
+          ownerAddress: ownerAddress!,
+          triggerMode,
+          withdrawParams,
+          swapParams: simulationSwapParams,
+          feeParams: simulationFeeParams,
+        })
+      : encodeNftExecuteOrderCalldata({
+          nftId: nftId!,
+          triggerMode,
+          withdrawParams,
+          swapParams: simulationSwapParams,
+          feeParams: simulationFeeParams,
+        });
+
+    const signerEndpoint = isVault
+      ? '/api/sign/automation/uniswapv3/vault-position-closer/execute-order'
+      : '/api/sign/automation/uniswapv3/position-closer/execute-order';
+
+    const signedTx = await signerClient.signTransaction({
       userId,
       chainId,
       contractAddress,
-      nftId,
-      triggerMode,
       operatorAddress,
       nonce,
-      withdrawParams: withdrawParamsInput,
-      swapParams: swapParamsInput,
-      feeParams: feeParamsInput,
+      callData,
+      signerEndpoint,
+      signerPayload: {
+        ...(isVault
+          ? { vaultAddress, ownerAddress }
+          : { nftId: nftId!.toString() }),
+        triggerMode,
+        withdrawParams: withdrawParamsInput,
+        swapParams: swapParamsInput,
+        feeParams: feeParamsInput,
+      },
     });
 
     autoLog.orderExecution(log, orderId, 'broadcasting', {
@@ -1035,50 +1147,52 @@ export class CloseOrderExecutor {
         msg: 'Transaction reverted - gathering diagnostics',
       });
 
-      if (nftId) {
+      {
         try {
-          const postRevertPreflight = await validatePositionForClose(
-            chainId as SupportedChainId,
-            nftId,
-            position.typedState.ownerAddress as `0x${string}`,
-            contractAddress as `0x${string}`
-          );
-
-          log.error({
-            orderId,
-            positionId,
-            postRevertState: {
-              isValid: postRevertPreflight.isValid,
-              reason: postRevertPreflight.reason,
-              liquidity: postRevertPreflight.positionData?.liquidity.toString(),
-              token0: postRevertPreflight.positionData?.token0,
-              token1: postRevertPreflight.positionData?.token1,
-              owner: postRevertPreflight.owner,
-              isApproved: postRevertPreflight.isApproved,
-            },
-            msg: 'Position state after revert',
-          });
-
-          if (postRevertPreflight.positionData) {
-            const balances = await checkContractTokenBalances(
+          // Re-run preflight to get post-revert state for diagnostics
+          if (!isVault && nftId) {
+            const postRevertPreflight = await validateNftPosition(
               chainId as SupportedChainId,
-              postRevertPreflight.positionData.token0,
-              postRevertPreflight.positionData.token1,
+              nftId,
+              position.typedState.ownerAddress as `0x${string}`,
               contractAddress as `0x${string}`
             );
 
             log.error({
               orderId,
               positionId,
-              contractBalances: {
-                token0Symbol: balances.token0Symbol,
-                token0Balance: balances.token0Balance.toString(),
-                token1Symbol: balances.token1Symbol,
-                token1Balance: balances.token1Balance.toString(),
+              postRevertState: {
+                isValid: postRevertPreflight.isValid,
+                reason: postRevertPreflight.reason,
+                liquidity: postRevertPreflight.positionData?.liquidity.toString(),
+                token0: postRevertPreflight.positionData?.token0,
+                token1: postRevertPreflight.positionData?.token1,
+                owner: postRevertPreflight.owner,
+                isApproved: postRevertPreflight.isApproved,
               },
-              msg: 'Contract token balances after revert',
+              msg: 'Position state after revert',
             });
           }
+
+          // Check contract token balances for diagnostics (works for both protocols)
+          const balances = await checkContractTokenBalances(
+            chainId as SupportedChainId,
+            (position.pool.token0.config as Record<string, unknown>).address as string as `0x${string}`,
+            (position.pool.token1.config as Record<string, unknown>).address as string as `0x${string}`,
+            contractAddress as `0x${string}`
+          );
+
+          log.error({
+            orderId,
+            positionId,
+            contractBalances: {
+              token0Symbol: balances.token0Symbol,
+              token0Balance: balances.token0Balance.toString(),
+              token1Symbol: balances.token1Symbol,
+              token1Balance: balances.token1Balance.toString(),
+            },
+            msg: 'Contract token balances after revert',
+          });
         } catch (diagErr) {
           log.warn({
             orderId,

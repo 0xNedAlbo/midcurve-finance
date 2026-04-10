@@ -17,15 +17,15 @@
 
 import { prisma } from '@midcurve/database';
 import type { CloseOrder } from '@midcurve/database';
-import { getUniswapV3CloseOrderService, getAutomationSubscriptionService } from '../lib/services';
-import { automationLogger, autoLog } from '../lib/logger';
-import { readPoolPrice, type SupportedChainId } from '../lib/evm';
-import { getRabbitMQConnection } from '../mq/connection-manager';
-import { EXCHANGES, ROUTING_KEYS } from '../mq/topology';
+import { getUniswapV3CloseOrderService, getAutomationSubscriptionService } from '../../lib/services';
+import { automationLogger, autoLog } from '../../lib/logger';
+import { readPoolPrice, type SupportedChainId } from '../../lib/evm';
+import { getRabbitMQConnection } from '../../mq/connection-manager';
+import { EXCHANGES, ROUTING_KEYS } from '../../mq/topology';
 import {
   serializeMessage,
   type OrderTriggerMessage,
-} from '../mq/messages';
+} from '../../mq/messages';
 import {
   createPoolPriceSubscriber,
   type PoolPriceSubscriber,
@@ -229,8 +229,10 @@ export class CloseOrderMonitor {
   private async syncOrderSubscriptions(): Promise<void> {
     const closeOrderService = getUniswapV3CloseOrderService();
 
-    // Get all monitoring orders with position→pool relations
-    const monitoringOrders = await closeOrderService.findMonitoringOrders();
+    // Get monitoring orders scoped to UniswapV3 protocols (NFT + vault)
+    const monitoringOrders = await closeOrderService.findMonitoringOrders({
+      protocols: ['uniswapv3', 'uniswapv3-vault'],
+    });
 
     // Get set of active order IDs
     const activeOrderIds = new Set(monitoringOrders.map((o) => o.id));

@@ -199,33 +199,92 @@ class SignerClient {
   }
 
   /**
-   * Sign an executeOrder transaction
+   * Sign a generic contract transaction with pre-encoded calldata.
    *
-   * Gas estimation is performed here before calling the signer.
-   * This keeps the signer isolated from external RPC endpoints.
+   * Gas estimation is performed here (automation has RPC access).
+   * The signer is isolated from external RPC endpoints.
    *
-   * The caller must fetch the on-chain nonce and pass it to this method.
-   * The signer service is stateless and does not manage nonces.
+   * Each execution module (NFT, vault) encodes its own calldata using
+   * its contract ABI and specifies the signer endpoint to call.
    */
-  async signExecuteOrder(params: ExecuteOrderParams): Promise<SignedTransaction> {
-    const { userId, chainId, contractAddress, nftId, triggerMode, operatorAddress, nonce, withdrawParams, swapParams, feeParams } =
-      params;
+  async signTransaction(params: {
+    userId: string;
+    chainId: number;
+    contractAddress: string;
+    operatorAddress: string;
+    nonce: number;
+    callData: `0x${string}`;
+    signerEndpoint: string;
+    /** Extra fields forwarded to the signer (e.g. nftId, triggerMode for logging) */
+    signerPayload: Record<string, unknown>;
+  }): Promise<SignedTransaction> {
+    const { userId, chainId, contractAddress, operatorAddress, nonce, callData, signerEndpoint, signerPayload } = params;
 
     log.info({
       userId,
       chainId,
       contractAddress,
-      nftId: nftId.toString(),
-      triggerMode,
+      operatorAddress,
       explicitNonce: nonce,
-      hasSwap: swapParams.hops.length > 0,
-      msg: 'Estimating gas for order execution',
+      signerEndpoint,
+      msg: 'Estimating gas for transaction signing',
     });
 
-    // Estimate gas locally (automation service has RPC access)
     const publicClient = getPublicClient(chainId as SupportedChainId);
 
-    // Build tuples for ABI encoding
+    let gasLimit: bigint;
+    let gasPrice: bigint;
+
+    try {
+      [gasPrice, gasLimit] = await Promise.all([
+        publicClient.getGasPrice().then((price) => (price * 120n) / 100n),
+        publicClient.estimateGas({
+          account: operatorAddress as Address,
+          to: contractAddress as Address,
+          data: callData,
+        }).then((estimate) => (estimate * 120n) / 100n),
+      ]);
+    } catch (error) {
+      log.warn({
+        userId,
+        chainId,
+        contractAddress,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        msg: 'Gas estimation failed, using fallback values',
+      });
+      gasPrice = await publicClient.getGasPrice().then((price) => (price * 120n) / 100n);
+      gasLimit = 500_000n;
+    }
+
+    log.info({
+      userId,
+      chainId,
+      contractAddress,
+      gasLimit: gasLimit.toString(),
+      gasPrice: gasPrice.toString(),
+      msg: 'Signing transaction',
+    });
+
+    return this.request<SignedTransaction>('POST', signerEndpoint, {
+      userId,
+      chainId,
+      contractAddress,
+      gasLimit: gasLimit.toString(),
+      gasPrice: gasPrice.toString(),
+      nonce,
+      ...signerPayload,
+    });
+  }
+
+  /**
+   * Sign an NFT executeOrder transaction (legacy convenience wrapper).
+   *
+   * @deprecated Use signTransaction with pre-encoded calldata instead.
+   */
+  async signExecuteOrder(params: ExecuteOrderParams): Promise<SignedTransaction> {
+    const { userId, chainId, contractAddress, nftId, triggerMode, operatorAddress, nonce, withdrawParams, swapParams, feeParams } =
+      params;
+
     const withdrawParamsTuple = {
       amount0Min: BigInt(withdrawParams.amount0Min),
       amount1Min: BigInt(withdrawParams.amount1Min),
@@ -254,59 +313,21 @@ class SignerClient {
       args: [nftId, triggerMode, withdrawParamsTuple, swapParamsTuple, feeParamsTuple],
     });
 
-    let gasLimit: bigint;
-    let gasPrice: bigint;
-
-    try {
-      // Get current gas price and estimate gas
-      // Add buffers to both: 20% for gasLimit, 20% for gasPrice (Arbitrum base fee can fluctuate)
-      [gasPrice, gasLimit] = await Promise.all([
-        publicClient.getGasPrice().then((price) => (price * 120n) / 100n), // 20% buffer for base fee fluctuation
-        publicClient.estimateGas({
-          account: operatorAddress as Address,
-          to: contractAddress as Address,
-          data: callData,
-        }).then((estimate) => (estimate * 120n) / 100n), // 20% buffer
-      ]);
-    } catch (error) {
-      log.warn({
-        userId,
-        chainId,
-        contractAddress,
+    return this.signTransaction({
+      userId,
+      chainId,
+      contractAddress,
+      operatorAddress,
+      nonce,
+      callData,
+      signerEndpoint: '/api/sign/automation/uniswapv3/position-closer/execute-order',
+      signerPayload: {
         nftId: nftId.toString(),
         triggerMode,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        msg: 'Gas estimation failed, using fallback values',
-      });
-      // Fallback values if estimation fails (with 20% buffer on gas price)
-      gasPrice = await publicClient.getGasPrice().then((price) => (price * 120n) / 100n);
-      gasLimit = 500_000n;
-    }
-
-    log.info({
-      userId,
-      chainId,
-      contractAddress,
-      nftId: nftId.toString(),
-      triggerMode,
-      gasLimit: gasLimit.toString(),
-      gasPrice: gasPrice.toString(),
-      msg: 'Signing order execution',
-    });
-
-    // Call signer with gas params and nonce (nonce always required, fetched from chain by caller)
-    return this.request<SignedTransaction>('POST', '/api/sign/automation/uniswapv3/position-closer/execute-order', {
-      userId,
-      chainId,
-      contractAddress,
-      nftId: nftId.toString(),
-      triggerMode,
-      gasLimit: gasLimit.toString(),
-      gasPrice: gasPrice.toString(),
-      nonce,
-      withdrawParams,
-      swapParams,
-      feeParams,
+        withdrawParams,
+        swapParams,
+        feeParams,
+      },
     });
   }
 

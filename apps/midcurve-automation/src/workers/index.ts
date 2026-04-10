@@ -7,11 +7,11 @@
 
 import { automationLogger, autoLog } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
-import { CloseOrderExecutor, type CloseOrderExecutorStatus } from './close-order-executor';
+import { CloseOrderExecutor, type CloseOrderExecutorStatus } from './uniswapv3/uniswapv3-close-order-executor';
 import {
   CloseOrderMonitor,
   type CloseOrderMonitorStatus,
-} from './close-order-monitor';
+} from './uniswapv3/uniswapv3-close-order-monitor';
 import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
 import {
   OutboxPublisher,

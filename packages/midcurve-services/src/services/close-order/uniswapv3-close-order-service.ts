@@ -478,12 +478,14 @@ export class UniswapV3CloseOrderService {
    * Includes position for subscription sync.
    */
   async findMonitoringOrders(
+    options?: { protocols?: string[] },
     tx?: PrismaTransactionClient,
   ): Promise<CloseOrderWithPosition[]> {
     const db = tx ?? this.prisma;
     return db.closeOrder.findMany({
       where: {
         automationState: 'monitoring',
+        ...(options?.protocols && { protocol: { in: options.protocols } }),
       },
       include: {
         position: {
