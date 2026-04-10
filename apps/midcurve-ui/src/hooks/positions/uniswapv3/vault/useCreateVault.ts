@@ -35,6 +35,7 @@ export interface UseCreateVaultParams {
   tokenName: string;
   tokenSymbol: string;
   decimals: number;
+  operatorAddress: Address | undefined;
 }
 
 export function useCreateVault({
@@ -44,6 +45,7 @@ export function useCreateVault({
   tokenName,
   tokenSymbol,
   decimals,
+  operatorAddress,
 }: UseCreateVaultParams): UseCreateVaultResult {
   const [error, setError] = useState<Error | null>(null);
   const [vaultAddress, setVaultAddress] = useState<Address | null>(null);
@@ -97,7 +99,7 @@ export function useCreateVault({
   }, [writeError, receiptError]);
 
   const createVault = useCallback(() => {
-    if (!factoryAddress || !chainId || nftId === undefined) {
+    if (!factoryAddress || !chainId || nftId === undefined || !operatorAddress) {
       setError(new Error('Missing required parameters for vault creation'));
       return;
     }
@@ -109,10 +111,10 @@ export function useCreateVault({
       address: factoryAddress,
       abi: UniswapV3VaultFactoryAbi,
       functionName: 'createVault',
-      args: [nftId, tokenName, tokenSymbol, decimals],
+      args: [nftId, tokenName, tokenSymbol, decimals, operatorAddress],
       chainId,
     } as any); // cast needed for strict tuple ABI type inference
-  }, [factoryAddress, chainId, nftId, tokenName, tokenSymbol, decimals, writeContract]);
+  }, [factoryAddress, chainId, nftId, tokenName, tokenSymbol, decimals, operatorAddress, writeContract]);
 
   const reset = useCallback(() => {
     resetWrite();

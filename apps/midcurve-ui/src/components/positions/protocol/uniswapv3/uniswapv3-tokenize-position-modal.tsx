@@ -24,6 +24,7 @@ import { useNftApproval } from '@/hooks/positions/uniswapv3/vault/useNftApproval
 import { useCreateVault } from '@/hooks/positions/uniswapv3/vault/useCreateVault';
 import { useDiscoverVaultPosition } from '@/hooks/positions/uniswapv3/vault/useDiscoverVaultPosition';
 import { useCollectFees } from '@/hooks/positions/uniswapv3/useCollectFees';
+import { useConfig } from '@/providers/ConfigProvider';
 import { normalizeAddress } from '@midcurve/shared';
 
 interface UniswapV3TokenizePositionModalProps {
@@ -93,6 +94,7 @@ export function UniswapV3TokenizePositionModal({
   const factoryAddress = sharedContract?.contracts['UniswapV3VaultFactory']?.contractAddress as Address | undefined;
 
   const { address: connectedAddress } = useAccount();
+  const { operatorAddress } = useConfig();
 
   // Collect fees hook
   const collectParams = useMemo(() => {
@@ -133,6 +135,7 @@ export function UniswapV3TokenizePositionModal({
     tokenName,
     tokenSymbol,
     decimals,
+    operatorAddress: operatorAddress as Address | undefined,
   });
 
   // Discover vault hook
