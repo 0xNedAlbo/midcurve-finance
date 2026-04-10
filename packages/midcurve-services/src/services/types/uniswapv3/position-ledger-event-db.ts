@@ -94,6 +94,11 @@ export interface UniswapV3LedgerEventConfigDB {
    * Pool price (sqrtPriceX96) (as string)
    */
   sqrtPriceX96: string;
+
+  /**
+   * Fee recipient address (for COLLECT events, null otherwise)
+   */
+  feeRecipient: string | null;
 }
 
 /**
@@ -122,6 +127,7 @@ export function toEventConfig(
     uncollectedPrincipal0After: BigInt(configDB.uncollectedPrincipal0After),
     uncollectedPrincipal1After: BigInt(configDB.uncollectedPrincipal1After),
     sqrtPriceX96: BigInt(configDB.sqrtPriceX96),
+    feeRecipient: configDB.feeRecipient ?? null,
   };
 }
 
@@ -151,6 +157,7 @@ export function toEventConfigDB(
     uncollectedPrincipal0After: config.uncollectedPrincipal0After.toString(),
     uncollectedPrincipal1After: config.uncollectedPrincipal1After.toString(),
     sqrtPriceX96: config.sqrtPriceX96.toString(),
+    feeRecipient: config.feeRecipient,
   };
 }
 

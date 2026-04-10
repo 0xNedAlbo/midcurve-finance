@@ -56,6 +56,9 @@ export interface UniswapV3LedgerEventConfig {
 
   /** Pool price at event time (sqrtPriceX96) */
   sqrtPriceX96: bigint;
+
+  /** Fee recipient address (for COLLECT events, null otherwise) */
+  feeRecipient: string | null;
 }
 
 // ============================================================================
@@ -82,6 +85,7 @@ export interface UniswapV3LedgerEventConfigJSON {
   uncollectedPrincipal0After: string;
   uncollectedPrincipal1After: string;
   sqrtPriceX96: string;
+  feeRecipient: string | null;
 }
 
 // ============================================================================
@@ -109,6 +113,7 @@ export function ledgerEventConfigToJSON(
     uncollectedPrincipal0After: config.uncollectedPrincipal0After.toString(),
     uncollectedPrincipal1After: config.uncollectedPrincipal1After.toString(),
     sqrtPriceX96: config.sqrtPriceX96.toString(),
+    feeRecipient: config.feeRecipient,
   };
 }
 
@@ -133,5 +138,6 @@ export function ledgerEventConfigFromJSON(
     uncollectedPrincipal0After: BigInt(json.uncollectedPrincipal0After),
     uncollectedPrincipal1After: BigInt(json.uncollectedPrincipal1After),
     sqrtPriceX96: BigInt(json.sqrtPriceX96),
+    feeRecipient: json.feeRecipient ?? null,
   };
 }

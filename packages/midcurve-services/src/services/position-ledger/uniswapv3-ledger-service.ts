@@ -399,6 +399,8 @@ export interface UpdateEventAggregatesInput {
     feesCollected0: bigint;
     /** Fees collected in token1 (for COLLECT events, 0 otherwise) */
     feesCollected1: bigint;
+    /** Fee recipient address (for COLLECT events, null otherwise) */
+    feeRecipient: string | null;
     /** Whether this event is ignored for financial calculations */
     isIgnored: boolean;
     /** Reason the event is ignored */
@@ -790,6 +792,7 @@ export class UniswapV3LedgerService {
             uncollectedPrincipal1After: updates.uncollectedPrincipal1After,
             feesCollected0: updates.feesCollected0,
             feesCollected1: updates.feesCollected1,
+            feeRecipient: updates.feeRecipient,
         };
 
         await db.positionLedgerEvent.update({
@@ -1119,6 +1122,7 @@ export class UniswapV3LedgerService {
             let deltaCollectedYield = 0n;
             let feesCollected0 = 0n;
             let feesCollected1 = 0n;
+            let feeRecipient: string | null = null;
             let isIgnored = false;
             let ignoredReason: string | null = null;
             let tokenValueOverride: bigint | undefined;
@@ -1250,9 +1254,14 @@ export class UniswapV3LedgerService {
 
             } else if (state.eventType === "COLLECT") {
                 liquidityAfter = previousLiquidity;
+                feeRecipient = state.recipient;
 
-                if (ownershipActive) {
-                    // Normal: realize yield
+                const recipientIsUser = userWalletAddresses.has(
+                    state.recipient.toLowerCase(),
+                );
+
+                if (recipientIsUser) {
+                    // Realize yield — user actually received the tokens
                     costBasisAfter = previousCostBasis;
 
                     const principal0Collected =
@@ -1289,13 +1298,13 @@ export class UniswapV3LedgerService {
                     uncollectedPrincipal1After =
                         previousUncollectedPrincipal1 - principal1Collected;
                 } else {
-                    // Outside ownership: no financial impact
+                    // Tokens went elsewhere — no income for this user
                     costBasisAfter = previousCostBasis;
                     pnlAfter = previousPnl;
                     uncollectedPrincipal0After = previousUncollectedPrincipal0;
                     uncollectedPrincipal1After = previousUncollectedPrincipal1;
                     isIgnored = true;
-                    ignoredReason = "not_owned_by_user";
+                    ignoredReason = !ownershipActive ? "not_owned_by_user" : "recipient_is_not_user";
                 }
             }
 
@@ -1392,6 +1401,7 @@ export class UniswapV3LedgerService {
                     uncollectedPrincipal1After,
                     feesCollected0,
                     feesCollected1,
+                    feeRecipient,
                     isIgnored,
                     ignoredReason,
                     tokenValue: tokenValueOverride,
@@ -1485,6 +1495,7 @@ export class UniswapV3LedgerService {
             uncollectedPrincipal0After: 0n,
             uncollectedPrincipal1After: 0n,
             sqrtPriceX96: params.sqrtPriceX96,
+            feeRecipient: null,
         };
 
         // Merge common financial fields into protocol-specific state
@@ -1754,6 +1765,7 @@ export class UniswapV3LedgerService {
                 uncollectedPrincipal0After: 0n,
                 uncollectedPrincipal1After: 0n,
                 sqrtPriceX96,
+                feeRecipient: null,
             };
 
             const createInput: CreateLedgerEventInput = {
@@ -1851,6 +1863,7 @@ export class UniswapV3LedgerService {
             uncollectedPrincipal0After: 0n, // Will be fixed by recalculateAggregates
             uncollectedPrincipal1After: 0n, // Will be fixed by recalculateAggregates
             sqrtPriceX96,
+            feeRecipient: null, // Will be fixed by recalculateAggregates for COLLECT events
         };
 
         // Build ledger event state (includes common financial fields)
