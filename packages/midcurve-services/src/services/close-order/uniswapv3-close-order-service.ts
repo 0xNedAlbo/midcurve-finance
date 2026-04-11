@@ -256,7 +256,6 @@ export class UniswapV3CloseOrderService {
         throw new Error(`Position not found: ${positionId}`);
       }
       const posConfig = position.config as Record<string, unknown>;
-      const posState = position.state as Record<string, unknown>;
       const chainId = posConfig.chainId as number;
       const protocol = position.protocol; // 'uniswapv3' or 'uniswapv3-vault'
       const isVault = protocol === 'uniswapv3-vault';
@@ -264,7 +263,7 @@ export class UniswapV3CloseOrderService {
       // Protocol-specific identifiers
       const nftId = isVault ? undefined : String(posConfig.nftId);
       const vaultAddress = isVault ? (posConfig.vaultAddress as string) : undefined;
-      const ownerAddress = isVault ? (posState.ownerAddress as string) : undefined;
+      const ownerAddress = isVault ? (posConfig.ownerAddress as string) : undefined;
 
       if (isVault && (!vaultAddress || !ownerAddress)) {
         throw new Error(`Vault position missing vaultAddress or ownerAddress: ${positionId}`);
