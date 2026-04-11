@@ -73,6 +73,13 @@ export {
 export { useSharedContract } from './useSharedContract';
 export { useVaultSharedContract } from './useVaultSharedContract';
 
+// Vault Multicall
+export {
+  useMulticallVaultPositionCloser,
+  type VaultPositionCloserCall,
+  type UseMulticallVaultPositionCloserResult,
+} from './useMulticallVaultPositionCloser';
+
 // Operator Approval (setApprovalForAll on NFPM)
 export { useOperatorApproval, type UseOperatorApprovalResult } from './useOperatorApproval';
 

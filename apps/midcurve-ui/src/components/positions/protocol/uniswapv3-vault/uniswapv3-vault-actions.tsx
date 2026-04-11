@@ -4,23 +4,22 @@
  * UniswapV3VaultActions - Action buttons for vault positions
  *
  * Protocol-specific component for vault position management actions.
- * Includes increase deposit button and automation buttons (SL/TP).
+ * Includes position management (increase, withdraw, collect fees) and
+ * automation buttons (stop-loss, take-profit).
  */
 
 import { useState, useMemo } from 'react';
 import { Plus, Minus, DollarSign } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import type { Address } from 'viem';
 import type { UniswapV3VaultPositionData } from '@/hooks/positions/uniswapv3-vault/useUniswapV3VaultPosition';
 import type {
   UniswapV3VaultPositionConfigResponse,
   UniswapV3VaultPositionStateResponse,
 } from '@midcurve/api-shared';
 import { getChainSlugByChainId } from '@/config/chains';
-import { StopLossButton } from '@/components/positions/automation/StopLossButton';
-import { TakeProfitButton } from '@/components/positions/automation/TakeProfitButton';
+import { VaultStopLossButton } from '@/components/positions/automation/VaultStopLossButton';
+import { VaultTakeProfitButton } from '@/components/positions/automation/VaultTakeProfitButton';
 import { FlashingPriceLabel } from '@/components/positions/automation/FlashingPriceLabel';
-import { useVaultSharedContract } from '@/hooks/automation';
 import { formatTriggerPrice, type TokenConfig } from '@/components/positions/automation/order-button-utils';
 import { UniswapV3VaultCollectFeesModal } from './uniswapv3-vault-collect-fees-modal';
 
@@ -50,20 +49,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
 
-  const poolConfig = position.pool.config as { address: string; chainId: number };
   const poolState = position.pool.state as { sqrtPriceX96: string };
-
-  // Check automation availability for vault positions
-  const { data: contractData } = useVaultSharedContract(config.chainId);
-  const isChainSupported = contractData?.isSupported ?? false;
-
-  const automationDisabled = !position.isActive || isClosed || !isChainSupported;
-
-  const automationDisabledReason = useMemo(() => {
-    if (!position.isActive || isClosed) return 'Position is closed';
-    if (!isChainSupported) return 'Automation not supported on this chain';
-    return undefined;
-  }, [position.isActive, isClosed, isChainSupported]);
 
   // Build token config for price display
   const tokenConfig: TokenConfig = useMemo(
@@ -140,17 +126,9 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
       {/* Automation Buttons */}
       <div className="w-px h-6 bg-slate-600/50 mx-1" />
 
-      <StopLossButton
-        position={position as any}
-        positionId={position.id}
-        poolAddress={poolConfig.address}
+      <VaultStopLossButton
         chainId={config.chainId}
-        contractAddress={automationDisabled ? undefined : contractData!.contractAddress as Address}
-        positionManager={undefined}
-        nftId={BigInt(config.underlyingTokenId)}
-        positionOwner={config.ownerAddress as Address}
-        currentPriceDisplay={currentPriceDisplay}
-        currentSqrtPriceX96={poolState.sqrtPriceX96}
+        vaultAddress={config.vaultAddress}
         baseToken={{
           address: baseTokenConfig.address,
           symbol: baseToken.symbol,
@@ -162,24 +140,17 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
           decimals: quoteToken.decimals,
         }}
         isToken0Quote={position.isToken0Quote}
-        disabled={automationDisabled}
-        disabledReason={automationDisabledReason}
+        disabled={isClosed}
+        disabledReason={isClosed ? 'Position is closed' : undefined}
         closeOrders={position.closeOrders ?? []}
       />
 
+      {/* Current Price Display */}
       <FlashingPriceLabel price={currentPriceDisplay} symbol={quoteToken.symbol} />
 
-      <TakeProfitButton
-        position={position as any}
-        positionId={position.id}
-        poolAddress={poolConfig.address}
+      <VaultTakeProfitButton
         chainId={config.chainId}
-        contractAddress={automationDisabled ? undefined : contractData!.contractAddress as Address}
-        positionManager={undefined}
-        nftId={BigInt(config.underlyingTokenId)}
-        positionOwner={config.ownerAddress as Address}
-        currentPriceDisplay={currentPriceDisplay}
-        currentSqrtPriceX96={poolState.sqrtPriceX96}
+        vaultAddress={config.vaultAddress}
         baseToken={{
           address: baseTokenConfig.address,
           symbol: baseToken.symbol,
@@ -191,12 +162,13 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
           decimals: quoteToken.decimals,
         }}
         isToken0Quote={position.isToken0Quote}
-        disabled={automationDisabled}
-        disabledReason={automationDisabledReason}
+        disabled={isClosed}
+        disabledReason={isClosed ? 'Position is closed' : undefined}
         closeOrders={position.closeOrders ?? []}
       />
     </div>
 
+    {/* Collect Fees Modal */}
     <UniswapV3VaultCollectFeesModal
       isOpen={showCollectFeesModal}
       onClose={() => setShowCollectFeesModal(false)}

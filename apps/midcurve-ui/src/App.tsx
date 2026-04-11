@@ -18,6 +18,7 @@ import { VaultIncreaseDepositPage } from './pages/VaultIncreaseDepositPage';
 import { VaultWithdrawPage } from './pages/VaultWithdrawPage';
 import { WithdrawPage } from './pages/WithdrawPage';
 import { RiskTriggersPage } from './pages/RiskTriggersPage';
+import { VaultRiskTriggersPage } from './pages/VaultRiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
 import { WalletManagementPage } from './pages/WalletManagementPage';
@@ -99,6 +100,10 @@ function ConfigGate() {
               <Route
                 path="/positions/triggers/:protocol/:chain/:nftId"
                 element={<RiskTriggersPage />}
+              />
+              <Route
+                path="/positions/triggers/uniswapv3-vault/:chain/:vaultAddress"
+                element={<VaultRiskTriggersPage />}
               />
               <Route path="/wallets" element={<WalletManagementPage />} />
               <Route path="/system-config" element={<SystemConfigPage />} />
