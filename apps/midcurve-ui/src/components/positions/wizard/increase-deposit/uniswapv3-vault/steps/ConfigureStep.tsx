@@ -127,12 +127,16 @@ export function ConfigureStep() {
     const totalSupply = BigInt(vaultState.totalSupply);
     const additionalLiquidity = BigInt(calculations.liquidity || '0');
 
-    if (vaultLiquidity === 0n || additionalLiquidity === 0n) {
+    if (additionalLiquidity === 0n) {
       setExpectedShares('0');
       return;
     }
 
-    const expectedShares = totalSupply * additionalLiquidity / vaultLiquidity;
+    // When vault is empty (reopen), shares = addedLiquidity (contract mints 1:1)
+    // When vault has existing liquidity, shares = totalSupply * addedLiquidity / vaultLiquidity
+    const expectedShares = vaultLiquidity === 0n
+      ? additionalLiquidity
+      : totalSupply * additionalLiquidity / vaultLiquidity;
     setExpectedShares(expectedShares.toString());
   }, [vaultState, calculations.liquidity, setExpectedShares]);
 
