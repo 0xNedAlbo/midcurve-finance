@@ -15,7 +15,7 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { ParaswapSwapService, isParaswapSupportedChain, publishCloseOrderEventsFromReceipt } from '@midcurve/services';
-import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getUserNotificationService } from '../../lib/services';
+import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getVaultPositionService, getUserNotificationService } from '../../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -327,8 +327,9 @@ export class CloseOrderExecutor {
 
           // Send failure notification
           try {
-            const positionService = getPositionService();
-            const position = await positionService.findById(positionId);
+            const position = order.protocol === 'uniswapv3-vault'
+              ? await getVaultPositionService().findById(positionId)
+              : await getPositionService().findById(positionId);
             if (position) {
               const userNotificationService = getUserNotificationService();
               const notifyMethod = triggerSide === 'lower'
@@ -517,8 +518,12 @@ export class CloseOrderExecutor {
     const operatorAddress = await signerClient.getOperatorAddress();
 
     // Get full position data (needed for signer service + price formatting)
-    const positionService = getPositionService();
-    const positionData = await positionService.findById(positionId);
+    // Use protocol-specific service: NFT positions use PositionService,
+    // vault positions use VaultPositionService.
+    const isVaultOrder = order.protocol === 'uniswapv3-vault';
+    const positionData = isVaultOrder
+      ? await getVaultPositionService().findById(positionId)
+      : await getPositionService().findById(positionId);
     if (!positionData) {
       throw new Error(`Position not found: ${positionId}`);
     }
@@ -550,7 +555,7 @@ export class CloseOrderExecutor {
       // Vault: position identifier is vault address + owner
       const posConfig = position.config as Record<string, unknown>;
       vaultAddress = posConfig.vaultAddress as `0x${string}`;
-      ownerAddress = (position.state as Record<string, unknown>).ownerAddress as `0x${string}`;
+      ownerAddress = posConfig.ownerAddress as `0x${string}`;
       if (!vaultAddress || !ownerAddress) {
         throw new Error(`Vault position missing vaultAddress or ownerAddress: ${positionId}`);
       }
@@ -1261,7 +1266,11 @@ export class CloseOrderExecutor {
       msg: 'Order executed successfully',
     });
 
-    await positionService.refresh(positionId);
+    if (isVaultOrder) {
+      await getVaultPositionService().refresh(positionId);
+    } else {
+      await getPositionService().refresh(positionId);
+    }
 
     // Send execution success notification
     try {

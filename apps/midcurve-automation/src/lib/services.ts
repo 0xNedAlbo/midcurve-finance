@@ -11,6 +11,7 @@ import {
   UniswapV3PoolService,
   AutomationLogService,
   UniswapV3PositionService,
+  UniswapV3VaultPositionService,
   WebhookConfigService,
   UserNotificationService,
   UiNotificationAdapter,
@@ -24,6 +25,7 @@ let _automationSubscriptionService: AutomationSubscriptionService | null = null;
 let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
+let _vaultPositionService: UniswapV3VaultPositionService | null = null;
 let _webhookConfigService: WebhookConfigService | null = null;
 let _userNotificationService: UserNotificationService | null = null;
 let _sharedContractService: SharedContractService | null = null;
@@ -76,6 +78,16 @@ export function getPositionService(): UniswapV3PositionService {
     _positionService = new UniswapV3PositionService();
   }
   return _positionService;
+}
+
+/**
+ * Get singleton instance of UniswapV3VaultPositionService
+ */
+export function getVaultPositionService(): UniswapV3VaultPositionService {
+  if (!_vaultPositionService) {
+    _vaultPositionService = new UniswapV3VaultPositionService();
+  }
+  return _vaultPositionService;
 }
 
 /**

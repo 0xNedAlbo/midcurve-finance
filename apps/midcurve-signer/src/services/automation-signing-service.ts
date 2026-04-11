@@ -97,6 +97,27 @@ export interface SignExecuteOrderInput {
 }
 
 /**
+ * Input for signing a vault executeOrder transaction
+ *
+ * Based on contract function:
+ * executeOrder(address vault, address owner, TriggerMode triggerMode, WithdrawParams, SwapParams, FeeParams)
+ */
+export interface SignVaultExecuteOrderInput {
+  userId: string;
+  chainId: number;
+  contractAddress: Address;
+  vaultAddress: Address;
+  ownerAddress: Address;
+  triggerMode: number;
+  gasLimit: bigint;
+  gasPrice: bigint;
+  nonce: number;
+  withdrawParams: WithdrawParams;
+  swapParams: SwapParams;
+  feeParams: FeeParams;
+}
+
+/**
  * Input for signing a refuelOperator transaction on MidcurveTreasury
  *
  * Based on contract function:
@@ -183,6 +204,51 @@ const POSITION_CLOSER_ABI = [
         name: 'feeParams',
         type: 'tuple',
         components: [
+          { name: 'feeRecipient', type: 'address' },
+          { name: 'feeBps', type: 'uint16' },
+        ],
+      },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+] as const;
+
+/**
+ * UniswapV3VaultPositionCloser ABI (minimal - only executeOrder needed)
+ * executeOrder(vault, owner, triggerMode, withdrawParams, swapParams, feeParams)
+ */
+const VAULT_POSITION_CLOSER_ABI = [
+  {
+    type: 'function',
+    name: 'executeOrder',
+    inputs: [
+      { name: 'vault', type: 'address' },
+      { name: 'owner', type: 'address' },
+      { name: 'triggerMode', type: 'uint8' },
+      {
+        name: 'withdrawParams', type: 'tuple', components: [
+          { name: 'amount0Min', type: 'uint256' },
+          { name: 'amount1Min', type: 'uint256' },
+        ],
+      },
+      {
+        name: 'swapParams', type: 'tuple', components: [
+          { name: 'guaranteedAmountIn', type: 'uint256' },
+          { name: 'minAmountOut', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+          {
+            name: 'hops', type: 'tuple[]', components: [
+              { name: 'venueId', type: 'bytes32' },
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'venueData', type: 'bytes' },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'feeParams', type: 'tuple', components: [
           { name: 'feeRecipient', type: 'address' },
           { name: 'feeBps', type: 'uint16' },
         ],
@@ -313,6 +379,82 @@ class AutomationSigningServiceImpl {
       nonce,
       from: operatorAddress,
     };
+  }
+
+  /**
+   * Sign an executeOrder transaction for a UniswapV3VaultPositionCloser contract.
+   */
+  async signVaultExecuteOrder(input: SignVaultExecuteOrderInput): Promise<SignTransactionResult> {
+    const { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = input;
+    signerLog.methodEntry(this.logger, 'signVaultExecuteOrder', { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, nonce, hasSwap: swapParams.hops.length > 0 });
+
+    const operatorKeyService = OperatorKeyService.getInstance();
+    const operatorAddress = await operatorKeyService.getOperatorAddress();
+
+    const withdrawParamsTuple = {
+      amount0Min: BigInt(withdrawParams.amount0Min),
+      amount1Min: BigInt(withdrawParams.amount1Min),
+    };
+
+    const swapParamsTuple = {
+      guaranteedAmountIn: BigInt(swapParams.guaranteedAmountIn),
+      minAmountOut: BigInt(swapParams.minAmountOut),
+      deadline: BigInt(swapParams.deadline),
+      hops: swapParams.hops.map((hop) => ({
+        venueId: hop.venueId as `0x${string}`,
+        tokenIn: hop.tokenIn,
+        tokenOut: hop.tokenOut,
+        venueData: hop.venueData,
+      })),
+    };
+
+    const feeParamsTuple = {
+      feeRecipient: feeParams.feeRecipient,
+      feeBps: feeParams.feeBps,
+    };
+
+    const callData = encodeFunctionData({
+      abi: VAULT_POSITION_CLOSER_ABI,
+      functionName: 'executeOrder',
+      args: [vaultAddress, ownerAddress, triggerMode, withdrawParamsTuple, swapParamsTuple, feeParamsTuple],
+    });
+
+    const tx = {
+      to: contractAddress,
+      data: callData,
+      chainId,
+      nonce,
+      gas: gasLimit,
+      gasPrice,
+      type: 'legacy' as const,
+    };
+
+    const unsignedTxHash = keccak256(serializeTransaction(tx));
+    const signature = await operatorKeyService.signTransaction(unsignedTxHash);
+
+    const signedTransaction = serializeTransaction(tx, {
+      r: signature.r,
+      s: signature.s,
+      v: BigInt(signature.v - 27 + chainId * 2 + 35),
+    });
+
+    const txHash = keccak256(signedTransaction);
+
+    this.logger.info({
+      userId,
+      chainId,
+      contractAddress,
+      vaultAddress,
+      ownerAddress,
+      triggerMode,
+      nonce,
+      from: operatorAddress,
+      msg: 'vault executeOrder transaction signed with operator key',
+    });
+
+    signerLog.methodExit(this.logger, 'signVaultExecuteOrder', { nonce });
+
+    return { signedTransaction, txHash, nonce, from: operatorAddress };
   }
 
   /**
