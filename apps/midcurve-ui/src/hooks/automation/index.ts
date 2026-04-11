@@ -47,6 +47,7 @@ export {
 
 // Close Orders - Read only (position-scoped)
 export { useCloseOrders, useCloseOrderByHash } from './useCloseOrders';
+export { useVaultCloseOrders } from './useVaultCloseOrders';
 
 // Close Orders - Automation state control (API-only, no wallet signing)
 export {

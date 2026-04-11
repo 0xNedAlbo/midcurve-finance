@@ -79,6 +79,17 @@ export const queryKeys = {
       aprs: () => [...queryKeys.positions.uniswapv3Vault.all, 'apr'] as const,
       apr: (chainId: number, vaultAddress: string) =>
         [...queryKeys.positions.uniswapv3Vault.aprs(), chainId, vaultAddress] as const,
+
+      // Close Orders (position-scoped)
+      closeOrders: {
+        // All close orders for a vault position
+        all: (chainId: number, vaultAddress: string) =>
+          [...queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress), 'close-orders'] as const,
+
+        // List with optional filters
+        list: (chainId: number, vaultAddress: string, filters?: { automationState?: string; type?: string }) =>
+          [...queryKeys.positions.uniswapv3Vault.closeOrders.all(chainId, vaultAddress), 'list', filters] as const,
+      },
     },
 
     // Future: Orca (Solana)

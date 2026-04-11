@@ -284,6 +284,27 @@ export const automationApi = {
   },
 
   // ---------------------------------------------------------------------------
+  // Vault Close Orders (Position-Scoped)
+  // ---------------------------------------------------------------------------
+
+  vaultPositionCloseOrders: {
+    /**
+     * List close orders for a specific vault position
+     * @param chainId - Chain ID
+     * @param vaultAddress - Vault contract address
+     * @param params - Optional filters (automationState, type)
+     */
+    list(chainId: number, vaultAddress: string, params?: { automationState?: string; type?: 'sl' | 'tp' }) {
+      const searchParams = new URLSearchParams();
+      if (params?.automationState) searchParams.set('automationState', params.automationState);
+      if (params?.type) searchParams.set('type', params.type);
+      const query = searchParams.toString();
+      const url = `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/close-orders${query ? `?${query}` : ''}`;
+      return apiClient.get<ListCloseOrdersResponse['data']>(url);
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // Shared Contracts
   // ---------------------------------------------------------------------------
 

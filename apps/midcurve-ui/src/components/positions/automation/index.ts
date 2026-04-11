@@ -9,6 +9,9 @@ export { CloseOrderCard } from './CloseOrderCard';
 export { PositionCloseOrdersPanel } from './PositionCloseOrdersPanel';
 export { CloseOrderModal, type CloseOrderModalProps, type CloseOrderFormData } from './CloseOrderModal';
 
+// Vault Close Orders Panel
+export { VaultCloseOrdersPanel } from './VaultCloseOrdersPanel';
+
 // Automation Logs
 export { AutomationLogItem } from './AutomationLogItem';
 export { AutomationLogList } from './AutomationLogList';

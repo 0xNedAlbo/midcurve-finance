@@ -1,0 +1,195 @@
+/**
+ * Vault Close Orders Nested Endpoint
+ *
+ * GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/close-orders - List close orders for vault position
+ *
+ * Authentication: Required (session only)
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { withSessionAuth } from '@/middleware/with-session-auth';
+import {
+  createSuccessResponse,
+  createErrorResponse,
+  ApiErrorCode,
+  ErrorCodeToHttpStatus,
+} from '@midcurve/api-shared';
+import { serializeCloseOrder } from '@/lib/serializers';
+import { apiLogger, apiLog } from '@/lib/logger';
+import { getUniswapV3CloseOrderService, getUniswapV3VaultPositionService } from '@/lib/services';
+import { createPreflightResponse } from '@/lib/cors';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/**
+ * Path params schema
+ */
+const PathParamsSchema = z.object({
+  chainId: z.string().regex(/^\d+$/).transform(Number),
+  vaultAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+});
+
+/**
+ * Query params schema for filtering
+ */
+const QueryParamsSchema = z.object({
+  automationState: z
+    .enum(['monitoring', 'executing', 'retrying', 'failed', 'inactive'])
+    .optional(),
+  type: z.enum(['sl', 'tp']).optional(),
+});
+
+/**
+ * Handle CORS preflight
+ */
+export async function OPTIONS(request: NextRequest): Promise<Response> {
+  return createPreflightResponse(request.headers.get('origin'));
+}
+
+/**
+ * GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/close-orders
+ *
+ * List all close orders for a specific vault position.
+ *
+ * Features:
+ * - Validates position exists and belongs to user
+ * - Supports filtering by status and order type (sl/tp)
+ * - Returns serialized close orders with closeOrderHash
+ *
+ * Query parameters:
+ * - automationState: Filter by automation state (optional)
+ * - type: Filter by order type - 'sl' (stop-loss) or 'tp' (take-profit) (optional)
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ chainId: string; vaultAddress: string }> }
+): Promise<Response> {
+  return withSessionAuth(request, async (user, requestId) => {
+    const startTime = Date.now();
+
+    try {
+      // 1. Parse and validate path parameters
+      const resolvedParams = await params;
+      const paramsValidation = PathParamsSchema.safeParse(resolvedParams);
+
+      if (!paramsValidation.success) {
+        apiLog.validationError(apiLogger, requestId, paramsValidation.error.errors);
+
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.VALIDATION_ERROR,
+          'Invalid path parameters',
+          paramsValidation.error.errors
+        );
+
+        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+
+        return NextResponse.json(errorResponse, {
+          status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
+        });
+      }
+
+      const { chainId, vaultAddress } = paramsValidation.data;
+
+      // 2. Parse query parameters
+      const { searchParams } = new URL(request.url);
+      const queryParams = {
+        automationState: searchParams.get('automationState') ?? undefined,
+        type: searchParams.get('type') ?? undefined,
+      };
+
+      const queryValidation = QueryParamsSchema.safeParse(queryParams);
+      if (!queryValidation.success) {
+        apiLog.validationError(apiLogger, requestId, queryValidation.error.errors);
+
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.VALIDATION_ERROR,
+          'Invalid query parameters',
+          queryValidation.error.errors
+        );
+
+        apiLog.requestEnd(apiLogger, requestId, 400, Date.now() - startTime);
+
+        return NextResponse.json(errorResponse, {
+          status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR],
+        });
+      }
+
+      const { automationState, type } = queryValidation.data;
+
+      // 3. Find vault position by positionHash
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const position = await getUniswapV3VaultPositionService().findByPositionHash(
+        user.id,
+        positionHash
+      );
+
+      if (!position) {
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.POSITION_NOT_FOUND,
+          'Vault position not found',
+          `No vault position found for chainId ${chainId} and vaultAddress ${vaultAddress}`
+        );
+
+        apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
+
+        return NextResponse.json(errorResponse, {
+          status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND],
+        });
+      }
+
+      apiLog.businessOperation(
+        apiLogger,
+        requestId,
+        'list',
+        'close-orders',
+        position.id,
+        { chainId, vaultAddress, automationState, type }
+      );
+
+      // 4. Fetch close orders for position
+      const filterOptions = automationState ? { automationState } : {};
+      let orders = await getUniswapV3CloseOrderService().findByPositionId(
+        position.id,
+        filterOptions
+      );
+
+      // 5. Filter by type if specified
+      if (type) {
+        orders = orders.filter((order) => {
+          const hash = order.closeOrderHash;
+          return hash && hash.startsWith(`${type}@`);
+        });
+      }
+
+      // 6. Serialize and return
+      const serializedOrders = orders.map(serializeCloseOrder);
+
+      const response = createSuccessResponse(serializedOrders);
+
+      apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
+
+      return NextResponse.json(response, { status: 200 });
+    } catch (error) {
+      apiLog.methodError(
+        apiLogger,
+        'GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/close-orders',
+        error,
+        { requestId }
+      );
+
+      const errorResponse = createErrorResponse(
+        ApiErrorCode.INTERNAL_SERVER_ERROR,
+        'Failed to list close orders',
+        error instanceof Error ? error.message : String(error)
+      );
+
+      apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
+
+      return NextResponse.json(errorResponse, {
+        status: ErrorCodeToHttpStatus[ApiErrorCode.INTERNAL_SERVER_ERROR],
+      });
+    }
+  });
+}
