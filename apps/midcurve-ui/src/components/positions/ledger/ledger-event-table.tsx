@@ -1,12 +1,23 @@
 "use client";
 
+import { useMemo } from "react";
 import type { LedgerEventData } from "@midcurve/api-shared";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { buildTxUrl, formatBlockNumber, truncateTxHash } from "@/lib/explorer-utils";
-import { getEventTypeInfo, isCollectEvent, isLifecycleEvent, type EventType } from "@/lib/event-type-utils";
+import { getEventTypeInfo, isCollectEvent, isVaultCollectEvent, isLifecycleEvent, isVaultLifecycleEvent, type EventType } from "@/lib/event-type-utils";
 import { buildAddressUrl } from "@/lib/explorer-utils";
 import { formatEventDateTime } from "@/lib/date-utils";
+import { useChainSharedContract } from "@/hooks/automation/useChainSharedContract";
+import { getNonfungiblePositionManagerAddress } from "@/config/contracts/nonfungible-position-manager";
 import { ExternalLink, Clock } from "lucide-react";
+
+const CONTRACT_DISPLAY_NAMES: Record<string, string> = {
+  UniswapV3PositionCloser: "Position Closer",
+  MidcurveSwapRouter: "Swap Router",
+  UniswapV3VaultFactory: "Vault Factory",
+  UniswapV3VaultPositionCloser: "Vault Position Closer",
+  UniswapV3FeeCollector: "Fee Collector",
+};
 
 
 // Token type from position response (already serialized)
@@ -33,6 +44,28 @@ export function LedgerEventTable({
   token0,
   token1,
 }: LedgerEventTableProps) {
+  // Build reverse lookup: address → display name for known contracts
+  const { data: sharedContractData } = useChainSharedContract(chainId);
+  const knownAddresses = useMemo(() => {
+    const map = new Map<string, { name: string; address: string }>();
+
+    // Add NFPM address
+    const nfpmAddress = getNonfungiblePositionManagerAddress(chainId);
+    if (nfpmAddress) {
+      map.set(nfpmAddress.toLowerCase(), { name: "Uniswap NFPM", address: nfpmAddress });
+    }
+
+    // Add shared contracts
+    if (sharedContractData?.contracts) {
+      for (const [contractName, info] of Object.entries(sharedContractData.contracts)) {
+        const displayName = CONTRACT_DISPLAY_NAMES[contractName] ?? contractName;
+        map.set(info.contractAddress.toLowerCase(), { name: displayName, address: info.contractAddress });
+      }
+    }
+
+    return map;
+  }, [chainId, sharedContractData]);
+
   if (isLoading) {
     return (
       <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-8">
@@ -225,6 +258,24 @@ export function LedgerEventTable({
     </a>
   );
 
+  // Render known contract name or fallback to truncated address link
+  const renderKnownAddressOrLink = (address: string) => {
+    const known = address ? knownAddresses.get(address.toLowerCase()) : undefined;
+    if (known) {
+      return (
+        <a
+          href={buildAddressUrl(chainId, known.address)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+        >
+          {known.name}
+        </a>
+      );
+    }
+    return renderAddressLink(address);
+  };
+
   // Render lifecycle event details (MINT, BURN, TRANSFER)
   const renderLifecycleDetails = (event: LedgerEventData) => {
     const state = event.state as any;
@@ -235,11 +286,11 @@ export function LedgerEventTable({
         <div className="space-y-0.5">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-slate-500">From:</span>
-            {renderAddressLink(state.from)}
+            {renderKnownAddressOrLink(state.from)}
           </div>
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-slate-500">To:</span>
-            {renderAddressLink(state.to)}
+            {renderKnownAddressOrLink(state.to)}
           </div>
         </div>
       );
@@ -249,7 +300,7 @@ export function LedgerEventTable({
       return (
         <div className="flex items-center gap-1.5 text-xs">
           <span className="text-slate-500">Minted to:</span>
-          {renderAddressLink(state.to)}
+          {renderKnownAddressOrLink(state.to)}
         </div>
       );
     }
@@ -258,12 +309,73 @@ export function LedgerEventTable({
       return (
         <div className="flex items-center gap-1.5 text-xs">
           <span className="text-slate-500">Burned by:</span>
-          {renderAddressLink(state.from)}
+          {renderKnownAddressOrLink(state.from)}
         </div>
       );
     }
 
     return null;
+  };
+
+  // Render vault lifecycle event details (VAULT_MINT, VAULT_BURN, VAULT_TRANSFER_IN/OUT)
+  const renderVaultLifecycleDetails = (event: LedgerEventData) => {
+    const state = event.state as any;
+    const eventType = event.eventType as EventType;
+
+    if (eventType === "VAULT_MINT") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">Minted to</span>
+          {renderKnownAddressOrLink(state.recipient)}
+        </div>
+      );
+    }
+
+    if (eventType === "VAULT_BURN") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">Burned from</span>
+          {renderKnownAddressOrLink(state.burner)}
+        </div>
+      );
+    }
+
+    if (eventType === "VAULT_TRANSFER_IN") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">From:</span>
+          {renderKnownAddressOrLink(state.from)}
+        </div>
+      );
+    }
+
+    if (eventType === "VAULT_TRANSFER_OUT") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">To:</span>
+          {renderKnownAddressOrLink(state.to)}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // Render vault collect yield details
+  const renderVaultCollectDetails = (event: LedgerEventData) => {
+    const state = event.state as any;
+    return (
+      <div className="space-y-1">
+        {state.recipient && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500">Recipient:</span>
+            {renderKnownAddressOrLink(state.recipient)}
+          </div>
+        )}
+        {renderTokenAmount(event.token0Amount, token0)}
+        {renderTokenAmount(event.token1Amount, token1)}
+      </div>
+    );
   };
 
   return (
@@ -383,6 +495,10 @@ export function LedgerEventTable({
                     <div className="space-y-1">
                       {isLifecycleEvent(event.eventType as EventType) ? (
                         renderLifecycleDetails(event)
+                      ) : isVaultLifecycleEvent(event.eventType as EventType) ? (
+                        renderVaultLifecycleDetails(event)
+                      ) : isVaultCollectEvent(event.eventType as EventType) ? (
+                        renderVaultCollectDetails(event)
                       ) : isCollectEvent(event.eventType as EventType) ? (
                         <>
                           {/* Show fee recipient */}
@@ -516,6 +632,14 @@ export function LedgerEventTable({
               {isLifecycleEvent(event.eventType as EventType) ? (
                 <div className="text-xs text-slate-400">
                   {renderLifecycleDetails(event)}
+                </div>
+              ) : isVaultLifecycleEvent(event.eventType as EventType) ? (
+                <div className="text-xs text-slate-400">
+                  {renderVaultLifecycleDetails(event)}
+                </div>
+              ) : isVaultCollectEvent(event.eventType as EventType) ? (
+                <div className="text-xs text-slate-400">
+                  {renderVaultCollectDetails(event)}
                 </div>
               ) : (event.token0Amount !== "0" ||
                 event.token1Amount !== "0" ||
