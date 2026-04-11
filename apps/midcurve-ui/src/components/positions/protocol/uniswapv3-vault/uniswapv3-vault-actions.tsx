@@ -7,7 +7,7 @@
  * Includes increase deposit button and automation buttons (SL/TP).
  */
 
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, Minus, DollarSign } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { Address } from 'viem';
@@ -22,6 +22,7 @@ import { TakeProfitButton } from '@/components/positions/automation/TakeProfitBu
 import { FlashingPriceLabel } from '@/components/positions/automation/FlashingPriceLabel';
 import { useVaultSharedContract } from '@/hooks/automation';
 import { formatTriggerPrice, type TokenConfig } from '@/components/positions/automation/order-button-utils';
+import { UniswapV3VaultCollectFeesModal } from './uniswapv3-vault-collect-fees-modal';
 
 interface UniswapV3VaultActionsProps {
   position: UniswapV3VaultPositionData;
@@ -31,11 +32,13 @@ interface UniswapV3VaultActionsProps {
 export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
 
   const config = position.config as UniswapV3VaultPositionConfigResponse;
   const state = position.state as UniswapV3VaultPositionStateResponse;
 
   const isClosed = BigInt(state.sharesBalance) === 0n;
+  const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
 
   // Get base/quote tokens
   const quoteToken = position.isToken0Quote
@@ -86,6 +89,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
   }
 
   return (
+    <>
     <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
       {/* Increase Deposit / Reopen Position */}
       <button
@@ -117,12 +121,16 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
         </button>
       )}
 
-      {/* Collect Fees — stub, disabled for now */}
+      {/* Collect Fees */}
       {!isClosed && (
         <button
-          disabled
-          title="Fee collection is not yet available for vault positions"
-          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
+          onClick={() => setShowCollectFeesModal(true)}
+          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
+            hasUnclaimedFees
+              ? "text-amber-300 bg-amber-900/20 hover:bg-amber-800/30 border-amber-600/50 cursor-pointer"
+              : "text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
+          }`}
+          disabled={!hasUnclaimedFees}
         >
           <DollarSign className="w-3 h-3" />
           Collect Fees
@@ -188,5 +196,12 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
         closeOrders={position.closeOrders ?? []}
       />
     </div>
+
+    <UniswapV3VaultCollectFeesModal
+      isOpen={showCollectFeesModal}
+      onClose={() => setShowCollectFeesModal(false)}
+      position={position}
+    />
+    </>
   );
 }

@@ -207,6 +207,13 @@ export const UniswapV3VaultAbi = [
 
   {
     type: 'function',
+    name: 'collectYield',
+    inputs: [{ name: 'recipient', type: 'address' }],
+    outputs: [{ name: 'tokenAmounts', type: 'uint256[]' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'burn',
     inputs: [
       { name: 'shares', type: 'uint256' },
