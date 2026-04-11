@@ -19,6 +19,7 @@ import { apiLogger, apiLog } from '@/lib/logger';
 import {
   getAutomationLogService,
   getUniswapV3PositionService,
+  getUniswapV3VaultPositionService,
 } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 
@@ -77,9 +78,10 @@ export async function GET(request: NextRequest): Promise<Response> {
 
       const { positionId, level, limit, cursor } = validation.data;
 
-      // Verify position exists and belongs to user
-      const positionService = getUniswapV3PositionService();
-      const position = await positionService.findById(positionId);
+      // Verify position exists and belongs to user (check both NFT and vault positions)
+      const position =
+        await getUniswapV3PositionService().findById(positionId) ??
+        await getUniswapV3VaultPositionService().findById(positionId);
 
       if (!position) {
         apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
