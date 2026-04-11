@@ -11,7 +11,7 @@ import {IDiamondCut} from "../contracts/position-closer/diamond/interfaces/IDiam
 import {DiamondCutFacet} from "../contracts/position-closer/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../contracts/position-closer/facets/DiamondLoupeFacet.sol";
 import {OwnershipFacet} from "../contracts/position-closer/facets/OwnershipFacet.sol";
-import {MulticallFacet} from "../contracts/position-closer/facets/MulticallFacet.sol";
+import {MulticallFacet} from "../contracts/vault-position-closer/facets/MulticallFacet.sol";
 
 // Vault-specific facets
 import {VersionFacet} from "../contracts/vault-position-closer/facets/VersionFacet.sol";

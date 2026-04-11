@@ -8,6 +8,6 @@
     "UniswapV3Vault": "0xD85A1ECB2F8515D8f542B1efcb10409E47be643c",
     "AllowlistedUniswapV3Vault": "0xFf266AA88BD2B1496eb354116b70D845d8a896c6",
     "UniswapV3VaultFactory": "0x463570772794a2708AcB15f7ba7073f15cc4000A",
-    "UniswapV3VaultPositionCloser": "0xAA1733c4B6D389aF063FD39295085ABEd66Fda8f"
+    "UniswapV3VaultPositionCloser": "0x13d13B15BbE9b06C0279a7aB5f0a898EA3f25A40"
   }
 }

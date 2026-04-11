@@ -155,7 +155,7 @@ async function main(): Promise<void> {
     console.log('');
     console.log('To register in database, run:');
     console.log('');
-    console.log(`  CONTRACT_ADDRESS=${diamondAddress} CHAIN_ID=${chainId} pnpm db:upsert-contract`);
+    console.log(`  CONTRACT_ADDRESS=${diamondAddress} CHAIN_ID=${chainId} CONTRACT_NAME=UniswapV3VaultPositionCloser pnpm db:upsert-contract`);
     console.log('');
     console.log('Or export for later use:');
     console.log('');
