@@ -149,7 +149,14 @@ export function isDecreaseEvent(eventType: EventType): boolean {
  * @returns True if this is a COLLECT event
  */
 export function isCollectEvent(eventType: EventType): boolean {
-  return eventType === 'COLLECT' || eventType === 'VAULT_COLLECT_YIELD';
+  return eventType === 'COLLECT';
+}
+
+/**
+ * Check if an event type is a vault yield collection
+ */
+export function isVaultCollectEvent(eventType: EventType): boolean {
+  return eventType === 'VAULT_COLLECT_YIELD';
 }
 
 /**
@@ -157,5 +164,13 @@ export function isCollectEvent(eventType: EventType): boolean {
  */
 export function isLifecycleEvent(eventType: EventType): boolean {
   return eventType === 'MINT' || eventType === 'BURN' || eventType === 'TRANSFER';
+}
+
+/**
+ * Check if an event type is a vault lifecycle event (VAULT_MINT, VAULT_BURN, VAULT_TRANSFER_IN/OUT)
+ */
+export function isVaultLifecycleEvent(eventType: EventType): boolean {
+  return eventType === 'VAULT_MINT' || eventType === 'VAULT_BURN'
+    || eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT';
 }
 
