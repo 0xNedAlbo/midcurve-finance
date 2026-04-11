@@ -15,6 +15,7 @@ import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
 import { IncreaseDepositPage } from './pages/IncreaseDepositPage';
 import { VaultIncreaseDepositPage } from './pages/VaultIncreaseDepositPage';
+import { VaultWithdrawPage } from './pages/VaultWithdrawPage';
 import { WithdrawPage } from './pages/WithdrawPage';
 import { RiskTriggersPage } from './pages/RiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
@@ -90,6 +91,10 @@ function ConfigGate() {
               <Route
                 path="/positions/withdraw/:protocol/:chain/:nftId"
                 element={<WithdrawPage />}
+              />
+              <Route
+                path="/positions/withdraw/uniswapv3-vault/:chain/:vaultAddress"
+                element={<VaultWithdrawPage />}
               />
               <Route
                 path="/positions/triggers/:protocol/:chain/:nftId"

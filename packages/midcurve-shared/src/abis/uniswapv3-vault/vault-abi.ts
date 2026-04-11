@@ -205,6 +205,27 @@ export const UniswapV3VaultAbi = [
     stateMutability: 'nonpayable',
   },
 
+  {
+    type: 'function',
+    name: 'burn',
+    inputs: [
+      { name: 'shares', type: 'uint256' },
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'minAmounts', type: 'uint256[]' },
+          { name: 'recipient', type: 'address' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
+    ],
+    outputs: [
+      { name: 'tokenAmounts', type: 'uint256[]' },
+    ],
+    stateMutability: 'nonpayable',
+  },
+
   // ============ IMultiTokenVault events ============
   {
     type: 'event',

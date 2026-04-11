@@ -101,12 +101,16 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
         {isClosed ? 'Reopen Position' : 'Increase Deposit'}
       </button>
 
-      {/* Withdraw — stub, disabled for now */}
+      {/* Withdraw */}
       {!isClosed && (
         <button
-          disabled
-          title="Withdraw is not yet available for vault positions"
-          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors text-slate-500 bg-slate-800/30 border-slate-600/30 cursor-not-allowed"
+          onClick={() => {
+            const chainSlug = getChainSlugByChainId(config.chainId);
+            if (chainSlug) {
+              navigate(`/positions/withdraw/uniswapv3-vault/${chainSlug}/${config.vaultAddress}`, { state: { returnTo: location.pathname } });
+            }
+          }}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
         >
           <Minus className="w-3 h-3" />
           Withdraw
