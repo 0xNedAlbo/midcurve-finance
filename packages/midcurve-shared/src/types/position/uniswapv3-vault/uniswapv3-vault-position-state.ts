@@ -105,7 +105,11 @@ export function vaultPositionStateToJSON(
     operatorAddress: state.operatorAddress,
     isClosed: state.isClosed,
     isOwnedByUser: state.isOwnedByUser,
-    // Pool-level fields intentionally omitted from API responses
+    sqrtPriceX96: state.sqrtPriceX96.toString(),
+    currentTick: state.currentTick,
+    poolLiquidity: state.poolLiquidity.toString(),
+    feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
+    feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
   };
 }
 
