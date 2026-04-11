@@ -3,15 +3,16 @@
  *
  * Layout: | status-icon | SL@2800.03 -> USDC ✏️ | ✕ |
  *
- * Vault-specific:
- * - Cancel uses useVaultCancelCloseOrder (vault closer contract)
- * - Status toggle navigates to wizard (vault close order API endpoints not yet implemented)
- * - Edit navigates to vault risk triggers wizard
+ * - Left zone: monitoring state toggle (click to pause/resume)
+ *   - For inactive orders: on-chain setOperator() tx via vault closer, then API toggle
+ *   - For paused/failed/monitoring: API-only toggle via vault endpoint
+ * - Middle zone: price label + pen icon (click to open wizard)
+ * - Right zone: cancel order (on-chain tx via vault closer)
  */
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Eye,
   Pause,
@@ -23,8 +24,12 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useChainId, useSwitchChain } from 'wagmi';
+import type { Address } from 'viem';
 import type { SerializedCloseOrder } from '@midcurve/api-shared';
+import { useVaultSetAutomationState } from '@/hooks/automation/useVaultSetAutomationState';
 import { useVaultCancelCloseOrder } from '@/hooks/automation/useVaultCancelCloseOrder';
+import { useVaultUpdateCloseOrder } from '@/hooks/automation/useVaultUpdateCloseOrder';
+import { useConfig } from '@/providers/ConfigProvider';
 import type { OrderType } from '@/hooks/automation/useCreateCloseOrder';
 import type { OrderButtonVisualState, OrderButtonLabel } from './order-button-utils';
 
@@ -52,28 +57,28 @@ const STATUS_ICON_CONFIG: Record<
     Icon: Eye,
     colorClass: 'text-green-400',
     hoverClass: 'hover:text-green-300 hover:bg-green-900/30',
-    title: 'Monitoring — click to edit in wizard',
+    title: 'Monitoring — click to pause',
     interactive: true,
   },
   paused: {
     Icon: Pause,
     colorClass: 'text-slate-400',
     hoverClass: 'hover:text-slate-300 hover:bg-slate-700/30',
-    title: 'Paused — click to edit in wizard',
+    title: 'Paused — click to resume',
     interactive: true,
   },
   suspended: {
     Icon: AlertTriangle,
     colorClass: 'text-red-400',
     hoverClass: 'hover:text-red-300 hover:bg-red-900/30',
-    title: 'Failed — click to edit in wizard',
+    title: 'Failed — click to resume monitoring',
     interactive: true,
   },
   inactive: {
     Icon: EyeOff,
     colorClass: 'text-slate-500',
     hoverClass: 'hover:text-slate-400 hover:bg-slate-700/30',
-    title: 'Inactive — click to edit in wizard',
+    title: 'Inactive — click to activate monitoring',
     interactive: true,
   },
   executing: {
@@ -94,7 +99,7 @@ const CONTAINER_STYLE: Record<OrderButtonVisualState, string> = {
 };
 
 export function VaultOrderActionButton({
-  order: _order,
+  order,
   orderType,
   visualState,
   buttonLabel,
@@ -102,16 +107,48 @@ export function VaultOrderActionButton({
   vaultAddress,
   onNavigateToWizard,
 }: VaultOrderActionButtonProps) {
+  const { operatorAddress } = useConfig();
   const walletChainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
+  const setAutomationState = useVaultSetAutomationState();
   const {
     cancelOrder,
     isCancelling,
     isWaitingForConfirmation: isCancelWaiting,
   } = useVaultCancelCloseOrder(chainId, vaultAddress);
+  const {
+    updateOrder,
+    isUpdating: isOperatorUpdating,
+    isWaitingForConfirmation: isOperatorWaiting,
+    isSuccess: isOperatorSuccess,
+    reset: resetOperatorUpdate,
+  } = useVaultUpdateCloseOrder(chainId, vaultAddress);
 
   const isCancelBusy = isCancelling || isCancelWaiting;
-  const [isToggling] = useState(false);
+  const isOperatorBusy = isOperatorUpdating || isOperatorWaiting;
+
+  // Track target state for toggling — keeps spinner until polling catches up
+  const [togglingTo, setTogglingTo] = useState<'monitoring' | 'paused' | null>(null);
+
+  useEffect(() => {
+    if (togglingTo && order.automationState === togglingTo) {
+      setTogglingTo(null);
+    }
+  }, [order.automationState, togglingTo]);
+
+  // After on-chain operator change succeeds, fire PATCH to activate monitoring
+  useEffect(() => {
+    if (isOperatorSuccess && order.closeOrderHash) {
+      resetOperatorUpdate();
+      setTogglingTo('monitoring');
+      setAutomationState.mutate({
+        chainId,
+        vaultAddress,
+        closeOrderHash: order.closeOrderHash,
+        automationState: 'monitoring',
+      });
+    }
+  }, [isOperatorSuccess, order.closeOrderHash, chainId, vaultAddress, setAutomationState, resetOperatorUpdate]);
 
   const ensureCorrectChain = useCallback(async () => {
     if (walletChainId !== chainId) {
@@ -119,11 +156,38 @@ export function VaultOrderActionButton({
     }
   }, [walletChainId, chainId, switchChainAsync]);
 
-  // Status toggle → navigate to wizard (vault API endpoints for inline toggle not yet available)
-  const handleToggleMonitoring = useCallback(() => {
-    onNavigateToWizard();
-  }, [onNavigateToWizard]);
+  // Toggle monitoring state
+  const handleToggleMonitoring = useCallback(async () => {
+    if (!order.closeOrderHash) return;
 
+    // Inactive orders need on-chain operator change first
+    if (visualState === 'inactive') {
+      if (!operatorAddress) return;
+      try {
+        await ensureCorrectChain();
+      } catch {
+        return;
+      }
+      updateOrder({
+        orderType,
+        operatorAddress: operatorAddress as Address,
+        closeOrderHash: order.closeOrderHash,
+      });
+      return;
+    }
+
+    // All other states: API-only toggle
+    const newState = order.automationState === 'monitoring' ? 'paused' : 'monitoring';
+    setTogglingTo(newState);
+    setAutomationState.mutate({
+      chainId,
+      vaultAddress,
+      closeOrderHash: order.closeOrderHash,
+      automationState: newState,
+    });
+  }, [order.automationState, order.closeOrderHash, visualState, operatorAddress, chainId, vaultAddress, orderType, setAutomationState, updateOrder, ensureCorrectChain]);
+
+  // Cancel order on-chain
   const handleCancel = useCallback(async () => {
     try {
       await ensureCorrectChain();
@@ -135,6 +199,7 @@ export function VaultOrderActionButton({
 
   const statusConfig = STATUS_ICON_CONFIG[visualState];
   const { Icon, colorClass, hoverClass, title, interactive } = statusConfig;
+  const isToggling = setAutomationState.isPending || isOperatorBusy || togglingTo !== null;
   const isMonitoring = visualState === 'monitoring';
 
   return (
