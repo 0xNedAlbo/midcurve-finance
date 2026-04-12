@@ -1,8 +1,10 @@
 /**
- * PostJournalEntriesOnPositionEventsRule
+ * UniswapV3PostJournalEntriesRule
  *
- * Subscribes to all position domain events and creates balanced double-entry
- * journal entries in the accounting schema. Only realized entries are created.
+ * Subscribes to UniswapV3 and UniswapV3-Vault position domain events and creates
+ * balanced double-entry journal entries in the accounting schema.
+ *
+ * Protocol-specific: assumes two-token EVM pool with ERC-20 tokens and CoinGecko pricing.
  *
  * Events handled:
  * - position.created           → DR 1000 / CR 3000 (capital contribution)
@@ -19,11 +21,9 @@ import type { ConsumeMessage } from 'amqplib';
 import { prisma } from '@midcurve/database';
 import {
   setupConsumerQueue,
-  ROUTING_PATTERNS,
   ACCOUNT_CODES,
   LEDGER_REF_PREFIX,
   JournalService,
-  JournalBackfillService,
   JournalLineBuilder,
   CoinGeckoClient,
   type DomainEvent,
@@ -33,14 +33,16 @@ import {
   type PositionLiquidityRevertedPayload,
 } from '@midcurve/services';
 import { createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
-import { BusinessRule } from '../base';
+import { BusinessRule } from '../../base';
+import { UniswapV3JournalBackfillService } from './uniswapv3-journal-backfill';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const QUEUE_NAME = 'business-logic.post-journal-entries';
-const ROUTING_PATTERN = ROUTING_PATTERNS.ALL_POSITION_EVENTS;
+const QUEUE_NAME = 'business-logic.uniswapv3-post-journal-entries';
+const UNISWAPV3_ROUTING_PATTERN = 'positions.*.uniswapv3';
+const UNISWAPV3_VAULT_ROUTING_PATTERN = 'positions.*.uniswapv3-vault';
 const FLOAT_TO_BIGINT_SCALE = 1e8;
 
 // =============================================================================
@@ -58,19 +60,19 @@ interface ReportingContext {
 // Rule Implementation
 // =============================================================================
 
-export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
-  readonly ruleName = 'post-journal-entries-on-position-events';
+export class UniswapV3PostJournalEntriesRule extends BusinessRule {
+  readonly ruleName = 'uniswapv3-post-journal-entries';
   readonly ruleDescription =
-    'Creates double-entry journal entries from position domain events';
+    'Creates double-entry journal entries from UniswapV3 position domain events';
 
   private consumerTag: string | null = null;
   private readonly journalService: JournalService;
-  private readonly backfillService: JournalBackfillService;
+  private readonly backfillService: UniswapV3JournalBackfillService;
 
   constructor() {
     super();
     this.journalService = JournalService.getInstance();
-    this.backfillService = JournalBackfillService.getInstance();
+    this.backfillService = UniswapV3JournalBackfillService.getInstance();
   }
 
   // ===========================================================================
@@ -80,7 +82,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   protected async onStartup(): Promise<void> {
     if (!this.channel) throw new Error('No channel available');
 
-    await setupConsumerQueue(this.channel, QUEUE_NAME, ROUTING_PATTERN);
+    // Bind to both uniswapv3 and uniswapv3-vault position events on the same queue
+    await setupConsumerQueue(this.channel, QUEUE_NAME, UNISWAPV3_ROUTING_PATTERN);
+    await this.channel.bindQueue(QUEUE_NAME, 'domain-events', UNISWAPV3_VAULT_ROUTING_PATTERN);
     await this.channel.prefetch(1);
 
     const result = await this.channel.consume(
@@ -90,8 +94,12 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
     );
 
     this.consumerTag = result.consumerTag;
-    this.logger.info({ queueName: QUEUE_NAME, routingPattern: ROUTING_PATTERN },
-      'Subscribed to all position events for journal entries'
+    this.logger.info(
+      {
+        queueName: QUEUE_NAME,
+        routingPatterns: [UNISWAPV3_ROUTING_PATTERN, UNISWAPV3_VAULT_ROUTING_PATTERN],
+      },
+      'Subscribed to UniswapV3 position events for journal entries'
     );
   }
 
@@ -167,7 +175,7 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   /**
    * position.created → Backfill journal entries from ledger event history
    *
-   * Uses JournalBackfillService to replay all ledger events chronologically,
+   * Uses UniswapV3JournalBackfillService to replay all ledger events chronologically,
    * creating journal entries with historic exchange rates. This correctly handles
    * positions imported after ownership changes (e.g., NFT tokenized into a vault)
    * by respecting per-event ownership flags (isIgnored) set during ledger import.

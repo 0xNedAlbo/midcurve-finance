@@ -32,7 +32,6 @@ import {
   UniswapV3AprService,
   SwapRouterService,
   JournalService,
-  JournalBackfillService,
   UniswapV3VaultPositionService,
   UniswapV3VaultLedgerService,
   UserWalletService,
@@ -326,9 +325,3 @@ export function getJournalService(): JournalService {
   return JournalService.getInstance();
 }
 
-/**
- * Get singleton instance of JournalBackfillService
- */
-export function getJournalBackfillService(): JournalBackfillService {
-  return JournalBackfillService.getInstance();
-}

@@ -1,7 +1,7 @@
 /**
- * JournalBackfillService
+ * UniswapV3 Journal Backfill Service
  *
- * Replays a position's ledger event history to create journal entries
+ * Replays a UniswapV3 position's ledger event history to create journal entries
  * with historic exchange rates. Called when a user tracks a position
  * in the accounting system.
  *
@@ -12,15 +12,20 @@
  * - TRANSFER          → DR 1000 / CR 3000 (in) or CR 1000 / DR 3100 + PnL (out)
  *
  * For closed positions, creates a cost basis remainder correction entry.
+ *
+ * Protocol-specific: assumes two-token EVM pool with ERC-20 tokens and CoinGecko pricing.
  */
 
 import { prisma as prismaClient, type PrismaClient } from '@midcurve/database';
 import { ACCOUNT_CODES, LEDGER_REF_PREFIX, createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
-import { createServiceLogger } from '../../logging/index.js';
-import type { ServiceLogger } from '../../logging/index.js';
-import { CoinGeckoClient, findClosestPrice } from '../../clients/coingecko/index.js';
-import { JournalService } from './journal-service.js';
-import { JournalLineBuilder } from './journal-line-builder.js';
+import {
+  createServiceLogger,
+  type ServiceLogger,
+  CoinGeckoClient,
+  findClosestPrice,
+  JournalService,
+  JournalLineBuilder,
+} from '@midcurve/services';
 
 // =============================================================================
 // Types
@@ -58,8 +63,8 @@ const FINANCIAL_EVENT_TYPES = ['INCREASE_POSITION', 'DECREASE_POSITION', 'COLLEC
 // Service
 // =============================================================================
 
-export class JournalBackfillService {
-  private static instance: JournalBackfillService | null = null;
+export class UniswapV3JournalBackfillService {
+  private static instance: UniswapV3JournalBackfillService | null = null;
 
   private readonly prisma: PrismaClient;
   private readonly logger: ServiceLogger;
@@ -68,16 +73,16 @@ export class JournalBackfillService {
 
   constructor(deps?: { prisma?: PrismaClient }) {
     this.prisma = (deps?.prisma ?? prismaClient) as PrismaClient;
-    this.logger = createServiceLogger('JournalBackfillService');
+    this.logger = createServiceLogger('UniswapV3JournalBackfillService');
     this.journalService = JournalService.getInstance();
     this.coingecko = CoinGeckoClient.getInstance();
   }
 
-  static getInstance(): JournalBackfillService {
-    if (!JournalBackfillService.instance) {
-      JournalBackfillService.instance = new JournalBackfillService();
+  static getInstance(): UniswapV3JournalBackfillService {
+    if (!UniswapV3JournalBackfillService.instance) {
+      UniswapV3JournalBackfillService.instance = new UniswapV3JournalBackfillService();
     }
-    return JournalBackfillService.instance;
+    return UniswapV3JournalBackfillService.instance;
   }
 
   /**

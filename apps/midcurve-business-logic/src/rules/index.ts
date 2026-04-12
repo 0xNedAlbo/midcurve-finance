@@ -50,9 +50,8 @@ export { RefreshCoingeckoTokensRule } from './refresh-coingecko-tokens';
 // UniswapV3 protocol-specific rules
 export * from './uniswapv3';
 
-// Accounting rules (double-entry journal system)
-export { PostJournalEntriesOnPositionEventsRule } from './accounting/post-journal-entries-on-position-events';
-export { ReconcileCostBasisCorrectionsRule } from './accounting/reconcile-cost-basis-corrections';
+// Accounting rules (double-entry journal system, protocol-specific)
+export { UniswapV3PostJournalEntriesRule, UniswapV3ReconcileCostBasisRule } from './accounting/uniswapv3';
 
 // Automation rules
 export { RefuelOperatorRule } from './automation/refuel-operator';

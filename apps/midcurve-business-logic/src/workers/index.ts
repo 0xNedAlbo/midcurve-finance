@@ -18,8 +18,8 @@ import {
   EnrichCoingeckoTokensRule,
   RefreshCoingeckoTokensRule,
   ProcessCloseOrderEventsRule,
-  PostJournalEntriesOnPositionEventsRule,
-  ReconcileCostBasisCorrectionsRule,
+  UniswapV3PostJournalEntriesRule,
+  UniswapV3ReconcileCostBasisRule,
   RefuelOperatorRule,
   type BusinessRuleStatus,
 } from '../rules';
@@ -67,11 +67,11 @@ export class RuleManager {
     // Close order lifecycle event handler - syncs close orders with on-chain state
     this.registry.register(new ProcessCloseOrderEventsRule());
 
-    // Accounting rules
-    // Double-entry journal entries from position domain events
-    this.registry.register(new PostJournalEntriesOnPositionEventsRule());
+    // UniswapV3 accounting rules
+    // Double-entry journal entries from UniswapV3 position domain events
+    this.registry.register(new UniswapV3PostJournalEntriesRule());
     // Periodic reconciliation for missed cost basis corrections
-    this.registry.register(new ReconcileCostBasisCorrectionsRule());
+    this.registry.register(new UniswapV3ReconcileCostBasisRule());
 
     // Automation rules
     // Operator gas refueling from treasury WETH

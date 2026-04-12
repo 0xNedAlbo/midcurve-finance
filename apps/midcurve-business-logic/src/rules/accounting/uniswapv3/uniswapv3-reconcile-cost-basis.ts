@@ -1,12 +1,13 @@
 /**
- * ReconcileCostBasisCorrectionsRule
+ * UniswapV3ReconcileCostBasisRule
  *
- * Scheduled rule that finds closed tracked positions with non-zero
- * LP_POSITION_AT_COST balance and creates the missing cost basis correction
- * entries.
+ * Scheduled rule that finds closed UniswapV3/UniswapV3-Vault positions with non-zero
+ * LP_POSITION_AT_COST balance and creates the missing cost basis correction entries.
  *
  * This handles cases where the position.closed domain event was lost or
  * failed processing (e.g., CoinGecko API error during getReportingContext).
+ *
+ * Protocol-specific: assumes two-token EVM pool with ERC-20 tokens and CoinGecko pricing.
  *
  * Schedule: Every hour at minute 42
  */
@@ -18,15 +19,15 @@ import {
   CoinGeckoClient,
 } from '@midcurve/services';
 import { createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
-import { BusinessRule } from '../base';
-import { ruleLog } from '../../lib/logger';
+import { BusinessRule } from '../../base';
+import { ruleLog } from '../../../lib/logger';
 
 const FLOAT_TO_BIGINT_SCALE = 1e8;
 
-export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
-  readonly ruleName = 'reconcile-cost-basis-corrections';
+export class UniswapV3ReconcileCostBasisRule extends BusinessRule {
+  readonly ruleName = 'uniswapv3-reconcile-cost-basis';
   readonly ruleDescription =
-    'Periodically fixes missing cost basis corrections for closed tracked positions';
+    'Periodically fixes missing cost basis corrections for closed UniswapV3 positions';
 
   private readonly journalService: JournalService;
 
@@ -38,14 +39,14 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
   protected async onStartup(): Promise<void> {
     this.registerSchedule(
       '42 * * * *',
-      'Reconcile missing cost basis corrections for closed positions',
+      'Reconcile missing cost basis corrections for closed UniswapV3 positions',
       () => this.executeReconciliation(),
       { timezone: 'UTC', runOnStart: true }
     );
 
     this.logger.info(
       { schedule: '42 * * * * (UTC)' },
-      'Registered cost basis correction reconciliation schedule'
+      'Registered UniswapV3 cost basis correction reconciliation schedule'
     );
   }
 
@@ -63,10 +64,11 @@ export class ReconcileCostBasisCorrectionsRule extends BusinessRule {
 
     const startTime = Date.now();
 
-    // Find all closed positions that have journal entries (i.e., accounting is active)
+    // Find all closed UniswapV3/UniswapV3-Vault positions that have journal entries
     const closedPositions = await prisma.position.findMany({
       where: {
         positionHash: { not: null },
+        protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
       },
       select: {
         id: true,
