@@ -9,8 +9,9 @@ import { UniswapV3VaultAprTab } from "./uniswapv3-vault-apr-tab";
 import { UniswapV3VaultHistoryTab } from "./uniswapv3-vault-history-tab";
 import { UniswapV3VaultTechnicalTab } from "./uniswapv3-vault-technical-tab";
 import { UniswapV3VaultAutomationTab } from "./uniswapv3-vault-automation-tab";
+import { UniswapV3VaultConversionTab } from "./uniswapv3-vault-conversion-tab";
 import { getChainMetadataByChainId } from "@/config/chains";
-import { BarChart3, Clock, TrendingUp, Settings, Shield } from "lucide-react";
+import { BarChart3, Clock, TrendingUp, Settings, Shield, Repeat } from "lucide-react";
 import type {
   UniswapV3VaultPositionConfigResponse,
   UniswapV3VaultPositionStateResponse,
@@ -20,11 +21,12 @@ interface UniswapV3VaultPositionDetailProps {
   position: UniswapV3VaultPositionData;
 }
 
-export type VaultTabType = "overview" | "apr-analysis" | "pnl-analysis" | "automation" | "technical";
+export type VaultTabType = "overview" | "pnl-analysis" | "conversion" | "apr-analysis" | "automation" | "technical";
 
 const vaultTabs = [
   { id: "overview", icon: BarChart3, label: "Overview" },
   { id: "pnl-analysis", icon: Clock, label: "PnL Analysis" },
+  { id: "conversion", icon: Repeat, label: "Conversion" },
   { id: "apr-analysis", icon: TrendingUp, label: "APR Analysis" },
   { id: "automation", icon: Shield, label: "Automation" },
   { id: "technical", icon: Settings, label: "Technical Details" },
@@ -153,6 +155,7 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
       {/* Tab Content */}
       <div className="mt-6">
         {activeTab === "overview" && <UniswapV3VaultOverviewTab position={position} />}
+        {activeTab === "conversion" && <UniswapV3VaultConversionTab position={position} />}
         {activeTab === "apr-analysis" && <UniswapV3VaultAprTab position={position} />}
         {activeTab === "pnl-analysis" && <UniswapV3VaultHistoryTab position={position} />}
         {activeTab === "automation" && <UniswapV3VaultAutomationTab position={position} />}
