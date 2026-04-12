@@ -108,7 +108,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
       )}
 
       {/* Collect Fees */}
-      {!isClosed && (
+      {(!isClosed || hasUnclaimedFees) && (
         <button
           onClick={() => setShowCollectFeesModal(true)}
           className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
