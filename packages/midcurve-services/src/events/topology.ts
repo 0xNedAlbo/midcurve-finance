@@ -37,20 +37,20 @@ export const DOMAIN_QUEUES = {
  * - `#` matches zero or more words
  *
  * Position event routing key format:
- *   positions.{action}.{protocol}.{chainId}.{nftId}
- *   e.g., positions.created.uniswapv3.1.12345
+ *   positions.{action}.{positionType}
+ *   e.g., positions.created.uniswapv3
  *
  * Order event routing key format:
  *   orders.{action}.{orderId}
  *   e.g., orders.triggered.abc123
  */
 export const ROUTING_PATTERNS = {
-  // Position events: positions.{action}.{protocol}.{chainId}.{nftId}
+  // Position events: positions.{action}.{positionType}
   /** All position created events */
   POSITION_CREATED: 'positions.created.#',
   /** All position closed events */
   POSITION_CLOSED: 'positions.closed.#',
-  /** All position burned events (NFT destroyed on-chain) */
+  /** All position burned events (destroyed on-chain) */
   POSITION_BURNED: 'positions.burned.#',
   /** All position deleted events */
   POSITION_DELETED: 'positions.deleted.#',
@@ -62,12 +62,10 @@ export const ROUTING_PATTERNS = {
   POSITION_FEES_COLLECTED: 'positions.fees-collected.#',
   /** All position liquidity reverted events (chain reorgs) */
   POSITION_LIQUIDITY_REVERTED: 'positions.liquidity-reverted.#',
-  /** All position transferred in events (NFT received into user wallet perimeter) */
+  /** All position transferred in events */
   POSITION_TRANSFERRED_IN: 'positions.transferred-in.#',
-  /** All position transferred out events (NFT sent out of user wallet perimeter) */
+  /** All position transferred out events */
   POSITION_TRANSFERRED_OUT: 'positions.transferred-out.#',
-  /** All position state refreshed events */
-  POSITION_STATE_REFRESHED: 'positions.state-refreshed.#',
   /** All position events */
   ALL_POSITION_EVENTS: 'positions.#',
 
@@ -85,22 +83,6 @@ export const ROUTING_PATTERNS = {
 } as const;
 
 /**
- * Position coordinates extracted from positionHash or routing key
- */
-export interface PositionCoordinates {
-  protocol: string;
-  chainId: number;
-  nftId: string;
-}
-
-/**
- * Parsed position routing key (includes action)
- */
-export interface ParsedPositionRoutingKey extends PositionCoordinates {
-  action: string;
-}
-
-/**
  * Map from event type to routing key action
  */
 const POSITION_EVENT_TO_ACTION: Record<string, string> = {
@@ -114,7 +96,6 @@ const POSITION_EVENT_TO_ACTION: Record<string, string> = {
   'position.liquidity.reverted': 'liquidity-reverted',
   'position.transferred.in': 'transferred-in',
   'position.transferred.out': 'transferred-out',
-  'position.state.refreshed': 'state-refreshed',
 };
 
 /**
@@ -141,33 +122,30 @@ export function buildUserRoutingKey(eventType: string, userId: string): string {
 }
 
 /**
- * Parse a positionHash to extract coordinates
+ * Extract the position type (first segment) from a positionHash.
  *
- * @param positionHash - Position hash (e.g., 'uniswapv3/1/12345')
- * @returns Parsed coordinates or null if invalid
+ * @param positionHash - Position hash (e.g., 'uniswapv3/42161/12345', 'hyperliquid/mainnet/BTC-USD')
+ * @returns Position type (e.g., 'uniswapv3', 'hyperliquid')
+ * @throws Error if positionHash is empty or has no segments
  */
-export function parsePositionHash(positionHash: string): PositionCoordinates | null {
-  const parts = positionHash.split('/');
-  if (parts.length !== 3) {
-    return null;
+export function extractPositionType(positionHash: string): string {
+  const slashIndex = positionHash.indexOf('/');
+  const positionType = slashIndex === -1 ? positionHash : positionHash.slice(0, slashIndex);
+  if (!positionType) {
+    throw new Error(`Invalid positionHash: cannot extract position type from "${positionHash}"`);
   }
-  const [protocol, chainIdStr, nftId] = parts;
-  if (!protocol || !chainIdStr || !nftId) {
-    return null;
-  }
-  const chainId = parseInt(chainIdStr, 10);
-  if (isNaN(chainId)) {
-    return null;
-  }
-  return { protocol, chainId, nftId };
+  return positionType;
 }
 
 /**
- * Build a routing key for position events from positionHash
+ * Build a routing key for position events.
+ *
+ * Routing key format: positions.{action}.{positionType}
+ * e.g., positions.created.uniswapv3
  *
  * @param eventType - Full event type (e.g., 'position.created')
- * @param positionHash - Position hash (e.g., 'uniswapv3/1/12345')
- * @returns Routing key (e.g., 'positions.created.uniswapv3.1.12345')
+ * @param positionHash - Position hash (e.g., 'uniswapv3/42161/12345')
+ * @returns Routing key (e.g., 'positions.created.uniswapv3')
  * @throws Error if event type is unknown or positionHash is invalid
  */
 export function buildPositionRoutingKey(eventType: string, positionHash: string): string {
@@ -175,34 +153,8 @@ export function buildPositionRoutingKey(eventType: string, positionHash: string)
   if (!action) {
     throw new Error(`Unknown position event type: ${eventType}`);
   }
-  const coords = parsePositionHash(positionHash);
-  if (!coords) {
-    throw new Error(`Invalid positionHash format: ${positionHash}`);
-  }
-  return `positions.${action}.${coords.protocol}.${coords.chainId}.${coords.nftId}`;
-}
-
-/**
- * Parse a position routing key to extract coordinates
- *
- * @param routingKey - Routing key (e.g., 'positions.created.uniswapv3.1.12345')
- * @returns Parsed coordinates or null if invalid
- */
-export function parsePositionRoutingKey(routingKey: string): ParsedPositionRoutingKey | null {
-  const parts = routingKey.split('.');
-  if (parts.length !== 5 || parts[0] !== 'positions') {
-    return null;
-  }
-  const [, action, protocol, chainIdStr, nftId] = parts;
-  if (!action || !protocol || !chainIdStr || !nftId) {
-    return null;
-  }
-  return {
-    action,
-    protocol,
-    chainId: parseInt(chainIdStr, 10),
-    nftId,
-  };
+  const positionType = extractPositionType(positionHash);
+  return `positions.${action}.${positionType}`;
 }
 
 /**

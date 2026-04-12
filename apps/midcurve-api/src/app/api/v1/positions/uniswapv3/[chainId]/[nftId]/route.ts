@@ -13,6 +13,7 @@ import { withSessionAuth } from '@/middleware/with-session-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import {
   getDomainEventPublisher,
+  type PositionLifecyclePayload,
 } from '@midcurve/services';
 import {
   createSuccessResponse,
@@ -473,12 +474,15 @@ export async function PUT(
 
       // 4. Emit position.created domain event
       const eventPublisher = getDomainEventPublisher();
-      await eventPublisher.createAndPublish({
+      await eventPublisher.createAndPublish<PositionLifecyclePayload>({
         type: 'position.created',
         entityId: position.id,
         entityType: 'position',
         userId: user.id,
-        payload: position.toJSON(),
+        payload: {
+          positionId: position.id,
+          positionHash: position.positionHash,
+        },
         source: 'api',
         traceId: requestId,
       });

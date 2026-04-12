@@ -5,8 +5,6 @@
  * Events are published to RabbitMQ for decoupled, event-driven processing.
  */
 
-import type { PositionJSON } from '@midcurve/shared';
-
 // ============================================================
 // Event Type Discriminators
 // ============================================================
@@ -24,8 +22,7 @@ export type PositionEventType =
   | 'position.liquidity.reverted'
   | 'position.fees.collected'
   | 'position.transferred.in'
-  | 'position.transferred.out'
-  | 'position.state.refreshed';
+  | 'position.transferred.out';
 
 /**
  * Close order event types - emitted when close order on-chain state changes
@@ -111,155 +108,51 @@ export interface DomainEvent<TPayload = unknown> {
 // ============================================================
 
 /**
- * Payload for position.created event
+ * Payload for position lifecycle events (created, closed, burned, deleted).
  *
- * Contains the full position data including nested pool and token information
- * for complete audit trails and downstream business processes.
- */
-export type PositionCreatedPayload = PositionJSON;
-
-/**
- * Payload for position.closed event
- * Emitted when a position's liquidity drops to 0
+ * Contains only reference IDs — consumers look up position details by positionId
+ * when needed. Protocol-agnostic: works for any position type.
  *
- * Contains the full position data including nested pool and token information
- * for complete audit trails and downstream business processes.
+ * Edge case: for position.deleted the DB row is already gone, but positionHash
+ * is sufficient for cleanup operations (e.g. deleting journal entries by ref).
  */
-export type PositionClosedPayload = PositionJSON;
-
-/**
- * Payload for position.burned event
- * Emitted when a position NFT is burned on-chain (destroyed permanently)
- *
- * Contains the full position data including nested pool and token information
- * for complete audit trails and downstream business processes.
- */
-export type PositionBurnedPayload = PositionJSON;
-
-/**
- * Payload for position.deleted event
- * Emitted when a position is removed from the database by user action
- *
- * Contains the full position data including nested pool and token information
- * for complete audit trails and downstream business processes.
- */
-export type PositionDeletedPayload = PositionJSON;
-
-/**
- * Payload for position.liquidity.increased event
- */
-export interface PositionLiquidityIncreasedPayload {
+export interface PositionLifecyclePayload {
   positionId: string;
+  /** Composite position identity: "positionType/...type-specific-segments" */
   positionHash: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  /** Amount of liquidity added (as string for bigint) */
-  liquidityDelta: string;
-  /** New total liquidity after increase (as string for bigint) */
-  liquidityAfter: string;
-  /** Token0 amount deposited (as string for bigint) */
-  token0Amount: string;
-  /** Token1 amount deposited (as string for bigint) */
-  token1Amount: string;
-  /** Block timestamp of the event */
+}
+
+/**
+ * Payload for position events linked to a ledger event
+ * (liquidity.increased, liquidity.decreased, fees.collected, transferred.in/out).
+ *
+ * Contains only reference IDs — consumers look up financial details from the
+ * PositionLedgerEvent via ledgerInputHash. Protocol-agnostic: the base ledger
+ * event has universal financial fields (tokenValue, deltaCostBasis, deltaPnl, etc.).
+ */
+export interface PositionLedgerEventPayload {
+  positionId: string;
+  /** Composite position identity: "positionType/...type-specific-segments" */
+  positionHash: string;
+  /** Composite ledger event ID for deterministic lookup */
+  ledgerInputHash: string;
+  /** Block timestamp of the event (ISO 8601) */
   eventTimestamp: string;
 }
 
 /**
- * Payload for position.liquidity.decreased event
- */
-export interface PositionLiquidityDecreasedPayload {
-  positionId: string;
-  positionHash: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  /** Amount of liquidity removed (as string for bigint) */
-  liquidityDelta: string;
-  /** New total liquidity after decrease (as string for bigint) */
-  liquidityAfter: string;
-  /** Token0 amount withdrawn (as string for bigint) */
-  token0Amount: string;
-  /** Token1 amount withdrawn (as string for bigint) */
-  token1Amount: string;
-  /** Block timestamp of the event */
-  eventTimestamp: string;
-}
-
-/**
- * Payload for position.fees.collected event
- */
-export interface PositionFeesCollectedPayload {
-  positionId: string;
-  positionHash: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  /** Fees collected in token0 (as string for bigint) */
-  fees0: string;
-  /** Fees collected in token1 (as string for bigint) */
-  fees1: string;
-  /** Total fees collected value in quote token (as string for bigint) */
-  feesValueInQuote: string;
-  /** Block timestamp of the collection */
-  eventTimestamp: string;
-}
-
-/**
- * Payload for position.liquidity.reverted event
- * Emitted when a chain reorg causes ledger events to be removed from a position
+ * Payload for position.liquidity.reverted event.
+ * Emitted when a chain reorg causes ledger events to be removed from a position.
  */
 export interface PositionLiquidityRevertedPayload {
   positionId: string;
   positionHash: string;
-  chainId: number;
-  nftId: string;
   /** Block hash of the reverted block */
   blockHash: string;
   /** Number of ledger events removed */
   deletedCount: number;
   /** ISO 8601 timestamp when the revert was detected */
   revertedAt: string;
-}
-
-/**
- * Payload for position.transferred.in / position.transferred.out events
- * Emitted when an NFT position is transferred to or from the user's wallet perimeter
- */
-export interface PositionTransferredPayload {
-  positionId: string;
-  positionHash: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  /** Fair market value at time of transfer (quote token units, bigint as string) */
-  tokenValue: string;
-  /** Cost basis change: positive for transfer-in, negative for transfer-out (bigint as string) */
-  deltaCostBasis: string;
-  /** Realized PnL at transfer (only meaningful for transfer-out) (bigint as string) */
-  deltaPnl: string;
-  /** Block timestamp of the transfer */
-  eventTimestamp: string;
-}
-
-/**
- * Payload for position.state.refreshed event
- */
-export interface PositionStateRefreshedPayload {
-  positionId: string;
-  positionHash: string;
-  poolId: string;
-  chainId: number;
-  nftId: string;
-  /** New liquidity value (as string for bigint) */
-  liquidity: string;
-  /** Current value in quote token (as string for bigint) */
-  currentValue: string;
-  /** Unrealized PnL (as string for bigint) */
-  unrealizedPnl: string;
-  /** Unclaimed yield in quote token (as string for bigint) */
-  unclaimedYield: string;
 }
 
 // ============================================================
@@ -383,59 +276,25 @@ export interface CloseOrderFailedPayload {
 // Type-Safe Event Types
 // ============================================================
 
-/**
- * Position closed event with typed payload
- */
-export type PositionClosedEvent = DomainEvent<PositionClosedPayload>;
+/** Position lifecycle event (created/closed/burned/deleted) */
+export type PositionLifecycleEvent = DomainEvent<PositionLifecyclePayload>;
 
-/**
- * Position liquidity increased event with typed payload
- */
-export type PositionLiquidityIncreasedEvent = DomainEvent<PositionLiquidityIncreasedPayload>;
+/** Position ledger-linked event (liquidity/fees/transfer) */
+export type PositionLedgerEvent = DomainEvent<PositionLedgerEventPayload>;
 
-/**
- * Position liquidity decreased event with typed payload
- */
-export type PositionLiquidityDecreasedEvent = DomainEvent<PositionLiquidityDecreasedPayload>;
-
-/**
- * Position fees collected event with typed payload
- */
-export type PositionFeesCollectedEvent = DomainEvent<PositionFeesCollectedPayload>;
-
-/**
- * Position liquidity reverted event with typed payload
- */
+/** Position liquidity reverted event */
 export type PositionLiquidityRevertedEvent = DomainEvent<PositionLiquidityRevertedPayload>;
 
-/**
- * Position transferred in event with typed payload
- */
-export type PositionTransferredInEvent = DomainEvent<PositionTransferredPayload>;
-
-/**
- * Position transferred out event with typed payload
- */
-export type PositionTransferredOutEvent = DomainEvent<PositionTransferredPayload>;
-
-/**
- * Close order cancelled event with typed payload
- */
+/** Close order cancelled event */
 export type CloseOrderCancelledEvent = DomainEvent<CloseOrderCancelledPayload>;
 
-/**
- * Close order triggered event with typed payload
- */
+/** Close order triggered event */
 export type CloseOrderTriggeredEvent = DomainEvent<CloseOrderTriggeredPayload>;
 
-/**
- * Close order executed event with typed payload
- */
+/** Close order executed event */
 export type CloseOrderExecutedEvent = DomainEvent<CloseOrderExecutedPayload>;
 
-/**
- * Close order modified event with typed payload
- */
+/** Close order modified event */
 export type CloseOrderModifiedEvent = DomainEvent<CloseOrderModifiedPayload>;
 
 // ============================================================

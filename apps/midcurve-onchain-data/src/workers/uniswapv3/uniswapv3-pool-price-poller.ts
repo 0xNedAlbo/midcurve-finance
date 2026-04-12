@@ -7,7 +7,7 @@
  */
 
 import { prisma } from '@midcurve/database';
-import type { PositionJSON } from '@midcurve/shared';
+// PositionJSON import removed — handlePositionCreated now uses DB lookup
 import { getEvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
 import {
@@ -267,41 +267,51 @@ export class PoolPriceSubscriber {
    * Handle position.created domain event.
    * Adds the pool to polling if not already subscribed.
    *
-   * @param payload - Position data from the domain event
+   * @param positionId - Database position ID from the domain event
    */
-  async handlePositionCreated(payload: PositionJSON): Promise<void> {
-    // 1. Filter by protocol — handle both UniswapV3 NFT and vault positions (same pools)
-    if (!['uniswapv3', 'uniswapv3-vault'].includes(payload.protocol)) {
-      log.debug({ protocol: payload.protocol, positionId: payload.id }, 'Ignoring non-UniswapV3 position');
+  async handlePositionCreated(positionId: string): Promise<void> {
+    // 1. Look up position from DB
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
+      select: { id: true, protocol: true, config: true },
+    });
+    if (!position) {
+      log.warn({ positionId }, 'Position not found for position.created event');
       return;
     }
 
-    // 2. Extract and validate config
-    const config = payload.config as unknown as PositionConfig;
+    // 2. Filter by protocol — handle both UniswapV3 NFT and vault positions (same pools)
+    if (!['uniswapv3', 'uniswapv3-vault'].includes(position.protocol)) {
+      log.debug({ protocol: position.protocol, positionId }, 'Ignoring non-UniswapV3 position');
+      return;
+    }
+
+    // 3. Extract and validate config
+    const config = position.config as unknown as PositionConfig;
     if (!config.chainId || !config.poolAddress) {
-      log.warn({ positionId: payload.id }, 'Position config missing chainId or poolAddress');
+      log.warn({ positionId }, 'Position config missing chainId or poolAddress');
       return;
     }
 
-    // 3. Validate chain support
+    // 4. Validate chain support
     if (!isSupportedChain(config.chainId)) {
-      log.debug({ chainId: config.chainId, positionId: payload.id }, 'Unsupported chain, ignoring');
+      log.debug({ chainId: config.chainId, positionId }, 'Unsupported chain, ignoring');
       return;
     }
 
     const chainId = config.chainId;
     const normalizedAddress = config.poolAddress.toLowerCase();
 
-    // 4. Skip if pool already subscribed (idempotency)
+    // 5. Skip if pool already subscribed (idempotency)
     if (this.subscribedPools.has(normalizedAddress)) {
-      log.debug({ poolAddress: normalizedAddress, positionId: payload.id }, 'Pool already subscribed, skipping');
+      log.debug({ poolAddress: normalizedAddress, positionId }, 'Pool already subscribed, skipping');
       return;
     }
 
-    // 5. Compute pool ID from chain/address
+    // 6. Compute pool ID from chain/address
     const poolId = `uniswapv3/${chainId}/${normalizedAddress}`;
 
-    // 6. Track and add to polling batch
+    // 7. Track and add to polling batch
     this.subscribedPools.set(normalizedAddress, {
       poolId,
       poolAddress: normalizedAddress,
@@ -313,7 +323,7 @@ export class PoolPriceSubscriber {
       poolId,
     };
 
-    log.info({ chainId, poolAddress: normalizedAddress, positionId: payload.id }, 'Adding pool from position.created event');
+    log.info({ chainId, poolAddress: normalizedAddress, positionId }, 'Adding pool from position.created event');
     await this.addPoolToBatch(chainId, poolInfo);
   }
 

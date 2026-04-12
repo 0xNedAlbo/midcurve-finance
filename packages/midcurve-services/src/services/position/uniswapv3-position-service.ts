@@ -33,14 +33,9 @@ import type { ServiceLogger } from "../../logging/index.js";
 import { getDomainEventPublisher } from "../../events/index.js";
 import type {
     DomainEventPublisher,
-    PositionClosedPayload,
-    PositionBurnedPayload,
-    PositionDeletedPayload,
-    PositionLiquidityIncreasedPayload,
-    PositionLiquidityDecreasedPayload,
-    PositionFeesCollectedPayload,
+    PositionLifecyclePayload,
+    PositionLedgerEventPayload,
     PositionLiquidityRevertedPayload,
-    PositionTransferredPayload,
 } from "../../events/index.js";
 import { EvmConfig } from "../../config/evm.js";
 import {
@@ -1419,13 +1414,16 @@ export class UniswapV3PositionService {
                 }
 
                 // Publish position.closed domain event (transactional via outbox)
-                await this.eventPublisher.createAndPublish<PositionClosedPayload>(
+                await this.eventPublisher.createAndPublish<PositionLifecyclePayload>(
                     {
                         type: "position.closed",
                         entityType: "position",
                         entityId: closedPosition.id,
                         userId: closedPosition.userId,
-                        payload: closedPosition.toJSON(),
+                        payload: {
+                            positionId: closedPosition.id,
+                            positionHash: closedPosition.positionHash,
+                        },
                         source: "ledger-sync",
                     },
                     dbTx,
@@ -1527,8 +1525,6 @@ export class UniswapV3PositionService {
                             payload: {
                                 positionId: existingPosition.id,
                                 positionHash: existingPosition.positionHash,
-                                chainId,
-                                nftId: nftId.toString(),
                                 blockHash,
                                 deletedCount: count,
                                 revertedAt: new Date().toISOString(),
@@ -1694,8 +1690,6 @@ export class UniswapV3PositionService {
                     payload: {
                         positionId: position.id,
                         positionHash: position.positionHash,
-                        chainId,
-                        nftId: nftId.toString(),
                         blockHash,
                         deletedCount,
                         revertedAt: new Date().toISOString(),
@@ -1707,8 +1701,7 @@ export class UniswapV3PositionService {
         }
 
         // Batch-query ledger events for all inserted results to check isIgnored
-        // and to get real financial data for TRANSFER events (which have zero
-        // values in eventDetail because recalculateAggregates computes them).
+        // and to determine TRANSFER direction (deltaCostBasis sign).
         const insertedHashes = importResult.results
             .filter((r): r is Extract<typeof r, { action: "inserted" }> => r.action === "inserted")
             .map((r) => r.inputHash);
@@ -1716,10 +1709,7 @@ export class UniswapV3PositionService {
         const ledgerEventsByHash = new Map<string, {
             inputHash: string;
             isIgnored: boolean;
-            eventType: string;
-            tokenValue: string;
             deltaCostBasis: string;
-            deltaPnl: string;
         }>();
         if (insertedHashes.length > 0) {
             const db = dbTx ?? this.prisma;
@@ -1728,10 +1718,7 @@ export class UniswapV3PositionService {
                 select: {
                     inputHash: true,
                     isIgnored: true,
-                    eventType: true,
-                    tokenValue: true,
                     deltaCostBasis: true,
-                    deltaPnl: true,
                 },
             });
             for (const row of ledgerRows) {
@@ -1747,8 +1734,7 @@ export class UniswapV3PositionService {
             const ledgerEvent = ledgerEventsByHash.get(result.inputHash);
             if (ledgerEvent?.isIgnored) continue;
 
-            const { validEventType, amount0, amount1, liquidityDelta, blockTimestamp } =
-                result.eventDetail;
+            const { validEventType, blockTimestamp } = result.eventDetail;
 
             if (validEventType === "TRANSFER") {
                 // TRANSFER events: emit position.transferred.in or .out
@@ -1761,7 +1747,7 @@ export class UniswapV3PositionService {
                     ? ("position.transferred.out" as const)
                     : ("position.transferred.in" as const);
 
-                await publisher.createAndPublish<PositionTransferredPayload>(
+                await publisher.createAndPublish<PositionLedgerEventPayload>(
                     {
                         type,
                         entityId: position.id,
@@ -1770,12 +1756,7 @@ export class UniswapV3PositionService {
                         payload: {
                             positionId: position.id,
                             positionHash: position.positionHash,
-                            poolId: position.pool.id,
-                            chainId,
-                            nftId: nftId.toString(),
-                            tokenValue: ledgerEvent.tokenValue,
-                            deltaCostBasis: ledgerEvent.deltaCostBasis,
-                            deltaPnl: ledgerEvent.deltaPnl,
+                            ledgerInputHash: result.inputHash,
                             eventTimestamp: blockTimestamp.toISOString(),
                         },
                         source: "business-logic",
@@ -1783,10 +1764,7 @@ export class UniswapV3PositionService {
                     dbTx,
                 );
             } else if (validEventType === "COLLECT") {
-                const feeDelta =
-                    importResult.aggregates.collectedYieldAfter -
-                    importResult.preImportAggregates.collectedYieldAfter;
-                await publisher.createAndPublish<PositionFeesCollectedPayload>(
+                await publisher.createAndPublish<PositionLedgerEventPayload>(
                     {
                         type: "position.fees.collected",
                         entityId: position.id,
@@ -1795,12 +1773,7 @@ export class UniswapV3PositionService {
                         payload: {
                             positionId: position.id,
                             positionHash: position.positionHash,
-                            poolId: position.pool.id,
-                            chainId,
-                            nftId: nftId.toString(),
-                            fees0: amount0.toString(),
-                            fees1: amount1.toString(),
-                            feesValueInQuote: feeDelta.toString(),
+                            ledgerInputHash: result.inputHash,
                             eventTimestamp: blockTimestamp.toISOString(),
                         },
                         source: "business-logic",
@@ -1812,9 +1785,7 @@ export class UniswapV3PositionService {
                     validEventType === "INCREASE_LIQUIDITY"
                         ? ("position.liquidity.increased" as const)
                         : ("position.liquidity.decreased" as const);
-                await publisher.createAndPublish<
-                    PositionLiquidityIncreasedPayload | PositionLiquidityDecreasedPayload
-                >(
+                await publisher.createAndPublish<PositionLedgerEventPayload>(
                     {
                         type,
                         entityId: position.id,
@@ -1823,14 +1794,7 @@ export class UniswapV3PositionService {
                         payload: {
                             positionId: position.id,
                             positionHash: position.positionHash,
-                            poolId: position.pool.id,
-                            chainId,
-                            nftId: nftId.toString(),
-                            liquidityDelta: liquidityDelta.toString(),
-                            liquidityAfter:
-                                importResult.aggregates.liquidityAfter.toString(),
-                            token0Amount: amount0.toString(),
-                            token1Amount: amount1.toString(),
+                            ledgerInputHash: result.inputHash,
                             eventTimestamp: blockTimestamp.toISOString(),
                         },
                         source: "business-logic",
@@ -3129,13 +3093,16 @@ export class UniswapV3PositionService {
         }
 
         // Publish position.burned domain event (transactional via outbox)
-        await this.eventPublisher.createAndPublish<PositionBurnedPayload>(
+        await this.eventPublisher.createAndPublish<PositionLifecyclePayload>(
             {
                 type: "position.burned",
                 entityType: "position",
                 entityId: burnedPosition.id,
                 userId: burnedPosition.userId,
-                payload: burnedPosition.toJSON(),
+                payload: {
+                    positionId: burnedPosition.id,
+                    positionHash: burnedPosition.positionHash,
+                },
                 source: "ledger-sync",
             },
             tx,
@@ -3898,13 +3865,16 @@ export class UniswapV3PositionService {
         await this.prisma.$transaction(async (tx) => {
             await tx.position.delete({ where: { id } });
 
-            await this.eventPublisher.createAndPublish<PositionDeletedPayload>(
+            await this.eventPublisher.createAndPublish<PositionLifecyclePayload>(
                 {
                     type: "position.deleted",
                     entityType: "position",
                     entityId: existing.id,
                     userId: existing.userId,
-                    payload: positionJSON,
+                    payload: {
+                        positionId: existing.id,
+                        positionHash: positionJSON.positionHash,
+                    },
                     source: "api",
                 },
                 tx,

@@ -33,13 +33,9 @@ import type { ServiceLogger } from '../../logging/index.js';
 import { getDomainEventPublisher } from '../../events/index.js';
 import type {
     DomainEventPublisher,
-    PositionClosedPayload,
-    PositionDeletedPayload,
+    PositionLifecyclePayload,
+    PositionLedgerEventPayload,
     PositionLiquidityRevertedPayload,
-    PositionLiquidityIncreasedPayload,
-    PositionLiquidityDecreasedPayload,
-    PositionFeesCollectedPayload,
-    PositionTransferredPayload,
 } from '../../events/index.js';
 import { EvmConfig } from '../../config/evm.js';
 import { UNISWAP_V3_POSITION_MANAGER_ABI } from '../../config/uniswapv3.js';
@@ -212,12 +208,15 @@ export class UniswapV3VaultPositionService {
         await this.prisma.$transaction(async (tx) => {
             await tx.position.delete({ where: { id } });
 
-            await this.eventPublisher.createAndPublish<PositionDeletedPayload>({
+            await this.eventPublisher.createAndPublish<PositionLifecyclePayload>({
                 type: 'position.deleted',
                 entityType: 'position',
                 entityId: position.id,
                 userId: position.userId,
-                payload: positionJSON,
+                payload: {
+                    positionId: position.id,
+                    positionHash: positionJSON.positionHash,
+                },
                 source: 'api',
             }, tx);
         });
@@ -540,8 +539,6 @@ export class UniswapV3VaultPositionService {
                 payload: {
                     positionId: position.id,
                     positionHash: position.positionHash,
-                    chainId: position.chainId,
-                    nftId: position.underlyingTokenId.toString(),
                     blockHash,
                     deletedCount,
                     revertedAt: new Date().toISOString(),
@@ -657,8 +654,6 @@ export class UniswapV3VaultPositionService {
                 payload: {
                     positionId: position.id,
                     positionHash: position.positionHash,
-                    chainId,
-                    nftId: position.underlyingTokenId.toString(),
                     blockHash,
                     deletedCount,
                     revertedAt: new Date().toISOString(),
@@ -673,13 +668,10 @@ export class UniswapV3VaultPositionService {
         // so all imported events are relevant (no isIgnored check needed).
         for (const result of importResult.perLogResults) {
             if (result.action !== 'inserted') continue;
-            const { eventType, shares, blockTimestamp } = result.eventDetail;
+            const { eventType, blockTimestamp } = result.eventDetail;
 
             if (eventType === 'VAULT_COLLECT_YIELD') {
-                const feeDelta =
-                    importResult.postImportAggregates.collectedYieldAfter -
-                    importResult.preImportAggregates.collectedYieldAfter;
-                await publisher.createAndPublish<PositionFeesCollectedPayload>({
+                await publisher.createAndPublish<PositionLedgerEventPayload>({
                     type: 'position.fees.collected',
                     entityId: position.id,
                     entityType: 'position',
@@ -687,55 +679,16 @@ export class UniswapV3VaultPositionService {
                     payload: {
                         positionId: position.id,
                         positionHash: position.positionHash,
-                        poolId: position.pool.id,
-                        chainId,
-                        nftId: position.underlyingTokenId.toString(),
-                        fees0: '0',
-                        fees1: '0',
-                        feesValueInQuote: feeDelta.toString(),
+                        ledgerInputHash: result.inputHash,
                         eventTimestamp: blockTimestamp.toISOString(),
                     },
                     source: 'business-logic',
                 }, dbTx);
             } else if (eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT' || eventType === 'VAULT_CLOSE_ORDER_EXECUTED') {
-                // Transfer events: read real financial data from DB (computed by recalculateAggregates)
-                const db = dbTx ?? this.prisma;
-                const ledgerEvent = await db.positionLedgerEvent.findFirst({
-                    where: { positionId: id, inputHash: result.inputHash },
-                    select: { tokenValue: true, deltaCostBasis: true, deltaPnl: true },
-                });
-                if (ledgerEvent) {
-                    const type = eventType === 'VAULT_TRANSFER_IN'
-                        ? ('position.transferred.in' as const)
-                        : ('position.transferred.out' as const); // VAULT_TRANSFER_OUT and VAULT_CLOSE_ORDER_EXECUTED
-                    await publisher.createAndPublish<PositionTransferredPayload>({
-                        type,
-                        entityId: position.id,
-                        entityType: 'position',
-                        userId: position.userId,
-                        payload: {
-                            positionId: position.id,
-                            positionHash: position.positionHash,
-                            poolId: position.pool.id,
-                            chainId,
-                            nftId: position.underlyingTokenId.toString(),
-                            tokenValue: ledgerEvent.tokenValue,
-                            deltaCostBasis: ledgerEvent.deltaCostBasis,
-                            deltaPnl: ledgerEvent.deltaPnl,
-                            eventTimestamp: blockTimestamp.toISOString(),
-                        },
-                        source: 'business-logic',
-                    }, dbTx);
-                }
-            } else {
-                // VAULT_MINT → position.liquidity.increased
-                // VAULT_BURN → position.liquidity.decreased
-                const type = (eventType === 'VAULT_MINT')
-                    ? ('position.liquidity.increased' as const)
-                    : ('position.liquidity.decreased' as const);
-                await publisher.createAndPublish<
-                    PositionLiquidityIncreasedPayload | PositionLiquidityDecreasedPayload
-                >({
+                const type = eventType === 'VAULT_TRANSFER_IN'
+                    ? ('position.transferred.in' as const)
+                    : ('position.transferred.out' as const); // VAULT_TRANSFER_OUT and VAULT_CLOSE_ORDER_EXECUTED
+                await publisher.createAndPublish<PositionLedgerEventPayload>({
                     type,
                     entityId: position.id,
                     entityType: 'position',
@@ -743,13 +696,26 @@ export class UniswapV3VaultPositionService {
                     payload: {
                         positionId: position.id,
                         positionHash: position.positionHash,
-                        poolId: position.pool.id,
-                        chainId,
-                        nftId: position.underlyingTokenId.toString(),
-                        liquidityDelta: shares.toString(),
-                        liquidityAfter: importResult.postImportAggregates.sharesAfter.toString(),
-                        token0Amount: '0',
-                        token1Amount: '0',
+                        ledgerInputHash: result.inputHash,
+                        eventTimestamp: blockTimestamp.toISOString(),
+                    },
+                    source: 'business-logic',
+                }, dbTx);
+            } else {
+                // VAULT_MINT → position.liquidity.increased
+                // VAULT_BURN → position.liquidity.decreased
+                const type = (eventType === 'VAULT_MINT')
+                    ? ('position.liquidity.increased' as const)
+                    : ('position.liquidity.decreased' as const);
+                await publisher.createAndPublish<PositionLedgerEventPayload>({
+                    type,
+                    entityId: position.id,
+                    entityType: 'position',
+                    userId: position.userId,
+                    payload: {
+                        positionId: position.id,
+                        positionHash: position.positionHash,
+                        ledgerInputHash: result.inputHash,
                         eventTimestamp: blockTimestamp.toISOString(),
                     },
                     source: 'business-logic',
@@ -876,12 +842,15 @@ export class UniswapV3VaultPositionService {
         if (isClosed && !position.typedState.isClosed) {
             const closedPosition = await this.findById(id, dbTx);
             if (closedPosition) {
-                await this.eventPublisher.createAndPublish<PositionClosedPayload>({
+                await this.eventPublisher.createAndPublish<PositionLifecyclePayload>({
                     type: 'position.closed',
                     entityType: 'position',
                     entityId: closedPosition.id,
                     userId: closedPosition.userId,
-                    payload: closedPosition.toJSON(),
+                    payload: {
+                        positionId: closedPosition.id,
+                        positionHash: closedPosition.positionHash,
+                    },
                     source: 'ledger-sync',
                 }, dbTx);
             }

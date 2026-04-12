@@ -88,17 +88,10 @@ export type {
   // Event envelope
   DomainEvent,
   DomainEventMetadata,
-  // Position payloads
-  PositionCreatedPayload,
-  PositionClosedPayload,
-  PositionBurnedPayload,
-  PositionDeletedPayload,
-  PositionLiquidityIncreasedPayload,
-  PositionLiquidityDecreasedPayload,
-  PositionFeesCollectedPayload,
+  // Position payloads (protocol-agnostic)
+  PositionLifecyclePayload,
+  PositionLedgerEventPayload,
   PositionLiquidityRevertedPayload,
-  PositionTransferredPayload,
-  PositionStateRefreshedPayload,
   // Close order payloads (on-chain state changes)
   CloseOrderCancelReason,
   CloseOrderRegisteredPayload,
@@ -112,13 +105,9 @@ export type {
   // User payloads
   UserRegisteredPayload,
   // Typed events
-  PositionClosedEvent,
-  PositionLiquidityIncreasedEvent,
-  PositionLiquidityDecreasedEvent,
-  PositionFeesCollectedEvent,
+  PositionLifecycleEvent,
+  PositionLedgerEvent,
   PositionLiquidityRevertedEvent,
-  PositionTransferredInEvent,
-  PositionTransferredOutEvent,
   CloseOrderCancelledEvent,
   CloseOrderTriggeredEvent,
   CloseOrderExecutedEvent,
@@ -142,7 +131,7 @@ export {
   DLQ_MESSAGE_TTL_MS,
   // Functions - Position routing keys
   buildPositionRoutingKey,
-  parsePositionRoutingKey,
+  extractPositionType,
   // Functions - Order routing keys
   buildOrderRoutingKey,
   getEventSuffix,
@@ -154,11 +143,6 @@ export {
   setupDomainEventsTopology,
   setupConsumerQueue,
   verifyDomainEventsTopology,
-} from './topology.js';
-
-export type {
-  PositionCoordinates,
-  ParsedPositionRoutingKey,
 } from './topology.js';
 
 // ============================================================

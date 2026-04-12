@@ -9,12 +9,12 @@
  */
 
 import type { Channel } from 'amqplib';
-import type { PositionJSON } from '@midcurve/shared';
 import {
   DomainEventConsumer,
   ROUTING_PATTERNS,
   DOMAIN_EVENTS_EXCHANGE,
   type DomainEvent,
+  type PositionLifecyclePayload,
 } from '@midcurve/services';
 import type { PoolPriceSubscriber } from '../workers/uniswapv3/uniswapv3-pool-price-poller';
 
@@ -25,7 +25,7 @@ import type { PoolPriceSubscriber } from '../workers/uniswapv3/uniswapv3-pool-pr
  * Uses a single queue bound to all event patterns, dispatching based on event type.
  * Notifies the pool price subscriber.
  */
-export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
+export class PositionEventHandler extends DomainEventConsumer<PositionLifecyclePayload> {
   readonly eventPattern = ROUTING_PATTERNS.POSITION_CREATED; // Primary binding
   readonly queueName = 'onchain-data.position-events';
 
@@ -79,7 +79,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
     }
   }
 
-  async handle(event: DomainEvent<PositionJSON>, routingKey: string): Promise<void> {
+  async handle(event: DomainEvent<PositionLifecyclePayload>, routingKey: string): Promise<void> {
     if (!this.poolPriceSubscriber) {
       this.logger.warn({ eventId: event.id }, 'No subscribers set, skipping event');
       return;
@@ -91,7 +91,7 @@ export class PositionEventHandler extends DomainEventConsumer<PositionJSON> {
     );
 
     if (event.type === 'position.created') {
-      await this.poolPriceSubscriber.handlePositionCreated(event.payload);
+      await this.poolPriceSubscriber.handlePositionCreated(event.payload.positionId);
     } else if (event.type === 'position.closed') {
       // Don't unsubscribe — position may be reopened (IncreaseLiquidity on same NFT).
       // Subscriptions are cleaned up on position.deleted or by the inactive cleanup timer.

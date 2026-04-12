@@ -23,7 +23,7 @@ import {
 import type { DiscoverPositionsData } from '@midcurve/api-shared';
 import {
   getDomainEventPublisher,
-  type PositionCreatedPayload,
+  type PositionLifecyclePayload,
 } from '@midcurve/services';
 import { getUniswapV3PositionService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
@@ -88,12 +88,15 @@ export async function POST(request: NextRequest): Promise<Response> {
       // 3. Publish position.created domain events for downstream processing
       const eventPublisher = getDomainEventPublisher();
       for (const position of result.positions) {
-        await eventPublisher.createAndPublish<PositionCreatedPayload>({
+        await eventPublisher.createAndPublish<PositionLifecyclePayload>({
           type: 'position.created',
           entityType: 'position',
           entityId: position.id,
           userId: position.userId,
-          payload: position.toJSON(),
+          payload: {
+            positionId: position.id,
+            positionHash: position.positionHash,
+          },
           source: 'api',
         });
       }

@@ -9,7 +9,6 @@
  * - position.liquidity.increased → DR 1000 / CR 3000 (additional capital)
  * - position.liquidity.decreased → CR 1000 / DR 3100 + realized gain/loss
  * - position.fees.collected    → DR 3100 / CR 4000 (fee income)
- * - position.state.refreshed   → No-op (unrealized entries removed)
  * - position.closed            → Zero out cost basis remainder
  * - position.burned            → No financial entry (gas deferred to Phase 2)
  * - position.deleted           → Delete all journal entries for position
@@ -29,14 +28,9 @@ import {
   CoinGeckoClient,
   type DomainEvent,
   type PositionEventType,
-  type PositionCreatedPayload,
-  type PositionClosedPayload,
-  type PositionDeletedPayload,
-  type PositionLiquidityIncreasedPayload,
-  type PositionLiquidityDecreasedPayload,
-  type PositionFeesCollectedPayload,
+  type PositionLifecyclePayload,
+  type PositionLedgerEventPayload,
   type PositionLiquidityRevertedPayload,
-  type PositionTransferredPayload,
 } from '@midcurve/services';
 import { createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
 import { BusinessRule } from '../base';
@@ -141,27 +135,24 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   ): Promise<void> {
     switch (eventType) {
       case 'position.created':
-        return this.handlePositionCreated(event as DomainEvent<PositionCreatedPayload>);
+        return this.handlePositionCreated(event as DomainEvent<PositionLifecyclePayload>);
       case 'position.liquidity.increased':
-        return this.handleLiquidityIncreased(event as DomainEvent<PositionLiquidityIncreasedPayload>);
+        return this.handleLiquidityIncreased(event as DomainEvent<PositionLedgerEventPayload>);
       case 'position.liquidity.decreased':
-        return this.handleLiquidityDecreased(event as DomainEvent<PositionLiquidityDecreasedPayload>);
+        return this.handleLiquidityDecreased(event as DomainEvent<PositionLedgerEventPayload>);
       case 'position.fees.collected':
-        return this.handleFeesCollected(event as DomainEvent<PositionFeesCollectedPayload>);
+        return this.handleFeesCollected(event as DomainEvent<PositionLedgerEventPayload>);
       case 'position.transferred.in':
-        return this.handleTransferredIn(event as DomainEvent<PositionTransferredPayload>);
+        return this.handleTransferredIn(event as DomainEvent<PositionLedgerEventPayload>);
       case 'position.transferred.out':
-        return this.handleTransferredOut(event as DomainEvent<PositionTransferredPayload>);
-      case 'position.state.refreshed':
-        // No-op: unrealized journal entries (M2M, fee accrual) no longer created
-        return;
+        return this.handleTransferredOut(event as DomainEvent<PositionLedgerEventPayload>);
       case 'position.closed':
-        return this.handlePositionClosed(event as DomainEvent<PositionClosedPayload>);
+        return this.handlePositionClosed(event as DomainEvent<PositionLifecyclePayload>);
       case 'position.burned':
         // No financial entry — gas tracking deferred to Phase 2
         return;
       case 'position.deleted':
-        return this.handlePositionDeleted(event as DomainEvent<PositionDeletedPayload>);
+        return this.handlePositionDeleted(event as DomainEvent<PositionLifecyclePayload>);
       case 'position.liquidity.reverted':
         return this.handleLiquidityReverted(event as DomainEvent<PositionLiquidityRevertedPayload>);
       default:
@@ -184,12 +175,22 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * Falls back to a simple foundation entry if no ledger events exist yet.
    */
   private async handlePositionCreated(
-    event: DomainEvent<PositionCreatedPayload>
+    event: DomainEvent<PositionLifecyclePayload>
   ): Promise<void> {
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const position = event.payload;
-    const positionRef = position.positionHash;
+    const { positionId, positionHash } = event.payload;
+    const positionRef = positionHash;
+
+    // Look up position from DB for protocol-specific config
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
+      select: { id: true, userId: true, protocol: true, config: true, costBasis: true },
+    });
+    if (!position) {
+      this.logger.warn({ positionId }, 'Position not found for position.created');
+      return;
+    }
 
     // Build instrumentRef for backfill
     const positionConfig = position.config as Record<string, unknown>;
@@ -245,9 +246,9 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * creates it here from the position's current costBasis.
    */
   private async handleLiquidityIncreased(
-    event: DomainEvent<PositionLiquidityIncreasedPayload>
+    event: DomainEvent<PositionLedgerEventPayload>
   ): Promise<void> {
-    const { positionId, positionHash } = event.payload;
+    const { positionId, positionHash, ledgerInputHash } = event.payload;
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
@@ -291,10 +292,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
     if (await this.journalService.isProcessed(event.id)) return;
 
-    // Find the corresponding ledger event to get deltaCostBasis
-    const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'INCREASE_POSITION', event.payload.eventTimestamp);
+    // Look up the corresponding ledger event by composite ID
+    const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     if (!ledgerEvent) {
-      this.logger.warn({ positionId, eventId: event.id }, 'No ledger event found for liquidity increase');
+      this.logger.warn({ positionId, ledgerInputHash, eventId: event.id }, 'No ledger event found for liquidity increase');
       return;
     }
 
@@ -330,17 +331,15 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * 4. FX gain/loss from exchange rate difference between WAC and spot
    */
   private async handleLiquidityDecreased(
-    event: DomainEvent<PositionLiquidityDecreasedPayload>
+    event: DomainEvent<PositionLedgerEventPayload>
   ): Promise<void> {
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const { positionId, positionHash } = event.payload;
+    const { positionId, positionHash, ledgerInputHash } = event.payload;
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
-
-
-    const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'DECREASE_POSITION', event.payload.eventTimestamp);
+    const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     if (!ledgerEvent) {
       this.logger.warn({ positionId, eventId: event.id }, 'No ledger event found for liquidity decrease');
       return;
@@ -426,20 +425,19 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * All collected fees go directly to Fee Income (4000).
    */
   private async handleFeesCollected(
-    event: DomainEvent<PositionFeesCollectedPayload>
+    event: DomainEvent<PositionLedgerEventPayload>
   ): Promise<void> {
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const { positionId, positionHash, feesValueInQuote } = event.payload;
+    const { positionId, positionHash, ledgerInputHash } = event.payload;
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
+    // Look up the ledger event by composite ID to get fee amount
+    const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
 
-
-    const totalFees = BigInt(feesValueInQuote);
+    const totalFees = ledgerEvent ? BigInt(ledgerEvent.deltaCollectedYield) : 0n;
     if (totalFees <= 0n) return;
-
-    const ledgerEvent = await this.findLatestLedgerEvent(positionId, 'COLLECT', event.payload.eventTimestamp);
 
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
@@ -471,10 +469,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * between deposit and withdrawal time.
    */
   private async handlePositionClosed(
-    event: DomainEvent<PositionClosedPayload>
+    event: DomainEvent<PositionLifecyclePayload>
   ): Promise<void> {
-    const position = event.payload;
-    const positionRef = position.positionHash;
+    const { positionId, positionHash } = event.payload;
+    const positionRef = positionHash;
 
     // Cost basis remainder correction (Account 1000)
     // The quote token balance may be 0 while the reporting currency balance is not,
@@ -489,7 +487,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
       );
 
       if (costBasisQuote !== 0n || costBasisReporting !== 0n) {
-        const ctx = await this.getReportingContext(position.id);
+        const userId = await this.getPositionUserId(positionId);
+        const ctx = await this.getReportingContext(positionId);
         const instrumentRef = ctx.poolHash;
         const absQuote = absBigintValue(costBasisQuote).toString();
         const absReporting = absBigintValue(costBasisReporting).toString();
@@ -517,8 +516,8 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
 
         await this.journalService.createEntry(
           {
-            userId: position.userId,
-    
+            userId,
+
             domainEventId: costBasisCorrectionEventId,
             domainEventType: event.type,
             entryDate: new Date(event.timestamp),
@@ -534,10 +533,10 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * position.deleted → Delete all journal entries for the position
    */
   private async handlePositionDeleted(
-    event: DomainEvent<PositionDeletedPayload>
+    event: DomainEvent<PositionLifecyclePayload>
   ): Promise<void> {
-    const position = event.payload;
-    const positionRef = position.positionHash;
+    const { positionHash } = event.payload;
+    const positionRef = positionHash;
     if (!positionRef) return;
 
     const count = await this.journalService.deleteEntriesByPositionRef(positionRef);
@@ -615,17 +614,21 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * Creates cost basis at FMV when position is received via transfer.
    */
   private async handleTransferredIn(
-    event: DomainEvent<PositionTransferredPayload>
+    event: DomainEvent<PositionLedgerEventPayload>
   ): Promise<void> {
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const { positionId, positionHash, deltaCostBasis } = event.payload;
+    const { positionId, positionHash, ledgerInputHash } = event.payload;
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
+    const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
+    if (!ledgerEvent) {
+      this.logger.warn({ positionId, ledgerInputHash, eventId: event.id }, 'No ledger event found for transfer in');
+      return;
+    }
 
-
-    const costBasis = deltaCostBasis;
+    const costBasis = ledgerEvent.deltaCostBasis;
     if (costBasis === '0') return;
 
     const ctx = await this.getReportingContext(positionId);
@@ -655,18 +658,23 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
    * Derecognizes remaining cost basis and realizes PnL at FMV.
    */
   private async handleTransferredOut(
-    event: DomainEvent<PositionTransferredPayload>
+    event: DomainEvent<PositionLedgerEventPayload>
   ): Promise<void> {
     if (await this.journalService.isProcessed(event.id)) return;
 
-    const { positionId, positionHash, tokenValue, deltaCostBasis, deltaPnl: deltaPnlStr } = event.payload;
+    const { positionId, positionHash, ledgerInputHash } = event.payload;
     const positionRef = positionHash;
     const userId = await this.getPositionUserId(positionId);
 
+    const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
+    if (!ledgerEvent) {
+      this.logger.warn({ positionId, ledgerInputHash, eventId: event.id }, 'No ledger event found for transfer out');
+      return;
+    }
 
-
-    const absDeltaCostBasis = absBigint(deltaCostBasis);
-    const deltaPnl = BigInt(deltaPnlStr);
+    const { tokenValue } = ledgerEvent;
+    const absDeltaCostBasis = absBigint(ledgerEvent.deltaCostBasis);
+    const deltaPnl = BigInt(ledgerEvent.deltaPnl);
 
     const ctx = await this.getReportingContext(positionId);
     const instrumentRef = ctx.poolHash;
@@ -740,22 +748,17 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * Find the most recent ledger event for a position matching the given event type
-   * and close to the given timestamp.
+   * Find a ledger event by its composite input hash (deterministic lookup).
    */
-  private async findLatestLedgerEvent(
+  private async findLedgerEventByInputHash(
     positionId: string,
-    eventType: string,
-    eventTimestamp: string
+    inputHash: string,
   ) {
     return prisma.positionLedgerEvent.findFirst({
       where: {
         positionId,
-        eventType,
-        timestamp: new Date(eventTimestamp),
-        isIgnored: false,
+        inputHash,
       },
-      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         deltaCostBasis: true,
@@ -765,7 +768,6 @@ export class PostJournalEntriesOnPositionEventsRule extends BusinessRule {
         deltaCollectedYield: true,
         collectedYieldAfter: true,
         tokenValue: true,
-        state: true,
       },
     });
   }
