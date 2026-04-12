@@ -92,26 +92,20 @@ export type {
   PositionLifecyclePayload,
   PositionLedgerEventPayload,
   PositionLiquidityRevertedPayload,
-  // Close order payloads (on-chain state changes)
+  // Close order payloads (protocol-agnostic)
   CloseOrderCancelReason,
-  CloseOrderRegisteredPayload,
+  CloseOrderLifecyclePayload,
   CloseOrderCancelledPayload,
   CloseOrderExecutedPayload,
-  CloseOrderModifiedPayload,
-  // Close order payloads (executor-specific)
-  CloseOrderCreatedPayload,
-  CloseOrderTriggeredPayload,
-  CloseOrderFailedPayload,
   // User payloads
   UserRegisteredPayload,
   // Typed events
   PositionLifecycleEvent,
   PositionLedgerEvent,
   PositionLiquidityRevertedEvent,
+  CloseOrderLifecycleEvent,
   CloseOrderCancelledEvent,
-  CloseOrderTriggeredEvent,
   CloseOrderExecutedEvent,
-  CloseOrderModifiedEvent,
   UserRegisteredEvent,
   // Outbox
   OutboxStatus,

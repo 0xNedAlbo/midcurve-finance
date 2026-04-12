@@ -42,10 +42,9 @@ import type {
   OrderExecutedContext,
   OrderCancelledContext,
   OrderModifiedContext,
-  CloseOrderRegisteredPayload,
+  CloseOrderLifecyclePayload,
   CloseOrderCancelledPayload,
   CloseOrderExecutedPayload,
-  CloseOrderModifiedPayload,
 } from '@midcurve/services';
 import {
   ContractTriggerMode,
@@ -213,23 +212,23 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
   private async processEvent(event: AnyCloseOrderEvent): Promise<void> {
     switch (event.type) {
-      case 'close-order.uniswapv3.registered':
+      case 'close-order.registered.uniswapv3':
         return this.handleRegistered(event);
-      case 'close-order.uniswapv3.cancelled':
+      case 'close-order.cancelled.uniswapv3':
         return this.handleCancelled(event);
-      case 'close-order.uniswapv3.executed':
+      case 'close-order.executed.uniswapv3':
         return this.handleExecuted(event);
-      case 'close-order.uniswapv3.operator-updated':
+      case 'close-order.operator-updated.uniswapv3':
         return this.handleOperatorUpdated(event);
-      case 'close-order.uniswapv3.payout-updated':
+      case 'close-order.payout-updated.uniswapv3':
         return this.handlePayoutUpdated(event);
-      case 'close-order.uniswapv3.trigger-tick-updated':
+      case 'close-order.trigger-tick-updated.uniswapv3':
         return this.handleTriggerTickUpdated(event);
-      case 'close-order.uniswapv3.valid-until-updated':
+      case 'close-order.valid-until-updated.uniswapv3':
         return this.handleValidUntilUpdated(event);
-      case 'close-order.uniswapv3.slippage-updated':
+      case 'close-order.slippage-updated.uniswapv3':
         return this.handleSlippageUpdated(event);
-      case 'close-order.uniswapv3.swap-intent-updated':
+      case 'close-order.swap-intent-updated.uniswapv3':
         return this.handleSwapIntentUpdated(event);
       default:
         this.logger.warn(
@@ -516,6 +515,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return {
         orderId: created.id,
         positionId: position.id,
+        orderIdentityHash: createInput.orderIdentityHash,
         poolAddress: poolAddress ?? null,
         isNew,
       };
@@ -531,15 +531,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
 
     // Publish close-order.registered domain event (direct, best-effort)
     if (result) {
-      this.publishDomainEvent<CloseOrderRegisteredPayload>('close-order.registered', {
+      this.publishDomainEvent<CloseOrderLifecyclePayload>('close-order.registered', {
         entityId: result.orderId,
         payload: {
           orderId: result.orderId,
           positionId: result.positionId,
-          chainId,
-          registrationTxHash: transactionHash,
-          closeId: nftId,
-          registeredAt: new Date().toISOString(),
+          orderIdentityHash: result.orderIdentityHash,
         },
       });
     }
@@ -585,6 +582,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return {
         orderId: order.id,
         positionId: order.positionId,
+        orderIdentityHash: order.orderIdentityHash,
         previousState,
       };
     });
@@ -601,9 +599,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         payload: {
           orderId: cancelResult.orderId,
           positionId: cancelResult.positionId,
+          orderIdentityHash: cancelResult.orderIdentityHash,
           reason: 'on_chain',
-          previousStatus: cancelResult.previousState,
-          cancelledAt: new Date().toISOString(),
         },
       });
     }
@@ -654,6 +651,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       return {
         orderId: order.id,
         positionId: order.positionId,
+        orderIdentityHash: order.orderIdentityHash,
       };
     });
 
@@ -669,12 +667,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         payload: {
           orderId: result.orderId,
           positionId: result.positionId,
-          chainId: event.chainId,
+          orderIdentityHash: result.orderIdentityHash,
           executionTxHash: event.transactionHash,
-          amount0Out: event.payload.amount0Out,
-          amount1Out: event.payload.amount1Out,
-          executionFeeBps: 0,
-          executedAt: new Date().toISOString(),
         },
       });
     }
@@ -713,17 +707,14 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
   private publishModifiedEvent(
     orderId: string,
     positionId: string,
-    chainId: number,
-    modifiedFields: string[]
+    orderIdentityHash: string,
   ): void {
-    this.publishDomainEvent<CloseOrderModifiedPayload>('close-order.modified', {
+    this.publishDomainEvent<CloseOrderLifecyclePayload>('close-order.modified', {
       entityId: orderId,
       payload: {
         orderId,
         positionId,
-        chainId,
-        modifiedFields,
-        modifiedAt: new Date().toISOString(),
+        orderIdentityHash,
       },
     });
   }
@@ -767,11 +758,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return { orderId: order.id, positionId: order.positionId };
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
     });
 
     if (result) {
-      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['operatorAddress']);
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
     }
   }
 
@@ -810,11 +801,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return { orderId: order.id, positionId: order.positionId };
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
     });
 
     if (result) {
-      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['payoutAddress']);
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
     }
   }
 
@@ -872,11 +863,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return { orderId: order.id, positionId: order.positionId };
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
     });
 
     if (result) {
-      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['triggerTick']);
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
     }
   }
 
@@ -919,11 +910,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return { orderId: order.id, positionId: order.positionId };
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
     });
 
     if (result) {
-      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['validUntil']);
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
     }
   }
 
@@ -967,11 +958,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return { orderId: order.id, positionId: order.positionId };
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
     });
 
     if (result) {
-      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['slippageBps']);
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
     }
   }
 
@@ -1013,11 +1004,11 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      return { orderId: order.id, positionId: order.positionId };
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
     });
 
     if (result) {
-      this.publishModifiedEvent(result.orderId, result.positionId, event.chainId, ['swapDirection', 'swapSlippageBps']);
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
     }
   }
 }

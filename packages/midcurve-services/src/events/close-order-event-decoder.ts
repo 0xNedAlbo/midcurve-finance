@@ -38,25 +38,25 @@ export function swapDirectionToString(value: number | bigint): SwapDirectionStri
 // ============================================================
 
 export type CloseOrderOnChainEventType =
-  | 'close-order.uniswapv3.registered'
-  | 'close-order.uniswapv3.cancelled'
-  | 'close-order.uniswapv3.executed'
-  | 'close-order.uniswapv3.operator-updated'
-  | 'close-order.uniswapv3.payout-updated'
-  | 'close-order.uniswapv3.trigger-tick-updated'
-  | 'close-order.uniswapv3.valid-until-updated'
-  | 'close-order.uniswapv3.slippage-updated'
-  | 'close-order.uniswapv3.swap-intent-updated'
-  | 'close-order.uniswapv3-vault.registered'
-  | 'close-order.uniswapv3-vault.cancelled'
-  | 'close-order.uniswapv3-vault.executed'
-  | 'close-order.uniswapv3-vault.operator-updated'
-  | 'close-order.uniswapv3-vault.payout-updated'
-  | 'close-order.uniswapv3-vault.trigger-tick-updated'
-  | 'close-order.uniswapv3-vault.valid-until-updated'
-  | 'close-order.uniswapv3-vault.slippage-updated'
-  | 'close-order.uniswapv3-vault.swap-intent-updated'
-  | 'close-order.uniswapv3-vault.shares-updated';
+  | 'close-order.registered.uniswapv3'
+  | 'close-order.cancelled.uniswapv3'
+  | 'close-order.executed.uniswapv3'
+  | 'close-order.operator-updated.uniswapv3'
+  | 'close-order.payout-updated.uniswapv3'
+  | 'close-order.trigger-tick-updated.uniswapv3'
+  | 'close-order.valid-until-updated.uniswapv3'
+  | 'close-order.slippage-updated.uniswapv3'
+  | 'close-order.swap-intent-updated.uniswapv3'
+  | 'close-order.registered.uniswapv3-vault'
+  | 'close-order.cancelled.uniswapv3-vault'
+  | 'close-order.executed.uniswapv3-vault'
+  | 'close-order.operator-updated.uniswapv3-vault'
+  | 'close-order.payout-updated.uniswapv3-vault'
+  | 'close-order.trigger-tick-updated.uniswapv3-vault'
+  | 'close-order.valid-until-updated.uniswapv3-vault'
+  | 'close-order.slippage-updated.uniswapv3-vault'
+  | 'close-order.swap-intent-updated.uniswapv3-vault'
+  | 'close-order.shares-updated.uniswapv3-vault';
 
 /**
  * Lifecycle event names from the contract (used for discrimination after decodeEventLog)
@@ -80,31 +80,31 @@ type LifecycleEventName = (typeof LIFECYCLE_EVENT_NAMES)[number];
  * Map contract event name to domain event type (NFT variant)
  */
 const NFT_EVENT_NAME_TO_DOMAIN_TYPE: Record<string, CloseOrderOnChainEventType> = {
-  OrderRegistered: 'close-order.uniswapv3.registered',
-  OrderCancelled: 'close-order.uniswapv3.cancelled',
-  OrderExecuted: 'close-order.uniswapv3.executed',
-  OrderOperatorUpdated: 'close-order.uniswapv3.operator-updated',
-  OrderPayoutUpdated: 'close-order.uniswapv3.payout-updated',
-  OrderTriggerTickUpdated: 'close-order.uniswapv3.trigger-tick-updated',
-  OrderValidUntilUpdated: 'close-order.uniswapv3.valid-until-updated',
-  OrderSlippageUpdated: 'close-order.uniswapv3.slippage-updated',
-  OrderSwapIntentUpdated: 'close-order.uniswapv3.swap-intent-updated',
+  OrderRegistered: 'close-order.registered.uniswapv3',
+  OrderCancelled: 'close-order.cancelled.uniswapv3',
+  OrderExecuted: 'close-order.executed.uniswapv3',
+  OrderOperatorUpdated: 'close-order.operator-updated.uniswapv3',
+  OrderPayoutUpdated: 'close-order.payout-updated.uniswapv3',
+  OrderTriggerTickUpdated: 'close-order.trigger-tick-updated.uniswapv3',
+  OrderValidUntilUpdated: 'close-order.valid-until-updated.uniswapv3',
+  OrderSlippageUpdated: 'close-order.slippage-updated.uniswapv3',
+  OrderSwapIntentUpdated: 'close-order.swap-intent-updated.uniswapv3',
 };
 
 /**
  * Map contract event name to domain event type (vault variant)
  */
 const VAULT_EVENT_NAME_TO_DOMAIN_TYPE: Record<string, CloseOrderOnChainEventType> = {
-  OrderRegistered: 'close-order.uniswapv3-vault.registered',
-  OrderCancelled: 'close-order.uniswapv3-vault.cancelled',
-  OrderExecuted: 'close-order.uniswapv3-vault.executed',
-  OrderOperatorUpdated: 'close-order.uniswapv3-vault.operator-updated',
-  OrderPayoutUpdated: 'close-order.uniswapv3-vault.payout-updated',
-  OrderTriggerTickUpdated: 'close-order.uniswapv3-vault.trigger-tick-updated',
-  OrderValidUntilUpdated: 'close-order.uniswapv3-vault.valid-until-updated',
-  OrderSlippageUpdated: 'close-order.uniswapv3-vault.slippage-updated',
-  OrderSwapIntentUpdated: 'close-order.uniswapv3-vault.swap-intent-updated',
-  OrderSharesUpdated: 'close-order.uniswapv3-vault.shares-updated',
+  OrderRegistered: 'close-order.registered.uniswapv3-vault',
+  OrderCancelled: 'close-order.cancelled.uniswapv3-vault',
+  OrderExecuted: 'close-order.executed.uniswapv3-vault',
+  OrderOperatorUpdated: 'close-order.operator-updated.uniswapv3-vault',
+  OrderPayoutUpdated: 'close-order.payout-updated.uniswapv3-vault',
+  OrderTriggerTickUpdated: 'close-order.trigger-tick-updated.uniswapv3-vault',
+  OrderValidUntilUpdated: 'close-order.valid-until-updated.uniswapv3-vault',
+  OrderSlippageUpdated: 'close-order.slippage-updated.uniswapv3-vault',
+  OrderSwapIntentUpdated: 'close-order.swap-intent-updated.uniswapv3-vault',
+  OrderSharesUpdated: 'close-order.shares-updated.uniswapv3-vault',
 };
 
 function isLifecycleEventName(name: string): name is LifecycleEventName {
@@ -203,27 +203,27 @@ export interface OrderSharesUpdatedPayload {
 // Typed Event Aliases
 // ============================================================
 
-export type OrderRegisteredEvent = CloseOrderDomainEvent<'close-order.uniswapv3.registered', OrderRegisteredPayload>;
-export type OrderCancelledEvent = CloseOrderDomainEvent<'close-order.uniswapv3.cancelled', OrderCancelledPayload>;
-export type OrderExecutedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.executed', OrderExecutedPayload>;
-export type OrderOperatorUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.operator-updated', OrderOperatorUpdatedPayload>;
-export type OrderPayoutUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.payout-updated', OrderPayoutUpdatedPayload>;
-export type OrderTriggerTickUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.trigger-tick-updated', OrderTriggerTickUpdatedPayload>;
-export type OrderValidUntilUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.valid-until-updated', OrderValidUntilUpdatedPayload>;
-export type OrderSlippageUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.slippage-updated', OrderSlippageUpdatedPayload>;
-export type OrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3.swap-intent-updated', OrderSwapIntentUpdatedPayload>;
+export type OrderRegisteredEvent = CloseOrderDomainEvent<'close-order.registered.uniswapv3', OrderRegisteredPayload>;
+export type OrderCancelledEvent = CloseOrderDomainEvent<'close-order.cancelled.uniswapv3', OrderCancelledPayload>;
+export type OrderExecutedEvent = CloseOrderDomainEvent<'close-order.executed.uniswapv3', OrderExecutedPayload>;
+export type OrderOperatorUpdatedEvent = CloseOrderDomainEvent<'close-order.operator-updated.uniswapv3', OrderOperatorUpdatedPayload>;
+export type OrderPayoutUpdatedEvent = CloseOrderDomainEvent<'close-order.payout-updated.uniswapv3', OrderPayoutUpdatedPayload>;
+export type OrderTriggerTickUpdatedEvent = CloseOrderDomainEvent<'close-order.trigger-tick-updated.uniswapv3', OrderTriggerTickUpdatedPayload>;
+export type OrderValidUntilUpdatedEvent = CloseOrderDomainEvent<'close-order.valid-until-updated.uniswapv3', OrderValidUntilUpdatedPayload>;
+export type OrderSlippageUpdatedEvent = CloseOrderDomainEvent<'close-order.slippage-updated.uniswapv3', OrderSlippageUpdatedPayload>;
+export type OrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.swap-intent-updated.uniswapv3', OrderSwapIntentUpdatedPayload>;
 
 // Vault event aliases
-export type VaultOrderRegisteredEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.registered', OrderRegisteredPayload>;
-export type VaultOrderCancelledEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.cancelled', OrderCancelledPayload>;
-export type VaultOrderExecutedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.executed', OrderExecutedPayload>;
-export type VaultOrderOperatorUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.operator-updated', OrderOperatorUpdatedPayload>;
-export type VaultOrderPayoutUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.payout-updated', OrderPayoutUpdatedPayload>;
-export type VaultOrderTriggerTickUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.trigger-tick-updated', OrderTriggerTickUpdatedPayload>;
-export type VaultOrderValidUntilUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.valid-until-updated', OrderValidUntilUpdatedPayload>;
-export type VaultOrderSlippageUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.slippage-updated', OrderSlippageUpdatedPayload>;
-export type VaultOrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.swap-intent-updated', OrderSwapIntentUpdatedPayload>;
-export type VaultOrderSharesUpdatedEvent = CloseOrderDomainEvent<'close-order.uniswapv3-vault.shares-updated', OrderSharesUpdatedPayload>;
+export type VaultOrderRegisteredEvent = CloseOrderDomainEvent<'close-order.registered.uniswapv3-vault', OrderRegisteredPayload>;
+export type VaultOrderCancelledEvent = CloseOrderDomainEvent<'close-order.cancelled.uniswapv3-vault', OrderCancelledPayload>;
+export type VaultOrderExecutedEvent = CloseOrderDomainEvent<'close-order.executed.uniswapv3-vault', OrderExecutedPayload>;
+export type VaultOrderOperatorUpdatedEvent = CloseOrderDomainEvent<'close-order.operator-updated.uniswapv3-vault', OrderOperatorUpdatedPayload>;
+export type VaultOrderPayoutUpdatedEvent = CloseOrderDomainEvent<'close-order.payout-updated.uniswapv3-vault', OrderPayoutUpdatedPayload>;
+export type VaultOrderTriggerTickUpdatedEvent = CloseOrderDomainEvent<'close-order.trigger-tick-updated.uniswapv3-vault', OrderTriggerTickUpdatedPayload>;
+export type VaultOrderValidUntilUpdatedEvent = CloseOrderDomainEvent<'close-order.valid-until-updated.uniswapv3-vault', OrderValidUntilUpdatedPayload>;
+export type VaultOrderSlippageUpdatedEvent = CloseOrderDomainEvent<'close-order.slippage-updated.uniswapv3-vault', OrderSlippageUpdatedPayload>;
+export type VaultOrderSwapIntentUpdatedEvent = CloseOrderDomainEvent<'close-order.swap-intent-updated.uniswapv3-vault', OrderSwapIntentUpdatedPayload>;
+export type VaultOrderSharesUpdatedEvent = CloseOrderDomainEvent<'close-order.shares-updated.uniswapv3-vault', OrderSharesUpdatedPayload>;
 
 export type AnyCloseOrderEvent =
   | OrderRegisteredEvent
