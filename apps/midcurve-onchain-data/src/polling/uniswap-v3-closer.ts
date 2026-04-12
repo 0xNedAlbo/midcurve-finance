@@ -159,7 +159,7 @@ export class UniswapV3CloserPollingBatch {
       let publishedCount = 0;
 
       for (const { event } of events) {
-        if (!event) continue;
+        if (!event || !event.nftId) continue;
         const routingKey = buildCloseOrderRoutingKey(this.chainId, event.nftId, event.triggerMode);
         const content = serializeCloseOrderEvent(event);
         await mq.publishCloseOrderEvent(routingKey, content);

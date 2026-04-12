@@ -318,7 +318,7 @@ export async function executeCloseOrderCatchUpNonFinalized(
     const mq = getRabbitMQConnection();
 
     for (const { event } of events) {
-      if (!event) continue;
+      if (!event || !event.nftId) continue;
       try {
         const routingKey = buildCloseOrderRoutingKey(chainId, event.nftId, event.triggerMode);
         const content = serializeCloseOrderEvent(event);
@@ -401,7 +401,7 @@ export async function executeCloseOrderCatchUpFinalized(
     const mq = getRabbitMQConnection();
 
     for (const { event } of events) {
-      if (!event) continue;
+      if (!event || !event.nftId) continue;
       try {
         const routingKey = buildCloseOrderRoutingKey(chainId, event.nftId, event.triggerMode);
         const content = serializeCloseOrderEvent(event);

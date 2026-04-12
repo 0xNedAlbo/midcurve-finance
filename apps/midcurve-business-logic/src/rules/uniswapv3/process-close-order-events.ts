@@ -251,6 +251,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     event: AnyCloseOrderEvent,
     tx?: TxClient
   ): Promise<CloseOrder | null> {
+    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
     const triggerMode = parseTriggerMode(event.triggerMode);
     const orderIdentityHash = createOrderIdentityHash(
       event.chainId,
@@ -353,6 +354,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     event: OrderRegisteredEvent,
     positionId: string,
   ) {
+    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
     const triggerMode = parseTriggerMode(event.triggerMode);
     const { payload } = event;
 
@@ -405,7 +407,8 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
    * 3. No order exists → find position, INSERT new order
    */
   private async handleRegistered(event: OrderRegisteredEvent): Promise<void> {
-    const { chainId, nftId, triggerMode, transactionHash, payload } = event;
+    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
+    const { chainId, nftId, triggerMode, transactionHash, payload } = event as OrderRegisteredEvent & { nftId: string };
     const triggerModeNum = parseTriggerMode(triggerMode);
 
     const orderIdentityHash = createOrderIdentityHash(

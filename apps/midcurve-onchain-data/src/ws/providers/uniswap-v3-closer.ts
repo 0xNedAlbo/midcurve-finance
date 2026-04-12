@@ -325,6 +325,7 @@ export class UniswapV3CloserSubscriptionBatch {
    * Publish a domain event to RabbitMQ.
    */
   private async publishDomainEvent(event: AnyCloseOrderEvent): Promise<void> {
+    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
     const mq = getRabbitMQConnection();
     const routingKey = buildCloseOrderRoutingKey(this.chainId, event.nftId, event.triggerMode);
     const content = serializeCloseOrderEvent(event);
