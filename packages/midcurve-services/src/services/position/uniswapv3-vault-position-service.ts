@@ -950,6 +950,12 @@ export class UniswapV3VaultPositionService {
         const transferEvent = parseAbiItem(
             'event Transfer(address indexed from, address indexed to, uint256 value)',
         );
+        const mintedEvent = parseAbiItem(
+            'event Minted(address indexed minter, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
+        );
+        const burnedEvent = parseAbiItem(
+            'event Burned(address indexed burner, address indexed recipient, uint256 shares, uint256[] tokenAmounts)',
+        );
 
         const commonParams = { address: vaultAddress, fromBlock, toBlock };
 
@@ -957,6 +963,8 @@ export class UniswapV3VaultPositionService {
             client.getLogs({ ...commonParams, event: yieldCollectedEvent, args: { user: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { to: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { from: ownerAddress } }),
+            client.getLogs({ ...commonParams, event: mintedEvent, args: { recipient: ownerAddress } }),
+            client.getLogs({ ...commonParams, event: burnedEvent, args: { burner: ownerAddress } }),
         ];
 
         // Also fetch closer contract events if a closer address is known

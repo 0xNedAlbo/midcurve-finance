@@ -21,6 +21,7 @@ import {
     valueOfToken0AmountInToken1,
     valueOfToken1AmountInToken0,
     calculatePositionValue,
+    getTokenAmountsFromLiquidity,
 } from '@midcurve/shared';
 import type {
     UniswapV3VaultPositionLedgerEventRow,
@@ -52,6 +53,16 @@ import type { AprPeriodData } from '../types/position-apr/index.js';
 export const VAULT_EVENT_SIGNATURES = {
     YIELD_COLLECTED: '0x18898ecacb8287585d905259ceebe4f692ca4a958d7e2c1383dc9e9f493a053f',
     TRANSFER: '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+} as const;
+
+/**
+ * Companion event signatures for Minted/Burned events.
+ * Not processed as primary events — looked up from the same transaction
+ * when a mint/burn Transfer is detected, to extract tokenAmounts.
+ */
+export const VAULT_COMPANION_SIGNATURES = {
+    MINTED: '0x09a6b7fc897b2b2cb269f200c545ec63a2e2e2333c6c67a401474f3e769d2d5c',
+    BURNED: '0x9c1f1198afd378491520e2f7dc5adff4ae935658c101093cf24dfce2ed379089',
 } as const;
 
 export type ValidVaultEventType = keyof typeof VAULT_EVENT_SIGNATURES;
@@ -210,6 +221,22 @@ export function decodeVaultLogData(
             };
         }
     }
+}
+
+/**
+ * Decode tokenAmounts from a companion Minted or Burned log.
+ * Both events have the same data layout: (uint256 shares, uint256[] tokenAmounts).
+ */
+export function decodeMintBurnCompanionLog(log: VaultRawLogInput): bigint[] {
+    const hex = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
+    const decoded = decodeAbiParameters(
+        [
+            { name: 'shares', type: 'uint256' },
+            { name: 'tokenAmounts', type: 'uint256[]' },
+        ],
+        `0x${hex}` as `0x${string}`,
+    );
+    return [...decoded[1]];
 }
 
 // ============================================================================
@@ -613,12 +640,34 @@ export class UniswapV3VaultLedgerService {
             }
         }
 
+        // Build a map of Minted/Burned companion logs grouped by transaction hash
+        // so processSingleLog can extract tokenAmounts for mint/burn Transfer events
+        const mintBurnLogsByTx = new Map<string, VaultRawLogInput[]>();
+        const vaultAddrLower = position.typedConfig.vaultAddress.toLowerCase();
+        for (const log of logs) {
+            if (log.address.toLowerCase() !== vaultAddrLower) continue;
+            const topic0 = log.topics[0]?.toLowerCase();
+            if (topic0 === VAULT_COMPANION_SIGNATURES.MINTED.toLowerCase()
+                || topic0 === VAULT_COMPANION_SIGNATURES.BURNED.toLowerCase()) {
+                const txHash = log.transactionHash.toLowerCase();
+                const existing = mintBurnLogsByTx.get(txHash) ?? [];
+                existing.push(log);
+                mintBurnLogsByTx.set(txHash, existing);
+            }
+        }
+
         const perLogResults: VaultSingleLogResult[] = [];
         const allDeletedEvents: UniswapV3VaultPositionLedgerEvent[] = [];
 
         for (const log of logs) {
             // Skip closer contract logs — they're only used as companion data
             if (closerAddress && log.address.toLowerCase() === closerAddress.toLowerCase()) {
+                continue;
+            }
+            // Skip Minted/Burned companion logs — they're only used as companion data
+            const topic0 = log.topics[0]?.toLowerCase();
+            if (topic0 === VAULT_COMPANION_SIGNATURES.MINTED.toLowerCase()
+                || topic0 === VAULT_COMPANION_SIGNATURES.BURNED.toLowerCase()) {
                 continue;
             }
 
@@ -630,6 +679,7 @@ export class UniswapV3VaultLedgerService {
                 poolPriceService,
                 closerAddress,
                 closerLogsByTx,
+                mintBurnLogsByTx,
                 tx,
             );
             perLogResults.push(result);
@@ -660,6 +710,7 @@ export class UniswapV3VaultLedgerService {
         poolPriceService: UniswapV3PoolPriceService,
         closerAddress?: string,
         closerLogsByTx?: Map<string, VaultRawLogInput[]>,
+        mintBurnLogsByTx?: Map<string, VaultRawLogInput[]>,
         tx?: PrismaTransactionClient,
     ): Promise<VaultSingleLogResult> {
         // 1. Validate
@@ -753,45 +804,84 @@ export class UniswapV3VaultLedgerService {
             //   from owner → 0x0 = VAULT_BURN
             //   from owner → other = VAULT_TRANSFER_OUT
             //   from other → owner = VAULT_TRANSFER_IN
-            // Since totalSupply == liquidity (vault invariant), shares == liquidity delta,
-            // so we can use calculatePositionValue with shares as liquidity.
             const ZERO_TOPIC = '0x' + '0'.repeat(64);
             const from = log.topics[1]?.toLowerCase();
             const to = log.topics[2]?.toLowerCase();
             shares = decoded.value;
-            tokenValue = calculatePositionValue(
-                decoded.value,
-                sqrtPriceX96,
-                position.typedConfig.tickLower,
-                position.typedConfig.tickUpper,
-                !position.typedConfig.isToken0Quote, // baseIsToken0
-            );
 
             if (from === ZERO_TOPIC && to === userHex) {
                 // Mint: from 0x0 → owner
+                // Look for companion Minted event in same tx for actual tokenAmounts
+                const tokenAmounts = this.extractCompanionTokenAmounts(
+                    mintBurnLogsByTx, log.transactionHash, VAULT_COMPANION_SIGNATURES.MINTED,
+                );
                 eventType = 'VAULT_MINT';
+                if (tokenAmounts) {
+                    tokenValue = this.calculateTokenValue(tokenAmounts[0]!, tokenAmounts[1]!, sqrtPriceX96, position.typedConfig.isToken0Quote);
+                } else {
+                    // Fallback: initial vault creation has no Minted event — compute from shares
+                    tokenValue = calculatePositionValue(
+                        decoded.value, sqrtPriceX96,
+                        position.typedConfig.tickLower, position.typedConfig.tickUpper,
+                        !position.typedConfig.isToken0Quote,
+                    );
+                }
+                let mintTokenAmounts = tokenAmounts;
+                if (!mintTokenAmounts) {
+                    // Initial vault creation: compute from shares (== liquidity) at event price
+                    const computed = getTokenAmountsFromLiquidity(
+                        decoded.value, sqrtPriceX96,
+                        position.typedConfig.tickLower, position.typedConfig.tickUpper,
+                    );
+                    mintTokenAmounts = [computed.token0Amount, computed.token1Amount];
+                }
                 ledgerState = {
                     eventType: 'VAULT_MINT',
                     shares: decoded.value,
                     minter: '0x0000000000000000000000000000000000000000',
                     recipient: userAddress,
                     poolPrice: sqrtPriceX96,
-                    tokenAmounts: [0n, 0n],
+                    tokenAmounts: mintTokenAmounts,
                 };
             } else if (from === userHex && to === ZERO_TOPIC) {
                 // Burn: from owner → 0x0
+                const tokenAmounts = this.extractCompanionTokenAmounts(
+                    mintBurnLogsByTx, log.transactionHash, VAULT_COMPANION_SIGNATURES.BURNED,
+                );
                 eventType = 'VAULT_BURN';
+                if (tokenAmounts) {
+                    tokenValue = this.calculateTokenValue(tokenAmounts[0]!, tokenAmounts[1]!, sqrtPriceX96, position.typedConfig.isToken0Quote);
+                } else {
+                    tokenValue = calculatePositionValue(
+                        decoded.value, sqrtPriceX96,
+                        position.typedConfig.tickLower, position.typedConfig.tickUpper,
+                        !position.typedConfig.isToken0Quote,
+                    );
+                }
+                let burnTokenAmounts = tokenAmounts;
+                if (!burnTokenAmounts) {
+                    const computed = getTokenAmountsFromLiquidity(
+                        decoded.value, sqrtPriceX96,
+                        position.typedConfig.tickLower, position.typedConfig.tickUpper,
+                    );
+                    burnTokenAmounts = [computed.token0Amount, computed.token1Amount];
+                }
                 ledgerState = {
                     eventType: 'VAULT_BURN',
                     shares: decoded.value,
                     burner: userAddress,
                     recipient: userAddress,
                     poolPrice: sqrtPriceX96,
-                    tokenAmounts: [0n, 0n],
+                    tokenAmounts: burnTokenAmounts,
                 };
             } else if (from === userHex) {
                 // Transfer OUT: from owner → another address
                 const toAddress = '0x' + to!.slice(26);
+                tokenValue = calculatePositionValue(
+                    decoded.value, sqrtPriceX96,
+                    position.typedConfig.tickLower, position.typedConfig.tickUpper,
+                    !position.typedConfig.isToken0Quote,
+                );
 
                 // Check if the transfer is to the closer contract (close order execution)
                 const isCloseOrder = closerAddress
@@ -821,6 +911,11 @@ export class UniswapV3VaultLedgerService {
             } else {
                 // Transfer IN: from another address → owner
                 eventType = 'VAULT_TRANSFER_IN';
+                tokenValue = calculatePositionValue(
+                    decoded.value, sqrtPriceX96,
+                    position.typedConfig.tickLower, position.typedConfig.tickUpper,
+                    !position.typedConfig.isToken0Quote,
+                );
                 const fromAddress = '0x' + from!.slice(26);
                 ledgerState = {
                     eventType: 'VAULT_TRANSFER_IN',
@@ -1077,6 +1172,25 @@ export class UniswapV3VaultLedgerService {
         } else {
             return valueOfToken0AmountInToken1(amount0, sqrtPriceX96) + amount1;
         }
+    }
+
+    /**
+     * Extract tokenAmounts from a companion Minted or Burned log in the same transaction.
+     * Returns null if no companion event is found (e.g. initial vault creation).
+     */
+    private extractCompanionTokenAmounts(
+        mintBurnLogsByTx: Map<string, VaultRawLogInput[]> | undefined,
+        transactionHash: string,
+        expectedSignature: string,
+    ): [bigint, bigint] | null {
+        if (!mintBurnLogsByTx) return null;
+        const companions = mintBurnLogsByTx.get(transactionHash.toLowerCase()) ?? [];
+        const match = companions.find(
+            (l) => l.topics[0]?.toLowerCase() === expectedSignature.toLowerCase(),
+        );
+        if (!match) return null;
+        const amounts = decodeMintBurnCompanionLog(match);
+        return [amounts[0] ?? 0n, amounts[1] ?? 0n];
     }
 
     /**
