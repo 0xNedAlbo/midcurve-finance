@@ -17,7 +17,7 @@ import {
   RuleRegistry,
   EnrichCoingeckoTokensRule,
   RefreshCoingeckoTokensRule,
-  ProcessCloseOrderEventsRule,
+  UniswapV3ProcessCloseOrderEventsRule,
   UniswapV3PostJournalEntriesRule,
   UniswapV3ReconcileCostBasisRule,
   RefuelOperatorRule,
@@ -64,8 +64,8 @@ export class RuleManager {
     // CoinGecko token enrichment - runs every 5 minutes
     this.registry.register(new EnrichCoingeckoTokensRule());
 
-    // Close order lifecycle event handler - syncs close orders with on-chain state
-    this.registry.register(new ProcessCloseOrderEventsRule());
+    // UniswapV3 close order lifecycle event handler - syncs close orders with on-chain state
+    this.registry.register(new UniswapV3ProcessCloseOrderEventsRule());
 
     // UniswapV3 accounting rules
     // Double-entry journal entries from UniswapV3 position domain events

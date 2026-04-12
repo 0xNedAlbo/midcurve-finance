@@ -1,8 +1,8 @@
 /**
- * Process Close Order Events Rule
+ * UniswapV3 Process Close Order Events Rule
  *
- * Subscribes to close order lifecycle events from the onchain-data service
- * and synchronizes the database with on-chain state.
+ * Subscribes to UniswapV3 and UniswapV3-Vault close order lifecycle events
+ * from the onchain-data service and synchronizes the database with on-chain state.
  *
  * DB lifecycle driven by on-chain events:
  * - OrderRegistered → INSERT new order (automationState=monitoring)
@@ -53,7 +53,7 @@ import {
 
 /** Transaction client type — subset of PrismaClient usable inside $transaction */
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
-import { BusinessRule } from '../base';
+import { BusinessRule } from '../../base';
 import type {
   AnyCloseOrderEvent,
   TriggerModeString,
@@ -74,10 +74,13 @@ import type {
 // =============================================================================
 
 /** Queue name for this rule's consumption */
-const QUEUE_NAME = 'business-logic.process-close-order-events';
+const QUEUE_NAME = 'business-logic.uniswapv3-process-close-order-events';
 
-/** Routing pattern to subscribe to all close order events */
-const ROUTING_PATTERN = 'closer.#';
+/** Routing pattern for UniswapV3 NFT close order events (4 segments: closer.chainId.nftId.triggerMode) */
+const UNISWAPV3_ROUTING_PATTERN = 'closer.*.*.*';
+
+/** Routing pattern for UniswapV3 Vault close order events (5 segments: closer.vault.chainId.vaultAddress.triggerMode) */
+const UNISWAPV3_VAULT_ROUTING_PATTERN = 'closer.vault.*.*.*';
 
 // =============================================================================
 // String → Numeric Enum Mapping
@@ -101,10 +104,10 @@ function parseSwapDirection(s: SwapDirectionString): ContractSwapDirection {
 // Rule Implementation
 // =============================================================================
 
-export class ProcessCloseOrderEventsRule extends BusinessRule {
-  readonly ruleName = 'process-close-order-events';
+export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
+  readonly ruleName = 'uniswapv3-process-close-order-events';
   readonly ruleDescription =
-    'Processes close order lifecycle events from on-chain data (registration, cancellation, execution, config updates)';
+    'Processes UniswapV3 close order lifecycle events from on-chain data (registration, cancellation, execution, config updates)';
 
   private consumerTag: string | null = null;
   private orderService: UniswapV3CloseOrderService;
@@ -137,7 +140,7 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       autoDelete: false,
     });
 
-    // Assert queue and bind to close order events exchange
+    // Assert queue and bind to close order events exchange for both UniswapV3 variants
     await this.channel.assertQueue(QUEUE_NAME, {
       durable: true,
       autoDelete: false,
@@ -145,7 +148,12 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
     await this.channel.bindQueue(
       QUEUE_NAME,
       EXCHANGE_CLOSE_ORDER_EVENTS,
-      ROUTING_PATTERN
+      UNISWAPV3_ROUTING_PATTERN
+    );
+    await this.channel.bindQueue(
+      QUEUE_NAME,
+      EXCHANGE_CLOSE_ORDER_EVENTS,
+      UNISWAPV3_VAULT_ROUTING_PATTERN
     );
     await this.channel.prefetch(1);
 
@@ -161,9 +169,9 @@ export class ProcessCloseOrderEventsRule extends BusinessRule {
       {
         queueName: QUEUE_NAME,
         exchange: EXCHANGE_CLOSE_ORDER_EVENTS,
-        routingPattern: ROUTING_PATTERN,
+        routingPatterns: [UNISWAPV3_ROUTING_PATTERN, UNISWAPV3_VAULT_ROUTING_PATTERN],
       },
-      'Subscribed to close order events'
+      'Subscribed to UniswapV3 close order events'
     );
   }
 

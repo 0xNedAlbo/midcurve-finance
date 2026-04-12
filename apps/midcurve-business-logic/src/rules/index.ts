@@ -47,8 +47,8 @@ export { RuleRegistry } from './registry';
 export { EnrichCoingeckoTokensRule } from './enrich-coingecko-tokens';
 export { RefreshCoingeckoTokensRule } from './refresh-coingecko-tokens';
 
-// UniswapV3 protocol-specific rules
-export * from './uniswapv3';
+// Close order rules (protocol-specific)
+export * from './close-orders';
 
 // Accounting rules (double-entry journal system, protocol-specific)
 export { UniswapV3PostJournalEntriesRule, UniswapV3ReconcileCostBasisRule } from './accounting/uniswapv3';
