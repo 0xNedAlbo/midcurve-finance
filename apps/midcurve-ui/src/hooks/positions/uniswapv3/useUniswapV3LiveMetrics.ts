@@ -57,8 +57,11 @@ export function useUniswapV3LiveMetrics(
       baseIsToken0
     );
 
-    // Unrealized PnL = currentValue - costBasis
-    const unrealizedPnl = currentValue - BigInt(position.costBasis);
+    // Unrealized PnL = currentValue - costBasis (only when owned by user)
+    // When not owned (e.g. tokenized to vault), preserve backend value (0n)
+    const unrealizedPnl = state.isOwnedByUser
+      ? currentValue - BigInt(position.costBasis)
+      : BigInt(position.unrealizedPnl);
 
     // Unclaimed fees: convert token0/token1 amounts to quote token value at live price
     const unclaimedFees0 = BigInt(state.unclaimedFees0);
