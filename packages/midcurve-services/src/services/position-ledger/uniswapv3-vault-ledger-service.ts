@@ -1123,31 +1123,38 @@ export class UniswapV3VaultLedgerService {
             totalSwapAmountOut += swap.amountOut;
         }
 
-        // Calculate final proceeds: burn output - fees ± swap
-        // After fees: payout0 = amount0Out - feeAmount0, payout1 = amount1Out - feeAmount1
-        // After swap: one side is reduced by swapAmountIn, other side increased by swapAmountOut
-        let finalAmount0 = amount0Out - feeAmount0;
-        let finalAmount1 = amount1Out - feeAmount1;
-
-        // Apply swap adjustments — determine swap direction from the first swap event
-        if (swapsExecuted.length > 0) {
-            // The swap converts one token entirely into the other
-            // After swap, the contract reads final balances, so we reconstruct:
-            // If swapping token0→token1: finalAmount0 = 0, finalAmount1 = (amount1Out - fee1) + totalSwapOut
-            // If swapping token1→token0: finalAmount1 = 0, finalAmount0 = (amount0Out - fee0) + totalSwapOut
-            // But the swap input comes from the after-fee amount, so:
-            finalAmount0 = finalAmount0 - (swapsExecuted[0]?.tokenIn === swapsExecuted[0]?.tokenOut ? 0n : 0n);
-            // Simpler: the OrderExecuted has pre-swap amounts, so final = afterFee - swapIn on one side + swapOut on other
-            // We can just report the raw data and let the UI/display compute; for tokenValue we use afterFee amounts
-            // since the swap is value-neutral (minus slippage)
-            finalAmount0 = amount0Out - feeAmount0;
-            finalAmount1 = amount1Out - feeAmount1;
-        }
-
-        // tokenValue = value of the actual burn proceeds (after fees) in quote token
+        // Calculate final proceeds: burn output - fees, then apply swap
         const afterFee0 = amount0Out - feeAmount0;
         const afterFee1 = amount1Out - feeAmount1;
-        const tokenValue = this.calculateTokenValue(afterFee0, afterFee1, sqrtPriceX96, isToken0Quote);
+
+        let finalAmount0 = afterFee0;
+        let finalAmount1 = afterFee1;
+
+        // Apply swap: the swap converts one token entirely into the other.
+        // Determine direction from the first SwapExecuted event's tokenIn.
+        if (swapsExecuted.length > 0) {
+            // We need to identify which token is token0 vs token1.
+            // The vault emits OrderExecuted with the vault address indexed.
+            // SwapExecuted has tokenIn/tokenOut addresses — compare with known token addresses
+            // from the earlier burn logs to determine direction.
+            // Simpler: if tokenIn was the same token that had afterFee > 0 on the token0 side,
+            // it's TOKEN0_TO_1; otherwise TOKEN1_TO_0.
+            // Since the contract swaps ALL of one side, the swapped side goes to 0.
+            const swapInputIsToken0 = afterFee0 > 0n && totalSwapAmountIn > 0n && afterFee0 >= totalSwapAmountIn;
+
+            if (swapInputIsToken0) {
+                // TOKEN0_TO_1: all token0 swapped, token1 receives swap output
+                finalAmount0 = afterFee0 - totalSwapAmountIn;
+                finalAmount1 = afterFee1 + totalSwapAmountOut;
+            } else {
+                // TOKEN1_TO_0: all token1 swapped, token0 receives swap output
+                finalAmount1 = afterFee1 - totalSwapAmountIn;
+                finalAmount0 = afterFee0 + totalSwapAmountOut;
+            }
+        }
+
+        // tokenValue based on actual final proceeds
+        const tokenValue = this.calculateTokenValue(finalAmount0, finalAmount1, sqrtPriceX96, isToken0Quote);
 
         const ledgerState: UniswapV3VaultLedgerEventState = {
             eventType: 'VAULT_CLOSE_ORDER_EXECUTED',
@@ -1164,7 +1171,7 @@ export class UniswapV3VaultLedgerService {
             finalAmount0,
             finalAmount1,
             poolPrice: sqrtPriceX96,
-            tokenAmounts: [afterFee0, afterFee1],
+            tokenAmounts: [finalAmount0, finalAmount1],
         };
 
         return { eventType: 'VAULT_CLOSE_ORDER_EXECUTED', tokenValue, ledgerState };

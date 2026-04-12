@@ -360,9 +360,18 @@ export function LedgerEventTable({
 
     if (eventType === "VAULT_CLOSE_ORDER_EXECUTED") {
       return (
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-slate-500">Payout:</span>
-          {renderKnownAddressOrLink(state.payout)}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500">Payout:</span>
+            {renderKnownAddressOrLink(state.payout)}
+          </div>
+          {renderTokenAmount(state.tokenAmounts?.[0]?.toString() ?? "0", token0)}
+          {renderTokenAmount(state.tokenAmounts?.[1]?.toString() ?? "0", token1)}
+          {state.feeBps > 0 && (
+            <div className="text-xs text-slate-500">
+              Operator fee: {state.feeBps / 100}%
+            </div>
+          )}
         </div>
       );
     }
