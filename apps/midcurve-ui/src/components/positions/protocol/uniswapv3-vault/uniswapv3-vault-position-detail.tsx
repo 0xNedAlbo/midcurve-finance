@@ -21,13 +21,13 @@ interface UniswapV3VaultPositionDetailProps {
   position: UniswapV3VaultPositionData;
 }
 
-export type VaultTabType = "overview" | "pnl-analysis" | "conversion" | "apr-analysis" | "automation" | "technical";
+export type VaultTabType = "overview" | "pnl-analysis" | "apr-analysis" | "conversion" | "automation" | "technical";
 
 const vaultTabs = [
   { id: "overview", icon: BarChart3, label: "Overview" },
   { id: "pnl-analysis", icon: Clock, label: "PnL Analysis" },
-  { id: "conversion", icon: Repeat, label: "Conversion" },
   { id: "apr-analysis", icon: TrendingUp, label: "APR Analysis" },
+  { id: "conversion", icon: Repeat, label: "Conversion" },
   { id: "automation", icon: Shield, label: "Automation" },
   { id: "technical", icon: Settings, label: "Technical Details" },
 ] as const;

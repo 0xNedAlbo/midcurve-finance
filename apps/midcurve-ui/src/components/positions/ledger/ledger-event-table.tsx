@@ -324,18 +324,26 @@ export function LedgerEventTable({
 
     if (eventType === "VAULT_MINT") {
       return (
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-slate-500">Minted to</span>
-          {renderKnownAddressOrLink(state.recipient)}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500">Minted to</span>
+            {renderKnownAddressOrLink(state.recipient)}
+          </div>
+          {renderTokenAmount(state.tokenAmounts?.[0]?.toString() ?? "0", token0)}
+          {renderTokenAmount(state.tokenAmounts?.[1]?.toString() ?? "0", token1)}
         </div>
       );
     }
 
     if (eventType === "VAULT_BURN") {
       return (
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-slate-500">Burned from</span>
-          {renderKnownAddressOrLink(state.burner)}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500">Burned from</span>
+            {renderKnownAddressOrLink(state.burner)}
+          </div>
+          {renderTokenAmount(state.tokenAmounts?.[0]?.toString() ?? "0", token0)}
+          {renderTokenAmount(state.tokenAmounts?.[1]?.toString() ?? "0", token1)}
         </div>
       );
     }
