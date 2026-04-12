@@ -624,12 +624,21 @@ export class UniswapV3VaultPositionService {
 
         const ownerAddress = position.typedConfig.ownerAddress;
 
+        // Look up the closer contract address for this chain
+        let closerAddress: Address | undefined;
+        const closerContract = await this._sharedContractService.findLatestByChainAndName(
+            chainId, 'UniswapV3VaultPositionCloser' as SharedContractName,
+        );
+        if (closerContract) {
+            closerAddress = closerContract.config.address as Address;
+        }
+
         const logs = await this.fetchAllVaultLogs(
-            client, vaultAddress as Address, ownerAddress as Address, fromBlock,
+            client, vaultAddress as Address, ownerAddress as Address, fromBlock, 'latest', closerAddress,
         );
 
         const importResult = await ledgerService.importLogsForPosition(
-            position, chainId, ownerAddress, logs, this._poolPriceService, dbTx,
+            position, chainId, ownerAddress, logs, this._poolPriceService, closerAddress, dbTx,
         );
 
         // Emit domain events for deletions (reorgs)
@@ -688,7 +697,7 @@ export class UniswapV3VaultPositionService {
                     },
                     source: 'business-logic',
                 }, dbTx);
-            } else if (eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT') {
+            } else if (eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT' || eventType === 'VAULT_CLOSE_ORDER_EXECUTED') {
                 // Transfer events: read real financial data from DB (computed by recalculateAggregates)
                 const db = dbTx ?? this.prisma;
                 const ledgerEvent = await db.positionLedgerEvent.findFirst({
@@ -698,7 +707,7 @@ export class UniswapV3VaultPositionService {
                 if (ledgerEvent) {
                     const type = eventType === 'VAULT_TRANSFER_IN'
                         ? ('position.transferred.in' as const)
-                        : ('position.transferred.out' as const);
+                        : ('position.transferred.out' as const); // VAULT_TRANSFER_OUT and VAULT_CLOSE_ORDER_EXECUTED
                     await publisher.createAndPublish<PositionTransferredPayload>({
                         type,
                         entityId: position.id,
@@ -964,6 +973,7 @@ export class UniswapV3VaultPositionService {
         ownerAddress: Address,
         fromBlock: bigint,
         toBlock: bigint | 'latest' = 'latest',
+        closerAddress?: Address,
     ): Promise<VaultRawLogInput[]> {
         const yieldCollectedEvent = parseAbiItem(
             'event YieldCollected(address indexed user, address indexed recipient, uint256[] tokenAmounts)',
@@ -974,13 +984,33 @@ export class UniswapV3VaultPositionService {
 
         const commonParams = { address: vaultAddress, fromBlock, toBlock };
 
-        const [yieldLogs, transferInLogs, transferOutLogs] = await Promise.all([
+        const logPromises: Promise<unknown[]>[] = [
             client.getLogs({ ...commonParams, event: yieldCollectedEvent, args: { user: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { to: ownerAddress } }),
             client.getLogs({ ...commonParams, event: transferEvent, args: { from: ownerAddress } }),
-        ]);
+        ];
 
-        const allLogs = [...yieldLogs, ...transferInLogs, ...transferOutLogs];
+        // Also fetch closer contract events if a closer address is known
+        if (closerAddress) {
+            const orderExecutedEvent = parseAbiItem(
+                'event OrderExecuted(address indexed vault, uint8 indexed triggerMode, address indexed owner, address payout, int24 executionTick, uint256 sharesClosed, uint256 amount0Out, uint256 amount1Out)',
+            );
+            const feeAppliedEvent = parseAbiItem(
+                'event FeeApplied(address indexed vault, uint8 indexed triggerMode, address indexed feeRecipient, uint16 feeBps, uint256 feeAmount0, uint256 feeAmount1)',
+            );
+            const swapExecutedEvent = parseAbiItem(
+                'event SwapExecuted(address indexed vault, uint8 indexed triggerMode, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)',
+            );
+            const closerParams = { address: closerAddress, fromBlock, toBlock };
+            logPromises.push(
+                client.getLogs({ ...closerParams, event: orderExecutedEvent, args: { vault: vaultAddress, owner: ownerAddress } }),
+                client.getLogs({ ...closerParams, event: feeAppliedEvent, args: { vault: vaultAddress } }),
+                client.getLogs({ ...closerParams, event: swapExecutedEvent, args: { vault: vaultAddress } }),
+            );
+        }
+
+        const results = await Promise.all(logPromises);
+        const allLogs = results.flat() as Array<{ address: string; topics: readonly string[]; data: string; blockNumber: bigint; blockHash: string; transactionHash: string; transactionIndex: number; logIndex: number }>;
         allLogs.sort((a, b) => {
             const blockDiff = Number(a.blockNumber! - b.blockNumber!);
             if (blockDiff !== 0) return blockDiff;

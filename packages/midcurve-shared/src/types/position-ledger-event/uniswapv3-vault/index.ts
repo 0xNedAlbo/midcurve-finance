@@ -23,6 +23,7 @@ export {
   type UniswapV3VaultCollectYieldEvent,
   type UniswapV3VaultTransferInEvent,
   type UniswapV3VaultTransferOutEvent,
+  type UniswapV3VaultCloseOrderExecutedEvent,
   vaultLedgerEventStateToJSON,
   vaultLedgerEventStateFromJSON,
 } from './uniswapv3-vault-ledger-event-state.js';

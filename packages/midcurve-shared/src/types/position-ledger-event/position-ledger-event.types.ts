@@ -41,7 +41,8 @@ export type EventType =
   | 'VAULT_BURN'
   | 'VAULT_COLLECT_YIELD'
   | 'VAULT_TRANSFER_IN'
-  | 'VAULT_TRANSFER_OUT';
+  | 'VAULT_TRANSFER_OUT'
+  | 'VAULT_CLOSE_ORDER_EXECUTED';
 
 // ============================================================================
 // REWARD STRUCTURE

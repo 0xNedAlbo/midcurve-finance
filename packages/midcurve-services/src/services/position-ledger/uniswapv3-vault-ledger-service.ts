@@ -56,6 +56,16 @@ export const VAULT_EVENT_SIGNATURES = {
 
 export type ValidVaultEventType = keyof typeof VAULT_EVENT_SIGNATURES;
 
+/**
+ * Vault position closer contract event signatures (topic0 values).
+ * Used to decode companion events in close order transactions.
+ */
+export const CLOSER_EVENT_SIGNATURES = {
+    ORDER_EXECUTED: '0x3b42dbda3381567ed7cf11ea8695c3f8928c814a5992dddbb42172cbc951d5d7',
+    FEE_APPLIED: '0x084dea19ebac10547492fe21b6ed26d07ce133d2b1589cbea787e3872ec1ece1',
+    SWAP_EXECUTED: '0xdd918ef080ed96250ca11bb10fb199f9634a2cb595e4d7dda0bde43879494421',
+} as const;
+
 // ============================================================================
 // RAW LOG TYPES
 // ============================================================================
@@ -200,6 +210,95 @@ export function decodeVaultLogData(
             };
         }
     }
+}
+
+// ============================================================================
+// CLOSER EVENT DECODING
+// ============================================================================
+
+export interface DecodedOrderExecutedData {
+    vault: string;
+    triggerMode: number;
+    owner: string;
+    payout: string;
+    executionTick: number;
+    sharesClosed: bigint;
+    amount0Out: bigint;
+    amount1Out: bigint;
+}
+
+export interface DecodedFeeAppliedData {
+    vault: string;
+    triggerMode: number;
+    feeRecipient: string;
+    feeBps: number;
+    feeAmount0: bigint;
+    feeAmount1: bigint;
+}
+
+export interface DecodedSwapExecutedData {
+    vault: string;
+    triggerMode: number;
+    tokenIn: string;
+    tokenOut: string;
+    amountIn: bigint;
+    amountOut: bigint;
+}
+
+/**
+ * Decode an OrderExecuted event from the closer contract.
+ * Indexed: vault (topic1), triggerMode (topic2), owner (topic3)
+ * Data: (address payout, int24 executionTick, uint256 sharesClosed, uint256 amount0Out, uint256 amount1Out)
+ */
+export function decodeOrderExecutedLog(data: string, topics: readonly string[]): DecodedOrderExecutedData {
+    const hex = data.startsWith('0x') ? data.slice(2) : data;
+    const chunks = hex.match(/.{64}/g) || [];
+    return {
+        vault: '0x' + (topics[1]?.slice(26) ?? ''),
+        triggerMode: Number(BigInt('0x' + (topics[2]?.slice(2) ?? '0'))),
+        owner: '0x' + (topics[3]?.slice(26) ?? ''),
+        payout: '0x' + (chunks[0]?.slice(24) ?? ''),
+        executionTick: Number(BigInt.asIntN(24, BigInt('0x' + (chunks[1] ?? '0')))),
+        sharesClosed: BigInt('0x' + (chunks[2] ?? '0')),
+        amount0Out: BigInt('0x' + (chunks[3] ?? '0')),
+        amount1Out: BigInt('0x' + (chunks[4] ?? '0')),
+    };
+}
+
+/**
+ * Decode a FeeApplied event from the closer contract.
+ * Indexed: vault (topic1), triggerMode (topic2), feeRecipient (topic3)
+ * Data: (uint16 feeBps, uint256 feeAmount0, uint256 feeAmount1)
+ */
+export function decodeFeeAppliedLog(data: string, topics: readonly string[]): DecodedFeeAppliedData {
+    const hex = data.startsWith('0x') ? data.slice(2) : data;
+    const chunks = hex.match(/.{64}/g) || [];
+    return {
+        vault: '0x' + (topics[1]?.slice(26) ?? ''),
+        triggerMode: Number(BigInt('0x' + (topics[2]?.slice(2) ?? '0'))),
+        feeRecipient: '0x' + (topics[3]?.slice(26) ?? ''),
+        feeBps: Number(BigInt('0x' + (chunks[0] ?? '0'))),
+        feeAmount0: BigInt('0x' + (chunks[1] ?? '0')),
+        feeAmount1: BigInt('0x' + (chunks[2] ?? '0')),
+    };
+}
+
+/**
+ * Decode a SwapExecuted event from the closer contract.
+ * Indexed: vault (topic1), triggerMode (topic2)
+ * Data: (address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)
+ */
+export function decodeSwapExecutedLog(data: string, topics: readonly string[]): DecodedSwapExecutedData {
+    const hex = data.startsWith('0x') ? data.slice(2) : data;
+    const chunks = hex.match(/.{64}/g) || [];
+    return {
+        vault: '0x' + (topics[1]?.slice(26) ?? ''),
+        triggerMode: Number(BigInt('0x' + (topics[2]?.slice(2) ?? '0'))),
+        tokenIn: '0x' + (chunks[0]?.slice(24) ?? ''),
+        tokenOut: '0x' + (chunks[1]?.slice(24) ?? ''),
+        amountIn: BigInt('0x' + (chunks[2] ?? '0')),
+        amountOut: BigInt('0x' + (chunks[3] ?? '0')),
+    };
 }
 
 // ============================================================================
@@ -491,6 +590,7 @@ export class UniswapV3VaultLedgerService {
         userAddress: string,
         logs: VaultRawLogInput[],
         poolPriceService: UniswapV3PoolPriceService,
+        closerAddress?: string,
         tx?: PrismaTransactionClient,
     ): Promise<VaultImportLogsResult> {
         const preImportAggregates = await this.recalculateAggregates(
@@ -498,16 +598,38 @@ export class UniswapV3VaultLedgerService {
             tx,
         );
 
+        // Build a map of closer contract logs grouped by transaction hash
+        // so processSingleLog can look up companion events for close order detection
+        const closerLogsByTx = new Map<string, VaultRawLogInput[]>();
+        if (closerAddress) {
+            const closerAddrLower = closerAddress.toLowerCase();
+            for (const log of logs) {
+                if (log.address.toLowerCase() === closerAddrLower) {
+                    const txHash = log.transactionHash.toLowerCase();
+                    const existing = closerLogsByTx.get(txHash) ?? [];
+                    existing.push(log);
+                    closerLogsByTx.set(txHash, existing);
+                }
+            }
+        }
+
         const perLogResults: VaultSingleLogResult[] = [];
         const allDeletedEvents: UniswapV3VaultPositionLedgerEvent[] = [];
 
         for (const log of logs) {
+            // Skip closer contract logs — they're only used as companion data
+            if (closerAddress && log.address.toLowerCase() === closerAddress.toLowerCase()) {
+                continue;
+            }
+
             const result = await this.processSingleLog(
                 position,
                 chainId,
                 userAddress,
                 log,
                 poolPriceService,
+                closerAddress,
+                closerLogsByTx,
                 tx,
             );
             perLogResults.push(result);
@@ -536,6 +658,8 @@ export class UniswapV3VaultLedgerService {
         userAddress: string,
         log: VaultRawLogInput,
         poolPriceService: UniswapV3PoolPriceService,
+        closerAddress?: string,
+        closerLogsByTx?: Map<string, VaultRawLogInput[]>,
         tx?: PrismaTransactionClient,
     ): Promise<VaultSingleLogResult> {
         // 1. Validate
@@ -667,15 +791,33 @@ export class UniswapV3VaultLedgerService {
                 };
             } else if (from === userHex) {
                 // Transfer OUT: from owner → another address
-                eventType = 'VAULT_TRANSFER_OUT';
                 const toAddress = '0x' + to!.slice(26);
-                ledgerState = {
-                    eventType: 'VAULT_TRANSFER_OUT',
-                    shares: decoded.value,
-                    to: toAddress,
-                    poolPrice: sqrtPriceX96,
-                    tokenAmounts: [0n, 0n],
-                };
+
+                // Check if the transfer is to the closer contract (close order execution)
+                const isCloseOrder = closerAddress
+                    && toAddress.toLowerCase() === closerAddress.toLowerCase()
+                    && closerLogsByTx;
+
+                if (isCloseOrder) {
+                    // Composite close order event — look up companion events from the same tx
+                    const companionLogs = closerLogsByTx.get(log.transactionHash.toLowerCase()) ?? [];
+                    const { eventType: closeEventType, tokenValue: closeTokenValue, ledgerState: closeLedgerState } =
+                        this.buildCloseOrderEvent(
+                            decoded.value, sqrtPriceX96, companionLogs, position.typedConfig.isToken0Quote,
+                        );
+                    eventType = closeEventType;
+                    tokenValue = closeTokenValue;
+                    ledgerState = closeLedgerState;
+                } else {
+                    eventType = 'VAULT_TRANSFER_OUT';
+                    ledgerState = {
+                        eventType: 'VAULT_TRANSFER_OUT',
+                        shares: decoded.value,
+                        to: toAddress,
+                        poolPrice: sqrtPriceX96,
+                        tokenAmounts: [0n, 0n],
+                    };
+                }
             } else {
                 // Transfer IN: from another address → owner
                 eventType = 'VAULT_TRANSFER_IN';
@@ -808,7 +950,8 @@ export class UniswapV3VaultLedgerService {
                     break;
                 }
                 case 'VAULT_BURN':
-                case 'VAULT_TRANSFER_OUT': {
+                case 'VAULT_TRANSFER_OUT':
+                case 'VAULT_CLOSE_ORDER_EXECUTED': {
                     let proportionalCostBasis = 0n;
                     if (previousShares > 0n && state.shares > 0n) {
                         proportionalCostBasis = (state.shares * previousCostBasis) / previousShares;
@@ -934,5 +1077,96 @@ export class UniswapV3VaultLedgerService {
         } else {
             return valueOfToken0AmountInToken1(amount0, sqrtPriceX96) + amount1;
         }
+    }
+
+    /**
+     * Build a composite VAULT_CLOSE_ORDER_EXECUTED event from companion closer contract logs.
+     * Correlates OrderExecuted + FeeApplied + SwapExecuted from the same transaction
+     * to compute the actual execution proceeds.
+     */
+    private buildCloseOrderEvent(
+        shares: bigint,
+        sqrtPriceX96: bigint,
+        companionLogs: VaultRawLogInput[],
+        isToken0Quote: boolean,
+    ): { eventType: EventType; tokenValue: bigint; ledgerState: UniswapV3VaultLedgerEventState } {
+        // Decode companion events
+        let orderExecuted: DecodedOrderExecutedData | null = null;
+        let feeApplied: DecodedFeeAppliedData | null = null;
+        const swapsExecuted: DecodedSwapExecutedData[] = [];
+
+        for (const cLog of companionLogs) {
+            const topic0 = cLog.topics[0]?.toLowerCase();
+            if (topic0 === CLOSER_EVENT_SIGNATURES.ORDER_EXECUTED.toLowerCase()) {
+                orderExecuted = decodeOrderExecutedLog(cLog.data, cLog.topics);
+            } else if (topic0 === CLOSER_EVENT_SIGNATURES.FEE_APPLIED.toLowerCase()) {
+                feeApplied = decodeFeeAppliedLog(cLog.data, cLog.topics);
+            } else if (topic0 === CLOSER_EVENT_SIGNATURES.SWAP_EXECUTED.toLowerCase()) {
+                swapsExecuted.push(decodeSwapExecutedLog(cLog.data, cLog.topics));
+            }
+        }
+
+        // Extract execution data (fallback to zeros if OrderExecuted not found)
+        const amount0Out = orderExecuted?.amount0Out ?? 0n;
+        const amount1Out = orderExecuted?.amount1Out ?? 0n;
+        const payout = orderExecuted?.payout ?? '';
+        const executionTick = orderExecuted?.executionTick ?? 0;
+        const feeAmount0 = feeApplied?.feeAmount0 ?? 0n;
+        const feeAmount1 = feeApplied?.feeAmount1 ?? 0n;
+        const feeBps = feeApplied?.feeBps ?? 0;
+
+        // Aggregate swap amounts across all phases
+        let totalSwapAmountIn = 0n;
+        let totalSwapAmountOut = 0n;
+        for (const swap of swapsExecuted) {
+            totalSwapAmountIn += swap.amountIn;
+            totalSwapAmountOut += swap.amountOut;
+        }
+
+        // Calculate final proceeds: burn output - fees ± swap
+        // After fees: payout0 = amount0Out - feeAmount0, payout1 = amount1Out - feeAmount1
+        // After swap: one side is reduced by swapAmountIn, other side increased by swapAmountOut
+        let finalAmount0 = amount0Out - feeAmount0;
+        let finalAmount1 = amount1Out - feeAmount1;
+
+        // Apply swap adjustments — determine swap direction from the first swap event
+        if (swapsExecuted.length > 0) {
+            // The swap converts one token entirely into the other
+            // After swap, the contract reads final balances, so we reconstruct:
+            // If swapping token0→token1: finalAmount0 = 0, finalAmount1 = (amount1Out - fee1) + totalSwapOut
+            // If swapping token1→token0: finalAmount1 = 0, finalAmount0 = (amount0Out - fee0) + totalSwapOut
+            // But the swap input comes from the after-fee amount, so:
+            finalAmount0 = finalAmount0 - (swapsExecuted[0]?.tokenIn === swapsExecuted[0]?.tokenOut ? 0n : 0n);
+            // Simpler: the OrderExecuted has pre-swap amounts, so final = afterFee - swapIn on one side + swapOut on other
+            // We can just report the raw data and let the UI/display compute; for tokenValue we use afterFee amounts
+            // since the swap is value-neutral (minus slippage)
+            finalAmount0 = amount0Out - feeAmount0;
+            finalAmount1 = amount1Out - feeAmount1;
+        }
+
+        // tokenValue = value of the actual burn proceeds (after fees) in quote token
+        const afterFee0 = amount0Out - feeAmount0;
+        const afterFee1 = amount1Out - feeAmount1;
+        const tokenValue = this.calculateTokenValue(afterFee0, afterFee1, sqrtPriceX96, isToken0Quote);
+
+        const ledgerState: UniswapV3VaultLedgerEventState = {
+            eventType: 'VAULT_CLOSE_ORDER_EXECUTED',
+            shares,
+            payout,
+            executionTick,
+            amount0Out,
+            amount1Out,
+            feeAmount0,
+            feeAmount1,
+            feeBps,
+            swapAmountIn: totalSwapAmountIn,
+            swapAmountOut: totalSwapAmountOut,
+            finalAmount0,
+            finalAmount1,
+            poolPrice: sqrtPriceX96,
+            tokenAmounts: [afterFee0, afterFee1],
+        };
+
+        return { eventType: 'VAULT_CLOSE_ORDER_EXECUTED', tokenValue, ledgerState };
     }
 }

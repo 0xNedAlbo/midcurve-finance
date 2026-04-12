@@ -358,6 +358,15 @@ export function LedgerEventTable({
       );
     }
 
+    if (eventType === "VAULT_CLOSE_ORDER_EXECUTED") {
+      return (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-500">Payout:</span>
+          {renderKnownAddressOrLink(state.payout)}
+        </div>
+      );
+    }
+
     return null;
   };
 

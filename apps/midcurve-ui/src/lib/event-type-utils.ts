@@ -7,7 +7,7 @@
 
 import { createElement } from 'react';
 import type { ReactNode } from 'react';
-import { Pickaxe, BookPlus, BookMinus, ArrowRightLeft, Coins, Flame, LogIn, LogOut, CircleHelp } from 'lucide-react';
+import { Pickaxe, BookPlus, BookMinus, ArrowRightLeft, Coins, Flame, LogIn, LogOut, Zap, CircleHelp } from 'lucide-react';
 
 /**
  * Position ledger event types
@@ -23,7 +23,8 @@ export type EventType =
   | 'VAULT_BURN'
   | 'VAULT_COLLECT_YIELD'
   | 'VAULT_TRANSFER_IN'
-  | 'VAULT_TRANSFER_OUT';
+  | 'VAULT_TRANSFER_OUT'
+  | 'VAULT_CLOSE_ORDER_EXECUTED';
 
 /**
  * Visual metadata for an event type
@@ -105,6 +106,12 @@ const EVENT_TYPE_MAP: Record<EventType, EventTypeInfo> = {
     color: 'text-orange-400',
     bgColor: 'bg-orange-500/20',
   },
+  VAULT_CLOSE_ORDER_EXECUTED: {
+    label: 'Close Order Executed',
+    icon: createElement(Zap, { className: 'w-5 h-5' }),
+    color: 'text-amber-400',
+    bgColor: 'bg-amber-500/20',
+  },
 };
 
 /**
@@ -171,6 +178,7 @@ export function isLifecycleEvent(eventType: EventType): boolean {
  */
 export function isVaultLifecycleEvent(eventType: EventType): boolean {
   return eventType === 'VAULT_MINT' || eventType === 'VAULT_BURN'
-    || eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT';
+    || eventType === 'VAULT_TRANSFER_IN' || eventType === 'VAULT_TRANSFER_OUT'
+    || eventType === 'VAULT_CLOSE_ORDER_EXECUTED';
 }
 

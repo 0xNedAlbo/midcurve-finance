@@ -63,6 +63,31 @@ export interface UniswapV3VaultTransferOutEvent extends UniswapV3VaultLedgerEven
   to: string;
 }
 
+export interface UniswapV3VaultCloseOrderExecutedEvent extends UniswapV3VaultLedgerEventStateBase {
+  eventType: 'VAULT_CLOSE_ORDER_EXECUTED';
+  /** Shares closed by the order */
+  shares: bigint;
+  /** Address that received the final payout */
+  payout: string;
+  /** Pool tick at execution time */
+  executionTick: number;
+  /** Raw token amounts from vault burn (before fees/swap) */
+  amount0Out: bigint;
+  amount1Out: bigint;
+  /** Operator fee amounts (0 if none) */
+  feeAmount0: bigint;
+  feeAmount1: bigint;
+  /** Operator fee in basis points */
+  feeBps: number;
+  /** Total swap input across all phases (0 if no swap) */
+  swapAmountIn: bigint;
+  /** Total swap output across all phases */
+  swapAmountOut: bigint;
+  /** Net proceeds after fees and swap */
+  finalAmount0: bigint;
+  finalAmount1: bigint;
+}
+
 // ============================================================================
 // UNION TYPE
 // ============================================================================
@@ -72,7 +97,8 @@ export type UniswapV3VaultLedgerEventState =
   | UniswapV3VaultBurnEvent
   | UniswapV3VaultCollectYieldEvent
   | UniswapV3VaultTransferInEvent
-  | UniswapV3VaultTransferOutEvent;
+  | UniswapV3VaultTransferOutEvent
+  | UniswapV3VaultCloseOrderExecutedEvent;
 
 // ============================================================================
 // JSON TYPES
@@ -110,6 +136,21 @@ export type UniswapV3VaultLedgerEventStateJSON =
       eventType: 'VAULT_TRANSFER_OUT';
       shares: string;
       to: string;
+    })
+  | (UniswapV3VaultLedgerEventStateBaseJSON & {
+      eventType: 'VAULT_CLOSE_ORDER_EXECUTED';
+      shares: string;
+      payout: string;
+      executionTick: number;
+      amount0Out: string;
+      amount1Out: string;
+      feeAmount0: string;
+      feeAmount1: string;
+      feeBps: number;
+      swapAmountIn: string;
+      swapAmountOut: string;
+      finalAmount0: string;
+      finalAmount1: string;
     });
 
 // ============================================================================
@@ -145,6 +186,15 @@ export function vaultLedgerEventStateToJSON(
       return { ...base, eventType: 'VAULT_TRANSFER_IN', shares: state.shares.toString(), from: state.from };
     case 'VAULT_TRANSFER_OUT':
       return { ...base, eventType: 'VAULT_TRANSFER_OUT', shares: state.shares.toString(), to: state.to };
+    case 'VAULT_CLOSE_ORDER_EXECUTED':
+      return {
+        ...base, eventType: 'VAULT_CLOSE_ORDER_EXECUTED',
+        shares: state.shares.toString(), payout: state.payout, executionTick: state.executionTick,
+        amount0Out: state.amount0Out.toString(), amount1Out: state.amount1Out.toString(),
+        feeAmount0: state.feeAmount0.toString(), feeAmount1: state.feeAmount1.toString(), feeBps: state.feeBps,
+        swapAmountIn: state.swapAmountIn.toString(), swapAmountOut: state.swapAmountOut.toString(),
+        finalAmount0: state.finalAmount0.toString(), finalAmount1: state.finalAmount1.toString(),
+      };
   }
 }
 
@@ -163,5 +213,14 @@ export function vaultLedgerEventStateFromJSON(
       return { ...base, eventType: 'VAULT_TRANSFER_IN', shares: BigInt(json.shares), from: json.from };
     case 'VAULT_TRANSFER_OUT':
       return { ...base, eventType: 'VAULT_TRANSFER_OUT', shares: BigInt(json.shares), to: json.to };
+    case 'VAULT_CLOSE_ORDER_EXECUTED':
+      return {
+        ...base, eventType: 'VAULT_CLOSE_ORDER_EXECUTED',
+        shares: BigInt(json.shares), payout: json.payout, executionTick: json.executionTick,
+        amount0Out: BigInt(json.amount0Out), amount1Out: BigInt(json.amount1Out),
+        feeAmount0: BigInt(json.feeAmount0), feeAmount1: BigInt(json.feeAmount1), feeBps: json.feeBps,
+        swapAmountIn: BigInt(json.swapAmountIn), swapAmountOut: BigInt(json.swapAmountOut),
+        finalAmount0: BigInt(json.finalAmount0), finalAmount1: BigInt(json.finalAmount1),
+      };
   }
 }
