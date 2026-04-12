@@ -204,12 +204,6 @@ function computeSummary(
     const event = financialEvents[i]!;
     const cfg = parseConfig(event);
 
-    // Fees from this event (always counted, even without rebalancing)
-    const eventFees = feesToQuote(
-      cfg.feesCollected0, cfg.feesCollected1, cfg.sqrtPriceX96, baseIsToken0,
-    );
-    totalPremium += eventFees;
-
     // Rebalancing segment
     if (i > 0) {
       const prevCfg = parseConfig(financialEvents[i - 1]!);
@@ -235,19 +229,10 @@ function computeSummary(
         if (deltaBase < 0n) {
           ammSoldBase += absBI(deltaBase);
           ammSoldQuoteVolume += absBI(deltaQuote);
-          ammSoldPremium += eventFees;
         } else if (deltaBase > 0n) {
           ammBoughtBase += absBI(deltaBase);
           ammBoughtQuoteVolume += absBI(deltaQuote);
-          ammBoughtPremium += eventFees;
         }
-
-        // Effective price includes fees:
-        // Sold base: received quote + fees → (|deltaQuote| + fees) / |deltaBase|
-        // Bought base: paid quote - fees → (|deltaQuote| - fees) / |deltaBase|
-        const effectiveQuoteForPrice = deltaBase < 0n
-          ? absBI(deltaQuote) + eventFees
-          : absBI(deltaQuote) - eventFees;
 
         segments.push({
           index: segments.length,
@@ -257,9 +242,9 @@ function computeSummary(
           deltaBase,
           deltaQuote,
           avgPrice: deltaBase !== 0n
-            ? (effectiveQuoteForPrice * scale) / absBI(deltaBase)
+            ? (absBI(deltaQuote) * scale) / absBI(deltaBase)
             : 0n,
-          feesEarned: eventFees,
+          feesEarned: 0n,
         });
       }
     }
@@ -371,16 +356,18 @@ function computeSummary(
     currentHoldingsQuote = mapped.quote;
   }
 
-  // Unclaimed fees
-  totalPremium += feesToQuote(
+  // Premium = unclaimed fees only.
+  // Fees are not compounded into liquidity. Once claimed, they leave the position
+  // and can go anywhere — they cannot count against the purchase or sale of assets
+  // inside the position. Only unclaimed fees are still inside the position.
+  totalPremium = feesToQuote(
     BigInt(posState.unclaimedFees0),
     BigInt(posState.unclaimedFees1),
     currentSqrtPriceX96,
     baseIsToken0,
   );
 
-  // Distribute unattributed fees (from COLLECT events after close + unclaimed fees)
-  // to the last segment so per-segment execution prices account for all fees.
+  // Assign all unclaimed fees to the last segment for execution price adjustment.
   if (segments.length > 0) {
     const attributedFees = segments.reduce((acc, s) => acc + s.feesEarned, 0n);
     const unattributedFees = totalPremium - attributedFees;
