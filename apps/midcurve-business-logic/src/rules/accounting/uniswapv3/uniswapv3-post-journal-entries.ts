@@ -1,26 +1,26 @@
 /**
  * UniswapV3PostJournalEntriesRule
  *
- * Subscribes to UniswapV3 NFT position domain events and
- * maintains token lot records for cost basis tracking.
+ * Subscribes to UniswapV3 NFT position domain events,
+ * maintains token lots, and creates double-entry journal entries.
  *
  * Flow: Domain Events → Token Lots → Journal Entries (lot-based cost basis)
  *
- * Acquisition events (create lots):
- * - position.created           → Backfill lots from ledger history
- * - position.liquidity.increased → Create acquisition lot
- * - position.transferred.in    → Create acquisition lot
+ * Acquisition events (create lots + DR 1000 / CR 3000):
+ * - position.created           → Backfill lots + entries from ledger history
+ * - position.liquidity.increased → Create acquisition lot + entry
+ * - position.transferred.in    → Create acquisition lot + entry
  *
- * Disposal events (consume lots):
- * - position.liquidity.decreased → Dispose lots via cost basis method
- * - position.transferred.out   → Dispose lots via cost basis method
+ * Disposal events (consume lots + CR 1000 / DR 3100 / gain-loss / FX):
+ * - position.liquidity.decreased → Dispose lots + entry
+ * - position.transferred.out   → Dispose lots + entry
  *
  * Non-lot events:
- * - position.fees.collected    → Fee income (outside lot system)
- * - position.closed            → Cost basis correction
+ * - position.fees.collected    → DR 3100 / CR 4000 (outside lot system)
+ * - position.closed            → Cost basis correction (zero remainder → FX)
  * - position.burned            → No financial entry
- * - position.deleted           → Delete all lots for position
- * - position.liquidity.reverted → Delete lots for reverted events
+ * - position.deleted           → Delete all lots + journal entries
+ * - position.liquidity.reverted → Delete lots + entries for reverted events
  */
 
 import type { ConsumeMessage } from 'amqplib';
@@ -28,7 +28,10 @@ import { prisma } from '@midcurve/database';
 import {
   setupConsumerQueue,
   CoinGeckoClient,
+  findClosestPrice,
   TokenLotService,
+  JournalService,
+  JournalLineBuilder,
   createLotSelector,
   type DomainEvent,
   type PositionEventType,
@@ -41,6 +44,9 @@ import {
   createErc20TokenHash,
   createErc721TokenHash,
   getUniswapV3NfpmAddress,
+  ACCOUNT_CODES,
+  LEDGER_REF_PREFIX,
+  type JournalLineInput,
   type CostBasisMethod,
   DEFAULT_USER_SETTINGS,
 } from '@midcurve/shared';
@@ -65,10 +71,9 @@ interface ReportingContext {
   poolHash: string;
 }
 
-/** Position metadata needed for lot operations. */
 interface PositionTokenContext {
-  tokenId: string; // Token DB row ID (ERC-721)
-  tokenHash: string; // "erc721/{chainId}/{nfpmAddr}/{nftId}" or vault equivalent
+  tokenId: string;
+  tokenHash: string;
 }
 
 // =============================================================================
@@ -78,14 +83,16 @@ interface PositionTokenContext {
 export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   readonly ruleName = 'uniswapv3-post-journal-entries';
   readonly ruleDescription =
-    'Maintains token lots from UniswapV3 NFT position domain events';
+    'Maintains token lots and journal entries from UniswapV3 NFT position domain events';
 
   private consumerTag: string | null = null;
   private readonly tokenLotService: TokenLotService;
+  private readonly journalService: JournalService;
 
   constructor() {
     super();
     this.tokenLotService = TokenLotService.getInstance();
+    this.journalService = JournalService.getInstance();
   }
 
   // ===========================================================================
@@ -106,11 +113,8 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     this.consumerTag = result.consumerTag;
     this.logger.info(
-      {
-        queueName: QUEUE_NAME,
-        routingPattern: ROUTING_PATTERN,
-      },
-      'Subscribed to UniswapV3 NFT position events for token lot tracking',
+      { queueName: QUEUE_NAME, routingPattern: ROUTING_PATTERN },
+      'Subscribed to UniswapV3 NFT position events',
     );
   }
 
@@ -134,7 +138,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
       this.logger.info(
         { eventId: event.id, eventType, entityId: event.entityId },
-        'Processing position event for token lots',
+        'Processing position event',
       );
 
       await this.routeEvent(event, eventType);
@@ -142,7 +146,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     } catch (error) {
       this.logger.error(
         { error: error instanceof Error ? error.message : String(error) },
-        'Error processing position event for token lots',
+        'Error processing position event',
       );
       this.channel.nack(msg, false, false);
     }
@@ -179,14 +183,13 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   }
 
   // ===========================================================================
-  // Acquisition Handlers — create lots
+  // Acquisition Handlers — create lots + journal entries
   // ===========================================================================
 
   /**
-   * position.created → Backfill lots from ledger event history.
+   * position.created → Backfill lots + journal entries from ledger history.
    *
-   * Replays all financial ledger events for the position and creates
-   * acquisition/disposal lots chronologically.
+   * Uses historic CoinGecko prices for event-time exchange rates.
    */
   private async handlePositionCreated(
     event: DomainEvent<PositionLifecyclePayload>,
@@ -205,14 +208,13 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const tokenCtx = await this.resolvePositionToken(positionId);
     if (!tokenCtx) return;
 
-    // Check if lots already exist for this token (idempotency)
+    // Idempotency — skip if lots already exist
     const existingLots = await this.tokenLotService.getOpenLots(position.userId, tokenCtx.tokenHash);
     if (existingLots.length > 0) {
       this.logger.info({ positionHash }, 'Lots already exist for position, skipping backfill');
       return;
     }
 
-    // Replay all financial ledger events and create lots
     const costBasisMethod = await this.getUserCostBasisMethod(position.userId);
     const lotSelector = createLotSelector(costBasisMethod);
 
@@ -223,136 +225,144 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
         isIgnored: false,
       },
       select: {
-        id: true,
-        eventType: true,
-        inputHash: true,
-        timestamp: true,
-        tokenValue: true,
-        deltaCostBasis: true,
-        costBasisAfter: true,
-        deltaPnl: true,
-        config: true,
+        id: true, eventType: true, inputHash: true, timestamp: true,
+        tokenValue: true, deltaCostBasis: true, deltaPnl: true, config: true,
       },
       orderBy: { timestamp: 'asc' },
     });
 
     if (ledgerEvents.length === 0) return;
 
-    const ctx = await this.getReportingContext(positionId);
+    // Resolve position metadata for reporting context
+    const positionConfig = position.config as Record<string, unknown>;
+    const chainId = positionConfig.chainId as number;
+    const poolAddress = positionConfig.poolAddress as string;
+    const positionRef = positionHash;
+    const instrumentRef = `${position.protocol}/${chainId}/${poolAddress}`;
+
+    const { reportingCurrency, quoteTokenDecimals, quoteCoingeckoId } =
+      await this.getQuoteTokenInfo(positionId);
+
+    // Fetch historic price time series from CoinGecko
+    let priceTimeSeries: [number, number][] = [];
+    if (quoteCoingeckoId) {
+      const firstTs = Math.floor(ledgerEvents[0]!.timestamp.getTime() / 1000);
+      const lastTs = Math.floor(ledgerEvents[ledgerEvents.length - 1]!.timestamp.getTime() / 1000);
+      const chartData = await CoinGeckoClient.getInstance().getMarketChartRange(
+        quoteCoingeckoId, firstTs - 3600, lastTs + 3600,
+      );
+      priceTimeSeries = chartData.prices;
+    }
 
     for (const le of ledgerEvents) {
       const config = le.config as Record<string, unknown>;
+      const eventRate = computeHistoricRate(quoteCoingeckoId, priceTimeSeries, le.timestamp);
+      const eventRateStr = eventRate.toString();
 
       if (le.eventType === 'TRANSFER') {
-        // NFT transfers are all-or-nothing — deltaL is always 0.
-        // Direction is determined by deltaCostBasis sign.
         const deltaCostBasis = BigInt(le.deltaCostBasis);
         if (deltaCostBasis === 0n) continue;
 
+        const domainEventId = `${event.id}:${le.inputHash}`;
+        if (await this.journalService.isProcessed(domainEventId)) continue;
+
         if (deltaCostBasis > 0n) {
-          // Transfer IN — acquire the entire position liquidity
+          // Transfer IN
           const liquidityAfter = config.liquidityAfter as string;
-          const costBasisAbsolute = computeReportingAmount(
-            le.deltaCostBasis, ctx.exchangeRate, ctx.quoteTokenDecimals,
-          );
+          const costBasisAbsolute = computeReportingAmount(le.deltaCostBasis, eventRateStr, quoteTokenDecimals);
 
           await this.tokenLotService.createLot({
-            userId: position.userId,
-            tokenId: tokenCtx.tokenId,
-            tokenHash: tokenCtx.tokenHash,
-            quantity: liquidityAfter,
-            costBasisAbsolute,
-            acquiredAt: le.timestamp,
-            acquisitionEventId: le.inputHash,
-            transferEvent: 'TRANSFER_IN',
+            userId: position.userId, tokenId: tokenCtx.tokenId, tokenHash: tokenCtx.tokenHash,
+            quantity: liquidityAfter, costBasisAbsolute, acquiredAt: le.timestamp,
+            acquisitionEventId: le.inputHash, transferEvent: 'TRANSFER_IN',
           });
-        } else {
-          // Transfer OUT — dispose all remaining open lots
-          const openLots = await this.tokenLotService.getOpenLots(
-            position.userId, tokenCtx.tokenHash,
-          );
-          const totalOpen = openLots.reduce(
-            (sum, lot) => sum + BigInt(lot.openQuantity), 0n,
-          );
-          if (totalOpen > 0n) {
-            const proceedsReporting = computeReportingAmount(
-              le.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
-            );
 
-            await this.tokenLotService.disposeLots({
-              userId: position.userId,
-              tokenHash: tokenCtx.tokenHash,
-              quantityToDispose: totalOpen.toString(),
-              proceedsReporting,
-              disposedAt: le.timestamp,
-              disposalEventId: le.inputHash,
-              transferEvent: 'TRANSFER_OUT',
-              lotSelector,
+          await this.createAcquisitionEntry(
+            position.userId, domainEventId, 'position.transferred.in',
+            `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${le.id}`,
+            le.timestamp, le.deltaCostBasis, positionRef, instrumentRef,
+            reportingCurrency, eventRateStr, quoteTokenDecimals,
+          );
+        } else {
+          // Transfer OUT
+          const openLots = await this.tokenLotService.getOpenLots(position.userId, tokenCtx.tokenHash);
+          const totalOpen = openLots.reduce((sum, lot) => sum + BigInt(lot.openQuantity), 0n);
+          if (totalOpen > 0n) {
+            const proceedsReporting = computeReportingAmount(le.tokenValue, eventRateStr, quoteTokenDecimals);
+            const result = await this.tokenLotService.disposeLots({
+              userId: position.userId, tokenHash: tokenCtx.tokenHash,
+              quantityToDispose: totalOpen.toString(), proceedsReporting,
+              disposedAt: le.timestamp, disposalEventId: le.inputHash,
+              transferEvent: 'TRANSFER_OUT', lotSelector,
             });
+
+            await this.createDisposalEntry(
+              position.userId, domainEventId, 'position.transferred.out',
+              `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${le.id}`,
+              le.timestamp, le, result, positionRef, instrumentRef,
+              reportingCurrency, eventRateStr, quoteTokenDecimals,
+            );
           }
         }
         continue;
       }
 
-      // INCREASE_POSITION / DECREASE_POSITION — use deltaL
+      // INCREASE_POSITION / DECREASE_POSITION
       const deltaL = config.deltaL as string;
       const absDeltaL = absBigint(deltaL);
       if (absDeltaL === '0') continue;
 
-      if (le.eventType === 'INCREASE_POSITION') {
-        const deltaCostBasis = le.deltaCostBasis;
-        if (deltaCostBasis === '0') continue;
+      const domainEventId = `${event.id}:${le.inputHash}`;
+      if (await this.journalService.isProcessed(domainEventId)) continue;
 
-        const costBasisAbsolute = computeReportingAmount(
-          deltaCostBasis, ctx.exchangeRate, ctx.quoteTokenDecimals,
-        );
+      if (le.eventType === 'INCREASE_POSITION') {
+        if (le.deltaCostBasis === '0') continue;
+        const costBasisAbsolute = computeReportingAmount(le.deltaCostBasis, eventRateStr, quoteTokenDecimals);
 
         await this.tokenLotService.createLot({
-          userId: position.userId,
-          tokenId: tokenCtx.tokenId,
-          tokenHash: tokenCtx.tokenHash,
-          quantity: absDeltaL,
-          costBasisAbsolute,
-          acquiredAt: le.timestamp,
-          acquisitionEventId: le.inputHash,
-          transferEvent: 'INCREASE_POSITION',
+          userId: position.userId, tokenId: tokenCtx.tokenId, tokenHash: tokenCtx.tokenHash,
+          quantity: absDeltaL, costBasisAbsolute, acquiredAt: le.timestamp,
+          acquisitionEventId: le.inputHash, transferEvent: 'INCREASE_POSITION',
         });
-      } else if (le.eventType === 'DECREASE_POSITION') {
-        const tokenValue = le.tokenValue;
-        const proceedsReporting = computeReportingAmount(
-          tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
-        );
 
-        await this.tokenLotService.disposeLots({
-          userId: position.userId,
-          tokenHash: tokenCtx.tokenHash,
-          quantityToDispose: absDeltaL,
-          proceedsReporting,
-          disposedAt: le.timestamp,
-          disposalEventId: le.inputHash,
-          transferEvent: 'DECREASE_POSITION',
-          lotSelector,
+        await this.createAcquisitionEntry(
+          position.userId, domainEventId, 'position.liquidity.increased',
+          `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${le.id}`,
+          le.timestamp, le.deltaCostBasis, positionRef, instrumentRef,
+          reportingCurrency, eventRateStr, quoteTokenDecimals,
+        );
+      } else if (le.eventType === 'DECREASE_POSITION') {
+        const proceedsReporting = computeReportingAmount(le.tokenValue, eventRateStr, quoteTokenDecimals);
+        const result = await this.tokenLotService.disposeLots({
+          userId: position.userId, tokenHash: tokenCtx.tokenHash,
+          quantityToDispose: absDeltaL, proceedsReporting,
+          disposedAt: le.timestamp, disposalEventId: le.inputHash,
+          transferEvent: 'DECREASE_POSITION', lotSelector,
         });
+
+        await this.createDisposalEntry(
+          position.userId, domainEventId, 'position.liquidity.decreased',
+          `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${le.id}`,
+          le.timestamp, le, result, positionRef, instrumentRef,
+          reportingCurrency, eventRateStr, quoteTokenDecimals,
+        );
       }
     }
 
     this.logger.info(
       { positionHash, eventsProcessed: ledgerEvents.length },
-      'Token lots backfilled from ledger history',
+      'Token lots and journal entries backfilled from ledger history',
     );
-
-    // TODO: Create journal entries from lots
   }
 
   /**
-   * position.liquidity.increased → Create acquisition lot.
-   *
-   * Cost basis = combined FMV of deposited tokens (tokenValue * exchange rate).
-   * Quantity = liquidity units (deltaL from ledger event config).
+   * position.liquidity.increased → Create acquisition lot + DR 1000 / CR 3000.
    */
   private async handleLiquidityIncreased(
     event: DomainEvent<PositionLedgerEventPayload>,
   ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
     const { positionId, positionHash, ledgerInputHash } = event.payload;
     const userId = await this.getPositionUserId(positionId);
 
@@ -378,27 +388,29 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     );
 
     await this.tokenLotService.createLot({
-      userId,
-      tokenId: tokenCtx.tokenId,
-      tokenHash: tokenCtx.tokenHash,
-      quantity: deltaL,
-      costBasisAbsolute,
+      userId, tokenId: tokenCtx.tokenId, tokenHash: tokenCtx.tokenHash,
+      quantity: deltaL, costBasisAbsolute,
       acquiredAt: new Date(event.payload.eventTimestamp),
-      acquisitionEventId: ledgerInputHash,
-      transferEvent: 'INCREASE_POSITION',
+      acquisitionEventId: ledgerInputHash, transferEvent: 'INCREASE_POSITION',
     });
 
-    this.logger.info({ positionHash, deltaL, costBasisAbsolute }, 'Acquisition lot created');
-
-    // TODO: Create journal entry (DR 1000 / CR 3000) from lot
+    await this.createAcquisitionEntry(
+      userId, event.id, event.type,
+      `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
+      new Date(event.payload.eventTimestamp), deltaCostBasis,
+      positionHash, ctx.poolHash,
+      ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals,
+    );
   }
 
   /**
-   * position.transferred.in → Create acquisition lot at FMV.
+   * position.transferred.in → Create acquisition lot + DR 1000 / CR 3000.
    */
   private async handleTransferredIn(
     event: DomainEvent<PositionLedgerEventPayload>,
   ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
     const { positionId, positionHash, ledgerInputHash } = event.payload;
     const userId = await this.getPositionUserId(positionId);
 
@@ -408,8 +420,6 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
       return;
     }
 
-    // NFT transfers are all-or-nothing — deltaL is always 0.
-    // Use liquidityAfter as the lot quantity (the full position liquidity).
     const config = ledgerEvent.config as Record<string, unknown>;
     const liquidityAfter = config.liquidityAfter as string;
     const costBasis = ledgerEvent.deltaCostBasis;
@@ -424,34 +434,33 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     );
 
     await this.tokenLotService.createLot({
-      userId,
-      tokenId: tokenCtx.tokenId,
-      tokenHash: tokenCtx.tokenHash,
-      quantity: liquidityAfter,
-      costBasisAbsolute,
+      userId, tokenId: tokenCtx.tokenId, tokenHash: tokenCtx.tokenHash,
+      quantity: liquidityAfter, costBasisAbsolute,
       acquiredAt: new Date(event.payload.eventTimestamp),
-      acquisitionEventId: ledgerInputHash,
-      transferEvent: 'TRANSFER_IN',
+      acquisitionEventId: ledgerInputHash, transferEvent: 'TRANSFER_IN',
     });
 
-    this.logger.info({ positionHash, liquidityAfter }, 'Transfer-in acquisition lot created');
-
-    // TODO: Create journal entry (DR 1000 / CR 3000) from lot
+    await this.createAcquisitionEntry(
+      userId, event.id, event.type,
+      `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
+      new Date(event.payload.eventTimestamp), costBasis,
+      positionHash, ctx.poolHash,
+      ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals,
+    );
   }
 
   // ===========================================================================
-  // Disposal Handlers — consume lots
+  // Disposal Handlers — consume lots + journal entries
   // ===========================================================================
 
   /**
-   * position.liquidity.decreased → Dispose lots via cost basis method.
-   *
-   * Proceeds = FMV of withdrawn tokens (tokenValue * exchange rate).
-   * Realized PnL = proceeds - cost basis of consumed lots.
+   * position.liquidity.decreased → Dispose lots + CR 1000 / DR 3100 / gain-loss / FX.
    */
   private async handleLiquidityDecreased(
     event: DomainEvent<PositionLedgerEventPayload>,
   ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
     const { positionId, positionHash, ledgerInputHash } = event.payload;
     const userId = await this.getPositionUserId(positionId);
 
@@ -472,43 +481,34 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const costBasisMethod = await this.getUserCostBasisMethod(userId);
     const lotSelector = createLotSelector(costBasisMethod);
 
-    const tokenValue = ledgerEvent.tokenValue;
     const proceedsReporting = computeReportingAmount(
-      tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
+      ledgerEvent.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
     );
 
     const result = await this.tokenLotService.disposeLots({
-      userId,
-      tokenHash: tokenCtx.tokenHash,
-      quantityToDispose: absBigint(deltaL),
-      proceedsReporting,
+      userId, tokenHash: tokenCtx.tokenHash,
+      quantityToDispose: absBigint(deltaL), proceedsReporting,
       disposedAt: new Date(event.payload.eventTimestamp),
-      disposalEventId: ledgerInputHash,
-      transferEvent: 'DECREASE_POSITION',
-      lotSelector,
+      disposalEventId: ledgerInputHash, transferEvent: 'DECREASE_POSITION', lotSelector,
     });
 
-    this.logger.info(
-      {
-        positionHash,
-        disposalCount: result.disposals.length,
-        totalPnl: result.totalRealizedPnl.toString(),
-      },
-      'Lots disposed for liquidity decrease',
+    await this.createDisposalEntry(
+      userId, event.id, event.type,
+      `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
+      new Date(event.payload.eventTimestamp), ledgerEvent, result,
+      positionHash, ctx.poolHash,
+      ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals,
     );
-
-    // TODO: Create journal entries from disposal result
-    //   CR 1000 (cost basis), DR 3100 (capital returned),
-    //   DR/CR 4100/5000 (realized gain/loss), DR/CR FX
-    this.logDisposalStub(positionHash, result);
   }
 
   /**
-   * position.transferred.out → Dispose all remaining lots.
+   * position.transferred.out → Dispose all remaining lots + journal entry.
    */
   private async handleTransferredOut(
     event: DomainEvent<PositionLedgerEventPayload>,
   ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
     const { positionId, positionHash, ledgerInputHash } = event.payload;
     const userId = await this.getPositionUserId(positionId);
 
@@ -518,7 +518,6 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
       return;
     }
 
-    // NFT transfers are all-or-nothing — dispose all remaining open lots.
     const tokenCtx = await this.resolvePositionToken(positionId);
     if (!tokenCtx) return;
 
@@ -532,29 +531,24 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const costBasisMethod = await this.getUserCostBasisMethod(userId);
     const lotSelector = createLotSelector(costBasisMethod);
 
-    const tokenValue = ledgerEvent.tokenValue;
     const proceedsReporting = computeReportingAmount(
-      tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
+      ledgerEvent.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
     );
 
     const result = await this.tokenLotService.disposeLots({
-      userId,
-      tokenHash: tokenCtx.tokenHash,
-      quantityToDispose: totalOpenQuantity.toString(),
-      proceedsReporting,
+      userId, tokenHash: tokenCtx.tokenHash,
+      quantityToDispose: totalOpenQuantity.toString(), proceedsReporting,
       disposedAt: new Date(event.payload.eventTimestamp),
-      disposalEventId: ledgerInputHash,
-      transferEvent: 'TRANSFER_OUT',
-      lotSelector,
+      disposalEventId: ledgerInputHash, transferEvent: 'TRANSFER_OUT', lotSelector,
     });
 
-    this.logger.info(
-      { positionHash, totalPnl: result.totalRealizedPnl.toString() },
-      'Lots disposed for transfer out',
+    await this.createDisposalEntry(
+      userId, event.id, event.type,
+      `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}`,
+      new Date(event.payload.eventTimestamp), ledgerEvent, result,
+      positionHash, ctx.poolHash,
+      ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals,
     );
-
-    // TODO: Create journal entries from disposal result
-    this.logDisposalStub(positionHash, result);
   }
 
   // ===========================================================================
@@ -562,48 +556,99 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * position.fees.collected → Fee income (outside lot system).
-   *
-   * TODO: Create journal entry (DR 3100 / CR 4000) directly — fees don't go through lots.
+   * position.fees.collected → DR 3100 / CR 4000.
    */
   private async handleFeesCollected(
     event: DomainEvent<PositionLedgerEventPayload>,
   ): Promise<void> {
+    if (await this.journalService.isProcessed(event.id)) return;
+
     const { positionId, positionHash, ledgerInputHash } = event.payload;
+    const userId = await this.getPositionUserId(positionId);
 
     const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     const totalFees = ledgerEvent ? BigInt(ledgerEvent.deltaCollectedYield) : 0n;
     if (totalFees <= 0n) return;
 
-    this.logger.info(
-      { positionHash, totalFees: totalFees.toString() },
-      'Fee collection event received (journal entry stub)',
-    );
+    const ctx = await this.getReportingContext(positionId);
+    const lines = new JournalLineBuilder()
+      .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
+      .debit(ACCOUNT_CODES.CAPITAL_RETURNED, totalFees.toString(), positionHash, ctx.poolHash)
+      .credit(ACCOUNT_CODES.FEE_INCOME, totalFees.toString(), positionHash, ctx.poolHash)
+      .build();
 
-    // TODO: Create journal entry for fee income
-    //   DR 3100 (Capital Returned) / CR 4000 (Fee Income)
+    await this.journalService.createEntry(
+      {
+        userId,
+        domainEventId: event.id,
+        domainEventType: event.type,
+        ledgerEventRef: ledgerEvent ? `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${ledgerEvent.id}` : undefined,
+        entryDate: new Date(event.payload.eventTimestamp),
+        description: `Fees collected: ${positionHash}`,
+      },
+      lines,
+    );
   }
 
   /**
-   * position.closed → Cost basis correction stub.
-   *
-   * TODO: Zero out any remaining cost basis in the journal via lots.
+   * position.closed → Zero out cost basis remainder against FX_GAIN_LOSS.
    */
   private async handlePositionClosed(
     event: DomainEvent<PositionLifecyclePayload>,
   ): Promise<void> {
-    const { positionHash } = event.payload;
+    const { positionId, positionHash } = event.payload;
+    const positionRef = positionHash;
 
-    this.logger.info(
-      { positionHash },
-      'Position closed event received (journal correction stub)',
+    const correctionEventId = `${event.id}:cost-basis-correction`;
+    if (await this.journalService.isProcessed(correctionEventId)) return;
+
+    const cbQuote = await this.journalService.getAccountBalance(
+      ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef,
+    );
+    const cbReporting = await this.journalService.getAccountBalanceReporting(
+      ACCOUNT_CODES.LP_POSITION_AT_COST, positionRef,
     );
 
-    // TODO: Create cost basis correction entry from remaining lot state
+    if (cbQuote === 0n && cbReporting === 0n) return;
+
+    const userId = await this.getPositionUserId(positionId);
+    const ctx = await this.getReportingContext(positionId);
+    const absQuote = absBigintValue(cbQuote).toString();
+    const absReporting = absBigintValue(cbReporting).toString();
+    const isOverCredited = cbQuote < 0n || (cbQuote === 0n && cbReporting < 0n);
+
+    const lines: JournalLineInput[] = isOverCredited
+      ? [
+          { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'debit', amountQuote: absQuote,
+            amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+            exchangeRate: ctx.exchangeRate, positionRef, instrumentRef: ctx.poolHash },
+          { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'credit', amountQuote: absQuote,
+            amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+            exchangeRate: ctx.exchangeRate, positionRef, instrumentRef: ctx.poolHash },
+        ]
+      : [
+          { accountCode: ACCOUNT_CODES.LP_POSITION_AT_COST, side: 'credit', amountQuote: absQuote,
+            amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+            exchangeRate: ctx.exchangeRate, positionRef, instrumentRef: ctx.poolHash },
+          { accountCode: ACCOUNT_CODES.FX_GAIN_LOSS, side: 'debit', amountQuote: absQuote,
+            amountReporting: absReporting, reportingCurrency: ctx.reportingCurrency,
+            exchangeRate: ctx.exchangeRate, positionRef, instrumentRef: ctx.poolHash },
+        ];
+
+    await this.journalService.createEntry(
+      {
+        userId,
+        domainEventId: correctionEventId,
+        domainEventType: event.type,
+        entryDate: new Date(event.timestamp),
+        description: `Cost basis correction: ${positionRef}`,
+      },
+      lines,
+    );
   }
 
   /**
-   * position.deleted → Delete all lots for this position.
+   * position.deleted → Delete all lots + journal entries.
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionLifecyclePayload>,
@@ -619,21 +664,19 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const tokenCtx = await this.resolvePositionToken(positionId);
     if (!tokenCtx) return;
 
-    const count = await this.tokenLotService.deleteLotsByTokenHash(
-      position.userId,
-      tokenCtx.tokenHash,
+    const lotCount = await this.tokenLotService.deleteLotsByTokenHash(
+      position.userId, tokenCtx.tokenHash,
     );
+    const entryCount = await this.journalService.deleteEntriesByPositionRef(positionHash);
 
     this.logger.info(
-      { positionHash, deletedLots: count },
-      'Deleted token lots for deleted position',
+      { positionHash, deletedLots: lotCount, deletedEntries: entryCount },
+      'Deleted lots and journal entries for deleted position',
     );
-
-    // TODO: Delete journal entries for position
   }
 
   /**
-   * position.liquidity.reverted → Delete lots for reverted ledger events.
+   * position.liquidity.reverted → Delete lots + journal entries for reverted events.
    */
   private async handleLiquidityReverted(
     event: DomainEvent<PositionLiquidityRevertedPayload>,
@@ -649,14 +692,13 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const tokenCtx = await this.resolvePositionToken(positionId);
     if (!tokenCtx) return;
 
-    // Find ledger events that still exist (non-reverted)
+    // Find lots whose acquisition events no longer exist (reverted)
     const existingEvents = await prisma.positionLedgerEvent.findMany({
       where: { positionId },
       select: { inputHash: true },
     });
     const existingHashes = new Set(existingEvents.map((e) => e.inputHash));
 
-    // Find lots whose acquisition event no longer exists
     const allLots = await prisma.tokenLot.findMany({
       where: { userId: position.userId, tokenHash: tokenCtx.tokenHash },
       select: { acquisitionEventId: true },
@@ -666,28 +708,149 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
       .map((lot) => lot.acquisitionEventId);
 
     if (orphanedEventIds.length > 0) {
-      const count = await this.tokenLotService.deleteLotsByAcquisitionEventIds(
-        position.userId,
-        tokenCtx.tokenHash,
-        orphanedEventIds,
+      const lotCount = await this.tokenLotService.deleteLotsByAcquisitionEventIds(
+        position.userId, tokenCtx.tokenHash, orphanedEventIds,
       );
-      this.logger.info(
-        { positionHash, deletedLots: count },
-        'Deleted token lots for reverted ledger events',
-      );
+      this.logger.info({ positionHash, deletedLots: lotCount }, 'Deleted reverted lots');
     }
 
-    // TODO: Delete/recreate journal entries for reverted events
+    // Delete orphaned journal entries (whose ledger event refs no longer exist)
+    const prefix = `${LEDGER_REF_PREFIX.POSITION_LEDGER}:`;
+    const journalEntries = await prisma.journalEntry.findMany({
+      where: {
+        ledgerEventRef: { startsWith: prefix },
+        lines: { some: { positionRef: positionHash } },
+      },
+      select: { id: true, ledgerEventRef: true },
+    });
+
+    if (journalEntries.length > 0) {
+      const refToId = new Map(
+        journalEntries.map((e) => [e.ledgerEventRef!, e.ledgerEventRef!.slice(prefix.length)]),
+      );
+      const existingLedgerIds = new Set(
+        (await prisma.positionLedgerEvent.findMany({
+          where: { positionId, id: { in: [...refToId.values()] } },
+          select: { id: true },
+        })).map((e) => e.id),
+      );
+
+      const orphanedRefs = journalEntries
+        .filter((e) => e.ledgerEventRef && !existingLedgerIds.has(refToId.get(e.ledgerEventRef!)!))
+        .map((e) => e.ledgerEventRef!);
+
+      if (orphanedRefs.length > 0) {
+        const entryCount = await this.journalService.deleteByLedgerEventRefs(orphanedRefs);
+        this.logger.info({ positionHash, deletedEntries: entryCount }, 'Deleted reverted journal entries');
+      }
+    }
+  }
+
+  // ===========================================================================
+  // Journal Entry Builders
+  // ===========================================================================
+
+  /**
+   * Create a balanced acquisition journal entry: DR 1000 / CR 3000.
+   */
+  private async createAcquisitionEntry(
+    userId: string,
+    domainEventId: string,
+    domainEventType: string,
+    ledgerEventRef: string,
+    entryDate: Date,
+    deltaCostBasis: string,
+    positionRef: string,
+    instrumentRef: string,
+    reportingCurrency: string,
+    exchangeRate: string,
+    quoteTokenDecimals: number,
+  ): Promise<void> {
+    const lines = new JournalLineBuilder()
+      .withReporting(reportingCurrency, exchangeRate, quoteTokenDecimals)
+      .debit(ACCOUNT_CODES.LP_POSITION_AT_COST, deltaCostBasis, positionRef, instrumentRef)
+      .credit(ACCOUNT_CODES.CONTRIBUTED_CAPITAL, deltaCostBasis, positionRef, instrumentRef)
+      .build();
+
+    await this.journalService.createEntry(
+      { userId, domainEventId, domainEventType, ledgerEventRef, entryDate,
+        description: `Acquisition: ${positionRef}` },
+      lines,
+    );
+  }
+
+  /**
+   * Create a balanced disposal journal entry:
+   * CR 1000 (cost basis at lot rate) + DR 3100 (capital returned at spot) +
+   * DR/CR gain/loss + CR/DR FX_GAIN_LOSS.
+   */
+  private async createDisposalEntry(
+    userId: string,
+    domainEventId: string,
+    domainEventType: string,
+    ledgerEventRef: string,
+    entryDate: Date,
+    ledgerEvent: { deltaCostBasis: string; tokenValue: string; deltaPnl: string },
+    result: DisposalResult,
+    positionRef: string,
+    instrumentRef: string,
+    reportingCurrency: string,
+    exchangeRate: string,
+    quoteTokenDecimals: number,
+  ): Promise<void> {
+    const absDeltaCostBasis = absBigint(ledgerEvent.deltaCostBasis);
+    const tokenValue = ledgerEvent.tokenValue;
+    const deltaPnl = BigInt(ledgerEvent.deltaPnl);
+
+    const builder = new JournalLineBuilder()
+      .withReporting(reportingCurrency, exchangeRate, quoteTokenDecimals);
+
+    // CR 1000: Derecognize cost basis
+    builder.credit(ACCOUNT_CODES.LP_POSITION_AT_COST, absDeltaCostBasis, positionRef, instrumentRef);
+    // DR 3100: Capital returned at FMV
+    builder.debit(ACCOUNT_CODES.CAPITAL_RETURNED, tokenValue, positionRef, instrumentRef);
+
+    // Realized gain or loss (quote-token PnL)
+    if (deltaPnl > 0n) {
+      builder.credit(ACCOUNT_CODES.REALIZED_GAINS, deltaPnl.toString(), positionRef, instrumentRef);
+    } else if (deltaPnl < 0n) {
+      builder.debit(ACCOUNT_CODES.REALIZED_LOSSES, (-deltaPnl).toString(), positionRef, instrumentRef);
+    }
+
+    const lines = builder.build();
+
+    // Override cost basis line's amountReporting with lot-derived value
+    const cbLine = lines.find((l) => l.accountCode === ACCOUNT_CODES.LP_POSITION_AT_COST)!;
+    const cbAtSpot = BigInt(cbLine.amountReporting!);
+    cbLine.amountReporting = result.totalCostBasisAllocated.toString();
+
+    // FX difference: (cost basis at spot rate) - (cost basis from lots at acquisition rate)
+    const fxDiff = cbAtSpot - result.totalCostBasisAllocated;
+    if (fxDiff !== 0n) {
+      const fxLine: JournalLineInput = {
+        accountCode: ACCOUNT_CODES.FX_GAIN_LOSS,
+        side: fxDiff > 0n ? 'credit' : 'debit',
+        amountQuote: '0',
+        amountReporting: (fxDiff < 0n ? -fxDiff : fxDiff).toString(),
+        reportingCurrency,
+        exchangeRate,
+        positionRef,
+        instrumentRef,
+      };
+      lines.push(fxLine);
+    }
+
+    await this.journalService.createEntry(
+      { userId, domainEventId, domainEventType, ledgerEventRef, entryDate,
+        description: `Disposal: ${positionRef}` },
+      lines,
+    );
   }
 
   // ===========================================================================
   // Token Resolution
   // ===========================================================================
 
-  /**
-   * Resolve or create the ERC-721 Token row for a UniswapV3 NFT position.
-   * tokenHash = "erc721/{chainId}/{nfpmAddr}/{nftId}"
-   */
   private async resolvePositionToken(positionId: string): Promise<PositionTokenContext | null> {
     const position = await prisma.position.findUnique({
       where: { id: positionId },
@@ -726,15 +889,9 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     return prisma.positionLedgerEvent.findFirst({
       where: { positionId, inputHash },
       select: {
-        id: true,
-        deltaCostBasis: true,
-        costBasisAfter: true,
-        deltaPnl: true,
-        pnlAfter: true,
-        deltaCollectedYield: true,
-        collectedYieldAfter: true,
-        tokenValue: true,
-        config: true,
+        id: true, deltaCostBasis: true, costBasisAfter: true,
+        deltaPnl: true, pnlAfter: true, deltaCollectedYield: true,
+        collectedYieldAfter: true, tokenValue: true, config: true,
       },
     });
   }
@@ -758,12 +915,45 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     return (data.costBasisMethod as CostBasisMethod) ?? DEFAULT_USER_SETTINGS.costBasisMethod;
   }
 
+  /**
+   * Get quote token metadata for historic price lookups (used by backfill).
+   */
+  private async getQuoteTokenInfo(positionId: string) {
+    const position = await prisma.position.findUnique({
+      where: { id: positionId },
+      select: { config: true, user: { select: { reportingCurrency: true } } },
+    });
+    if (!position) throw new Error(`Position not found: ${positionId}`);
+
+    const config = position.config as Record<string, unknown>;
+    const chainId = config.chainId as number;
+    const isToken0Quote = config.isToken0Quote as boolean;
+    const quoteAddress = isToken0Quote
+      ? config.token0Address as string
+      : config.token1Address as string;
+
+    const quoteToken = await prisma.token.findUnique({
+      where: { tokenHash: createErc20TokenHash(chainId, quoteAddress) },
+      select: { decimals: true, coingeckoId: true },
+    });
+    if (!quoteToken) throw new Error(`Quote token not found for ${quoteAddress} on chain ${chainId}`);
+
+    return {
+      reportingCurrency: position.user.reportingCurrency,
+      quoteTokenDecimals: quoteToken.decimals,
+      quoteCoingeckoId: quoteToken.coingeckoId,
+    };
+  }
+
+  /**
+   * Resolve reporting currency context for a position (current spot price).
+   * Used by live event handlers where events are processed in near-real-time.
+   */
   private async getReportingContext(positionId: string): Promise<ReportingContext> {
     const position = await prisma.position.findUnique({
       where: { id: positionId },
       select: {
-        protocol: true,
-        config: true,
+        protocol: true, config: true,
         user: { select: { reportingCurrency: true } },
       },
     });
@@ -791,7 +981,6 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const isToken0Quote = positionConfig.isToken0Quote as boolean;
     const quoteToken = isToken0Quote ? token0Row : token1Row;
     const reportingCurrency = position.user.reportingCurrency;
-
     const reportingCurrencyUsdPrice = 1.0;
 
     let quoteTokenUsdPrice = 1.0;
@@ -803,27 +992,12 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const rate = quoteTokenUsdPrice / reportingCurrencyUsdPrice;
     const exchangeRate = BigInt(Math.round(rate * FLOAT_TO_BIGINT_SCALE));
 
-    const poolHash = `${position.protocol}/${chainId}/${poolAddress}`;
-
     return {
       reportingCurrency,
       exchangeRate: exchangeRate.toString(),
       quoteTokenDecimals: quoteToken.decimals,
-      poolHash,
+      poolHash: `${position.protocol}/${chainId}/${poolAddress}`,
     };
-  }
-
-  /** Log stub info for disposal-to-journal-entry creation. */
-  private logDisposalStub(positionHash: string, result: DisposalResult): void {
-    this.logger.info(
-      {
-        positionHash,
-        totalCostBasis: result.totalCostBasisAllocated.toString(),
-        totalPnl: result.totalRealizedPnl.toString(),
-        disposals: result.disposals.length,
-      },
-      'Journal entry stub: disposal results ready for journal creation',
-    );
   }
 }
 
@@ -831,15 +1005,18 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 // Utility Functions
 // =============================================================================
 
-/** Returns the absolute value of a bigint string. */
 function absBigint(value: string): string {
   const n = BigInt(value);
   return (n < 0n ? -n : n).toString();
 }
 
+function absBigintValue(value: bigint): bigint {
+  return value < 0n ? -value : value;
+}
+
 /**
  * Convert a quote-token amount to reporting currency.
- * result = (amountQuote * exchangeRate) / 10^quoteTokenDecimals
+ * result = abs(amountQuote) * exchangeRate / 10^quoteTokenDecimals
  */
 function computeReportingAmount(
   amountQuote: string,
@@ -851,4 +1028,21 @@ function computeReportingAmount(
   const scale = 10n ** BigInt(quoteTokenDecimals);
   const absAmount = amount < 0n ? -amount : amount;
   return ((absAmount * rate) / scale).toString();
+}
+
+/**
+ * Compute exchange rate at a specific event timestamp using historic CoinGecko data.
+ */
+function computeHistoricRate(
+  quoteCoingeckoId: string | null,
+  priceTimeSeries: [number, number][],
+  eventTimestamp: Date,
+): bigint {
+  let quoteTokenUsdPrice = 1.0;
+  if (quoteCoingeckoId && priceTimeSeries.length > 0) {
+    quoteTokenUsdPrice = findClosestPrice(priceTimeSeries, eventTimestamp.getTime());
+  }
+  const reportingCurrencyUsdPrice = 1.0;
+  const rate = quoteTokenUsdPrice / reportingCurrencyUsdPrice;
+  return BigInt(Math.round(rate * FLOAT_TO_BIGINT_SCALE));
 }
