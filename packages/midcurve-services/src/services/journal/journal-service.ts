@@ -185,10 +185,12 @@ export class JournalService {
           userId: entry.userId,
           domainEventId: entry.domainEventId,
           domainEventType: entry.domainEventType,
-          ledgerEventRef: entry.ledgerEventRef,
+          positionLedgerEventId: entry.positionLedgerEventId,
           entryDate: entry.entryDate,
           description: entry.description,
           memo: entry.memo,
+          tokenLotId: entry.tokenLotId,
+          tokenLotDisposalId: entry.tokenLotDisposalId,
           lines: {
             create: resolvedLines,
           },
@@ -380,18 +382,11 @@ export class JournalService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Deletes journal entries that reference the given ledger event refs.
-   * Used for chain reorg handling.
+   * @deprecated Ledger event FK cascade handles cleanup automatically.
+   * Kept for backward compatibility — will be removed in a future cleanup.
    */
-  async deleteByLedgerEventRefs(refs: string[]): Promise<number> {
-    if (refs.length === 0) return 0;
-
-    const result = await this.prisma.journalEntry.deleteMany({
-      where: { ledgerEventRef: { in: refs } },
-    });
-
-    this.logger.info(`Deleted ${result.count} journal entries for ${refs.length} ledger event refs`);
-    return result.count;
+  async deleteByLedgerEventRefs(_refs: string[]): Promise<number> {
+    return 0;
   }
 
   // ---------------------------------------------------------------------------

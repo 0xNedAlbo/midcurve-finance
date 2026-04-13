@@ -17,7 +17,7 @@
  */
 
 import { prisma as prismaClient, type PrismaClient } from '@midcurve/database';
-import { ACCOUNT_CODES, LEDGER_REF_PREFIX, createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
+import { ACCOUNT_CODES, createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
 import {
   createServiceLogger,
   type ServiceLogger,
@@ -349,7 +349,7 @@ export class UniswapV3JournalBackfillService {
 
         domainEventId,
         domainEventType: isFoundation ? 'position.created' : 'position.liquidity.increased',
-        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        positionLedgerEventId: event.id,
         entryDate: event.timestamp,
         description: isFoundation
           ? `Position created (backfill): ${positionRef}`
@@ -441,7 +441,7 @@ export class UniswapV3JournalBackfillService {
 
         domainEventId,
         domainEventType: 'position.liquidity.decreased',
-        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        positionLedgerEventId: event.id,
         entryDate: event.timestamp,
         description: `Liquidity decrease (backfill): ${positionRef}`,
       },
@@ -483,7 +483,7 @@ export class UniswapV3JournalBackfillService {
 
         domainEventId,
         domainEventType: 'position.fees.collected',
-        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        positionLedgerEventId: event.id,
         entryDate: event.timestamp,
         description: `Fees collected (backfill): ${positionRef}`,
       },
@@ -529,7 +529,7 @@ export class UniswapV3JournalBackfillService {
 
         domainEventId,
         domainEventType: isFoundation ? 'position.created' : 'position.transferred.in',
-        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        positionLedgerEventId: event.id,
         entryDate: event.timestamp,
         description: isFoundation
           ? `Position received (backfill): ${positionRef}`
@@ -620,7 +620,7 @@ export class UniswapV3JournalBackfillService {
 
         domainEventId,
         domainEventType: 'position.transferred.out',
-        ledgerEventRef: `${LEDGER_REF_PREFIX.POSITION_LEDGER}:${event.id}`,
+        positionLedgerEventId: event.id,
         entryDate: event.timestamp,
         description: `Transfer out (backfill): ${positionRef}`,
       },

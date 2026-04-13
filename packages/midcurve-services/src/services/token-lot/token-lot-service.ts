@@ -23,8 +23,8 @@ export interface CreateLotInput {
   costBasisAbsolute: string; // bigint string (reporting currency, scaled 10^8)
   acquiredAt: Date;
   acquisitionEventId: string; // inputHash from PositionLedgerEvent
+  positionLedgerEventId: string; // FK to PositionLedgerEvent (cascade-deletes lot when event is deleted)
   transferEvent: AcquisitionTransferEvent;
-  journalEntryId?: string;
 }
 
 export interface DisposeLotInput {
@@ -34,9 +34,9 @@ export interface DisposeLotInput {
   proceedsReporting: string; // bigint string (reporting currency, scaled 10^8)
   disposedAt: Date;
   disposalEventId: string; // inputHash from PositionLedgerEvent
+  positionLedgerEventId: string; // FK to PositionLedgerEvent (cascade-deletes disposal when event is deleted)
   transferEvent: DisposalTransferEvent;
   lotSelector: LotSelector;
-  journalEntryId?: string;
 }
 
 export interface DisposalResult {
@@ -44,9 +44,11 @@ export interface DisposalResult {
     id: string;
     lotId: string;
     quantityDisposed: string;
+    proceedsReporting: string;
     costBasisAllocated: string;
     realizedPnl: string;
   }>;
+  totalQuantityDisposed: bigint;
   totalCostBasisAllocated: bigint;
   totalRealizedPnl: bigint;
 }
@@ -104,9 +106,9 @@ export class TokenLotService {
         costBasisAbsolute: input.costBasisAbsolute,
         acquiredAt: input.acquiredAt,
         acquisitionEventId: input.acquisitionEventId,
+        positionLedgerEventId: input.positionLedgerEventId,
         transferEvent: input.transferEvent,
         sequenceNum: seqNum,
-        journalEntryId: input.journalEntryId,
         // Create the 1:1 state row in the same call
         lotState: {
           create: {
@@ -155,6 +157,7 @@ export class TokenLotService {
 
       return {
         disposals,
+        totalQuantityDisposed: quantityNeeded,
         totalCostBasisAllocated: totalCostBasis,
         totalRealizedPnl: totalProceeds - totalCostBasis,
       };
@@ -282,8 +285,8 @@ export class TokenLotService {
           disposedAt: input.disposedAt,
           transferEvent: input.transferEvent,
           disposalEventId: input.disposalEventId,
+          positionLedgerEventId: input.positionLedgerEventId,
           sequenceNum: seqNum,
-          journalEntryId: input.journalEntryId,
         },
       });
 
@@ -307,6 +310,7 @@ export class TokenLotService {
         id: disposal.id,
         lotId: alloc.lotId,
         quantityDisposed: alloc.quantityFromLot.toString(),
+        proceedsReporting: proceeds.toString(),
         costBasisAllocated: alloc.costBasisAllocated.toString(),
         realizedPnl: realizedPnl.toString(),
       });

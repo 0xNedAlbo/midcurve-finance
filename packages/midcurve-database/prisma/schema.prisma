@@ -320,6 +320,11 @@ model PositionLedgerEvent {
   config Json // Protocol-specific config (blockNumber, txIndex, logIndex, liquidity, fees, etc.)
   state  Json // Raw event data (INCREASE_LIQUIDITY, DECREASE_LIQUIDITY, COLLECT, TRANSFER, etc.)
 
+  // Accounting relations (cascade-deleted when ledger event is deleted)
+  journalEntries JournalEntry[]
+  tokenLots      TokenLot[]
+  tokenLotDisposals TokenLotDisposal[]
+
   @@unique([positionId, inputHash]) // Deduplication per-position; allows multi-user event import
   // Indexes for efficient queries
   @@index([positionId, timestamp]) // Time-series queries for position
@@ -808,7 +813,10 @@ model JournalEntry {
   // Traceability
   domainEventId   String? @unique // References DomainEvent.id for idempotency
   domainEventType String? // Event type discriminator (e.g., "position.liquidity.increased")
-  ledgerEventRef  String? // Prefixed reference: "{table_prefix}:{id}" (e.g., "position_ledger:cm4abc...")
+
+  // Ledger event FK — cascade-deletes this entry when the ledger event is deleted
+  positionLedgerEventId String?
+  positionLedgerEvent   PositionLedgerEvent? @relation(fields: [positionLedgerEventId], references: [id], onDelete: Cascade)
 
   // Business date
   entryDate DateTime // Block timestamp for on-chain events, snapshot date for M2M
@@ -820,12 +828,16 @@ model JournalEntry {
   // Relations
   lines JournalLine[]
 
-  // Token lot relations
-  tokenLots TokenLot[]          @relation("LotAcquisitionEntry")
-  disposals TokenLotDisposal[]  @relation("LotDisposalEntry")
+  // Token lot FK — cascade-deletes this entry when the lot is deleted
+  tokenLotId String?   @unique
+  tokenLot   TokenLot? @relation("LotAcquisitionEntry", fields: [tokenLotId], references: [id], onDelete: Cascade)
+
+  // Disposal FK — cascade-deletes this entry when the disposal is deleted
+  tokenLotDisposalId String?            @unique
+  tokenLotDisposal   TokenLotDisposal?  @relation("LotDisposalEntry", fields: [tokenLotDisposalId], references: [id], onDelete: Cascade)
 
   @@index([userId, entryDate])
-  @@index([ledgerEventRef])
+  @@index([positionLedgerEventId])
   @@map("journal_entries")
   @@schema("accounting")
 }
@@ -912,22 +924,23 @@ model TokenLot {
   acquisitionEventId String                // inputHash from PositionLedgerEvent
   transferEvent      TokenLotTransferEvent
 
+  // Ledger event FK — cascade-deletes this lot when the ledger event is deleted
+  positionLedgerEventId String
+  positionLedgerEvent   PositionLedgerEvent @relation(fields: [positionLedgerEventId], references: [id], onDelete: Cascade)
+
   // Ordering (lot-local, sortable for FIFO/LIFO)
   sequenceNum Int
 
-  // Journal traceability (acquisition journal entry)
-  journalEntryId String?
-  journalEntry   JournalEntry? @relation("LotAcquisitionEntry", fields: [journalEntryId], references: [id])
-
   // Relations
-  lotState  TokenLotState?
-  disposals TokenLotDisposal[]
+  lotState     TokenLotState?
+  disposals    TokenLotDisposal[]
+  journalEntry JournalEntry?      @relation("LotAcquisitionEntry") // Back-reference (FK owned by JournalEntry)
 
   @@unique([userId, tokenHash, acquisitionEventId]) // Idempotency
-  @@index([journalEntryId])
   @@index([userId, tokenHash])
   @@index([userId, tokenHash, acquiredAt]) // FIFO ordering
   @@index([userId, sequenceNum])
+  @@index([positionLedgerEventId])
   @@map("token_lots")
   @@schema("accounting")
 }
@@ -977,17 +990,20 @@ model TokenLotDisposal {
   // Provenance
   disposalEventId String // inputHash from PositionLedgerEvent
 
+  // Ledger event FK — cascade-deletes this disposal when the ledger event is deleted
+  positionLedgerEventId String
+  positionLedgerEvent   PositionLedgerEvent @relation(fields: [positionLedgerEventId], references: [id], onDelete: Cascade)
+
   // Ordering
   sequenceNum Int
 
-  // Journal traceability
-  journalEntryId String?
-  journalEntry   JournalEntry? @relation("LotDisposalEntry", fields: [journalEntryId], references: [id])
+  // Relations
+  journalEntry JournalEntry? @relation("LotDisposalEntry") // Back-reference (FK owned by JournalEntry)
 
   @@index([lotId])
   @@index([userId, disposedAt])
   @@index([disposalEventId])
-  @@index([journalEntryId])
+  @@index([positionLedgerEventId])
   @@map("token_lot_disposals")
   @@schema("accounting")
 }

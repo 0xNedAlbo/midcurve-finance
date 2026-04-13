@@ -157,10 +157,8 @@ export const CHART_OF_ACCOUNTS: readonly AccountDefinitionSeed[] = [
 ] as const;
 
 /**
- * Prefixes for the `ledgerEventRef` column in journal entries.
- *
- * Because different instrument types have their own ledger tables,
- * the ref is stored as `{prefix}:{id}` to disambiguate the source table.
+ * @deprecated Use `positionLedgerEventId` FK on JournalEntry instead.
+ * Kept for backward compatibility with existing code that may reference it.
  */
 export const LEDGER_REF_PREFIX = {
   POSITION_LEDGER: 'position_ledger',
@@ -174,10 +172,12 @@ export interface JournalEntryInput {
   userId: string;
   domainEventId?: string;
   domainEventType?: string;
-  ledgerEventRef?: string;
+  positionLedgerEventId?: string; // FK to PositionLedgerEvent (cascade-deletes entry when event is deleted)
   entryDate: Date;
   description: string;
   memo?: string;
+  tokenLotId?: string;            // FK to TokenLot (cascade-deletes entry when lot is deleted)
+  tokenLotDisposalId?: string;    // FK to TokenLotDisposal (cascade-deletes entry when disposal is deleted)
 }
 
 export interface JournalLineInput {
