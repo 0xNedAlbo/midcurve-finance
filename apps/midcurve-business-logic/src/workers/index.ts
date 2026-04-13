@@ -20,6 +20,7 @@ import {
   UniswapV3ProcessCloseOrderEventsRule,
   UniswapV3PostJournalEntriesRule,
   UniswapV3ReconcileCostBasisRule,
+  UniswapV3VaultPostJournalEntriesRule,
   RefuelOperatorRule,
   type BusinessRuleStatus,
 } from '../rules';
@@ -67,11 +68,12 @@ export class RuleManager {
     // UniswapV3 close order lifecycle event handler - syncs close orders with on-chain state
     this.registry.register(new UniswapV3ProcessCloseOrderEventsRule());
 
-    // UniswapV3 accounting rules
-    // Double-entry journal entries from UniswapV3 position domain events
+    // UniswapV3 accounting rules — NFT positions
     this.registry.register(new UniswapV3PostJournalEntriesRule());
-    // Periodic reconciliation for missed cost basis corrections
     this.registry.register(new UniswapV3ReconcileCostBasisRule());
+
+    // UniswapV3 accounting rules — Vault positions
+    this.registry.register(new UniswapV3VaultPostJournalEntriesRule());
 
     // Automation rules
     // Operator gas refueling from treasury WETH

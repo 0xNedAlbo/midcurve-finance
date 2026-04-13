@@ -1,19 +1,20 @@
 /**
- * UniswapV3PostJournalEntriesRule
+ * UniswapV3VaultPostJournalEntriesRule
  *
- * Subscribes to UniswapV3 NFT position domain events and
+ * Subscribes to UniswapV3-Vault position domain events and
  * maintains token lot records for cost basis tracking.
  *
- * Flow: Domain Events → Token Lots → Journal Entries (lot-based cost basis)
+ * Vault positions represent shares in a vault that wraps a UniswapV3 NFT.
+ * Lot quantity is denominated in vault shares (not liquidity units).
  *
  * Acquisition events (create lots):
  * - position.created           → Backfill lots from ledger history
- * - position.liquidity.increased → Create acquisition lot
- * - position.transferred.in    → Create acquisition lot
+ * - position.liquidity.increased → Create acquisition lot (VAULT_MINT)
+ * - position.transferred.in    → Create acquisition lot (VAULT_TRANSFER_IN)
  *
  * Disposal events (consume lots):
- * - position.liquidity.decreased → Dispose lots via cost basis method
- * - position.transferred.out   → Dispose lots via cost basis method
+ * - position.liquidity.decreased → Dispose lots (VAULT_BURN)
+ * - position.transferred.out   → Dispose lots (VAULT_TRANSFER_OUT)
  *
  * Non-lot events:
  * - position.fees.collected    → Fee income (outside lot system)
@@ -40,7 +41,6 @@ import {
 import {
   createErc20TokenHash,
   createErc721TokenHash,
-  getUniswapV3NfpmAddress,
   type CostBasisMethod,
   DEFAULT_USER_SETTINGS,
 } from '@midcurve/shared';
@@ -50,8 +50,8 @@ import { BusinessRule } from '../../base';
 // Constants
 // =============================================================================
 
-const QUEUE_NAME = 'business-logic.uniswapv3-post-journal-entries';
-const ROUTING_PATTERN = 'positions.*.uniswapv3';
+const QUEUE_NAME = 'business-logic.uniswapv3-vault-post-journal-entries';
+const ROUTING_PATTERN = 'positions.*.uniswapv3-vault';
 const FLOAT_TO_BIGINT_SCALE = 1e8;
 
 // =============================================================================
@@ -65,20 +65,19 @@ interface ReportingContext {
   poolHash: string;
 }
 
-/** Position metadata needed for lot operations. */
 interface PositionTokenContext {
-  tokenId: string; // Token DB row ID (ERC-721)
-  tokenHash: string; // "erc721/{chainId}/{nfpmAddr}/{nftId}" or vault equivalent
+  tokenId: string;
+  tokenHash: string;
 }
 
 // =============================================================================
 // Rule Implementation
 // =============================================================================
 
-export class UniswapV3PostJournalEntriesRule extends BusinessRule {
-  readonly ruleName = 'uniswapv3-post-journal-entries';
+export class UniswapV3VaultPostJournalEntriesRule extends BusinessRule {
+  readonly ruleName = 'uniswapv3-vault-post-journal-entries';
   readonly ruleDescription =
-    'Maintains token lots from UniswapV3 NFT position domain events';
+    'Maintains token lots from UniswapV3 Vault position domain events';
 
   private consumerTag: string | null = null;
   private readonly tokenLotService: TokenLotService;
@@ -106,11 +105,8 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     this.consumerTag = result.consumerTag;
     this.logger.info(
-      {
-        queueName: QUEUE_NAME,
-        routingPattern: ROUTING_PATTERN,
-      },
-      'Subscribed to UniswapV3 NFT position events for token lot tracking',
+      { queueName: QUEUE_NAME, routingPattern: ROUTING_PATTERN },
+      'Subscribed to UniswapV3 Vault position events for token lot tracking',
     );
   }
 
@@ -134,7 +130,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
       this.logger.info(
         { eventId: event.id, eventType, entityId: event.entityId },
-        'Processing position event for token lots',
+        'Processing vault position event for token lots',
       );
 
       await this.routeEvent(event, eventType);
@@ -142,7 +138,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     } catch (error) {
       this.logger.error(
         { error: error instanceof Error ? error.message : String(error) },
-        'Error processing position event for token lots',
+        'Error processing vault position event for token lots',
       );
       this.channel.nack(msg, false, false);
     }
@@ -183,10 +179,11 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * position.created → Backfill lots from ledger event history.
+   * position.created → Backfill lots from vault ledger event history.
    *
-   * Replays all financial ledger events for the position and creates
-   * acquisition/disposal lots chronologically.
+   * Vault events use `shares` (config field) instead of `deltaL`.
+   * VAULT_MINT / VAULT_TRANSFER_IN → acquisition lots
+   * VAULT_BURN / VAULT_TRANSFER_OUT → disposal lots
    */
   private async handlePositionCreated(
     event: DomainEvent<PositionLifecyclePayload>,
@@ -195,31 +192,42 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     const position = await prisma.position.findUnique({
       where: { id: positionId },
-      select: { id: true, userId: true, protocol: true, config: true },
+      select: { id: true, userId: true, protocol: true, config: true, state: true },
     });
     if (!position) {
       this.logger.warn({ positionId }, 'Position not found for position.created');
       return;
     }
 
-    const tokenCtx = await this.resolvePositionToken(positionId);
-    if (!tokenCtx) return;
-
-    // Check if lots already exist for this token (idempotency)
-    const existingLots = await this.tokenLotService.getOpenLots(position.userId, tokenCtx.tokenHash);
-    if (existingLots.length > 0) {
-      this.logger.info({ positionHash }, 'Lots already exist for position, skipping backfill');
+    // Vault ownership guard
+    const positionState = position.state as Record<string, unknown>;
+    if (positionState.isOwnedByUser === false) {
+      this.logger.info({ positionHash }, 'Skipping backfill — vault position not owned by user');
       return;
     }
 
-    // Replay all financial ledger events and create lots
+    const tokenCtx = await this.resolvePositionToken(positionId);
+    if (!tokenCtx) return;
+
+    // Idempotency — skip if lots already exist
+    const existingLots = await this.tokenLotService.getOpenLots(position.userId, tokenCtx.tokenHash);
+    if (existingLots.length > 0) {
+      this.logger.info({ positionHash }, 'Lots already exist for vault position, skipping backfill');
+      return;
+    }
+
     const costBasisMethod = await this.getUserCostBasisMethod(position.userId);
     const lotSelector = createLotSelector(costBasisMethod);
 
     const ledgerEvents = await prisma.positionLedgerEvent.findMany({
       where: {
         positionId,
-        eventType: { in: ['INCREASE_POSITION', 'DECREASE_POSITION', 'TRANSFER'] },
+        eventType: {
+          in: [
+            'VAULT_MINT', 'VAULT_BURN',
+            'VAULT_TRANSFER_IN', 'VAULT_TRANSFER_OUT',
+          ],
+        },
         isIgnored: false,
       },
       select: {
@@ -229,8 +237,6 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
         timestamp: true,
         tokenValue: true,
         deltaCostBasis: true,
-        costBasisAfter: true,
-        deltaPnl: true,
         config: true,
       },
       orderBy: { timestamp: 'asc' },
@@ -242,64 +248,10 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     for (const le of ledgerEvents) {
       const config = le.config as Record<string, unknown>;
+      const shares = config.shares as string;
+      if (!shares || shares === '0') continue;
 
-      if (le.eventType === 'TRANSFER') {
-        // NFT transfers are all-or-nothing — deltaL is always 0.
-        // Direction is determined by deltaCostBasis sign.
-        const deltaCostBasis = BigInt(le.deltaCostBasis);
-        if (deltaCostBasis === 0n) continue;
-
-        if (deltaCostBasis > 0n) {
-          // Transfer IN — acquire the entire position liquidity
-          const liquidityAfter = config.liquidityAfter as string;
-          const costBasisAbsolute = computeReportingAmount(
-            le.deltaCostBasis, ctx.exchangeRate, ctx.quoteTokenDecimals,
-          );
-
-          await this.tokenLotService.createLot({
-            userId: position.userId,
-            tokenId: tokenCtx.tokenId,
-            tokenHash: tokenCtx.tokenHash,
-            quantity: liquidityAfter,
-            costBasisAbsolute,
-            acquiredAt: le.timestamp,
-            acquisitionEventId: le.inputHash,
-            transferEvent: 'TRANSFER_IN',
-          });
-        } else {
-          // Transfer OUT — dispose all remaining open lots
-          const openLots = await this.tokenLotService.getOpenLots(
-            position.userId, tokenCtx.tokenHash,
-          );
-          const totalOpen = openLots.reduce(
-            (sum, lot) => sum + BigInt(lot.openQuantity), 0n,
-          );
-          if (totalOpen > 0n) {
-            const proceedsReporting = computeReportingAmount(
-              le.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
-            );
-
-            await this.tokenLotService.disposeLots({
-              userId: position.userId,
-              tokenHash: tokenCtx.tokenHash,
-              quantityToDispose: totalOpen.toString(),
-              proceedsReporting,
-              disposedAt: le.timestamp,
-              disposalEventId: le.inputHash,
-              transferEvent: 'TRANSFER_OUT',
-              lotSelector,
-            });
-          }
-        }
-        continue;
-      }
-
-      // INCREASE_POSITION / DECREASE_POSITION — use deltaL
-      const deltaL = config.deltaL as string;
-      const absDeltaL = absBigint(deltaL);
-      if (absDeltaL === '0') continue;
-
-      if (le.eventType === 'INCREASE_POSITION') {
+      if (le.eventType === 'VAULT_MINT' || le.eventType === 'VAULT_TRANSFER_IN') {
         const deltaCostBasis = le.deltaCostBasis;
         if (deltaCostBasis === '0') continue;
 
@@ -311,26 +263,25 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
           userId: position.userId,
           tokenId: tokenCtx.tokenId,
           tokenHash: tokenCtx.tokenHash,
-          quantity: absDeltaL,
+          quantity: shares,
           costBasisAbsolute,
           acquiredAt: le.timestamp,
           acquisitionEventId: le.inputHash,
-          transferEvent: 'INCREASE_POSITION',
+          transferEvent: le.eventType === 'VAULT_TRANSFER_IN' ? 'TRANSFER_IN' : 'VAULT_MINT',
         });
-      } else if (le.eventType === 'DECREASE_POSITION') {
-        const tokenValue = le.tokenValue;
+      } else if (le.eventType === 'VAULT_BURN' || le.eventType === 'VAULT_TRANSFER_OUT') {
         const proceedsReporting = computeReportingAmount(
-          tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
+          le.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
         );
 
         await this.tokenLotService.disposeLots({
           userId: position.userId,
           tokenHash: tokenCtx.tokenHash,
-          quantityToDispose: absDeltaL,
+          quantityToDispose: shares,
           proceedsReporting,
           disposedAt: le.timestamp,
           disposalEventId: le.inputHash,
-          transferEvent: 'DECREASE_POSITION',
+          transferEvent: le.eventType === 'VAULT_TRANSFER_OUT' ? 'TRANSFER_OUT' : 'VAULT_BURN',
           lotSelector,
         });
       }
@@ -338,17 +289,17 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     this.logger.info(
       { positionHash, eventsProcessed: ledgerEvents.length },
-      'Token lots backfilled from ledger history',
+      'Token lots backfilled from vault ledger history',
     );
 
     // TODO: Create journal entries from lots
   }
 
   /**
-   * position.liquidity.increased → Create acquisition lot.
+   * position.liquidity.increased → Create acquisition lot (VAULT_MINT).
    *
-   * Cost basis = combined FMV of deposited tokens (tokenValue * exchange rate).
-   * Quantity = liquidity units (deltaL from ledger event config).
+   * Cost basis = combined FMV of deposited tokens.
+   * Quantity = vault shares minted.
    */
   private async handleLiquidityIncreased(
     event: DomainEvent<PositionLedgerEventPayload>,
@@ -358,13 +309,13 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     if (!ledgerEvent) {
-      this.logger.warn({ positionId, ledgerInputHash }, 'No ledger event found for liquidity increase');
+      this.logger.warn({ positionId, ledgerInputHash }, 'No ledger event found for vault mint');
       return;
     }
 
     const config = ledgerEvent.config as Record<string, unknown>;
-    const deltaL = config.deltaL as string;
-    if (!deltaL || deltaL === '0') return;
+    const shares = config.shares as string;
+    if (!shares || shares === '0') return;
 
     const deltaCostBasis = ledgerEvent.deltaCostBasis;
     if (deltaCostBasis === '0') return;
@@ -381,20 +332,22 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
       userId,
       tokenId: tokenCtx.tokenId,
       tokenHash: tokenCtx.tokenHash,
-      quantity: deltaL,
+      quantity: shares,
       costBasisAbsolute,
       acquiredAt: new Date(event.payload.eventTimestamp),
       acquisitionEventId: ledgerInputHash,
-      transferEvent: 'INCREASE_POSITION',
+      transferEvent: 'VAULT_MINT',
     });
 
-    this.logger.info({ positionHash, deltaL, costBasisAbsolute }, 'Acquisition lot created');
+    this.logger.info({ positionHash, shares, costBasisAbsolute }, 'Vault acquisition lot created');
 
     // TODO: Create journal entry (DR 1000 / CR 3000) from lot
   }
 
   /**
    * position.transferred.in → Create acquisition lot at FMV.
+   *
+   * Vault share transfers carry `sharesAfter` — the user's total share balance.
    */
   private async handleTransferredIn(
     event: DomainEvent<PositionLedgerEventPayload>,
@@ -404,16 +357,14 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     if (!ledgerEvent) {
-      this.logger.warn({ positionId, ledgerInputHash }, 'No ledger event found for transfer in');
+      this.logger.warn({ positionId, ledgerInputHash }, 'No ledger event found for vault transfer in');
       return;
     }
 
-    // NFT transfers are all-or-nothing — deltaL is always 0.
-    // Use liquidityAfter as the lot quantity (the full position liquidity).
     const config = ledgerEvent.config as Record<string, unknown>;
-    const liquidityAfter = config.liquidityAfter as string;
+    const shares = config.shares as string;
     const costBasis = ledgerEvent.deltaCostBasis;
-    if (!liquidityAfter || liquidityAfter === '0' || costBasis === '0') return;
+    if (!shares || shares === '0' || costBasis === '0') return;
 
     const ctx = await this.getReportingContext(positionId);
     const tokenCtx = await this.resolvePositionToken(positionId);
@@ -427,14 +378,14 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
       userId,
       tokenId: tokenCtx.tokenId,
       tokenHash: tokenCtx.tokenHash,
-      quantity: liquidityAfter,
+      quantity: shares,
       costBasisAbsolute,
       acquiredAt: new Date(event.payload.eventTimestamp),
       acquisitionEventId: ledgerInputHash,
       transferEvent: 'TRANSFER_IN',
     });
 
-    this.logger.info({ positionHash, liquidityAfter }, 'Transfer-in acquisition lot created');
+    this.logger.info({ positionHash, shares }, 'Vault transfer-in acquisition lot created');
 
     // TODO: Create journal entry (DR 1000 / CR 3000) from lot
   }
@@ -444,10 +395,10 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * position.liquidity.decreased → Dispose lots via cost basis method.
+   * position.liquidity.decreased → Dispose lots (VAULT_BURN).
    *
-   * Proceeds = FMV of withdrawn tokens (tokenValue * exchange rate).
-   * Realized PnL = proceeds - cost basis of consumed lots.
+   * Proceeds = FMV of withdrawn tokens.
+   * Quantity = vault shares burned.
    */
   private async handleLiquidityDecreased(
     event: DomainEvent<PositionLedgerEventPayload>,
@@ -457,13 +408,13 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     if (!ledgerEvent) {
-      this.logger.warn({ positionId }, 'No ledger event found for liquidity decrease');
+      this.logger.warn({ positionId }, 'No ledger event found for vault burn');
       return;
     }
 
     const config = ledgerEvent.config as Record<string, unknown>;
-    const deltaL = config.deltaL as string;
-    if (!deltaL || deltaL === '0') return;
+    const shares = config.shares as string;
+    if (!shares || shares === '0') return;
 
     const ctx = await this.getReportingContext(positionId);
     const tokenCtx = await this.resolvePositionToken(positionId);
@@ -472,39 +423,35 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const costBasisMethod = await this.getUserCostBasisMethod(userId);
     const lotSelector = createLotSelector(costBasisMethod);
 
-    const tokenValue = ledgerEvent.tokenValue;
     const proceedsReporting = computeReportingAmount(
-      tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
+      ledgerEvent.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
     );
 
     const result = await this.tokenLotService.disposeLots({
       userId,
       tokenHash: tokenCtx.tokenHash,
-      quantityToDispose: absBigint(deltaL),
+      quantityToDispose: shares,
       proceedsReporting,
       disposedAt: new Date(event.payload.eventTimestamp),
       disposalEventId: ledgerInputHash,
-      transferEvent: 'DECREASE_POSITION',
+      transferEvent: 'VAULT_BURN',
       lotSelector,
     });
 
     this.logger.info(
-      {
-        positionHash,
-        disposalCount: result.disposals.length,
-        totalPnl: result.totalRealizedPnl.toString(),
-      },
-      'Lots disposed for liquidity decrease',
+      { positionHash, disposalCount: result.disposals.length, totalPnl: result.totalRealizedPnl.toString() },
+      'Lots disposed for vault burn',
     );
 
     // TODO: Create journal entries from disposal result
-    //   CR 1000 (cost basis), DR 3100 (capital returned),
-    //   DR/CR 4100/5000 (realized gain/loss), DR/CR FX
     this.logDisposalStub(positionHash, result);
   }
 
   /**
-   * position.transferred.out → Dispose all remaining lots.
+   * position.transferred.out → Dispose lots for the transferred shares.
+   *
+   * Unlike NFT transfers, vault share transfers can be partial.
+   * Quantity = shares transferred (from config).
    */
   private async handleTransferredOut(
     event: DomainEvent<PositionLedgerEventPayload>,
@@ -514,33 +461,29 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     const ledgerEvent = await this.findLedgerEventByInputHash(positionId, ledgerInputHash);
     if (!ledgerEvent) {
-      this.logger.warn({ positionId, ledgerInputHash }, 'No ledger event found for transfer out');
+      this.logger.warn({ positionId, ledgerInputHash }, 'No ledger event found for vault transfer out');
       return;
     }
 
-    // NFT transfers are all-or-nothing — dispose all remaining open lots.
+    const config = ledgerEvent.config as Record<string, unknown>;
+    const shares = config.shares as string;
+    if (!shares || shares === '0') return;
+
+    const ctx = await this.getReportingContext(positionId);
     const tokenCtx = await this.resolvePositionToken(positionId);
     if (!tokenCtx) return;
 
-    const openLots = await this.tokenLotService.getOpenLots(userId, tokenCtx.tokenHash);
-    const totalOpenQuantity = openLots.reduce(
-      (sum, lot) => sum + BigInt(lot.openQuantity), 0n,
-    );
-    if (totalOpenQuantity <= 0n) return;
-
-    const ctx = await this.getReportingContext(positionId);
     const costBasisMethod = await this.getUserCostBasisMethod(userId);
     const lotSelector = createLotSelector(costBasisMethod);
 
-    const tokenValue = ledgerEvent.tokenValue;
     const proceedsReporting = computeReportingAmount(
-      tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
+      ledgerEvent.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals,
     );
 
     const result = await this.tokenLotService.disposeLots({
       userId,
       tokenHash: tokenCtx.tokenHash,
-      quantityToDispose: totalOpenQuantity.toString(),
+      quantityToDispose: shares,
       proceedsReporting,
       disposedAt: new Date(event.payload.eventTimestamp),
       disposalEventId: ledgerInputHash,
@@ -550,7 +493,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     this.logger.info(
       { positionHash, totalPnl: result.totalRealizedPnl.toString() },
-      'Lots disposed for transfer out',
+      'Lots disposed for vault transfer out',
     );
 
     // TODO: Create journal entries from disposal result
@@ -564,7 +507,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   /**
    * position.fees.collected → Fee income (outside lot system).
    *
-   * TODO: Create journal entry (DR 3100 / CR 4000) directly — fees don't go through lots.
+   * TODO: Create journal entry (DR 3100 / CR 4000) directly.
    */
   private async handleFeesCollected(
     event: DomainEvent<PositionLedgerEventPayload>,
@@ -577,33 +520,28 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     this.logger.info(
       { positionHash, totalFees: totalFees.toString() },
-      'Fee collection event received (journal entry stub)',
+      'Vault fee collection event received (journal entry stub)',
     );
 
     // TODO: Create journal entry for fee income
-    //   DR 3100 (Capital Returned) / CR 4000 (Fee Income)
   }
 
   /**
    * position.closed → Cost basis correction stub.
-   *
-   * TODO: Zero out any remaining cost basis in the journal via lots.
    */
   private async handlePositionClosed(
     event: DomainEvent<PositionLifecyclePayload>,
   ): Promise<void> {
-    const { positionHash } = event.payload;
-
     this.logger.info(
-      { positionHash },
-      'Position closed event received (journal correction stub)',
+      { positionHash: event.payload.positionHash },
+      'Vault position closed event received (journal correction stub)',
     );
 
     // TODO: Create cost basis correction entry from remaining lot state
   }
 
   /**
-   * position.deleted → Delete all lots for this position.
+   * position.deleted → Delete all lots for this vault position.
    */
   private async handlePositionDeleted(
     event: DomainEvent<PositionLifecyclePayload>,
@@ -626,7 +564,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     this.logger.info(
       { positionHash, deletedLots: count },
-      'Deleted token lots for deleted position',
+      'Deleted token lots for deleted vault position',
     );
 
     // TODO: Delete journal entries for position
@@ -649,14 +587,12 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const tokenCtx = await this.resolvePositionToken(positionId);
     if (!tokenCtx) return;
 
-    // Find ledger events that still exist (non-reverted)
     const existingEvents = await prisma.positionLedgerEvent.findMany({
       where: { positionId },
       select: { inputHash: true },
     });
     const existingHashes = new Set(existingEvents.map((e) => e.inputHash));
 
-    // Find lots whose acquisition event no longer exists
     const allLots = await prisma.tokenLot.findMany({
       where: { userId: position.userId, tokenHash: tokenCtx.tokenHash },
       select: { acquisitionEventId: true },
@@ -673,7 +609,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
       );
       this.logger.info(
         { positionHash, deletedLots: count },
-        'Deleted token lots for reverted ledger events',
+        'Deleted token lots for reverted vault ledger events',
       );
     }
 
@@ -685,8 +621,8 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
   // ===========================================================================
 
   /**
-   * Resolve or create the ERC-721 Token row for a UniswapV3 NFT position.
-   * tokenHash = "erc721/{chainId}/{nfpmAddr}/{nftId}"
+   * Resolve or create the Token row for a vault position.
+   * tokenHash = "erc721/{chainId}/{vaultAddress}/{vaultAddress}"
    */
   private async resolvePositionToken(positionId: string): Promise<PositionTokenContext | null> {
     const position = await prisma.position.findUnique({
@@ -697,20 +633,19 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 
     const config = position.config as Record<string, unknown>;
     const chainId = config.chainId as number;
-    const nftId = config.nftId as number;
-    const nfpmAddress = getUniswapV3NfpmAddress(chainId);
-    const tokenHash = createErc721TokenHash(chainId, nfpmAddress, nftId.toString());
+    const vaultAddress = config.vaultAddress as string;
+    const tokenHash = createErc721TokenHash(chainId, vaultAddress, vaultAddress);
 
     const token = await prisma.token.upsert({
       where: { tokenHash },
       update: {},
       create: {
         tokenType: 'erc721',
-        name: `UniswapV3 Position (${nftId})`,
-        symbol: 'UV3-NFT',
+        name: `UniswapV3 Vault (${vaultAddress.slice(0, 8)}...)`,
+        symbol: 'UV3-VAULT',
         decimals: 0,
         tokenHash,
-        config: { chainId, protocol: 'uniswapv3' },
+        config: { chainId, protocol: 'uniswapv3-vault' },
       },
       select: { id: true, tokenHash: true },
     });
@@ -803,7 +738,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     const rate = quoteTokenUsdPrice / reportingCurrencyUsdPrice;
     const exchangeRate = BigInt(Math.round(rate * FLOAT_TO_BIGINT_SCALE));
 
-    const poolHash = `${position.protocol}/${chainId}/${poolAddress}`;
+    const poolHash = `uniswapv3-vault/${chainId}/${poolAddress}`;
 
     return {
       reportingCurrency,
@@ -813,7 +748,6 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
     };
   }
 
-  /** Log stub info for disposal-to-journal-entry creation. */
   private logDisposalStub(positionHash: string, result: DisposalResult): void {
     this.logger.info(
       {
@@ -822,7 +756,7 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
         totalPnl: result.totalRealizedPnl.toString(),
         disposals: result.disposals.length,
       },
-      'Journal entry stub: disposal results ready for journal creation',
+      'Journal entry stub: vault disposal results ready for journal creation',
     );
   }
 }
@@ -831,16 +765,6 @@ export class UniswapV3PostJournalEntriesRule extends BusinessRule {
 // Utility Functions
 // =============================================================================
 
-/** Returns the absolute value of a bigint string. */
-function absBigint(value: string): string {
-  const n = BigInt(value);
-  return (n < 0n ? -n : n).toString();
-}
-
-/**
- * Convert a quote-token amount to reporting currency.
- * result = (amountQuote * exchangeRate) / 10^quoteTokenDecimals
- */
 function computeReportingAmount(
   amountQuote: string,
   exchangeRate: string,
