@@ -20,7 +20,7 @@ import type {
 /**
  * Token type matching @midcurve/shared TokenType
  */
-export type TokenTypeResponse = 'erc20' | 'basic-currency';
+export type TokenTypeResponse = 'erc20' | 'erc721' | 'basic-currency';
 
 export interface Erc20TokenResponse {
   id: string;

@@ -1,8 +1,11 @@
 /**
  * Double-Entry Accounting Types — Phase 1
  *
- * Types for the journal system, chart of accounts, and NAV snapshots.
+ * Types for the journal system, chart of accounts, NAV snapshots,
+ * and token lot tracking.
  */
+
+export * from './token-lot.js';
 
 // =============================================================================
 // Account Classification

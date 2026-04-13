@@ -2,9 +2,10 @@
  * Token type discriminator - identifies the token protocol/platform.
  *
  * - 'erc20': ERC-20 tokens on EVM-compatible chains
+ * - 'erc721': ERC-721 NFTs on EVM-compatible chains (e.g., UniswapV3 LP positions)
  * - 'basic-currency': Platform-agnostic currency references (USD, ETH, BTC)
  */
-export type TokenType = 'erc20' | 'basic-currency';
+export type TokenType = 'erc20' | 'erc721' | 'basic-currency';
 
 /**
  * JSON representation of a token for API responses.

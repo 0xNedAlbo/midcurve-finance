@@ -12,6 +12,16 @@
  * New settings fields should be added here with sensible defaults
  * reflected in DEFAULT_USER_SETTINGS.
  */
+/**
+ * Cost basis tracking method for token lot disposals.
+ *
+ * - 'fifo': First In, First Out — oldest lots consumed first
+ * - 'lifo': Last In, First Out — newest lots consumed first
+ * - 'hifo': Highest In, First Out — highest cost basis lots consumed first
+ * - 'wac': Weighted Average Cost — blended cost basis across all open lots
+ */
+export type CostBasisMethod = 'fifo' | 'lifo' | 'hifo' | 'wac';
+
 export interface UserSettingsData {
   /**
    * Pool hashes the user has favorited for quick access.
@@ -19,6 +29,12 @@ export interface UserSettingsData {
    * Ordered most-recent-first (new favorites prepended).
    */
   favoritePoolHashes: string[];
+
+  /**
+   * Cost basis method for realized PnL calculations.
+   * Determines how token lots are selected for disposal.
+   */
+  costBasisMethod: CostBasisMethod;
 }
 
 /**
@@ -26,4 +42,5 @@ export interface UserSettingsData {
  */
 export const DEFAULT_USER_SETTINGS: UserSettingsData = {
   favoritePoolHashes: [],
+  costBasisMethod: 'fifo',
 };

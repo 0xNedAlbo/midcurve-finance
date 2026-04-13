@@ -5,7 +5,7 @@
 
 // User types
 export type { User } from './user.js';
-export type { UserSettingsData } from './user-settings.js';
+export type { UserSettingsData, CostBasisMethod } from './user-settings.js';
 export { DEFAULT_USER_SETTINGS } from './user-settings.js';
 
 // ============================================================================
@@ -21,6 +21,9 @@ export type {
   SnapshotType,
   ValuationMethod,
   PositionBreakdownItem,
+  TokenLotTransferEvent,
+  AcquisitionTransferEvent,
+  DisposalTransferEvent,
 } from './accounting/index.js';
 export { ACCOUNT_CODES, LEDGER_REF_PREFIX, CHART_OF_ACCOUNTS } from './accounting/index.js';
 

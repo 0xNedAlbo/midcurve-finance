@@ -6,6 +6,7 @@
  *
  * Supported formats:
  * - ERC-20: "erc20/{chainId}/{address}" → { tokenType: 'erc20', chainId, address }
+ * - ERC-721: "erc721/{chainId}/{contractAddress}/{tokenId}" → { tokenType: 'erc721', chainId, contractAddress, tokenId }
  * - Basic Currency: "basic-currency/{currencyCode}" → { tokenType: 'basic-currency', currencyCode }
  *
  * @example
@@ -34,6 +35,16 @@ export interface Erc20TokenHashData {
 }
 
 /**
+ * Parsed ERC-721 token hash
+ */
+export interface Erc721TokenHashData {
+  tokenType: 'erc721';
+  chainId: number;
+  contractAddress: string;
+  tokenId: string;
+}
+
+/**
  * Parsed basic currency token hash
  */
 export interface BasicCurrencyTokenHashData {
@@ -45,7 +56,7 @@ export interface BasicCurrencyTokenHashData {
  * Discriminated union of all parsed token hash types.
  * Extend this union when adding new token type support.
  */
-export type ParsedTokenHash = Erc20TokenHashData | BasicCurrencyTokenHashData;
+export type ParsedTokenHash = Erc20TokenHashData | Erc721TokenHashData | BasicCurrencyTokenHashData;
 
 // ============================================================================
 // CREATION
@@ -75,6 +86,43 @@ export function createErc20TokenHash(chainId: number, address: string): string {
   }
 
   return `erc20/${chainId}/${address}`;
+}
+
+/**
+ * Create a token hash for an ERC-721 NFT token.
+ *
+ * @param chainId - EVM chain ID (must be a positive integer)
+ * @param contractAddress - EIP-55 normalized NFT contract address (caller must normalize)
+ * @param tokenId - NFT token ID (string representation of uint256)
+ * @returns Token hash string in format "erc721/{chainId}/{contractAddress}/{tokenId}"
+ * @throws Error if any parameter is invalid
+ */
+export function createErc721TokenHash(
+  chainId: number,
+  contractAddress: string,
+  tokenId: string
+): string {
+  if (chainId === undefined || chainId === null) {
+    throw new Error('chainId is required for ERC-721 token hash creation');
+  }
+  if (typeof chainId !== 'number' || !Number.isInteger(chainId) || chainId <= 0) {
+    throw new Error(`chainId must be a positive integer, got ${chainId}`);
+  }
+
+  if (!contractAddress || typeof contractAddress !== 'string') {
+    throw new Error('contractAddress is required for ERC-721 token hash creation');
+  }
+  if (!contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+    throw new Error(
+      `contractAddress must be a valid 0x-prefixed 42-character hex string, got "${contractAddress}"`
+    );
+  }
+
+  if (!tokenId || typeof tokenId !== 'string') {
+    throw new Error('tokenId is required for ERC-721 token hash creation');
+  }
+
+  return `erc721/${chainId}/${contractAddress}/${tokenId}`;
 }
 
 /**
@@ -131,6 +179,27 @@ export function parseTokenHash(hash: string): ParsedTokenHash {
         throw new Error(`Invalid address in tokenHash: "${parts[2]}"`);
       }
       return { tokenType: 'erc20', chainId, address };
+    }
+
+    case 'erc721': {
+      if (parts.length !== 4) {
+        throw new Error(
+          `Invalid erc721 tokenHash: "${hash}" (expected "erc721/{chainId}/{contractAddress}/{tokenId}")`
+        );
+      }
+      const chainId = Number(parts[1]);
+      const contractAddress = parts[2]!;
+      const nftTokenId = parts[3]!;
+      if (!Number.isInteger(chainId) || chainId <= 0) {
+        throw new Error(`Invalid chainId in tokenHash: "${parts[1]}"`);
+      }
+      if (!contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+        throw new Error(`Invalid contractAddress in tokenHash: "${parts[2]}"`);
+      }
+      if (!nftTokenId) {
+        throw new Error(`Invalid tokenId in tokenHash: empty string`);
+      }
+      return { tokenType: 'erc721', chainId, contractAddress, tokenId: nftTokenId };
     }
 
     case 'basic-currency': {

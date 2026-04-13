@@ -104,6 +104,8 @@ model User {
   // Accounting relations
   journalEntries     JournalEntry[]
   navSnapshots       NAVSnapshot[]
+  tokenLots          TokenLot[]
+  tokenLotDisposals  TokenLotDisposal[]
 
   // Wallet perimeter relations
   userWallets UserWallet[]
@@ -145,8 +147,11 @@ model Token {
   config Json
 
   // Token hash for fast lookups by type+chain+address
-  // Format: "erc20/{chainId}/{address}" or "basic-currency/{currencyCode}"
+  // Format: "erc20/{chainId}/{address}", "erc721/{chainId}/{contractAddr}/{tokenId}", or "basic-currency/{currencyCode}"
   tokenHash String @unique
+
+  // Token lot relations
+  tokenLots TokenLot[]
 
   // Indexes for efficient queries
   @@index([tokenType])
@@ -816,6 +821,10 @@ model JournalEntry {
   // Relations
   lines JournalLine[]
 
+  // Token lot relations
+  tokenLots TokenLot[]          @relation("LotAcquisitionEntry")
+  disposals TokenLotDisposal[]  @relation("LotDisposalEntry")
+
   @@index([userId, entryDate])
   @@index([ledgerEventRef])
   @@map("journal_entries")
@@ -943,6 +952,128 @@ model SnapshotStateCache {
   @@unique([snapshotId, chainId])
   @@index([snapshotId])
   @@map("snapshot_state_cache")
+  @@schema("accounting")
+}
+
+// =============================================================================
+// Token Lot Tracking Models (accounting schema)
+// =============================================================================
+
+enum TokenLotTransferEvent {
+  INCREASE_POSITION
+  DECREASE_POSITION
+  TRANSFER_IN
+  TRANSFER_OUT
+  VAULT_MINT
+  VAULT_BURN
+  DEPOSIT_TO_PROTOCOL
+  WITHDRAWAL_FROM_PROTOCOL
+
+  @@schema("accounting")
+}
+
+// TokenLot - Records a distinct token acquisition with its cost basis.
+// One lot per position event (e.g., each INCREASE_POSITION creates one lot).
+// Token reference is an individual ERC-721 NFT; quantity is in liquidity units (deltaL).
+model TokenLot {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Owner
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Token reference (individual ERC-721 NFT or vault share token)
+  tokenId   String
+  token     Token  @relation(fields: [tokenId], references: [id])
+  tokenHash String // Denormalized for fast queries: "erc721/{chainId}/{addr}/{nftId}"
+
+  // Acquisition data
+  quantity          String   // bigint string — liquidity units (deltaL)
+  costBasisAbsolute String   // bigint string — reporting currency, scaled 10^8
+  acquiredAt        DateTime // Block timestamp
+
+  // Provenance
+  acquisitionEventId String                // inputHash from PositionLedgerEvent
+  transferEvent      TokenLotTransferEvent
+
+  // Ordering (lot-local, sortable for FIFO/LIFO)
+  sequenceNum Int
+
+  // Journal traceability (acquisition journal entry)
+  journalEntryId String?
+  journalEntry   JournalEntry? @relation("LotAcquisitionEntry", fields: [journalEntryId], references: [id])
+
+  // Relations
+  lotState  TokenLotState?
+  disposals TokenLotDisposal[]
+
+  @@unique([userId, tokenHash, acquisitionEventId]) // Idempotency
+  @@index([journalEntryId])
+  @@index([userId, tokenHash])
+  @@index([userId, tokenHash, acquiredAt]) // FIFO ordering
+  @@index([userId, sequenceNum])
+  @@map("token_lots")
+  @@schema("accounting")
+}
+
+// TokenLotState - Mutable consumption state for a token lot (1:1).
+// Tracks how much of the lot's original quantity remains unconsumed.
+model TokenLotState {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Parent lot (1:1)
+  lotId String   @unique
+  lot   TokenLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+
+  // Mutable consumption state
+  openQuantity    String  // bigint string — remaining unconsumed liquidity
+  isFullyConsumed Boolean @default(false)
+
+  @@index([isFullyConsumed])
+  @@map("token_lot_states")
+  @@schema("accounting")
+}
+
+// TokenLotDisposal - Records consumption of a token lot during a disposal event.
+// Links the disposed quantity back to the source lot and the resulting journal entry.
+model TokenLotDisposal {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Parent lot
+  lotId String
+  lot   TokenLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+
+  // Owner (denormalized)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Disposal data
+  quantityDisposed   String   // bigint string — liquidity units consumed
+  proceedsReporting  String   // bigint string — proceeds in reporting currency, scaled 10^8
+  costBasisAllocated String   // bigint string — lot cost basis portion consumed, scaled 10^8
+  realizedPnl        String   // bigint string — proceeds minus cost basis, scaled 10^8
+  disposedAt         DateTime // Block timestamp
+  transferEvent      TokenLotTransferEvent
+
+  // Provenance
+  disposalEventId String // inputHash from PositionLedgerEvent
+
+  // Ordering
+  sequenceNum Int
+
+  // Journal traceability
+  journalEntryId String?
+  journalEntry   JournalEntry? @relation("LotDisposalEntry", fields: [journalEntryId], references: [id])
+
+  @@index([lotId])
+  @@index([userId, disposedAt])
+  @@index([disposalEventId])
+  @@index([journalEntryId])
+  @@map("token_lot_disposals")
   @@schema("accounting")
 }
 
