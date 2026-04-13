@@ -182,6 +182,24 @@ interface IMultiTokenVault is IERC20 {
     // Views
     // =========================================================================
 
+    /// @notice Returns the total token amounts held as equity by the vault.
+    /// @dev Excludes uncollected yield. Represents the sum of all depositors' principal.
+    /// @return tokenAmounts Total equity per token, indexed by tokenIndex.
+    function totalAssets()
+        external
+        view
+        returns (uint256[] memory tokenAmounts);
+
+    /// @notice Returns the token amounts attributable to a given user's share balance.
+    /// @dev Equivalent to totalAssets() * balanceOf(user) / totalSupply().
+    ///      Excludes uncollected yield — use claimableYield() for that.
+    /// @param user Address to query.
+    /// @return tokenAmounts Principal per token, indexed by tokenIndex.
+    function principalOf(address user)
+        external
+        view
+        returns (uint256[] memory tokenAmounts);
+
     /// @notice Quote the token amounts required to mint a given number of shares.
     /// @param shares Number of shares to quote.
     /// @return tokenAmounts Token amounts per share, indexed by tokenIndex.

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IMultiTokenVault, MintParams, BurnParams} from "./interfaces/IMultiTokenVault.sol";
 import {INonfungiblePositionManagerMinimal} from "../position-closer/interfaces/INonfungiblePositionManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../position-closer/interfaces/IUniswapV3PoolMinimal.sol";
@@ -456,6 +457,37 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
                 tokenAmounts[1] += (inside1 - feeGrowthInside1LastX128) * uint256(L_total) * balance / Q128 / supply;
             }
         }
+    }
+
+    // SafeCast in totalAssets/principalOf is a defensive guard only — Uniswap V3 caps
+    // liquidity at uint128.max, so totalSupply (== L) should never exceed that in practice.
+
+    /// @inheritdoc IMultiTokenVault
+    function totalAssets() external view returns (uint256[] memory tokenAmounts) {
+        tokenAmounts = new uint256[](2);
+        uint256 supply = totalSupply();
+        if (supply == 0) return tokenAmounts;
+
+        (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+        uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(_tickLower);
+        uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(_tickUpper);
+
+        (tokenAmounts[0], tokenAmounts[1]) =
+            LiquidityAmounts.getAmountsForLiquidity(sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, SafeCast.toUint128(supply));
+    }
+
+    /// @inheritdoc IMultiTokenVault
+    function principalOf(address user) external view returns (uint256[] memory tokenAmounts) {
+        tokenAmounts = new uint256[](2);
+        uint256 balance = balanceOf(user);
+        if (balance == 0) return tokenAmounts;
+
+        (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
+        uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(_tickLower);
+        uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(_tickUpper);
+
+        (tokenAmounts[0], tokenAmounts[1]) =
+            LiquidityAmounts.getAmountsForLiquidity(sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, SafeCast.toUint128(balance));
     }
 
     // NOTE: quoteBurn and quoteMint are intentionally identical. This is not a bug —
