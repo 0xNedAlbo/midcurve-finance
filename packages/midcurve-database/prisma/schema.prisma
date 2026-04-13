@@ -103,7 +103,6 @@ model User {
 
   // Accounting relations
   journalEntries     JournalEntry[]
-  navSnapshots       NAVSnapshot[]
   tokenLots          TokenLot[]
   tokenLotDisposals  TokenLotDisposal[]
 
@@ -870,90 +869,6 @@ model JournalLine {
   @@schema("accounting")
 }
 
-// NAVSnapshot - Daily portfolio-level snapshot
-// Foundation for period comparisons and Balance Sheet view.
-// Serves as the single source of truth for all reporting (snapshot-only reporting).
-model NAVSnapshot {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  // Owner
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Snapshot identity
-  snapshotDate DateTime // Midnight UTC of the date this snapshot represents
-  snapshotType String // "daily" | "weekly" | "monthly" | "quarterly" | "yearly"
-
-  // Journal hash — SHA-256 of sorted tracked position refs at snapshot time.
-  // Used for staleness detection: if the current hash differs, snapshot needs recomputation.
-  journalHash String
-
-  // Reporting currency and method
-  reportingCurrency String // ISO 4217 currency of all amounts below
-  valuationMethod   String // "pool_price" for Phase 1
-
-  // Balance sheet totals (bigint strings, scaled 10^8 in reporting currency)
-  totalAssets      String // Sum of all asset account balances
-  totalLiabilities String // Sum of all liability account balances (always "0" in Phase 1)
-  netAssetValue    String // totalAssets - totalLiabilities
-
-  // Asset breakdown (bigint strings, scaled 10^8 in reporting currency)
-  depositedLiquidityAtCost String // Account 1000 cumulative balance
-  markToMarketAdjustment   String // Account 1001 cumulative balance
-  unclaimedFees            String // Account 1002 cumulative balance
-
-  // Equity breakdown (bigint strings, scaled 10^8 in reporting currency)
-  contributedCapital String // Account 3000 cumulative balance
-  capitalReturned    String // Account 3100 cumulative balance
-
-  // Retained earnings sub-categories (bigint strings, scaled 10^8 in reporting currency)
-  retainedRealizedWithdrawals String // Accounts 4100 - 5000 net
-  retainedRealizedFees        String // Account 4000 balance
-  retainedUnrealizedPrice     String // Accounts 4200 - 5200 net
-  retainedUnrealizedFees      String // Account 4001 balance
-
-  // Position summary
-  activePositionCount Int // Number of active positions at snapshot time
-  positionBreakdown   Json // Array of per-instrument data
-
-  // On-chain state cache — one entry per chain, cascade-deleted with snapshot
-  stateCache SnapshotStateCache[]
-
-  @@unique([userId, snapshotDate, snapshotType])
-  @@index([userId, snapshotDate])
-  @@index([userId, journalHash])
-  @@map("nav_snapshots")
-  @@schema("accounting")
-}
-
-// SnapshotStateCache - Immutable on-chain state cached per snapshot per chain.
-// Enables snapshot recomputation without RPC calls when positions are removed.
-// Owned by NAVSnapshot — cascade-deleted when the snapshot is pruned or deleted.
-model SnapshotStateCache {
-  id         String      @id @default(cuid())
-  snapshotId String
-  snapshot   NAVSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-
-  // Per-chain data
-  chainId       Int
-  midnightBlock String // bigint-as-string
-
-  // Cached state per position (JSON array)
-  // Each entry: { positionRef, poolAddress, sqrtPriceX96, liquidity,
-  //               tokensOwed0, tokensOwed1, uncollectedPrincipal0, uncollectedPrincipal1,
-  //               tickLower, tickUpper, token0Decimals, token1Decimals,
-  //               isToken0Quote, currentCostBasis, quoteTokenCoingeckoId }
-  positionStates Json
-
-  // CoinGecko USD prices at snapshot date (JSON object: { coingeckoId: usdPrice })
-  quoteTokenPrices Json
-
-  @@unique([snapshotId, chainId])
-  @@index([snapshotId])
-  @@map("snapshot_state_cache")
-  @@schema("accounting")
-}
 
 // =============================================================================
 // Token Lot Tracking Models (accounting schema)
