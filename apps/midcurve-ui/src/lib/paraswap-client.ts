@@ -102,6 +102,8 @@ export interface ParaswapSwapResult {
   chainId: number;
   /** The actual srcAmount from the fresh quote (may differ from display quote) */
   srcAmount: string;
+  /** The tokenTransferProxy from the fresh quote (may differ from display quote) */
+  tokenTransferProxy: Address;
 }
 
 // =============================================================================
@@ -250,5 +252,6 @@ export async function getParaswapSwap(
     value: data.txParams.value || '0',
     chainId: data.txParams.chainId,
     srcAmount: data.priceRoute.srcAmount,
+    tokenTransferProxy: data.priceRoute.tokenTransferProxy as Address,
   };
 }

@@ -120,6 +120,12 @@ export function FreeFormSwapWidget({
     userAddress: userAddress as Address | undefined,
   });
 
+  // Effective spender address — if /swap returned a different tokenTransferProxy,
+  // use that so the approval targets the correct contract.
+  const spenderAddress = useMemo(() => {
+    return swap.freshSpender ?? quote?.tokenTransferProxy ?? null;
+  }, [quote?.tokenTransferProxy, swap.freshSpender]);
+
   // Token approval via shared prompt
   // For BUY side, add slippage buffer since /swap may get a different srcAmount.
   // If /swap returned a higher srcAmount (freshSrcAmount), use that instead.
@@ -148,7 +154,7 @@ export function FreeFormSwapWidget({
     tokenSymbol: sourceToken?.symbol ?? '',
     tokenDecimals: sourceToken?.decimals ?? 18,
     requiredAmount: approvalAmount,
-    spenderAddress: (quote?.tokenTransferProxy as Address) ?? null,
+    spenderAddress: (spenderAddress as Address) ?? null,
     chainId,
     enabled: !!sourceToken && !!quote && !!userAddress && !isWrongNetwork,
     onApprovalChange: handleApprovalChange,
@@ -184,8 +190,13 @@ export function FreeFormSwapWidget({
 
   const handleSwap = useCallback(() => {
     if (!quote) return;
-    swap.executeSwap({ quote, slippageBps, currentAllowance: approvalPrompt.allowance });
-  }, [quote, slippageBps, swap, approvalPrompt.allowance]);
+    swap.executeSwap({
+      quote,
+      slippageBps,
+      currentAllowance: approvalPrompt.allowance,
+      approvedSpender: (spenderAddress ?? undefined) as Address | undefined,
+    });
+  }, [quote, slippageBps, swap, approvalPrompt.allowance, spenderAddress]);
 
   // Swap transaction prompt
   const swapTx = useEvmTransactionPrompt({

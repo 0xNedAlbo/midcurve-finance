@@ -16,6 +16,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { Address } from 'viem';
 import { useSendTransaction } from 'wagmi';
+import { normalizeAddress, compareAddresses } from '@midcurve/shared';
 import {
   getParaswapSwap,
   type ParaswapQuoteResult,
@@ -32,6 +33,8 @@ export interface ParaswapExecuteSwapInput {
   slippageBps: number;
   /** Current allowance from backend subscription, used for pre-submission safety check */
   currentAllowance: bigint | undefined;
+  /** The spender address used for the current approval */
+  approvedSpender: Address | undefined;
 }
 
 export interface UseParaswapExecuteSwapResult {
@@ -42,6 +45,8 @@ export interface UseParaswapExecuteSwapResult {
   error: Error | null;
   /** The srcAmount from the most recent /swap call, if it required more approval */
   freshSrcAmount: bigint | null;
+  /** The tokenTransferProxy from the most recent /swap call, if it differs from the approved spender */
+  freshSpender: Address | null;
   reset: () => void;
 }
 
@@ -52,6 +57,7 @@ export function useParaswapExecuteSwap({
   const [isPreparing, setIsPreparing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [freshSrcAmount, setFreshSrcAmount] = useState<bigint | null>(null);
+  const [freshSpender, setFreshSpender] = useState<Address | null>(null);
 
   const {
     sendTransaction,
@@ -75,8 +81,9 @@ export function useParaswapExecuteSwap({
       setIsPreparing(true);
       setError(null);
       setFreshSrcAmount(null);
+      setFreshSpender(null);
 
-      const { quote, slippageBps, currentAllowance } = input;
+      const { quote, slippageBps, currentAllowance, approvedSpender } = input;
 
       // Use /swap endpoint: fetches fresh quote + tx calldata in one atomic call,
       // eliminating staleness between quote and transaction build.
@@ -91,6 +98,16 @@ export function useParaswapExecuteSwap({
         side: quote.side,
         slippageBps,
       });
+
+      // Check if the /swap endpoint returned a different tokenTransferProxy than
+      // what the user approved. Paraswap may route through different contract
+      // versions, causing the approved spender to not match.
+      const swapSpender = normalizeAddress(swapResult.tokenTransferProxy) as Address;
+      if (approvedSpender && compareAddresses(swapSpender, approvedSpender) !== 0) {
+        setFreshSpender(swapSpender);
+        setIsPreparing(false);
+        return;
+      }
 
       // Check if current allowance covers what the calldata will actually transferFrom.
       // In BUY mode, Paraswap's calldata transfers up to srcAmount × (1 + slippage).
@@ -123,6 +140,7 @@ export function useParaswapExecuteSwap({
     setError(null);
     setIsPreparing(false);
     setFreshSrcAmount(null);
+    setFreshSpender(null);
     resetSend();
   }, [resetSend]);
 
@@ -133,6 +151,7 @@ export function useParaswapExecuteSwap({
     txHash,
     error,
     freshSrcAmount,
+    freshSpender,
     reset,
   };
 }
