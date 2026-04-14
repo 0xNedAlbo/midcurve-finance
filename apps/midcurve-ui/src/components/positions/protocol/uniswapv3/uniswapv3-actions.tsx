@@ -111,11 +111,6 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   }, [poolState.sqrtPriceX96, tokenConfig]);
 
 
-  // Don't show action buttons if position is burned
-  if (isBurned) {
-    return null;
-  }
-
   // Archive-only views:
   // - Archived positions: show unarchive button
   // - Not owned by user (NFT owner not in user_wallets): show archive button always
