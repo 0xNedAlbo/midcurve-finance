@@ -2,27 +2,29 @@
  * Erc20TokenApprovalPrompt - Complete ERC-20 token approval flow component
  *
  * Encapsulates the entire approval flow including:
- * - Reading current allowance directly via wagmi
+ * - Monitoring current allowance via backend subscription
  * - Exact amount approval
  * - Infinite (max) approval
  * - User rejection handling (silently ignored)
- * - Transaction confirmation tracking
+ * - Transaction confirmation tracking via backend subscription
  * - Error handling with retry
  *
- * Exception to the no-direct-RPC rule (frontend-no-rpc.md):
- * This hook reads allowance and waits for tx receipt via wagmi directly,
- * instead of using backend subscription endpoints.
+ * Uses backend subscription hooks for all blockchain reads:
+ * - useWatchErc20TokenApproval for allowance monitoring
+ * - useWatchTransactionStatus for tx confirmation tracking
  */
 
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Circle, Check, Loader2, AlertCircle, ExternalLink, Copy } from 'lucide-react';
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useWriteContract } from 'wagmi';
 import type { Address } from 'viem';
-import { formatUnits, getAddress, maxUint256 } from 'viem';
+import { getAddress, maxUint256 } from 'viem';
 import { ERC20_ABI } from '@/config/tokens/erc20-abi';
 import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
+import { useWatchErc20TokenApproval } from '@/hooks/tokens/erc20/useWatchErc20TokenApproval';
+import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 
 export type ApprovalStatus = 'pending' | 'waiting' | 'confirming' | 'success' | 'error';
 
@@ -51,10 +53,21 @@ function isUserRejection(error: Error | null | undefined): boolean {
 }
 
 function formatTokenAmount(amount: bigint, decimals: number): string {
-  const formatted = formatUnits(amount, decimals);
-  const num = parseFloat(formatted);
-  if (num === 0) return '0';
-  if (num < 0.0001) return '<0.0001';
+  // Scale down from smallest unit to human-readable
+  const divisor = 10n ** BigInt(decimals);
+  const whole = amount / divisor;
+  const remainder = amount % divisor;
+
+  if (amount === 0n) return '0';
+
+  // For very small amounts, show "<0.0001"
+  const threshold = divisor / 10000n; // 0.0001 in token units
+  if (amount > 0n && amount < threshold) return '<0.0001';
+
+  // Build a decimal string from bigint parts
+  const remainderStr = remainder.toString().padStart(decimals, '0');
+  const num = parseFloat(`${whole}.${remainderStr}`);
+
   if (num < 1) return num.toPrecision(4);
   if (num < 1000) return num.toFixed(4).replace(/\.?0+$/, '');
   if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`;
@@ -62,8 +75,6 @@ function formatTokenAmount(amount: bigint, decimals: number): string {
   if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`;
   return num.toFixed(2);
 }
-
-const POLL_INTERVAL_MS = 15_000;
 
 export function useErc20TokenApprovalPrompt({
   tokenAddress,
@@ -79,31 +90,21 @@ export function useErc20TokenApprovalPrompt({
 
   const canCheck = enabled && !!tokenAddress && !!ownerAddress && !!spenderAddress && !!chainId;
 
-  // Read current allowance — once on mount, then poll every 15s
+  // Watch allowance via backend subscription
   const {
-    data: allowanceData,
-    refetch: refetchAllowance,
-  } = useReadContract({
-    address: tokenAddress ?? undefined,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: ownerAddress && spenderAddress ? [ownerAddress, spenderAddress] : undefined,
-    chainId,
-    query: {
-      enabled: canCheck && requiredAmount > 0n,
-      refetchInterval: (query) => {
-        // Stop polling once allowance meets the required amount
-        const data = query.state.data;
-        if (data !== undefined && BigInt(data.toString()) >= requiredAmount) {
-          return false;
-        }
-        return POLL_INTERVAL_MS;
-      },
-    },
+    isApproved: approvalSufficient,
+    refresh: refreshApproval,
+    error: approvalWatchError,
+  } = useWatchErc20TokenApproval({
+    tokenAddress: tokenAddress ?? null,
+    ownerAddress: ownerAddress ?? null,
+    spenderAddress: spenderAddress ?? null,
+    chainId: chainId ?? 0,
+    requiredAmount,
+    enabled: canCheck && requiredAmount > 0n,
   });
 
-  const allowance = allowanceData !== undefined ? BigInt(allowanceData.toString()) : undefined;
-  const isApproved = requiredAmount === 0n || (allowance !== undefined && allowance >= requiredAmount);
+  const isApproved = requiredAmount === 0n || approvalSufficient;
 
   // Single writeContract instance for both exact and infinite approvals
   const {
@@ -114,25 +115,23 @@ export function useErc20TokenApprovalPrompt({
     reset: resetWrite,
   } = useWriteContract();
 
-  // Wait for 1 confirmation after tx is sent
-  const {
-    isLoading: isConfirming,
-    isSuccess: receiptSuccess,
-    error: receiptError,
-  } = useWaitForTransactionReceipt({
-    hash: txHash,
-    confirmations: 1,
+  // Watch tx confirmation via backend subscription
+  const txWatch = useWatchTransactionStatus({
+    txHash: txHash ?? null,
+    chainId: chainId ?? 0,
+    targetConfirmations: 1,
+    enabled: !!txHash,
+    onConfirmed: () => refreshApproval(),
   });
 
-  // Immediately refetch allowance when receipt confirms — don't wait for 15s poll
-  useEffect(() => {
-    if (receiptSuccess) refetchAllowance();
-  }, [receiptSuccess, refetchAllowance]);
+  const isConfirming = !!txHash && txWatch.status !== 'success' && txWatch.status !== 'reverted' && !txWatch.error;
+  const receiptSuccess = txWatch.status === 'success';
+  const receiptError = txWatch.status === 'reverted' ? new Error('Transaction reverted') : null;
 
   // Filter user rejection errors
   const filteredWriteError = isUserRejection(writeError) ? null : writeError;
-  const filteredReceiptError = receiptError && !isUserRejection(receiptError) ? receiptError : null;
-  const errorObj = filteredWriteError || filteredReceiptError;
+  const filteredReceiptError = receiptError;
+  const errorObj = filteredWriteError || filteredReceiptError || (approvalWatchError ? new Error(approvalWatchError) : null);
   const error = errorObj?.message || null;
 
   const status = useMemo((): ApprovalStatus => {
