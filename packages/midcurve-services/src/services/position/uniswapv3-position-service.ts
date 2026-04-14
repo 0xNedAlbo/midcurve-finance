@@ -1299,10 +1299,13 @@ export class UniswapV3PositionService {
             ) {
                 this.logger.info(
                     { id },
-                    "Position is closed and has no on-chain activity - skipping refresh",
+                    "Position is closed and has no on-chain activity - refreshing metrics only",
                 );
-                log.methodExit(this.logger, "refresh", { id, skipped: true });
-                return position;
+                // Still refresh metrics to pick up ledger changes (e.g. after rebuild)
+                await this.refreshMetrics(id, "latest", dbTx);
+                const refreshed = await this.findById(id, dbTx);
+                log.methodExit(this.logger, "refresh", { id, closedMetricsOnly: true });
+                return refreshed!;
             }
 
             // 2.3 Handle reopened position (was closed but now has liquidity or owed tokens)
