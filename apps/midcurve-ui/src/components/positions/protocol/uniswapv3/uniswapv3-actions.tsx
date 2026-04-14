@@ -109,25 +109,24 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     areAddressesEqual(walletAddress, ownerAddress)
   );
 
-  // Don't show action buttons if position is burned or user doesn't own it
+  // Don't show action buttons if position is burned
   if (isBurned) {
     return null;
   }
-  if (!isOwner) {
-    return null;
-  }
 
-  // Archived positions only show the Unarchive button
-  if (position.isArchived) {
+  // Non-owner or archived: only show archive/unarchive (account-level action, no NFT ownership required)
+  if (!isOwner || position.isArchived) {
     return (
       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
         <button
-          onClick={() => archiveMutation.mutate({ positionId: position.id, archive: false })}
+          onClick={() => archiveMutation.mutate({ positionId: position.id, archive: !position.isArchived })}
           disabled={archiveMutation.isPending}
           className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 disabled:opacity-50"
         >
           <Archive className="w-3 h-3" />
-          {archiveMutation.isPending ? 'Unarchiving...' : 'Unarchive Position'}
+          {archiveMutation.isPending
+            ? (position.isArchived ? 'Unarchiving...' : 'Archiving...')
+            : (position.isArchived ? 'Unarchive Position' : 'Archive Position')}
         </button>
       </div>
     );
