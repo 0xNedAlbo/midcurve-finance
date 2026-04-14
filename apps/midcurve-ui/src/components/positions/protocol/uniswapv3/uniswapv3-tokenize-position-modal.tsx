@@ -62,7 +62,7 @@ export function UniswapV3TokenizePositionModal({
   // Editable vault token parameters
   const defaultDecimals = computeDefaultDecimals(liquidity);
   const [tokenName, setTokenName] = useState(`UniswapV3 Tokenized Position #${nftId}`);
-  const [tokenSymbol, setTokenSymbol] = useState(`uv3-${chainId}-${nftId}`);
+  const [tokenSymbol, setTokenSymbol] = useState(`UV3-${chainId}-${nftId}`);
   const [decimals, setDecimals] = useState(defaultDecimals);
 
   // Editing state
@@ -157,7 +157,7 @@ export function UniswapV3TokenizePositionModal({
   useEffect(() => {
     if (isOpen) {
       setTokenName(`UniswapV3 Tokenized Position #${nftId}`);
-      setTokenSymbol(`uv3-${chainId}-${nftId}`);
+      setTokenSymbol(`UV3-${chainId}-${nftId}`);
       setDecimals(computeDefaultDecimals(liquidity));
       setEditingField(null);
       setDiscoverStatus('idle');
