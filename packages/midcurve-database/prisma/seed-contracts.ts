@@ -35,12 +35,6 @@ interface DeploymentFile {
 }
 
 async function main() {
-  const existingCount = await prisma.sharedContract.count();
-  if (existingCount > 0) {
-    console.log(`Shared contracts already seeded (${existingCount} rows), skipping.`);
-    return;
-  }
-
   console.log('Seeding SharedContracts...');
 
   const deploymentsDir = resolve(
