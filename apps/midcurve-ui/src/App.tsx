@@ -3,7 +3,6 @@ import { QueryProvider } from './providers/QueryProvider';
 import { ConfigProvider, useConfig } from './providers/ConfigProvider';
 import { Web3Provider } from './providers/Web3Provider';
 import { AuthProvider } from './providers/AuthProvider';
-import { Erc20TransferEventProvider } from './lib/events/erc20-transfer-event-context';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -56,8 +55,7 @@ function ConfigGate() {
   return (
     <Web3Provider>
       <AuthProvider>
-        <Erc20TransferEventProvider>
-          <BrowserRouter>
+        <BrowserRouter>
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
@@ -110,7 +108,6 @@ function ConfigGate() {
               <Route path="/setup" element={<SetupWizardPage />} />
             </Routes>
           </BrowserRouter>
-        </Erc20TransferEventProvider>
       </AuthProvider>
     </Web3Provider>
   );
