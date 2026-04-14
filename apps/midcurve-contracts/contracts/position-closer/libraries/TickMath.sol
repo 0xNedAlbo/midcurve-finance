@@ -20,6 +20,7 @@ library TickMath {
         unchecked {
             if (tick < MIN_TICK || tick > MAX_TICK) revert TickOutOfRange();
 
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 absTick = tick < 0 ? uint256(uint24(-tick)) : uint256(uint24(tick));
             uint256 ratio =
                 absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;

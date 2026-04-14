@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IDiamondCut} from "./interfaces/IDiamondCut.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /// @title LibDiamond
 /// @notice Library for diamond storage and cut operations (EIP-2535)
@@ -204,7 +205,7 @@ library LibDiamond {
         if (selectorPosition != lastSelectorPosition) {
             bytes4 lastSelector = ds.facetFunctionSelectors[_facetAddress].functionSelectors[lastSelectorPosition];
             ds.facetFunctionSelectors[_facetAddress].functionSelectors[selectorPosition] = lastSelector;
-            ds.selectorToFacetAndPosition[lastSelector].functionSelectorPosition = uint96(selectorPosition);
+            ds.selectorToFacetAndPosition[lastSelector].functionSelectorPosition = SafeCast.toUint96(selectorPosition);
         }
         // delete the last selector
         ds.facetFunctionSelectors[_facetAddress].functionSelectors.pop();

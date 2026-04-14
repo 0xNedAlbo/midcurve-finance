@@ -7,7 +7,7 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MidcurveTreasury } from "../../contracts/treasury/MidcurveTreasury.sol";
 import { IMidcurveTreasury } from "../../contracts/treasury/interfaces/IMidcurveTreasury.sol";
 import { IMidcurveSwapRouter } from "../../contracts/swap-router/interfaces/IMidcurveSwapRouter.sol";
-import { IWETH } from "../../contracts/treasury/interfaces/IWETH.sol";
+
 
 // ============================================================================
 // Mock Contracts
@@ -59,11 +59,13 @@ contract MockSwapRouter {
         IMidcurveSwapRouter.Hop[] calldata /* path */
     ) external returns (uint256 amountOut) {
         // Pull tokenIn from caller
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
 
         // Send WETH to recipient (1:1 ratio for simplicity)
         amountOut = amountIn;
         require(amountOut >= minAmountOut, "MockSwapRouter: slippage");
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         IERC20(weth).transfer(recipient, amountOut);
 
         return amountOut;
@@ -177,43 +179,43 @@ contract MidcurveTreasuryTest is Test {
     }
 
     // ============================================================================
-    // rescueETH
+    // rescueEth
     // ============================================================================
 
-    function test_rescueETH_sendsEth() public {
+    function test_rescueEth_sendsEth() public {
         vm.deal(address(treasury), 2 ether);
 
         vm.prank(admin);
-        treasury.rescueETH(recipient, 1 ether);
+        treasury.rescueEth(recipient, 1 ether);
 
         assertEq(recipient.balance, 1 ether);
         assertEq(address(treasury).balance, 1 ether);
     }
 
-    function test_rescueETH_emitsEvent() public {
+    function test_rescueEth_emitsEvent() public {
         vm.deal(address(treasury), 1 ether);
 
         vm.expectEmit(true, false, false, true);
         emit IMidcurveTreasury.EthRescued(recipient, 1 ether);
 
         vm.prank(admin);
-        treasury.rescueETH(recipient, 1 ether);
+        treasury.rescueEth(recipient, 1 ether);
     }
 
-    function test_rescueETH_revertsIfNotAdmin() public {
+    function test_rescueEth_revertsIfNotAdmin() public {
         vm.deal(address(treasury), 1 ether);
 
         vm.prank(stranger);
         vm.expectRevert(IMidcurveTreasury.NotAdmin.selector);
-        treasury.rescueETH(recipient, 1 ether);
+        treasury.rescueEth(recipient, 1 ether);
     }
 
-    function test_rescueETH_revertsOnZeroRecipient() public {
+    function test_rescueEth_revertsOnZeroRecipient() public {
         vm.deal(address(treasury), 1 ether);
 
         vm.prank(admin);
         vm.expectRevert(IMidcurveTreasury.ZeroAddress.selector);
-        treasury.rescueETH(address(0), 1 ether);
+        treasury.rescueEth(address(0), 1 ether);
     }
 
     // ============================================================================
@@ -360,6 +362,7 @@ contract MidcurveTreasuryTest is Test {
         // Fund treasury with WETH directly (simulating WETH fees)
         vm.deal(address(this), amountIn);
         mockWeth.deposit{ value: amountIn }();
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         MockERC20(address(mockWeth)).transfer(address(treasury), amountIn);
 
         uint256 operatorBalBefore = operatorAddr.balance;
@@ -379,6 +382,7 @@ contract MidcurveTreasuryTest is Test {
         // Fund treasury with WETH
         vm.deal(address(this), amountIn);
         mockWeth.deposit{ value: amountIn }();
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         MockERC20(address(mockWeth)).transfer(address(treasury), amountIn);
 
         vm.prank(operatorAddr);
@@ -393,6 +397,7 @@ contract MidcurveTreasuryTest is Test {
 
         vm.deal(address(this), amountIn);
         mockWeth.deposit{ value: amountIn }();
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         MockERC20(address(mockWeth)).transfer(address(treasury), amountIn);
 
         vm.expectEmit(true, false, false, true);
@@ -414,6 +419,7 @@ contract MidcurveTreasuryTest is Test {
         // Fund mock router with WETH so it can send WETH back during sell()
         vm.deal(address(this), amountIn);
         mockWeth.deposit{ value: amountIn }();
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         MockERC20(address(mockWeth)).transfer(address(mockRouter), amountIn);
     }
 

@@ -122,6 +122,7 @@ contract AllowlistedUniswapV3VaultTest is Test {
     function test_transfer_revertsIfRecipientNotAllowlisted() public {
         vm.prank(alice);
         vm.expectRevert(AllowlistedUniswapV3Vault.RecipientNotAllowlisted.selector);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, 100);
     }
 
@@ -130,6 +131,7 @@ contract AllowlistedUniswapV3VaultTest is Test {
         vault.addToAllowlist(bob);
 
         vm.prank(alice);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, 100);
 
         assertEq(vault.balanceOf(bob), 100);
@@ -278,6 +280,7 @@ contract AllowlistedUniswapV3VaultTest is Test {
 
         // Bob was never allowlisted, but can now receive shares
         vm.prank(alice);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, 100);
         assertEq(vault.balanceOf(bob), 100);
     }
@@ -294,6 +297,7 @@ contract AllowlistedUniswapV3VaultTest is Test {
         vm.prank(alice);
         vault.addToAllowlist(bob);
         vm.prank(alice);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, 1000);
 
         vm.prank(alice);
@@ -302,6 +306,7 @@ contract AllowlistedUniswapV3VaultTest is Test {
         // Bob can't receive more shares
         vm.prank(alice);
         vm.expectRevert(AllowlistedUniswapV3Vault.RecipientNotAllowlisted.selector);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, 100);
 
         // But bob can burn

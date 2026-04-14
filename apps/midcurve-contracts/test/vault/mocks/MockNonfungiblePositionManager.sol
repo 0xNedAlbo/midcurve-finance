@@ -112,8 +112,6 @@ contract MockNonfungiblePositionManager {
         // add liquidity equal to amount0Desired (test controls the setup).
         // In tests, amount0Desired and amount1Desired represent what the caller approved.
         // We consume a reasonable portion.
-        uint128 currentL = p.liquidity;
-
         // Compute amounts to consume: for a balanced position, consume both equally.
         // For testing, we'll consume the desired amounts and add proportional liquidity.
         amount0 = params.amount0Desired;
@@ -122,18 +120,23 @@ contract MockNonfungiblePositionManager {
         // Calculate liquidity to add based on amounts (simplified: L = amount0 for testing)
         // In real Uniswap, liquidity is computed from sqrtPrice and tick range.
         // Here we use a simple heuristic: average of both amounts if both > 0.
+        // forge-lint: disable-next-line(unsafe-typecast)
         if (amount0 > 0 && amount1 > 0) {
             liquidity = uint128((amount0 + amount1) / 2);
         } else if (amount0 > 0) {
+            // forge-lint: disable-next-line(unsafe-typecast)
             liquidity = uint128(amount0);
         } else {
+            // forge-lint: disable-next-line(unsafe-typecast)
             liquidity = uint128(amount1);
         }
 
         p.liquidity += liquidity;
 
         // Pull tokens from caller (the vault contract)
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         if (amount0 > 0) IERC20(p.token0).transferFrom(msg.sender, address(this), amount0);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         if (amount1 > 0) IERC20(p.token1).transferFrom(msg.sender, address(this), amount1);
 
         return (liquidity, amount0, amount1);
@@ -153,7 +156,9 @@ contract MockNonfungiblePositionManager {
         amount1 = uint256(params.liquidity) / 2;
 
         // Principal goes to tokensOwed (like real NFPM)
+        // forge-lint: disable-next-line(unsafe-typecast)
         p.tokensOwed0 += uint128(amount0);
+        // forge-lint: disable-next-line(unsafe-typecast)
         p.tokensOwed1 += uint128(amount1);
 
         return (amount0, amount1);
@@ -168,11 +173,15 @@ contract MockNonfungiblePositionManager {
         amount0 = p.tokensOwed0 > params.amount0Max ? params.amount0Max : p.tokensOwed0;
         amount1 = p.tokensOwed1 > params.amount1Max ? params.amount1Max : p.tokensOwed1;
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         p.tokensOwed0 -= uint128(amount0);
+        // forge-lint: disable-next-line(unsafe-typecast)
         p.tokensOwed1 -= uint128(amount1);
 
         // Transfer tokens to recipient
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         if (amount0 > 0) IERC20(p.token0).transfer(params.recipient, amount0);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         if (amount1 > 0) IERC20(p.token1).transfer(params.recipient, amount1);
 
         return (amount0, amount1);

@@ -333,8 +333,8 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
         // Collect outstanding fees and update accumulators
         _collectAndUpdateAccumulator();
 
-        // shares == deltaL by invariant
-        uint128 deltaL = uint128(shares);
+        // shares == deltaL by invariant (each share minted from uint128 liquidity)
+        uint128 deltaL = SafeCast.toUint128(shares);
 
         // Decrease liquidity — principal goes to tokensOwed on the NFT
         positionManager.decreaseLiquidity(
@@ -495,7 +495,7 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
         uint256 supply = totalSupply();
         if (supply == 0) return tokenAmounts;
 
-        uint128 deltaL = uint128(shares);
+        uint128 deltaL = SafeCast.toUint128(shares);
 
         (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
         uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(_tickLower);
@@ -511,7 +511,7 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
         uint256 supply = totalSupply();
         if (supply == 0) return tokenAmounts;
 
-        uint128 deltaL = uint128(shares);
+        uint128 deltaL = SafeCast.toUint128(shares);
 
         (uint160 sqrtPriceX96,,,,,,) = IUniswapV3PoolMinimal(pool).slot0();
         uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(_tickLower);

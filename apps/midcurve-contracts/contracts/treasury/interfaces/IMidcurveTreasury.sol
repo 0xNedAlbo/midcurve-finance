@@ -52,7 +52,7 @@ interface IMidcurveTreasury {
     /// @notice Rescue ETH held by the treasury (e.g. from selfdestruct or direct sends)
     /// @param to Recipient address
     /// @param amount Amount of ETH to send
-    function rescueETH(address to, uint256 amount) external;
+    function rescueEth(address to, uint256 amount) external;
 
     /// @notice Update the operator address that receives ETH from refueling
     /// @param newOperator New operator address

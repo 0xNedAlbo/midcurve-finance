@@ -76,7 +76,7 @@ contract MidcurveTreasury is IMidcurveTreasury {
     }
 
     /// @inheritdoc IMidcurveTreasury
-    function rescueETH(address to, uint256 amount) external onlyAdmin {
+    function rescueEth(address to, uint256 amount) external onlyAdmin {
         if (to == address(0)) revert ZeroAddress();
         (bool success,) = to.call{ value: amount }("");
         if (!success) revert EthTransferFailed();

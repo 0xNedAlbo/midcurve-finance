@@ -455,6 +455,7 @@ contract UniswapV3VaultTest is Test {
 
     function test_collectYield_proportionalDistribution() public {
         vm.prank(alice);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, INITIAL_LIQUIDITY / 2);
 
         nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 20_000);
@@ -478,6 +479,7 @@ contract UniswapV3VaultTest is Test {
         nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 0);
 
         vm.prank(alice);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, INITIAL_LIQUIDITY / 2);
 
         uint256 balA_before = tokenA.balanceOf(alice);
@@ -523,6 +525,7 @@ contract UniswapV3VaultTest is Test {
 
     function test_claimableYield_proportionalSplit() public {
         vm.prank(alice);
+        // forge-lint: disable-next-line(erc20-unchecked-transfer)
         vault.transfer(bob, INITIAL_LIQUIDITY / 2);
 
         nfpm.accrueFeesForTesting(TOKEN_ID, 10_000, 20_000);
