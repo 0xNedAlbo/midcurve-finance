@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Plus, Minus, DollarSign } from 'lucide-react';
+import { Plus, Minus, DollarSign, Archive } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { UniswapV3VaultPositionData } from '@/hooks/positions/uniswapv3-vault/useUniswapV3VaultPosition';
 import type {
@@ -22,6 +22,7 @@ import { VaultTakeProfitButton } from '@/components/positions/automation/VaultTa
 import { FlashingPriceLabel } from '@/components/positions/automation/FlashingPriceLabel';
 import { formatTriggerPrice, type TokenConfig } from '@/components/positions/automation/order-button-utils';
 import { UniswapV3VaultCollectFeesModal } from './uniswapv3-vault-collect-fees-modal';
+import { useArchivePosition } from '@/hooks/positions/useArchivePosition';
 
 interface UniswapV3VaultActionsProps {
   position: UniswapV3VaultPositionData;
@@ -38,6 +39,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
 
   const hasShares = BigInt(state.sharesBalance) > 0n;
   const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
+  const archiveMutation = useArchivePosition();
 
   // Get base/quote tokens
   const quoteToken = position.isToken0Quote
@@ -72,6 +74,22 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
   // Backend already determines ownership via the authenticated session
   if (!state.isOwnedByUser) {
     return null;
+  }
+
+  // Archived positions only show the Unarchive button
+  if (position.isArchived) {
+    return (
+      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
+        <button
+          onClick={() => archiveMutation.mutate({ positionId: position.id, archive: false })}
+          disabled={archiveMutation.isPending}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 disabled:opacity-50"
+        >
+          <Archive className="w-3 h-3" />
+          {archiveMutation.isPending ? 'Unarchiving...' : 'Unarchive Position'}
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -120,6 +138,18 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
         >
           <DollarSign className="w-3 h-3" />
           Collect Fees
+        </button>
+      )}
+
+      {/* Archive Position — shown when no shares and no unclaimed fees */}
+      {!hasShares && !hasUnclaimedFees && (
+        <button
+          onClick={() => archiveMutation.mutate({ positionId: position.id, archive: true })}
+          disabled={archiveMutation.isPending}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 disabled:opacity-50"
+        >
+          <Archive className="w-3 h-3" />
+          {archiveMutation.isPending ? 'Archiving...' : 'Archive Position'}
         </button>
       )}
 

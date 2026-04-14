@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Plus, Minus, DollarSign, Flame, Coins } from "lucide-react";
+import { Plus, Minus, DollarSign, Flame, Coins, Archive } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { Address } from "viem";
@@ -23,6 +23,7 @@ import { TakeProfitButton } from "@/components/positions/automation/TakeProfitBu
 import { FlashingPriceLabel } from "@/components/positions/automation/FlashingPriceLabel";
 import { useSharedContract } from "@/hooks/automation";
 import { areAddressesEqual } from "@/utils/evm";
+import { useArchivePosition } from "@/hooks/positions/useArchivePosition";
 import { formatTriggerPrice, type TokenConfig } from "@/components/positions/automation/order-button-utils";
 
 interface UniswapV3ActionsProps {
@@ -38,6 +39,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const [showBurnModal, setShowBurnModal] = useState(false);
   const [showTokenizeModal, setShowTokenizeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
+  const archiveMutation = useArchivePosition();
 
   // Position lifecycle state — check on-chain conditions directly
   const hasLiquidity = BigInt((position.state as { liquidity: string }).liquidity) > 0n;
@@ -115,6 +117,22 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     return null;
   }
 
+  // Archived positions only show the Unarchive button
+  if (position.isArchived) {
+    return (
+      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
+        <button
+          onClick={() => archiveMutation.mutate({ positionId: position.id, archive: false })}
+          disabled={archiveMutation.isPending}
+          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 disabled:opacity-50"
+        >
+          <Archive className="w-3 h-3" />
+          {archiveMutation.isPending ? 'Unarchiving...' : 'Unarchive Position'}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
@@ -172,6 +190,18 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           >
             <Flame className="w-3 h-3" />
             Burn NFT
+          </button>
+        )}
+
+        {/* Archive Position — shown when no liquidity and no unclaimed fees */}
+        {!hasLiquidity && !hasUnclaimedFees && (
+          <button
+            onClick={() => archiveMutation.mutate({ positionId: position.id, archive: true })}
+            disabled={archiveMutation.isPending}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50 disabled:opacity-50"
+          >
+            <Archive className="w-3 h-3" />
+            {archiveMutation.isPending ? 'Archiving...' : 'Archive Position'}
           </button>
         )}
 
