@@ -47,8 +47,17 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     || BigInt((position.state as { tokensOwed1: string }).tokensOwed1) > 0n;
   const isBurned = (position.state as { isBurned?: boolean }).isBurned === true;
 
-  // Extract owner address from position state
+  // Extract owner address and ownership flags from position state
   const ownerAddress = position.state.ownerAddress;
+  const isOwnedByUser = (position.state as { isOwnedByUser?: boolean }).isOwnedByUser ?? true;
+
+  // Check if connected wallet owns this position (gates wallet-interaction buttons)
+  const isOwner = !!(
+    isConnected &&
+    walletAddress &&
+    ownerAddress &&
+    areAddressesEqual(walletAddress, ownerAddress)
+  );
 
   // Extract position data for automation buttons
   const poolConfig = position.pool.config as { address: string; chainId: number };
@@ -101,21 +110,19 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     return formatTriggerPrice(poolState.sqrtPriceX96, tokenConfig);
   }, [poolState.sqrtPriceX96, tokenConfig]);
 
-  // Check if connected wallet owns this position
-  const isOwner = !!(
-    isConnected &&
-    walletAddress &&
-    ownerAddress &&
-    areAddressesEqual(walletAddress, ownerAddress)
-  );
 
   // Don't show action buttons if position is burned
   if (isBurned) {
     return null;
   }
 
-  // Non-owner or archived: only show archive/unarchive (account-level action, no NFT ownership required)
+  // Archive-only views:
+  // - Archived positions: show unarchive button
+  // - Not owned by user (NFT owner not in user_wallets): show archive button always
+  // - Owned by user but not by connected wallet: show archive only when empty
   if (!isOwner || position.isArchived) {
+    const showArchiveButton = !isOwnedByUser || position.isArchived || (!hasLiquidity && !hasUnclaimedFees);
+    if (!showArchiveButton) return null;
     return (
       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-700/50">
         <button
