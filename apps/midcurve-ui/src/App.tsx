@@ -3,7 +3,6 @@ import { QueryProvider } from './providers/QueryProvider';
 import { ConfigProvider, useConfig } from './providers/ConfigProvider';
 import { Web3Provider } from './providers/Web3Provider';
 import { AuthProvider } from './providers/AuthProvider';
-import { Erc20TransferEventProvider } from './lib/events/erc20-transfer-event-context';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -56,8 +55,7 @@ function ConfigGate() {
   return (
     <Web3Provider>
       <AuthProvider>
-        <Erc20TransferEventProvider>
-          <BrowserRouter>
+        <BrowserRouter>
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
@@ -66,7 +64,7 @@ function ConfigGate() {
                 element={<PositionDetailPage />}
               />
               <Route
-                path="/positions/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultPositionDetailPage />}
               />
               <Route
@@ -86,7 +84,7 @@ function ConfigGate() {
                 element={<IncreaseDepositPage />}
               />
               <Route
-                path="/positions/increase/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/increase/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultIncreaseDepositPage />}
               />
               <Route
@@ -94,7 +92,7 @@ function ConfigGate() {
                 element={<WithdrawPage />}
               />
               <Route
-                path="/positions/withdraw/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/withdraw/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultWithdrawPage />}
               />
               <Route
@@ -102,7 +100,7 @@ function ConfigGate() {
                 element={<RiskTriggersPage />}
               />
               <Route
-                path="/positions/triggers/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/triggers/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultRiskTriggersPage />}
               />
               <Route path="/wallets" element={<WalletManagementPage />} />
@@ -110,7 +108,6 @@ function ConfigGate() {
               <Route path="/setup" element={<SetupWizardPage />} />
             </Routes>
           </BrowserRouter>
-        </Erc20TransferEventProvider>
       </AuthProvider>
     </Web3Provider>
   );

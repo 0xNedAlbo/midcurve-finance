@@ -265,6 +265,7 @@ export function PositionList({ className }: PositionListProps) {
                         key={item.positionHash}
                         chainId={parsed.chainId}
                         vaultAddress={parsed.vaultAddress}
+                        ownerAddress={parsed.ownerAddress}
                         index={index}
                       />
                     );

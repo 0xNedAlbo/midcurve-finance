@@ -1050,7 +1050,7 @@ export class UniswapV3LedgerService {
      * @param tx - Optional transaction client
      * @returns Aggregated metrics after updating events
      */
-    private async recalculateAggregates(
+    async recalculateAggregates(
         isToken0Quote: boolean,
         userWalletAddresses: Set<string>,
         tickLower: number,

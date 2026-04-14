@@ -6,6 +6,7 @@
  *
  * Supported formats:
  * - Uniswap V3: "uniswapv3/{chainId}/{nftId}" → { protocol: 'uniswapv3', chainId, nftId }
+ * - Uniswap V3 Vault: "uniswapv3-vault/{chainId}/{vaultAddress}/{ownerAddress}" → { protocol: 'uniswapv3-vault', chainId, vaultAddress, ownerAddress }
  *
  * @example
  * ```typescript
@@ -38,6 +39,7 @@ export interface UniswapV3VaultPositionHashData {
   protocol: 'uniswapv3-vault';
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
 }
 
 /**
@@ -90,20 +92,24 @@ export function parsePositionHash(hash: string): ParsedPositionHash {
     }
 
     case 'uniswapv3-vault': {
-      if (parts.length !== 3) {
+      if (parts.length !== 4) {
         throw new Error(
-          `Invalid uniswapv3-vault positionHash: "${hash}" (expected "uniswapv3-vault/{chainId}/{vaultAddress}")`
+          `Invalid uniswapv3-vault positionHash: "${hash}" (expected "uniswapv3-vault/{chainId}/{vaultAddress}/{ownerAddress}")`
         );
       }
       const chainId = Number(parts[1]);
       const vaultAddress = parts[2]!;
+      const ownerAddress = parts[3]!;
       if (!Number.isInteger(chainId) || chainId <= 0) {
         throw new Error(`Invalid chainId in positionHash: "${parts[1]}"`);
       }
       if (!vaultAddress || !vaultAddress.startsWith('0x')) {
         throw new Error(`Invalid vaultAddress in positionHash: "${parts[2]}"`);
       }
-      return { protocol: 'uniswapv3-vault', chainId, vaultAddress };
+      if (!ownerAddress || !ownerAddress.startsWith('0x')) {
+        throw new Error(`Invalid ownerAddress in positionHash: "${parts[3]}"`);
+      }
+      return { protocol: 'uniswapv3-vault', chainId, vaultAddress, ownerAddress };
     }
 
     default:

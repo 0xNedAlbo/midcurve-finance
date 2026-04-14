@@ -23,6 +23,7 @@ import {
   buildPositionRoutingKey,
   buildOrderRoutingKey,
   buildUserRoutingKey,
+  buildWalletRoutingKey,
   getEventSuffix,
 } from './topology.js';
 
@@ -265,6 +266,9 @@ export class DomainEventPublisher {
     } else if (event.entityType === 'user') {
       // User events: use userId from entityId
       routingKey = buildUserRoutingKey(event.type, event.entityId);
+    } else if (event.entityType === 'wallet') {
+      // Wallet events: use userId from entityId
+      routingKey = buildWalletRoutingKey(event.type, event.entityId);
     } else {
       // Order events: use legacy format
       const eventSuffix = getEventSuffix(event.type);

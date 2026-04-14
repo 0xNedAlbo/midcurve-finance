@@ -1,7 +1,7 @@
 /**
- * Vault Position APR Endpoint
+ * Vault Position Ledger Endpoint
  *
- * GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/apr
+ * GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/ledger
  *
  * Authentication: Required (session only)
  */
@@ -16,11 +16,9 @@ import {
   ErrorCodeToHttpStatus,
   GetUniswapV3VaultPositionParamsSchema,
 } from '@midcurve/api-shared';
-import type { AprPeriodsResponse, AprPeriodData, AprSummaryData } from '@midcurve/api-shared';
-import { serializeBigInt } from '@/lib/serializers';
+import type { LedgerEventsResponse, LedgerEventData } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getUniswapV3VaultPositionService } from '@/lib/services';
-import { UniswapV3AprService } from '@midcurve/services';
+import { getUniswapV3VaultPositionService, getUniswapV3VaultLedgerService } from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,7 +29,7 @@ export async function OPTIONS(request: NextRequest) {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ chainId: string; vaultAddress: string }> }
+  { params }: { params: Promise<{ chainId: string; vaultAddress: string; ownerAddress: string }> }
 ): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
@@ -47,8 +45,8 @@ export async function GET(
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR] });
       }
 
-      const { chainId, vaultAddress } = validation.data;
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const { chainId, vaultAddress, ownerAddress } = validation.data;
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
 
       const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(user.id, positionHash);
 
@@ -59,23 +57,15 @@ export async function GET(
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND] });
       }
 
-      const aprService = new UniswapV3AprService({ positionId: dbPosition.id });
-      const aprPeriods = await aprService.fetchAprPeriods();
-      const aprSummary = await aprService.calculateSummary({
-        positionOpenedAt: dbPosition.positionOpenedAt,
-        costBasis: dbPosition.costBasis,
-        unclaimedYield: dbPosition.unclaimedYield,
-      });
+      const ledgerEvents = await getUniswapV3VaultLedgerService(dbPosition.id).findAll();
 
-      const serializedPeriods = serializeBigInt(aprPeriods) as unknown as AprPeriodData[];
-      const serializedSummary = serializeBigInt(aprSummary) as unknown as AprSummaryData;
+      const serializedEvents = ledgerEvents.map((event: { toJSON: () => unknown }) => event.toJSON()) as unknown as LedgerEventData[];
 
-      const response: AprPeriodsResponse = {
-        ...createSuccessResponse(serializedPeriods),
-        summary: serializedSummary,
+      const response: LedgerEventsResponse = {
+        ...createSuccessResponse(serializedEvents),
         meta: {
           timestamp: new Date().toISOString(),
-          count: aprPeriods.length,
+          count: ledgerEvents.length,
           requestId,
         },
       };
@@ -83,7 +73,7 @@ export async function GET(
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
       return NextResponse.json(response, { status: 200 });
     } catch (error) {
-      apiLog.methodError(apiLogger, 'GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/apr', error, { requestId });
+      apiLog.methodError(apiLogger, 'GET /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/ledger', error, { requestId });
 
       if (error instanceof Error) {
         if (error.message.includes('not found') || error.message.includes('does not exist')) {
@@ -93,7 +83,7 @@ export async function GET(
         }
       }
 
-      const errorResponse = createErrorResponse(ApiErrorCode.INTERNAL_SERVER_ERROR, 'Failed to fetch vault position APR',
+      const errorResponse = createErrorResponse(ApiErrorCode.INTERNAL_SERVER_ERROR, 'Failed to fetch vault position ledger',
         error instanceof Error ? error.message : String(error));
       apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
       return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.INTERNAL_SERVER_ERROR] });

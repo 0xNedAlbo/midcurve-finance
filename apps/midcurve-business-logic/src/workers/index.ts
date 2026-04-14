@@ -20,6 +20,7 @@ import {
   UniswapV3ProcessCloseOrderEventsRule,
   UniswapV3PostJournalEntriesRule,
   UniswapV3ReconcileCostBasisRule,
+  UniswapV3ReevaluateOnWalletChangeRule,
   UniswapV3VaultPostJournalEntriesRule,
   RefuelOperatorRule,
   type BusinessRuleStatus,
@@ -71,6 +72,7 @@ export class RuleManager {
     // UniswapV3 accounting rules — NFT positions
     this.registry.register(new UniswapV3PostJournalEntriesRule());
     this.registry.register(new UniswapV3ReconcileCostBasisRule());
+    this.registry.register(new UniswapV3ReevaluateOnWalletChangeRule());
 
     // UniswapV3 accounting rules — Vault positions
     this.registry.register(new UniswapV3VaultPostJournalEntriesRule());

@@ -242,7 +242,7 @@ export class UniswapV3VaultPositionService {
         const vaultAddress = normalizeAddress(params.vaultAddress);
 
         // Check for existing position
-        const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+        const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${normalizeAddress(ownerAddress)}`;
         const existing = await this.findByPositionHash(userId, positionHash, dbTx);
         if (existing) {
             return this.refresh(existing.id, 'latest', dbTx);
@@ -452,7 +452,7 @@ export class UniswapV3VaultPositionService {
             found += matchedVaults.size;
 
             for (const vaultAddr of matchedVaults) {
-                const positionHash = `uniswapv3-vault/${chainId}/${vaultAddr}`;
+                const positionHash = `uniswapv3-vault/${chainId}/${vaultAddr}/${normalizeAddress(walletAddress)}`;
                 const existing = await this.findByPositionHash(userId, positionHash);
                 if (existing) {
                     skipped++;

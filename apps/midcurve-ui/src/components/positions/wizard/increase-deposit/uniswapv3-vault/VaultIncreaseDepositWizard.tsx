@@ -43,11 +43,11 @@ function TransactionStepRenderer() {
 function StepRenderer({ content }: { content: StepContent }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { chain, vaultAddress } = useParams<{ chain: string; vaultAddress: string }>();
+  const { chain, vaultAddress, ownerAddress } = useParams<{ chain: string; vaultAddress: string; ownerAddress: string }>();
   const { steps, state } = useVaultIncreaseDepositWizard();
   const returnTo =
     (location.state as { returnTo?: string })?.returnTo ||
-    `/positions/uniswapv3-vault/${chain}/${vaultAddress}`;
+    `/positions/uniswapv3-vault/${chain}/${vaultAddress}/${ownerAddress}`;
 
   const handleClose = () => {
     navigate(returnTo, { replace: true });
@@ -72,10 +72,10 @@ function StepRenderer({ content }: { content: StepContent }) {
 function LoadingState() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { chain, vaultAddress } = useParams<{ chain: string; vaultAddress: string }>();
+  const { chain, vaultAddress, ownerAddress } = useParams<{ chain: string; vaultAddress: string; ownerAddress: string }>();
   const returnTo =
     (location.state as { returnTo?: string })?.returnTo ||
-    `/positions/uniswapv3-vault/${chain}/${vaultAddress}`;
+    `/positions/uniswapv3-vault/${chain}/${vaultAddress}/${ownerAddress}`;
 
   return (
     <FullPageWizardLayout
@@ -103,10 +103,10 @@ function LoadingState() {
 function ErrorState({ message }: { message: string }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { chain, vaultAddress } = useParams<{ chain: string; vaultAddress: string }>();
+  const { chain, vaultAddress, ownerAddress } = useParams<{ chain: string; vaultAddress: string; ownerAddress: string }>();
   const returnTo =
     (location.state as { returnTo?: string })?.returnTo ||
-    `/positions/uniswapv3-vault/${chain}/${vaultAddress}`;
+    `/positions/uniswapv3-vault/${chain}/${vaultAddress}/${ownerAddress}`;
 
   return (
     <FullPageWizardLayout
@@ -137,13 +137,14 @@ function ErrorState({ message }: { message: string }) {
 
 // Data loader component - fetches position, pool, and close orders
 function VaultIncreaseDepositDataLoader() {
-  const { chain, vaultAddress } = useParams<{
+  const { chain, vaultAddress, ownerAddress } = useParams<{
     chain: string;
     vaultAddress: string;
+    ownerAddress: string;
   }>();
 
   // Validate route params
-  if (!chain || !vaultAddress || !isValidChainSlug(chain)) {
+  if (!chain || !vaultAddress || !ownerAddress || !isValidChainSlug(chain)) {
     return <ErrorState message="Invalid position URL." />;
   }
 
@@ -151,13 +152,13 @@ function VaultIncreaseDepositDataLoader() {
 
   return (
     <VaultIncreaseDepositWizardProvider>
-      <DataFetcher chainId={chainId} vaultAddress={vaultAddress} />
+      <DataFetcher chainId={chainId} vaultAddress={vaultAddress} ownerAddress={ownerAddress} />
     </VaultIncreaseDepositWizardProvider>
   );
 }
 
 // Separated data fetcher that can use context hooks
-function DataFetcher({ chainId, vaultAddress }: { chainId: number; vaultAddress: string }) {
+function DataFetcher({ chainId, vaultAddress, ownerAddress }: { chainId: number; vaultAddress: string; ownerAddress: string }) {
   const {
     setPosition,
     setPositionLoading,
@@ -167,7 +168,7 @@ function DataFetcher({ chainId, vaultAddress }: { chainId: number; vaultAddress:
   } = useVaultIncreaseDepositWizard();
 
   // Fetch position data (includes close orders)
-  const positionQuery = useUniswapV3VaultPosition(chainId, vaultAddress);
+  const positionQuery = useUniswapV3VaultPosition(chainId, vaultAddress, ownerAddress);
   const discoverPool = useDiscoverPool();
 
   // Load position and close orders into context when fetched
@@ -224,10 +225,10 @@ function DataFetcher({ chainId, vaultAddress }: { chainId: number; vaultAddress:
 function VaultIncreaseDepositWizardContent() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { chain, vaultAddress } = useParams<{ chain: string; vaultAddress: string }>();
+  const { chain, vaultAddress, ownerAddress } = useParams<{ chain: string; vaultAddress: string; ownerAddress: string }>();
   const returnTo =
     (location.state as { returnTo?: string })?.returnTo ||
-    `/positions/uniswapv3-vault/${chain}/${vaultAddress}`;
+    `/positions/uniswapv3-vault/${chain}/${vaultAddress}/${ownerAddress}`;
   const { steps, state, goBack, goToStep } = useVaultIncreaseDepositWizard();
   const currentStepId = steps[state.currentStepIndex]?.id;
 

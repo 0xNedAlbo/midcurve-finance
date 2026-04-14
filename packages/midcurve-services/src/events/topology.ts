@@ -75,6 +75,14 @@ export const ROUTING_PATTERNS = {
   /** All user events */
   ALL_USER_EVENTS: 'users.#',
 
+  // Wallet events: wallets.{action}.{userId}
+  /** All wallet added events */
+  WALLET_ADDED: 'wallets.added.#',
+  /** All wallet removed events */
+  WALLET_REMOVED: 'wallets.removed.#',
+  /** All wallet events */
+  ALL_WALLET_EVENTS: 'wallets.#',
+
   // Order events (keeping existing format for now)
   /** All order events: order.# */
   ALL_ORDER_EVENTS: 'order.#',
@@ -106,6 +114,14 @@ const USER_EVENT_TO_ACTION: Record<string, string> = {
 };
 
 /**
+ * Map from wallet event type to routing key action
+ */
+const WALLET_EVENT_TO_ACTION: Record<string, string> = {
+  'wallet.added': 'added',
+  'wallet.removed': 'removed',
+};
+
+/**
  * Build a routing key for user events
  *
  * @param eventType - Full event type (e.g., 'user.registered')
@@ -119,6 +135,22 @@ export function buildUserRoutingKey(eventType: string, userId: string): string {
     throw new Error(`Unknown user event type: ${eventType}`);
   }
   return `users.${action}.${userId}`;
+}
+
+/**
+ * Build a routing key for wallet events
+ *
+ * @param eventType - Full event type (e.g., 'wallet.added')
+ * @param userId - User ID
+ * @returns Routing key (e.g., 'wallets.added.clxyz123abc')
+ * @throws Error if event type is unknown
+ */
+export function buildWalletRoutingKey(eventType: string, userId: string): string {
+  const action = WALLET_EVENT_TO_ACTION[eventType];
+  if (!action) {
+    throw new Error(`Unknown wallet event type: ${eventType}`);
+  }
+  return `wallets.${action}.${userId}`;
 }
 
 /**

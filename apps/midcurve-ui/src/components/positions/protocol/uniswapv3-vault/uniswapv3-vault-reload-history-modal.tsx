@@ -21,6 +21,7 @@ interface UniswapV3VaultReloadHistoryModalProps {
   positionHash: string;
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   token0Symbol: string;
   token1Symbol: string;
   feeBps: number;
@@ -33,6 +34,7 @@ export function UniswapV3VaultReloadHistoryModal({
   positionHash,
   chainId,
   vaultAddress,
+  ownerAddress,
   token0Symbol,
   token1Symbol,
   feeBps,
@@ -47,7 +49,7 @@ export function UniswapV3VaultReloadHistoryModal({
 
   const handleReload = async () => {
     await reloadHistory.mutateAsync({
-      endpoint: `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/reload-history`,
+      endpoint: `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}/reload-history`,
     });
 
     onReloadSuccess?.();

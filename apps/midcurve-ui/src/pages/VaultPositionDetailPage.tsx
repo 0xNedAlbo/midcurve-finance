@@ -11,6 +11,7 @@ export function VaultPositionDetailPage() {
 
   const chainSlug = params?.chain as string | undefined;
   const vaultAddress = params?.vaultAddress as string | undefined;
+  const ownerAddress = params?.ownerAddress as string | undefined;
 
   const chainMetadata =
     chainSlug && isValidChainSlug(chainSlug)
@@ -24,7 +25,7 @@ export function VaultPositionDetailPage() {
     isFetching,
     error,
     refetch,
-  } = useUniswapV3VaultPosition(chainId, vaultAddress || '0x0');
+  } = useUniswapV3VaultPosition(chainId, vaultAddress || '0x0', ownerAddress || '0x0');
 
   useEffect(() => {
     if (position && !position.protocol && !isFetching) {
@@ -32,7 +33,7 @@ export function VaultPositionDetailPage() {
     }
   }, [position, isFetching, refetch]);
 
-  if (!chainSlug || !vaultAddress) {
+  if (!chainSlug || !vaultAddress || !ownerAddress) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
         <div className="max-w-[1600px] mx-auto px-2 md:px-4 lg:px-6 py-8">

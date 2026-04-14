@@ -23,7 +23,8 @@ export function UniswapV3VaultHistoryTab({ position }: UniswapV3VaultHistoryTabP
   // Vault event types: VAULT_MINT, VAULT_BURN, VAULT_COLLECT_YIELD, VAULT_TRANSFER_IN, VAULT_TRANSFER_OUT
   const { data: ledgerEvents, isLoading } = useUniswapV3VaultLedger(
     config.chainId,
-    config.vaultAddress
+    config.vaultAddress,
+    config.ownerAddress
   );
 
   return (

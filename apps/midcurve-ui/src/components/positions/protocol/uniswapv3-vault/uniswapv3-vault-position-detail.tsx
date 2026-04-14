@@ -47,7 +47,7 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
   const position = useUniswapV3VaultLiveMetrics(rawPosition);
 
   // On-chain refresh on mount + every 60s (fire-and-forget, DB polling picks up changes)
-  const { isRefreshing: isAutoRefreshing } = useUniswapV3VaultAutoRefresh(config.chainId, config.vaultAddress);
+  const { isRefreshing: isAutoRefreshing } = useUniswapV3VaultAutoRefresh(config.chainId, config.vaultAddress, config.ownerAddress);
 
   // Manual refresh via POST endpoint (on-chain sync, not just DB refetch)
   const refreshMutation = useUniswapV3VaultRefreshPosition();
@@ -57,6 +57,7 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
     refreshMutation.mutate({
       chainId: config.chainId,
       vaultAddress: config.vaultAddress,
+      ownerAddress: config.ownerAddress,
     });
   };
 
@@ -79,7 +80,7 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
       params.set("tab", tabId);
     }
     const queryString = params.toString();
-    const url = `/positions/uniswapv3-vault/${chainSlug}/${config.vaultAddress}${queryString ? `?${queryString}` : ""}`;
+    const url = `/positions/uniswapv3-vault/${chainSlug}/${config.vaultAddress}/${config.ownerAddress}${queryString ? `?${queryString}` : ""}`;
     navigate(url);
   };
 

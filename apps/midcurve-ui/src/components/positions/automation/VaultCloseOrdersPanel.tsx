@@ -18,6 +18,7 @@ interface VaultCloseOrdersPanelProps {
   positionId: string;
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   contractAddress?: Address;
   quoteTokenSymbol: string;
   quoteTokenDecimals: number;
@@ -33,6 +34,7 @@ export function VaultCloseOrdersPanel({
   positionId,
   chainId,
   vaultAddress,
+  ownerAddress,
   contractAddress,
   quoteTokenSymbol,
   quoteTokenDecimals,
@@ -46,7 +48,7 @@ export function VaultCloseOrdersPanel({
   const hasContract = !!contractAddress;
 
   const { data: orders, isLoading, error } = useVaultCloseOrders(
-    { chainId, vaultAddress, polling: true },
+    { chainId, vaultAddress, ownerAddress, polling: true },
     { enabled: !!positionId && hasContract }
   );
 

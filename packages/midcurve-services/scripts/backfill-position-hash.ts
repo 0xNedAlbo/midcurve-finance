@@ -45,6 +45,9 @@ async function backfillPositionHash() {
       if (position.protocol === 'uniswapv3') {
         const config = position.config as { chainId: number; nftId: number };
         positionHash = `uniswapv3/${config.chainId}/${config.nftId}`;
+      } else if (position.protocol === 'uniswapv3-vault') {
+        const config = position.config as { chainId: number; vaultAddress: string; ownerAddress: string };
+        positionHash = `uniswapv3-vault/${config.chainId}/${config.vaultAddress}/${config.ownerAddress}`;
       } else {
         console.warn(`Unknown protocol: ${position.protocol}, skipping position ${position.id}`);
         continue;

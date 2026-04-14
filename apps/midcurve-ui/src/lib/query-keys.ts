@@ -69,26 +69,26 @@ export const queryKeys = {
       all: ['positions', 'uniswapv3-vault'] as const,
 
       details: () => [...queryKeys.positions.uniswapv3Vault.all, 'detail'] as const,
-      detail: (chainId: number, vaultAddress: string) =>
-        [...queryKeys.positions.uniswapv3Vault.details(), chainId, vaultAddress] as const,
+      detail: (chainId: number, vaultAddress: string, ownerAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.details(), chainId, vaultAddress, ownerAddress] as const,
 
       ledgers: () => [...queryKeys.positions.uniswapv3Vault.all, 'ledger'] as const,
-      ledger: (chainId: number, vaultAddress: string) =>
-        [...queryKeys.positions.uniswapv3Vault.ledgers(), chainId, vaultAddress] as const,
+      ledger: (chainId: number, vaultAddress: string, ownerAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.ledgers(), chainId, vaultAddress, ownerAddress] as const,
 
       aprs: () => [...queryKeys.positions.uniswapv3Vault.all, 'apr'] as const,
-      apr: (chainId: number, vaultAddress: string) =>
-        [...queryKeys.positions.uniswapv3Vault.aprs(), chainId, vaultAddress] as const,
+      apr: (chainId: number, vaultAddress: string, ownerAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.aprs(), chainId, vaultAddress, ownerAddress] as const,
 
       // Close Orders (position-scoped)
       closeOrders: {
         // All close orders for a vault position
-        all: (chainId: number, vaultAddress: string) =>
-          [...queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress), 'close-orders'] as const,
+        all: (chainId: number, vaultAddress: string, ownerAddress: string) =>
+          [...queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress, ownerAddress), 'close-orders'] as const,
 
         // List with optional filters
-        list: (chainId: number, vaultAddress: string, filters?: { automationState?: string; type?: string }) =>
-          [...queryKeys.positions.uniswapv3Vault.closeOrders.all(chainId, vaultAddress), 'list', filters] as const,
+        list: (chainId: number, vaultAddress: string, ownerAddress: string, filters?: { automationState?: string; type?: string }) =>
+          [...queryKeys.positions.uniswapv3Vault.closeOrders.all(chainId, vaultAddress, ownerAddress), 'list', filters] as const,
       },
     },
 

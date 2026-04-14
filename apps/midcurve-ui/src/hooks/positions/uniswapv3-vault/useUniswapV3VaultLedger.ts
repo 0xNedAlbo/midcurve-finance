@@ -9,13 +9,14 @@ import { queryKeys } from '@/lib/query-keys';
 
 export function useUniswapV3VaultLedger(
   chainId: number,
-  vaultAddress: string
+  vaultAddress: string,
+  ownerAddress: string
 ): UseQueryResult<LedgerEventData[], Error> {
   return useQuery<LedgerEventData[], Error>({
-    queryKey: queryKeys.positions.uniswapv3Vault.ledger(chainId, vaultAddress),
+    queryKey: queryKeys.positions.uniswapv3Vault.ledger(chainId, vaultAddress, ownerAddress),
     queryFn: async () => {
       return apiClientFn<LedgerEventData[]>(
-        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/ledger`
+        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}/ledger`
       );
     },
     staleTime: 60 * 1000,

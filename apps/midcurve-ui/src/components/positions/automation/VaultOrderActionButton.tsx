@@ -40,6 +40,7 @@ interface VaultOrderActionButtonProps {
   buttonLabel: OrderButtonLabel;
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   onNavigateToWizard: () => void;
 }
 
@@ -105,6 +106,7 @@ export function VaultOrderActionButton({
   buttonLabel,
   chainId,
   vaultAddress,
+  ownerAddress,
   onNavigateToWizard,
 }: VaultOrderActionButtonProps) {
   const { operatorAddress } = useConfig();
@@ -115,14 +117,14 @@ export function VaultOrderActionButton({
     cancelOrder,
     isCancelling,
     isWaitingForConfirmation: isCancelWaiting,
-  } = useVaultCancelCloseOrder(chainId, vaultAddress);
+  } = useVaultCancelCloseOrder(chainId, vaultAddress, ownerAddress);
   const {
     updateOrder,
     isUpdating: isOperatorUpdating,
     isWaitingForConfirmation: isOperatorWaiting,
     isSuccess: isOperatorSuccess,
     reset: resetOperatorUpdate,
-  } = useVaultUpdateCloseOrder(chainId, vaultAddress);
+  } = useVaultUpdateCloseOrder(chainId, vaultAddress, ownerAddress);
 
   const isCancelBusy = isCancelling || isCancelWaiting;
   const isOperatorBusy = isOperatorUpdating || isOperatorWaiting;
@@ -144,11 +146,12 @@ export function VaultOrderActionButton({
       setAutomationState.mutate({
         chainId,
         vaultAddress,
+        ownerAddress,
         closeOrderHash: order.closeOrderHash,
         automationState: 'monitoring',
       });
     }
-  }, [isOperatorSuccess, order.closeOrderHash, chainId, vaultAddress, setAutomationState, resetOperatorUpdate]);
+  }, [isOperatorSuccess, order.closeOrderHash, chainId, vaultAddress, ownerAddress, setAutomationState, resetOperatorUpdate]);
 
   const ensureCorrectChain = useCallback(async () => {
     if (walletChainId !== chainId) {
@@ -182,10 +185,11 @@ export function VaultOrderActionButton({
     setAutomationState.mutate({
       chainId,
       vaultAddress,
+      ownerAddress,
       closeOrderHash: order.closeOrderHash,
       automationState: newState,
     });
-  }, [order.automationState, order.closeOrderHash, visualState, operatorAddress, chainId, vaultAddress, orderType, setAutomationState, updateOrder, ensureCorrectChain]);
+  }, [order.automationState, order.closeOrderHash, visualState, operatorAddress, chainId, vaultAddress, ownerAddress, orderType, setAutomationState, updateOrder, ensureCorrectChain]);
 
   // Cancel order on-chain
   const handleCancel = useCallback(async () => {

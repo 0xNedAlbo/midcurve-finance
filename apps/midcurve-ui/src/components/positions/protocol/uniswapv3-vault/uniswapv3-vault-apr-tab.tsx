@@ -22,7 +22,8 @@ export function UniswapV3VaultAprTab({ position }: UniswapV3VaultAprTabProps) {
   // Fetch APR periods and summary from enhanced endpoint
   const { data: aprResponse, isLoading } = useUniswapV3VaultAprPeriods(
     config.chainId,
-    config.vaultAddress
+    config.vaultAddress,
+    config.ownerAddress
   );
 
   return (

@@ -33,6 +33,7 @@ export const dynamic = 'force-dynamic';
 const PathParamsSchema = z.object({
   chainId: z.string().regex(/^\d+$/).transform(Number),
   vaultAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   closeOrderHash: CloseOrderHashSchema,
 });
 
@@ -44,7 +45,7 @@ export async function PATCH(
   request: NextRequest,
   {
     params,
-  }: { params: Promise<{ chainId: string; vaultAddress: string; closeOrderHash: string }> }
+  }: { params: Promise<{ chainId: string; vaultAddress: string; ownerAddress: string; closeOrderHash: string }> }
 ): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
@@ -70,10 +71,10 @@ export async function PATCH(
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR] });
       }
 
-      const { chainId, vaultAddress, closeOrderHash } = paramsValidation.data;
+      const { chainId, vaultAddress, ownerAddress, closeOrderHash } = paramsValidation.data;
       const { automationState } = bodyValidation.data;
 
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
       const position = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,
         positionHash

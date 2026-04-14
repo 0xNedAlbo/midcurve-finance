@@ -51,6 +51,7 @@ function encodeMulticallData(
 export function useMulticallVaultPositionCloser(
   chainId: number,
   vaultAddress: string,
+  ownerAddress: string,
   options?: UseMulticallVaultPositionCloserOptions
 ): UseMulticallVaultPositionCloserResult {
   const queryClient = useQueryClient();
@@ -101,10 +102,10 @@ export function useMulticallVaultPositionCloser(
     // Invalidate vault position caches
     if (vaultAddress) {
       queryClient.invalidateQueries({
-        queryKey: queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress),
+        queryKey: queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress, ownerAddress),
       });
     }
-  }, [isTxSuccess, txHash, queryClient, chainId, vaultAddress]);
+  }, [isTxSuccess, txHash, queryClient, chainId, vaultAddress, ownerAddress]);
 
   useEffect(() => {
     if (writeError) {

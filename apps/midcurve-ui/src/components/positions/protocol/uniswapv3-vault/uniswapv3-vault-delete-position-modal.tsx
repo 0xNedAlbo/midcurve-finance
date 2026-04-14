@@ -21,6 +21,7 @@ interface UniswapV3VaultDeletePositionModalProps {
   positionHash: string;
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   token0Symbol: string;
   token1Symbol: string;
   feeBps: number;
@@ -33,6 +34,7 @@ export function UniswapV3VaultDeletePositionModal({
   positionHash,
   chainId,
   vaultAddress,
+  ownerAddress,
   token0Symbol,
   token1Symbol,
   feeBps,
@@ -47,7 +49,7 @@ export function UniswapV3VaultDeletePositionModal({
 
   const handleDelete = async () => {
     await deletePosition.mutateAsync({
-      endpoint: `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}`,
+      endpoint: `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`,
     });
 
     onDeleteSuccess?.();

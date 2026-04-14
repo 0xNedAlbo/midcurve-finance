@@ -17,6 +17,7 @@ import {
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUserWalletService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
+import { getDomainEventPublisher, type WalletChangedPayload } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -70,12 +71,31 @@ export async function DELETE(request: NextRequest, { params }: RouteParams): Pro
       );
     }
 
+    // Capture wallet details before deletion for the domain event
+    const walletConfig = wallet.config as { address: string };
+
     await getUserWalletService().delete(wallet.id);
 
     apiLog.businessOperation(apiLogger, requestId, 'deleted', 'userWallet', wallet.id, {
       walletType: wallet.walletType,
       walletHash: wallet.walletHash,
     });
+
+    // Publish wallet.removed domain event for accounting re-evaluation
+    const eventPublisher = getDomainEventPublisher();
+    await eventPublisher.createAndPublish<WalletChangedPayload>({
+      type: 'wallet.removed',
+      entityId: user.id,
+      entityType: 'wallet',
+      payload: {
+        userId: user.id,
+        walletId: wallet.id,
+        walletType: wallet.walletType,
+        address: walletConfig.address,
+      },
+      source: 'api',
+    });
+
     apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
 
     return NextResponse.json(

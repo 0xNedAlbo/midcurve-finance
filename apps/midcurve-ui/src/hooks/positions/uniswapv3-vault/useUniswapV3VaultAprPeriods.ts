@@ -9,13 +9,14 @@ import { queryKeys } from '@/lib/query-keys';
 
 export function useUniswapV3VaultAprPeriods(
   chainId: number,
-  vaultAddress: string
+  vaultAddress: string,
+  ownerAddress: string
 ): UseQueryResult<AprPeriodsResponse, Error> {
   return useQuery<AprPeriodsResponse, Error>({
-    queryKey: queryKeys.positions.uniswapv3Vault.apr(chainId, vaultAddress),
+    queryKey: queryKeys.positions.uniswapv3Vault.apr(chainId, vaultAddress, ownerAddress),
     queryFn: async () => {
       const response = await apiClient.get<AprPeriodsResponse>(
-        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/apr`
+        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}/apr`
       );
       return response as unknown as AprPeriodsResponse;
     },

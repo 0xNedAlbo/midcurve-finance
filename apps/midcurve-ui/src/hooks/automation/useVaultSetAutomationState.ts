@@ -12,6 +12,7 @@ import type { SerializedCloseOrder } from '@midcurve/api-shared';
 interface VaultSetAutomationStateParams {
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   closeOrderHash: string;
   automationState: 'monitoring' | 'paused';
 }
@@ -22,13 +23,13 @@ export function useVaultSetAutomationState() {
   return useMutation({
     mutationFn: async (params: VaultSetAutomationStateParams) => {
       return apiClient.patch<SerializedCloseOrder>(
-        `/api/v1/positions/uniswapv3-vault/${params.chainId}/${params.vaultAddress}/close-orders/${params.closeOrderHash}/automation-state`,
+        `/api/v1/positions/uniswapv3-vault/${params.chainId}/${params.vaultAddress}/${params.ownerAddress}/close-orders/${params.closeOrderHash}/automation-state`,
         { automationState: params.automationState }
       );
     },
     onSuccess: (_data, params) => {
       queryClient.invalidateQueries({
-        queryKey: queryKeys.positions.uniswapv3Vault.detail(params.chainId, params.vaultAddress),
+        queryKey: queryKeys.positions.uniswapv3Vault.detail(params.chainId, params.vaultAddress, params.ownerAddress),
       });
     },
   });

@@ -189,7 +189,7 @@ export function TransactionStep() {
       !refreshPosition.isPending &&
       !refreshPosition.isSuccess
     ) {
-      refreshPosition.mutate({ chainId: poolChainId, vaultAddress: config.vaultAddress });
+      refreshPosition.mutate({ chainId: poolChainId, vaultAddress: config.vaultAddress, ownerAddress: config.ownerAddress });
     }
   }, [vaultMint.isSuccess, config, poolChainId, refreshPosition]);
 
@@ -279,7 +279,7 @@ export function TransactionStep() {
               label="Updating the position in your portfolio"
               onRetry={() => {
                 if (config) {
-                  refreshPosition.mutate({ chainId: poolChainId, vaultAddress: config.vaultAddress });
+                  refreshPosition.mutate({ chainId: poolChainId, vaultAddress: config.vaultAddress, ownerAddress: config.ownerAddress });
                 }
               }}
             />

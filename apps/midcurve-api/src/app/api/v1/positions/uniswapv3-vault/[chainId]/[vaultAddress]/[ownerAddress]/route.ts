@@ -41,7 +41,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ chainId: string; vaultAddress: string }> }
+  { params }: { params: Promise<{ chainId: string; vaultAddress: string; ownerAddress: string }> }
 ): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
@@ -63,8 +63,8 @@ export async function GET(
         });
       }
 
-      const { chainId, vaultAddress } = validation.data;
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const { chainId, vaultAddress, ownerAddress } = validation.data;
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
 
       apiLog.businessOperation(apiLogger, requestId, 'lookup', 'vault-position', positionHash, {
         chainId,
@@ -152,7 +152,7 @@ export async function GET(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ chainId: string; vaultAddress: string }> }
+  { params }: { params: Promise<{ chainId: string; vaultAddress: string; ownerAddress: string }> }
 ): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
@@ -174,8 +174,8 @@ export async function DELETE(
         });
       }
 
-      const { chainId, vaultAddress } = validation.data;
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const { chainId, vaultAddress, ownerAddress } = validation.data;
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
 
       const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(user.id, positionHash);
 
