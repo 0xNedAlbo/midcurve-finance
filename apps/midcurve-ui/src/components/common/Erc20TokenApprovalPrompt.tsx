@@ -42,6 +42,8 @@ export interface Erc20TokenApprovalPromptProps {
 export interface UseErc20TokenApprovalPromptResult {
   element: React.ReactNode;
   isApproved: boolean;
+  /** Current allowance from backend subscription (undefined while loading) */
+  allowance: bigint | undefined;
   status: ApprovalStatus;
   error: string | null;
 }
@@ -92,6 +94,7 @@ export function useErc20TokenApprovalPrompt({
 
   // Watch allowance via backend subscription
   const {
+    allowance,
     isApproved: approvalSufficient,
     refresh: refreshApproval,
     error: approvalWatchError,
@@ -263,6 +266,7 @@ export function useErc20TokenApprovalPrompt({
   return {
     element,
     isApproved,
+    allowance,
     status,
     error,
   };

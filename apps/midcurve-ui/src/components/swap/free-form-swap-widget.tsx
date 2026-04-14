@@ -118,8 +118,6 @@ export function FreeFormSwapWidget({
   const swap = useParaswapExecuteSwap({
     chainId,
     userAddress: userAddress as Address | undefined,
-    srcTokenAddress: (sourceToken?.address as Address) ?? undefined,
-    spenderAddress: (quote?.tokenTransferProxy as Address) ?? undefined,
   });
 
   // Token approval via shared prompt
@@ -186,8 +184,8 @@ export function FreeFormSwapWidget({
 
   const handleSwap = useCallback(() => {
     if (!quote) return;
-    swap.executeSwap({ quote, slippageBps });
-  }, [quote, slippageBps, swap]);
+    swap.executeSwap({ quote, slippageBps, currentAllowance: approvalPrompt.allowance });
+  }, [quote, slippageBps, swap, approvalPrompt.allowance]);
 
   // Swap transaction prompt
   const swapTx = useEvmTransactionPrompt({

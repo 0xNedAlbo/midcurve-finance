@@ -4,8 +4,9 @@
  * Fetches fresh quote + tx calldata via Velora's /swap endpoint and submits via wagmi.
  * No backend involvement — calls Paraswap directly from the browser.
  *
- * If the fresh quote's srcAmount exceeds the current allowance, the hook
- * exposes `freshSrcAmount` so the widget can update the approval requirement
+ * If the fresh quote's srcAmount exceeds the current allowance (passed via
+ * executeSwap input from the backend subscription), the hook exposes
+ * `freshSrcAmount` so the widget can update the approval requirement
  * instead of submitting a tx that would revert.
  *
  * Transaction confirmation tracking is handled by EvmTransactionPrompt,
@@ -14,8 +15,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import type { Address } from 'viem';
-import { erc20Abi } from 'viem';
-import { useSendTransaction, useReadContract } from 'wagmi';
+import { useSendTransaction } from 'wagmi';
 import {
   getParaswapSwap,
   type ParaswapQuoteResult,
@@ -25,15 +25,13 @@ import {
 export interface UseParaswapExecuteSwapParams {
   chainId: number | undefined;
   userAddress: Address | undefined;
-  /** Source token address — needed to read allowance before submitting */
-  srcTokenAddress: Address | undefined;
-  /** Spender address (tokenTransferProxy) — needed to read allowance */
-  spenderAddress: Address | undefined;
 }
 
 export interface ParaswapExecuteSwapInput {
   quote: ParaswapQuoteResult;
   slippageBps: number;
+  /** Current allowance from backend subscription, used for pre-submission safety check */
+  currentAllowance: bigint | undefined;
 }
 
 export interface UseParaswapExecuteSwapResult {
@@ -50,8 +48,6 @@ export interface UseParaswapExecuteSwapResult {
 export function useParaswapExecuteSwap({
   chainId,
   userAddress,
-  srcTokenAddress,
-  spenderAddress,
 }: UseParaswapExecuteSwapParams): UseParaswapExecuteSwapResult {
   const [isPreparing, setIsPreparing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -64,18 +60,6 @@ export function useParaswapExecuteSwap({
     error: sendError,
     reset: resetSend,
   } = useSendTransaction();
-
-  // Read current allowance for pre-submission check
-  const { refetch: refetchAllowance } = useReadContract({
-    address: srcTokenAddress,
-    abi: erc20Abi,
-    functionName: 'allowance',
-    args: userAddress && spenderAddress ? [userAddress, spenderAddress] : undefined,
-    chainId,
-    query: {
-      enabled: !!srcTokenAddress && !!userAddress && !!spenderAddress && !!chainId,
-    },
-  });
 
   useEffect(() => {
     if (sendError) setError(sendError);
@@ -92,7 +76,7 @@ export function useParaswapExecuteSwap({
       setError(null);
       setFreshSrcAmount(null);
 
-      const { quote, slippageBps } = input;
+      const { quote, slippageBps, currentAllowance } = input;
 
       // Use /swap endpoint: fetches fresh quote + tx calldata in one atomic call,
       // eliminating staleness between quote and transaction build.
@@ -114,8 +98,7 @@ export function useParaswapExecuteSwap({
       const requiredAllowance = quote.side === 'BUY'
         ? freshAmount * (10000n + BigInt(slippageBps)) / 10000n
         : freshAmount;
-      const { data: currentAllowance } = await refetchAllowance();
-      const allowance = currentAllowance !== undefined ? BigInt(currentAllowance.toString()) : 0n;
+      const allowance = currentAllowance ?? 0n;
 
       if (allowance < requiredAllowance) {
         // Approval insufficient — expose fresh amount so widget can update approval
@@ -133,7 +116,7 @@ export function useParaswapExecuteSwap({
         chainId,
       });
     },
-    [chainId, userAddress, sendTransaction, refetchAllowance]
+    [chainId, userAddress, sendTransaction]
   );
 
   const reset = useCallback(() => {
