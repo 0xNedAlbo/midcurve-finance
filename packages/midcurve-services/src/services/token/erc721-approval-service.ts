@@ -10,14 +10,15 @@
  *
  * Features:
  * - Reads approval via viem PublicClient (RPC)
- * - Caches results in PostgreSQL (30-second TTL)
  * - Validates addresses (EIP-55 checksumming)
  * - Handles RPC failures gracefully
+ *
+ * No caching: approval state is always read fresh from chain to avoid
+ * stale data after approval transactions.
  */
 
 import { normalizeAddress, isValidAddress } from '@midcurve/shared';
 import { EvmConfig } from '../../config/evm.js';
-import { CacheService } from '../cache/index.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -99,12 +100,6 @@ export interface Erc721ApprovalServiceDependencies {
    * If not provided, the singleton EvmConfig instance will be used
    */
   evmConfig?: EvmConfig;
-
-  /**
-   * Cache service for approval caching
-   * If not provided, the singleton CacheService instance will be used
-   */
-  cacheService?: CacheService;
 }
 
 /**
@@ -112,17 +107,10 @@ export interface Erc721ApprovalServiceDependencies {
  */
 export class Erc721ApprovalService {
   private readonly evmConfig: EvmConfig;
-  private readonly cacheService: CacheService;
   private readonly logger: ServiceLogger = createServiceLogger('Erc721ApprovalService');
-
-  /**
-   * Cache TTL for approval data (30 seconds)
-   */
-  private static readonly CACHE_TTL_SECONDS = 30;
 
   constructor(dependencies: Erc721ApprovalServiceDependencies = {}) {
     this.evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
-    this.cacheService = dependencies.cacheService ?? CacheService.getInstance();
   }
 
   /**
@@ -142,29 +130,6 @@ export class Erc721ApprovalService {
    * @throws Error if neither tokenId nor operatorAddress provided
    * @throws Error if chain is not supported
    * @throws Error if RPC call fails
-   *
-   * @example
-   * ```typescript
-   * const service = new Erc721ApprovalService();
-   *
-   * // Check approval for specific NFT
-   * const tokenApproval = await service.getApproval(
-   *   '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // Uniswap V3 NFPM
-   *   '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb', // owner
-   *   1,
-   *   { tokenId: '12345' }
-   * );
-   * console.log(tokenApproval.approvedAddress); // '0x...' or null
-   *
-   * // Check if operator is approved for all
-   * const operatorApproval = await service.getApproval(
-   *   '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-   *   '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
-   *   1,
-   *   { operatorAddress: '0xPositionCloser...' }
-   * );
-   * console.log(operatorApproval.isApprovedForAll); // true or false
-   * ```
    */
   async getApproval(
     tokenAddress: string,
@@ -214,35 +179,7 @@ export class Erc721ApprovalService {
     chainId: number,
     tokenId: string
   ): Promise<Erc721Approval> {
-    // Check cache first
-    const cacheKey = this.getTokenCacheKey(tokenAddress, chainId, tokenId);
-    const cached = await this.cacheService.get<string | null>(cacheKey);
-
-    if (cached !== undefined) {
-      log.cacheHit(this.logger, 'erc721-token-approval', cacheKey);
-      const approvedAddress = cached === ZERO_ADDRESS ? null : cached;
-      return {
-        tokenAddress,
-        ownerAddress,
-        chainId,
-        tokenId,
-        approvedAddress,
-        hasApproval: approvedAddress !== null,
-        timestamp: new Date(),
-      };
-    }
-
-    log.cacheMiss(this.logger, 'erc721-token-approval', cacheKey);
-
-    // Fetch from RPC
     const approvedAddress = await this.fetchGetApprovedFromRPC(tokenAddress, chainId, tokenId);
-
-    // Cache the result
-    await this.cacheService.set(
-      cacheKey,
-      approvedAddress ?? ZERO_ADDRESS,
-      Erc721ApprovalService.CACHE_TTL_SECONDS
-    );
 
     return {
       tokenAddress,
@@ -266,38 +203,11 @@ export class Erc721ApprovalService {
     chainId: number,
     operatorAddress: string
   ): Promise<Erc721Approval> {
-    // Check cache first
-    const cacheKey = this.getOperatorCacheKey(tokenAddress, ownerAddress, chainId, operatorAddress);
-    const cached = await this.cacheService.get<boolean>(cacheKey);
-
-    if (cached !== null && cached !== undefined) {
-      log.cacheHit(this.logger, 'erc721-operator-approval', cacheKey);
-      return {
-        tokenAddress,
-        ownerAddress,
-        chainId,
-        operatorAddress,
-        isApprovedForAll: cached,
-        hasApproval: cached,
-        timestamp: new Date(),
-      };
-    }
-
-    log.cacheMiss(this.logger, 'erc721-operator-approval', cacheKey);
-
-    // Fetch from RPC
     const isApproved = await this.fetchIsApprovedForAllFromRPC(
       tokenAddress,
       ownerAddress,
       operatorAddress,
       chainId
-    );
-
-    // Cache the result
-    await this.cacheService.set(
-      cacheKey,
-      isApproved,
-      Erc721ApprovalService.CACHE_TTL_SECONDS
     );
 
     return {
@@ -430,93 +340,5 @@ export class Erc721ApprovalService {
         }`
       );
     }
-  }
-
-  /**
-   * Generate cache key for token-specific approval
-   *
-   * @private
-   */
-  private getTokenCacheKey(
-    tokenAddress: string,
-    chainId: number,
-    tokenId: string
-  ): string {
-    return `erc721-token-approval:${chainId}:${tokenAddress}:${tokenId}`;
-  }
-
-  /**
-   * Generate cache key for operator approval
-   *
-   * @private
-   */
-  private getOperatorCacheKey(
-    tokenAddress: string,
-    ownerAddress: string,
-    chainId: number,
-    operatorAddress: string
-  ): string {
-    return `erc721-operator-approval:${chainId}:${tokenAddress}:${ownerAddress}:${operatorAddress}`;
-  }
-
-  /**
-   * Clear cached approval for specific token
-   *
-   * @param tokenAddress - ERC-721 contract address
-   * @param chainId - EVM chain ID
-   * @param tokenId - Token ID
-   */
-  async invalidateTokenCache(
-    tokenAddress: string,
-    chainId: number,
-    tokenId: string
-  ): Promise<void> {
-    const normalizedToken = normalizeAddress(tokenAddress);
-    const cacheKey = this.getTokenCacheKey(normalizedToken, chainId, tokenId);
-
-    await this.cacheService.delete(cacheKey);
-
-    this.logger.debug(
-      { cacheKey, tokenAddress: normalizedToken, tokenId, chainId },
-      'Cache invalidated for ERC-721 token approval'
-    );
-  }
-
-  /**
-   * Clear cached operator approval
-   *
-   * @param tokenAddress - ERC-721 contract address
-   * @param ownerAddress - Token owner address
-   * @param chainId - EVM chain ID
-   * @param operatorAddress - Operator address
-   */
-  async invalidateOperatorCache(
-    tokenAddress: string,
-    ownerAddress: string,
-    chainId: number,
-    operatorAddress: string
-  ): Promise<void> {
-    const normalizedToken = normalizeAddress(tokenAddress);
-    const normalizedOwner = normalizeAddress(ownerAddress);
-    const normalizedOperator = normalizeAddress(operatorAddress);
-    const cacheKey = this.getOperatorCacheKey(
-      normalizedToken,
-      normalizedOwner,
-      chainId,
-      normalizedOperator
-    );
-
-    await this.cacheService.delete(cacheKey);
-
-    this.logger.debug(
-      {
-        cacheKey,
-        tokenAddress: normalizedToken,
-        ownerAddress: normalizedOwner,
-        operatorAddress: normalizedOperator,
-        chainId,
-      },
-      'Cache invalidated for ERC-721 operator approval'
-    );
   }
 }

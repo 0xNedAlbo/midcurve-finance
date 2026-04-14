@@ -162,6 +162,7 @@ export function UniswapV3TokenizePositionModal({
       setEditingField(null);
       setDiscoverStatus('idle');
       nftApproval.reset();
+      nftApproval.refetch();
       createVault.reset();
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps

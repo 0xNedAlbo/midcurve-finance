@@ -13,7 +13,7 @@
  * 5. Wait for confirmation, refetch approval status
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useWriteContract } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
@@ -60,7 +60,10 @@ export function useNftApproval(
 
   // Read current approved address for this token via backend API
   const canCheck = !!nfpmAddress && !!ownerAddress && nftId !== undefined && !!chainId;
-  const approvalQueryKey = ['erc721-approval', chainId, nfpmAddress, ownerAddress, nftId?.toString()];
+  const approvalQueryKey = useMemo(
+    () => ['erc721-approval', chainId, nfpmAddress, ownerAddress, nftId?.toString()],
+    [chainId, nfpmAddress, ownerAddress, nftId],
+  );
 
   const {
     data: approvalData,
