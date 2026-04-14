@@ -1,12 +1,14 @@
 /**
- * UniswapV3OwnerBadge - Displays the position owner wallet with avatar
+ * UniswapV3OwnerBadge - Displays the position owner wallet
  *
- * Shows a small WalletAvatar and truncated owner address.
+ * Own wallet: Botts icon only (hover shows full address).
+ * Other wallet: truncated address only (no icon).
  * Uses the ownerWallet DB field (format: "evm:0x...") rather than state.ownerAddress.
  */
 
 import { WalletAvatar } from "@/components/ui/wallet-avatar";
-import { parseOwnerWallet } from "@midcurve/shared";
+import { parseOwnerWallet, compareAddresses } from "@midcurve/shared";
+import { useUserWallets } from "@/hooks/wallets/useWallets";
 import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 
 interface UniswapV3OwnerBadgeProps {
@@ -15,14 +17,27 @@ interface UniswapV3OwnerBadgeProps {
 
 export function UniswapV3OwnerBadge({ position }: UniswapV3OwnerBadgeProps) {
   const ownerWallet = (position as UniswapV3PositionData & { ownerWallet?: string | null }).ownerWallet;
+  const { data: walletsData } = useUserWallets();
   if (!ownerWallet) return null;
 
   const { address } = parseOwnerWallet(ownerWallet);
-  const truncated = `${address.slice(0, 6)}...${address.slice(-4)}`;
 
+  const isOwnWallet = walletsData?.wallets.some((w) => {
+    const walletAddress = w.walletHash.split("/")[1];
+    return walletAddress && compareAddresses(walletAddress, address) === 0;
+  });
+
+  if (isOwnWallet) {
+    return (
+      <span className="text-[10px] md:text-xs text-slate-400 flex items-center" title={address}>
+        <WalletAvatar address={address} size={16} />
+      </span>
+    );
+  }
+
+  const truncated = `${address.slice(0, 6)}...${address.slice(-4)}`;
   return (
-    <span className="text-[10px] md:text-xs text-slate-400 flex items-center gap-1">
-      <WalletAvatar address={address} size={16} />
+    <span className="text-[10px] md:text-xs text-slate-400 flex items-center">
       {truncated}
     </span>
   );
