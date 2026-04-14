@@ -39,14 +39,19 @@ export type CloseOrderEventType =
 export type UserEventType = 'user.registered';
 
 /**
+ * Wallet event types - emitted when user's wallet set changes
+ */
+export type WalletEventType = 'wallet.added' | 'wallet.removed';
+
+/**
  * All supported domain event types
  */
-export type DomainEventType = PositionEventType | CloseOrderEventType | UserEventType;
+export type DomainEventType = PositionEventType | CloseOrderEventType | UserEventType | WalletEventType;
 
 /**
  * Entity types for routing and filtering
  */
-export type DomainEntityType = 'position' | 'order' | 'pool' | 'user';
+export type DomainEntityType = 'position' | 'order' | 'pool' | 'user' | 'wallet';
 
 /**
  * Source services that can publish events
@@ -241,6 +246,28 @@ export interface UserRegisteredPayload {
  * User registered event with typed payload
  */
 export type UserRegisteredEvent = DomainEvent<UserRegisteredPayload>;
+
+// ============================================================
+// Wallet Event Payloads
+// ============================================================
+
+/**
+ * Payload for wallet.added and wallet.removed events.
+ * Emitted when a user adds or removes a wallet from their wallet perimeter.
+ */
+export interface WalletChangedPayload {
+  userId: string;
+  walletId: string;
+  walletType: string;
+  /** Normalized address (EIP-55 checksummed for EVM) */
+  address: string;
+}
+
+/** Wallet added event with typed payload */
+export type WalletAddedEvent = DomainEvent<WalletChangedPayload>;
+
+/** Wallet removed event with typed payload */
+export type WalletRemovedEvent = DomainEvent<WalletChangedPayload>;
 
 // ============================================================
 // Outbox Status

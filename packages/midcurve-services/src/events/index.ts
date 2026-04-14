@@ -99,6 +99,11 @@ export type {
   CloseOrderExecutedPayload,
   // User payloads
   UserRegisteredPayload,
+  // Wallet payloads
+  WalletEventType,
+  WalletChangedPayload,
+  WalletAddedEvent,
+  WalletRemovedEvent,
   // Typed events
   PositionLifecycleEvent,
   PositionLedgerEvent,
@@ -131,6 +136,8 @@ export {
   getEventSuffix,
   // Functions - User routing keys
   buildUserRoutingKey,
+  // Functions - Wallet routing keys
+  buildWalletRoutingKey,
   // Functions - Legacy (deprecated)
   buildRoutingKey,
   // Functions - Topology setup

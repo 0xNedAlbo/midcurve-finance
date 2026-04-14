@@ -17,6 +17,7 @@ import {
   buildPositionRoutingKey,
   buildOrderRoutingKey,
   buildUserRoutingKey,
+  buildWalletRoutingKey,
   getEventSuffix,
 } from './topology.js';
 
@@ -247,6 +248,9 @@ export class OutboxPublisher {
     } else if (outboxRecord.entityType === 'user') {
       // User events: use userId from entityId
       routingKey = buildUserRoutingKey(outboxRecord.eventType, outboxRecord.entityId);
+    } else if (outboxRecord.entityType === 'wallet') {
+      // Wallet events: use userId from entityId
+      routingKey = buildWalletRoutingKey(outboxRecord.eventType, outboxRecord.entityId);
     } else {
       // Order events: use legacy format
       const eventSuffix = getEventSuffix(outboxRecord.eventType);
