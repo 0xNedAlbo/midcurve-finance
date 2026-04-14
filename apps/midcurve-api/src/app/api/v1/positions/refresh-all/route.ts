@@ -41,7 +41,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const positions = await prisma.position.findMany({
         where: {
           userId: user.id,
-          isActive: true,
+          isArchived: false,
           positionHash: { not: null },
         },
         select: {
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       // Get updated oldest timestamp
       const updatedPositions = await prisma.position.findMany({
-        where: { userId: user.id, isActive: true },
+        where: { userId: user.id, isArchived: false },
         select: { updatedAt: true },
         orderBy: { updatedAt: 'asc' },
         take: 1,

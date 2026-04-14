@@ -92,8 +92,8 @@ export interface UniswapV3PositionResponse {
 
   // Lifecycle
   positionOpenedAt: string;
-  positionClosedAt: string | null;
-  isActive: boolean;
+  archivedAt: string | null;
+  isArchived: boolean;
 
   // Protocol-specific (STRONGLY TYPED)
   config: UniswapV3PositionConfigResponse;

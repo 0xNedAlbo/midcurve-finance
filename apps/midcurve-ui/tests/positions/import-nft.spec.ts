@@ -117,8 +117,8 @@ test.describe('Import NFT by ID', () => {
               priceRangeUpper: '2000000000',
               isToken0Quote: true,
               positionOpenedAt: new Date().toISOString(),
-              positionClosedAt: null,
-              isActive: true,
+              archivedAt: null,
+              isArchived: false,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
               pool: {

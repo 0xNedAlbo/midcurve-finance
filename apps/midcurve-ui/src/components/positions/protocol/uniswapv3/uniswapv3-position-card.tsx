@@ -128,7 +128,8 @@ function UniswapV3PositionCardLoaded({
   // Calculate in-range status
   const config = position.config as { tickLower: number; tickUpper: number };
   const poolState = position.pool.state as { currentTick: number };
-  const isInRange = position.isActive &&
+  const hasLiquidity = BigInt((position.state as { liquidity: string }).liquidity) > 0n;
+  const isInRange = hasLiquidity &&
     poolState.currentTick >= config.tickLower &&
     poolState.currentTick <= config.tickUpper;
 
@@ -152,10 +153,18 @@ function UniswapV3PositionCardLoaded({
         <PositionCardHeader
           baseToken={baseToken}
           quoteToken={quoteToken}
-          status={position.isActive ? "active" : "closed"}
           protocol={position.protocol}
           positionOpenedAt={position.positionOpenedAt}
-          statusLineBadges={<UniswapV3RangeStatus position={position} />}
+          statusLineBadges={
+            <>
+              {(position.state as { isBurned?: boolean }).isBurned && (
+                <span className="px-1.5 md:px-2 py-0.5 rounded text-[10px] md:text-xs font-medium border text-red-400 bg-red-500/10 border-red-500/20">
+                  Burned
+                </span>
+              )}
+              <UniswapV3RangeStatus position={position} />
+            </>
+          }
           protocolLineBadges={
             <>
               <UniswapV3ChainBadge position={position} />
@@ -175,7 +184,7 @@ function UniswapV3PositionCardLoaded({
           lastYieldClaimedAt={position.lastYieldClaimedAt}
           positionOpenedAt={position.positionOpenedAt}
           quoteToken={quoteToken}
-          isActive={position.isActive}
+          isArchived={position.isArchived}
           isInRange={isInRange}
           totalApr={position.totalApr}
           pnlCurveSlot={<UniswapV3MiniPnLCurve position={position} />}

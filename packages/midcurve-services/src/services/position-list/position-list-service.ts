@@ -45,8 +45,8 @@ const POSITION_LIST_SELECT = {
   rewardApr: true,
   config: true,
   positionOpenedAt: true,
-  positionClosedAt: true,
-  isActive: true,
+  archivedAt: true,
+  isArchived: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -124,9 +124,9 @@ export class PositionListService {
       };
 
       if (status === 'active') {
-        where.isActive = true;
-      } else if (status === 'closed') {
-        where.isActive = false;
+        where.isArchived = false;
+      } else if (status === 'archived') {
+        where.isArchived = true;
       }
 
       if (protocols && protocols.length > 0) {

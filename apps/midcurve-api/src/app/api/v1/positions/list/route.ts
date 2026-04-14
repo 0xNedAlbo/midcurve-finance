@@ -56,8 +56,8 @@ function serializeListRow(row: PositionListRow): PositionListItem {
     priceRangeLower: row.priceRangeLower,
     priceRangeUpper: row.priceRangeUpper,
     positionOpenedAt: row.positionOpenedAt.toISOString(),
-    positionClosedAt: row.positionClosedAt?.toISOString() ?? null,
-    isActive: row.isActive,
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    isArchived: row.isArchived,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

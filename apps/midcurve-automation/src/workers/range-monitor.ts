@@ -226,7 +226,7 @@ export class RangeMonitor {
    */
   private async getActivePoolKeys(): Promise<string[]> {
     const positions = await prisma.position.findMany({
-      where: { isActive: true },
+      where: { isArchived: false },
       select: { config: true },
     });
     const uniqueKeys = new Set<string>();
@@ -248,7 +248,7 @@ export class RangeMonitor {
 
     const positions = await prisma.position.findMany({
       where: {
-        isActive: true,
+        isArchived: false,
         config: { path: ['chainId'], equals: chainId },
         AND: [{ config: { path: ['poolAddress'], string_contains: poolAddress! } }],
       },
@@ -486,10 +486,10 @@ export class RangeMonitor {
         const positionId = subscriptionId.replace('auto:range-monitor:', '');
         const position = await prisma.position.findUnique({
           where: { id: positionId },
-          select: { isActive: true },
+          select: { isArchived: true },
         });
 
-        if (position?.isActive) continue; // Still active — keep
+        if (position && !position.isArchived) continue; // Not archived — keep
       }
 
       // Legacy format or inactive position — mark as deleted

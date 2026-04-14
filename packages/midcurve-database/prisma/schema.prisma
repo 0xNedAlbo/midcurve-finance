@@ -248,8 +248,8 @@ model Position {
 
   // Position state
   positionOpenedAt DateTime
-  positionClosedAt DateTime?
-  isActive         Boolean
+  archivedAt       DateTime?
+  isArchived       Boolean     @default(false)
 
   // Protocol-specific data (JSON)
   config Json // Immutable: chainId, nftId, poolAddress, ticks, etc.
@@ -268,7 +268,7 @@ model Position {
   @@index([protocol])
   @@index([type])
   @@index([userId])
-  @@index([isActive])
+  @@index([isArchived])
   @@index([ownerWallet])
   @@map("positions")
   @@schema("public")

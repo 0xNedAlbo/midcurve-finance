@@ -86,8 +86,8 @@ export interface PositionJSON {
 
   // Lifecycle
   positionOpenedAt: string;
-  positionClosedAt: string | null;
-  isActive: boolean;
+  archivedAt: string | null;
+  isArchived: boolean;
 
   // Protocol-specific
   config: Record<string, unknown>;
@@ -134,8 +134,8 @@ export interface BasePositionParams {
 
   // Lifecycle
   positionOpenedAt: Date;
-  positionClosedAt: Date | null;
-  isActive: boolean;
+  archivedAt: Date | null;
+  isArchived: boolean;
 
   // Timestamps
   createdAt: Date;
@@ -177,8 +177,8 @@ export interface PositionRow {
 
   // Lifecycle
   positionOpenedAt: Date;
-  positionClosedAt: Date | null;
-  isActive: boolean;
+  archivedAt: Date | null;
+  isArchived: boolean;
 
   // Protocol-specific (JSON columns)
   config: Record<string, unknown>;

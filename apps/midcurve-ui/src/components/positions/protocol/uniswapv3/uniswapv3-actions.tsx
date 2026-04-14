@@ -39,9 +39,11 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const [showTokenizeModal, setShowTokenizeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
 
-  // Position lifecycle state
-  const positionState = position.state as { isClosed?: boolean; ownerAddress: string };
-  const isClosed = positionState.isClosed ?? false;
+  // Position lifecycle state — check on-chain conditions directly
+  const hasLiquidity = BigInt((position.state as { liquidity: string }).liquidity) > 0n;
+  const hasTokensOwed = BigInt((position.state as { tokensOwed0: string }).tokensOwed0) > 0n
+    || BigInt((position.state as { tokensOwed1: string }).tokensOwed1) > 0n;
+  const isBurned = (position.state as { isBurned?: boolean }).isBurned === true;
 
   // Extract owner address from position state
   const ownerAddress = position.state.ownerAddress;
@@ -70,13 +72,14 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const isChainSupported = contractData?.isSupported ?? false;
 
   // Calculate automation disabled state and reason
-  const automationDisabled = !position.isActive || isClosed || !isChainSupported;
+  const automationDisabled = isBurned || !hasLiquidity || !isChainSupported;
 
   const automationDisabledReason = useMemo(() => {
-    if (!position.isActive || isClosed) return 'Position is closed';
+    if (isBurned) return 'NFT is burned';
+    if (!hasLiquidity) return 'No liquidity in position';
     if (!isChainSupported) return 'Automation not supported on this chain';
     return undefined;
-  }, [position.isActive, isClosed, isChainSupported]);
+  }, [isBurned, hasLiquidity, isChainSupported]);
 
   // Build token config for price display
   const tokenConfig: TokenConfig = useMemo(
@@ -104,8 +107,8 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
     areAddressesEqual(walletAddress, ownerAddress)
   );
 
-  // Don't show action buttons if position is inactive (burned) or user doesn't own it
-  if (!position.isActive) {
+  // Don't show action buttons if position is burned or user doesn't own it
+  if (isBurned) {
     return null;
   }
   if (!isOwner) {
@@ -126,11 +129,11 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
         >
           <Plus className="w-3 h-3" />
-          {isClosed ? 'Reopen Position' : 'Increase Deposit'}
+          {!hasLiquidity ? 'Reopen Position' : 'Increase Deposit'}
         </button>
 
-        {/* Withdraw — hidden for closed positions */}
-        {!isClosed && (
+        {/* Withdraw — hidden when no liquidity */}
+        {hasLiquidity && (
           <button
             onClick={() => {
               const chainSlug = getChainSlugByChainId(positionConfig.chainId);
@@ -145,8 +148,8 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           </button>
         )}
 
-        {/* Collect Fees — hidden for closed positions */}
-        {!isClosed && (
+        {/* Collect Fees — hidden when no liquidity and no fees */}
+        {(hasLiquidity || hasUnclaimedFees) && (
           <button
             onClick={() => setShowCollectFeesModal(true)}
             className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
@@ -161,8 +164,8 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           </button>
         )}
 
-        {/* Burn NFT — shown only for closed, not-burned positions */}
-        {isClosed && (
+        {/* Burn NFT — shown when position has no liquidity, no owed tokens, no fees */}
+        {!hasLiquidity && !hasTokensOwed && !hasUnclaimedFees && (
           <button
             onClick={() => setShowBurnModal(true)}
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-slate-300 bg-slate-800/30 hover:bg-slate-700/30 border-slate-600/50"
@@ -233,8 +236,8 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           closeOrders={position.closeOrders}
         />
 
-        {/* Tokenize Position — only for active, non-closed positions */}
-        {!isClosed && (
+        {/* Tokenize Position — only for positions with liquidity */}
+        {hasLiquidity && (
           <>
             <div className="w-px h-6 bg-slate-600/50 mx-1" />
             <button

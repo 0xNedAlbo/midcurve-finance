@@ -12,7 +12,7 @@ interface UniswapV3RangeStatusProps {
 
 export function UniswapV3RangeStatus({ position }: UniswapV3RangeStatusProps) {
   // Only show for active positions (burned positions show no badge)
-  if (!position.isActive) return null;
+  if (position.isArchived) return null;
 
   const positionState = position.state as { liquidity: string };
   const hasLiquidity = BigInt(positionState.liquidity || '0') > 0n;

@@ -67,7 +67,7 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
 
   // Compute derived fields
   const isInRange = poolState.currentTick >= config.tickLower && poolState.currentTick <= config.tickUpper;
-  const status = BigInt(state.sharesBalance) > 0n ? "active" : "closed";
+  const status = BigInt(state.sharesBalance) > 0n ? "active" : "archived";
 
   // Truncated vault address for identifier display (first 6 + last 4 chars)
   const truncatedAddress = `${config.vaultAddress.slice(0, 6)}...${config.vaultAddress.slice(-4)}`;

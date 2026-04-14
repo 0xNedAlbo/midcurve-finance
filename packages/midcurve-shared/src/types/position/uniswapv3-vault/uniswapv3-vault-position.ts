@@ -286,8 +286,8 @@ export class UniswapV3VaultPosition extends BasePosition {
       rewardApr: row.rewardApr,
       totalApr: row.totalApr,
       positionOpenedAt: row.positionOpenedAt,
-      positionClosedAt: row.positionClosedAt,
-      isActive: row.isActive,
+      archivedAt: row.archivedAt,
+      isArchived: row.isArchived,
       config: UniswapV3VaultPositionConfig.fromJSON(configJSON),
       state: vaultPositionStateFromJSON(stateJSON),
       createdAt: row.createdAt,
@@ -323,10 +323,10 @@ export class UniswapV3VaultPosition extends BasePosition {
       rewardApr: json.rewardApr,
       totalApr: json.totalApr,
       positionOpenedAt: new Date(json.positionOpenedAt),
-      positionClosedAt: json.positionClosedAt
-        ? new Date(json.positionClosedAt)
+      archivedAt: json.archivedAt
+        ? new Date(json.archivedAt)
         : null,
-      isActive: json.isActive,
+      isArchived: json.isArchived,
       config: UniswapV3VaultPositionConfig.fromJSON(configJSON),
       state: vaultPositionStateFromJSON(stateJSON),
       createdAt: new Date(json.createdAt),

@@ -81,8 +81,8 @@ export abstract class BasePosition implements PositionInterface {
   // ============================================================================
 
   readonly positionOpenedAt: Date;
-  readonly positionClosedAt: Date | null;
-  readonly isActive: boolean;
+  readonly archivedAt: Date | null;
+  readonly isArchived: boolean;
 
   // ============================================================================
   // Timestamps
@@ -168,8 +168,8 @@ export abstract class BasePosition implements PositionInterface {
 
     // Lifecycle
     this.positionOpenedAt = params.positionOpenedAt;
-    this.positionClosedAt = params.positionClosedAt;
-    this.isActive = params.isActive;
+    this.archivedAt = params.archivedAt;
+    this.isArchived = params.isArchived;
 
     // Timestamps
     this.createdAt = params.createdAt;
@@ -219,8 +219,8 @@ export abstract class BasePosition implements PositionInterface {
 
       // Lifecycle
       positionOpenedAt: this.positionOpenedAt.toISOString(),
-      positionClosedAt: this.positionClosedAt?.toISOString() ?? null,
-      isActive: this.isActive,
+      archivedAt: this.archivedAt?.toISOString() ?? null,
+      isArchived: this.isArchived,
 
       // Protocol-specific
       config: this.config,

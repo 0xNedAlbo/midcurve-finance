@@ -830,11 +830,7 @@ export class UniswapV3VaultPositionService {
                 totalApr: persistedApr,
                 baseApr: persistedApr,
                 rewardApr: 0,
-                isActive: true,
                 positionOpenedAt: correctedOpenedAt,
-                ...(isClosed && !position.positionClosedAt
-                    ? { positionClosedAt: new Date() }
-                    : {}),
             },
         });
 
@@ -1041,7 +1037,7 @@ export class UniswapV3VaultPositionService {
                 collectedYield: '0',
                 unclaimedYield: '0',
                 positionOpenedAt,
-                isActive: true,
+                isArchived: false,
             },
         });
 

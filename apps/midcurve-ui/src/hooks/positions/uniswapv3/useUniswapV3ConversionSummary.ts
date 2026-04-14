@@ -137,14 +137,14 @@ function computeSummary(
   const isClosed = currentLiquidity === 0n;
 
   // Days position was active (for closed positions)
-  // Use last DECREASE event timestamp as close time since positionClosedAt may be null
+  // Use last DECREASE event timestamp as close time since archivedAt may be null
   let daysActive: number | null = null;
   if (isClosed && position.positionOpenedAt) {
     const opened = new Date(position.positionOpenedAt).getTime();
     // Find the closing event timestamp from ledger events
     let closedAt: number | null = null;
-    if (position.positionClosedAt) {
-      closedAt = new Date(position.positionClosedAt).getTime();
+    if (position.archivedAt) {
+      closedAt = new Date(position.archivedAt).getTime();
     } else {
       // Fall back to last DECREASE event timestamp
       for (let j = events.length - 1; j >= 0; j--) {
@@ -315,7 +315,7 @@ function computeSummary(
         index: segments.length,
         startTimestamp: financialEvents[financialEvents.length - 1]!.timestamp,
         endTimestamp: isClosed
-          ? (position.positionClosedAt ?? financialEvents[financialEvents.length - 1]!.timestamp)
+          ? (position.archivedAt ?? financialEvents[financialEvents.length - 1]!.timestamp)
           : null,
         isTrailing: !isClosed,
         deltaBase,

@@ -197,7 +197,7 @@ export class PoolPriceSubscriber {
     // Includes both NFT and vault positions — they share the same UniswapV3 pools
     const activePositions = await prisma.position.findMany({
       where: {
-        isActive: true,
+        isArchived: false,
         protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
       },
       select: {
@@ -377,7 +377,7 @@ export class PoolPriceSubscriber {
     // 4. Check if other active positions (NFT or vault) still use this pool
     const otherActivePositions = await prisma.position.count({
       where: {
-        isActive: true,
+        isArchived: false,
         protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
         id: { not: position.id },
         config: { path: ['poolAddress'], string_contains: posConfig.poolAddress },
@@ -495,7 +495,7 @@ export class PoolPriceSubscriber {
     // Query active positions to determine which pools still have active positions
     const activePositions = await prisma.position.findMany({
       where: {
-        isActive: true,
+        isArchived: false,
         protocol: { in: ['uniswapv3', 'uniswapv3-vault'] },
       },
       select: { config: true },

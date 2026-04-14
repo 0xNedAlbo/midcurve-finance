@@ -454,8 +454,8 @@ export class UniswapV3Position extends BasePosition {
 
       // Lifecycle
       positionOpenedAt: row.positionOpenedAt,
-      positionClosedAt: row.positionClosedAt,
-      isActive: row.isActive,
+      archivedAt: row.archivedAt,
+      isArchived: row.isArchived,
 
       // Protocol-specific
       config: UniswapV3PositionConfig.fromJSON(configJSON),
@@ -533,8 +533,8 @@ export class UniswapV3Position extends BasePosition {
 
       // Lifecycle
       positionOpenedAt: now,
-      positionClosedAt: null,
-      isActive: true,
+      archivedAt: null,
+      isArchived: false,
 
       // Protocol-specific
       config: new UniswapV3PositionConfig({
@@ -651,8 +651,8 @@ export class UniswapV3Position extends BasePosition {
 
       // Lifecycle
       positionOpenedAt: new Date(json.positionOpenedAt),
-      positionClosedAt: json.positionClosedAt ? new Date(json.positionClosedAt) : null,
-      isActive: json.isActive,
+      archivedAt: json.archivedAt ? new Date(json.archivedAt) : null,
+      isArchived: json.isArchived,
 
       // Protocol-specific
       config,

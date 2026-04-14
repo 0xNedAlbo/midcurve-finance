@@ -36,7 +36,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
   const config = position.config as UniswapV3VaultPositionConfigResponse;
   const state = position.state as UniswapV3VaultPositionStateResponse;
 
-  const isClosed = BigInt(state.sharesBalance) === 0n;
+  const hasShares = BigInt(state.sharesBalance) > 0n;
   const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
 
   // Get base/quote tokens
@@ -70,7 +70,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
   }, [poolState.sqrtPriceX96, tokenConfig]);
 
   // Backend already determines ownership via the authenticated session
-  if (!position.isActive || !state.isOwnedByUser) {
+  if (!state.isOwnedByUser) {
     return null;
   }
 
@@ -88,11 +88,11 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
         className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
       >
         <Plus className="w-3 h-3" />
-        {isClosed ? 'Reopen Position' : 'Increase Deposit'}
+        {!hasShares ? 'Reopen Position' : 'Increase Deposit'}
       </button>
 
-      {/* Withdraw */}
-      {!isClosed && (
+      {/* Withdraw — only when user has shares */}
+      {hasShares && (
         <button
           onClick={() => {
             const chainSlug = getChainSlugByChainId(config.chainId);
@@ -108,7 +108,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
       )}
 
       {/* Collect Fees */}
-      {(!isClosed || hasUnclaimedFees) && (
+      {(hasShares || hasUnclaimedFees) && (
         <button
           onClick={() => setShowCollectFeesModal(true)}
           className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
@@ -141,8 +141,8 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
           decimals: quoteToken.decimals,
         }}
         isToken0Quote={position.isToken0Quote}
-        disabled={isClosed}
-        disabledReason={isClosed ? 'Position is closed' : undefined}
+        disabled={!hasShares}
+        disabledReason={!hasShares ? 'No shares in position' : undefined}
         closeOrders={position.closeOrders ?? []}
       />
 
@@ -164,8 +164,8 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
           decimals: quoteToken.decimals,
         }}
         isToken0Quote={position.isToken0Quote}
-        disabled={isClosed}
-        disabledReason={isClosed ? 'Position is closed' : undefined}
+        disabled={!hasShares}
+        disabledReason={!hasShares ? 'No shares in position' : undefined}
         closeOrders={position.closeOrders ?? []}
       />
     </div>

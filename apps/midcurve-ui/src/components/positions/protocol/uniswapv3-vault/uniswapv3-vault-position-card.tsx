@@ -135,7 +135,8 @@ function UniswapV3VaultPositionCardLoaded({
   // Calculate in-range status
   const config = position.config as UniswapV3VaultPositionConfigResponse;
   const poolState = position.pool.state as { currentTick: number };
-  const isInRange = position.isActive &&
+  const hasShares = BigInt((position.state as { sharesBalance: string }).sharesBalance) > 0n;
+  const isInRange = hasShares &&
     poolState.currentTick >= config.tickLower &&
     poolState.currentTick <= config.tickUpper;
 
@@ -160,7 +161,6 @@ function UniswapV3VaultPositionCardLoaded({
         <PositionCardHeader
           baseToken={baseToken}
           quoteToken={quoteToken}
-          status={position.isActive ? "active" : "closed"}
           protocol={position.protocol}
           positionOpenedAt={position.positionOpenedAt}
           statusLineBadges={
@@ -190,7 +190,7 @@ function UniswapV3VaultPositionCardLoaded({
           lastYieldClaimedAt={position.lastYieldClaimedAt}
           positionOpenedAt={position.positionOpenedAt}
           quoteToken={quoteToken}
-          isActive={position.isActive}
+          isArchived={position.isArchived}
           isInRange={isInRange}
           totalApr={position.totalApr}
           pnlCurveSlot={<UniswapV3VaultMiniPnLCurve position={position} />}

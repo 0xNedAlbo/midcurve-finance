@@ -14,13 +14,13 @@ export interface PositionListFilters {
   /**
    * Filter by position status
    *
-   * - 'active': Only open positions (isActive = true)
-   * - 'closed': Only closed positions (isActive = false)
-   * - 'all': Both active and closed positions
+   * - 'active': Only non-archived positions (isArchived = false)
+   * - 'archived': Only archived positions (isArchived = true)
+   * - 'all': All positions
    *
    * @default 'all'
    */
-  status?: 'active' | 'closed' | 'all';
+  status?: 'active' | 'archived' | 'all';
 
   /**
    * Filter by protocol(s)
@@ -113,8 +113,8 @@ export interface PositionListRow {
 
   // Lifecycle
   positionOpenedAt: Date;
-  positionClosedAt: Date | null;
-  isActive: boolean;
+  archivedAt: Date | null;
+  isArchived: boolean;
 
   // Timestamps
   createdAt: Date;

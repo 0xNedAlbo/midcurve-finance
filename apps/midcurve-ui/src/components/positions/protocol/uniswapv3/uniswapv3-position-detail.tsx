@@ -54,7 +54,7 @@ export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3Posi
 
   // Compute derived fields
   const isInRange = poolState.currentTick >= config.tickLower && poolState.currentTick <= config.tickUpper;
-  const status = BigInt(positionState.liquidity) > 0n ? "active" : "closed";
+  const status = BigInt(positionState.liquidity) > 0n ? "active" : "archived";
 
   // Get NFPM address for explorer link
   const nftManagerAddress = getNonfungiblePositionManagerAddress(config.chainId);

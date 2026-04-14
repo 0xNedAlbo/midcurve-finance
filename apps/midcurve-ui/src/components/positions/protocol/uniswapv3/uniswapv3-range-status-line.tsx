@@ -15,7 +15,7 @@ import { tickToPrice } from "@midcurve/shared";
 
 interface Position {
   isToken0Quote: boolean;
-  isActive: boolean;
+  isArchived: boolean;
   config: {
     tickLower: number;
     tickUpper: number;
@@ -87,7 +87,7 @@ export function UniswapV3RangeStatusLine({
   let currentPosition = 50;
   let currentAlignment: "left" | "center" | "right" = "center";
 
-  if (position.isActive) {
+  if (!position.isArchived) {
     currentTick = pool.state.currentTick;
     currentPrice = tickToPrice(
       currentTick,
@@ -289,7 +289,7 @@ export function UniswapV3RangeStatusLine({
         </div>
 
         {/* Current Price - Above Line (only for active positions) */}
-        {position.isActive ? (
+        {!position.isArchived ? (
           <div
             className="absolute top-1/2"
             style={{
@@ -366,7 +366,7 @@ export function UniswapV3RangeStatusLine({
             </div>
           </div>
         ) : (
-          /* Position Closed Badge - Centered Above Line */
+          /* Position Archived Badge - Centered Above Line */
           <div
             className="absolute top-1/2"
             style={{
@@ -383,7 +383,7 @@ export function UniswapV3RangeStatusLine({
             >
               <div className="px-3 py-1 bg-slate-700/50 border border-slate-600/50 rounded-lg">
                 <div className="text-sm font-medium text-slate-400 whitespace-nowrap">
-                  Position Closed
+                  Position Archived
                 </div>
               </div>
             </div>

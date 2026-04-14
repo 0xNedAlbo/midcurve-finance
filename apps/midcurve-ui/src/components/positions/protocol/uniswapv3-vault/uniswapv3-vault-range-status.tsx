@@ -17,8 +17,8 @@ interface UniswapV3VaultRangeStatusProps {
 }
 
 export function UniswapV3VaultRangeStatus({ position }: UniswapV3VaultRangeStatusProps) {
-  // Only show for active positions (closed positions show no badge)
-  if (!position.isActive) return null;
+  // Only show for active positions (archived positions show no badge)
+  if (position.isArchived) return null;
 
   const state = position.state as UniswapV3VaultPositionStateResponse;
   const hasLiquidity = BigInt(state.liquidity || '0') > 0n;

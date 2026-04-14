@@ -239,8 +239,8 @@ export function serializeUniswapV3Position(position: UniswapV3Position) {
 
     // Position state
     positionOpenedAt: position.positionOpenedAt.toISOString(),
-    positionClosedAt: position.positionClosedAt?.toISOString() ?? null,
-    isActive: position.isActive,
+    archivedAt: position.archivedAt?.toISOString() ?? null,
+    isArchived: position.isArchived,
 
     // Protocol-specific (config has no bigints, state has bigints)
     config: {
@@ -323,8 +323,8 @@ export function serializeUniswapV3VaultPosition(position: UniswapV3VaultPosition
 
     // Position state
     positionOpenedAt: position.positionOpenedAt.toISOString(),
-    positionClosedAt: position.positionClosedAt?.toISOString() ?? null,
-    isActive: position.isActive,
+    archivedAt: position.archivedAt?.toISOString() ?? null,
+    isArchived: position.isArchived,
 
     // Protocol-specific
     config: {

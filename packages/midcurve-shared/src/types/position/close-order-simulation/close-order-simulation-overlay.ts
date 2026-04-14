@@ -478,12 +478,12 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
     return this._underlying.positionOpenedAt;
   }
 
-  get positionClosedAt(): Date | null {
-    return this._underlying.positionClosedAt;
+  get archivedAt(): Date | null {
+    return this._underlying.archivedAt;
   }
 
-  get isActive(): boolean {
-    return this._underlying.isActive;
+  get isArchived(): boolean {
+    return this._underlying.isArchived;
   }
 
   // ============================================================================
@@ -551,8 +551,8 @@ export class CloseOrderSimulationOverlay implements PositionInterface {
 
       // Lifecycle
       positionOpenedAt: this.positionOpenedAt.toISOString(),
-      positionClosedAt: this.positionClosedAt?.toISOString() ?? null,
-      isActive: this.isActive,
+      archivedAt: this.archivedAt?.toISOString() ?? null,
+      isArchived: this.isArchived,
 
       // Protocol-specific
       config: this.config,

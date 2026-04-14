@@ -16,17 +16,15 @@ interface Token {
 interface PositionCardHeaderProps {
   baseToken: Token;
   quoteToken: Token;
-  status: "active" | "closed";
   protocol: string;
   positionOpenedAt?: string; // ISO timestamp for calculating position age
-  statusLineBadges?: React.ReactNode; // Protocol-specific badges for first line (e.g., range status)
+  statusLineBadges?: React.ReactNode; // Protocol-specific badges for first line (e.g., range status, burned)
   protocolLineBadges?: React.ReactNode; // Protocol-specific badges for second line (e.g., chain, fee, NFT ID)
 }
 
 export function PositionCardHeader({
   baseToken,
   quoteToken,
-  status,
   protocol,
   positionOpenedAt,
   statusLineBadges,
@@ -36,10 +34,6 @@ export function PositionCardHeader({
   const baseLogo = baseToken.logoUrl || `/images/tokens/${baseToken.symbol.toLowerCase()}.svg`;
   const quoteLogo = quoteToken.logoUrl || `/images/tokens/${quoteToken.symbol.toLowerCase()}.svg`;
 
-  const statusColor = status === "active"
-    ? "text-green-400 bg-green-500/10 border-green-500/20"
-    : "text-slate-400 bg-slate-500/10 border-slate-500/20";
-
   // Calculate position age in days
   const positionAge = positionOpenedAt ? (() => {
     const now = Date.now();
@@ -47,9 +41,7 @@ export function PositionCardHeader({
     const diffMs = now - opened;
     const days = diffMs / (1000 * 60 * 60 * 24);
     const formattedDays = days < 1 ? days.toFixed(1) : Math.floor(days).toString();
-    return status === "closed"
-      ? `${formattedDays} days ago`
-      : `${formattedDays} days`;
+    return `${formattedDays} days`;
   })() : null;
 
   return (
@@ -81,12 +73,7 @@ export function PositionCardHeader({
 
           {/* Status badges line - All badges together, won't wrap between them */}
           <div className="flex items-center gap-1 md:gap-2 flex-wrap">
-            {/* Status Badge */}
-            <span className={`px-1.5 md:px-2 py-0.5 rounded text-[10px] md:text-xs font-medium border ${statusColor}`}>
-              {status === "active" ? "Active" : "Closed"}
-            </span>
-
-            {/* Protocol-specific badges (e.g., range status) */}
+            {/* Protocol-specific badges (e.g., range status, burned) */}
             {statusLineBadges}
 
             {/* Position Age Badge */}

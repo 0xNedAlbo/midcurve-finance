@@ -99,8 +99,8 @@ const EXAMPLE_POSITION_DATA = {
   priceRangeUpper: '3000450000',
   isToken0Quote: true,
   positionOpenedAt: '2024-01-10T08:00:00.000Z',
-  positionClosedAt: null,
-  isActive: true,
+  archivedAt: null,
+  isArchived: false,
   pool: {
     id: 'pool_xyz789',
     protocol: 'uniswapv3',

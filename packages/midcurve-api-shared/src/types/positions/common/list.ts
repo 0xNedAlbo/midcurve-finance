@@ -15,7 +15,7 @@ import { PaginationParamsSchema } from '../../common/pagination.js';
 /**
  * Position status filter options
  */
-export type PositionStatus = 'active' | 'closed' | 'all';
+export type PositionStatus = 'active' | 'archived' | 'all';
 
 /**
  * Sort field options
@@ -77,8 +77,8 @@ export interface PositionListItem {
 
   // Lifecycle — for sorting/filtering by age, status
   positionOpenedAt: string;
-  positionClosedAt: string | null;
-  isActive: boolean;
+  archivedAt: string | null;
+  isArchived: boolean;
 
   // Timestamps
   createdAt: string;
@@ -102,8 +102,8 @@ export interface ListPositionsParams {
 
   /**
    * Filter by position status
-   * - 'active': Only active positions (isActive = true)
-   * - 'closed': Only closed positions (isActive = false)
+   * - 'active': Only non-archived positions (isArchived = false)
+   * - 'archived': Only archived positions (isArchived = true)
    * - 'all': All positions (no filter)
    * @default 'all'
    */
@@ -159,7 +159,7 @@ export type ListPositionsResponse = PaginatedResponse<PositionListItem> & {
 /**
  * Position status enum for validation
  */
-export const PositionStatusSchema = z.enum(['active', 'closed', 'all']);
+export const PositionStatusSchema = z.enum(['active', 'archived', 'all']);
 
 /**
  * Sort field enum for validation
@@ -192,7 +192,7 @@ export const ListPositionsQuerySchema = PaginationParamsSchema.extend({
     .string()
     .optional()
     .default('all')
-    .transform((val) => val as 'active' | 'closed' | 'all')
+    .transform((val) => val as 'active' | 'archived' | 'all')
     .pipe(PositionStatusSchema),
 
   sortBy: z

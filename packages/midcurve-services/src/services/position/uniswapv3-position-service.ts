@@ -218,8 +218,8 @@ export interface PositionDbResult {
     rewardApr: number | null;
     totalApr: number | null;
     positionOpenedAt: Date;
-    positionClosedAt: Date | null;
-    isActive: boolean;
+    archivedAt: Date | null;
+    isArchived: boolean;
     config: Record<string, unknown>;
     state: Record<string, unknown>;
 }
@@ -1179,7 +1179,7 @@ export class UniswapV3PositionService {
      * - Uses last known fee growth values with tokensOwed set to 0
      * - Prevents "Invalid token ID" errors for burned NFTs
      * - Checks if position is fully closed (final COLLECT with all principal withdrawn)
-     * - If fully closed: Sets isClosed=true and positionClosedAt to timestamp of final COLLECT event
+     * - If fully closed: Sets isClosed=true in state JSON
      *
      * For active positions (liquidity > 0):
      * - Fetches current fee data from NonfungiblePositionManager
@@ -1211,8 +1211,8 @@ export class UniswapV3PositionService {
      *
      * Note: Config fields (chainId, nftId, ticks, poolAddress) are immutable and not updated.
      * Note: totalApr is NOT updated by this method (use refreshPositionApr).
-     * Note: isActive is only set to false when a burned NFT is detected.
-     * Note: isClosed and positionClosedAt are updated when close/reopen conditions are detected.
+     * Note: isArchived is user-controlled only — not modified by refresh.
+     * Note: isClosed in state JSON is updated when close/reopen conditions are detected.
      *
      * @param id - Position ID
      * @param dbTx - Optional Prisma transaction client for atomic operations
@@ -1319,19 +1319,12 @@ export class UniswapV3PositionService {
             // 3.1 Check if position is still owned by user (wallet perimeter check)
             const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
             if (!userWalletAddresses.has(currentOwner.toLowerCase())) {
-                // Position has left the user's perimeter — mark inactive
+                // Position has left the user's perimeter — log but don't auto-archive
+                // (isArchived is user-controlled only)
                 this.logger.info(
                     { id, currentOwner, userId: position.userId },
-                    "Position transferred outside user perimeter, marking inactive",
+                    "Position transferred outside user perimeter",
                 );
-                const db = dbTx ?? this.prisma;
-                await db.position.update({
-                    where: { id },
-                    data: {
-                        isActive: false,
-                        positionClosedAt: new Date(),
-                    },
-                });
                 // Still continue refresh to update metrics for display
             }
 
@@ -1382,28 +1375,12 @@ export class UniswapV3PositionService {
                 refreshedState.tokensOwed0 === 0n &&
                 refreshedState.tokensOwed1 === 0n
             ) {
-                // Get last COLLECT event timestamp for positionClosedAt
-                const ledgerService = new UniswapV3LedgerService(
-                    { positionId: id },
-                    { prisma: this._prisma },
-                );
-                const lastCollect = await ledgerService.fetchLastCollectEvent(
-                    "latest",
-                    dbTx,
-                );
-                const closedAt =
-                    lastCollect?.timestamp ??
-                    refreshedPosition.positionOpenedAt;
-
                 this.logger.info(
-                    {
-                        id,
-                        closedAt: closedAt.toISOString(),
-                    },
-                    "Position fully closed - marking as closed",
+                    { id },
+                    "Position fully closed - marking state.isClosed",
                 );
 
-                await this.updateClosedState(id, false, true, closedAt, dbTx);
+                await this.updateClosedState(id, false, true, null, dbTx);
 
                 // Re-fetch to get updated state
                 const closedPosition = await this.findById(id, dbTx);
@@ -3048,19 +3025,8 @@ export class UniswapV3PositionService {
             "NFT burned (detected by fetchPositionState) - updating state and refreshing metrics",
         );
 
-        // Get last COLLECT event timestamp for positionClosedAt
-        const ledgerService = new UniswapV3LedgerService(
-            { positionId: id },
-            { prisma: this._prisma },
-        );
-        const lastCollect = await ledgerService.fetchLastCollectEvent(
-            "latest",
-            tx,
-        );
-        const closedAt = lastCollect?.timestamp ?? position.positionOpenedAt;
-
-        // Update closed state
-        await this.updateClosedState(id, true, true, closedAt, tx);
+        // Update closed state (state JSON only, no position-level changes)
+        await this.updateClosedState(id, true, true, null, tx);
 
         // Zero out on-chain state fields
         await this.updateLiquidity(id, 0n, tx);
@@ -3149,7 +3115,6 @@ export class UniswapV3PositionService {
             where: { id },
             data: {
                 state: this.serializeState(updatedState) as object,
-                positionClosedAt: null,
             },
         });
     }
@@ -3157,18 +3122,13 @@ export class UniswapV3PositionService {
     /**
      * Update position closed/burned state
      *
-     * Updates the isBurned and isClosed flags in the position state,
-     * and synchronizes the position-level isActive and positionClosedAt fields.
-     *
-     * State transitions:
-     * - When isBurned becomes true: isActive=false, positionClosedAt is set
-     * - When isClosed becomes true: positionClosedAt is set (isActive unchanged)
-     * - positionClosedAt is only set on transition to burned (not if already burned)
+     * Updates state.isBurned and state.isClosed flags only.
+     * Does NOT modify isArchived/archivedAt — those are user-controlled.
      *
      * @param id - Position database ID
      * @param isBurned - Whether the NFT has been burned
      * @param isClosed - Whether the position is fully closed (L=0, tokensOwed=0)
-     * @param closedAt - Timestamp for positionClosedAt (typically last COLLECT event)
+     * @param closedAt - Unused, kept for signature compatibility
      * @param tx - Optional Prisma transaction client
      * @returns Updated position
      */
@@ -3176,14 +3136,13 @@ export class UniswapV3PositionService {
         id: string,
         isBurned: boolean,
         isClosed: boolean,
-        closedAt: Date | null,
+        _closedAt: Date | null,
         tx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "updateClosedState", {
             id,
             isBurned,
             isClosed,
-            closedAt: closedAt?.toISOString() ?? null,
         });
 
         const db = tx ?? this.prisma;
@@ -3203,45 +3162,18 @@ export class UniswapV3PositionService {
                 isClosed,
             };
 
-            // 3. Determine if this is a state transition to closed/burned
-            const wasActive = existing.isActive;
-            const becomingInactive = isBurned && wasActive;
-
-            // 4. Serialize state
+            // 3. Serialize state
             const stateDB = this.serializeState(updatedState);
-
-            // 5. Build update data
-            const updateData: {
-                state: object;
-                isActive?: boolean;
-                positionClosedAt?: Date;
-            } = {
-                state: stateDB as object,
-            };
-
-            // Only update position-level fields if transitioning to inactive
-            if (becomingInactive) {
-                updateData.isActive = false;
-                if (closedAt) {
-                    updateData.positionClosedAt = closedAt;
-                }
-            }
 
             log.dbOperation(this.logger, "update", "Position", {
                 id,
-                fields: [
-                    "state.isBurned",
-                    "state.isClosed",
-                    ...(becomingInactive
-                        ? ["isActive", "positionClosedAt"]
-                        : []),
-                ],
+                fields: ["state.isBurned", "state.isClosed"],
             });
 
-            // 6. Persist
+            // 4. Persist (only state JSON, no position-level fields)
             const result = await db.position.update({
                 where: { id },
-                data: updateData,
+                data: { state: stateDB as object },
             });
 
             const position = await this.mapToPosition(
@@ -3249,14 +3181,7 @@ export class UniswapV3PositionService {
             ) as UniswapV3Position;
 
             this.logger.info(
-                {
-                    id,
-                    isBurned,
-                    isClosed,
-                    isActive: position.isActive,
-                    positionClosedAt:
-                        position.positionClosedAt?.toISOString() ?? null,
-                },
+                { id, isBurned, isClosed },
                 "Position closed state updated",
             );
             log.methodExit(this.logger, "updateClosedState", { id });
@@ -3526,7 +3451,7 @@ export class UniswapV3PositionService {
      * Also refreshes pool state to ensure accurate price data.
      * Calculates and persists totalApr via UniswapV3AprService.calculateSummary().
      *
-     * Note: Does NOT update isActive, isClosed, or positionClosedAt.
+     * Note: Does NOT update isArchived, isClosed, or archivedAt.
      *
      * @param id - Position database ID
      * @param blockNumber - Block number to fetch state at, or 'latest' for current block
@@ -3746,8 +3671,8 @@ export class UniswapV3PositionService {
                     unclaimedYield: zeroValue,
                     lastYieldClaimedAt: now,
                     positionOpenedAt: input.positionOpenedAt ?? now,
-                    positionClosedAt: null,
-                    isActive: true,
+                    archivedAt: null,
+                    isArchived: false,
                 },
             });
 
@@ -4101,8 +4026,8 @@ export class UniswapV3PositionService {
             rewardApr: dbResult.rewardApr,
             totalApr: dbResult.totalApr,
             positionOpenedAt: dbResult.positionOpenedAt,
-            positionClosedAt: dbResult.positionClosedAt,
-            isActive: dbResult.isActive,
+            archivedAt: dbResult.archivedAt,
+            isArchived: dbResult.isArchived,
             config: dbResult.config,
             state: dbResult.state,
             createdAt: dbResult.createdAt,

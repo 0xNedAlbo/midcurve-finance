@@ -13,7 +13,7 @@ interface PositionListProps {
 }
 
 // Valid filter values for validation
-const VALID_STATUS_VALUES = ["all", "active", "closed"] as const;
+const VALID_STATUS_VALUES = ["all", "active", "archived"] as const;
 const VALID_PROTOCOL_VALUES = ["all", "uniswapv3", "uniswapv3-vault"] as const;
 const VALID_SORT_VALUES = ["positionOpenedAt", "totalApr", "currentValue"] as const;
 
@@ -24,7 +24,7 @@ export function PositionList({ className }: PositionListProps) {
   const statusParam = searchParams.get("status");
   const filterStatus = (VALID_STATUS_VALUES.includes(statusParam as any)
     ? statusParam
-    : "active") as "all" | "active" | "closed";
+    : "active") as "all" | "active" | "archived";
 
   const protocolParam = searchParams.get("protocol");
   const filterProtocol = (VALID_PROTOCOL_VALUES.includes(protocolParam as any)
@@ -149,14 +149,14 @@ export function PositionList({ className }: PositionListProps) {
           value={filterStatus}
           onChange={(e) =>
             handleFilterChange({
-              status: e.target.value as "active" | "closed" | "all",
+              status: e.target.value as "active" | "archived" | "all",
             })
           }
           className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
         >
           <option value="all">All Positions</option>
           <option value="active">Active</option>
-          <option value="closed">Closed</option>
+          <option value="archived">Archived</option>
         </select>
 
         {/* Protocol Filter */}

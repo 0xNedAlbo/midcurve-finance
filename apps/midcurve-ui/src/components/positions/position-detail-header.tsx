@@ -25,7 +25,7 @@ interface PositionDetailHeaderProps {
   token1LogoUrl?: string;
 
   // Status
-  status: "active" | "closed" | "archived" | "liquidated";
+  status: "active" | "archived" | "liquidated";
   isInRange?: boolean; // Optional - for active positions
 
   // Chain/Protocol info
@@ -88,8 +88,6 @@ export function PositionDetailHeader({
     switch (s) {
       case "active":
         return "text-green-400 bg-green-500/10 border-green-500/20";
-      case "closed":
-        return "text-slate-400 bg-slate-500/10 border-slate-500/20";
       case "liquidated":
         return "text-red-400 bg-red-500/10 border-red-500/20";
       case "archived":
@@ -110,8 +108,6 @@ export function PositionDetailHeader({
     switch (s) {
       case "active":
         return "Active";
-      case "closed":
-        return "Closed";
       case "archived":
         return "Archived";
       case "liquidated":

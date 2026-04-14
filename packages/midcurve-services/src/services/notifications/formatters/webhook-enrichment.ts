@@ -78,7 +78,7 @@ export function serializePositionForWebhook(position: UniswapV3Position): Record
     id: position.id,
     positionHash: position.positionHash,
     protocol: position.protocol,
-    isActive: position.isActive,
+    isArchived: position.isArchived,
     currentValue: position.currentValue.toString(),
     costBasis: position.costBasis.toString(),
     realizedPnl: position.realizedPnl.toString(),

@@ -22,7 +22,7 @@ interface PositionCardMetricsProps {
   lastYieldClaimedAt: string | null; // ISO timestamp or null
   positionOpenedAt: string; // ISO timestamp
   quoteToken: Token;
-  isActive: boolean; // Used for visual cues
+  isArchived: boolean; // Used for visual cues
   isInRange: boolean; // Used for APR calculation
   totalApr: number | null; // Pre-calculated APR from backend (null if below threshold)
   pnlCurveSlot?: React.ReactNode; // Protocol-specific PnL curve visualization
@@ -37,7 +37,7 @@ export function PositionCardMetrics({
   lastYieldClaimedAt: _lastYieldClaimedAt, // Reserved for future use
   positionOpenedAt: _positionOpenedAt, // Reserved for future use
   quoteToken,
-  isActive: _isActive, // Reserved for future visual cues
+  isArchived: _isArchived, // Reserved for future visual cues
   isInRange: _isInRange, // Reserved for future use
   totalApr,
   pnlCurveSlot,

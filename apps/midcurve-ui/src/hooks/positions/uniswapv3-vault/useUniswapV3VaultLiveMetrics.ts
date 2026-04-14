@@ -29,7 +29,7 @@ export function useUniswapV3VaultLiveMetrics(
   const { sqrtPriceX96BigInt, currentTick } = useWatchUniswapV3PoolPrice({
     poolAddress: config.poolAddress,
     chainId: config.chainId,
-    enabled: position.isActive,
+    enabled: !position.isArchived,
     pollIntervalMs: POLL_INTERVAL_MS,
   });
 

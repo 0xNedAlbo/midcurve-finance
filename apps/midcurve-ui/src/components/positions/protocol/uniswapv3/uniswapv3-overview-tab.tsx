@@ -56,7 +56,7 @@ export function UniswapV3OverviewTab({ position }: UniswapV3OverviewTabProps) {
   const positionStates = calculatePositionStates(position, pnlBreakdown, position.closeOrders);
 
   // Calculate break-even price (only for active positions)
-  const breakEvenPrice = position.isActive
+  const breakEvenPrice = !position.isArchived
     ? calculateBreakEvenPrice(position, pnlBreakdown)
     : null;
 

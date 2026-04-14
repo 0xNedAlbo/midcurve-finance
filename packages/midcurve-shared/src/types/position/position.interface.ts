@@ -144,14 +144,14 @@ export interface PositionInterface {
   readonly positionOpenedAt: Date;
 
   /**
-   * When the position was closed (null if still open)
+   * When the position was archived by the user (null if not archived)
    */
-  readonly positionClosedAt: Date | null;
+  readonly archivedAt: Date | null;
 
   /**
-   * Whether the position is currently active
+   * Whether the position is archived (user-controlled, hides from active list)
    */
-  readonly isActive: boolean;
+  readonly isArchived: boolean;
 
   // ============================================================================
   // Protocol-specific (generic Record for interface)
