@@ -33,7 +33,8 @@ export interface UseVaultUpdateCloseOrderResult {
 
 export function useVaultUpdateCloseOrder(
   chainId: number,
-  vaultAddress: string
+  vaultAddress: string,
+  ownerAddress: string
 ): UseVaultUpdateCloseOrderResult {
   const queryClient = useQueryClient();
   const [result, setResult] = useState<{ txHash: Hash } | null>(null);
@@ -70,9 +71,9 @@ export function useVaultUpdateCloseOrder(
     setResult({ txHash });
 
     queryClient.invalidateQueries({
-      queryKey: queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress),
+      queryKey: queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress, ownerAddress),
     });
-  }, [isTxSuccess, txHash, result, queryClient, chainId, vaultAddress]);
+  }, [isTxSuccess, txHash, result, queryClient, chainId, vaultAddress, ownerAddress]);
 
   useEffect(() => {
     if (writeError) setError(writeError);

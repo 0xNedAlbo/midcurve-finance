@@ -1,9 +1,7 @@
 /**
- * Vault Position Switch Quote Token Endpoint
+ * Vault Position On-Chain Refresh Endpoint
  *
- * POST /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/switch-quote-token
- *
- * Flips the quote/base token assignment and rebuilds the ledger.
+ * POST /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/refresh
  *
  * Authentication: Required (session only)
  */
@@ -18,22 +16,27 @@ import {
   ErrorCodeToHttpStatus,
   GetUniswapV3VaultPositionParamsSchema,
 } from '@midcurve/api-shared';
-import type { UniswapV3VaultPositionResponse } from '@midcurve/api-shared';
 import { serializeUniswapV3VaultPosition } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getUniswapV3VaultPositionService } from '@/lib/services';
+import { prisma } from '@/lib/prisma';
+import {
+  getUniswapV3VaultPositionService,
+  getUniswapV3CloseOrderService,
+} from '@/lib/services';
+import { serializeCloseOrder } from '@/lib/serializers';
+import type { GetUniswapV3VaultPositionResponse } from '@midcurve/api-shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS(request: NextRequest): Promise<Response> {
   return createPreflightResponse(request.headers.get('origin'));
 }
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ chainId: string; vaultAddress: string }> }
+  { params }: { params: Promise<{ chainId: string; vaultAddress: string; ownerAddress: string }> }
 ): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
@@ -49,27 +52,42 @@ export async function POST(
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.VALIDATION_ERROR] });
       }
 
-      const { chainId, vaultAddress } = validation.data;
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const { chainId, vaultAddress, ownerAddress } = validation.data;
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
 
-      const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(user.id, positionHash);
+      const result = await prisma.$transaction(async (tx) => {
+        const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(user.id, positionHash, tx);
+        if (!dbPosition) return null;
 
-      if (!dbPosition) {
+        const refreshedPosition = await getUniswapV3VaultPositionService().refresh(dbPosition.id, 'latest', tx);
+
+        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
+          refreshedPosition.id,
+          {},
+          tx
+        );
+
+        return { position: refreshedPosition, closeOrders };
+      });
+
+      if (!result) {
         const errorResponse = createErrorResponse(ApiErrorCode.POSITION_NOT_FOUND, 'Vault position not found',
           `No vault position found for chainId ${chainId} and vaultAddress ${vaultAddress}`);
         apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND] });
       }
 
-      const position = await getUniswapV3VaultPositionService().switchQuoteToken(dbPosition.id);
+      const { position, closeOrders } = result;
+      const serializedPosition: GetUniswapV3VaultPositionResponse = {
+        ...serializeUniswapV3VaultPosition(position),
+        closeOrders: closeOrders.map(serializeCloseOrder),
+      };
 
-      const serializedPosition = serializeUniswapV3VaultPosition(position) as UniswapV3VaultPositionResponse;
       const response = createSuccessResponse(serializedPosition);
-
       apiLog.requestEnd(apiLogger, requestId, 200, Date.now() - startTime);
       return NextResponse.json(response, { status: 200 });
     } catch (error) {
-      apiLog.methodError(apiLogger, 'POST /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/switch-quote-token', error, { requestId });
+      apiLog.methodError(apiLogger, 'POST /api/v1/positions/uniswapv3-vault/:chainId/:vaultAddress/refresh', error, { requestId });
 
       if (error instanceof Error) {
         if (error.message.includes('not found') || error.message.includes('does not exist')) {
@@ -77,14 +95,9 @@ export async function POST(
           apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
           return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND] });
         }
-        if (error.message.includes('rate limit') || error.message.includes('too many requests')) {
-          const errorResponse = createErrorResponse(ApiErrorCode.TOO_MANY_REQUESTS, 'Rate limit exceeded', error.message);
-          apiLog.requestEnd(apiLogger, requestId, 429, Date.now() - startTime);
-          return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.TOO_MANY_REQUESTS] });
-        }
       }
 
-      const errorResponse = createErrorResponse(ApiErrorCode.INTERNAL_SERVER_ERROR, 'Failed to switch quote token',
+      const errorResponse = createErrorResponse(ApiErrorCode.INTERNAL_SERVER_ERROR, 'Failed to refresh vault position',
         error instanceof Error ? error.message : String(error));
       apiLog.requestEnd(apiLogger, requestId, 500, Date.now() - startTime);
       return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.INTERNAL_SERVER_ERROR] });

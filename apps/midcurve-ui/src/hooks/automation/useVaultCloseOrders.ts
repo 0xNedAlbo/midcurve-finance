@@ -23,6 +23,7 @@ const POLLING_INTERVAL_EXECUTING = 2_000;
 interface UseVaultCloseOrdersParams {
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   automationState?: AutomationState;
   type?: 'sl' | 'tp';
   polling?: boolean;
@@ -46,12 +47,12 @@ export function useVaultCloseOrders(
   params: UseVaultCloseOrdersParams,
   options?: Omit<UseQueryOptions<SerializedCloseOrder[]>, 'queryKey' | 'queryFn'>
 ) {
-  const { chainId, vaultAddress, automationState, type, polling = false } = params;
+  const { chainId, vaultAddress, ownerAddress, automationState, type, polling = false } = params;
 
   return useQuery({
-    queryKey: queryKeys.positions.uniswapv3Vault.closeOrders.list(chainId, vaultAddress, { automationState, type }),
+    queryKey: queryKeys.positions.uniswapv3Vault.closeOrders.list(chainId, vaultAddress, ownerAddress, { automationState, type }),
     queryFn: async () => {
-      const response = await automationApi.vaultPositionCloseOrders.list(chainId, vaultAddress, { automationState, type });
+      const response = await automationApi.vaultPositionCloseOrders.list(chainId, vaultAddress, ownerAddress, { automationState, type });
       return response.data;
     },
     staleTime: 30_000,

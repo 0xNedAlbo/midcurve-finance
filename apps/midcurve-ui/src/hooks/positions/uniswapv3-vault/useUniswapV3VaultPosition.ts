@@ -1,5 +1,5 @@
 /**
- * useUniswapV3VaultPosition - Fetch single vault position by chainId + vaultAddress
+ * useUniswapV3VaultPosition - Fetch single vault position by chainId + vaultAddress + ownerAddress
  *
  * Polls the DB-only GET endpoint every 3 seconds to pick up background
  * state changes. On-chain refresh is handled separately by useUniswapV3VaultAutoRefresh (60s).
@@ -15,13 +15,14 @@ export type UniswapV3VaultPositionData = GetUniswapV3VaultPositionResponse;
 export function useUniswapV3VaultPosition(
   chainId: number,
   vaultAddress: string,
+  ownerAddress: string,
   options?: Omit<UseQueryOptions<GetUniswapV3VaultPositionResponse>, 'queryKey' | 'queryFn'>
 ) {
   return useQuery({
-    queryKey: queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress),
+    queryKey: queryKeys.positions.uniswapv3Vault.detail(chainId, vaultAddress, ownerAddress),
     queryFn: async () => {
       return apiClientFn<GetUniswapV3VaultPositionResponse>(
-        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}`
+        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`
       );
     },
     staleTime: 2_000,

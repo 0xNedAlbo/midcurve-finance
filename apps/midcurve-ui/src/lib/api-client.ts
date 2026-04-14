@@ -294,12 +294,12 @@ export const automationApi = {
      * @param vaultAddress - Vault contract address
      * @param params - Optional filters (automationState, type)
      */
-    list(chainId: number, vaultAddress: string, params?: { automationState?: string; type?: 'sl' | 'tp' }) {
+    list(chainId: number, vaultAddress: string, ownerAddress: string, params?: { automationState?: string; type?: 'sl' | 'tp' }) {
       const searchParams = new URLSearchParams();
       if (params?.automationState) searchParams.set('automationState', params.automationState);
       if (params?.type) searchParams.set('type', params.type);
       const query = searchParams.toString();
-      const url = `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/close-orders${query ? `?${query}` : ''}`;
+      const url = `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}/close-orders${query ? `?${query}` : ''}`;
       return apiClient.get<ListCloseOrdersResponse['data']>(url);
     },
   },

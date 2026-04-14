@@ -82,7 +82,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
         onClick={() => {
           const chainSlug = getChainSlugByChainId(config.chainId);
           if (chainSlug) {
-            navigate(`/positions/increase/uniswapv3-vault/${chainSlug}/${config.vaultAddress}`, { state: { returnTo: location.pathname } });
+            navigate(`/positions/increase/uniswapv3-vault/${chainSlug}/${config.vaultAddress}/${config.ownerAddress}`, { state: { returnTo: location.pathname } });
           }
         }}
         className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
@@ -97,7 +97,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
           onClick={() => {
             const chainSlug = getChainSlugByChainId(config.chainId);
             if (chainSlug) {
-              navigate(`/positions/withdraw/uniswapv3-vault/${chainSlug}/${config.vaultAddress}`, { state: { returnTo: location.pathname } });
+              navigate(`/positions/withdraw/uniswapv3-vault/${chainSlug}/${config.vaultAddress}/${config.ownerAddress}`, { state: { returnTo: location.pathname } });
             }
           }}
           className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-green-300 bg-green-900/20 hover:bg-green-800/30 border-green-600/50"
@@ -129,6 +129,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
       <VaultStopLossButton
         chainId={config.chainId}
         vaultAddress={config.vaultAddress}
+        ownerAddress={config.ownerAddress}
         baseToken={{
           address: baseTokenConfig.address,
           symbol: baseToken.symbol,
@@ -151,6 +152,7 @@ export function UniswapV3VaultActions({ position }: UniswapV3VaultActionsProps) 
       <VaultTakeProfitButton
         chainId={config.chainId}
         vaultAddress={config.vaultAddress}
+        ownerAddress={config.ownerAddress}
         baseToken={{
           address: baseTokenConfig.address,
           symbol: baseToken.symbol,

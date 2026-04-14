@@ -9,7 +9,7 @@ import { apiClientFn } from "@/lib/api-client";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-export function useUniswapV3VaultAutoRefresh(chainId: number, vaultAddress: string) {
+export function useUniswapV3VaultAutoRefresh(chainId: number, vaultAddress: string, ownerAddress: string) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -21,7 +21,7 @@ export function useUniswapV3VaultAutoRefresh(chainId: number, vaultAddress: stri
     setIsRefreshing(true);
     try {
       await apiClientFn(
-        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/refresh`,
+        `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}/refresh`,
         { method: "POST", signal: controller.signal }
       );
     } catch {
@@ -31,7 +31,7 @@ export function useUniswapV3VaultAutoRefresh(chainId: number, vaultAddress: stri
         setIsRefreshing(false);
       }
     }
-  }, [chainId, vaultAddress]);
+  }, [chainId, vaultAddress, ownerAddress]);
 
   useEffect(() => {
     refresh();

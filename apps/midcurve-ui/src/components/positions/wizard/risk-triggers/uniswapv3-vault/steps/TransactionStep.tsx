@@ -115,7 +115,7 @@ export function TransactionStep() {
   const contractAddress = sharedContract?.contractAddress as
     | Address
     | undefined;
-  const multicall = useMulticallVaultPositionCloser(chainId, vaultAddress);
+  const multicall = useMulticallVaultPositionCloser(chainId, vaultAddress, config?.ownerAddress ?? '');
   const refreshPosition = useUniswapV3VaultRefreshPosition();
 
   // ERC-20 approval: vault shares token approval to the closer contract
@@ -461,7 +461,7 @@ export function TransactionStep() {
     }
 
     setConfirmStatus('active');
-    refreshPosition.mutateAsync({ chainId, vaultAddress })
+    refreshPosition.mutateAsync({ chainId, vaultAddress, ownerAddress: config?.ownerAddress ?? '' })
       .then(() => setConfirmStatus('success'))
       .catch(() => setConfirmStatus('warning'))
       .finally(() => setPhase('done'));

@@ -82,6 +82,7 @@ export function UniswapV3VaultConversionTab({ position }: UniswapV3VaultConversi
   const { data: ledgerEvents, isLoading } = useUniswapV3VaultLedger(
     config.chainId,
     config.vaultAddress,
+    config.ownerAddress,
   );
 
   // Adapt vault position: sharesBalance is the user's proportional liquidity

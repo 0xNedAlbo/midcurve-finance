@@ -44,10 +44,11 @@ import { getChainSlugByChainId } from "@/config/chains";
 interface UniswapV3VaultPositionCardProps {
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   index?: number;
 }
 
-export function UniswapV3VaultPositionCard({ chainId, vaultAddress, index = 0 }: UniswapV3VaultPositionCardProps) {
+export function UniswapV3VaultPositionCard({ chainId, vaultAddress, ownerAddress, index = 0 }: UniswapV3VaultPositionCardProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showReloadHistoryModal, setShowReloadHistoryModal] = useState(false);
   const [showSwitchQuoteTokenModal, setShowSwitchQuoteTokenModal] = useState(false);
@@ -55,7 +56,7 @@ export function UniswapV3VaultPositionCard({ chainId, vaultAddress, index = 0 }:
   const isAlt = index % 2 === 1;
 
   // Fetch position detail (auto-refreshes every 3s)
-  const { data: position, isLoading } = useUniswapV3VaultPosition(chainId, vaultAddress);
+  const { data: position, isLoading } = useUniswapV3VaultPosition(chainId, vaultAddress, ownerAddress);
 
   // Show skeleton while loading
   if (isLoading || !position) {
@@ -67,6 +68,7 @@ export function UniswapV3VaultPositionCard({ chainId, vaultAddress, index = 0 }:
       position={position}
       chainId={chainId}
       vaultAddress={vaultAddress}
+      ownerAddress={ownerAddress}
       isAlt={isAlt}
       showDeleteModal={showDeleteModal}
       setShowDeleteModal={setShowDeleteModal}
@@ -86,6 +88,7 @@ interface UniswapV3VaultPositionCardLoadedProps {
   position: UniswapV3VaultPositionData;
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   isAlt: boolean;
   showDeleteModal: boolean;
   setShowDeleteModal: (show: boolean) => void;
@@ -99,6 +102,7 @@ function UniswapV3VaultPositionCardLoaded({
   position: rawPosition,
   chainId,
   vaultAddress,
+  ownerAddress,
   isAlt,
   showDeleteModal,
   setShowDeleteModal,
@@ -111,7 +115,7 @@ function UniswapV3VaultPositionCardLoaded({
   const position = useUniswapV3VaultLiveMetrics(rawPosition);
 
   // On-chain refresh on mount + every 60s (fire-and-forget, DB polling picks up changes)
-  const { isRefreshing: isAutoRefreshing } = useUniswapV3VaultAutoRefresh(chainId, vaultAddress);
+  const { isRefreshing: isAutoRefreshing } = useUniswapV3VaultAutoRefresh(chainId, vaultAddress, ownerAddress);
 
   const isDeleting = useIsMutating({ mutationKey: deletePositionMutationKey(position.positionHash) }) > 0;
   const isReloadingHistory = useIsMutating({ mutationKey: reloadPositionHistoryMutationKey(position.positionHash) }) > 0;
@@ -138,13 +142,14 @@ function UniswapV3VaultPositionCardLoaded({
   // Detail page path
   const chainSlug = getChainSlugByChainId(chainId);
   const detailPath = chainSlug
-    ? `/positions/uniswapv3-vault/${chainSlug}/${vaultAddress}`
-    : `/positions/uniswapv3-vault/${chainId}/${vaultAddress}`;
+    ? `/positions/uniswapv3-vault/${chainSlug}/${vaultAddress}/${ownerAddress}`
+    : `/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
 
   const handleRefresh = () => {
     refreshMutation.mutate({
       chainId,
       vaultAddress,
+      ownerAddress,
     });
   };
 
@@ -240,6 +245,7 @@ function UniswapV3VaultPositionCardLoaded({
         positionHash={position.positionHash}
         chainId={chainId}
         vaultAddress={vaultAddress}
+        ownerAddress={ownerAddress}
         token0Symbol={position.pool.token0.symbol}
         token1Symbol={position.pool.token1.symbol}
         feeBps={position.pool.feeBps}
@@ -253,6 +259,7 @@ function UniswapV3VaultPositionCardLoaded({
         positionHash={position.positionHash}
         chainId={chainId}
         vaultAddress={vaultAddress}
+        ownerAddress={ownerAddress}
         token0Symbol={position.pool.token0.symbol}
         token1Symbol={position.pool.token1.symbol}
         feeBps={position.pool.feeBps}
@@ -267,6 +274,7 @@ function UniswapV3VaultPositionCardLoaded({
         positionHash={position.positionHash}
         chainId={chainId}
         vaultAddress={vaultAddress}
+        ownerAddress={ownerAddress}
         token0Symbol={position.pool.token0.symbol}
         token1Symbol={position.pool.token1.symbol}
         feeBps={position.pool.feeBps}

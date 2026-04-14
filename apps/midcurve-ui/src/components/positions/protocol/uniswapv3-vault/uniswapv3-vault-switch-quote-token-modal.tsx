@@ -22,6 +22,7 @@ interface UniswapV3VaultSwitchQuoteTokenModalProps {
   positionHash: string;
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   token0Symbol: string;
   token1Symbol: string;
   feeBps: number;
@@ -35,6 +36,7 @@ export function UniswapV3VaultSwitchQuoteTokenModal({
   positionHash,
   chainId,
   vaultAddress,
+  ownerAddress,
   token0Symbol,
   token1Symbol,
   feeBps,
@@ -50,7 +52,7 @@ export function UniswapV3VaultSwitchQuoteTokenModal({
 
   const handleSwitch = async () => {
     await switchQuoteToken.mutateAsync({
-      endpoint: `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/switch-quote-token`,
+      endpoint: `/api/v1/positions/uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}/switch-quote-token`,
     });
 
     onSwitchSuccess?.();

@@ -57,7 +57,7 @@ export function UniswapV3VaultAutomationTab({ position }: UniswapV3VaultAutomati
   const handleEditOrders = useCallback(() => {
     const chainSlug = getChainSlugByChainId(config.chainId);
     if (chainSlug) {
-      navigate(`/positions/triggers/uniswapv3-vault/${chainSlug}/${config.vaultAddress}`, {
+      navigate(`/positions/triggers/uniswapv3-vault/${chainSlug}/${config.vaultAddress}/${config.ownerAddress}`, {
         state: { returnTo: `${location.pathname}?tab=automation` },
       });
     }
@@ -102,6 +102,7 @@ export function UniswapV3VaultAutomationTab({ position }: UniswapV3VaultAutomati
         positionId={position.id}
         chainId={config.chainId}
         vaultAddress={config.vaultAddress}
+        ownerAddress={config.ownerAddress}
         contractAddress={contractAddress}
         quoteTokenSymbol={quoteToken.symbol}
         quoteTokenDecimals={quoteToken.decimals}

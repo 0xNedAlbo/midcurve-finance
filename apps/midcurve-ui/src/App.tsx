@@ -64,7 +64,7 @@ function ConfigGate() {
                 element={<PositionDetailPage />}
               />
               <Route
-                path="/positions/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultPositionDetailPage />}
               />
               <Route
@@ -84,7 +84,7 @@ function ConfigGate() {
                 element={<IncreaseDepositPage />}
               />
               <Route
-                path="/positions/increase/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/increase/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultIncreaseDepositPage />}
               />
               <Route
@@ -92,7 +92,7 @@ function ConfigGate() {
                 element={<WithdrawPage />}
               />
               <Route
-                path="/positions/withdraw/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/withdraw/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultWithdrawPage />}
               />
               <Route
@@ -100,7 +100,7 @@ function ConfigGate() {
                 element={<RiskTriggersPage />}
               />
               <Route
-                path="/positions/triggers/uniswapv3-vault/:chain/:vaultAddress"
+                path="/positions/triggers/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultRiskTriggersPage />}
               />
               <Route path="/wallets" element={<WalletManagementPage />} />

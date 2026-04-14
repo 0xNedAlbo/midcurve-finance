@@ -25,6 +25,7 @@ import { VaultOrderActionButton } from './VaultOrderActionButton';
 interface VaultStopLossButtonProps {
   chainId: number;
   vaultAddress: string;
+  ownerAddress: string;
   baseToken: {
     address: string;
     symbol: string;
@@ -44,6 +45,7 @@ interface VaultStopLossButtonProps {
 export function VaultStopLossButton({
   chainId,
   vaultAddress,
+  ownerAddress,
   baseToken,
   quoteToken,
   isToken0Quote,
@@ -81,7 +83,7 @@ export function VaultStopLossButton({
   const handleNavigateToWizard = () => {
     const chainSlug = getChainSlugByChainId(chainId);
     if (chainSlug) {
-      navigate(`/positions/triggers/uniswapv3-vault/${chainSlug}/${vaultAddress}`, {
+      navigate(`/positions/triggers/uniswapv3-vault/${chainSlug}/${vaultAddress}/${ownerAddress}`, {
         state: { returnTo: location.pathname },
       });
     }
@@ -109,6 +111,7 @@ export function VaultStopLossButton({
         buttonLabel={buttonLabel}
         chainId={chainId}
         vaultAddress={vaultAddress}
+        ownerAddress={ownerAddress}
         onNavigateToWizard={handleNavigateToWizard}
       />
     );

@@ -68,9 +68,9 @@ export function UniswapV3VaultCollectFeesForm({
 
   useEffect(() => {
     if (collectFees.isSuccess && !refreshPosition.isPending && !refreshPosition.isSuccess) {
-      refreshPosition.mutate({ chainId: config.chainId, vaultAddress: config.vaultAddress });
+      refreshPosition.mutate({ chainId: config.chainId, vaultAddress: config.vaultAddress, ownerAddress: config.ownerAddress });
     }
-  }, [collectFees.isSuccess, config.chainId, config.vaultAddress, refreshPosition]);
+  }, [collectFees.isSuccess, config.chainId, config.vaultAddress, config.ownerAddress, refreshPosition]);
 
   const isWrongNetwork = !!(
     isConnected &&

@@ -29,6 +29,7 @@ export const dynamic = 'force-dynamic';
 const PathParamsSchema = z.object({
   chainId: z.string().regex(/^\d+$/).transform(Number),
   vaultAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
 });
 
 /**
@@ -64,7 +65,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ chainId: string; vaultAddress: string }> }
+  { params }: { params: Promise<{ chainId: string; vaultAddress: string; ownerAddress: string }> }
 ): Promise<Response> {
   return withSessionAuth(request, async (user, requestId) => {
     const startTime = Date.now();
@@ -90,7 +91,7 @@ export async function GET(
         });
       }
 
-      const { chainId, vaultAddress } = paramsValidation.data;
+      const { chainId, vaultAddress, ownerAddress } = paramsValidation.data;
 
       // 2. Parse query parameters
       const { searchParams } = new URL(request.url);
@@ -119,7 +120,7 @@ export async function GET(
       const { automationState, type } = queryValidation.data;
 
       // 3. Find vault position by positionHash
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}`;
+      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
       const position = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,
         positionHash
