@@ -22,6 +22,7 @@ import {
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUserWalletService, getAuthNonceService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
+import { getDomainEventPublisher, type WalletChangedPayload } from '@midcurve/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -147,6 +148,22 @@ export async function POST(request: NextRequest): Promise<Response> {
       walletType,
       address: normalizedAddress,
     });
+
+    // Publish wallet.added domain event for accounting re-evaluation
+    const eventPublisher = getDomainEventPublisher();
+    await eventPublisher.createAndPublish<WalletChangedPayload>({
+      type: 'wallet.added',
+      entityId: user.id,
+      entityType: 'wallet',
+      payload: {
+        userId: user.id,
+        walletId: wallet.id,
+        walletType,
+        address: normalizedAddress,
+      },
+      source: 'api',
+    });
+
     apiLog.requestEnd(apiLogger, requestId, 201, Date.now() - startTime);
 
     return NextResponse.json(
