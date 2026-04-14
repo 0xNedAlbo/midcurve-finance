@@ -185,24 +185,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // 6. Ensure primary wallet exists in user_wallets table
-    try {
-      const existingWallet = await getUserWalletService().findByTypeAndAddress('evm', address);
-      if (!existingWallet) {
-        await getUserWalletService().create({
-          userId: user.id,
-          walletType: 'evm',
-          address,
-          label: 'Primary Wallet',
-          isPrimary: true,
-        });
-        apiLog.businessOperation(apiLogger, requestId, 'created', 'userWallet', user.id, { address, isPrimary: true });
-      }
-    } catch (walletError) {
-      apiLog.methodError(apiLogger, 'POST /api/v1/auth/verify', walletError, {
-        requestId,
-        context: 'Failed to ensure primary wallet registration',
+    // 6. Ensure primary wallet exists in user_wallets table for this user
+    const hasWallet = await getUserWalletService().isUserWallet(user.id, 'evm', address);
+    if (!hasWallet) {
+      await getUserWalletService().create({
+        userId: user.id,
+        walletType: 'evm',
+        address,
+        label: 'Primary Wallet',
+        isPrimary: true,
       });
+      apiLog.businessOperation(apiLogger, requestId, 'created', 'userWallet', user.id, { address, isPrimary: true });
     }
 
     // 7. Create session

@@ -75,7 +75,7 @@ export class UserWalletService {
   }
 
   async findByWalletHash(walletHash: string): Promise<UserWallet | null> {
-    return this.prisma.userWallet.findUnique({ where: { walletHash } });
+    return this.prisma.userWallet.findFirst({ where: { walletHash } });
   }
 
   /**
@@ -84,7 +84,7 @@ export class UserWalletService {
    */
   async findByTypeAndAddress(walletType: string, address: string): Promise<UserWallet | null> {
     const { walletHash } = this.buildWalletData(walletType, address);
-    return this.prisma.userWallet.findUnique({ where: { walletHash } });
+    return this.prisma.userWallet.findFirst({ where: { walletHash } });
   }
 
   /**

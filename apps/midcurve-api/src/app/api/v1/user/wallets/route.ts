@@ -118,19 +118,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    // Check if wallet is already registered
-    const existing = await getUserWalletService().findByTypeAndAddress(walletType, normalizedAddress);
-    if (existing) {
-      if (existing.userId === user.id) {
-        apiLog.requestEnd(apiLogger, requestId, 409, Date.now() - startTime);
-        return NextResponse.json(
-          createErrorResponse(ApiErrorCode.CONFLICT, 'This wallet is already in your wallet list'),
-          { status: 409 }
-        );
-      }
+    // Check if wallet is already registered by this user
+    const alreadyOwned = await getUserWalletService().isUserWallet(user.id, walletType, normalizedAddress);
+    if (alreadyOwned) {
       apiLog.requestEnd(apiLogger, requestId, 409, Date.now() - startTime);
       return NextResponse.json(
-        createErrorResponse(ApiErrorCode.CONFLICT, 'This wallet is already registered to another account'),
+        createErrorResponse(ApiErrorCode.CONFLICT, 'This wallet is already in your wallet list'),
         { status: 409 }
       );
     }

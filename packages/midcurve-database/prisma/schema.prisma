@@ -1027,7 +1027,7 @@ model UserWallet {
 
   // Human-readable composite key: "evm/{checksummed-address}"
   // No chainId — an EVM wallet is the same identity across all chains
-  walletHash String @unique
+  walletHash String
 
   // Display label (optional, user-assigned)
   label String?
@@ -1043,6 +1043,7 @@ model UserWallet {
 
   @@unique([userId, walletHash])
   @@index([userId])
+  @@index([walletHash])
   @@index([walletType])
   @@map("user_wallets")
   @@schema("public")
