@@ -8,17 +8,20 @@
  * NonfungiblePositionManager to be able to close positions on behalf of the user.
  *
  * Flow:
- * 1. Read isApprovedForAll(owner, operator) from NFPM
+ * 1. Check isApprovedForAll via backend API
  * 2. If not approved, user calls approve()
  * 3. User signs setApprovalForAll(operator, true) tx in wallet
- * 4. Wait for confirmation
- * 5. Update approval status
+ * 4. Wait for confirmation via backend subscription
+ * 5. Re-check approval status via backend API
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWriteContract, useReadContract, useAccount } from 'wagmi';
+import { useWriteContract, useAccount } from 'wagmi';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 import type { Address, Hash } from 'viem';
+import type { Erc721ApprovalData } from '@midcurve/api-shared';
+import { apiClient } from '@/lib/api-client';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ABI,
   getNonfungiblePositionManagerAddress,
@@ -61,28 +64,37 @@ export function useOperatorApproval(
   operatorAddress: Address | undefined
 ): UseOperatorApprovalResult {
   const { address: ownerAddress } = useAccount();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<Error | null>(null);
 
   // Get NFPM address for this chain
   const nfpmAddress = chainId ? getNonfungiblePositionManagerAddress(chainId) : undefined;
 
-  // Read current approval status
+  // Check approval status via backend API
+  const canCheck = !!nfpmAddress && !!ownerAddress && !!operatorAddress && !!chainId;
+  const approvalQueryKey = ['erc721-approval', chainId, nfpmAddress, ownerAddress, operatorAddress];
+
   const {
-    data: isApprovedData,
+    data: approvalData,
     isLoading: isChecking,
     error: readError,
-    refetch,
-  } = useReadContract({
-    address: nfpmAddress,
-    abi: NONFUNGIBLE_POSITION_MANAGER_ABI,
-    functionName: 'isApprovedForAll',
-    args: ownerAddress && operatorAddress ? [ownerAddress, operatorAddress] : undefined,
-    query: {
-      enabled: !!nfpmAddress && !!ownerAddress && !!operatorAddress,
+  } = useQuery({
+    queryKey: approvalQueryKey,
+    queryFn: async (): Promise<Erc721ApprovalData> => {
+      const response = await apiClient.get<Erc721ApprovalData>(
+        `/api/v1/tokens/erc721/approval?tokenAddress=${nfpmAddress}&ownerAddress=${ownerAddress}&operatorAddress=${operatorAddress}&chainId=${chainId}`
+      );
+      return response.data;
     },
+    enabled: canCheck,
+    staleTime: 30_000,
   });
 
-  const isApproved = !!isApprovedData;
+  const refetch = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: approvalQueryKey });
+  }, [queryClient, approvalQueryKey]);
+
+  const isApproved = approvalData?.isApprovedForAll ?? false;
 
   // Write contract hook for approval
   const {
