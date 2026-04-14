@@ -2,17 +2,24 @@
  * UniswapV3ReevaluateOnWalletChangeRule
  *
  * Subscribes to wallet.added and wallet.removed domain events.
- * When a user's wallet set changes, re-evaluates isIgnored flags on all
- * their UniswapV3 position ledger events and rebuilds accounting artifacts
- * (journal entries + token lots).
+ * When a user's wallet set changes, re-evaluates accounting for all
+ * their positions affected by the change.
  *
- * Flow:
- * 1. Wallet change event arrives
- * 2. Build updated wallet address set for the user
- * 3. For each UniswapV3 position:
- *    a. Recalculate ledger aggregates (updates isIgnored flags)
- *    b. Delete existing journal entries + token lots
- *    c. Re-backfill from corrected ledger events
+ * ## UniswapV3 NFT positions (both wallet.added and wallet.removed)
+ *
+ * All NFT positions are re-evaluated because ownership is tracked per-event
+ * via isIgnored flags that depend on the full wallet set:
+ * 1. Recalculate ledger aggregates (updates isIgnored flags)
+ * 2. Delete existing journal entries + token lots
+ * 3. Re-backfill from corrected ledger events
+ *
+ * ## UniswapV3 Vault positions
+ *
+ * Vault positions are tied to a single ownerAddress. Only positions whose
+ * ownerAddress matches the changed wallet are affected:
+ * - wallet.removed: delete journal entries + token lots (position stays)
+ * - wallet.added: delete + re-backfill accounting for matching vault positions
+ *   by emitting position.created to trigger the vault journal entries rule
  */
 
 import type { ConsumeMessage } from 'amqplib';
@@ -24,8 +31,10 @@ import {
   UniswapV3LedgerService,
   JournalService,
   TokenLotService,
+  getDomainEventPublisher,
   type DomainEvent,
   type WalletChangedPayload,
+  type PositionLifecyclePayload,
 } from '@midcurve/services';
 import {
   createErc721TokenHash,
@@ -126,47 +135,57 @@ export class UniswapV3ReevaluateOnWalletChangeRule extends BusinessRule {
   private async handleWalletChanged(
     event: DomainEvent<WalletChangedPayload>,
   ): Promise<void> {
-    const { userId } = event.payload;
+    const { userId, address } = event.payload;
+    const isWalletAdded = event.type === 'wallet.added';
 
-    // 1. Build updated wallet address set
+    // 1. Build updated wallet address set (for NFT position recalculation)
     const walletAddresses = await this.buildUserWalletAddresses(userId);
     this.logger.info(
-      { userId, walletCount: walletAddresses.size },
+      { userId, walletCount: walletAddresses.size, eventType: event.type },
       'Built updated wallet address set',
     );
 
-    // 2. Query all UniswapV3 NFT positions for the user
+    // 2. Re-evaluate UniswapV3 NFT positions (all of them — ownership is per-event)
+    await this.reevaluateNftPositions(userId, walletAddresses);
+
+    // 3. Handle vault positions whose ownerAddress matches the changed wallet
+    await this.handleVaultPositions(userId, address, isWalletAdded);
+  }
+
+  // ===========================================================================
+  // NFT Positions — recalculate isIgnored + rebuild accounting
+  // ===========================================================================
+
+  private async reevaluateNftPositions(
+    userId: string,
+    walletAddresses: Set<string>,
+  ): Promise<void> {
     const positions = await prisma.position.findMany({
       where: { userId, protocol: 'uniswapv3' },
-      select: {
-        id: true,
-        positionHash: true,
-        config: true,
-      },
+      select: { id: true, positionHash: true, config: true },
     });
 
     if (positions.length === 0) {
-      this.logger.info({ userId }, 'No UniswapV3 positions to re-evaluate');
+      this.logger.info({ userId }, 'No UniswapV3 NFT positions to re-evaluate');
       return;
     }
 
     this.logger.info(
       { userId, positionCount: positions.length },
-      'Re-evaluating positions after wallet change',
+      'Re-evaluating NFT positions after wallet change',
     );
 
-    // 3. Re-evaluate each position
     for (const position of positions) {
-      await this.reevaluatePosition(position, userId, walletAddresses);
+      await this.reevaluateNftPosition(position, userId, walletAddresses);
     }
 
     this.logger.info(
       { userId, positionCount: positions.length },
-      'Completed re-evaluation of all positions',
+      'Completed re-evaluation of NFT positions',
     );
   }
 
-  private async reevaluatePosition(
+  private async reevaluateNftPosition(
     position: { id: string; positionHash: string | null; config: unknown },
     userId: string,
     walletAddresses: Set<string>,
@@ -181,7 +200,7 @@ export class UniswapV3ReevaluateOnWalletChangeRule extends BusinessRule {
     const nftId = config.nftId as number;
     const poolAddress = config.poolAddress as string;
 
-    this.logger.info({ positionId, positionHash }, 'Re-evaluating position');
+    this.logger.info({ positionId, positionHash }, 'Re-evaluating NFT position');
 
     // a. Recalculate ledger aggregates (updates isIgnored flags + financial metrics)
     const ledgerService = new UniswapV3LedgerService({ positionId });
@@ -197,7 +216,7 @@ export class UniswapV3ReevaluateOnWalletChangeRule extends BusinessRule {
       const deletedEntries = await this.journalService.deleteEntriesByPositionRef(positionHash);
       this.logger.info(
         { positionId, positionHash, deletedEntries },
-        'Deleted journal entries for position',
+        'Deleted journal entries for NFT position',
       );
     }
 
@@ -207,7 +226,7 @@ export class UniswapV3ReevaluateOnWalletChangeRule extends BusinessRule {
     const deletedLots = await this.tokenLotService.deleteLotsByTokenHash(userId, tokenHash);
     this.logger.info(
       { positionId, tokenHash, deletedLots },
-      'Deleted token lots for position',
+      'Deleted token lots for NFT position',
     );
 
     // d. Re-backfill journal entries + token lots from corrected ledger events
@@ -221,7 +240,97 @@ export class UniswapV3ReevaluateOnWalletChangeRule extends BusinessRule {
       );
       this.logger.info(
         { positionId, positionHash, entriesCreated: result.entriesCreated, eventsProcessed: result.eventsProcessed },
-        'Re-backfilled journal entries for position',
+        'Re-backfilled journal entries for NFT position',
+      );
+    }
+  }
+
+  // ===========================================================================
+  // Vault Positions — delete accounting, optionally re-backfill
+  // ===========================================================================
+
+  private async handleVaultPositions(
+    userId: string,
+    changedAddress: string,
+    isWalletAdded: boolean,
+  ): Promise<void> {
+    // Find vault positions whose ownerAddress matches the changed wallet
+    // ownerAddress is stored in position config JSON
+    const vaultPositions = await prisma.position.findMany({
+      where: {
+        userId,
+        protocol: 'uniswapv3-vault',
+        config: { path: ['ownerAddress'], equals: changedAddress },
+      },
+      select: { id: true, positionHash: true, config: true },
+    });
+
+    if (vaultPositions.length === 0) {
+      this.logger.info(
+        { userId, changedAddress },
+        'No vault positions match the changed wallet',
+      );
+      return;
+    }
+
+    this.logger.info(
+      { userId, changedAddress, positionCount: vaultPositions.length, isWalletAdded },
+      'Processing vault positions for wallet change',
+    );
+
+    for (const position of vaultPositions) {
+      await this.handleVaultPosition(position, userId, isWalletAdded);
+    }
+  }
+
+  private async handleVaultPosition(
+    position: { id: string; positionHash: string | null; config: unknown },
+    userId: string,
+    isWalletAdded: boolean,
+  ): Promise<void> {
+    const positionId = position.id;
+    const positionHash = position.positionHash;
+    const config = position.config as Record<string, unknown>;
+    const chainId = config.chainId as number;
+    const vaultAddress = config.vaultAddress as string;
+
+    // a. Delete existing journal entries
+    if (positionHash) {
+      const deletedEntries = await this.journalService.deleteEntriesByPositionRef(positionHash);
+      this.logger.info(
+        { positionId, positionHash, deletedEntries },
+        'Deleted journal entries for vault position',
+      );
+    }
+
+    // b. Delete existing token lots
+    // Vault tokenHash uses createErc721TokenHash(chainId, vaultAddress, vaultAddress)
+    const tokenHash = createErc721TokenHash(chainId, vaultAddress, vaultAddress);
+    const deletedLots = await this.tokenLotService.deleteLotsByTokenHash(userId, tokenHash);
+    this.logger.info(
+      { positionId, tokenHash, deletedLots },
+      'Deleted token lots for vault position',
+    );
+
+    // c. For wallet.added: re-trigger backfill via position.created domain event
+    //    The existing UniswapV3VaultPostJournalEntriesRule will handle the backfill.
+    //    Its idempotency guard (getOpenLots) passes since we just deleted them.
+    if (isWalletAdded && positionHash) {
+      const publisher = getDomainEventPublisher();
+      await publisher.createAndPublish<PositionLifecyclePayload>({
+        type: 'position.created',
+        entityId: positionId,
+        entityType: 'position',
+        userId,
+        payload: {
+          positionId,
+          positionHash,
+        },
+        source: 'business-logic',
+      });
+      this.logger.info(
+        { positionId, positionHash },
+        'Emitted position.created to trigger vault journal backfill',
       );
     }
   }
