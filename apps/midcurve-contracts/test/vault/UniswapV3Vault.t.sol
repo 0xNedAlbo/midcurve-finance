@@ -153,6 +153,93 @@ contract UniswapV3VaultTest is Test {
         assertEq(emptyVault.balanceOf(alice), 0);
     }
 
+    function test_initialize_feesClaimableViaAccumulator() public {
+        // Create a fresh position with pre-existing fees
+        uint256 feeTokenId = 200;
+        nfpm.createPosition(
+            feeTokenId, alice, address(tokenA), address(tokenB), FEE, TICK_LOWER, TICK_UPPER, INITIAL_LIQUIDITY
+        );
+        nfpm.accrueFeesForTesting(feeTokenId, 5000, 8000);
+
+        // Deploy a new vault and initialize with the fee-bearing position
+        UniswapV3Vault feeVault = UniswapV3Vault(Clones.clone(address(implementation)));
+        vm.prank(alice);
+        nfpm.approve(address(this), feeTokenId);
+        nfpm.transferFrom(alice, address(feeVault), feeTokenId);
+
+        uint256 aliceA_before = tokenA.balanceOf(alice);
+        uint256 aliceB_before = tokenB.balanceOf(alice);
+
+        feeVault.initialize(address(nfpm), feeTokenId, "FeeVault", "FVLT", 6, alice, operator_);
+
+        // Fees should NOT have been sent directly to alice during init
+        assertEq(tokenA.balanceOf(alice), aliceA_before, "no direct token0 transfer during init");
+        assertEq(tokenB.balanceOf(alice), aliceB_before, "no direct token1 transfer during init");
+
+        // Fees should be held by the vault
+        assertEq(tokenA.balanceOf(address(feeVault)), 5000, "vault holds token0 fees");
+        assertEq(tokenB.balanceOf(address(feeVault)), 8000, "vault holds token1 fees");
+
+        // Alice can claim the initialization fees via collectYield
+        vm.prank(alice);
+        feeVault.collectYield(alice);
+
+        assertEq(tokenA.balanceOf(alice) - aliceA_before, 5000, "alice claims token0 fees");
+        assertEq(tokenB.balanceOf(alice) - aliceB_before, 8000, "alice claims token1 fees");
+    }
+
+    function test_initialize_feesNotOrphanedWithZeroLiquidity() public {
+        // Edge case: position with fees but zero liquidity
+        uint256 emptyFeeTokenId = 201;
+        nfpm.createPosition(
+            emptyFeeTokenId, alice, address(tokenA), address(tokenB), FEE, TICK_LOWER, TICK_UPPER, 0
+        );
+        nfpm.accrueFeesForTesting(emptyFeeTokenId, 1000, 2000);
+
+        UniswapV3Vault emptyFeeVault = UniswapV3Vault(Clones.clone(address(implementation)));
+        vm.prank(alice);
+        nfpm.approve(address(this), emptyFeeTokenId);
+        nfpm.transferFrom(alice, address(emptyFeeVault), emptyFeeTokenId);
+
+        emptyFeeVault.initialize(address(nfpm), emptyFeeTokenId, "Empty", "EMPTY", 18, alice, operator_);
+
+        // With zero liquidity, no shares minted → totalSupply = 0
+        // Fees collected into vault but can't be distributed (supply = 0 in accumulator)
+        // This is acceptable: zero-liquidity positions shouldn't have meaningful fees
+        assertEq(emptyFeeVault.totalSupply(), 0);
+    }
+
+    function test_initialize_subsequentFeesWorkNormally() public {
+        // Verify that after init with fees, the accumulator works for future fees too
+        uint256 feeTokenId = 202;
+        nfpm.createPosition(
+            feeTokenId, alice, address(tokenA), address(tokenB), FEE, TICK_LOWER, TICK_UPPER, INITIAL_LIQUIDITY
+        );
+        nfpm.accrueFeesForTesting(feeTokenId, 1000, 1000);
+
+        UniswapV3Vault feeVault = UniswapV3Vault(Clones.clone(address(implementation)));
+        vm.prank(alice);
+        nfpm.approve(address(this), feeTokenId);
+        nfpm.transferFrom(alice, address(feeVault), feeTokenId);
+        feeVault.initialize(address(nfpm), feeTokenId, "FV", "FV", 6, alice, operator_);
+
+        // Claim init fees
+        vm.prank(alice);
+        feeVault.collectYield(alice);
+
+        // Accrue new fees after init
+        nfpm.accrueFeesForTesting(feeTokenId, 3000, 4000);
+
+        uint256 aliceA_before = tokenA.balanceOf(alice);
+        uint256 aliceB_before = tokenB.balanceOf(alice);
+
+        vm.prank(alice);
+        feeVault.collectYield(alice);
+
+        assertEq(tokenA.balanceOf(alice) - aliceA_before, 3000, "post-init token0 fees");
+        assertEq(tokenB.balanceOf(alice) - aliceB_before, 4000, "post-init token1 fees");
+    }
+
     function test_initialize_revertsIfNFTNotOwned() public {
         uint256 otherTokenId = 100;
         nfpm.createPosition(

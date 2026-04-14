@@ -64,8 +64,8 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
 
     modifier initializer() {
         if (_initialized) revert AlreadyInitialized();
-        _initialized = true;
-        _;
+        _;                   // function body runs with _initialized = false
+        _initialized = true; // set AFTER body — keeps accumulator silent during init mint
     }
 
     modifier nonReentrant() {
@@ -184,23 +184,17 @@ contract UniswapV3Vault is ERC20, IMultiTokenVault {
         _operator = operator_;
         emit OperatorUpdated(address(0), operator_);
 
-        // Collect any outstanding NFPM fees and send them directly to the initial
-        // share recipient. This must happen before _mint() because the mint triggers
-        // _beforeTokenTransfer → _collectAndUpdateAccumulator(), which would drain
-        // the fees into the vault while totalSupply == 0, orphaning them. (See #33)
-        positionManager.collect(
-            INonfungiblePositionManagerMinimal.CollectParams({
-                tokenId: tokenId_,
-                recipient: initialShareRecipient_,
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
-
-        // Mint initial shares == liquidity
+        // Mint initial shares first. The initializer modifier keeps _initialized = false
+        // during this call, so _beforeTokenTransfer skips _collectAndUpdateAccumulator().
+        // _settleFees runs but balance = 0, keeping feeDebt at 0.
         if (liquidity > 0) {
             _mint(initialShareRecipient_, uint256(liquidity));
         }
+
+        // Now totalSupply > 0. Collect any outstanding NFPM fees into the vault and
+        // distribute them via the accumulator. Because feeDebt[initialShareRecipient_]
+        // is still 0, the full fee amount becomes claimable through collectYield().
+        _collectAndUpdateAccumulator();
 
         emit VaultInitialized(positionManager_, tokenId_, initialShareRecipient_, liquidity);
     }
