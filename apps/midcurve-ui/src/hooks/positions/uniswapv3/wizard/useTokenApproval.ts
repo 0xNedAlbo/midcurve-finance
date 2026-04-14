@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { Address } from 'viem';
 import { maxUint256, getAddress } from 'viem';
-import {
-  useReadContract,
-  useWriteContract,
-} from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
-import { ERC20_ABI } from '@/config/tokens/erc20-abi';
 import { getNonfungiblePositionManagerAddress } from '@/config/contracts/nonfungible-position-manager';
+import { apiClient } from '@/lib/api-client';
+import type { Erc20ApprovalData } from '@midcurve/api-shared';
+import { ERC20_ABI } from '@/config/tokens/erc20-abi';
 
 export interface UseTokenApprovalParams {
   tokenAddress: Address | null;
@@ -55,44 +55,44 @@ export function useTokenApproval({
   enabled = true,
 }: UseTokenApprovalParams): UseTokenApprovalResult {
   const [approvalError, setApprovalError] = useState<Error | null>(null);
+  const queryClient = useQueryClient();
 
   // Get the NonfungiblePositionManager address for this chain
   const spenderAddress = chainId
     ? getNonfungiblePositionManagerAddress(chainId)
     : undefined;
 
-  // Read current allowance
+  // Read current allowance via backend API
+  const canCheck = enabled && !!tokenAddress && !!ownerAddress && !!spenderAddress && !!chainId;
+  const approvalQueryKey = ['erc20-approval', chainId, tokenAddress, ownerAddress, spenderAddress];
+
   const {
-    data: allowanceData,
+    data: approvalData,
     isLoading: isLoadingAllowance,
-    refetch: refetchAllowance,
-  } = useReadContract({
-    address: tokenAddress ?? undefined,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args:
-      ownerAddress && spenderAddress
-        ? [ownerAddress, spenderAddress]
-        : undefined,
-    query: {
-      enabled:
-        enabled &&
-        !!tokenAddress &&
-        !!ownerAddress &&
-        !!spenderAddress &&
-        !!chainId,
+  } = useQuery({
+    queryKey: approvalQueryKey,
+    queryFn: async (): Promise<Erc20ApprovalData> => {
+      const response = await apiClient.get<Erc20ApprovalData>(
+        `/api/v1/tokens/erc20/approval?tokenAddress=${tokenAddress}&ownerAddress=${ownerAddress}&spenderAddress=${spenderAddress}&chainId=${chainId}`
+      );
+      return response.data;
     },
-    chainId,
+    enabled: canCheck,
+    staleTime: 30_000,
   });
 
   const allowance =
-    allowanceData !== undefined
-      ? BigInt(allowanceData.toString())
+    approvalData?.allowance !== undefined
+      ? BigInt(approvalData.allowance)
       : undefined;
 
   // Check if approval is needed
   const isApproved = allowance !== undefined && allowance >= requiredAmount;
   const needsApproval = allowance !== undefined && allowance < requiredAmount;
+
+  const refetchAllowance = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: approvalQueryKey });
+  }, [queryClient, approvalQueryKey]);
 
   // Write contract for approval
   const {
@@ -148,21 +148,17 @@ export function useTokenApproval({
 
     setApprovalError(null);
 
-    try {
-      // Ensure addresses are properly checksummed (EIP-55)
-      const checksummedTokenAddress = getAddress(tokenAddress);
-      const checksummedSpenderAddress = getAddress(spenderAddress);
+    // Ensure addresses are properly checksummed (EIP-55)
+    const checksummedTokenAddress = getAddress(tokenAddress);
+    const checksummedSpenderAddress = getAddress(spenderAddress);
 
-      writeContract({
-        address: checksummedTokenAddress,
-        abi: ERC20_ABI,
-        functionName: 'approve',
-        args: [checksummedSpenderAddress, maxUint256], // Approve max amount to avoid future approvals
-        chainId,
-      });
-    } catch (error) {
-      setApprovalError(error as Error);
-    }
+    writeContract({
+      address: checksummedTokenAddress,
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [checksummedSpenderAddress, maxUint256], // Approve max amount to avoid future approvals
+      chainId,
+    });
   };
 
   return {

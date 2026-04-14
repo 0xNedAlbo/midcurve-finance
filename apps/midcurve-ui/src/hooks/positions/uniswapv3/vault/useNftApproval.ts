@@ -6,7 +6,7 @@
  * this uses approve(address, tokenId) for single-token approval.
  *
  * Flow:
- * 1. Read getApproved(tokenId) from NFPM
+ * 1. Check getApproved(tokenId) via backend API
  * 2. Compare returned address to spender (factory)
  * 3. If not approved, user calls approve()
  * 4. User signs approve(spender, tokenId) tx in wallet
@@ -14,14 +14,18 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWriteContract, useReadContract } from 'wagmi';
+import { useWriteContract } from 'wagmi';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
+import { useAccount } from 'wagmi';
 import type { Address, Hash } from 'viem';
+import type { Erc721ApprovalData } from '@midcurve/api-shared';
 import {
   NONFUNGIBLE_POSITION_MANAGER_ABI,
   getNonfungiblePositionManagerAddress,
 } from '@/config/contracts/nonfungible-position-manager';
 import { compareAddresses } from '@midcurve/shared';
+import { apiClient } from '@/lib/api-client';
 
 export interface UseNftApprovalResult {
   isApproved: boolean;
@@ -49,27 +53,37 @@ export function useNftApproval(
   spenderAddress: Address | undefined
 ): UseNftApprovalResult {
   const [error, setError] = useState<Error | null>(null);
+  const { address: ownerAddress } = useAccount();
+  const queryClient = useQueryClient();
 
   const nfpmAddress = chainId ? getNonfungiblePositionManagerAddress(chainId) : undefined;
 
-  // Read current approved address for this token
+  // Read current approved address for this token via backend API
+  const canCheck = !!nfpmAddress && !!ownerAddress && nftId !== undefined && !!chainId;
+  const approvalQueryKey = ['erc721-approval', chainId, nfpmAddress, ownerAddress, nftId?.toString()];
+
   const {
-    data: approvedAddress,
+    data: approvalData,
     isLoading: isChecking,
     error: readError,
-    refetch,
-  } = useReadContract({
-    address: nfpmAddress,
-    abi: NONFUNGIBLE_POSITION_MANAGER_ABI,
-    functionName: 'getApproved',
-    args: nftId !== undefined ? [nftId] : undefined,
-    query: {
-      enabled: !!nfpmAddress && nftId !== undefined,
+  } = useQuery({
+    queryKey: approvalQueryKey,
+    queryFn: async (): Promise<Erc721ApprovalData> => {
+      const response = await apiClient.get<Erc721ApprovalData>(
+        `/api/v1/tokens/erc721/approval?tokenAddress=${nfpmAddress}&ownerAddress=${ownerAddress}&tokenId=${nftId!.toString()}&chainId=${chainId}`
+      );
+      return response.data;
     },
+    enabled: canCheck,
+    staleTime: 30_000,
   });
 
-  const isApproved = !!approvedAddress && !!spenderAddress &&
-    compareAddresses(approvedAddress as string, spenderAddress) === 0;
+  const refetch = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: approvalQueryKey });
+  }, [queryClient, approvalQueryKey]);
+
+  const isApproved = !!approvalData?.approvedAddress && !!spenderAddress &&
+    compareAddresses(approvalData.approvedAddress, spenderAddress) === 0;
 
   // Write contract hook for approval
   const {
