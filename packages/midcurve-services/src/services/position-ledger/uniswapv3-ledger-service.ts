@@ -1260,7 +1260,7 @@ export class UniswapV3LedgerService {
                     state.recipient.toLowerCase(),
                 );
 
-                if (recipientIsUser) {
+                if (recipientIsUser && ownershipActive) {
                     // Realize yield — user actually received the tokens
                     costBasisAfter = previousCostBasis;
 
