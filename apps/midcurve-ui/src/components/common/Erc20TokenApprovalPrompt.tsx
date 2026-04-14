@@ -26,7 +26,7 @@ import { buildTxUrl, truncateTxHash } from '@/lib/explorer-utils';
 import { useWatchErc20TokenApproval } from '@/hooks/tokens/erc20/useWatchErc20TokenApproval';
 import { useWatchTransactionStatus } from '@/hooks/transactions/evm/useWatchTransactionStatus';
 
-export type ApprovalStatus = 'pending' | 'waiting' | 'confirming' | 'success' | 'error';
+export type ApprovalStatus = 'loading' | 'pending' | 'waiting' | 'confirming' | 'success' | 'error';
 
 export interface Erc20TokenApprovalPromptProps {
   tokenAddress: Address | null;
@@ -96,6 +96,7 @@ export function useErc20TokenApprovalPrompt({
   const {
     allowance,
     isApproved: approvalSufficient,
+    isCreating: isCreatingSubscription,
     refresh: refreshApproval,
     error: approvalWatchError,
   } = useWatchErc20TokenApproval({
@@ -143,8 +144,9 @@ export function useErc20TokenApprovalPrompt({
     // Bridge the gap: receipt confirmed but allowance poll hasn't caught up yet
     if (isConfirming || (receiptSuccess && !isApproved)) return 'confirming';
     if (isSigning) return 'waiting';
+    if (isCreatingSubscription || allowance === undefined) return 'loading';
     return 'pending';
-  }, [requiredAmount, isApproved, errorObj, isConfirming, receiptSuccess, isSigning]);
+  }, [requiredAmount, isApproved, errorObj, isConfirming, receiptSuccess, isSigning, isCreatingSubscription, allowance]);
 
   const handleExactApprove = useCallback(() => {
     if (!tokenAddress || !spenderAddress || !chainId) return;
@@ -196,6 +198,7 @@ export function useErc20TokenApprovalPrompt({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
+          {status === 'loading' && <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />}
           {status === 'pending' && <Circle className="w-5 h-5 text-slate-500" />}
           {status === 'waiting' && <Circle className="w-5 h-5 text-blue-400" />}
           {status === 'confirming' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
