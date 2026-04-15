@@ -13,12 +13,12 @@ interface TokenizePromptProps {
 
 /**
  * Compute default vault token decimals from position liquidity.
- * Formula: max(0, floor(log10(L)) - 8)
+ * Formula: max(0, floor(log10(L)) - 4)
  */
 function computeDefaultDecimals(liquidity: string): number {
   if (!liquidity || liquidity === '0') return 0;
   const digits = liquidity.length;
-  return Math.max(0, digits - 1 - 8);
+  return Math.max(0, digits - 1 - 4);
 }
 
 export function TokenizePrompt({
