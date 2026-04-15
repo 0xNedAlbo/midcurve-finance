@@ -1,13 +1,14 @@
 /**
  * PoolPriceSubscriber Worker
  *
- * Monitors pool prices for pools that have active positions.
- * Dynamically adds/removes pools based on position lifecycle events.
+ * Monitors pool prices for pools that have active positions and active
+ * OnchainDataSubscribers (UI poll subscriptions). Dynamically adds/removes
+ * pools based on position lifecycle events and subscriber creation.
  * Publishes price changes to RabbitMQ via slot0() polling.
  */
 
 import { prisma } from '@midcurve/database';
-// PositionJSON import removed — handlePositionCreated now uses DB lookup
+import type { UniswapV3PoolPriceSubscriptionConfig } from '@midcurve/shared';
 import { getEvmConfig } from '@midcurve/services';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
 import {
@@ -22,6 +23,11 @@ import {
 } from '../../polling/uniswap-v3-pools';
 
 const log = onchainDataLogger.child({ component: 'PoolPriceSubscriber' });
+
+/** Interval for polling active OnchainDataSubscribers (default: 10 seconds) */
+const SUBSCRIBER_POLL_INTERVAL_MS = parseInt(
+  process.env.POOL_PRICE_SUBSCRIBER_POLL_INTERVAL_MS || '10000', 10
+);
 
 /**
  * Pool configuration from database JSON field.
@@ -51,8 +57,8 @@ interface SubscribedPool {
 
 /**
  * PoolPriceSubscriber manages pool price polling batches.
- * Subscriptions are derived from active positions - pools are polled
- * when they have at least one active position.
+ * Subscriptions are derived from active positions and active
+ * OnchainDataSubscribers (UI poll subscriptions).
  */
 export class PoolPriceSubscriber {
   private batches: UniswapV3PoolSubscriptionBatch[] = [];
@@ -64,6 +70,9 @@ export class PoolPriceSubscriber {
 
   // Cleanup state
   private cleanupTimer: NodeJS.Timeout | null = null;
+
+  // Subscriber polling state
+  private subscriberPollTimer: NodeJS.Timeout | null = null;
 
   /**
    * Start the subscriber.
@@ -124,6 +133,9 @@ export class PoolPriceSubscriber {
       // Start cleanup timer (safety net for missed events)
       this.startCleanup();
 
+      // Start polling for new subscriber pools
+      this.startSubscriberPolling();
+
       const totalPools = this.batches.reduce(
         (sum, batch) => sum + batch.getStatus().poolCount,
         0
@@ -153,8 +165,9 @@ export class PoolPriceSubscriber {
 
     priceLog.workerLifecycle(log, 'PoolPriceSubscriber', 'stopping');
 
-    // Stop cleanup timer
+    // Stop timers
     this.stopCleanup();
+    this.stopSubscriberPolling();
 
     // Stop all batches
     await Promise.all(this.batches.map((batch) => batch.stop()));
@@ -216,7 +229,30 @@ export class PoolPriceSubscriber {
       }
     }
 
-    log.info({ poolCount: uniquePools.size, msg: 'Loaded pools with active positions' });
+    // Also include pools from active OnchainDataSubscribers (UI poll subscriptions)
+    const activeSubscribers = await prisma.onchainDataSubscribers.findMany({
+      where: {
+        subscriptionType: 'uniswapv3-pool-price',
+        status: 'active',
+      },
+      select: { config: true },
+    });
+
+    for (const sub of activeSubscribers) {
+      const subConfig = sub.config as unknown as UniswapV3PoolPriceSubscriptionConfig;
+      if (!subConfig.chainId || !subConfig.poolAddress) continue;
+      const key = `${subConfig.chainId}/${subConfig.poolAddress.toLowerCase()}`;
+      if (!uniquePools.has(key)) {
+        uniquePools.set(key, { chainId: subConfig.chainId, address: subConfig.poolAddress });
+      }
+    }
+
+    log.info({
+      poolCount: uniquePools.size,
+      fromPositions: activePositions.length,
+      fromSubscribers: activeSubscribers.length,
+      msg: 'Loaded pools from active positions and subscribers',
+    });
 
     // Group pools by chain ID
     const poolsByChain = new Map<number, PoolInfo[]>();
@@ -454,6 +490,75 @@ export class PoolPriceSubscriber {
   }
 
   // ===========================================================================
+  // Subscriber Polling (discover pools from OnchainDataSubscribers)
+  // ===========================================================================
+
+  /**
+   * Start polling for active OnchainDataSubscribers that need pool price polling.
+   */
+  private startSubscriberPolling(): void {
+    this.subscriberPollTimer = setInterval(() => {
+      this.pollActiveSubscribers().catch((err) => {
+        log.error({
+          error: err instanceof Error ? err.message : String(err),
+          msg: 'Error polling for active subscribers',
+        });
+      });
+    }, SUBSCRIBER_POLL_INTERVAL_MS);
+
+    log.info({ intervalMs: SUBSCRIBER_POLL_INTERVAL_MS, msg: 'Started subscriber polling' });
+  }
+
+  /**
+   * Stop subscriber polling.
+   */
+  private stopSubscriberPolling(): void {
+    if (this.subscriberPollTimer) {
+      clearInterval(this.subscriberPollTimer);
+      this.subscriberPollTimer = null;
+      log.info({ msg: 'Stopped subscriber polling' });
+    }
+  }
+
+  /**
+   * Poll for active OnchainDataSubscribers and add any new pools to polling batches.
+   */
+  private async pollActiveSubscribers(): Promise<void> {
+    const activeSubscribers = await prisma.onchainDataSubscribers.findMany({
+      where: {
+        subscriptionType: 'uniswapv3-pool-price',
+        status: 'active',
+      },
+      select: { config: true },
+    });
+
+    for (const sub of activeSubscribers) {
+      const config = sub.config as unknown as UniswapV3PoolPriceSubscriptionConfig;
+      if (!config.chainId || !config.poolAddress) continue;
+      if (!isSupportedChain(config.chainId)) continue;
+
+      const normalizedAddress = config.poolAddress.toLowerCase();
+      if (this.subscribedPools.has(normalizedAddress)) continue;
+
+      const poolId = `uniswapv3/${config.chainId}/${normalizedAddress}`;
+
+      this.subscribedPools.set(normalizedAddress, {
+        poolId,
+        poolAddress: normalizedAddress,
+        chainId: config.chainId,
+      });
+
+      log.info({
+        chainId: config.chainId,
+        poolAddress: normalizedAddress,
+        msg: 'Adding pool from active subscriber',
+      });
+
+      await this.addPoolToBatch(config.chainId, { address: normalizedAddress, poolId });
+    }
+  }
+
+  // ===========================================================================
   // Cleanup (safety net for missed events)
   // ===========================================================================
 
@@ -484,7 +589,7 @@ export class PoolPriceSubscriber {
   }
 
   /**
-   * Clean up pools that no longer have active positions.
+   * Clean up pools that no longer have active positions or active subscribers.
    * Safety net in case domain events were missed.
    */
   private async cleanupOrphanedPools(): Promise<void> {
@@ -510,7 +615,23 @@ export class PoolPriceSubscriber {
       }
     }
 
-    // Find pools that are subscribed but have no active positions
+    // Also include pools from active OnchainDataSubscribers
+    const activeSubscribers = await prisma.onchainDataSubscribers.findMany({
+      where: {
+        subscriptionType: 'uniswapv3-pool-price',
+        status: 'active',
+      },
+      select: { config: true },
+    });
+
+    for (const sub of activeSubscribers) {
+      const subConfig = sub.config as unknown as UniswapV3PoolPriceSubscriptionConfig;
+      if (subConfig.chainId && subConfig.poolAddress) {
+        activePoolIds.add(`uniswapv3/${subConfig.chainId}/${subConfig.poolAddress.toLowerCase()}`);
+      }
+    }
+
+    // Find pools that are subscribed but have no active positions or subscribers
     const orphanedPools: SubscribedPool[] = [];
     for (const poolSub of this.subscribedPools.values()) {
       if (!activePoolIds.has(poolSub.poolId)) {
