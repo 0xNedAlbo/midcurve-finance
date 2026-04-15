@@ -22,8 +22,11 @@ import { useAccount } from 'wagmi';
 import { formatCompactValue } from '@midcurve/shared';
 import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
+import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
 import { formatChainName } from '@/lib/position-helpers';
+import type { EvmChainSlug } from '@/config/chains';
+import { CHAIN_METADATA } from '@/config/chains';
 import { useNftApproval } from '@/hooks/positions/uniswapv3/vault/useNftApproval';
 import { useCreateVault } from '@/hooks/positions/uniswapv3/vault/useCreateVault';
 import { useDiscoverVaultPosition } from '@/hooks/positions/uniswapv3/vault/useDiscoverVaultPosition';
@@ -81,8 +84,20 @@ export function UniswapV3TokenizePositionModal({
   const { data: sharedContract, isPending: isSharedContractPending } = useChainSharedContract(chainId);
   const factoryAddress = sharedContract?.contracts['UniswapV3VaultFactory']?.contractAddress as Address | undefined;
 
-  const { address: connectedAddress } = useAccount();
+  const { address: connectedAddress, isConnected, chainId: connectedChainId } = useAccount();
   const { operatorAddress } = useConfig();
+
+  // Map chainId to chain slug for network switch prompt
+  const getChainSlugFromChainId = (id: number): EvmChainSlug | null => {
+    const entry = Object.entries(CHAIN_METADATA).find(
+      ([_, meta]) => meta.chainId === id
+    );
+    return entry ? (entry[0] as EvmChainSlug) : null;
+  };
+
+  const chain = getChainSlugFromChainId(chainId);
+  const chainConfig = chain ? CHAIN_METADATA[chain] : null;
+  const isWrongNetwork = !!(isConnected && chainConfig && connectedChainId !== chainConfig.chainId);
 
   // NFT approval hook
   const nftApproval = useNftApproval(chainId, BigInt(nftId), factoryAddress);
@@ -311,8 +326,13 @@ export function UniswapV3TokenizePositionModal({
               </p>
             )}
 
+            {/* Network Switch */}
+            {isConnected && chain && (
+              <EvmSwitchNetworkPrompt chain={chain} isWrongNetwork={isWrongNetwork} />
+            )}
+
             {/* Transaction Section */}
-            {factoryAddress && (
+            {factoryAddress && !isWrongNetwork && (
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-slate-300 mb-3">Transactions</h3>
 

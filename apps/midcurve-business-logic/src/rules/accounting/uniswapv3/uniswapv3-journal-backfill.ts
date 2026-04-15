@@ -17,7 +17,15 @@
  */
 
 import { prisma as prismaClient, type PrismaClient } from '@midcurve/database';
-import { ACCOUNT_CODES, createErc20TokenHash, type JournalLineInput } from '@midcurve/shared';
+import {
+  ACCOUNT_CODES,
+  createErc20TokenHash,
+  createErc721TokenHash,
+  getUniswapV3NfpmAddress,
+  DEFAULT_USER_SETTINGS,
+  type JournalLineInput,
+  type CostBasisMethod,
+} from '@midcurve/shared';
 import {
   createServiceLogger,
   type ServiceLogger,
@@ -25,6 +33,9 @@ import {
   findClosestPrice,
   JournalService,
   JournalLineBuilder,
+  TokenLotService,
+  createLotSelector,
+  type LotSelector,
 } from '@midcurve/services';
 
 // =============================================================================
@@ -46,6 +57,8 @@ interface LedgerEventRow {
   id: string;
   eventType: string;
   timestamp: Date;
+  inputHash: string;
+  config: unknown;
   tokenValue: string;
   deltaCostBasis: string;
   costBasisAfter: string;
@@ -54,6 +67,11 @@ interface LedgerEventRow {
   deltaCollectedYield: string;
   collectedYieldAfter: string;
   isIgnored: boolean;
+}
+
+interface PositionTokenContext {
+  tokenId: string;
+  tokenHash: string;
 }
 
 const FLOAT_TO_BIGINT_SCALE = 1e8;
@@ -69,12 +87,14 @@ export class UniswapV3JournalBackfillService {
   private readonly prisma: PrismaClient;
   private readonly logger: ServiceLogger;
   private readonly journalService: JournalService;
+  private readonly tokenLotService: TokenLotService;
   private readonly coingecko: CoinGeckoClient;
 
   constructor(deps?: { prisma?: PrismaClient }) {
     this.prisma = (deps?.prisma ?? prismaClient) as PrismaClient;
     this.logger = createServiceLogger('UniswapV3JournalBackfillService');
     this.journalService = JournalService.getInstance();
+    this.tokenLotService = TokenLotService.getInstance();
     this.coingecko = CoinGeckoClient.getInstance();
   }
 
@@ -159,6 +179,8 @@ export class UniswapV3JournalBackfillService {
         id: true,
         eventType: true,
         timestamp: true,
+        inputHash: true,
+        config: true,
         tokenValue: true,
         deltaCostBasis: true,
         costBasisAfter: true,
@@ -200,6 +222,11 @@ export class UniswapV3JournalBackfillService {
       priceTimeSeries = chartData.prices;
     }
 
+    // Resolve token context for lot creation/disposal
+    const tokenCtx = await this.resolvePositionToken(positionId);
+    const costBasisMethod = await this.getUserCostBasisMethod(userId);
+    const lotSelector = createLotSelector(costBasisMethod);
+
     // Replay events chronologically
     let entriesCreated = 0;
     let isFirstFinancialEvent = true;
@@ -218,12 +245,14 @@ export class UniswapV3JournalBackfillService {
       switch (event.eventType) {
         case 'INCREASE_POSITION':
           created = await this.backfillLiquidityIncreased(
-            event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent,
+            event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent, tokenCtx,
           );
           isFirstFinancialEvent = false;
           break;
         case 'DECREASE_POSITION':
-          created = await this.backfillLiquidityDecreased(event, ctx, positionRef, instrumentRef, userId);
+          created = await this.backfillLiquidityDecreased(
+            event, ctx, positionRef, instrumentRef, userId, tokenCtx, lotSelector,
+          );
           break;
         case 'COLLECT':
           created = await this.backfillFeesCollected(event, ctx, positionRef, instrumentRef, userId);
@@ -231,10 +260,12 @@ export class UniswapV3JournalBackfillService {
         case 'TRANSFER': {
           const deltaCB = BigInt(event.deltaCostBasis);
           if (deltaCB < 0n) {
-            created = await this.backfillTransferOut(event, ctx, positionRef, instrumentRef, userId);
+            created = await this.backfillTransferOut(
+              event, ctx, positionRef, instrumentRef, userId, tokenCtx, lotSelector,
+            );
           } else if (deltaCB > 0n) {
             created = await this.backfillTransferIn(
-              event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent,
+              event, ctx, positionRef, instrumentRef, userId, isFirstFinancialEvent, tokenCtx,
             );
             isFirstFinancialEvent = false;
           }
@@ -325,8 +356,8 @@ export class UniswapV3JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-
     isFoundation: boolean,
+    tokenCtx: PositionTokenContext | null,
   ): Promise<boolean> {
     const domainEventId = isFoundation
       ? `backfill:${event.id}:foundation`
@@ -336,6 +367,27 @@ export class UniswapV3JournalBackfillService {
 
     const costBasis = isFoundation ? event.costBasisAfter : event.deltaCostBasis;
     if (costBasis === '0') return false;
+
+    // Create token lot for cost basis tracking
+    if (tokenCtx) {
+      const config = event.config as Record<string, unknown>;
+      const deltaL = config.deltaL as string | undefined;
+      const quantity = absBigint(deltaL ?? '0');
+      if (quantity !== '0') {
+        const costBasisAbsolute = computeReportingAmount(costBasis, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        await this.tokenLotService.createLot({
+          userId,
+          tokenId: tokenCtx.tokenId,
+          tokenHash: tokenCtx.tokenHash,
+          quantity,
+          costBasisAbsolute,
+          acquiredAt: event.timestamp,
+          acquisitionEventId: event.inputHash,
+          positionLedgerEventId: event.id,
+          transferEvent: 'INCREASE_POSITION',
+        });
+      }
+    }
 
     const lines = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
@@ -373,10 +425,32 @@ export class UniswapV3JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-
+    tokenCtx: PositionTokenContext | null,
+    lotSelector: LotSelector,
   ): Promise<boolean> {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
+
+    // Dispose token lots for the decreased liquidity
+    if (tokenCtx) {
+      const config = event.config as Record<string, unknown>;
+      const deltaL = config.deltaL as string | undefined;
+      const quantityToDispose = absBigint(deltaL ?? '0');
+      if (quantityToDispose !== '0') {
+        const proceedsReporting = computeReportingAmount(event.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        await this.tokenLotService.disposeLots({
+          userId,
+          tokenHash: tokenCtx.tokenHash,
+          quantityToDispose,
+          proceedsReporting,
+          disposedAt: event.timestamp,
+          disposalEventId: event.inputHash,
+          positionLedgerEventId: event.id,
+          transferEvent: 'DECREASE_POSITION',
+          lotSelector,
+        });
+      }
+    }
 
     const absDeltaCostBasis = absBigint(event.deltaCostBasis);
     const tokenValue = event.tokenValue;
@@ -505,8 +579,8 @@ export class UniswapV3JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-
     isFoundation: boolean,
+    tokenCtx: PositionTokenContext | null,
   ): Promise<boolean> {
     const domainEventId = isFoundation
       ? `backfill:${event.id}:foundation`
@@ -516,6 +590,27 @@ export class UniswapV3JournalBackfillService {
 
     const costBasis = isFoundation ? event.costBasisAfter : event.deltaCostBasis;
     if (costBasis === '0') return false;
+
+    // Create token lot — use liquidityAfter (total liquidity received via transfer)
+    if (tokenCtx) {
+      const config = event.config as Record<string, unknown>;
+      const liquidityAfter = config.liquidityAfter as string | undefined;
+      const quantity = liquidityAfter ?? '0';
+      if (quantity !== '0') {
+        const costBasisAbsolute = computeReportingAmount(costBasis, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        await this.tokenLotService.createLot({
+          userId,
+          tokenId: tokenCtx.tokenId,
+          tokenHash: tokenCtx.tokenHash,
+          quantity,
+          costBasisAbsolute,
+          acquiredAt: event.timestamp,
+          acquisitionEventId: event.inputHash,
+          positionLedgerEventId: event.id,
+          transferEvent: 'TRANSFER_IN',
+        });
+      }
+    }
 
     const lines = new JournalLineBuilder()
       .withReporting(ctx.reportingCurrency, ctx.exchangeRate, ctx.quoteTokenDecimals)
@@ -553,10 +648,31 @@ export class UniswapV3JournalBackfillService {
     positionRef: string,
     instrumentRef: string,
     userId: string,
-
+    tokenCtx: PositionTokenContext | null,
+    lotSelector: LotSelector,
   ): Promise<boolean> {
     const domainEventId = `backfill:${event.id}`;
     if (await this.journalService.isProcessed(domainEventId)) return false;
+
+    // Dispose all open lots — transfer out exits the entire position
+    if (tokenCtx) {
+      const openLots = await this.tokenLotService.getOpenLots(userId, tokenCtx.tokenHash);
+      const totalOpen = openLots.reduce((sum, lot) => sum + BigInt(lot.openQuantity), 0n);
+      if (totalOpen > 0n) {
+        const proceedsReporting = computeReportingAmount(event.tokenValue, ctx.exchangeRate, ctx.quoteTokenDecimals);
+        await this.tokenLotService.disposeLots({
+          userId,
+          tokenHash: tokenCtx.tokenHash,
+          quantityToDispose: totalOpen.toString(),
+          proceedsReporting,
+          disposedAt: event.timestamp,
+          disposalEventId: event.inputHash,
+          positionLedgerEventId: event.id,
+          transferEvent: 'TRANSFER_OUT',
+          lotSelector,
+        });
+      }
+    }
 
     const absDeltaCostBasis = absBigint(event.deltaCostBasis);
     const tokenValue = event.tokenValue;
@@ -661,6 +777,54 @@ export class UniswapV3JournalBackfillService {
     };
   }
 
+  // ===========================================================================
+  // Token Lot Helpers
+  // ===========================================================================
+
+  /**
+   * Resolve ERC-721 NFT token context for a UniswapV3 position.
+   * Upserts the token record if it doesn't exist.
+   */
+  private async resolvePositionToken(positionId: string): Promise<PositionTokenContext | null> {
+    const position = await this.prisma.position.findUnique({
+      where: { id: positionId },
+      select: { config: true },
+    });
+    if (!position) return null;
+
+    const config = position.config as Record<string, unknown>;
+    const chainId = config.chainId as number;
+    const nftId = config.nftId as number;
+    const nfpmAddress = getUniswapV3NfpmAddress(chainId);
+    const tokenHash = createErc721TokenHash(chainId, nfpmAddress, nftId.toString());
+
+    const token = await this.prisma.token.upsert({
+      where: { tokenHash },
+      update: {},
+      create: {
+        tokenType: 'erc721',
+        name: `UniswapV3 Position (${nftId})`,
+        symbol: 'UV3-NFT',
+        decimals: 0,
+        tokenHash,
+        config: { chainId, protocol: 'uniswapv3' },
+      },
+      select: { id: true, tokenHash: true },
+    });
+
+    return { tokenId: token.id, tokenHash: token.tokenHash };
+  }
+
+  private async getUserCostBasisMethod(userId: string): Promise<CostBasisMethod> {
+    const settings = await this.prisma.userSettings.findUnique({
+      where: { userId },
+      select: { settings: true },
+    });
+    if (!settings) return DEFAULT_USER_SETTINGS.costBasisMethod;
+    const s = settings.settings as Record<string, unknown>;
+    return (s.costBasisMethod as CostBasisMethod) ?? DEFAULT_USER_SETTINGS.costBasisMethod;
+  }
+
 }
 
 // =============================================================================
@@ -674,4 +838,18 @@ function absBigint(value: string): string {
 
 function absBigintValue(value: bigint): bigint {
   return value < 0n ? -value : value;
+}
+
+/**
+ * Convert a quote-token amount to reporting currency.
+ * result = abs(amountQuote) * exchangeRate / 10^quoteTokenDecimals
+ */
+function computeReportingAmount(
+  amountQuote: string, exchangeRate: string, quoteTokenDecimals: number,
+): string {
+  const amount = BigInt(amountQuote);
+  const rate = BigInt(exchangeRate);
+  const scale = 10n ** BigInt(quoteTokenDecimals);
+  const abs = amount < 0n ? -amount : amount;
+  return ((abs * rate) / scale).toString();
 }

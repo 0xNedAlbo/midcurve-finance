@@ -8,7 +8,7 @@
  * automation buttons (stop-loss, take-profit).
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Plus, Minus, DollarSign, Flame, Coins, Archive } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -37,7 +37,6 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const location = useLocation();
   const [showCollectFeesModal, setShowCollectFeesModal] = useState(false);
   const [showBurnModal, setShowBurnModal] = useState(false);
-  const [showTokenizeModal, setShowTokenizeModal] = useState(false);
   const hasUnclaimedFees = BigInt(position.unclaimedYield) > 0n;
   const archiveMutation = useArchivePosition();
 
@@ -63,6 +62,19 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
   const poolConfig = position.pool.config as { address: string; chainId: number };
   const poolState = position.pool.state as { sqrtPriceX96: string };
   const positionConfig = position.config as { nftId: number; chainId: number };
+
+  // Tokenize modal state driven by ?modal=tokenize query param for browser back navigation
+  const showTokenizeModal = new URLSearchParams(location.search).get('modal') === 'tokenize';
+  const openTokenizeModal = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.set('modal', 'tokenize');
+    params.set('chainId', String(positionConfig.chainId));
+    params.set('nftId', String(positionConfig.nftId));
+    navigate(`${location.pathname}?${params.toString()}`, { state: location.state });
+  }, [navigate, location, positionConfig.chainId, positionConfig.nftId]);
+  const closeTokenizeModal = useCallback(() => {
+    navigate(-1);
+  }, [navigate]);
 
   // Get base/quote tokens
   const quoteToken = position.isToken0Quote
@@ -272,7 +284,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
           <>
             <div className="w-px h-6 bg-slate-600/50 mx-1" />
             <button
-              onClick={() => setShowTokenizeModal(true)}
+              onClick={openTokenizeModal}
               className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors cursor-pointer text-violet-300 bg-violet-900/20 hover:bg-violet-800/30 border-violet-600/50"
             >
               <Coins className="w-3 h-3" />
@@ -304,7 +316,7 @@ export function UniswapV3Actions({ position }: UniswapV3ActionsProps) {
       {/* Tokenize Position Modal */}
       <UniswapV3TokenizePositionModal
         isOpen={showTokenizeModal}
-        onClose={() => setShowTokenizeModal(false)}
+        onClose={closeTokenizeModal}
         position={position}
       />
 
