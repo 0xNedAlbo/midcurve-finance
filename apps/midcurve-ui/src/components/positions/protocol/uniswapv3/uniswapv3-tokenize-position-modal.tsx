@@ -23,6 +23,7 @@ import { formatCompactValue } from '@midcurve/shared';
 import type { UniswapV3PositionData } from '@/hooks/positions/uniswapv3/useUniswapV3Position';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
+import { formatChainName } from '@/lib/position-helpers';
 import { useNftApproval } from '@/hooks/positions/uniswapv3/vault/useNftApproval';
 import { useCreateVault } from '@/hooks/positions/uniswapv3/vault/useCreateVault';
 import { useDiscoverVaultPosition } from '@/hooks/positions/uniswapv3/vault/useDiscoverVaultPosition';
@@ -39,13 +40,13 @@ type EditingField = 'name' | 'symbol' | 'decimals' | null;
 
 /**
  * Compute default vault token decimals from position liquidity.
- * Formula: max(0, floor(log10(L)) - 8)
+ * Formula: max(0, floor(log10(L)) - 4)
  */
 function computeDefaultDecimals(liquidity: string): number {
   if (!liquidity || liquidity === '0') return 0;
   // floor(log10(L)) = number of digits - 1
   const digits = liquidity.length;
-  return Math.max(0, digits - 1 - 8);
+  return Math.max(0, digits - 1 - 4);
 }
 
 export function UniswapV3TokenizePositionModal({
@@ -77,7 +78,7 @@ export function UniswapV3TokenizePositionModal({
   }, []);
 
   // Get factory address from shared contracts
-  const { data: sharedContract } = useChainSharedContract(chainId);
+  const { data: sharedContract, isPending: isSharedContractPending } = useChainSharedContract(chainId);
   const factoryAddress = sharedContract?.contracts['UniswapV3VaultFactory']?.contractAddress as Address | undefined;
 
   const { address: connectedAddress } = useAccount();
@@ -303,41 +304,50 @@ export function UniswapV3TokenizePositionModal({
               {renderFieldRow('Initial Shares', formatCompactValue(BigInt(liquidity), decimals), null, true)}
             </div>
 
+            {/* Unsupported chain notice */}
+            {!isSharedContractPending && !factoryAddress && (
+              <p className="text-sm text-slate-400">
+                Tokenization is not supported on {formatChainName(chainId)} yet.
+              </p>
+            )}
+
             {/* Transaction Section */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-slate-300 mb-3">Transactions</h3>
+            {factoryAddress && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-slate-300 mb-3">Transactions</h3>
 
-              {/* 1. NFT Approval */}
-              {approvalPrompt.element}
+                {/* 1. NFT Approval */}
+                {approvalPrompt.element}
 
-              {/* 2. Create Vault */}
-              {createVaultPrompt.element}
+                {/* 2. Create Vault */}
+                {createVaultPrompt.element}
 
-              {/* 3. Add to Portfolio (auto-triggered, no button) */}
-              <div className={`py-3 px-4 rounded-lg transition-colors ${
-                discoverStatus === 'error'
-                  ? 'bg-yellow-500/10 border border-yellow-500/30'
-                  : discoverStatus === 'success'
-                    ? 'bg-green-500/10 border border-green-500/20'
-                    : discoverStatus === 'active'
-                      ? 'bg-blue-500/10 border border-blue-500/20'
-                      : 'bg-slate-700/30 border border-slate-600/20'
-              }`}>
-                <div className="flex items-center gap-3">
-                  {discoverStatus === 'idle' && <Circle className="w-5 h-5 text-slate-500" />}
-                  {discoverStatus === 'active' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
-                  {discoverStatus === 'success' && <Check className="w-5 h-5 text-green-400" />}
-                  {discoverStatus === 'error' && <AlertCircle className="w-5 h-5 text-yellow-400" />}
-                  <span className={
-                    discoverStatus === 'success' ? 'text-slate-400'
-                      : discoverStatus === 'error' ? 'text-yellow-300'
-                        : 'text-white'
-                  }>
-                    Add to Portfolio
-                  </span>
+                {/* 3. Add to Portfolio (auto-triggered, no button) */}
+                <div className={`py-3 px-4 rounded-lg transition-colors ${
+                  discoverStatus === 'error'
+                    ? 'bg-yellow-500/10 border border-yellow-500/30'
+                    : discoverStatus === 'success'
+                      ? 'bg-green-500/10 border border-green-500/20'
+                      : discoverStatus === 'active'
+                        ? 'bg-blue-500/10 border border-blue-500/20'
+                        : 'bg-slate-700/30 border border-slate-600/20'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    {discoverStatus === 'idle' && <Circle className="w-5 h-5 text-slate-500" />}
+                    {discoverStatus === 'active' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+                    {discoverStatus === 'success' && <Check className="w-5 h-5 text-green-400" />}
+                    {discoverStatus === 'error' && <AlertCircle className="w-5 h-5 text-yellow-400" />}
+                    <span className={
+                      discoverStatus === 'success' ? 'text-slate-400'
+                        : discoverStatus === 'error' ? 'text-yellow-300'
+                          : 'text-white'
+                    }>
+                      Add to Portfolio
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Success message */}
             {isComplete && createVault.vaultAddress && (
