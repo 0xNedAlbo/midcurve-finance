@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { formatCompactValue } from "@/lib/fraction-format";
 import { calculatePositionStates, calculateBreakEvenPrice } from "@/lib/position-states";
@@ -14,13 +14,17 @@ import {
   ChevronDown,
   ChevronUp,
   Minus,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import type { UniswapV3VaultPositionData } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultPosition";
+import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUniswapV3Position";
 import type {
   UniswapV3VaultPositionStateResponse,
 } from "@midcurve/api-shared";
 import { UniswapV3RangeStatusLine } from "../uniswapv3/uniswapv3-range-status-line";
 import { UniswapV3VaultMiniPnLCurve } from "./uniswapv3-vault-mini-pnl-curve";
+import { PortfolioSimulator } from "../../portfolio-simulator";
 
 interface UniswapV3VaultOverviewTabProps {
   position: UniswapV3VaultPositionData;
@@ -55,6 +59,15 @@ export function UniswapV3VaultOverviewTab({ position }: UniswapV3VaultOverviewTa
       liquidity: userLiquidity.toString(),
     },
   }), [position, userLiquidity]);
+
+  // Simulation toggle
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  // Vaults have no close orders; simulator expects the field
+  const simulatorPosition = useMemo(
+    () => ({ ...positionWithUserLiquidity, closeOrders: [] }),
+    [positionWithUserLiquidity],
+  );
 
   // PnL breakdown data
   const pnlBreakdown = {
@@ -206,8 +219,33 @@ export function UniswapV3VaultOverviewTab({ position }: UniswapV3VaultOverviewTa
       <div className="space-y-4">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-semibold text-white">Position States</h3>
+          <button
+            onClick={() => setIsSimulating(!isSimulating)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              isSimulating
+                ? "bg-purple-500/20 text-purple-400 border border-purple-500/50 hover:bg-purple-500/30"
+                : "bg-slate-700/50 text-slate-300 border border-slate-600/50 hover:bg-slate-700"
+            }`}
+          >
+            {isSimulating ? (
+              <>
+                <X className="w-4 h-4" />
+                Exit Simulation
+              </>
+            ) : (
+              <>
+                <SlidersHorizontal className="w-4 h-4" />
+                Simulation
+              </>
+            )}
+          </button>
         </div>
 
+        {isSimulating ? (
+          <PortfolioSimulator
+            position={simulatorPosition as unknown as UniswapV3PositionData}
+          />
+        ) : (
         <div className="space-y-6">
           {/* Current Position State */}
           <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-6">
@@ -535,6 +573,7 @@ export function UniswapV3VaultOverviewTab({ position }: UniswapV3VaultOverviewTa
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
