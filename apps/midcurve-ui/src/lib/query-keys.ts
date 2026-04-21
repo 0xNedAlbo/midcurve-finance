@@ -48,6 +48,11 @@ export const queryKeys = {
       apr: (chainId: number, nftId: string) =>
         [...queryKeys.positions.uniswapv3.aprs(), chainId, nftId] as const,
 
+      // Accounting report
+      accountings: () => [...queryKeys.positions.uniswapv3.all, 'accounting'] as const,
+      accounting: (chainId: number, nftId: string) =>
+        [...queryKeys.positions.uniswapv3.accountings(), chainId, nftId] as const,
+
       // Close Orders (position-scoped)
       closeOrders: {
         // All close orders for a position
@@ -79,6 +84,11 @@ export const queryKeys = {
       aprs: () => [...queryKeys.positions.uniswapv3Vault.all, 'apr'] as const,
       apr: (chainId: number, vaultAddress: string, ownerAddress: string) =>
         [...queryKeys.positions.uniswapv3Vault.aprs(), chainId, vaultAddress, ownerAddress] as const,
+
+      // Accounting report
+      accountings: () => [...queryKeys.positions.uniswapv3Vault.all, 'accounting'] as const,
+      accounting: (chainId: number, vaultAddress: string, ownerAddress: string) =>
+        [...queryKeys.positions.uniswapv3Vault.accountings(), chainId, vaultAddress, ownerAddress] as const,
 
       // Close Orders (position-scoped)
       closeOrders: {

@@ -13,3 +13,11 @@ export {
   type PnlPositionItem,
 } from './pnl.js';
 
+export type {
+  PositionAccountingResponse,
+  PositionBalanceSheet,
+  PositionPnl,
+  JournalEntryData,
+  JournalLineData,
+} from './position-accounting.js';
+

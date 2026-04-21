@@ -7,7 +7,12 @@
 
 import { prisma as prismaClient, PrismaClient, Prisma } from '@midcurve/database';
 import type { JournalEntryInput, JournalLineInput } from '@midcurve/shared';
-import { CHART_OF_ACCOUNTS } from '@midcurve/shared';
+import { ACCOUNT_CODES, CHART_OF_ACCOUNTS } from '@midcurve/shared';
+import type {
+  JournalEntryData,
+  JournalLineData,
+  PositionAccountingResponse,
+} from '@midcurve/api-shared';
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -410,5 +415,148 @@ export class JournalService {
       include: { lines: true },
       orderBy: { entryDate: 'asc' },
     });
+  }
+
+  /**
+   * Builds a per-position accounting report: lifetime-to-date balance sheet,
+   * realized-only P&L, and the full journal entry audit trail.
+   *
+   * Balance-sheet sign conventions mirror the portfolio balance sheet route:
+   * assets use raw signed balance (debit-positive); equity items are negated
+   * for display. P&L sign conventions mirror the portfolio pnl route.
+   *
+   * Lines with `amountReporting = null` are skipped in aggregation but still
+   * listed in the journal entries array (their amount shows as null in the UI).
+   */
+  async getPositionAccountingReport(
+    positionRef: string,
+    userId: string
+  ): Promise<PositionAccountingResponse> {
+    const entries = await this.prisma.journalEntry.findMany({
+      where: {
+        userId,
+        lines: { some: { positionRef } },
+      },
+      include: {
+        lines: {
+          include: {
+            account: {
+              select: { code: true, name: true, category: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ entryDate: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    let lpPositionAtCost = 0n;
+    let contributedCapital = 0n;
+    let capitalReturned = 0n;
+    let realizedGains = 0n;
+    let realizedLosses = 0n;
+    let feeIncome = 0n;
+    let fxGainLoss = 0n;
+
+    let reportingCurrency = 'USD';
+
+    const journalEntries: JournalEntryData[] = [];
+
+    for (const entry of entries) {
+      const linesForThisPosition = entry.lines.filter((l) => l.positionRef === positionRef);
+
+      const lines: JournalLineData[] = linesForThisPosition.map((line) => ({
+        accountCode: line.account.code,
+        accountName: line.account.name,
+        accountCategory: line.account.category,
+        side: line.side as 'debit' | 'credit',
+        amountReporting: line.amountReporting,
+      }));
+
+      journalEntries.push({
+        id: entry.id,
+        entryDate: entry.entryDate.toISOString(),
+        description: entry.description,
+        memo: entry.memo,
+        lines,
+      });
+
+      for (const line of linesForThisPosition) {
+        if (line.amountReporting === null) continue;
+        if (line.reportingCurrency) reportingCurrency = line.reportingCurrency;
+
+        const amount = BigInt(line.amountReporting);
+        const signed = line.side === 'debit' ? amount : -amount;
+
+        switch (line.account.code) {
+          case ACCOUNT_CODES.LP_POSITION_AT_COST:
+            lpPositionAtCost += signed;
+            break;
+          case ACCOUNT_CODES.CONTRIBUTED_CAPITAL:
+            contributedCapital += signed;
+            break;
+          case ACCOUNT_CODES.CAPITAL_RETURNED:
+            capitalReturned += signed;
+            break;
+          case ACCOUNT_CODES.REALIZED_GAINS:
+            realizedGains += signed;
+            break;
+          case ACCOUNT_CODES.REALIZED_LOSSES:
+            realizedLosses += signed;
+            break;
+          case ACCOUNT_CODES.FEE_INCOME:
+            feeIncome += signed;
+            break;
+          case ACCOUNT_CODES.FX_GAIN_LOSS:
+            fxGainLoss += signed;
+            break;
+        }
+      }
+    }
+
+    // P&L sign conventions (mirror portfolio /accounting/pnl route):
+    //   Revenue (credit-normal): negate signed for positive-on-credit
+    //   Expense (debit-normal): take signed directly for positive-on-debit
+    const realizedFromWithdrawals = -realizedGains - realizedLosses;
+    const realizedFromCollectedFees = -feeIncome;
+    const realizedFromFxEffect = -fxGainLoss;
+    const netPnl = realizedFromWithdrawals + realizedFromCollectedFees + realizedFromFxEffect;
+
+    // Balance-sheet sign conventions (mirror portfolio /accounting/balance-sheet route):
+    //   Assets: raw signed (debit-positive)
+    //   Equity: negated for display
+    const lpPositionAtCostDisplay = lpPositionAtCost;
+    const contributedCapitalDisplay = -contributedCapital;
+    const capitalReturnedDisplay = -capitalReturned;
+    const retainedEarningsTotal = realizedFromWithdrawals + realizedFromCollectedFees + realizedFromFxEffect;
+    const totalEquity = contributedCapitalDisplay + capitalReturnedDisplay + retainedEarningsTotal;
+
+    return {
+      positionRef,
+      reportingCurrency,
+      balanceSheet: {
+        assets: {
+          lpPositionAtCost: lpPositionAtCostDisplay.toString(),
+          totalAssets: lpPositionAtCostDisplay.toString(),
+        },
+        equity: {
+          contributedCapital: contributedCapitalDisplay.toString(),
+          capitalReturned: capitalReturnedDisplay.toString(),
+          retainedEarnings: {
+            realizedFromWithdrawals: realizedFromWithdrawals.toString(),
+            realizedFromCollectedFees: realizedFromCollectedFees.toString(),
+            realizedFromFxEffect: realizedFromFxEffect.toString(),
+            total: retainedEarningsTotal.toString(),
+          },
+          totalEquity: totalEquity.toString(),
+        },
+      },
+      pnl: {
+        realizedFromWithdrawals: realizedFromWithdrawals.toString(),
+        realizedFromCollectedFees: realizedFromCollectedFees.toString(),
+        realizedFromFxEffect: realizedFromFxEffect.toString(),
+        netPnl: netPnl.toString(),
+      },
+      journalEntries,
+    };
   }
 }

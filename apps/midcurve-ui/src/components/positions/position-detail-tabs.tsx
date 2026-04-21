@@ -6,7 +6,7 @@
  */
 
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Clock, TrendingUp, Settings, Shield, Repeat } from "lucide-react";
+import { BarChart3, Clock, TrendingUp, Settings, Shield, Repeat, BookOpen } from "lucide-react";
 
 interface PositionDetailTabsProps {
   activeTab: string;
@@ -38,6 +38,11 @@ const tabs = [
     id: "automation",
     icon: Shield,
     label: "Automation",
+  },
+  {
+    id: "accounting",
+    icon: BookOpen,
+    label: "Accounting",
   },
   {
     id: "technical",
