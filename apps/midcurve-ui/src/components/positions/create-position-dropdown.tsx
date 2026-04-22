@@ -24,7 +24,7 @@ export function CreatePositionDropdown() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [vaultAddress, setVaultAddress] = useState("");
-  const [selectedVaultChain, setSelectedVaultChain] = useState(42161);
+  const [selectedVaultChain, setSelectedVaultChain] = useState<UniswapV3ChainSlug>("arbitrum");
   const [vaultImportError, setVaultImportError] = useState<string | null>(null);
   const [vaultImportSuccess, setVaultImportSuccess] = useState<string | null>(null);
   const [showScanModal, setShowScanModal] = useState(false);
@@ -128,8 +128,12 @@ export function CreatePositionDropdown() {
       return;
     }
 
+    const chains = getAllUniswapV3Chains();
+    const chainMetadata = chains.find((c) => c.slug === selectedVaultChain);
+    const chainId = chainMetadata?.chainId ?? 42161;
+
     vaultImportMutation.mutate(
-      { chainId: selectedVaultChain, vaultAddress: trimmed, shareOwnerAddress: connectedAddress },
+      { chainId, vaultAddress: trimmed, shareOwnerAddress: connectedAddress },
       {
         onSuccess: () => {
           setVaultImportSuccess('Vault position imported successfully!');
@@ -299,10 +303,14 @@ export function CreatePositionDropdown() {
                     </label>
                     <select
                       value={selectedVaultChain}
-                      onChange={(e) => setSelectedVaultChain(Number(e.target.value))}
+                      onChange={(e) => setSelectedVaultChain(e.target.value as UniswapV3ChainSlug)}
                       className="w-full px-2 py-1.5 text-sm bg-slate-700 border border-slate-600 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                     >
-                      <option value={42161}>Arbitrum</option>
+                      {getAllUniswapV3Chains().map((chain) => (
+                        <option key={chain.slug} value={chain.slug}>
+                          {chain.shortName}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
