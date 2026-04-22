@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -35,7 +35,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Get the authenticated user's webhook configuration.
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -98,7 +98,7 @@ export async function GET(request: NextRequest): Promise<Response> {
  * Update the authenticated user's webhook configuration.
  */
 export async function PUT(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

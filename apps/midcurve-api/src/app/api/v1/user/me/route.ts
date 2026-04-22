@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@midcurve/database';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -37,7 +37,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 }
 
 export async function PATCH(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

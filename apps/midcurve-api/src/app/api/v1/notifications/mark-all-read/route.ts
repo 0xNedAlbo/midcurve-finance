@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@midcurve/database';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -36,7 +36,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Marks all unread notifications as read for the authenticated user.
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

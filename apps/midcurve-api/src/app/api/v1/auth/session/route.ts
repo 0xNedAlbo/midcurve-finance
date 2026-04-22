@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSuccessResponse } from '@midcurve/api-shared';
 import type { SessionUser } from '@midcurve/api-shared';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { createPreflightResponse } from '@/lib/cors';
 
 export const runtime = 'nodejs';
@@ -31,7 +31,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user) => {
+  return withAuth(request, async (user) => {
     const sessionUser: SessionUser = {
       id: user.id,
       address: user.address,

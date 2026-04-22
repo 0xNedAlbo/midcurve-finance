@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -42,7 +42,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - limit (optional): Maximum results to return (1-100, default: 20)
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

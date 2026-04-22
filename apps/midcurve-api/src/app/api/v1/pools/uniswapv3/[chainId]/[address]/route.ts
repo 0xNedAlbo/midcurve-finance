@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { UniswapV3SubgraphClient } from '@midcurve/services';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import {
@@ -51,7 +51,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ chainId: string; address: string }> }
 ): Promise<Response> {
-  return withSessionAuth(request, async (_user, requestId) => {
+  return withAuth(request, async (_user, requestId) => {
     const startTime = Date.now();
 
     try {

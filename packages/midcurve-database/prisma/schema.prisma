@@ -44,6 +44,27 @@ model Session {
   @@schema("public")
 }
 
+// ApiKey - Long-lived personal access tokens for programmatic API access
+// User-managed via /api-keys page. Hashed at rest, raw key shown only on creation.
+model ApiKey {
+  id        String @id @default(cuid())
+  keyHash   String @unique // SHA-256 hex of full key (never store raw)
+  keyPrefix String // First 12 chars of the raw key, e.g. "mck_abcd1234" — for display
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name       String // User-assigned label
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime? // null = no expiry
+  lastUsedAt DateTime?
+
+  @@index([keyHash])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("api_keys")
+  @@schema("public")
+}
+
 
 // =============================================================================
 // Cache & Core Models
@@ -91,6 +112,9 @@ model User {
 
   // Session relation (custom server-side sessions)
   sessions Session[]
+
+  // API key relation (long-lived personal access tokens)
+  apiKeys ApiKey[]
 
   // Midcurve position relations
   positions             Position[]

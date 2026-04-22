@@ -16,7 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { createPreflightResponse } from '@/lib/cors';
 
 import {
@@ -61,7 +61,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - hasApproval: Whether any approval exists
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (_user, requestId) => {
+  return withAuth(request, async (_user, requestId) => {
     const startTime = Date.now();
 
     try {

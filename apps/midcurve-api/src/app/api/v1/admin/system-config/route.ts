@@ -22,7 +22,7 @@ import {
   ApiErrorCode,
   ErrorCodeToHttpStatus,
 } from '@midcurve/api-shared';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getCorsHeaders, createPreflightResponse } from '@/lib/cors';
 
@@ -59,7 +59,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Returns all system config with sensitive values masked, plus the allowlist.
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const origin = request.headers.get('origin');
     const corsHeaders = getCorsHeaders(origin);
 
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest): Promise<Response> {
  * - allowlist: string[] of EVM addresses (optional). Admin addresses are preserved automatically.
  */
 export async function PATCH(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const origin = request.headers.get('origin');
     const corsHeaders = getCorsHeaders(origin);
 

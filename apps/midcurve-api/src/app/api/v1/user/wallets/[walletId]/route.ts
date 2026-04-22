@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -40,7 +40,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 export async function DELETE(request: NextRequest, { params }: RouteParams): Promise<Response> {
   const { walletId } = await params;
 
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     const wallet = await getUserWalletService().findById(walletId);

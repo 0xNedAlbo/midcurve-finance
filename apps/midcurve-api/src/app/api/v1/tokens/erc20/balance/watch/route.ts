@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import {
   createSuccessResponse,
@@ -56,7 +56,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - 202 Accepted: Subscriptions created, includes current balance state
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (_user, requestId) => {
+  return withAuth(request, async (_user, requestId) => {
     const startTime = Date.now();
 
     try {

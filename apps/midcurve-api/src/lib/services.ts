@@ -8,6 +8,7 @@
  */
 
 import {
+  ApiKeyService,
   AuthUserService,
   AuthNonceService,
   SessionService,
@@ -41,6 +42,7 @@ import {
 let _authUserService: AuthUserService | null = null;
 let _authNonceService: AuthNonceService | null = null;
 let _sessionService: SessionService | null = null;
+let _apiKeyService: ApiKeyService | null = null;
 let _userAllowListService: UserAllowListService | null = null;
 let _erc20TokenService: Erc20TokenService | null = null;
 let _coingeckoTokenService: CoingeckoTokenService | null = null;
@@ -89,6 +91,16 @@ export function getSessionService(): SessionService {
     _sessionService = new SessionService();
   }
   return _sessionService;
+}
+
+/**
+ * Get singleton instance of ApiKeyService
+ */
+export function getApiKeyService(): ApiKeyService {
+  if (!_apiKeyService) {
+    _apiKeyService = new ApiKeyService();
+  }
+  return _apiKeyService;
 }
 
 /**

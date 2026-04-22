@@ -124,7 +124,7 @@ export const apiLog = {
     logger: ServiceLogger,
     requestId: string,
     userId: string,
-    authMethod: 'session'
+    authMethod: 'session' | 'api-key'
   ): void {
     logger.info({
       requestId,
@@ -142,7 +142,12 @@ export const apiLog = {
    * @param reason - Failure reason
    * @param authMethod - Authentication method attempted
    */
-  authFailure(logger: ServiceLogger, requestId: string, reason: string, authMethod?: 'session'): void {
+  authFailure(
+    logger: ServiceLogger,
+    requestId: string,
+    reason: string,
+    authMethod?: 'session' | 'api-key'
+  ): void {
     logger.warn({
       requestId,
       authMethod,

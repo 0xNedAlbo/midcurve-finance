@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createErrorResponse,
   createPaginatedResponse,
@@ -78,7 +78,7 @@ function serializeListRow(row: PositionListRow): PositionListItem {
  * - offset (optional): Pagination offset (>=0, default: 0)
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

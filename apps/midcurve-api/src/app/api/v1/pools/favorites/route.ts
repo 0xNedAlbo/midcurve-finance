@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -51,7 +51,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Returns the favorited pool with full pool data.
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -235,7 +235,7 @@ export async function POST(request: NextRequest): Promise<Response> {
  * Returns array of favorite pools ordered by favorited time (most recent first).
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -355,7 +355,7 @@ export async function GET(request: NextRequest): Promise<Response> {
  * This operation is idempotent - succeeds even if pool is not in favorites.
  */
 export async function DELETE(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

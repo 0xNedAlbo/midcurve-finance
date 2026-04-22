@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyMessage } from 'viem';
 import { normalizeAddress } from '@midcurve/shared';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -50,7 +50,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * List all wallets belonging to the authenticated user.
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     const wallets = await getUserWalletService().findByUserId(user.id);
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest): Promise<Response> {
  * Add a wallet after ownership verification (challenge signature).
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     const body = await request.json();

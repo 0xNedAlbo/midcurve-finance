@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma, type Prisma } from '@midcurve/database';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -48,7 +48,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - isRead: Filter by read status ('true' or 'false')
  */
 export async function GET(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -157,7 +157,7 @@ export async function GET(request: NextRequest): Promise<Response> {
  * - ids: Array of notification IDs to delete (1-100 items)
  */
 export async function DELETE(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {

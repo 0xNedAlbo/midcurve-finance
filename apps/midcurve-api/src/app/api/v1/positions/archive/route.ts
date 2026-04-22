@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import {
   createSuccessResponse,
@@ -34,7 +34,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
 }
 
 export async function PATCH(request: NextRequest): Promise<Response> {
-  return withSessionAuth(request, async (user) => {
+  return withAuth(request, async (user) => {
     const log = apiLogger.child({ endpoint: 'positions/archive', userId: user.id });
 
     const body = await request.json();

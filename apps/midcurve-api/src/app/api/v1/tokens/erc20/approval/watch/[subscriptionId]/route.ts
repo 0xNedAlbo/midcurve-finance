@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import {
   createSuccessResponse,
@@ -56,7 +56,7 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ subscriptionId: string }> }
 ): Promise<Response> {
-  return withSessionAuth(request, async (_user, requestId) => {
+  return withAuth(request, async (_user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -200,7 +200,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ subscriptionId: string }> }
 ): Promise<Response> {
-  return withSessionAuth(request, async (_user, requestId) => {
+  return withAuth(request, async (_user, requestId) => {
     const startTime = Date.now();
 
     try {

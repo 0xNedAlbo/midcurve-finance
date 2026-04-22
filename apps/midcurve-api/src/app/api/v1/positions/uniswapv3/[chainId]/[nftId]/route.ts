@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withSessionAuth } from '@/middleware/with-session-auth';
+import { withAuth } from '@/middleware/with-auth';
 import { createPreflightResponse } from '@/lib/cors';
 import {
   getDomainEventPublisher,
@@ -74,7 +74,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ chainId: string; nftId: string }> }
 ): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -249,7 +249,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ chainId: string; nftId: string }> }
 ): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
@@ -410,7 +410,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ chainId: string; nftId: string }> }
 ): Promise<Response> {
-  return withSessionAuth(request, async (user, requestId) => {
+  return withAuth(request, async (user, requestId) => {
     const startTime = Date.now();
 
     try {
