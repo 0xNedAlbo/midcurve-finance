@@ -13,8 +13,9 @@ import {
   sepolia,
   type Chain,
 } from 'wagmi/chains';
-import { createConfig, createStorage, http, noopStorage, type Config } from 'wagmi';
+import { createConfig, createStorage, http, noopStorage, type Config, type CreateConnectorFn } from 'wagmi';
 import { defineChain } from 'viem';
+import { burnerConnector } from './wagmi/burner-connector';
 
 // Check if development chains are enabled
 const isDevChainsEnabled =
@@ -75,8 +76,27 @@ const transports = isDevChainsEnabled
  * Create a wagmi config with the given WalletConnect project ID.
  * Called by Web3Provider once the project ID is known from the config API.
  */
+// Dev-only burner wallet: auto-connects with a local PrivateKeyAccount so that
+// SIWE and tx signing work headless (no MetaMask popup). Gated behind
+// import.meta.env.DEV so Vite's dead-code elimination strips the branch —
+// and the VITE_BURNER_PRIVATE_KEY import — from production bundles.
+const isBurnerEnabled =
+  import.meta.env.DEV &&
+  import.meta.env.VITE_ENABLE_BURNER_WALLET === 'true';
+
+function buildBurnerConnectors(): CreateConnectorFn[] {
+  if (!isBurnerEnabled) return [];
+  const key = import.meta.env.VITE_BURNER_PRIVATE_KEY;
+  if (!key) {
+    throw new Error(
+      'VITE_BURNER_PRIVATE_KEY is required when VITE_ENABLE_BURNER_WALLET=true'
+    );
+  }
+  return [burnerConnector(key as `0x${string}`)];
+}
+
 export function createWagmiConfig(projectId: string): Config {
-  const connectors = connectorsForWallets(
+  const rainbowKitConnectors = connectorsForWallets(
     [
       {
         groupName: 'Popular',
@@ -97,6 +117,11 @@ export function createWagmiConfig(projectId: string): Config {
       projectId,
     }
   );
+
+  const connectors: CreateConnectorFn[] = [
+    ...buildBurnerConnectors(),
+    ...rainbowKitConnectors,
+  ];
 
   return createConfig({
     chains,
