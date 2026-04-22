@@ -21,6 +21,7 @@ import { VaultRiskTriggersPage } from './pages/VaultRiskTriggersPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
 import { WalletManagementPage } from './pages/WalletManagementPage';
+import { ApiKeysPage } from './pages/ApiKeysPage';
 
 export function App() {
   return (
@@ -104,6 +105,7 @@ function ConfigGate() {
                 element={<VaultRiskTriggersPage />}
               />
               <Route path="/wallets" element={<WalletManagementPage />} />
+              <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/system-config" element={<SystemConfigPage />} />
               <Route path="/setup" element={<SetupWizardPage />} />
             </Routes>

@@ -216,6 +216,11 @@ import type {
   AddWalletResponseData,
   AddWalletRequest,
   DeleteWalletResponseData,
+  // API Keys
+  ListApiKeysResponseData,
+  CreateApiKeyRequest,
+  CreateApiKeyData,
+  RevokeApiKeyData,
 } from '@midcurve/api-shared';
 
 /**
@@ -475,5 +480,26 @@ export const walletsApi = {
    */
   deleteWallet(walletId: string) {
     return apiClient.delete<DeleteWalletResponseData>(`/api/v1/user/wallets/${walletId}`);
+  },
+};
+
+// =============================================================================
+// API KEYS API
+// =============================================================================
+
+/**
+ * API Keys client for managing user-issued personal access tokens
+ */
+export const apiKeysApi = {
+  listKeys() {
+    return apiClient.get<ListApiKeysResponseData>('/api/v1/user/api-keys');
+  },
+
+  createKey(body: CreateApiKeyRequest) {
+    return apiClient.post<CreateApiKeyData>('/api/v1/user/api-keys', body);
+  },
+
+  revokeKey(keyId: string) {
+    return apiClient.delete<RevokeApiKeyData>(`/api/v1/user/api-keys/${keyId}`);
   },
 };
