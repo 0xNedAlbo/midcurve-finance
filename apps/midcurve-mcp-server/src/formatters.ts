@@ -270,17 +270,19 @@ export function formatUser(user: { id: string; address: string; name?: string | 
 // =============================================================================
 
 /**
- * Average prices are scaled to base-token decimals — the integer part is
- * "quote units per one base unit" with fractional digits after.
+ * Average prices are stored as "quote raw units per one whole base unit" —
+ * i.e. the raw quote amount (already in quote-token decimals) multiplied by
+ * 10^baseDecimals and then divided by the raw base amount. To get a
+ * human-readable price, scale by the quote-token decimals.
  */
 function formatAvgPrice(
   raw: string,
-  baseDecimals: number,
+  quoteDecimals: number,
   quoteSymbol: string,
 ): string | null {
   const n = BigInt(raw);
   if (n === 0n) return null;
-  return formatTokenAmount(raw, quoteSymbol, baseDecimals);
+  return formatTokenAmount(raw, quoteSymbol, quoteDecimals);
 }
 
 function formatSegment(
@@ -301,7 +303,7 @@ function formatSegment(
     direction,
     baseAmount: formatTokenAmount(absBase.toString(), summary.baseTokenSymbol, summary.baseTokenDecimals),
     quoteAmount: formatTokenAmount(absQuote.toString(), summary.quoteTokenSymbol, summary.quoteTokenDecimals),
-    avgPrice: formatAvgPrice(segment.avgPrice, summary.baseTokenDecimals, summary.quoteTokenSymbol),
+    avgPrice: formatAvgPrice(segment.avgPrice, summary.quoteTokenDecimals, summary.quoteTokenSymbol),
     feesEarned:
       segment.feesEarned === '0'
         ? null
@@ -338,7 +340,7 @@ export function formatConversionSummary(
     deposits: {
       base: tokenAmount(summary.netDepositBase, baseTokenSymbol, baseTokenDecimals),
       quote: tokenAmount(summary.netDepositQuote, quoteTokenSymbol, quoteTokenDecimals),
-      avgPrice: formatAvgPrice(summary.netDepositAvgPrice, baseTokenDecimals, quoteTokenSymbol),
+      avgPrice: formatAvgPrice(summary.netDepositAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
     },
     withdrawn: {
       base: tokenAmount(summary.withdrawnBase, baseTokenSymbol, baseTokenDecimals),
@@ -347,25 +349,25 @@ export function formatConversionSummary(
     currentHoldings: {
       base: tokenAmount(summary.currentBase, baseTokenSymbol, baseTokenDecimals),
       quote: tokenAmount(summary.currentQuote, quoteTokenSymbol, quoteTokenDecimals),
-      spotPrice: formatAvgPrice(summary.currentSpotPrice, baseTokenDecimals, quoteTokenSymbol),
+      spotPrice: formatAvgPrice(summary.currentSpotPrice, quoteTokenDecimals, quoteTokenSymbol),
     },
     netConversion: {
       direction: netDirection,
       baseAmount: tokenAmount(absNetBase.toString(), baseTokenSymbol, baseTokenDecimals),
       quoteAmount: tokenAmount(absNetQuote.toString(), quoteTokenSymbol, quoteTokenDecimals),
-      avgExecutionPrice: formatAvgPrice(summary.netRebalancingAvgPrice, baseTokenDecimals, quoteTokenSymbol),
+      avgExecutionPrice: formatAvgPrice(summary.netRebalancingAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
     },
     ammBought: summary.ammBoughtBase === '0'
       ? null
       : {
           base: tokenAmount(summary.ammBoughtBase, baseTokenSymbol, baseTokenDecimals),
-          avgPrice: formatAvgPrice(summary.ammBoughtAvgPrice, baseTokenDecimals, quoteTokenSymbol),
+          avgPrice: formatAvgPrice(summary.ammBoughtAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
         },
     ammSold: summary.ammSoldBase === '0'
       ? null
       : {
           base: tokenAmount(summary.ammSoldBase, baseTokenSymbol, baseTokenDecimals),
-          avgPrice: formatAvgPrice(summary.ammSoldAvgPrice, baseTokenDecimals, quoteTokenSymbol),
+          avgPrice: formatAvgPrice(summary.ammSoldAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
         },
     totalPremium: summary.totalPremium === '0'
       ? null
