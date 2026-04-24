@@ -1,6 +1,6 @@
 "use client";
 
-import type { ConversionSummary as ConversionSummaryType } from "@/hooks/positions/uniswapv3/useUniswapV3ConversionSummary";
+import type { ConversionSummary as ConversionSummaryType } from "@midcurve/shared";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { RebalancingHistoryTable } from "./rebalancing-history-table";
 

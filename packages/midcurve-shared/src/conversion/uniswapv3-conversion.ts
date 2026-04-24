@@ -1,23 +1,76 @@
 /**
- * Client-Side Conversion Summary Computation
+ * Uniswap V3 Position Conversion Summary
  *
- * Computes conversion metrics from position data + ledger events.
- * No API call needed — uses data already fetched by position detail and ledger hooks.
- * Reacts to live pool price updates via the position prop.
+ * Pure function that derives "how much token A did this position convert into
+ * token B and at what average price" from a serialized position + its ledger
+ * events. All arithmetic stays in bigint.
  *
- * All arithmetic uses bigint. No conversions to Number or float.
+ * Consumed by:
+ * - apps/midcurve-api (the /conversion REST endpoint)
+ * - apps/midcurve-ui (the Conversion tab)
+ * - apps/midcurve-mcp-server (via the REST endpoint)
  */
 
-import { useMemo } from "react";
-import type { LedgerEventData } from "@midcurve/api-shared";
-import type { UniswapV3PositionData } from "./useUniswapV3Position";
 import {
   getTokenAmountsFromLiquidity,
   valueOfToken0AmountInToken1,
   valueOfToken1AmountInToken0,
   pricePerToken0InToken1,
   pricePerToken1InToken0,
-} from "@midcurve/shared";
+} from '../utils/uniswapv3/index.js';
+
+// =============================================================================
+// Input Types
+//
+// Narrow shapes that match the JSON-serialized form of a position and its
+// ledger events. Kept local (rather than importing from @midcurve/api-shared)
+// so this package preserves its zero-deps invariant.
+// =============================================================================
+
+export interface ConversionTokenInput {
+  symbol: string;
+  decimals: number;
+}
+
+export interface ConversionPositionInput {
+  isToken0Quote: boolean;
+  positionOpenedAt: string;
+  archivedAt: string | null;
+  config: {
+    tickLower: number;
+    tickUpper: number;
+  };
+  state: {
+    liquidity: string;
+    unclaimedFees0: string;
+    unclaimedFees1: string;
+  };
+  pool: {
+    token0: ConversionTokenInput;
+    token1: ConversionTokenInput;
+    state: {
+      sqrtPriceX96: string;
+    };
+  };
+}
+
+export interface ConversionLedgerEvent {
+  timestamp: string;
+  eventType: string;
+  config: {
+    sqrtPriceX96: string;
+    liquidityAfter: string;
+    feesCollected0: string;
+    feesCollected1: string;
+    blockNumber: string;
+    logIndex: number;
+  };
+  state: {
+    eventType: string;
+    amount0: string;
+    amount1: string;
+  };
+}
 
 // =============================================================================
 // Output Type
@@ -94,26 +147,22 @@ function toBaseQuote(
     : { base: token1Amount, quote: token0Amount };
 }
 
-/** Extract typed config fields from serialized ledger event */
-function parseConfig(event: LedgerEventData) {
-  const config = event.config as Record<string, unknown>;
+function parseConfig(event: ConversionLedgerEvent) {
   return {
-    sqrtPriceX96: BigInt(config.sqrtPriceX96 as string),
-    liquidityAfter: BigInt(config.liquidityAfter as string),
-    feesCollected0: BigInt(config.feesCollected0 as string),
-    feesCollected1: BigInt(config.feesCollected1 as string),
-    blockNumber: BigInt(config.blockNumber as string),
-    logIndex: config.logIndex as number,
+    sqrtPriceX96: BigInt(event.config.sqrtPriceX96),
+    liquidityAfter: BigInt(event.config.liquidityAfter),
+    feesCollected0: BigInt(event.config.feesCollected0),
+    feesCollected1: BigInt(event.config.feesCollected1),
+    blockNumber: BigInt(event.config.blockNumber),
+    logIndex: event.config.logIndex,
   };
 }
 
-/** Extract typed state fields from serialized ledger event */
-function parseState(event: LedgerEventData) {
-  const state = event.state as Record<string, unknown>;
+function parseState(event: ConversionLedgerEvent) {
   return {
-    eventType: state.eventType as string,
-    amount0: BigInt((state.amount0 as string) ?? "0"),
-    amount1: BigInt((state.amount1 as string) ?? "0"),
+    eventType: event.state.eventType,
+    amount0: BigInt(event.state.amount0 ?? '0'),
+    amount1: BigInt(event.state.amount1 ?? '0'),
   };
 }
 
@@ -121,19 +170,15 @@ function parseState(event: LedgerEventData) {
 // Computation
 // =============================================================================
 
-function computeSummary(
-  position: UniswapV3PositionData,
-  events: LedgerEventData[],
+export function computeUniswapV3ConversionSummary(
+  position: ConversionPositionInput,
+  events: ConversionLedgerEvent[],
 ): ConversionSummary {
-  const posConfig = position.config as { tickLower: number; tickUpper: number };
-  const posState = position.state as { liquidity: string; unclaimedFees0: string; unclaimedFees1: string };
-  const poolState = position.pool.state as { sqrtPriceX96: string };
-
-  const tickLower = posConfig.tickLower;
-  const tickUpper = posConfig.tickUpper;
+  const tickLower = position.config.tickLower;
+  const tickUpper = position.config.tickUpper;
   const baseIsToken0 = !position.isToken0Quote;
-  const currentSqrtPriceX96 = BigInt(poolState.sqrtPriceX96);
-  const currentLiquidity = BigInt(posState.liquidity);
+  const currentSqrtPriceX96 = BigInt(position.pool.state.sqrtPriceX96);
+  const currentLiquidity = BigInt(position.state.liquidity);
   const isClosed = currentLiquidity === 0n;
 
   // Days position was active (for closed positions)
@@ -141,14 +186,12 @@ function computeSummary(
   let daysActive: number | null = null;
   if (isClosed && position.positionOpenedAt) {
     const opened = new Date(position.positionOpenedAt).getTime();
-    // Find the closing event timestamp from ledger events
     let closedAt: number | null = null;
     if (position.archivedAt) {
       closedAt = new Date(position.archivedAt).getTime();
     } else {
-      // Fall back to last DECREASE event timestamp
       for (let j = events.length - 1; j >= 0; j--) {
-        if (events[j]!.eventType === "DECREASE_POSITION") {
+        if (events[j]!.eventType === 'DECREASE_POSITION') {
           closedAt = new Date(events[j]!.timestamp).getTime();
           break;
         }
@@ -167,9 +210,9 @@ function computeSummary(
   const financialEvents = events
     .filter(
       (e) =>
-        e.eventType === "INCREASE_POSITION" ||
-        e.eventType === "DECREASE_POSITION" ||
-        e.eventType === "COLLECT",
+        e.eventType === 'INCREASE_POSITION' ||
+        e.eventType === 'DECREASE_POSITION' ||
+        e.eventType === 'COLLECT',
     )
     .sort((a, b) => {
       const cfgA = parseConfig(a);
@@ -179,7 +222,6 @@ function computeSummary(
       return cfgA.logIndex - cfgB.logIndex;
     });
 
-  // Scale factor for price calculations
   const scale = 10n ** BigInt(baseTokenDecimals);
   const segments: RebalancingSegment[] = [];
 
@@ -192,10 +234,10 @@ function computeSummary(
   let withdrawnQuote = 0n;
   let ammSoldBase = 0n;
   let ammSoldQuoteVolume = 0n;
-  let ammSoldPremium = 0n;
+  const ammSoldPremium = 0n;
   let ammBoughtBase = 0n;
   let ammBoughtQuoteVolume = 0n;
-  let ammBoughtPremium = 0n;
+  const ammBoughtPremium = 0n;
   let totalPremium = 0n;
   let netRebalancingBase = 0n;
   let netRebalancingQuote = 0n;
@@ -211,10 +253,16 @@ function computeSummary(
 
       if (segmentL > 0n) {
         const amountsStart = getTokenAmountsFromLiquidity(
-          segmentL, prevCfg.sqrtPriceX96, tickLower, tickUpper,
+          segmentL,
+          prevCfg.sqrtPriceX96,
+          tickLower,
+          tickUpper,
         );
         const amountsEnd = getTokenAmountsFromLiquidity(
-          segmentL, cfg.sqrtPriceX96, tickLower, tickUpper,
+          segmentL,
+          cfg.sqrtPriceX96,
+          tickLower,
+          tickUpper,
         );
 
         const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
@@ -241,20 +289,21 @@ function computeSummary(
           isTrailing: false,
           deltaBase,
           deltaQuote,
-          avgPrice: deltaBase !== 0n
-            ? (absBI(deltaQuote) * scale) / absBI(deltaBase)
-            : 0n,
+          avgPrice:
+            deltaBase !== 0n ? (absBI(deltaQuote) * scale) / absBI(deltaBase) : 0n,
           feesEarned: 0n,
         });
       }
     }
 
-    // Deposits only (INCREASE events) — withdrawals are excluded
-    // Withdrawals are the "exercise" of the option, not part of the deposit
-    if (event.eventType === "INCREASE_POSITION") {
+    // Deposits only (INCREASE events) — withdrawals are excluded.
+    // Withdrawals are the "exercise" of the option, not part of the deposit.
+    if (event.eventType === 'INCREASE_POSITION') {
       const state = parseState(event);
       const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
-        state.amount0, state.amount1, baseIsToken0,
+        state.amount0,
+        state.amount1,
+        baseIsToken0,
       );
 
       netDepositBase += deltaBase;
@@ -271,10 +320,12 @@ function computeSummary(
     }
 
     // Track withdrawals (DECREASE events)
-    if (event.eventType === "DECREASE_POSITION") {
+    if (event.eventType === 'DECREASE_POSITION') {
       const state = parseState(event);
       const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
-        state.amount0, state.amount1, baseIsToken0,
+        state.amount0,
+        state.amount1,
+        baseIsToken0,
       );
       withdrawnBase += deltaBase;
       withdrawnQuote += deltaQuote;
@@ -288,10 +339,16 @@ function computeSummary(
 
     if (trailingL > 0n) {
       const amountsStart = getTokenAmountsFromLiquidity(
-        trailingL, lastCfg.sqrtPriceX96, tickLower, tickUpper,
+        trailingL,
+        lastCfg.sqrtPriceX96,
+        tickLower,
+        tickUpper,
       );
       const amountsEnd = getTokenAmountsFromLiquidity(
-        trailingL, currentSqrtPriceX96, tickLower, tickUpper,
+        trailingL,
+        currentSqrtPriceX96,
+        tickLower,
+        tickUpper,
       );
 
       const { base: deltaBase, quote: deltaQuote } = toBaseQuote(
@@ -320,9 +377,8 @@ function computeSummary(
         isTrailing: !isClosed,
         deltaBase,
         deltaQuote,
-        avgPrice: deltaBase !== 0n
-          ? (absBI(deltaQuote) * scale) / absBI(deltaBase)
-          : 0n,
+        avgPrice:
+          deltaBase !== 0n ? (absBI(deltaQuote) * scale) / absBI(deltaBase) : 0n,
         feesEarned: 0n,
       });
     }
@@ -337,7 +393,7 @@ function computeSummary(
     // Use the price from the final DECREASE event as the reference spot price.
     for (let j = financialEvents.length - 1; j >= 0; j--) {
       const evt = financialEvents[j]!;
-      if (evt.eventType === "DECREASE_POSITION") {
+      if (evt.eventType === 'DECREASE_POSITION') {
         const closeCfg = parseConfig(evt);
         if (closeCfg.liquidityAfter === 0n) {
           spotPriceX96 = closeCfg.sqrtPriceX96;
@@ -347,10 +403,15 @@ function computeSummary(
     }
   } else if (currentLiquidity > 0n) {
     const currentAmounts = getTokenAmountsFromLiquidity(
-      currentLiquidity, currentSqrtPriceX96, tickLower, tickUpper,
+      currentLiquidity,
+      currentSqrtPriceX96,
+      tickLower,
+      tickUpper,
     );
     const mapped = toBaseQuote(
-      currentAmounts.token0Amount, currentAmounts.token1Amount, baseIsToken0,
+      currentAmounts.token0Amount,
+      currentAmounts.token1Amount,
+      baseIsToken0,
     );
     currentHoldingsBase = mapped.base;
     currentHoldingsQuote = mapped.quote;
@@ -361,8 +422,8 @@ function computeSummary(
   // and can go anywhere — they cannot count against the purchase or sale of assets
   // inside the position. Only unclaimed fees are still inside the position.
   totalPremium = feesToQuote(
-    BigInt(posState.unclaimedFees0),
-    BigInt(posState.unclaimedFees1),
+    BigInt(position.state.unclaimedFees0),
+    BigInt(position.state.unclaimedFees1),
     currentSqrtPriceX96,
     baseIsToken0,
   );
@@ -374,11 +435,11 @@ function computeSummary(
     if (unattributedFees > 0n) {
       const last = segments[segments.length - 1]!;
       last.feesEarned += unattributedFees;
-      // Recompute effective execution price for this segment
       if (last.deltaBase !== 0n) {
-        const effectiveQuote = last.deltaBase < 0n
-          ? absBI(last.deltaQuote) + last.feesEarned
-          : absBI(last.deltaQuote) - last.feesEarned;
+        const effectiveQuote =
+          last.deltaBase < 0n
+            ? absBI(last.deltaQuote) + last.feesEarned
+            : absBI(last.deltaQuote) - last.feesEarned;
         last.avgPrice = (effectiveQuote * scale) / absBI(last.deltaBase);
       }
     }
@@ -387,22 +448,23 @@ function computeSummary(
   return {
     netDepositBase,
     netDepositQuote,
-    netDepositAvgPrice: depositVwapDenominator > 0n
-      ? depositVwapNumerator / depositVwapDenominator
-      : 0n,
+    netDepositAvgPrice:
+      depositVwapDenominator > 0n ? depositVwapNumerator / depositVwapDenominator : 0n,
     withdrawnBase,
     withdrawnQuote,
     ammBoughtBase,
-    ammBoughtAvgPrice: ammBoughtBase > 0n ? (ammBoughtQuoteVolume * scale) / ammBoughtBase : 0n,
+    ammBoughtAvgPrice:
+      ammBoughtBase > 0n ? (ammBoughtQuoteVolume * scale) / ammBoughtBase : 0n,
     ammBoughtPremium,
     ammSoldBase,
     ammSoldAvgPrice: ammSoldBase > 0n ? (ammSoldQuoteVolume * scale) / ammSoldBase : 0n,
     ammSoldPremium,
     netRebalancingBase,
     netRebalancingQuote,
-    netRebalancingAvgPrice: netRebalancingBase !== 0n
-      ? (absBI(netRebalancingQuote) * scale) / absBI(netRebalancingBase)
-      : 0n,
+    netRebalancingAvgPrice:
+      netRebalancingBase !== 0n
+        ? (absBI(netRebalancingQuote) * scale) / absBI(netRebalancingBase)
+        : 0n,
     totalPremium,
     segments,
     currentBase: currentHoldingsBase,
@@ -420,15 +482,129 @@ function computeSummary(
 }
 
 // =============================================================================
-// Hook
+// Serialization
+//
+// Wire form — all bigint fields become string. Used by the API response and
+// parsed back to bigint in the UI / MCP formatters.
 // =============================================================================
 
-export function useUniswapV3ConversionSummary(
-  position: UniswapV3PositionData,
-  events: LedgerEventData[] | undefined,
-): ConversionSummary | null {
-  return useMemo(() => {
-    if (!events || events.length === 0) return null;
-    return computeSummary(position, events);
-  }, [position, events]);
+export interface SerializedRebalancingSegment {
+  index: number;
+  startTimestamp: string;
+  endTimestamp: string | null;
+  isTrailing: boolean;
+  deltaBase: string;
+  deltaQuote: string;
+  avgPrice: string;
+  feesEarned: string;
+}
+
+export interface SerializedConversionSummary {
+  netDepositBase: string;
+  netDepositQuote: string;
+  netDepositAvgPrice: string;
+  withdrawnBase: string;
+  withdrawnQuote: string;
+  ammBoughtBase: string;
+  ammBoughtAvgPrice: string;
+  ammBoughtPremium: string;
+  ammSoldBase: string;
+  ammSoldAvgPrice: string;
+  ammSoldPremium: string;
+  netRebalancingBase: string;
+  netRebalancingQuote: string;
+  netRebalancingAvgPrice: string;
+  totalPremium: string;
+  currentBase: string;
+  currentQuote: string;
+  currentSpotPrice: string;
+  isClosed: boolean;
+  daysActive: number | null;
+  segments: SerializedRebalancingSegment[];
+  baseTokenSymbol: string;
+  quoteTokenSymbol: string;
+  baseTokenDecimals: number;
+  quoteTokenDecimals: number;
+}
+
+export function serializeConversionSummary(
+  summary: ConversionSummary,
+): SerializedConversionSummary {
+  return {
+    netDepositBase: summary.netDepositBase.toString(),
+    netDepositQuote: summary.netDepositQuote.toString(),
+    netDepositAvgPrice: summary.netDepositAvgPrice.toString(),
+    withdrawnBase: summary.withdrawnBase.toString(),
+    withdrawnQuote: summary.withdrawnQuote.toString(),
+    ammBoughtBase: summary.ammBoughtBase.toString(),
+    ammBoughtAvgPrice: summary.ammBoughtAvgPrice.toString(),
+    ammBoughtPremium: summary.ammBoughtPremium.toString(),
+    ammSoldBase: summary.ammSoldBase.toString(),
+    ammSoldAvgPrice: summary.ammSoldAvgPrice.toString(),
+    ammSoldPremium: summary.ammSoldPremium.toString(),
+    netRebalancingBase: summary.netRebalancingBase.toString(),
+    netRebalancingQuote: summary.netRebalancingQuote.toString(),
+    netRebalancingAvgPrice: summary.netRebalancingAvgPrice.toString(),
+    totalPremium: summary.totalPremium.toString(),
+    currentBase: summary.currentBase.toString(),
+    currentQuote: summary.currentQuote.toString(),
+    currentSpotPrice: summary.currentSpotPrice.toString(),
+    isClosed: summary.isClosed,
+    daysActive: summary.daysActive,
+    segments: summary.segments.map((s) => ({
+      index: s.index,
+      startTimestamp: s.startTimestamp,
+      endTimestamp: s.endTimestamp,
+      isTrailing: s.isTrailing,
+      deltaBase: s.deltaBase.toString(),
+      deltaQuote: s.deltaQuote.toString(),
+      avgPrice: s.avgPrice.toString(),
+      feesEarned: s.feesEarned.toString(),
+    })),
+    baseTokenSymbol: summary.baseTokenSymbol,
+    quoteTokenSymbol: summary.quoteTokenSymbol,
+    baseTokenDecimals: summary.baseTokenDecimals,
+    quoteTokenDecimals: summary.quoteTokenDecimals,
+  };
+}
+
+export function deserializeConversionSummary(
+  wire: SerializedConversionSummary,
+): ConversionSummary {
+  return {
+    netDepositBase: BigInt(wire.netDepositBase),
+    netDepositQuote: BigInt(wire.netDepositQuote),
+    netDepositAvgPrice: BigInt(wire.netDepositAvgPrice),
+    withdrawnBase: BigInt(wire.withdrawnBase),
+    withdrawnQuote: BigInt(wire.withdrawnQuote),
+    ammBoughtBase: BigInt(wire.ammBoughtBase),
+    ammBoughtAvgPrice: BigInt(wire.ammBoughtAvgPrice),
+    ammBoughtPremium: BigInt(wire.ammBoughtPremium),
+    ammSoldBase: BigInt(wire.ammSoldBase),
+    ammSoldAvgPrice: BigInt(wire.ammSoldAvgPrice),
+    ammSoldPremium: BigInt(wire.ammSoldPremium),
+    netRebalancingBase: BigInt(wire.netRebalancingBase),
+    netRebalancingQuote: BigInt(wire.netRebalancingQuote),
+    netRebalancingAvgPrice: BigInt(wire.netRebalancingAvgPrice),
+    totalPremium: BigInt(wire.totalPremium),
+    currentBase: BigInt(wire.currentBase),
+    currentQuote: BigInt(wire.currentQuote),
+    currentSpotPrice: BigInt(wire.currentSpotPrice),
+    isClosed: wire.isClosed,
+    daysActive: wire.daysActive,
+    segments: wire.segments.map((s) => ({
+      index: s.index,
+      startTimestamp: s.startTimestamp,
+      endTimestamp: s.endTimestamp,
+      isTrailing: s.isTrailing,
+      deltaBase: BigInt(s.deltaBase),
+      deltaQuote: BigInt(s.deltaQuote),
+      avgPrice: BigInt(s.avgPrice),
+      feesEarned: BigInt(s.feesEarned),
+    })),
+    baseTokenSymbol: wire.baseTokenSymbol,
+    quoteTokenSymbol: wire.quoteTokenSymbol,
+    baseTokenDecimals: wire.baseTokenDecimals,
+    quoteTokenDecimals: wire.quoteTokenDecimals,
+  };
 }

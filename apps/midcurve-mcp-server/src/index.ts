@@ -18,6 +18,7 @@ import { loadEnv } from './env.js';
 import { buildGetUserTool } from './tools/get-user.js';
 import { buildListPositionsTool } from './tools/list-positions.js';
 import { buildGetPositionTool } from './tools/get-position.js';
+import { buildGetPositionConversionTool } from './tools/get-position-conversion.js';
 import { buildGetPnlTool } from './tools/get-pnl.js';
 import { buildListCloseOrdersTool } from './tools/list-close-orders.js';
 import { buildGetPoolTool } from './tools/get-pool.js';
@@ -80,12 +81,13 @@ async function main(): Promise<void> {
   register(buildGetUserTool(client));
   register(buildListPositionsTool(client));
   register(buildGetPositionTool(client));
+  register(buildGetPositionConversionTool(client));
   register(buildGetPnlTool(client));
   register(buildListCloseOrdersTool(client));
   register(buildGetPoolTool(client));
   register(buildListNotificationsTool(client));
 
-  log.info({ count: 7 }, 'tools registered');
+  log.info({ count: 8 }, 'tools registered');
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
