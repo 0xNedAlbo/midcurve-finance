@@ -218,7 +218,8 @@ export function formatCompactValue(
 ): string {
   // Handle zero case
   if (value === 0n) {
-    return '0';
+    const decimalSep = opts?.decimalSep ?? FORMAT_PRESET_EN.decimalSep;
+    return decimals === 0 ? '0' : '0' + decimalSep + '00';
   }
 
   // Get the full formatted string first
