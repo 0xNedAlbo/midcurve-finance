@@ -46,12 +46,22 @@ export function buildGetPositionTool(client: ApiClient) {
     config: {
       title: 'Get position detail',
       description:
-        'Fetch full detail of a single position — pool/tokens, current value, cost basis, realized & unrealized PnL, ' +
-        'APR, price range, in-range status, and lifecycle timestamps. ' +
+        'Fetch full detail of a single position. ' +
         'Two protocols are supported: "uniswapv3" for classic NFT positions (pass chainId + nftId), and ' +
         '"uniswapv3-vault" for tokenized vault positions (pass chainId + vaultAddress + ownerAddress). ' +
         'The positionHash returned by list_positions tells you which form to use: ' +
-        '"uniswapv3/<chain>/<nft>" → uniswapv3 form, "uniswapv3-vault/<chain>/<vault>/<owner>" → vault form.',
+        '"uniswapv3/<chain>/<nft>" → uniswapv3 form, "uniswapv3-vault/<chain>/<vault>/<owner>" → vault form.\n\n' +
+        'Output shape (humanized in the position\'s quote token):\n' +
+        '- pool: { chainId, poolAddress, pair, feeBps, feeTier, ' +
+        'baseToken: { address, symbol, decimals }, quoteToken: { address, symbol, decimals } }\n' +
+        '- currentValue, costBasis, realizedPnl, unrealizedPnl, collectedYield, unclaimedYield — ' +
+        'humanized strings (e.g. "1,234.56 USDC") or null\n' +
+        '- priceRange: { lower, upper, current, inRange } — lower/upper humanized; ' +
+        'current is currently always null (not populated by the upstream API); inRange is a boolean\n' +
+        '- apr: { total, base, reward } — percentage strings or null\n' +
+        '- ownerWallet, openedAt, isArchived, archivedAt\n' +
+        '- rawConfig, rawState — protocol-specific objects with raw bigint strings for advanced use\n\n' +
+        'Note: the priceRange shape differs from list_positions, which returns only { lower, upper }.',
       inputSchema,
     },
     handler: async (args: Args) => {
