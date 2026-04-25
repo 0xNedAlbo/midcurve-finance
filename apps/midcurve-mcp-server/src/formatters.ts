@@ -14,6 +14,7 @@ import {
   type SerializedConversionSummary,
   type SerializedRebalancingSegment,
 } from '@midcurve/shared';
+import type { PositionAccountingResponse } from '@midcurve/api-shared';
 
 function pickAddress(obj: { address?: string | null } | null | undefined): string | null {
   return obj?.address ?? null;
@@ -374,6 +375,62 @@ export function formatConversionSummary(
       : tokenAmount(summary.totalPremium, quoteTokenSymbol, quoteTokenDecimals),
     segments: summary.segments.map((s) => formatSegment(s, summary)),
     raw: summary,
+  };
+}
+
+// =============================================================================
+// Position Accounting
+// =============================================================================
+
+export function formatPositionAccounting(
+  report: PositionAccountingResponse,
+): Record<string, unknown> {
+  const cur = report.reportingCurrency;
+  const amount = (raw: string) => formatReportingAmount(raw, cur);
+
+  return {
+    positionRef: report.positionRef,
+    reportingCurrency: cur,
+    balanceSheet: {
+      assets: {
+        lpPositionAtCost: amount(report.balanceSheet.assets.lpPositionAtCost),
+        totalAssets: amount(report.balanceSheet.assets.totalAssets),
+      },
+      equity: {
+        contributedCapital: amount(report.balanceSheet.equity.contributedCapital),
+        capitalReturned: amount(report.balanceSheet.equity.capitalReturned),
+        retainedEarnings: {
+          realizedFromWithdrawals: amount(
+            report.balanceSheet.equity.retainedEarnings.realizedFromWithdrawals,
+          ),
+          realizedFromCollectedFees: amount(
+            report.balanceSheet.equity.retainedEarnings.realizedFromCollectedFees,
+          ),
+          realizedFromFxEffect: amount(
+            report.balanceSheet.equity.retainedEarnings.realizedFromFxEffect,
+          ),
+          total: amount(report.balanceSheet.equity.retainedEarnings.total),
+        },
+        totalEquity: amount(report.balanceSheet.equity.totalEquity),
+      },
+    },
+    realizedPnl: {
+      netPnl: amount(report.pnl.netPnl),
+      realizedFromWithdrawals: amount(report.pnl.realizedFromWithdrawals),
+      realizedFromCollectedFees: amount(report.pnl.realizedFromCollectedFees),
+      realizedFromFxEffect: amount(report.pnl.realizedFromFxEffect),
+    },
+    journalEntries: report.journalEntries.map((entry) => ({
+      date: timestamp(entry.entryDate),
+      description: entry.description,
+      memo: entry.memo,
+      lines: entry.lines.map((line) => ({
+        side: line.side,
+        account: `${line.accountCode} — ${line.accountName} (${line.accountCategory})`,
+        amount: line.amountReporting === null ? null : amount(line.amountReporting),
+      })),
+    })),
+    raw: report,
   };
 }
 
