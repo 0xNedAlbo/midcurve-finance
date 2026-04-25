@@ -37,7 +37,7 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * - tokenSetA (required): Array of token addresses or symbols
  * - tokenSetB (required): Array of token addresses or symbols
  * - chainIds (required): Array of chain IDs to search
- * - sortBy (optional): Field to sort by (tvlUSD, volume24hUSD, fees24hUSD, apr7d)
+ * - sortBy (optional): Field to sort by (tvlUSD, volume24hUSD, fees24hUSD, volume7dAvgUSD, fees7dAvgUSD, apr7d)
  * - sortDirection (optional): Sort direction (asc, desc)
  * - limit (optional): Maximum results to return (1-100, default: 20)
  */

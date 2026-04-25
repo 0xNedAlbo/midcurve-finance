@@ -171,6 +171,8 @@ export async function POST(request: NextRequest): Promise<Response> {
             volume24hUSD: poolMetrics.volume24hUSD,
             fees24hUSD: poolMetrics.fees24hUSD,
             fees7dUSD: poolMetrics.fees7dUSD,
+            volume7dAvgUSD: poolMetrics.volume7dAvgUSD,
+            fees7dAvgUSD: poolMetrics.fees7dAvgUSD,
             apr7d: poolMetrics.apr7d,
           }
         : {
@@ -178,6 +180,8 @@ export async function POST(request: NextRequest): Promise<Response> {
             volume24hUSD: '0',
             fees24hUSD: '0',
             fees7dUSD: '0',
+            volume7dAvgUSD: '0',
+            fees7dAvgUSD: '0',
             apr7d: 0,
           };
 
@@ -304,6 +308,8 @@ export async function GET(request: NextRequest): Promise<Response> {
           volume24hUSD: fav.metrics.volume24hUSD,
           fees24hUSD: fav.metrics.fees24hUSD,
           fees7dUSD: fav.metrics.fees7dUSD,
+          volume7dAvgUSD: fav.metrics.volume7dAvgUSD,
+          fees7dAvgUSD: fav.metrics.fees7dAvgUSD,
           apr7d: fav.metrics.apr7d,
         });
       }

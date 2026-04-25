@@ -9,7 +9,10 @@ const inputSchema = {
     .boolean()
     .optional()
     .default(true)
-    .describe('Include subgraph metrics (TVL, 24h/7d volume).'),
+    .describe(
+      'Include subgraph metrics (TVL, 24h volume/fees from the last complete UTC day, ' +
+        'and 7d average daily volume/fees across the last 7 complete UTC days).'
+    ),
   fees: z
     .boolean()
     .optional()
@@ -24,15 +27,18 @@ export function buildGetPoolTool(client: ApiClient) {
       title: 'Get Uniswap V3 pool detail',
       description:
         'Returns pool state (tokens, fee tier, current tick / sqrtPrice) and optional subgraph metrics ' +
-        '(TVL in USD, recent volume). Use this when you need pool-level context (not user-specific) — ' +
-        'e.g. comparing fee tiers or checking liquidity depth.\n\n' +
+        '(TVL in USD, recent volume/fees, and trailing-week averages). Use this when you need pool-level ' +
+        'context (not user-specific) — e.g. comparing fee tiers or checking liquidity depth.\n\n' +
         'Standalone pool detail uses the canonical Uniswap pool ordering (`token0`/`token1`) ' +
         'rather than the position-context base/quote pivot — outside a user\'s position there ' +
         'is no canonical base/quote preference (see convention §3.1). USD metrics are dual-emitted: ' +
-        '`tvl`/`tvlRaw`, `volume24h`/`volume24hRaw`, `fees24h`/`fees24hRaw`. Display is the compact ' +
-        'subgraph value (e.g. "$123.5M"); Raw is the float string the subgraph returned. The ' +
-        'pool\'s `state` (sqrtPriceX96, currentTick, liquidity, feeGrowthGlobal0/1) and optional ' +
-        '`feeData` block are passed through as canonical bigint strings — single-emit per §2.',
+        '`tvl`/`tvlRaw`, `volume24h`/`volume24hRaw`, `fees24h`/`fees24hRaw`, `volume7dAvg`/`volume7dAvgRaw`, ' +
+        '`fees7dAvg`/`fees7dAvgRaw`. Display is the compact subgraph value (e.g. "$123.5M"); Raw is the ' +
+        'float string the subgraph returned. The 24h figure is the last complete UTC day; the 7d average ' +
+        'is the mean across the last 7 complete UTC days (1-7 if the pool is younger). Today\'s in-progress ' +
+        'UTC day is excluded from both to avoid partial-day under-reporting. The pool\'s `state` ' +
+        '(sqrtPriceX96, currentTick, liquidity, feeGrowthGlobal0/1) and optional `feeData` block are ' +
+        'passed through as canonical bigint strings — single-emit per §2.',
       inputSchema,
     },
     handler: async (args: { [K in keyof typeof inputSchema]: z.infer<(typeof inputSchema)[K]> }) => {

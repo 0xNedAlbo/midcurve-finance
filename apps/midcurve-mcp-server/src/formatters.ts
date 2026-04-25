@@ -362,7 +362,13 @@ interface PoolDetailRaw {
     config: { chainId: number; address: string; tickSpacing: number };
     state: Record<string, unknown>;
   };
-  metrics?: { tvlUSD: string; volumeUSD: string; feesUSD: string };
+  metrics?: {
+    tvlUSD: string;
+    volumeUSD: string;
+    feesUSD: string;
+    volume7dAvgUSD: string;
+    fees7dAvgUSD: string;
+  };
   feeData?: Record<string, unknown>;
 }
 
@@ -407,6 +413,10 @@ export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
           volume24hRaw: metrics.volumeUSD,
           fees24h: fmtUsd(metrics.feesUSD),
           fees24hRaw: metrics.feesUSD,
+          volume7dAvg: fmtUsd(metrics.volume7dAvgUSD),
+          volume7dAvgRaw: metrics.volume7dAvgUSD,
+          fees7dAvg: fmtUsd(metrics.fees7dAvgUSD),
+          fees7dAvgRaw: metrics.fees7dAvgUSD,
         }
       : null,
     feeData: feeData ?? null,

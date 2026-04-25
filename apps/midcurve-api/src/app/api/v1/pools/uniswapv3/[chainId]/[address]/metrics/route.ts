@@ -153,6 +153,8 @@ export async function GET(
         tvlUSD: feeData.tvlUSD,
         volumeUSD: feeData.volumeUSD,
         feesUSD: feeData.feesUSD,
+        volume7dAvgUSD: feeData.volume7dAvgUSD,
+        fees7dAvgUSD: feeData.fees7dAvgUSD,
         volumeToken0: feeData.token0.dailyVolume,
         volumeToken1: feeData.token1.dailyVolume,
         token0Price: feeData.token0.price,

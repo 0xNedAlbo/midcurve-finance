@@ -11,15 +11,19 @@
  * Get lightweight pool metrics (TVL, volume, fees)
  *
  * Returns minimal data for pool ranking and discovery.
- * Uses only the most recent poolDayData for 24h metrics.
+ *
+ * Fetches 8 days of poolDayData so the partial current-UTC-day entry can be
+ * dropped (poolDayData[0] accumulates from 00:00 UTC and is incomplete until
+ * the next midnight). The remaining 7 entries support trailing-week
+ * aggregations like `volume7dAvgUSD` / `fees7dAvgUSD`.
  *
  * Variables:
  * - $poolId: Pool address (lowercase, with or without 0x prefix)
  *
  * Returns:
  * - tvlUSD: Total Value Locked in USD
- * - volumeUSD: 24-hour volume in USD
- * - feesUSD: 24-hour fees in USD
+ * - volumeUSD: 24-hour volume in USD (last complete UTC day)
+ * - feesUSD: 24-hour fees in USD (last complete UTC day)
  *
  * Example usage:
  * ```typescript
@@ -32,7 +36,8 @@ export const POOL_METRICS_QUERY = `
   query GetPoolMetrics($poolId: ID!) {
     pools(where: {id: $poolId}) {
       id
-      poolDayData(orderBy: date, orderDirection: desc, first: 1) {
+      poolDayData(orderBy: date, orderDirection: desc, first: 8) {
+        date
         volumeUSD
         feesUSD
         tvlUSD
@@ -49,6 +54,11 @@ export const POOL_METRICS_QUERY = `
  * - Token metadata (symbols, decimals)
  * - Latest 24h metrics (volumes, prices, fees, TVL)
  *
+ * Fetches 8 days of poolDayData so the partial current-UTC-day entry can be
+ * dropped (poolDayData[0] accumulates from 00:00 UTC and is incomplete until
+ * the next midnight). The remaining 7 entries support trailing-week
+ * aggregations.
+ *
  * This query is more expensive than POOL_METRICS_QUERY but provides
  * all data needed for:
  * - APR calculations
@@ -62,7 +72,7 @@ export const POOL_METRICS_QUERY = `
  * Returns:
  * - Pool state and configuration
  * - Token0 and Token1 metadata
- * - Most recent 24h data point
+ * - Last complete UTC day of metrics + 7 trailing days for averages
  *
  * Example usage:
  * ```typescript
@@ -88,7 +98,7 @@ export const POOL_FEE_DATA_QUERY = `
         symbol
         decimals
       }
-      poolDayData(orderBy: date, orderDirection: desc, first: 1) {
+      poolDayData(orderBy: date, orderDirection: desc, first: 8) {
         date
         liquidity
         volumeToken0
@@ -158,7 +168,11 @@ export const POOLS_BATCH_QUERY = `
  * Get pool data with 7-day metrics for multiple pools
  *
  * Used by favorites endpoint to fetch full metrics including APR.
- * Returns 7 days of poolDayData for APR calculation.
+ *
+ * Fetches 8 days of poolDayData so the partial current-UTC-day entry can be
+ * dropped (poolDayData[0] accumulates from 00:00 UTC and is incomplete until
+ * the next midnight). The remaining 7 entries support APR and trailing-week
+ * aggregations.
  *
  * Variables:
  * - $poolIds: Array of pool addresses (lowercase)
@@ -195,7 +209,7 @@ export const POOLS_BATCH_WITH_METRICS_QUERY = `
         symbol
         decimals
       }
-      poolDayData(orderBy: date, orderDirection: desc, first: 7) {
+      poolDayData(orderBy: date, orderDirection: desc, first: 8) {
         date
         volumeUSD
         feesUSD
@@ -282,8 +296,9 @@ export const POOL_CREATION_QUERY = `
  * - token0 in setA AND token1 in setB, OR
  * - token0 in setB AND token1 in setA
  *
- * Returns pools sorted by TVL descending with 7 days of poolDayData
- * for APR calculation.
+ * Returns pools sorted by TVL descending with 8 days of poolDayData (the
+ * partial current-UTC-day entry is dropped client-side; remaining 7 entries
+ * are used for APR and trailing-week aggregations).
  *
  * Variables:
  * - $token0List: Array of token addresses (lowercase)
@@ -329,7 +344,7 @@ export const POOLS_BY_TOKEN_SETS_QUERY = `
         symbol
         decimals
       }
-      poolDayData(orderBy: date, orderDirection: desc, first: 7) {
+      poolDayData(orderBy: date, orderDirection: desc, first: 8) {
         date
         volumeUSD
         feesUSD

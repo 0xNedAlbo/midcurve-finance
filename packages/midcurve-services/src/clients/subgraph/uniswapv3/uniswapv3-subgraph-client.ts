@@ -49,6 +49,7 @@ import {
   SWAP_BLOCK_QUERY,
   FACTORY_QUERY,
 } from './queries.js';
+import { dropPartialDayEntry } from './pool-day-data.js';
 import { getFactoryAddress } from '../../../config/uniswapv3.js';
 import {
   PoolNotFoundInSubgraphError,
@@ -262,6 +263,8 @@ export class UniswapV3SubgraphClient {
         tvlUSD: '0',
         volumeUSD: '0',
         feesUSD: '0',
+        volume7dAvgUSD: '0',
+        fees7dAvgUSD: '0',
       };
 
       log.methodExit(this.logger, 'getPoolMetrics', { reason: 'local_chain' });
@@ -307,6 +310,8 @@ export class UniswapV3SubgraphClient {
           tvlUSD: '0',
           volumeUSD: '0',
           feesUSD: '0',
+          volume7dAvgUSD: '0',
+          fees7dAvgUSD: '0',
         };
 
         log.methodExit(this.logger, 'getPoolMetrics', { found: false });
@@ -326,18 +331,52 @@ export class UniswapV3SubgraphClient {
           tvlUSD: '0',
           volumeUSD: '0',
           feesUSD: '0',
+          volume7dAvgUSD: '0',
+          fees7dAvgUSD: '0',
         };
 
         log.methodExit(this.logger, 'getPoolMetrics', { found: true, hasData: false });
         return defaultMetrics;
       }
 
-      const dayData = pool.poolDayData[0]!; // We checked length above
+      // Drop the in-progress current UTC day (poolDayData[0] accumulates from
+      // 00:00 UTC and is incomplete) so 24h figures reflect the last complete day.
+      const completeDays = dropPartialDayEntry(pool.poolDayData);
+      if (completeDays.length === 0) {
+        this.logger.warn(
+          { chainId, poolAddress },
+          'No complete pool day data available, returning default metrics'
+        );
+
+        const defaultMetrics: PoolMetrics = {
+          tvlUSD: '0',
+          volumeUSD: '0',
+          feesUSD: '0',
+          volume7dAvgUSD: '0',
+          fees7dAvgUSD: '0',
+        };
+
+        log.methodExit(this.logger, 'getPoolMetrics', { found: true, hasData: false });
+        return defaultMetrics;
+      }
+
+      const dayData = completeDays[0]!;
+      const trailingDays = completeDays.slice(0, 7);
+      const volume7dSum = trailingDays.reduce(
+        (s, d) => s + parseFloat(d.volumeUSD || '0'),
+        0
+      );
+      const fees7dSum = trailingDays.reduce(
+        (s, d) => s + parseFloat(d.feesUSD || '0'),
+        0
+      );
 
       const metrics: PoolMetrics = {
         tvlUSD: dayData.tvlUSD || '0',
         volumeUSD: dayData.volumeUSD || '0',
         feesUSD: dayData.feesUSD || '0',
+        volume7dAvgUSD: (volume7dSum / trailingDays.length).toFixed(2),
+        fees7dAvgUSD: (fees7dSum / trailingDays.length).toFixed(2),
       };
 
       this.logger.debug(
@@ -440,7 +479,28 @@ export class UniswapV3SubgraphClient {
         throw error;
       }
 
-      const dayData = pool.poolDayData[0]!; // We checked length above
+      // Drop the in-progress current UTC day so 24h / 7d figures reflect only
+      // complete days.
+      const completeDays = dropPartialDayEntry(pool.poolDayData);
+      if (completeDays.length === 0) {
+        const error = new Error(
+          `No complete pool day data available for ${poolAddress} on chain ${chainId}`
+        ) as UniswapV3SubgraphApiError;
+        error.name = 'UniswapV3SubgraphApiError';
+        log.methodError(this.logger, 'getPoolFeeData', error, { chainId, poolAddress });
+        throw error;
+      }
+
+      const dayData = completeDays[0]!;
+      const trailingDays = completeDays.slice(0, 7);
+      const volume7dSum = trailingDays.reduce(
+        (s, d) => s + parseFloat(d.volumeUSD || '0'),
+        0
+      );
+      const fees7dSum = trailingDays.reduce(
+        (s, d) => s + parseFloat(d.feesUSD || '0'),
+        0
+      );
 
       // Convert decimal strings to bigint strings (for token amounts)
       // The subgraph returns decimal numbers, but we need them as token units (bigints)
@@ -456,6 +516,8 @@ export class UniswapV3SubgraphClient {
         tvlUSD: dayData.tvlUSD || '0',
         volumeUSD: dayData.volumeUSD || '0',
         feesUSD: dayData.feesUSD || '0',
+        volume7dAvgUSD: (volume7dSum / trailingDays.length).toFixed(2),
+        fees7dAvgUSD: (fees7dSum / trailingDays.length).toFixed(2),
         token0: {
           address: normalizeAddress(pool.token0.id),
           symbol: pool.token0.symbol,
@@ -573,21 +635,30 @@ export class UniswapV3SubgraphClient {
 
       // Process each pool
       const results: PoolSearchSubgraphResult[] = response.data.pools.map((pool) => {
-        // Calculate 7-day fees sum
-        const fees7d = pool.poolDayData.reduce((sum, day) => {
-          return sum + parseFloat(day.feesUSD || '0');
-        }, 0);
+        // Drop the in-progress current UTC day; use only complete days for
+        // 24h / 7d aggregations.
+        const completeDays = dropPartialDayEntry(pool.poolDayData);
+        const trailingDays = completeDays.slice(0, 7);
 
-        // Get most recent day data for 24h metrics
-        const latestDay = pool.poolDayData[0];
+        const volume7dSum = trailingDays.reduce(
+          (s, d) => s + parseFloat(d.volumeUSD || '0'),
+          0
+        );
+        const fees7dSum = trailingDays.reduce(
+          (s, d) => s + parseFloat(d.feesUSD || '0'),
+          0
+        );
+
+        const latestDay = completeDays[0];
         const volume24h = latestDay?.volumeUSD || '0';
         const fees24h = latestDay?.feesUSD || '0';
         const currentTvl = parseFloat(pool.totalValueLockedUSD || '0');
 
-        // Calculate 7-day average APR: (fees7d / 7 * 365) / tvl * 100
+        // 7-day average APR — divide by actual day count (not literal 7) so
+        // young pools with <7 days of history are not under-reported.
         let apr7d = 0;
-        if (currentTvl > 0 && fees7d > 0) {
-          const avgDailyFees = fees7d / 7;
+        if (currentTvl > 0 && trailingDays.length > 0 && fees7dSum > 0) {
+          const avgDailyFees = fees7dSum / trailingDays.length;
           apr7d = (avgDailyFees * 365 / currentTvl) * 100;
         }
 
@@ -608,7 +679,13 @@ export class UniswapV3SubgraphClient {
           tvlUSD: pool.totalValueLockedUSD || '0',
           volume24hUSD: volume24h,
           fees24hUSD: fees24h,
-          fees7dUSD: fees7d.toFixed(2),
+          fees7dUSD: fees7dSum.toFixed(2),
+          volume7dAvgUSD: trailingDays.length > 0
+            ? (volume7dSum / trailingDays.length).toFixed(2)
+            : '0',
+          fees7dAvgUSD: trailingDays.length > 0
+            ? (fees7dSum / trailingDays.length).toFixed(2)
+            : '0',
           apr7d: Math.round(apr7d * 100) / 100, // Round to 2 decimal places
         };
       });
@@ -702,21 +779,29 @@ export class UniswapV3SubgraphClient {
       const results = new Map<string, PoolSearchSubgraphResult>();
 
       for (const pool of response.data.pools) {
-        // Calculate 7-day fees sum
-        const fees7d = pool.poolDayData.reduce((sum, day) => {
-          return sum + parseFloat(day.feesUSD || '0');
-        }, 0);
+        // Drop the in-progress current UTC day; use only complete days for
+        // 24h / 7d aggregations.
+        const completeDays = dropPartialDayEntry(pool.poolDayData);
+        const trailingDays = completeDays.slice(0, 7);
 
-        // Get most recent day data
-        const latestDay = pool.poolDayData[0];
+        const volume7dSum = trailingDays.reduce(
+          (s, d) => s + parseFloat(d.volumeUSD || '0'),
+          0
+        );
+        const fees7dSum = trailingDays.reduce(
+          (s, d) => s + parseFloat(d.feesUSD || '0'),
+          0
+        );
+
+        const latestDay = completeDays[0];
         const volume24h = latestDay?.volumeUSD || '0';
         const fees24h = latestDay?.feesUSD || '0';
         const currentTvl = parseFloat(pool.totalValueLockedUSD || '0');
 
-        // Calculate 7-day average APR
+        // 7-day average APR — divide by actual day count, not literal 7.
         let apr7d = 0;
-        if (currentTvl > 0 && fees7d > 0) {
-          const avgDailyFees = fees7d / 7;
+        if (currentTvl > 0 && trailingDays.length > 0 && fees7dSum > 0) {
+          const avgDailyFees = fees7dSum / trailingDays.length;
           apr7d = (avgDailyFees * 365 / currentTvl) * 100;
         }
 
@@ -738,7 +823,13 @@ export class UniswapV3SubgraphClient {
           tvlUSD: pool.totalValueLockedUSD || '0',
           volume24hUSD: volume24h,
           fees24hUSD: fees24h,
-          fees7dUSD: fees7d.toFixed(2),
+          fees7dUSD: fees7dSum.toFixed(2),
+          volume7dAvgUSD: trailingDays.length > 0
+            ? (volume7dSum / trailingDays.length).toFixed(2)
+            : '0',
+          fees7dAvgUSD: trailingDays.length > 0
+            ? (fees7dSum / trailingDays.length).toFixed(2)
+            : '0',
           apr7d: Math.round(apr7d * 100) / 100,
         });
       }

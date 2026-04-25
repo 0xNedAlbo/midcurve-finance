@@ -144,27 +144,45 @@ export interface FavoritePoolItem {
   tvlUSD: string;
 
   /**
-   * 24-hour trading volume in USD
+   * 24-hour trading volume in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded)
    * @example "456789.12"
    */
   volume24hUSD: string;
 
   /**
-   * 24-hour fees collected in USD
+   * 24-hour fees collected in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded)
    * @example "1234.56"
    */
   fees24hUSD: string;
 
   /**
-   * 7-day fees collected in USD
+   * 7-day fees collected in USD (sum across last 7 complete UTC days)
    * @example "8642.15"
    */
   fees7dUSD: string;
 
   /**
+   * Average daily trading volume in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   * @example "423456.78"
+   */
+  volume7dAvgUSD: string;
+
+  /**
+   * Average daily fees collected in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   * @example "1234.59"
+   */
+  fees7dAvgUSD: string;
+
+  /**
    * 7-day average APR percentage
    *
-   * Calculated as: (fees7d / 7 * 365) / tvl * 100
+   * Calculated as: (avgDailyFees * 365) / tvl * 100
+   * Where avgDailyFees = fees7dUSD / N, and N is the number of complete days
+   * observed (1-7). Excludes today's partial day.
    * @example 12.34
    */
   apr7d: number;

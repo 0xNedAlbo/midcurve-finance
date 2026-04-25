@@ -331,7 +331,13 @@ export class UniswapV3PoolSearchService {
    */
   private sortPools(
     pools: PoolSearchResult[],
-    sortBy: 'tvlUSD' | 'volume24hUSD' | 'fees24hUSD' | 'apr7d',
+    sortBy:
+      | 'tvlUSD'
+      | 'volume24hUSD'
+      | 'fees24hUSD'
+      | 'volume7dAvgUSD'
+      | 'fees7dAvgUSD'
+      | 'apr7d',
     sortDirection: 'asc' | 'desc'
   ): PoolSearchResult[] {
     const multiplier = sortDirection === 'desc' ? -1 : 1;
@@ -352,6 +358,14 @@ export class UniswapV3PoolSearchService {
         case 'fees24hUSD':
           valueA = parseFloat(a.fees24hUSD);
           valueB = parseFloat(b.fees24hUSD);
+          break;
+        case 'volume7dAvgUSD':
+          valueA = parseFloat(a.volume7dAvgUSD);
+          valueB = parseFloat(b.volume7dAvgUSD);
+          break;
+        case 'fees7dAvgUSD':
+          valueA = parseFloat(a.fees7dAvgUSD);
+          valueB = parseFloat(b.fees7dAvgUSD);
           break;
         case 'apr7d':
           valueA = a.apr7d;

@@ -50,16 +50,32 @@ export interface PoolMetricsData {
   tvlUSD: string;
 
   /**
-   * 24-hour trading volume in USD
+   * 24-hour trading volume in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded to avoid partial-day under-reporting)
    * @example "23456789.12"
    */
   volumeUSD: string;
 
   /**
-   * 24-hour fees collected in USD
+   * 24-hour fees collected in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded to avoid partial-day under-reporting)
    * @example "2345.67"
    */
   feesUSD: string;
+
+  /**
+   * Average daily trading volume in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   * @example "21234567.89"
+   */
+  volume7dAvgUSD: string;
+
+  /**
+   * Average daily fees collected in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   * @example "2123.45"
+   */
+  fees7dAvgUSD: string;
 
   /**
    * 24-hour volume for token0 (in token0's native decimals)

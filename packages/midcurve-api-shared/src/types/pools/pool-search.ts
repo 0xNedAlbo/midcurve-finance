@@ -58,7 +58,13 @@ export interface PoolSearchRequest {
    *
    * @default "tvlUSD"
    */
-  sortBy?: 'tvlUSD' | 'volume24hUSD' | 'fees24hUSD' | 'apr7d';
+  sortBy?:
+    | 'tvlUSD'
+    | 'volume24hUSD'
+    | 'fees24hUSD'
+    | 'volume7dAvgUSD'
+    | 'fees7dAvgUSD'
+    | 'apr7d';
 
   /**
    * Sort direction
@@ -112,17 +118,34 @@ export interface PoolSearchResultItem {
 
   /** Current Total Value Locked in USD */
   tvlUSD: string;
-  /** Most recent 24h trading volume in USD */
+  /**
+   * Most recent 24h trading volume in USD (last complete UTC day; the
+   * in-progress current UTC day is excluded)
+   */
   volume24hUSD: string;
-  /** Most recent 24h fees collected in USD */
+  /**
+   * Most recent 24h fees collected in USD (last complete UTC day; the
+   * in-progress current UTC day is excluded)
+   */
   fees24hUSD: string;
-  /** Sum of fees from last 7 days in USD */
+  /** Sum of fees from last 7 complete UTC days in USD */
   fees7dUSD: string;
+  /**
+   * Average daily trading volume in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   */
+  volume7dAvgUSD: string;
+  /**
+   * Average daily fees collected in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   */
+  fees7dAvgUSD: string;
   /**
    * 7-day average APR
    *
-   * Calculated as: (fees7d / 7 * 365) / tvl * 100
-   * Rounded to 2 decimal places.
+   * Calculated as: (avgDailyFees * 365) / tvl * 100
+   * Where avgDailyFees = fees7dUSD / N, and N is the number of complete days
+   * observed (1-7). Excludes today's partial day. Rounded to 2 decimal places.
    */
   apr7d: number;
 
@@ -198,7 +221,14 @@ export const PoolSearchRequestSchema = z.object({
     .max(5, 'Cannot search more than 5 chains at once'),
 
   sortBy: z
-    .enum(['tvlUSD', 'volume24hUSD', 'fees24hUSD', 'apr7d'])
+    .enum([
+      'tvlUSD',
+      'volume24hUSD',
+      'fees24hUSD',
+      'volume7dAvgUSD',
+      'fees7dAvgUSD',
+      'apr7d',
+    ])
     .optional()
     .default('tvlUSD'),
 

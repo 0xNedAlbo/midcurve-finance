@@ -70,16 +70,32 @@ export interface GetUniswapV3PoolData {
     tvlUSD: string;
 
     /**
-     * 24-hour trading volume in USD
+     * 24-hour trading volume in USD (last complete UTC day; the in-progress
+     * current UTC day is excluded to avoid partial-day under-reporting)
      * @example "567890.12"
      */
     volumeUSD: string;
 
     /**
-     * 24-hour fees collected in USD
+     * 24-hour fees collected in USD (last complete UTC day; the in-progress
+     * current UTC day is excluded to avoid partial-day under-reporting)
      * @example "1234.56"
      */
     feesUSD: string;
+
+    /**
+     * Average daily trading volume in USD across the last 7 complete UTC days.
+     * Excludes today's partial day. Falls back to fewer days for young pools.
+     * @example "498765.43"
+     */
+    volume7dAvgUSD: string;
+
+    /**
+     * Average daily fees collected in USD across the last 7 complete UTC days.
+     * Excludes today's partial day. Falls back to fewer days for young pools.
+     * @example "1098.76"
+     */
+    fees7dAvgUSD: string;
   };
 
   /**

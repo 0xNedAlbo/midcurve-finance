@@ -56,6 +56,10 @@ export interface PoolMetricsData {
   volume24hUSD: string;
   fees24hUSD: string;
   fees7dUSD: string;
+  /** Average daily volume in USD across the last 7 complete UTC days */
+  volume7dAvgUSD: string;
+  /** Average daily fees in USD across the last 7 complete UTC days */
+  fees7dAvgUSD: string;
   apr7d: number;
 }
 
@@ -287,6 +291,8 @@ export class FavoritePoolService {
       volume24hUSD: '0',
       fees24hUSD: '0',
       fees7dUSD: '0',
+      volume7dAvgUSD: '0',
+      fees7dAvgUSD: '0',
       apr7d: 0,
     };
 
@@ -304,6 +310,8 @@ export class FavoritePoolService {
             volume24hUSD: poolMetrics.volume24hUSD,
             fees24hUSD: poolMetrics.fees24hUSD,
             fees7dUSD: poolMetrics.fees7dUSD,
+            volume7dAvgUSD: poolMetrics.volume7dAvgUSD,
+            fees7dAvgUSD: poolMetrics.fees7dAvgUSD,
             apr7d: poolMetrics.apr7d,
           };
         }

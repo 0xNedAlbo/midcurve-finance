@@ -47,16 +47,34 @@ export interface PoolMetrics {
   tvlUSD: string;
 
   /**
-   * 24-hour trading volume in USD
+   * 24-hour trading volume in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded to avoid partial-day under-reporting)
    * Example: "23456789.12"
    */
   volumeUSD: string;
 
   /**
-   * 24-hour fees collected in USD
+   * 24-hour fees collected in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded to avoid partial-day under-reporting)
    * Example: "2345.67"
    */
   feesUSD: string;
+
+  /**
+   * Average daily trading volume in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. If fewer than 7 complete days exist (young
+   * pool), the average is over the available count.
+   * Example: "21234567.89"
+   */
+  volume7dAvgUSD: string;
+
+  /**
+   * Average daily fees collected in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. If fewer than 7 complete days exist (young
+   * pool), the average is over the available count.
+   * Example: "2123.45"
+   */
+  fees7dAvgUSD: string;
 }
 
 /**
@@ -108,16 +126,34 @@ export interface PoolFeeData {
   tvlUSD: string;
 
   /**
-   * 24-hour trading volume in USD (from poolDayData)
+   * 24-hour trading volume in USD (last complete UTC day from poolDayData;
+   * the in-progress current UTC day is excluded to avoid partial-day
+   * under-reporting)
    * Example: "23456789.12"
    */
   volumeUSD: string;
 
   /**
-   * 24-hour fees collected in USD (from poolDayData)
+   * 24-hour fees collected in USD (last complete UTC day from poolDayData;
+   * the in-progress current UTC day is excluded to avoid partial-day
+   * under-reporting)
    * Example: "2345.67"
    */
   feesUSD: string;
+
+  /**
+   * Average daily trading volume in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   * Example: "21234567.89"
+   */
+  volume7dAvgUSD: string;
+
+  /**
+   * Average daily fees collected in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   * Example: "2123.45"
+   */
+  fees7dAvgUSD: string;
 
   /**
    * Token0 data (lower address in pool pair)
@@ -447,12 +483,32 @@ export interface PoolSearchSubgraphResult {
 
   /** Current Total Value Locked in USD */
   tvlUSD: string;
-  /** Most recent 24h volume in USD */
+  /**
+   * Most recent 24h volume in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded)
+   */
   volume24hUSD: string;
-  /** Most recent 24h fees in USD */
+  /**
+   * Most recent 24h fees in USD (last complete UTC day; the in-progress
+   * current UTC day is excluded)
+   */
   fees24hUSD: string;
-  /** Sum of fees from last 7 days in USD */
+  /** Sum of fees from last 7 complete UTC days in USD */
   fees7dUSD: string;
-  /** 7-day average APR: (fees7d/7 * 365) / tvl * 100 */
+  /**
+   * Average daily trading volume in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   */
+  volume7dAvgUSD: string;
+  /**
+   * Average daily fees collected in USD across the last 7 complete UTC days.
+   * Excludes today's partial day. Falls back to fewer days for young pools.
+   */
+  fees7dAvgUSD: string;
+  /**
+   * 7-day average APR: (avgDailyFees * 365) / tvl * 100
+   * Where avgDailyFees = fees7dUSD / N, and N is the number of complete days
+   * observed (1-7). Excludes today's partial day.
+   */
   apr7d: number;
 }

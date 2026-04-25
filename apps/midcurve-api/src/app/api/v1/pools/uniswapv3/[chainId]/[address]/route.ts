@@ -170,6 +170,8 @@ export async function GET(
             tvlUSD: poolMetrics.tvlUSD,
             volumeUSD: poolMetrics.volumeUSD,
             feesUSD: poolMetrics.feesUSD,
+            volume7dAvgUSD: poolMetrics.volume7dAvgUSD,
+            fees7dAvgUSD: poolMetrics.fees7dAvgUSD,
           };
         } catch (error) {
           // Graceful degradation: log warning but don't fail request

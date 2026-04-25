@@ -65,7 +65,13 @@ export interface UniswapV3PoolSearchInput {
    *
    * @default 'tvlUSD'
    */
-  sortBy?: 'tvlUSD' | 'volume24hUSD' | 'fees24hUSD' | 'apr7d';
+  sortBy?:
+    | 'tvlUSD'
+    | 'volume24hUSD'
+    | 'fees24hUSD'
+    | 'volume7dAvgUSD'
+    | 'fees7dAvgUSD'
+    | 'apr7d';
 
   /**
    * Sort direction
