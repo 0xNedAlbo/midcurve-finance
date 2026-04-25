@@ -100,6 +100,19 @@ interface PositionListItemRaw {
 }
 
 export function formatPositionListItem(item: PositionListItemRaw): Record<string, unknown> {
+  // priceRangeLower/Upper are quote-denominated bigints scaled to quote-token
+  // decimals. We need the pool summary's quote token to humanize them; without
+  // it we have to fall back to the raw scaled string.
+  const quoteToken = item.pool
+    ? item.pool.isToken0Quote ? item.pool.token0 : item.pool.token1
+    : null;
+  const priceLower = quoteToken
+    ? quoteAmount(item.priceRangeLower, quoteToken.symbol, quoteToken.decimals)
+    : item.priceRangeLower;
+  const priceUpper = quoteToken
+    ? quoteAmount(item.priceRangeUpper, quoteToken.symbol, quoteToken.decimals)
+    : item.priceRangeUpper;
+
   return {
     positionHash: item.positionHash,
     protocol: item.protocol,
@@ -117,8 +130,8 @@ export function formatPositionListItem(item: PositionListItemRaw): Record<string
       reward: pct(item.rewardApr),
     },
     priceRange: {
-      lowerRaw: item.priceRangeLower,
-      upperRaw: item.priceRangeUpper,
+      lower: priceLower,
+      upper: priceUpper,
     },
     openedAt: timestamp(item.positionOpenedAt),
     isArchived: item.isArchived,
@@ -183,9 +196,9 @@ export function formatPosition(p: UniswapV3PositionRaw): Record<string, unknown>
     unclaimedYield: quoteAmount(p.unclaimedYield, quoteToken.symbol, quoteToken.decimals),
     apr: { total: pct(p.totalApr), base: pct(p.baseApr), reward: pct(p.rewardApr) },
     priceRange: {
-      lowerRaw: p.priceRangeLower,
-      upperRaw: p.priceRangeUpper,
-      currentRaw: p.currentPrice,
+      lower: quoteAmount(p.priceRangeLower, quoteToken.symbol, quoteToken.decimals),
+      upper: quoteAmount(p.priceRangeUpper, quoteToken.symbol, quoteToken.decimals),
+      current: quoteAmount(p.currentPrice, quoteToken.symbol, quoteToken.decimals),
       inRange: p.inRange,
     },
     ownerWallet: p.ownerWallet,
