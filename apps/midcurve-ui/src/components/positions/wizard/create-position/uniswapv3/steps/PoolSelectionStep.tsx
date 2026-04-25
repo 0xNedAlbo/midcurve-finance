@@ -128,6 +128,8 @@ export function PoolSelectionStep() {
         volume24hUSD: favorite.volume24hUSD,
         fees24hUSD: favorite.fees24hUSD,
         fees7dUSD: favorite.fees7dUSD,
+        volume7dAvgUSD: favorite.volume7dAvgUSD,
+        fees7dAvgUSD: favorite.fees7dAvgUSD,
         apr7d: favorite.apr7d,
         isFavorite: true,
       };

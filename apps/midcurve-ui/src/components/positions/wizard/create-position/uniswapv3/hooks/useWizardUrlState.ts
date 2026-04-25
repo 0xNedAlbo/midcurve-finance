@@ -117,6 +117,8 @@ export function useWizardUrlState({
           volume24hUSD: '0',
           fees24hUSD: '0',
           fees7dUSD: '0',
+          volume7dAvgUSD: '0',
+          fees7dAvgUSD: '0',
           apr7d: 0,
         };
 
