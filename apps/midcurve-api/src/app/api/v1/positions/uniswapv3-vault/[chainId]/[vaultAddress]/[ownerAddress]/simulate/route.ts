@@ -23,9 +23,9 @@ import {
   calculatePositionValue,
   getTokenAmountsFromLiquidity_X96,
   priceToSqrtRatioX96,
+  tickToSqrtRatioX96,
   type Erc20Token,
 } from '@midcurve/shared';
-import { TickMath } from '@uniswap/v3-sdk';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUniswapV3VaultPositionService } from '@/lib/services';
 
@@ -114,10 +114,10 @@ export async function GET(
       );
       const sqrtPriceX96 = BigInt(sqrtPriceJSBI.toString());
       const sqrtPriceLowerX96 = BigInt(
-        TickMath.getSqrtRatioAtTick(dbPosition.tickLower).toString(),
+        tickToSqrtRatioX96(dbPosition.tickLower).toString(),
       );
       const sqrtPriceUpperX96 = BigInt(
-        TickMath.getSqrtRatioAtTick(dbPosition.tickUpper).toString(),
+        tickToSqrtRatioX96(dbPosition.tickUpper).toString(),
       );
 
       const fullValue = calculatePositionValue(
