@@ -70,6 +70,9 @@ interface OnChainVaultState {
     unclaimedFees1: bigint;
     sqrtPriceX96: bigint;
     currentTick: number;
+    poolLiquidity: bigint;
+    feeGrowthGlobal0: bigint;
+    feeGrowthGlobal1: bigint;
     positionManagerAddress: string;
     operatorAddress: string;
 }
@@ -84,6 +87,9 @@ interface OnChainVaultStateCached {
     unclaimedFees1: string;
     sqrtPriceX96: string;
     currentTick: number;
+    poolLiquidity: string;
+    feeGrowthGlobal0: string;
+    feeGrowthGlobal1: string;
     positionManagerAddress: string;
     operatorAddress: string;
 }
@@ -98,6 +104,9 @@ function serializeVaultState(state: OnChainVaultState): OnChainVaultStateCached 
         unclaimedFees1: state.unclaimedFees1.toString(),
         sqrtPriceX96: state.sqrtPriceX96.toString(),
         currentTick: state.currentTick,
+        poolLiquidity: state.poolLiquidity.toString(),
+        feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
+        feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
         positionManagerAddress: state.positionManagerAddress,
         operatorAddress: state.operatorAddress,
     };
@@ -113,6 +122,11 @@ function deserializeVaultState(cached: OnChainVaultStateCached): OnChainVaultSta
         unclaimedFees1: BigInt(cached.unclaimedFees1),
         sqrtPriceX96: BigInt(cached.sqrtPriceX96),
         currentTick: cached.currentTick,
+        // Default to 0 for backward-compat with cache entries written before
+        // pool-level fields were added.
+        poolLiquidity: BigInt(cached.poolLiquidity ?? '0'),
+        feeGrowthGlobal0: BigInt(cached.feeGrowthGlobal0 ?? '0'),
+        feeGrowthGlobal1: BigInt(cached.feeGrowthGlobal1 ?? '0'),
         positionManagerAddress: cached.positionManagerAddress,
         operatorAddress: cached.operatorAddress,
     };
@@ -327,11 +341,13 @@ export class UniswapV3VaultPositionService {
         const priceRangeLower = tickToPrice(tickLower as number, baseTokenAddr, quoteTokenAddr, baseDecimals);
         const priceRangeUpper = tickToPrice(tickUpper as number, baseTokenAddr, quoteTokenAddr, baseDecimals);
 
-        // Read pool state for the position state
-        const [slot0Data, poolLiquidity] = await Promise.all([
-            client.readContract({ address: poolAddr as Address, abi: [{ type: 'function', name: 'slot0', inputs: [], outputs: [{ name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint8' }, { name: '', type: 'bool' }], stateMutability: 'view' }], functionName: 'slot0' }),
-            client.readContract({ address: poolAddr as Address, abi: [{ type: 'function', name: 'liquidity', inputs: [], outputs: [{ name: '', type: 'uint128' }], stateMutability: 'view' }], functionName: 'liquidity' }),
-        ]) as [readonly [bigint, number, ...unknown[]], bigint];
+        // Read pool state (slot0, liquidity, feeGrowthGlobal0/1) — single
+        // cached call via the pool service, replacing four separate manual
+        // contract reads that previously omitted feeGrowthGlobal0/1.
+        const poolStateOnDiscover = await this._poolService.fetchPoolState(
+            chainId,
+            normalizeAddress(poolAddr as string),
+        );
 
         // Build config and state
         const configData: UniswapV3VaultPositionConfigData = {
@@ -362,11 +378,11 @@ export class UniswapV3VaultPositionService {
             operatorAddress: normalizeAddress(operatorAddr as string),
             isClosed: sharesBalance === 0n,
             isOwnedByUser: true, // Will be recalculated when vault perimeter is implemented
-            sqrtPriceX96: slot0Data[0],
-            currentTick: slot0Data[1],
-            poolLiquidity: poolLiquidity as bigint,
-            feeGrowthGlobal0: 0n,
-            feeGrowthGlobal1: 0n,
+            sqrtPriceX96: poolStateOnDiscover.sqrtPriceX96,
+            currentTick: poolStateOnDiscover.currentTick,
+            poolLiquidity: poolStateOnDiscover.liquidity,
+            feeGrowthGlobal0: poolStateOnDiscover.feeGrowthGlobal0,
+            feeGrowthGlobal1: poolStateOnDiscover.feeGrowthGlobal1,
         };
 
         // Get vault creation timestamp from first mint Transfer log
@@ -751,9 +767,9 @@ export class UniswapV3VaultPositionService {
             isOwnedByUser: position.typedState.isOwnedByUser ?? true,
             sqrtPriceX96: onChainState.sqrtPriceX96,
             currentTick: onChainState.currentTick,
-            poolLiquidity: 0n,
-            feeGrowthGlobal0: 0n,
-            feeGrowthGlobal1: 0n,
+            poolLiquidity: onChainState.poolLiquidity,
+            feeGrowthGlobal0: onChainState.feeGrowthGlobal0,
+            feeGrowthGlobal1: onChainState.feeGrowthGlobal1,
         };
 
         // Calculate metrics from on-chain state
@@ -878,8 +894,9 @@ export class UniswapV3VaultPositionService {
             ? await this._evmBlockService.getCurrentBlockNumber(chainId)
             : BigInt(blockNumber);
 
-        // 2. Check cache
-        const cacheKey = `vault-onchain:${chainId}:${vaultAddress}:${ownerAddress}:${resolvedBlockNumber}`;
+        // 2. Check cache. v2 cache key — bumped when pool-level state
+        // (poolLiquidity, feeGrowthGlobal0/1) was added to the cached payload.
+        const cacheKey = `vault-onchain:v2:${chainId}:${vaultAddress}:${ownerAddress}:${resolvedBlockNumber}`;
         const cached = await this._cacheService.get<OnChainVaultStateCached>(cacheKey);
         if (cached) {
             this.logger.debug({ chainId, vaultAddress, blockNumber: resolvedBlockNumber.toString(), cacheHit: true }, 'Vault on-chain state cache hit');
@@ -889,14 +906,17 @@ export class UniswapV3VaultPositionService {
         // 3. Cache miss — fetch from chain
         const client = this._evmConfig.getPublicClient(chainId);
 
-        const [sharesBalance, totalSupply, claimable, slot0Data, positionManagerAddr, operatorAddr] = await Promise.all([
+        // Pool state (slot0 + liquidity + feeGrowthGlobal0/1) is fetched via
+        // the pool service so we share its cache and read all four fields in
+        // one place rather than rolling our own slot0 multicall.
+        const [sharesBalance, totalSupply, claimable, poolState, positionManagerAddr, operatorAddr] = await Promise.all([
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply', blockNumber: resolvedBlockNumber }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableYield', args: [ownerAddress as Address], blockNumber: resolvedBlockNumber }),
-            client.readContract({ address: position.typedConfig.poolAddress as Address, abi: [{ type: 'function', name: 'slot0', inputs: [], outputs: [{ name: '', type: 'uint160' }, { name: '', type: 'int24' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint16' }, { name: '', type: 'uint8' }, { name: '', type: 'bool' }], stateMutability: 'view' }], functionName: 'slot0', blockNumber: resolvedBlockNumber }),
+            this._poolService.fetchPoolState(chainId, position.typedConfig.poolAddress, Number(resolvedBlockNumber)),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
             client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'operator' }),
-        ]) as [bigint, bigint, readonly bigint[], readonly [bigint, number, ...unknown[]], string, string];
+        ]) as [bigint, bigint, readonly bigint[], Awaited<ReturnType<UniswapV3PoolService['fetchPoolState']>>, string, string];
 
         // Read NFPM liquidity
         const nfpmData = await client.readContract({
@@ -914,8 +934,11 @@ export class UniswapV3VaultPositionService {
             liquidity: nfpmData[7] as bigint,
             unclaimedFees0: claimable[0] ?? 0n,
             unclaimedFees1: claimable[1] ?? 0n,
-            sqrtPriceX96: slot0Data[0],
-            currentTick: slot0Data[1],
+            sqrtPriceX96: poolState.sqrtPriceX96,
+            currentTick: poolState.currentTick,
+            poolLiquidity: poolState.liquidity,
+            feeGrowthGlobal0: poolState.feeGrowthGlobal0,
+            feeGrowthGlobal1: poolState.feeGrowthGlobal1,
             positionManagerAddress: positionManagerAddr as string,
             operatorAddress: normalizeAddress(operatorAddr as string),
         };
