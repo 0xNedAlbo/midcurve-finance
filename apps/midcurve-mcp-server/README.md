@@ -6,20 +6,45 @@ REST API in read-only mode.
 
 ## What it exposes
 
-Ten tools, all read-only:
+Sixteen tools, all read-only.
+
+**Identity & portfolio**
 
 | Tool | Purpose |
 |------|---------|
 | `get_user` | Identity check — returns the wallet address the API key is bound to. |
 | `list_positions` | Paginated list of all positions with PnL/APR fields. |
 | `get_position` | Detail of a single position (UniswapV3 NFT or vault). |
-| `get_position_conversion` | Net deposits/withdrawals/holdings, net rebalancing direction + average execution price, fee premium, and per-segment rebalancing history for a position. |
-| `get_position_accounting` | Lifetime balance sheet, realized P&L breakdown, and full journal-entry audit trail for a single position (in the user's reporting currency). |
-| `get_position_apr` | Per-period APR breakdown for a position (one window per fee collection) plus a time-weighted summary of realized, unrealized, and total APR. |
 | `get_pnl` | Realized P&L statement for a period (day/week/month/quarter/year). |
 | `list_close_orders` | Stop-loss / take-profit orders attached to a position. |
 | `get_pool` | UniswapV3 pool state + subgraph metrics. |
 | `list_notifications` | Range alerts and order-execution notifications. |
+
+**Per-position deep-dive**
+
+| Tool | Purpose |
+|------|---------|
+| `get_position_conversion` | Net deposits/withdrawals/holdings, net rebalancing direction + average execution price, fee premium, and per-segment rebalancing history. |
+| `get_position_accounting` | Lifetime balance sheet, realized P&L breakdown, and full journal-entry audit trail (in the user's reporting currency). |
+| `get_position_apr` | Per-period APR breakdown plus a time-weighted summary of realized, unrealized, and total APR. |
+
+**Per-position simulation**
+
+| Tool | Purpose |
+|------|---------|
+| `simulate_position_at_price` | Position value, PnL, base/quote amounts, and phase at a hypothetical price. |
+| `generate_position_pnl_curve` | List of (price, value, pnl, pnlPercent, phase) points across a price range — defaults to ±50% around the current price. |
+
+**Pure-math helpers**
+
+These compose `@midcurve/shared` math directly. Each accepts the inputs explicitly OR a position-lookup (protocol/chainId/nftId or vault triple) that auto-fills them from a live position; explicit overrides win, so you can simulate "what if" hypotheticals.
+
+| Tool | Purpose |
+|------|---------|
+| `compute_token_amounts_for_range` | Token0/token1 amounts a given liquidity holds in [tickLower, tickUpper] at sqrtPriceX96. |
+| `simulate_swap_output` | Rough fair-value swap estimate (zero price impact — NOT for execution, see tool description). |
+| `compute_liquidity_for_budget` | Maximum liquidity mintable from a base+quote budget given a tick range and current price. |
+| `convert_price_and_tick` | Bidirectional price ↔ tick converter, with optional snap to a usable position-bound tick. |
 
 ## Setup
 

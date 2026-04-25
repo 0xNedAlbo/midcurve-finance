@@ -21,6 +21,12 @@ import { buildGetPositionTool } from './tools/get-position.js';
 import { buildGetPositionConversionTool } from './tools/get-position-conversion.js';
 import { buildGetPositionAccountingTool } from './tools/get-position-accounting.js';
 import { buildGetPositionAprTool } from './tools/get-position-apr.js';
+import { buildSimulatePositionAtPriceTool } from './tools/simulate-position-at-price.js';
+import { buildGeneratePositionPnlCurveTool } from './tools/generate-position-pnl-curve.js';
+import { buildComputeTokenAmountsForRangeTool } from './tools/compute-token-amounts-for-range.js';
+import { buildSimulateSwapOutputTool } from './tools/simulate-swap-output.js';
+import { buildComputeLiquidityForBudgetTool } from './tools/compute-liquidity-for-budget.js';
+import { buildConvertPriceAndTickTool } from './tools/convert-price-and-tick.js';
 import { buildGetPnlTool } from './tools/get-pnl.js';
 import { buildListCloseOrdersTool } from './tools/list-close-orders.js';
 import { buildGetPoolTool } from './tools/get-pool.js';
@@ -86,12 +92,18 @@ async function main(): Promise<void> {
   register(buildGetPositionConversionTool(client));
   register(buildGetPositionAccountingTool(client));
   register(buildGetPositionAprTool(client));
+  register(buildSimulatePositionAtPriceTool(client));
+  register(buildGeneratePositionPnlCurveTool(client));
+  register(buildComputeTokenAmountsForRangeTool(client));
+  register(buildSimulateSwapOutputTool(client));
+  register(buildComputeLiquidityForBudgetTool(client));
+  register(buildConvertPriceAndTickTool(client));
   register(buildGetPnlTool(client));
   register(buildListCloseOrdersTool(client));
   register(buildGetPoolTool(client));
   register(buildListNotificationsTool(client));
 
-  log.info({ count: 10 }, 'tools registered');
+  log.info({ count: 16 }, 'tools registered');
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

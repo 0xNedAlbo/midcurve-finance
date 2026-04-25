@@ -10,3 +10,5 @@ export * from './ledger.js';
 export * from './apr.js';
 export * from './pnl-curve.js';
 export * from './conversion.js';
+export * from './simulate.js';
+export * from './position-pnl-curve.js';
