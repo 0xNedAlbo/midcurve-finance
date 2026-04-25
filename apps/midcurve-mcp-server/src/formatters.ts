@@ -14,7 +14,11 @@ import {
   type SerializedConversionSummary,
   type SerializedRebalancingSegment,
 } from '@midcurve/shared';
-import type { PositionAccountingResponse } from '@midcurve/api-shared';
+import type {
+  AprPeriodData,
+  AprPeriodsResponse,
+  PositionAccountingResponse,
+} from '@midcurve/api-shared';
 
 function pickAddress(obj: { address?: string | null } | null | undefined): string | null {
   return obj?.address ?? null;
@@ -431,6 +435,63 @@ export function formatPositionAccounting(
       })),
     })),
     raw: report,
+  };
+}
+
+// =============================================================================
+// Position APR
+// =============================================================================
+
+function bpsToPct(bps: number): string {
+  return formatPercentage(bps / 100, 2);
+}
+
+function formatAprPeriod(period: AprPeriodData): Record<string, unknown> {
+  const days = period.durationSeconds / 86400;
+  return {
+    period: {
+      start: timestamp(period.startTimestamp),
+      end: timestamp(period.endTimestamp),
+      durationDays: Number(days.toFixed(2)),
+    },
+    apr: bpsToPct(period.aprBps),
+    eventCount: period.eventCount,
+    raw: {
+      costBasis: period.costBasis,
+      collectedYieldValue: period.collectedYieldValue,
+      aprBps: period.aprBps,
+    },
+  };
+}
+
+export function formatPositionApr(
+  response: AprPeriodsResponse,
+): Record<string, unknown> {
+  const summary = response.summary;
+  const periods = response.data;
+
+  return {
+    summary: {
+      totalApr: formatPercentage(summary.totalApr, 2),
+      realizedApr: formatPercentage(summary.realizedApr, 2),
+      unrealizedApr: formatPercentage(summary.unrealizedApr, 2),
+      baseApr: formatPercentage(summary.baseApr, 2),
+      rewardApr: formatPercentage(summary.rewardApr, 2),
+      activeDays: {
+        total: Number(summary.totalActiveDays.toFixed(2)),
+        realized: Number(summary.realizedActiveDays.toFixed(2)),
+        unrealized: Number(summary.unrealizedActiveDays.toFixed(2)),
+      },
+      belowThreshold: summary.belowThreshold,
+      note: summary.belowThreshold
+        ? 'Position has too little history for reliable APR — treat values as preliminary.'
+        : null,
+    },
+    periods: periods.map(formatAprPeriod),
+    raw: {
+      summary,
+      periods,
+    },
   };
 }
 

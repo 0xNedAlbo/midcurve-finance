@@ -20,6 +20,7 @@ import { buildListPositionsTool } from './tools/list-positions.js';
 import { buildGetPositionTool } from './tools/get-position.js';
 import { buildGetPositionConversionTool } from './tools/get-position-conversion.js';
 import { buildGetPositionAccountingTool } from './tools/get-position-accounting.js';
+import { buildGetPositionAprTool } from './tools/get-position-apr.js';
 import { buildGetPnlTool } from './tools/get-pnl.js';
 import { buildListCloseOrdersTool } from './tools/list-close-orders.js';
 import { buildGetPoolTool } from './tools/get-pool.js';
@@ -84,12 +85,13 @@ async function main(): Promise<void> {
   register(buildGetPositionTool(client));
   register(buildGetPositionConversionTool(client));
   register(buildGetPositionAccountingTool(client));
+  register(buildGetPositionAprTool(client));
   register(buildGetPnlTool(client));
   register(buildListCloseOrdersTool(client));
   register(buildGetPoolTool(client));
   register(buildListNotificationsTool(client));
 
-  log.info({ count: 9 }, 'tools registered');
+  log.info({ count: 10 }, 'tools registered');
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
