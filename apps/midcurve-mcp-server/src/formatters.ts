@@ -40,7 +40,9 @@ function pct(value: number | null | undefined): string | null {
  * token is known and the API returns the value scaled to that token's decimals.
  */
 function quoteAmount(value: string | null | undefined, symbol: string, decimals: number): string | null {
-  if (!value) return null;
+  if (value === null || value === undefined || value === '') return null;
+  // Spec: zero must display with 2 fractional digits ("0.00 USDC"), not "0 USDC".
+  if (BigInt(value) === 0n) return `0.00 ${symbol}`;
   return formatTokenAmount(value, symbol, decimals);
 }
 
@@ -100,29 +102,32 @@ interface PositionListItemRaw {
 }
 
 export function formatPositionListItem(item: PositionListItemRaw): Record<string, unknown> {
-  // priceRangeLower/Upper are quote-denominated bigints scaled to quote-token
-  // decimals. We need the pool summary's quote token to humanize them; without
-  // it we have to fall back to the raw scaled string.
+  // priceRange + money fields are quote-denominated bigints scaled to quote-token
+  // decimals. The pool summary supplies the quote token for humanizing; if the
+  // pool is missing, raw companions still carry the canonical bigint string and
+  // display fields are null.
   const quoteToken = item.pool
     ? item.pool.isToken0Quote ? item.pool.token0 : item.pool.token1
     : null;
-  const priceLower = quoteToken
-    ? quoteAmount(item.priceRangeLower, quoteToken.symbol, quoteToken.decimals)
-    : item.priceRangeLower;
-  const priceUpper = quoteToken
-    ? quoteAmount(item.priceRangeUpper, quoteToken.symbol, quoteToken.decimals)
-    : item.priceRangeUpper;
+  const money = (raw: string): string | null =>
+    quoteToken ? quoteAmount(raw, quoteToken.symbol, quoteToken.decimals) : null;
 
   return {
     positionHash: item.positionHash,
     protocol: item.protocol,
     type: item.type,
     pool: item.pool ? formatPoolSummary(item.pool) : null,
+    currentValue: money(item.currentValue),
     currentValueRaw: item.currentValue,
+    costBasis: money(item.costBasis),
     costBasisRaw: item.costBasis,
+    realizedPnl: money(item.realizedPnl),
     realizedPnlRaw: item.realizedPnl,
+    unrealizedPnl: money(item.unrealizedPnl),
     unrealizedPnlRaw: item.unrealizedPnl,
+    collectedYield: money(item.collectedYield),
     collectedYieldRaw: item.collectedYield,
+    unclaimedYield: money(item.unclaimedYield),
     unclaimedYieldRaw: item.unclaimedYield,
     apr: {
       total: pct(item.totalApr),
@@ -130,8 +135,10 @@ export function formatPositionListItem(item: PositionListItemRaw): Record<string
       reward: pct(item.rewardApr),
     },
     priceRange: {
-      lower: priceLower,
-      upper: priceUpper,
+      lower: money(item.priceRangeLower),
+      lowerRaw: item.priceRangeLower,
+      upper: money(item.priceRangeUpper),
+      upperRaw: item.priceRangeUpper,
     },
     openedAt: timestamp(item.positionOpenedAt),
     isArchived: item.isArchived,
@@ -144,13 +151,16 @@ interface UniswapV3PositionRaw {
   protocol: string;
   type: string;
   isToken0Quote: boolean;
+  // Pool comes back via serializeUniswapV3Pool: token addresses are nested inside
+  // each token's `config`, and pool state carries the live currentTick used to
+  // determine in-range status.
   pool: {
     protocol: string;
     feeBps: number;
-    token0: { symbol: string; decimals: number; address: string };
-    token1: { symbol: string; decimals: number; address: string };
-    config?: { chainId?: number; poolAddress?: string };
-    state?: Record<string, unknown>;
+    token0: { symbol: string; decimals: number; config?: { address?: string; chainId?: number } };
+    token1: { symbol: string; decimals: number; config?: { address?: string; chainId?: number } };
+    config?: { chainId?: number; address?: string };
+    state?: { currentTick?: number; [k: string]: unknown };
   };
   currentValue: string;
   costBasis: string;
@@ -169,37 +179,81 @@ interface UniswapV3PositionRaw {
   isArchived: boolean;
   archivedAt: string | null;
   ownerWallet: string | null;
-  config?: Record<string, unknown>;
-  state?: Record<string, unknown>;
+  // Position config carries `poolAddress` and tick bounds for both protocols
+  // (NFT and vault). Token addresses live here on vault positions only —
+  // for NFTs, read them from pool.token0.config.address.
+  config?: { poolAddress?: string; tickLower?: number; tickUpper?: number; [k: string]: unknown };
+  state?: { currentTick?: number; [k: string]: unknown };
 }
 
 export function formatPosition(p: UniswapV3PositionRaw): Record<string, unknown> {
-  const quoteToken = p.isToken0Quote ? p.pool.token0 : p.pool.token1;
+  // Flatten token shape (API nests address under token.config.address) so the
+  // shared formatPoolSummary sees the same { address, symbol, decimals } shape
+  // it gets from list_positions.
+  const token0 = {
+    address: p.pool.token0.config?.address ?? '',
+    symbol: p.pool.token0.symbol,
+    decimals: p.pool.token0.decimals,
+  };
+  const token1 = {
+    address: p.pool.token1.config?.address ?? '',
+    symbol: p.pool.token1.symbol,
+    decimals: p.pool.token1.decimals,
+  };
+  const quoteToken = p.isToken0Quote ? token0 : token1;
+  const money = (raw: string | null | undefined): string | null =>
+    quoteAmount(raw, quoteToken.symbol, quoteToken.decimals);
+
+  // poolAddress is uniformly available on the position's own config for both
+  // NFT and vault positions; the pool's config exposes it as `address`.
+  const poolAddress = p.config?.poolAddress ?? p.pool.config?.address ?? '';
+
+  // Compute inRange deterministically from ticks. currentTick lives on the
+  // pool's state for both protocols (NFT positions don't carry it on their
+  // own state). Fall back to the API-provided flag if any input is missing.
+  const tickLower = p.config?.tickLower;
+  const tickUpper = p.config?.tickUpper;
+  const currentTick = p.pool.state?.currentTick ?? p.state?.currentTick;
+  const inRange =
+    typeof tickLower === 'number' &&
+    typeof tickUpper === 'number' &&
+    typeof currentTick === 'number'
+      ? currentTick >= tickLower && currentTick <= tickUpper
+      : (p.inRange ?? null);
 
   return {
     positionHash: p.positionHash,
     protocol: p.protocol,
     type: p.type,
     pool: formatPoolSummary({
-      chainId: p.pool.config?.chainId as number,
-      poolAddress: p.pool.config?.poolAddress as string,
+      chainId: (p.pool.config?.chainId ?? 0) as number,
+      poolAddress,
       feeBps: p.pool.feeBps,
       isToken0Quote: p.isToken0Quote,
-      token0: p.pool.token0,
-      token1: p.pool.token1,
+      token0,
+      token1,
     }),
-    currentValue: quoteAmount(p.currentValue, quoteToken.symbol, quoteToken.decimals),
-    costBasis: quoteAmount(p.costBasis, quoteToken.symbol, quoteToken.decimals),
-    realizedPnl: quoteAmount(p.realizedPnl, quoteToken.symbol, quoteToken.decimals),
-    unrealizedPnl: quoteAmount(p.unrealizedPnl, quoteToken.symbol, quoteToken.decimals),
-    collectedYield: quoteAmount(p.collectedYield, quoteToken.symbol, quoteToken.decimals),
-    unclaimedYield: quoteAmount(p.unclaimedYield, quoteToken.symbol, quoteToken.decimals),
+    currentValue: money(p.currentValue),
+    currentValueRaw: p.currentValue,
+    costBasis: money(p.costBasis),
+    costBasisRaw: p.costBasis,
+    realizedPnl: money(p.realizedPnl),
+    realizedPnlRaw: p.realizedPnl,
+    unrealizedPnl: money(p.unrealizedPnl),
+    unrealizedPnlRaw: p.unrealizedPnl,
+    collectedYield: money(p.collectedYield),
+    collectedYieldRaw: p.collectedYield,
+    unclaimedYield: money(p.unclaimedYield),
+    unclaimedYieldRaw: p.unclaimedYield,
     apr: { total: pct(p.totalApr), base: pct(p.baseApr), reward: pct(p.rewardApr) },
     priceRange: {
-      lower: quoteAmount(p.priceRangeLower, quoteToken.symbol, quoteToken.decimals),
-      upper: quoteAmount(p.priceRangeUpper, quoteToken.symbol, quoteToken.decimals),
-      current: quoteAmount(p.currentPrice, quoteToken.symbol, quoteToken.decimals),
-      inRange: p.inRange,
+      lower: money(p.priceRangeLower),
+      lowerRaw: p.priceRangeLower ?? null,
+      upper: money(p.priceRangeUpper),
+      upperRaw: p.priceRangeUpper ?? null,
+      current: money(p.currentPrice),
+      currentRaw: p.currentPrice ?? null,
+      inRange,
     },
     ownerWallet: p.ownerWallet,
     openedAt: timestamp(p.positionOpenedAt),

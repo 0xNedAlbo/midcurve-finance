@@ -43,15 +43,19 @@ export function buildListPositionsTool(client: ApiClient) {
         'Use this as the starting point for portfolio queries — each item carries a positionHash ' +
         '(e.g. "uniswapv3/42161/12345" or "uniswapv3-vault/8453/<vault>/<owner>") to pass to ' +
         'get_position for full detail.\n\n' +
+        'Money and price fields are dual-emitted: `<field>` is a humanized display string in the ' +
+        'position\'s quote token (e.g. "49,771.65 USDC"); `<field>Raw` is the bigint as decimal ' +
+        'string in quote-token base units. Raw is canonical — use it for further computation; ' +
+        'display is for narration/rendering.\n\n' +
         'Per-item shape:\n' +
         '- pool: { chainId, poolAddress, pair (e.g. "WETH/USDC"), feeBps, feeTier (e.g. "0.05%"), ' +
         'baseToken: { address, symbol, decimals }, quoteToken: { address, symbol, decimals } }\n' +
-        '- priceRange: { lower, upper } — already humanized in quote token (e.g. "3,831.42 USDC")\n' +
+        '- money pairs: currentValue/Raw, costBasis/Raw, realizedPnl/Raw, unrealizedPnl/Raw, ' +
+        'collectedYield/Raw, unclaimedYield/Raw\n' +
+        '- priceRange: { lower, lowerRaw, upper, upperRaw }\n' +
         '- apr: { total, base, reward } — percentage strings or null\n' +
-        '- *Raw money fields (currentValueRaw, costBasisRaw, realizedPnlRaw, unrealizedPnlRaw, ' +
-        'collectedYieldRaw, unclaimedYieldRaw) — quote-denominated bigints as decimal strings; ' +
-        'divide by 10^quoteToken.decimals to humanize\n\n' +
-        'For current spot price, in-range status, and humanized money fields, use get_position.',
+        '- openedAt, isArchived, archivedAt\n\n' +
+        'For current spot price and in-range status, use get_position.',
       inputSchema,
     },
     handler: async (args: { [K in keyof typeof inputSchema]: z.infer<(typeof inputSchema)[K]> }) => {

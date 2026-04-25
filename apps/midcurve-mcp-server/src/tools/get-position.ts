@@ -51,17 +51,21 @@ export function buildGetPositionTool(client: ApiClient) {
         '"uniswapv3-vault" for tokenized vault positions (pass chainId + vaultAddress + ownerAddress). ' +
         'The positionHash returned by list_positions tells you which form to use: ' +
         '"uniswapv3/<chain>/<nft>" → uniswapv3 form, "uniswapv3-vault/<chain>/<vault>/<owner>" → vault form.\n\n' +
-        'Output shape (humanized in the position\'s quote token):\n' +
+        'Money and price fields are dual-emitted: `<field>` is a humanized display string in the ' +
+        'position\'s quote token (e.g. "1,234.56 USDC"); `<field>Raw` is the bigint as decimal string ' +
+        'in quote-token base units. Raw is canonical — use it for further computation; display is ' +
+        'for narration/rendering.\n\n' +
+        'Output shape:\n' +
         '- pool: { chainId, poolAddress, pair, feeBps, feeTier, ' +
         'baseToken: { address, symbol, decimals }, quoteToken: { address, symbol, decimals } }\n' +
-        '- currentValue, costBasis, realizedPnl, unrealizedPnl, collectedYield, unclaimedYield — ' +
-        'humanized strings (e.g. "1,234.56 USDC") or null\n' +
-        '- priceRange: { lower, upper, current, inRange } — lower/upper humanized; ' +
-        'current is currently always null (not populated by the upstream API); inRange is a boolean\n' +
+        '- money pairs: currentValue/Raw, costBasis/Raw, realizedPnl/Raw, unrealizedPnl/Raw, ' +
+        'collectedYield/Raw, unclaimedYield/Raw\n' +
+        '- priceRange: { lower, lowerRaw, upper, upperRaw, current, currentRaw, inRange } — ' +
+        'current/currentRaw are currently always null (not populated by the upstream API); inRange is a boolean\n' +
         '- apr: { total, base, reward } — percentage strings or null\n' +
         '- ownerWallet, openedAt, isArchived, archivedAt\n' +
-        '- rawConfig, rawState — protocol-specific objects with raw bigint strings for advanced use\n\n' +
-        'Note: the priceRange shape differs from list_positions, which returns only { lower, upper }.',
+        '- rawConfig, rawState — protocol-specific objects with raw bigint strings (ticks, ' +
+        'sqrtPriceX96, liquidity, totalSupply, …) for advanced use',
       inputSchema,
     },
     handler: async (args: Args) => {
