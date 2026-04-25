@@ -52,9 +52,13 @@ export function buildGetPositionConversionTool(client: ApiClient) {
         'net-rebalanced into (direction + average execution price), plus fee premium earned ' +
         'and the per-segment rebalancing history. ' +
         'Two protocols are supported: "uniswapv3" for classic NFT positions (pass chainId + nftId), and ' +
-        '"uniswapv3-vault" for tokenized vault positions (pass chainId + vaultAddress + ownerAddress). ' +
-        'All numeric fields are returned both formatted (with token symbols) and as raw bigint strings ' +
-        'so they can be re-parsed without precision loss.',
+        '"uniswapv3-vault" for tokenized vault positions (pass chainId + vaultAddress + ownerAddress).\n\n' +
+        'Token amounts are dual-emitted, named by their denomination per §7 of the formatter ' +
+        'convention: `base` / `baseRaw` are scaled to base-token decimals; `quote` / `quoteRaw` ' +
+        '(and the quote-denominated price fields like `avgPrice` / `avgPriceRaw`) are scaled to ' +
+        'quote-token decimals. Display strings carry the symbol (e.g. "1.234 ETH", ' +
+        '"3,808.49 USDC"); Raw is the bigint as decimal string. Raw is canonical — use it for ' +
+        'further computation; display is for narration/rendering.',
       inputSchema,
     },
     handler: async (args: Args) => {

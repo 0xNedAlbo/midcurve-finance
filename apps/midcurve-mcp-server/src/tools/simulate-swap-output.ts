@@ -47,7 +47,11 @@ export function buildSimulateSwapOutputTool(client: ApiClient) {
         'accurate for exact on-chain quoting and MUST NOT be used to set slippage protection. Real ' +
         'execution should use the on-chain Quoter v2 or an external oracle. ' +
         'Either pass sqrtPriceX96 + feeBps directly, or supply the position-lookup fields to ' +
-        'auto-fill them from the position\'s pool.',
+        'auto-fill them from the position\'s pool.\n\n' +
+        'Amounts are dual-emitted: `amountIn` / `amountOut` are humanized display strings (only ' +
+        'present when a position context was resolved); `amountInRaw` / `amountOutRaw` are the ' +
+        'bigint decimal strings in each token\'s smallest unit. Raw is canonical — use it for ' +
+        'further computation. When a position context is resolved, a `pool` block is also emitted.',
       inputSchema,
     },
     handler: async (args: Args) => {
@@ -77,20 +81,29 @@ export function buildSimulateSwapOutputTool(client: ApiClient) {
           : ctx.token0
         : null;
 
-      const formatted =
-        tokenIn && tokenOut
-          ? {
-              amountIn: formatTokenAmount(amountIn.toString(), tokenIn.symbol, tokenIn.decimals),
-              amountOut: formatTokenAmount(amountOut.toString(), tokenOut.symbol, tokenOut.decimals),
-            }
-          : null;
+      const amountInRaw = amountIn.toString();
+      const amountOutRaw = amountOut.toString();
 
       const result = {
-        formatted,
-        raw: {
-          amountIn: amountIn.toString(),
-          amountOut: amountOut.toString(),
-        },
+        pool: ctx
+          ? {
+              chainId: ctx.pool.chainId,
+              poolAddress: ctx.pool.address,
+              pair: `${ctx.baseToken.symbol}/${ctx.quoteToken.symbol}`,
+              feeBps: ctx.feeBps,
+              feeTier: `${(ctx.feeBps / 10_000).toFixed(2)}%`,
+              token0: ctx.token0,
+              token1: ctx.token1,
+            }
+          : null,
+        amountIn: tokenIn
+          ? formatTokenAmount(amountInRaw, tokenIn.symbol, tokenIn.decimals)
+          : null,
+        amountInRaw,
+        amountOut: tokenOut
+          ? formatTokenAmount(amountOutRaw, tokenOut.symbol, tokenOut.decimals)
+          : null,
+        amountOutRaw,
         inputsUsed: {
           direction: args.direction,
           sqrtPriceX96: sqrtPriceX96.toString(),

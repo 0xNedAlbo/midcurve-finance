@@ -54,7 +54,12 @@ export function buildGetPositionAccountingTool(client: ApiClient) {
         'currency. Use this when the user asks "show me the books for this position", "how much have ' +
         'I actually realized", or wants to audit individual entries. ' +
         'Two protocols are supported: "uniswapv3" (chainId + nftId) and "uniswapv3-vault" ' +
-        '(chainId + vaultAddress + ownerAddress).',
+        '(chainId + vaultAddress + ownerAddress).\n\n' +
+        'Money fields are dual-emitted in the user\'s reporting currency: `<field>` is a humanized ' +
+        'display string (e.g. "$1,234.56"); `<field>Raw` is the bigint as decimal string scaled to ' +
+        '10^8 (accounting precision). Raw is canonical — use it for further computation. The ' +
+        'balanceSheet, realizedPnl block, and each journal line carry their own *Raw companions; ' +
+        'a journal line\'s amountReportingRaw is null when the upstream amount is null.',
       inputSchema,
     },
     handler: async (args: Args) => {

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { PositionPnlCurveData } from '@midcurve/api-shared';
 import { formatPercentage, formatTokenAmount } from '@midcurve/shared';
 import type { ApiClient } from '../api-client.js';
+import { formatPoolSummary } from '../formatters.js';
+import { resolvePositionContext } from '../lib/position-context.js';
 
 const inputSchema = {
   protocol: z
@@ -61,7 +63,16 @@ export function buildGeneratePositionPnlCurveTool(client: ApiClient) {
         'override priceMin/priceMax/numPoints for finer control. ' +
         'For vault positions the values are scaled by the user\'s share of total supply. ' +
         'Two protocols are supported: "uniswapv3" (chainId + nftId) and "uniswapv3-vault" ' +
-        '(chainId + vaultAddress + ownerAddress).',
+        '(chainId + vaultAddress + ownerAddress).\n\n' +
+        'Money and price fields are dual-emitted: `<field>` is a humanized display string in the ' +
+        'position\'s quote token; `<field>Raw` is the bigint as decimal string. Raw is canonical — ' +
+        'use it for further computation; display is for narration/rendering.\n\n' +
+        'Output shape:\n' +
+        '- pool: §3.1 pool summary\n' +
+        '- currentPrice/currentPriceRaw, priceMin/priceMinRaw, priceMax/priceMaxRaw, ' +
+        'costBasis/costBasisRaw\n' +
+        '- numPoints, liquidity\n' +
+        '- curve[]: { price/priceRaw, positionValue/positionValueRaw, pnl/pnlRaw, pnlPercent, phase }',
       inputSchema,
     },
     handler: async (args: Args) => {
@@ -71,30 +82,49 @@ export function buildGeneratePositionPnlCurveTool(client: ApiClient) {
       if (args.priceMax !== undefined) query.priceMax = args.priceMax;
       if (args.numPoints !== undefined) query.numPoints = args.numPoints;
 
-      const data = await client.get<PositionPnlCurveData>(path, query);
+      const [data, ctx] = await Promise.all([
+        client.get<PositionPnlCurveData>(path, query),
+        resolvePositionContext(client, args),
+      ]);
 
-      const formatted = {
-        currentPrice: formatTokenAmount(data.currentPrice, data.quoteTokenSymbol, data.quoteTokenDecimals),
-        priceMin: formatTokenAmount(data.priceMin, data.quoteTokenSymbol, data.quoteTokenDecimals),
-        priceMax: formatTokenAmount(data.priceMax, data.quoteTokenSymbol, data.quoteTokenDecimals),
-        costBasis: formatTokenAmount(data.costBasis, data.quoteTokenSymbol, data.quoteTokenDecimals),
+      const pool = formatPoolSummary({
+        chainId: ctx.pool.chainId,
+        poolAddress: ctx.pool.address,
+        feeBps: ctx.feeBps,
+        isToken0Quote: ctx.isToken0Quote,
+        token0: ctx.token0,
+        token1: ctx.token1,
+      });
+
+      const fmtQuote = (raw: string) =>
+        formatTokenAmount(raw, data.quoteTokenSymbol, data.quoteTokenDecimals);
+
+      const result = {
+        pool,
+        liquidity: data.liquidity,
         numPoints: data.numPoints,
+        currentPrice: fmtQuote(data.currentPrice),
+        currentPriceRaw: data.currentPrice,
+        priceMin: fmtQuote(data.priceMin),
+        priceMinRaw: data.priceMin,
+        priceMax: fmtQuote(data.priceMax),
+        priceMaxRaw: data.priceMax,
+        costBasis: fmtQuote(data.costBasis),
+        costBasisRaw: data.costBasis,
         curve: data.curve.map((p) => ({
-          price: formatTokenAmount(p.price, data.quoteTokenSymbol, data.quoteTokenDecimals),
-          positionValue: formatTokenAmount(p.positionValue, data.quoteTokenSymbol, data.quoteTokenDecimals),
-          pnl: formatTokenAmount(p.pnl, data.quoteTokenSymbol, data.quoteTokenDecimals),
+          price: fmtQuote(p.price),
+          priceRaw: p.price,
+          positionValue: fmtQuote(p.positionValue),
+          positionValueRaw: p.positionValue,
+          pnl: fmtQuote(p.pnl),
+          pnlRaw: p.pnl,
           pnlPercent: formatPercentage(p.pnlPercent, 2),
           phase: p.phase,
         })),
       };
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify({ formatted, raw: data }, null, 2),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
       };
     },
   };

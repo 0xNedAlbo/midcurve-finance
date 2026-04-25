@@ -44,7 +44,13 @@ export function buildComputeTokenAmountsForRangeTool(client: ApiClient) {
         '(protocol + chainId + nftId for NFTs, or protocol + chainId + vaultAddress + ownerAddress ' +
         'for vaults) to auto-fill them from the live position; any explicit primitive overrides ' +
         'wins over the resolved value, which lets you simulate hypotheticals (e.g. "what if my ' +
-        'liquidity were 2× larger?", "what would the split look like if price dropped to X?").',
+        'liquidity were 2× larger?", "what would the split look like if price dropped to X?").\n\n' +
+        'Token amounts are dual-emitted: `token0Amount` / `token1Amount` are humanized display ' +
+        'strings (only present when a position context was resolved); `token0AmountRaw` / ' +
+        '`token1AmountRaw` are the bigint decimal strings in each token\'s smallest unit. ' +
+        'Raw is canonical — use it for further computation; display is for narration/rendering. ' +
+        'When a position context is resolved, a `pool` block is also emitted with chainId, ' +
+        'poolAddress, pair, feeBps, feeTier, token0, token1.',
       inputSchema,
     },
     handler: async (args: Args) => {
@@ -73,19 +79,29 @@ export function buildComputeTokenAmountsForRangeTool(client: ApiClient) {
         tickUpper,
       );
 
-      const formatted = ctx
-        ? {
-            token0: formatTokenAmount(token0Amount.toString(), ctx.token0.symbol, ctx.token0.decimals),
-            token1: formatTokenAmount(token1Amount.toString(), ctx.token1.symbol, ctx.token1.decimals),
-          }
-        : null;
+      const token0Raw = token0Amount.toString();
+      const token1Raw = token1Amount.toString();
 
       const result = {
-        formatted,
-        raw: {
-          token0Amount: token0Amount.toString(),
-          token1Amount: token1Amount.toString(),
-        },
+        pool: ctx
+          ? {
+              chainId: ctx.pool.chainId,
+              poolAddress: ctx.pool.address,
+              pair: `${ctx.baseToken.symbol}/${ctx.quoteToken.symbol}`,
+              feeBps: ctx.feeBps,
+              feeTier: `${(ctx.feeBps / 10_000).toFixed(2)}%`,
+              token0: ctx.token0,
+              token1: ctx.token1,
+            }
+          : null,
+        token0Amount: ctx
+          ? formatTokenAmount(token0Raw, ctx.token0.symbol, ctx.token0.decimals)
+          : null,
+        token0AmountRaw: token0Raw,
+        token1Amount: ctx
+          ? formatTokenAmount(token1Raw, ctx.token1.symbol, ctx.token1.decimals)
+          : null,
+        token1AmountRaw: token1Raw,
         inputsUsed: {
           liquidity: liquidity.toString(),
           tickLower,

@@ -25,7 +25,14 @@ export function buildGetPoolTool(client: ApiClient) {
       description:
         'Returns pool state (tokens, fee tier, current tick / sqrtPrice) and optional subgraph metrics ' +
         '(TVL in USD, recent volume). Use this when you need pool-level context (not user-specific) — ' +
-        'e.g. comparing fee tiers or checking liquidity depth.',
+        'e.g. comparing fee tiers or checking liquidity depth.\n\n' +
+        'Standalone pool detail uses the canonical Uniswap pool ordering (`token0`/`token1`) ' +
+        'rather than the position-context base/quote pivot — outside a user\'s position there ' +
+        'is no canonical base/quote preference (see convention §3.1). USD metrics are dual-emitted: ' +
+        '`tvl`/`tvlRaw`, `volume24h`/`volume24hRaw`, `fees24h`/`fees24hRaw`. Display is the compact ' +
+        'subgraph value (e.g. "$123.5M"); Raw is the float string the subgraph returned. The ' +
+        'pool\'s `state` (sqrtPriceX96, currentTick, liquidity, feeGrowthGlobal0/1) and optional ' +
+        '`feeData` block are passed through as canonical bigint strings — single-emit per §2.',
       inputSchema,
     },
     handler: async (args: { [K in keyof typeof inputSchema]: z.infer<(typeof inputSchema)[K]> }) => {

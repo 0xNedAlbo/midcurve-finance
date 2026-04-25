@@ -11,6 +11,7 @@ import {
   formatReportingAmount,
   formatTokenAmount,
   formatUSDValue,
+  tickToPrice,
   type SerializedConversionSummary,
   type SerializedRebalancingSegment,
 } from '@midcurve/shared';
@@ -18,7 +19,9 @@ import type {
   AprPeriodData,
   AprPeriodsResponse,
   PositionAccountingResponse,
+  SerializedCloseOrder,
 } from '@midcurve/api-shared';
+import type { PositionContext } from './lib/position-context.js';
 
 function pickAddress(obj: { address?: string | null } | null | undefined): string | null {
   return obj?.address ?? null;
@@ -307,9 +310,13 @@ export function formatPnl(pnl: PnlResponseRaw): Record<string, unknown> {
     reportingCurrency: cur,
     portfolio: {
       netPnl: formatReportingAmount(pnl.netPnl, cur),
+      netPnlRaw: pnl.netPnl,
       realizedFromWithdrawals: formatReportingAmount(pnl.realizedFromWithdrawals, cur),
+      realizedFromWithdrawalsRaw: pnl.realizedFromWithdrawals,
       realizedFromCollectedFees: formatReportingAmount(pnl.realizedFromCollectedFees, cur),
+      realizedFromCollectedFeesRaw: pnl.realizedFromCollectedFees,
       realizedFromFxEffect: formatReportingAmount(pnl.realizedFromFxEffect, cur),
+      realizedFromFxEffectRaw: pnl.realizedFromFxEffect,
     },
     instruments: pnl.instruments.map((inst) => ({
       instrumentRef: inst.instrumentRef,
@@ -318,46 +325,92 @@ export function formatPnl(pnl: PnlResponseRaw): Record<string, unknown> {
       chainId: inst.chainId,
       feeTier: inst.feeTier,
       netPnl: formatReportingAmount(inst.netPnl, cur),
+      netPnlRaw: inst.netPnl,
       realizedFromWithdrawals: formatReportingAmount(inst.realizedFromWithdrawals, cur),
+      realizedFromWithdrawalsRaw: inst.realizedFromWithdrawals,
       realizedFromCollectedFees: formatReportingAmount(inst.realizedFromCollectedFees, cur),
+      realizedFromCollectedFeesRaw: inst.realizedFromCollectedFees,
       realizedFromFxEffect: formatReportingAmount(inst.realizedFromFxEffect, cur),
+      realizedFromFxEffectRaw: inst.realizedFromFxEffect,
       positions: inst.positions.map((pos) => ({
         positionRef: pos.positionRef,
         nftId: pos.nftId,
         netPnl: formatReportingAmount(pos.netPnl, cur),
+        netPnlRaw: pos.netPnl,
         realizedFromWithdrawals: formatReportingAmount(pos.realizedFromWithdrawals, cur),
+        realizedFromWithdrawalsRaw: pos.realizedFromWithdrawals,
         realizedFromCollectedFees: formatReportingAmount(pos.realizedFromCollectedFees, cur),
+        realizedFromCollectedFeesRaw: pos.realizedFromCollectedFees,
         realizedFromFxEffect: formatReportingAmount(pos.realizedFromFxEffect, cur),
+        realizedFromFxEffectRaw: pos.realizedFromFxEffect,
       })),
     })),
   };
 }
 
-interface PoolRaw {
-  protocol: string;
-  feeBps: number;
-  token0: { symbol: string; address: string; decimals: number };
-  token1: { symbol: string; address: string; decimals: number };
-  config?: Record<string, unknown>;
-  state?: Record<string, unknown>;
-  metrics?: { tvlUsd?: string; volume24hUsd?: string; volume7dUsd?: string };
+/**
+ * Pool detail response from `GET /api/v1/pools/uniswapv3/:chainId/:address`.
+ * Matches the wire shape: serialized pool nested under `pool`, with optional
+ * subgraph `metrics` and `feeData` siblings.
+ */
+interface PoolDetailRaw {
+  pool: {
+    protocol: string;
+    feeBps: number;
+    token0: { symbol: string; decimals: number; config: { address: string; chainId: number } };
+    token1: { symbol: string; decimals: number; config: { address: string; chainId: number } };
+    config: { chainId: number; address: string; tickSpacing: number };
+    state: Record<string, unknown>;
+  };
+  metrics?: { tvlUSD: string; volumeUSD: string; feesUSD: string };
+  feeData?: Record<string, unknown>;
 }
 
-export function formatPool(pool: PoolRaw): Record<string, unknown> {
-  const m = pool.metrics ?? {};
+/**
+ * Standalone pool detail uses the canonical pool ordering (`token0`/`token1`)
+ * — outside a position context there is no base/quote pivot. See convention
+ * §3.1 ("Embedded pool summary vs standalone pool detail").
+ */
+export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
+  const { pool, metrics, feeData } = detail;
+  const token0 = {
+    address: pool.token0.config.address,
+    symbol: pool.token0.symbol,
+    decimals: pool.token0.decimals,
+  };
+  const token1 = {
+    address: pool.token1.config.address,
+    symbol: pool.token1.symbol,
+    decimals: pool.token1.decimals,
+  };
+
+  // Subgraph metrics arrive as USD float strings. Per convention §3.2/§3.3,
+  // dual-emit the raw float string alongside the compact display.
+  const fmtUsd = (raw: string | undefined): string | null =>
+    raw ? formatUSDValue(raw) : null;
+
   return {
+    chainId: pool.config.chainId,
+    poolAddress: pool.config.address,
     protocol: pool.protocol,
-    pair: `${pool.token0.symbol}/${pool.token1.symbol}`,
+    pair: `${token0.symbol}/${token1.symbol}`,
+    feeBps: pool.feeBps,
     feeTier: `${(pool.feeBps / 10_000).toFixed(2)}%`,
-    token0: pool.token0,
-    token1: pool.token1,
-    metrics: {
-      tvl: m.tvlUsd ? formatUSDValue(m.tvlUsd) : null,
-      volume24h: m.volume24hUsd ? formatUSDValue(m.volume24hUsd) : null,
-      volume7d: m.volume7dUsd ? formatUSDValue(m.volume7dUsd) : null,
-    },
+    tickSpacing: pool.config.tickSpacing,
+    token0,
+    token1,
+    metrics: metrics
+      ? {
+          tvl: fmtUsd(metrics.tvlUSD),
+          tvlRaw: metrics.tvlUSD,
+          volume24h: fmtUsd(metrics.volumeUSD),
+          volume24hRaw: metrics.volumeUSD,
+          fees24h: fmtUsd(metrics.feesUSD),
+          fees24hRaw: metrics.feesUSD,
+        }
+      : null,
+    feeData: feeData ?? null,
     state: pool.state,
-    config: pool.config,
   };
 }
 
@@ -400,6 +453,9 @@ function formatSegment(
   const absBase = deltaBase < 0n ? -deltaBase : deltaBase;
   const deltaQuote = BigInt(segment.deltaQuote);
   const absQuote = deltaQuote < 0n ? -deltaQuote : deltaQuote;
+  const absBaseStr = absBase.toString();
+  const absQuoteStr = absQuote.toString();
+  const feesNonZero = segment.feesEarned !== '0';
 
   return {
     period: {
@@ -407,19 +463,16 @@ function formatSegment(
       end: segment.isTrailing ? 'now' : timestamp(segment.endTimestamp),
     },
     direction,
-    baseAmount: formatTokenAmount(absBase.toString(), summary.baseTokenSymbol, summary.baseTokenDecimals),
-    quoteAmount: formatTokenAmount(absQuote.toString(), summary.quoteTokenSymbol, summary.quoteTokenDecimals),
+    baseAmount: formatTokenAmount(absBaseStr, summary.baseTokenSymbol, summary.baseTokenDecimals),
+    baseAmountRaw: absBaseStr,
+    quoteAmount: formatTokenAmount(absQuoteStr, summary.quoteTokenSymbol, summary.quoteTokenDecimals),
+    quoteAmountRaw: absQuoteStr,
     avgPrice: formatAvgPrice(segment.avgPrice, summary.quoteTokenDecimals, summary.quoteTokenSymbol),
-    feesEarned:
-      segment.feesEarned === '0'
-        ? null
-        : formatTokenAmount(segment.feesEarned, summary.quoteTokenSymbol, summary.quoteTokenDecimals),
-    raw: {
-      deltaBase: segment.deltaBase,
-      deltaQuote: segment.deltaQuote,
-      avgPrice: segment.avgPrice,
-      feesEarned: segment.feesEarned,
-    },
+    avgPriceRaw: segment.avgPrice,
+    feesEarned: feesNonZero
+      ? formatTokenAmount(segment.feesEarned, summary.quoteTokenSymbol, summary.quoteTokenDecimals)
+      : null,
+    feesEarnedRaw: feesNonZero ? segment.feesEarned : null,
   };
 }
 
@@ -434,9 +487,16 @@ export function formatConversionSummary(
   const absNetBase = netRebalancingBase < 0n ? -netRebalancingBase : netRebalancingBase;
   const netRebalancingQuote = BigInt(summary.netRebalancingQuote);
   const absNetQuote = netRebalancingQuote < 0n ? -netRebalancingQuote : netRebalancingQuote;
+  const absNetBaseStr = absNetBase.toString();
+  const absNetQuoteStr = absNetQuote.toString();
 
-  const tokenAmount = (raw: string, symbol: string, decimals: number) =>
-    formatTokenAmount(raw, symbol, decimals);
+  const baseAmt = (raw: string) => formatTokenAmount(raw, baseTokenSymbol, baseTokenDecimals);
+  const quoteAmt = (raw: string) => formatTokenAmount(raw, quoteTokenSymbol, quoteTokenDecimals);
+  const price = (raw: string) => formatAvgPrice(raw, quoteTokenDecimals, quoteTokenSymbol);
+
+  const ammBoughtNonZero = summary.ammBoughtBase !== '0';
+  const ammSoldNonZero = summary.ammSoldBase !== '0';
+  const premiumNonZero = summary.totalPremium !== '0';
 
   return {
     baseToken: { symbol: baseTokenSymbol, decimals: baseTokenDecimals },
@@ -444,42 +504,55 @@ export function formatConversionSummary(
     isClosed: summary.isClosed,
     daysActive: summary.daysActive,
     deposits: {
-      base: tokenAmount(summary.netDepositBase, baseTokenSymbol, baseTokenDecimals),
-      quote: tokenAmount(summary.netDepositQuote, quoteTokenSymbol, quoteTokenDecimals),
-      avgPrice: formatAvgPrice(summary.netDepositAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
+      base: baseAmt(summary.netDepositBase),
+      baseRaw: summary.netDepositBase,
+      quote: quoteAmt(summary.netDepositQuote),
+      quoteRaw: summary.netDepositQuote,
+      avgPrice: price(summary.netDepositAvgPrice),
+      avgPriceRaw: summary.netDepositAvgPrice,
     },
     withdrawn: {
-      base: tokenAmount(summary.withdrawnBase, baseTokenSymbol, baseTokenDecimals),
-      quote: tokenAmount(summary.withdrawnQuote, quoteTokenSymbol, quoteTokenDecimals),
+      base: baseAmt(summary.withdrawnBase),
+      baseRaw: summary.withdrawnBase,
+      quote: quoteAmt(summary.withdrawnQuote),
+      quoteRaw: summary.withdrawnQuote,
     },
     currentHoldings: {
-      base: tokenAmount(summary.currentBase, baseTokenSymbol, baseTokenDecimals),
-      quote: tokenAmount(summary.currentQuote, quoteTokenSymbol, quoteTokenDecimals),
-      spotPrice: formatAvgPrice(summary.currentSpotPrice, quoteTokenDecimals, quoteTokenSymbol),
+      base: baseAmt(summary.currentBase),
+      baseRaw: summary.currentBase,
+      quote: quoteAmt(summary.currentQuote),
+      quoteRaw: summary.currentQuote,
+      spotPrice: price(summary.currentSpotPrice),
+      spotPriceRaw: summary.currentSpotPrice,
     },
     netConversion: {
       direction: netDirection,
-      baseAmount: tokenAmount(absNetBase.toString(), baseTokenSymbol, baseTokenDecimals),
-      quoteAmount: tokenAmount(absNetQuote.toString(), quoteTokenSymbol, quoteTokenDecimals),
-      avgExecutionPrice: formatAvgPrice(summary.netRebalancingAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
+      baseAmount: baseAmt(absNetBaseStr),
+      baseAmountRaw: absNetBaseStr,
+      quoteAmount: quoteAmt(absNetQuoteStr),
+      quoteAmountRaw: absNetQuoteStr,
+      avgExecutionPrice: price(summary.netRebalancingAvgPrice),
+      avgExecutionPriceRaw: summary.netRebalancingAvgPrice,
     },
-    ammBought: summary.ammBoughtBase === '0'
-      ? null
-      : {
-          base: tokenAmount(summary.ammBoughtBase, baseTokenSymbol, baseTokenDecimals),
-          avgPrice: formatAvgPrice(summary.ammBoughtAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
-        },
-    ammSold: summary.ammSoldBase === '0'
-      ? null
-      : {
-          base: tokenAmount(summary.ammSoldBase, baseTokenSymbol, baseTokenDecimals),
-          avgPrice: formatAvgPrice(summary.ammSoldAvgPrice, quoteTokenDecimals, quoteTokenSymbol),
-        },
-    totalPremium: summary.totalPremium === '0'
-      ? null
-      : tokenAmount(summary.totalPremium, quoteTokenSymbol, quoteTokenDecimals),
+    ammBought: ammBoughtNonZero
+      ? {
+          base: baseAmt(summary.ammBoughtBase),
+          baseRaw: summary.ammBoughtBase,
+          avgPrice: price(summary.ammBoughtAvgPrice),
+          avgPriceRaw: summary.ammBoughtAvgPrice,
+        }
+      : null,
+    ammSold: ammSoldNonZero
+      ? {
+          base: baseAmt(summary.ammSoldBase),
+          baseRaw: summary.ammSoldBase,
+          avgPrice: price(summary.ammSoldAvgPrice),
+          avgPriceRaw: summary.ammSoldAvgPrice,
+        }
+      : null,
+    totalPremium: premiumNonZero ? quoteAmt(summary.totalPremium) : null,
+    totalPremiumRaw: premiumNonZero ? summary.totalPremium : null,
     segments: summary.segments.map((s) => formatSegment(s, summary)),
-    raw: summary,
   };
 }
 
@@ -493,37 +566,49 @@ export function formatPositionAccounting(
   const cur = report.reportingCurrency;
   const amount = (raw: string) => formatReportingAmount(raw, cur);
 
+  const assets = report.balanceSheet.assets;
+  const equity = report.balanceSheet.equity;
+  const re = equity.retainedEarnings;
+  const pnl = report.pnl;
+
   return {
     positionRef: report.positionRef,
     reportingCurrency: cur,
     balanceSheet: {
       assets: {
-        lpPositionAtCost: amount(report.balanceSheet.assets.lpPositionAtCost),
-        totalAssets: amount(report.balanceSheet.assets.totalAssets),
+        lpPositionAtCost: amount(assets.lpPositionAtCost),
+        lpPositionAtCostRaw: assets.lpPositionAtCost,
+        totalAssets: amount(assets.totalAssets),
+        totalAssetsRaw: assets.totalAssets,
       },
       equity: {
-        contributedCapital: amount(report.balanceSheet.equity.contributedCapital),
-        capitalReturned: amount(report.balanceSheet.equity.capitalReturned),
+        contributedCapital: amount(equity.contributedCapital),
+        contributedCapitalRaw: equity.contributedCapital,
+        capitalReturned: amount(equity.capitalReturned),
+        capitalReturnedRaw: equity.capitalReturned,
         retainedEarnings: {
-          realizedFromWithdrawals: amount(
-            report.balanceSheet.equity.retainedEarnings.realizedFromWithdrawals,
-          ),
-          realizedFromCollectedFees: amount(
-            report.balanceSheet.equity.retainedEarnings.realizedFromCollectedFees,
-          ),
-          realizedFromFxEffect: amount(
-            report.balanceSheet.equity.retainedEarnings.realizedFromFxEffect,
-          ),
-          total: amount(report.balanceSheet.equity.retainedEarnings.total),
+          realizedFromWithdrawals: amount(re.realizedFromWithdrawals),
+          realizedFromWithdrawalsRaw: re.realizedFromWithdrawals,
+          realizedFromCollectedFees: amount(re.realizedFromCollectedFees),
+          realizedFromCollectedFeesRaw: re.realizedFromCollectedFees,
+          realizedFromFxEffect: amount(re.realizedFromFxEffect),
+          realizedFromFxEffectRaw: re.realizedFromFxEffect,
+          total: amount(re.total),
+          totalRaw: re.total,
         },
-        totalEquity: amount(report.balanceSheet.equity.totalEquity),
+        totalEquity: amount(equity.totalEquity),
+        totalEquityRaw: equity.totalEquity,
       },
     },
     realizedPnl: {
-      netPnl: amount(report.pnl.netPnl),
-      realizedFromWithdrawals: amount(report.pnl.realizedFromWithdrawals),
-      realizedFromCollectedFees: amount(report.pnl.realizedFromCollectedFees),
-      realizedFromFxEffect: amount(report.pnl.realizedFromFxEffect),
+      netPnl: amount(pnl.netPnl),
+      netPnlRaw: pnl.netPnl,
+      realizedFromWithdrawals: amount(pnl.realizedFromWithdrawals),
+      realizedFromWithdrawalsRaw: pnl.realizedFromWithdrawals,
+      realizedFromCollectedFees: amount(pnl.realizedFromCollectedFees),
+      realizedFromCollectedFeesRaw: pnl.realizedFromCollectedFees,
+      realizedFromFxEffect: amount(pnl.realizedFromFxEffect),
+      realizedFromFxEffectRaw: pnl.realizedFromFxEffect,
     },
     journalEntries: report.journalEntries.map((entry) => ({
       date: timestamp(entry.entryDate),
@@ -532,10 +617,10 @@ export function formatPositionAccounting(
       lines: entry.lines.map((line) => ({
         side: line.side,
         account: `${line.accountCode} — ${line.accountName} (${line.accountCategory})`,
-        amount: line.amountReporting === null ? null : amount(line.amountReporting),
+        amountReporting: line.amountReporting === null ? null : amount(line.amountReporting),
+        amountReportingRaw: line.amountReporting,
       })),
     })),
-    raw: report,
   };
 }
 
@@ -547,7 +632,15 @@ function bpsToPct(bps: number): string {
   return formatPercentage(bps / 100, 2);
 }
 
-function formatAprPeriod(period: AprPeriodData): Record<string, unknown> {
+interface AprQuoteContext {
+  symbol: string;
+  decimals: number;
+}
+
+function formatAprPeriod(
+  period: AprPeriodData,
+  quote: AprQuoteContext,
+): Record<string, unknown> {
   const days = period.durationSeconds / 86400;
   return {
     period: {
@@ -556,20 +649,22 @@ function formatAprPeriod(period: AprPeriodData): Record<string, unknown> {
       durationDays: Number(days.toFixed(2)),
     },
     apr: bpsToPct(period.aprBps),
+    aprBps: period.aprBps,
+    costBasis: formatTokenAmount(period.costBasis, quote.symbol, quote.decimals),
+    costBasisRaw: period.costBasis,
+    collectedYieldValue: formatTokenAmount(period.collectedYieldValue, quote.symbol, quote.decimals),
+    collectedYieldValueRaw: period.collectedYieldValue,
     eventCount: period.eventCount,
-    raw: {
-      costBasis: period.costBasis,
-      collectedYieldValue: period.collectedYieldValue,
-      aprBps: period.aprBps,
-    },
   };
 }
 
 export function formatPositionApr(
   response: AprPeriodsResponse,
+  quote: AprQuoteContext,
 ): Record<string, unknown> {
   const summary = response.summary;
   const periods = response.data;
+  const fmt = (raw: string) => formatTokenAmount(raw, quote.symbol, quote.decimals);
 
   return {
     summary: {
@@ -583,17 +678,92 @@ export function formatPositionApr(
         realized: Number(summary.realizedActiveDays.toFixed(2)),
         unrealized: Number(summary.unrealizedActiveDays.toFixed(2)),
       },
+      realizedFees: fmt(summary.realizedFees),
+      realizedFeesRaw: summary.realizedFees,
+      realizedTWCostBasis: fmt(summary.realizedTWCostBasis),
+      realizedTWCostBasisRaw: summary.realizedTWCostBasis,
+      unrealizedFees: fmt(summary.unrealizedFees),
+      unrealizedFeesRaw: summary.unrealizedFees,
+      unrealizedCostBasis: fmt(summary.unrealizedCostBasis),
+      unrealizedCostBasisRaw: summary.unrealizedCostBasis,
       belowThreshold: summary.belowThreshold,
       note: summary.belowThreshold
         ? 'Position has too little history for reliable APR — treat values as preliminary.'
         : null,
     },
-    periods: periods.map(formatAprPeriod),
-    raw: {
-      summary,
-      periods,
-    },
+    periods: periods.map((p) => formatAprPeriod(p, quote)),
   };
 }
 
-export { pickAddress, timestamp, pct };
+// =============================================================================
+// Close Orders
+// =============================================================================
+
+/**
+ * Build a §3.1 pool summary from a resolved {@link PositionContext}. Used by
+ * tools (close orders, simulate, pnl-curve) that emit position-shaped items
+ * but receive only an order-level payload from upstream.
+ */
+function poolSummaryFromContext(ctx: PositionContext): Record<string, unknown> {
+  return formatPoolSummary({
+    chainId: ctx.pool.chainId,
+    poolAddress: ctx.pool.address,
+    feeBps: ctx.feeBps,
+    isToken0Quote: ctx.isToken0Quote,
+    token0: ctx.token0,
+    token1: ctx.token1,
+  });
+}
+
+export function formatCloseOrders(
+  orders: SerializedCloseOrder[],
+  ctx: PositionContext,
+): Record<string, unknown>[] {
+  const pool = poolSummaryFromContext(ctx);
+  const { baseToken, quoteToken } = ctx;
+
+  return orders.map((order) => {
+    let triggerPriceRaw: string | null = null;
+    let triggerPriceDisplay: string | null = null;
+    if (order.triggerTick !== null) {
+      const priceBigInt = tickToPrice(
+        order.triggerTick,
+        baseToken.address,
+        quoteToken.address,
+        baseToken.decimals,
+      );
+      triggerPriceRaw = priceBigInt.toString();
+      triggerPriceDisplay = formatTokenAmount(
+        triggerPriceRaw,
+        quoteToken.symbol,
+        quoteToken.decimals,
+      );
+    }
+
+    return {
+      id: order.id,
+      closeOrderHash: order.closeOrderHash,
+      closeOrderType: order.closeOrderType,
+      automationState: order.automationState,
+      executionAttempts: order.executionAttempts,
+      lastError: order.lastError,
+      pool,
+      triggerTick: order.triggerTick,
+      triggerPrice: triggerPriceDisplay,
+      triggerPriceRaw,
+      triggerMode: order.triggerMode,
+      slippageBps: order.slippageBps,
+      swapDirection: order.swapDirection,
+      swapSlippageBps: order.swapSlippageBps,
+      validUntil: order.validUntil ? timestamp(order.validUntil) : null,
+      payoutAddress: order.payoutAddress,
+      contractAddress: order.contractAddress,
+      operatorAddress: order.operatorAddress,
+      createdAt: timestamp(order.createdAt),
+      updatedAt: timestamp(order.updatedAt),
+    };
+  });
+}
+
+export { pickAddress, timestamp, pct, formatPoolSummary };
+export type { PoolSummaryRaw };

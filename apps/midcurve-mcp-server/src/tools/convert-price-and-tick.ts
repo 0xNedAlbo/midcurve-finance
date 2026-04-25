@@ -64,7 +64,12 @@ export function buildConvertPriceAndTickTool(client: ApiClient) {
         'Uniswap V3 tick. Use mode="price-to-tick" with snap=true to snap to a usable position-bound ' +
         'tick (multiple of the pool\'s tickSpacing). ' +
         'Either pass the token metadata explicitly, or supply the position-lookup fields to inherit ' +
-        'addresses, baseTokenDecimals, and tickSpacing from a live position\'s pool.',
+        'addresses, baseTokenDecimals, and tickSpacing from a live position\'s pool.\n\n' +
+        'In `tick-to-price` mode, the result is dual-emitted: `price` is a humanized display string ' +
+        '(only present when a position context was resolved); `priceRaw` is the bigint decimal ' +
+        'string scaled to quote-token decimals. Raw is canonical. ' +
+        '`price-to-tick` mode returns `tick` as a single-emit integer (ticks are canonical per the ' +
+        '§2 decision table — there is no separate raw form).',
       inputSchema,
     },
     handler: async (args: Args) => {
@@ -117,17 +122,15 @@ export function buildConvertPriceAndTickTool(client: ApiClient) {
       if (args.tick === undefined) throw new Error('tick is required when mode="tick-to-price"');
 
       const price = tickToPrice(args.tick, baseAddr, quoteAddr, baseDecimals);
-
-      const formatted = ctx
-        ? formatTokenAmount(price.toString(), ctx.quoteToken.symbol, ctx.quoteToken.decimals)
+      const priceRaw = price.toString();
+      const priceDisplay = ctx
+        ? formatTokenAmount(priceRaw, ctx.quoteToken.symbol, ctx.quoteToken.decimals)
         : null;
 
       const result = {
         mode: 'tick-to-price',
-        price: {
-          formatted,
-          raw: price.toString(),
-        },
+        price: priceDisplay,
+        priceRaw,
         inputsUsed: {
           tick: args.tick,
           baseTokenAddress: baseAddr,

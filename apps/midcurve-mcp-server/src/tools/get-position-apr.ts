@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { AprPeriodsResponse } from '@midcurve/api-shared';
 import type { ApiClient } from '../api-client.js';
 import { formatPositionApr } from '../formatters.js';
+import { resolvePositionContext } from '../lib/position-context.js';
 
 const inputSchema = {
   protocol: z
@@ -54,20 +55,36 @@ export function buildGetPositionAprTool(client: ApiClient) {
         'periods. Use for "what APR is this position generating", "how does my fee income ' +
         'compare across windows", or "is this position outperforming". ' +
         'Two protocols are supported: "uniswapv3" (chainId + nftId) and "uniswapv3-vault" ' +
-        '(chainId + vaultAddress + ownerAddress).',
+        '(chainId + vaultAddress + ownerAddress).\n\n' +
+        'Money fields (fees and cost-basis values) are dual-emitted in the position\'s quote ' +
+        'token: `<field>` is a humanized display string (e.g. "1,234.56 USDC"); `<field>Raw` ' +
+        'is the bigint as decimal string in quote-token base units. Raw is canonical — use it ' +
+        'for further computation; display is for narration/rendering. APR percentages are ' +
+        'single-emit (the canonical form is the percentage itself).\n\n' +
+        'Output shape:\n' +
+        '- summary: percentages (totalApr, realizedApr, unrealizedApr, baseApr, rewardApr), ' +
+        'activeDays { total, realized, unrealized }, dual-emit money pairs ' +
+        '(realizedFees, realizedTWCostBasis, unrealizedFees, unrealizedCostBasis), ' +
+        'belowThreshold flag and note\n' +
+        '- periods[]: per-period { period: { start, end, durationDays }, apr, aprBps, ' +
+        'costBasis/costBasisRaw, collectedYieldValue/collectedYieldValueRaw, eventCount }',
       inputSchema,
     },
     handler: async (args: Args) => {
       const path = buildPath(args);
       // The APR endpoint returns the standard envelope with an extra top-level
       // `summary` sibling, so we use getRaw to keep it.
-      const response = await client.getRaw<AprPeriodsResponse>(path);
+      const [response, ctx] = await Promise.all([
+        client.getRaw<AprPeriodsResponse>(path),
+        resolvePositionContext(client, args),
+      ]);
+      const formatted = formatPositionApr(response, {
+        symbol: ctx.quoteToken.symbol,
+        decimals: ctx.quoteToken.decimals,
+      });
       return {
         content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(formatPositionApr(response), null, 2),
-          },
+          { type: 'text' as const, text: JSON.stringify(formatted, null, 2) },
         ],
       };
     },

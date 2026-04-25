@@ -63,7 +63,12 @@ export function buildComputeLiquidityForBudgetTool(client: ApiClient) {
         'converted to the single token that\'s required. ' +
         'Pass everything explicitly, OR supply the position-lookup fields to inherit ticks, sqrtPrice, ' +
         'decimals and isQuoteToken0 from a live position; you typically only need to provide ' +
-        'baseAmount + quoteAmount in that case.',
+        'baseAmount + quoteAmount in that case.\n\n' +
+        '`liquidity` is a single-emit canonical bigint string (per the §2 decision table — no raw ' +
+        'companion, the bigint string is already canonical). The base/quote amounts are dual-emitted: ' +
+        '`baseAmount` / `quoteAmount` are humanized display strings (only present when a position ' +
+        'context is resolved); `baseAmountRaw` / `quoteAmountRaw` are the bigint decimal strings in ' +
+        'each token\'s smallest unit.',
       inputSchema,
     },
     handler: async (args: Args) => {
@@ -100,24 +105,19 @@ export function buildComputeLiquidityForBudgetTool(client: ApiClient) {
         sqrtPriceCurrentX96,
       );
 
-      const formatted = ctx
-        ? {
-            baseAmount: formatTokenAmount(
-              baseAmount.toString(),
-              ctx.baseToken.symbol,
-              ctx.baseToken.decimals,
-            ),
-            quoteAmount: formatTokenAmount(
-              quoteAmount.toString(),
-              ctx.quoteToken.symbol,
-              ctx.quoteToken.decimals,
-            ),
-          }
-        : null;
+      const baseAmountRaw = baseAmount.toString();
+      const quoteAmountRaw = quoteAmount.toString();
 
       const result = {
         liquidity: liquidity.toString(),
-        formattedInputs: formatted,
+        baseAmount: ctx
+          ? formatTokenAmount(baseAmountRaw, ctx.baseToken.symbol, ctx.baseToken.decimals)
+          : null,
+        baseAmountRaw,
+        quoteAmount: ctx
+          ? formatTokenAmount(quoteAmountRaw, ctx.quoteToken.symbol, ctx.quoteToken.decimals)
+          : null,
+        quoteAmountRaw,
         inputsUsed: {
           tickLower,
           tickUpper,

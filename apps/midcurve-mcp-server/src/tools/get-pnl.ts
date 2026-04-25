@@ -23,7 +23,14 @@ export function buildGetPnlTool(client: ApiClient) {
       description:
         'Returns hierarchical realized P&L (portfolio → instrument → position) for a given period in the user\'s ' +
         'reporting currency. Includes withdrawals, collected fees, and FX effects. ' +
-        'For "how much did I make this month / last quarter" type questions.',
+        'For "how much did I make this month / last quarter" type questions.\n\n' +
+        'Money fields are dual-emitted in the user\'s reporting currency: `<field>` is a humanized ' +
+        'display string (e.g. "$1,234.56"); `<field>Raw` is the bigint as decimal string scaled to ' +
+        '10^8 (the accounting domain\'s reporting-currency precision). Raw is canonical — use it ' +
+        'for further computation; display is for narration/rendering. Each level (portfolio, ' +
+        'instruments[], positions[]) carries the same dual-emit pairs: netPnl/netPnlRaw, ' +
+        'realizedFromWithdrawals/...Raw, realizedFromCollectedFees/...Raw, ' +
+        'realizedFromFxEffect/...Raw.',
       inputSchema,
     },
     handler: async (args: { [K in keyof typeof inputSchema]: z.infer<(typeof inputSchema)[K]> }) => {
