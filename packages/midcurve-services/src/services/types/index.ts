@@ -61,7 +61,12 @@ export type {
 } from './position/index.js';
 
 // Position List input types
-export type { PositionListFilters, PositionListRow, PositionListResult } from './position-list/index.js';
+export type {
+  PositionListFilters,
+  PositionListRow,
+  PositionListResult,
+  PositionListPoolSummary,
+} from './position-list/index.js';
 
 // Position Ledger Event input types
 export type {

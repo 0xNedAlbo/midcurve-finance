@@ -44,6 +44,40 @@ function quoteAmount(value: string | null | undefined, symbol: string, decimals:
   return formatTokenAmount(value, symbol, decimals);
 }
 
+/**
+ * Raw pool/token summary as returned by the API when `include=pool` is set.
+ * token0/token1 follow canonical pool ordering — base/quote pivot is done
+ * inside {@link formatPoolSummary} via `isToken0Quote`.
+ */
+interface PoolSummaryRaw {
+  chainId: number;
+  poolAddress: string;
+  feeBps: number;
+  isToken0Quote: boolean;
+  token0: { address: string; symbol: string; decimals: number };
+  token1: { address: string; symbol: string; decimals: number };
+}
+
+/**
+ * Format a pool summary into the canonical MCP shape used by both
+ * `list_positions` items and `get_position.pool`. Uniswap's `feeBps` value
+ * is denominated in hundredths of a basis point (1/1,000,000), so the
+ * percentage divisor is 10_000 — not 100.
+ */
+function formatPoolSummary(pool: PoolSummaryRaw): Record<string, unknown> {
+  const baseToken = pool.isToken0Quote ? pool.token1 : pool.token0;
+  const quoteToken = pool.isToken0Quote ? pool.token0 : pool.token1;
+  return {
+    chainId: pool.chainId,
+    poolAddress: pool.poolAddress,
+    pair: `${baseToken.symbol}/${quoteToken.symbol}`,
+    feeBps: pool.feeBps,
+    feeTier: `${(pool.feeBps / 10_000).toFixed(2)}%`,
+    baseToken: { address: baseToken.address, symbol: baseToken.symbol, decimals: baseToken.decimals },
+    quoteToken: { address: quoteToken.address, symbol: quoteToken.symbol, decimals: quoteToken.decimals },
+  };
+}
+
 interface PositionListItemRaw {
   positionHash: string;
   protocol: string;
@@ -62,6 +96,7 @@ interface PositionListItemRaw {
   positionOpenedAt: string;
   isArchived: boolean;
   archivedAt: string | null;
+  pool?: PoolSummaryRaw;
 }
 
 export function formatPositionListItem(item: PositionListItemRaw): Record<string, unknown> {
@@ -69,6 +104,7 @@ export function formatPositionListItem(item: PositionListItemRaw): Record<string
     positionHash: item.positionHash,
     protocol: item.protocol,
     type: item.type,
+    pool: item.pool ? formatPoolSummary(item.pool) : null,
     currentValueRaw: item.currentValue,
     costBasisRaw: item.costBasis,
     realizedPnlRaw: item.realizedPnl,
@@ -126,21 +162,19 @@ interface UniswapV3PositionRaw {
 
 export function formatPosition(p: UniswapV3PositionRaw): Record<string, unknown> {
   const quoteToken = p.isToken0Quote ? p.pool.token0 : p.pool.token1;
-  const baseToken = p.isToken0Quote ? p.pool.token1 : p.pool.token0;
-  const feeTier = `${(p.pool.feeBps / 100).toFixed(2)}%`;
 
   return {
     positionHash: p.positionHash,
     protocol: p.protocol,
     type: p.type,
-    pool: {
-      pair: `${baseToken.symbol}/${quoteToken.symbol}`,
-      feeTier,
-      chainId: p.pool.config?.chainId,
-      poolAddress: p.pool.config?.poolAddress,
-      baseToken: { symbol: baseToken.symbol, address: baseToken.address, decimals: baseToken.decimals },
-      quoteToken: { symbol: quoteToken.symbol, address: quoteToken.address, decimals: quoteToken.decimals },
-    },
+    pool: formatPoolSummary({
+      chainId: p.pool.config?.chainId as number,
+      poolAddress: p.pool.config?.poolAddress as string,
+      feeBps: p.pool.feeBps,
+      isToken0Quote: p.isToken0Quote,
+      token0: p.pool.token0,
+      token1: p.pool.token1,
+    }),
     currentValue: quoteAmount(p.currentValue, quoteToken.symbol, quoteToken.decimals),
     costBasis: quoteAmount(p.costBasis, quoteToken.symbol, quoteToken.decimals),
     realizedPnl: quoteAmount(p.realizedPnl, quoteToken.symbol, quoteToken.decimals),
@@ -247,7 +281,7 @@ export function formatPool(pool: PoolRaw): Record<string, unknown> {
   return {
     protocol: pool.protocol,
     pair: `${pool.token0.symbol}/${pool.token1.symbol}`,
-    feeTier: `${(pool.feeBps / 100).toFixed(2)}%`,
+    feeTier: `${(pool.feeBps / 10_000).toFixed(2)}%`,
     token0: pool.token0,
     token1: pool.token1,
     metrics: {

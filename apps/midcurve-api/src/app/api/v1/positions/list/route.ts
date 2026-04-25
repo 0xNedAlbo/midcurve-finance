@@ -60,6 +60,7 @@ function serializeListRow(row: PositionListRow): PositionListItem {
     isArchived: row.isArchived,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    ...(row.pool ? { pool: row.pool } : {}),
   };
 }
 
@@ -111,8 +112,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { protocols, status, sortBy, sortDirection, limit, offset } =
+      const { protocols, status, sortBy, sortDirection, limit, offset, include } =
         validation.data;
+
+      const includePool = include?.includes('pool') ?? false;
 
       apiLog.businessOperation(apiLogger, requestId, 'list', 'positions', user.id, {
         protocols,
@@ -121,9 +124,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection,
         limit,
         offset,
+        includePool,
       });
 
-      // 2. Query positions from service (flat rows, no joins)
+      // 2. Query positions from service (flat rows, optional pool join)
       const result = await getPositionListService().list(user.id, {
         protocols,
         status,
@@ -131,6 +135,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection,
         limit,
         offset,
+        includePool,
       });
 
       // 3. Serialize rows (Date → ISO string conversion)

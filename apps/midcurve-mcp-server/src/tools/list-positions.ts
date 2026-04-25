@@ -39,7 +39,8 @@ export function buildListPositionsTool(client: ApiClient) {
     config: {
       title: 'List positions',
       description:
-        'List the user\'s concentrated-liquidity positions across all protocols, with PnL, APR, and price-range fields. ' +
+        'List the user\'s concentrated-liquidity positions across all protocols, with PnL, APR, price-range fields, ' +
+        'and a pool summary (chain, pair, fee tier, base/quote token addresses + decimals). ' +
         'Use this as the starting point for portfolio queries — it returns positionHash identifiers ' +
         '(e.g. "uniswapv3/42161/12345") that can be passed to get_position for detail. ' +
         'Bigint amounts are returned as raw decimal strings; use the position detail tool for human-formatted values.',
@@ -57,6 +58,7 @@ export function buildListPositionsTool(client: ApiClient) {
         sortDirection: args.sortDirection,
         limit: args.limit,
         offset: args.offset,
+        include: 'pool',
       });
 
       const result = {

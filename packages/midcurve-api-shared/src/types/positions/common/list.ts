@@ -32,6 +32,24 @@ export type PositionSortBy =
 export type SortDirection = 'asc' | 'desc';
 
 // =============================================================================
+// Pool Summary (opt-in via include=pool)
+// =============================================================================
+
+/**
+ * Compact pool/token summary attached to each list item when the caller
+ * passes `include=pool`. token0/token1 keep canonical pool ordering — the
+ * formatter layer pivots to base/quote via `isToken0Quote`.
+ */
+export interface PositionListPoolSummary {
+  chainId: number;
+  poolAddress: string;
+  feeBps: number;
+  isToken0Quote: boolean;
+  token0: { address: string; symbol: string; decimals: number };
+  token1: { address: string; symbol: string; decimals: number };
+}
+
+// =============================================================================
 // List Item Type
 // =============================================================================
 
@@ -83,6 +101,11 @@ export interface PositionListItem {
   // Timestamps
   createdAt: string;
   updatedAt: string;
+
+  /**
+   * Pool/token summary, present only when the caller passes `include=pool`.
+   */
+  pool?: PositionListPoolSummary;
 }
 
 // =============================================================================
@@ -135,6 +158,14 @@ export interface ListPositionsParams {
    * @default 0
    */
   offset?: number;
+
+  /**
+   * Optional list of related entities to attach to each item. Today only
+   * `'pool'` is supported, which adds a {@link PositionListPoolSummary}.
+   *
+   * Default behavior (omitted) returns the lean list shape.
+   */
+  include?: ('pool')[];
 }
 
 /**
@@ -211,6 +242,14 @@ export const ListPositionsQuerySchema = PaginationParamsSchema.extend({
     .default('desc')
     .transform((val) => val as 'asc' | 'desc')
     .pipe(SortDirectionSchema),
+
+  include: z
+    .string()
+    .optional()
+    .transform((val) =>
+      val ? val.split(',').map((p) => p.trim()).filter((p) => p.length > 0) : undefined
+    )
+    .pipe(z.array(z.enum(['pool'])).optional()),
 });
 
 /**

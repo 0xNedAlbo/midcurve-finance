@@ -14,8 +14,10 @@
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
+import { createErc20TokenHash, normalizeAddress } from '@midcurve/shared';
 import type {
   PositionListFilters,
+  PositionListPoolSummary,
   PositionListRow,
   PositionListResult,
 } from '../types/position-list/position-list-input.js';
@@ -103,6 +105,7 @@ export class PositionListService {
       offset = 0,
       sortBy = 'createdAt',
       sortDirection = 'desc',
+      includePool = false,
     } = filters ?? {};
 
     log.methodEntry(this.logger, 'list', {
@@ -113,6 +116,7 @@ export class PositionListService {
       offset,
       sortBy,
       sortDirection,
+      includePool,
     });
 
     try {
@@ -169,6 +173,13 @@ export class PositionListService {
         };
       });
 
+      if (includePool && positions.length > 0) {
+        const configsByPositionId = new Map(
+          results.map((row) => [row.id, row.config as Record<string, unknown>])
+        );
+        await this.attachPoolSummaries(positions, configsByPositionId);
+      }
+
       this.logger.info(
         {
           userId,
@@ -199,6 +210,100 @@ export class PositionListService {
         filters,
       });
       throw error;
+    }
+  }
+
+  /**
+   * Mutate `positions` in place by attaching a `pool` summary derived from
+   * each position's config JSON plus a single batched Token lookup.
+   *
+   * Both `uniswapv3` and `uniswapv3-vault` configs carry the same primitives
+   * (chainId, poolAddress, token0Address, token1Address, feeBps, isToken0Quote),
+   * so a single normalizer works for both.
+   */
+  private async attachPoolSummaries(
+    positions: PositionListRow[],
+    configsByPositionId: Map<string, Record<string, unknown>>
+  ): Promise<void> {
+    type ConfigPoolFields = {
+      chainId: number;
+      poolAddress: string;
+      token0Address: string;
+      token1Address: string;
+      feeBps: number;
+      isToken0Quote: boolean;
+    };
+
+    const extracted = new Map<string, ConfigPoolFields>();
+    const tokenHashes = new Set<string>();
+
+    for (const position of positions) {
+      const config = configsByPositionId.get(position.id);
+      if (!config) {
+        throw new Error(
+          `Position ${position.id} (${position.positionHash}) is missing config — cannot build pool summary`
+        );
+      }
+
+      const fields: ConfigPoolFields = {
+        chainId: config.chainId as number,
+        poolAddress: normalizeAddress(config.poolAddress as string),
+        token0Address: normalizeAddress(config.token0Address as string),
+        token1Address: normalizeAddress(config.token1Address as string),
+        feeBps: config.feeBps as number,
+        isToken0Quote: config.isToken0Quote as boolean,
+      };
+
+      extracted.set(position.id, fields);
+      tokenHashes.add(createErc20TokenHash(fields.chainId, fields.token0Address));
+      tokenHashes.add(createErc20TokenHash(fields.chainId, fields.token1Address));
+    }
+
+    const tokenRows = await this.prisma.token.findMany({
+      where: { tokenHash: { in: [...tokenHashes] } },
+      select: { tokenHash: true, symbol: true, decimals: true, config: true },
+    });
+
+    const tokensByHash = new Map(
+      tokenRows.map((t) => [t.tokenHash, t] as const)
+    );
+
+    for (const position of positions) {
+      const fields = extracted.get(position.id)!;
+      const t0Hash = createErc20TokenHash(fields.chainId, fields.token0Address);
+      const t1Hash = createErc20TokenHash(fields.chainId, fields.token1Address);
+      const t0 = tokensByHash.get(t0Hash);
+      const t1 = tokensByHash.get(t1Hash);
+
+      if (!t0) {
+        throw new Error(
+          `Token not found for ${t0Hash} (position ${position.positionHash})`
+        );
+      }
+      if (!t1) {
+        throw new Error(
+          `Token not found for ${t1Hash} (position ${position.positionHash})`
+        );
+      }
+
+      const pool: PositionListPoolSummary = {
+        chainId: fields.chainId,
+        poolAddress: fields.poolAddress,
+        feeBps: fields.feeBps,
+        isToken0Quote: fields.isToken0Quote,
+        token0: {
+          address: fields.token0Address,
+          symbol: t0.symbol,
+          decimals: t0.decimals,
+        },
+        token1: {
+          address: fields.token1Address,
+          symbol: t1.symbol,
+          decimals: t1.decimals,
+        },
+      };
+
+      position.pool = pool;
     }
   }
 }

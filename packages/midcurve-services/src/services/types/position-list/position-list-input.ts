@@ -76,6 +76,27 @@ export interface PositionListFilters {
    * @default 'desc'
    */
   sortDirection?: 'asc' | 'desc';
+
+  /**
+   * When true, attach a `pool` summary to each returned row.
+   * Off by default to keep the list query lean.
+   */
+  includePool?: boolean;
+}
+
+/**
+ * Minimal pool/token summary attached to each list row when
+ * {@link PositionListFilters.includePool} is set. Token-0/1 keep the
+ * canonical pool ordering — the formatter layer decides which is base/quote
+ * via `isToken0Quote`.
+ */
+export interface PositionListPoolSummary {
+  chainId: number;
+  poolAddress: string;
+  feeBps: number;
+  isToken0Quote: boolean;
+  token0: { address: string; symbol: string; decimals: number };
+  token1: { address: string; symbol: string; decimals: number };
 }
 
 /**
@@ -119,6 +140,12 @@ export interface PositionListRow {
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
+
+  /**
+   * Pool summary, populated only when the caller passes
+   * {@link PositionListFilters.includePool}.
+   */
+  pool?: PositionListPoolSummary;
 }
 
 /**

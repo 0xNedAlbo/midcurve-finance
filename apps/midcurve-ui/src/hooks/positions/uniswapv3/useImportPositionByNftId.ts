@@ -11,6 +11,7 @@ import { apiClientFn, ApiError } from '@/lib/api-client';
 import type {
   ImportUniswapV3PositionData,
   ListPositionsResponse,
+  PositionListItem,
 } from '@midcurve/api-shared';
 
 interface ImportPositionByNftIdParams {
@@ -69,12 +70,17 @@ export function useImportPositionByNftId(
             (p) => p.positionHash === newPosition.positionHash
           );
 
+          // The list cache holds PositionListItem rows; the import response is a
+          // detailed UniswapV3PositionResponse. Cast at the boundary — list-only
+          // consumers read positionHash + summary fields that both shapes share.
+          const newPositionAsListItem = newPosition as unknown as PositionListItem;
+
           if (exists) {
             // Replace existing position with fresh data
             return {
               ...oldData,
               data: oldData.data.map((p) =>
-                p.positionHash === newPosition.positionHash ? newPosition : p
+                p.positionHash === newPosition.positionHash ? newPositionAsListItem : p
               ),
             };
           }
@@ -82,7 +88,7 @@ export function useImportPositionByNftId(
           // Insert at top (user intent - just imported this position)
           return {
             ...oldData,
-            data: [newPosition, ...oldData.data],
+            data: [newPositionAsListItem, ...oldData.data],
             pagination: {
               ...oldData.pagination,
               total: oldData.pagination.total + 1,
