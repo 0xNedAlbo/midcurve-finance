@@ -92,6 +92,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         sortDirection: searchParams.get('sortDirection') ?? undefined,
         limit: searchParams.get('limit') ?? undefined,
         offset: searchParams.get('offset') ?? undefined,
+        include: searchParams.get('include') ?? undefined,
       };
 
       const validation = ListPositionsQuerySchema.safeParse(queryParams);
