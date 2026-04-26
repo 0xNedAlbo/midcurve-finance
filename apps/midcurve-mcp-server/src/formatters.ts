@@ -393,7 +393,7 @@ interface PoolDetailRaw {
     fees7dUSD: string;
     volume7dAvgUSD: string;
     fees7dAvgUSD: string;
-    apr7d: number;
+    apr7d: number | null;
     feeApr24h: number | null;
     feeApr7dAvg: number | null;
     feeAprPrimary: number | null;
@@ -450,7 +450,8 @@ function formatVolatility(v: VolatilityBlockRaw): Record<string, unknown> {
       sigma60d: formatSigmaResult(v.pair.sigma60d),
       sigma365d: formatSigmaResult(v.pair.sigma365d),
     },
-    velocity: v.velocity !== null ? v.velocity.toFixed(3) : null,
+    velocity:
+      v.velocity !== null && v.velocity !== undefined ? v.velocity.toFixed(3) : null,
     pivotCurrency: v.pivotCurrency,
     computedAt: v.computedAt,
   };
@@ -519,7 +520,10 @@ export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
           fees7dAvgRaw: metrics.fees7dAvgUSD,
           // Percentages — single-emit humanized (convention §73).
           // `apr7d` arrives as a percentage already (e.g. 25.12).
-          apr7d: formatPercentage(metrics.apr7d, 2),
+          apr7d:
+            metrics.apr7d !== null && metrics.apr7d !== undefined
+              ? formatPercentage(metrics.apr7d, 2)
+              : null,
           // Fee-APR raw rates → percentage strings.
           feeApr24h: fmtRate(metrics.feeApr24h, 2),
           feeApr7dAvg: fmtRate(metrics.feeApr7dAvg, 2),
