@@ -113,6 +113,26 @@ describe('formatPool', () => {
     expect(sigmaFilter.marginLongTerm).toBe('+18.7%');
     const volatility = m.volatility as Record<string, unknown>;
     expect(volatility.velocity).toBe('1.000');
+
+    // PRD §3.3: per-token σ blocks must NOT carry sigmaSqOver8 — only the
+    // pair block does. The token-level field has no LVR interpretation.
+    const t0 = volatility.token0 as Record<string, unknown>;
+    const t0_60 = t0.sigma60d as Record<string, unknown>;
+    const t0_365 = t0.sigma365d as Record<string, unknown>;
+    const t1 = volatility.token1 as Record<string, unknown>;
+    const t1_60 = t1.sigma60d as Record<string, unknown>;
+    const t1_365 = t1.sigma365d as Record<string, unknown>;
+    expect('sigmaSqOver8' in t0_60).toBe(false);
+    expect('sigmaSqOver8' in t0_365).toBe(false);
+    expect('sigmaSqOver8' in t1_60).toBe(false);
+    expect('sigmaSqOver8' in t1_365).toBe(false);
+
+    // Pair must keep sigmaSqOver8 humanized.
+    const pair = volatility.pair as Record<string, unknown>;
+    const p_60 = pair.sigma60d as Record<string, unknown>;
+    const p_365 = pair.sigma365d as Record<string, unknown>;
+    expect(p_60.sigmaSqOver8).toBe('6.4%');
+    expect(p_365.sigmaSqOver8).toBe('6.4%');
   });
 
   it('does not crash when velocity is undefined (regression: issue #43)', () => {

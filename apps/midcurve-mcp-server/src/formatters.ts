@@ -421,11 +421,23 @@ function fmtSignedRate(rate: number | null | undefined, decimals = 1): string | 
 }
 
 /**
- * Format a single σ-result block (per-token-vs-USD or per-pair-per-window).
- * `value` and `sigmaSqOver8` are raw rates → percentage strings; `status`,
- * `nReturns` are passed through. Missing fields are emitted as null.
+ * Per-token σ-vs-USD block. Per PRD §3.3, single-token σ has no LVR
+ * interpretation, so `sigmaSqOver8` is never present on the wire — emit
+ * `{status, value, nReturns}` only.
  */
-function formatSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
+function formatTokenSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
+  return {
+    status: r.status,
+    value: fmtRate(r.value),
+    nReturns: r.nReturns ?? null,
+  };
+}
+
+/**
+ * Pair σ block. Carries `sigmaSqOver8` (the LVR rate of the synthetic
+ * cross-pair) which feeds the σ-filter verdict.
+ */
+function formatPairSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
   return {
     status: r.status,
     value: fmtRate(r.value),
@@ -438,17 +450,17 @@ function formatVolatility(v: VolatilityBlockRaw): Record<string, unknown> {
   return {
     token0: {
       ref: v.token0.ref,
-      sigma60d: formatSigmaResult(v.token0.sigma60d),
-      sigma365d: formatSigmaResult(v.token0.sigma365d),
+      sigma60d: formatTokenSigmaResult(v.token0.sigma60d),
+      sigma365d: formatTokenSigmaResult(v.token0.sigma365d),
     },
     token1: {
       ref: v.token1.ref,
-      sigma60d: formatSigmaResult(v.token1.sigma60d),
-      sigma365d: formatSigmaResult(v.token1.sigma365d),
+      sigma60d: formatTokenSigmaResult(v.token1.sigma60d),
+      sigma365d: formatTokenSigmaResult(v.token1.sigma365d),
     },
     pair: {
-      sigma60d: formatSigmaResult(v.pair.sigma60d),
-      sigma365d: formatSigmaResult(v.pair.sigma365d),
+      sigma60d: formatPairSigmaResult(v.pair.sigma60d),
+      sigma365d: formatPairSigmaResult(v.pair.sigma365d),
     },
     velocity:
       v.velocity !== null && v.velocity !== undefined ? v.velocity.toFixed(3) : null,
