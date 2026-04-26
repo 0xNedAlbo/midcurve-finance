@@ -398,8 +398,8 @@ interface PoolDetailRaw {
     feeApr7dAvg: number | null;
     feeAprPrimary: number | null;
     feeAprSource: '24h' | '7d_avg' | 'unavailable';
-    volatility: VolatilityBlockRaw;
-    sigmaFilter: SigmaFilterBlockRaw;
+    volatility?: VolatilityBlockRaw;
+    sigmaFilter?: SigmaFilterBlockRaw;
   };
   feeData?: Record<string, unknown>;
 }
@@ -529,9 +529,11 @@ export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
           feeApr7dAvg: fmtRate(metrics.feeApr7dAvg, 2),
           feeAprPrimary: fmtRate(metrics.feeAprPrimary, 2),
           feeAprSource: metrics.feeAprSource,
-          // Volatility & σ-filter (PRD-pool-sigma-filter §3.3, §3.4).
-          volatility: formatVolatility(metrics.volatility),
-          sigmaFilter: formatSigmaFilter(metrics.sigmaFilter),
+          // Volatility & σ-filter (PRD-pool-sigma-filter §3.3, §3.4). Both
+          // blocks are optional at the wire boundary — older API responses or
+          // failed enrichment paths can omit them; emit null rather than crash.
+          volatility: metrics.volatility ? formatVolatility(metrics.volatility) : null,
+          sigmaFilter: metrics.sigmaFilter ? formatSigmaFilter(metrics.sigmaFilter) : null,
         }
       : null,
     feeData: feeData ?? null,
