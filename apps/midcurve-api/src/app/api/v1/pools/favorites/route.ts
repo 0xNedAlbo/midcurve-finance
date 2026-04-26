@@ -28,8 +28,11 @@ import {
 } from '@midcurve/api-shared';
 import { serializeUniswapV3Pool } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getFavoritePoolService, getSubgraphClient } from '@/lib/services';
+import { getFavoritePoolService, getPoolSigmaFilterService, getSubgraphClient } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
+import { buildPoolMetricsBlock, type PoolMetricsInput } from '@/lib/pool-metrics-block';
+import type { PoolSigmaResult } from '@midcurve/services';
+import type { Erc20Token } from '@midcurve/shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -165,7 +168,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const poolMetrics = metricsMap.get(poolAddress.toLowerCase());
 
       // Default metrics if subgraph data unavailable
-      const metrics = poolMetrics
+      const subgraphInput: PoolMetricsInput = poolMetrics
         ? {
             tvlUSD: poolMetrics.tvlUSD,
             volume24hUSD: poolMetrics.volume24hUSD,
@@ -185,6 +188,30 @@ export async function POST(request: NextRequest): Promise<Response> {
             apr7d: 0,
           };
 
+      // 3b. σ-filter enrichment for the single new favorite
+      const poolHash = result.poolHash;
+      let sigmaResult;
+      try {
+        const sigmaResults = await getPoolSigmaFilterService().enrichPools([
+          {
+            poolHash,
+            token0Hash: `erc20/${result.pool.chainId}/${(result.pool.token0 as Erc20Token).address}`,
+            token1Hash: `erc20/${result.pool.chainId}/${(result.pool.token1 as Erc20Token).address}`,
+            tvlUSD: subgraphInput.tvlUSD,
+            fees24hUSD: subgraphInput.fees24hUSD,
+            fees7dAvgUSD: subgraphInput.fees7dAvgUSD,
+          },
+        ]);
+        sigmaResult = sigmaResults.get(poolHash);
+      } catch (error) {
+        apiLogger.warn(
+          { requestId, poolHash, error },
+          'Sigma-filter enrichment failed for new favorite, returning without sigma data'
+        );
+      }
+
+      const metricsBlock = buildPoolMetricsBlock(subgraphInput, sigmaResult);
+
       // 4. Build response
       const serializedPool = serializeUniswapV3Pool(result.pool);
 
@@ -193,7 +220,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         chainId: result.pool.chainId,
         poolAddress: result.pool.address,
         pool: serializedPool as unknown as FavoritePoolItem['pool'],
-        ...metrics,
+        metrics: metricsBlock,
       };
 
       const responseData: AddFavoritePoolData = {
@@ -288,22 +315,16 @@ export async function GET(request: NextRequest): Promise<Response> {
         favoritePoolService.countFavorites(user.id),
       ]);
 
-      // 3. Transform to response items, optionally filtering by protocol
-      const favoriteItems: FavoritePoolItem[] = [];
+      // 3. Transform to response items, optionally filtering by protocol.
+      //    Build descriptors once for σ-filter batch enrichment so unique
+      //    tokens (e.g. USDC across many pools) are deduplicated (PRD §6.3).
+      const visibleFavorites = favorites.filter(
+        () => !(protocol && protocol !== 'uniswapv3'),
+      );
 
-      for (const fav of favorites) {
-        // Filter by protocol if specified
-        if (protocol && protocol !== 'uniswapv3') {
-          continue;
-        }
-
-        const serializedPool = serializeUniswapV3Pool(fav.pool);
-
-        favoriteItems.push({
-          poolHash: fav.poolHash,
-          chainId: fav.pool.chainId,
-          poolAddress: fav.pool.address,
-          pool: serializedPool as unknown as FavoritePoolItem['pool'],
+      const subgraphByHash = new Map<string, PoolMetricsInput>();
+      for (const fav of visibleFavorites) {
+        subgraphByHash.set(fav.poolHash, {
           tvlUSD: fav.metrics.tvlUSD,
           volume24hUSD: fav.metrics.volume24hUSD,
           fees24hUSD: fav.metrics.fees24hUSD,
@@ -311,6 +332,42 @@ export async function GET(request: NextRequest): Promise<Response> {
           volume7dAvgUSD: fav.metrics.volume7dAvgUSD,
           fees7dAvgUSD: fav.metrics.fees7dAvgUSD,
           apr7d: fav.metrics.apr7d,
+        });
+      }
+
+      let sigmaResults = new Map<string, PoolSigmaResult>();
+      try {
+        const descriptors = visibleFavorites.map((fav) => ({
+          poolHash: fav.poolHash,
+          token0Hash: `erc20/${fav.pool.chainId}/${(fav.pool.token0 as Erc20Token).address}`,
+          token1Hash: `erc20/${fav.pool.chainId}/${(fav.pool.token1 as Erc20Token).address}`,
+          tvlUSD: fav.metrics.tvlUSD,
+          fees24hUSD: fav.metrics.fees24hUSD,
+          fees7dAvgUSD: fav.metrics.fees7dAvgUSD,
+        }));
+        if (descriptors.length > 0) {
+          sigmaResults = await getPoolSigmaFilterService().enrichPools(descriptors);
+        }
+      } catch (error) {
+        apiLogger.warn(
+          { requestId, error },
+          'Sigma-filter enrichment failed for favorites list, returning without sigma data'
+        );
+      }
+
+      const favoriteItems: FavoritePoolItem[] = [];
+
+      for (const fav of visibleFavorites) {
+        const serializedPool = serializeUniswapV3Pool(fav.pool);
+        const subgraphInput = subgraphByHash.get(fav.poolHash)!;
+        const sigma = sigmaResults.get(fav.poolHash);
+
+        favoriteItems.push({
+          poolHash: fav.poolHash,
+          chainId: fav.pool.chainId,
+          poolAddress: fav.pool.address,
+          pool: serializedPool as unknown as FavoritePoolItem['pool'],
+          metrics: buildPoolMetricsBlock(subgraphInput, sigma),
         });
       }
 

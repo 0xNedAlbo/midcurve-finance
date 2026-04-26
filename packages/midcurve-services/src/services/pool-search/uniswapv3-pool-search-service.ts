@@ -25,6 +25,7 @@
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
+import type { PoolMetricsBlock } from '@midcurve/api-shared';
 import { isAddress, getAddress } from 'viem';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
@@ -32,16 +33,32 @@ import { UniswapV3SubgraphClient } from '../../clients/subgraph/uniswapv3/index.
 import type { PoolSearchSubgraphResult } from '../../clients/subgraph/uniswapv3/index.js';
 import { CoingeckoTokenService } from '../coingecko-token/index.js';
 import { EvmConfig } from '../../config/evm.js';
+import { PoolSigmaFilterService } from '../volatility/index.js';
+import type { PoolSigmaDescriptor, PoolSigmaResult } from '../volatility/index.js';
 import type { UniswapV3PoolSearchInput, ResolvedTokenAddress } from '../types/pool-search/index.js';
 
 /**
- * Pool search result with chain name
+ * Pool search result.
  *
- * Extends the subgraph result with human-readable chain name.
+ * Same shape as `PoolSearchResultItem` from `@midcurve/api-shared` (minus the
+ * route-only `isFavorite` flag) — metrics are nested under a single
+ * `PoolMetricsBlock` containing TVL/volume/fees alongside σ-filter verdict.
  */
-export interface PoolSearchResult extends PoolSearchSubgraphResult {
-  /** Human-readable chain name (e.g., "Ethereum", "Arbitrum One") */
+export interface PoolSearchResult {
+  /** Pool contract address (EIP-55 checksummed). */
+  poolAddress: string;
+  /** Chain ID. */
+  chainId: number;
+  /** Human-readable chain name (e.g., "Ethereum", "Arbitrum One"). */
   chainName: string;
+  /** Fee tier in basis points. */
+  feeTier: number;
+  /** Token0 information. */
+  token0: PoolSearchSubgraphResult['token0'];
+  /** Token1 information. */
+  token1: PoolSearchSubgraphResult['token1'];
+  /** Pool metrics — TVL, volume, fees, fee-APR, volatility, σ-filter verdict. */
+  metrics: PoolMetricsBlock;
 }
 
 /**
@@ -56,6 +73,8 @@ export interface UniswapV3PoolSearchServiceDependencies {
   coingeckoTokenService?: CoingeckoTokenService;
   /** EVM configuration for chain metadata */
   evmConfig?: EvmConfig;
+  /** σ-filter enrichment service */
+  poolSigmaFilterService?: PoolSigmaFilterService;
 }
 
 /**
@@ -68,6 +87,7 @@ export class UniswapV3PoolSearchService {
   private readonly subgraphClient: UniswapV3SubgraphClient;
   private readonly coingeckoTokenService: CoingeckoTokenService;
   private readonly evmConfig: EvmConfig;
+  private readonly poolSigmaFilterService: PoolSigmaFilterService;
   private readonly logger: ServiceLogger;
 
   constructor(dependencies: UniswapV3PoolSearchServiceDependencies = {}) {
@@ -75,6 +95,7 @@ export class UniswapV3PoolSearchService {
     this.subgraphClient = dependencies.subgraphClient ?? UniswapV3SubgraphClient.getInstance();
     this.coingeckoTokenService = dependencies.coingeckoTokenService ?? new CoingeckoTokenService({ prisma: this.prisma });
     this.evmConfig = dependencies.evmConfig ?? EvmConfig.getInstance();
+    this.poolSigmaFilterService = dependencies.poolSigmaFilterService ?? PoolSigmaFilterService.getInstance();
     this.logger = createServiceLogger('UniswapV3PoolSearchService');
   }
 
@@ -160,45 +181,68 @@ export class UniswapV3PoolSearchService {
 
     const chainResults = await Promise.all(chainQueries);
 
-    // Step 3: Merge and add chain names
-    const allPools: PoolSearchResult[] = [];
+    // Step 3: Merge and attach chain name. Track each pool's chainName for
+    // later assembly; sigma enrichment runs over the dedup'd list.
+    interface PendingResult {
+      subgraph: PoolSearchSubgraphResult;
+      chainName: string;
+    }
+    const allPending: PendingResult[] = [];
     for (let i = 0; i < input.chainIds.length; i++) {
       const chainId = input.chainIds[i]!;
       const pools = chainResults[i] ?? [];
 
-      // Get chain name
       let chainName = 'Unknown';
       try {
         const config = this.evmConfig.getChainConfig(chainId);
         chainName = config.name;
       } catch {
-        // Chain not configured, use default
         chainName = `Chain ${chainId}`;
       }
 
       for (const pool of pools) {
-        allPools.push({
-          ...pool,
-          chainName,
-        });
+        allPending.push({ subgraph: pool, chainName });
       }
     }
 
     // Step 4: Deduplicate (same pool might match multiple token combinations)
     const seen = new Set<string>();
-    const uniquePools = allPools.filter((pool) => {
-      const key = `${pool.chainId}:${pool.poolAddress}`;
-      if (seen.has(key)) {
-        return false;
-      }
+    const uniquePending = allPending.filter(({ subgraph }) => {
+      const key = `${subgraph.chainId}:${subgraph.poolAddress}`;
+      if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
 
-    // Step 5: Sort
+    // Step 5: σ-filter enrichment (PRD §3.2-§3.4). Token dedup (PRD §6.3)
+    // happens inside enrichPools. Failure is non-fatal — the result map will
+    // simply be empty, and per-pool buildPoolMetricsBlock falls back to
+    // INSUFFICIENT_DATA defaults.
+    let sigmaResults = new Map<string, PoolSigmaResult>();
+    if (uniquePending.length > 0) {
+      const descriptors: PoolSigmaDescriptor[] = uniquePending.map(({ subgraph }) => ({
+        poolHash: `uniswapv3/${subgraph.chainId}/${subgraph.poolAddress}`,
+        token0Hash: `erc20/${subgraph.chainId}/${subgraph.token0.address}`,
+        token1Hash: `erc20/${subgraph.chainId}/${subgraph.token1.address}`,
+        tvlUSD: subgraph.tvlUSD,
+        fees24hUSD: subgraph.fees24hUSD,
+        fees7dAvgUSD: subgraph.fees7dAvgUSD,
+      }));
+      try {
+        sigmaResults = await this.poolSigmaFilterService.enrichPools(descriptors);
+      } catch (error) {
+        this.logger.warn({ error }, 'Sigma-filter enrichment failed; returning results without sigma data');
+      }
+    }
+
+    const uniquePools: PoolSearchResult[] = uniquePending.map(({ subgraph, chainName }) =>
+      this.assembleResult(subgraph, chainName, sigmaResults),
+    );
+
+    // Step 6: Sort
     const sortedPools = this.sortPools(uniquePools, sortBy, sortDirection);
 
-    // Step 6: Apply limit
+    // Step 7: Apply limit
     const limitedPools = sortedPools.slice(0, limit);
 
     this.logger.info(
@@ -213,6 +257,78 @@ export class UniswapV3PoolSearchService {
 
     log.methodExit(this.logger, 'searchPools', { count: limitedPools.length });
     return limitedPools;
+  }
+
+  /**
+   * Assemble a PoolSearchResult from raw subgraph data + (optional) σ-filter
+   * result. Lives as a private helper so the same logic is reused if other
+   * batch paths are added in the future.
+   */
+  private assembleResult(
+    subgraph: PoolSearchSubgraphResult,
+    chainName: string,
+    sigmaResults: ReadonlyMap<string, PoolSigmaResult>,
+  ): PoolSearchResult {
+    const poolHash = `uniswapv3/${subgraph.chainId}/${subgraph.poolAddress}`;
+    const sigma = sigmaResults.get(poolHash);
+
+    const metrics: PoolMetricsBlock = sigma
+      ? {
+          tvlUSD: subgraph.tvlUSD,
+          volume24hUSD: subgraph.volume24hUSD,
+          fees24hUSD: subgraph.fees24hUSD,
+          fees7dUSD: subgraph.fees7dUSD,
+          volume7dAvgUSD: subgraph.volume7dAvgUSD,
+          fees7dAvgUSD: subgraph.fees7dAvgUSD,
+          apr7d: subgraph.apr7d,
+          feeApr24h: sigma.feeApr24h,
+          feeApr7dAvg: sigma.feeApr7dAvg,
+          feeAprPrimary: sigma.feeAprPrimary,
+          feeAprSource: sigma.feeAprSource,
+          volatility: sigma.volatility,
+          sigmaFilter: sigma.sigmaFilter,
+        }
+      : {
+          tvlUSD: subgraph.tvlUSD,
+          volume24hUSD: subgraph.volume24hUSD,
+          fees24hUSD: subgraph.fees24hUSD,
+          fees7dUSD: subgraph.fees7dUSD,
+          volume7dAvgUSD: subgraph.volume7dAvgUSD,
+          fees7dAvgUSD: subgraph.fees7dAvgUSD,
+          apr7d: subgraph.apr7d,
+          feeApr24h: null,
+          feeApr7dAvg: null,
+          feeAprPrimary: null,
+          feeAprSource: 'unavailable',
+          volatility: {
+            token0: { ref: '', sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+            token1: { ref: '', sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+            pair: { sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+            velocity: null,
+            pivotCurrency: 'usd',
+            computedAt: new Date(0).toISOString(),
+          },
+          sigmaFilter: {
+            feeApr: null,
+            sigmaSqOver8_365d: null,
+            sigmaSqOver8_60d: null,
+            marginLongTerm: null,
+            marginShortTerm: null,
+            verdictLongTerm: 'INSUFFICIENT_DATA',
+            verdictShortTerm: 'INSUFFICIENT_DATA',
+            verdictAgreement: 'INSUFFICIENT_DATA',
+          },
+        };
+
+    return {
+      poolAddress: subgraph.poolAddress,
+      chainId: subgraph.chainId,
+      chainName,
+      feeTier: subgraph.feeTier,
+      token0: subgraph.token0,
+      token1: subgraph.token1,
+      metrics,
+    };
   }
 
   /**
@@ -348,32 +464,32 @@ export class UniswapV3PoolSearchService {
 
       switch (sortBy) {
         case 'tvlUSD':
-          valueA = parseFloat(a.tvlUSD);
-          valueB = parseFloat(b.tvlUSD);
+          valueA = parseFloat(a.metrics.tvlUSD);
+          valueB = parseFloat(b.metrics.tvlUSD);
           break;
         case 'volume24hUSD':
-          valueA = parseFloat(a.volume24hUSD);
-          valueB = parseFloat(b.volume24hUSD);
+          valueA = parseFloat(a.metrics.volume24hUSD);
+          valueB = parseFloat(b.metrics.volume24hUSD);
           break;
         case 'fees24hUSD':
-          valueA = parseFloat(a.fees24hUSD);
-          valueB = parseFloat(b.fees24hUSD);
+          valueA = parseFloat(a.metrics.fees24hUSD);
+          valueB = parseFloat(b.metrics.fees24hUSD);
           break;
         case 'volume7dAvgUSD':
-          valueA = parseFloat(a.volume7dAvgUSD);
-          valueB = parseFloat(b.volume7dAvgUSD);
+          valueA = parseFloat(a.metrics.volume7dAvgUSD);
+          valueB = parseFloat(b.metrics.volume7dAvgUSD);
           break;
         case 'fees7dAvgUSD':
-          valueA = parseFloat(a.fees7dAvgUSD);
-          valueB = parseFloat(b.fees7dAvgUSD);
+          valueA = parseFloat(a.metrics.fees7dAvgUSD);
+          valueB = parseFloat(b.metrics.fees7dAvgUSD);
           break;
         case 'apr7d':
-          valueA = a.apr7d;
-          valueB = b.apr7d;
+          valueA = a.metrics.apr7d;
+          valueB = b.metrics.apr7d;
           break;
         default:
-          valueA = parseFloat(a.tvlUSD);
-          valueB = parseFloat(b.tvlUSD);
+          valueA = parseFloat(a.metrics.tvlUSD);
+          valueB = parseFloat(b.metrics.tvlUSD);
       }
 
       return (valueA - valueB) * multiplier;

@@ -113,13 +113,39 @@ export function useWizardUrlState({
             symbol: poolInstance.token1.symbol,
             decimals: poolInstance.token1.decimals,
           },
-          tvlUSD: '0', // Not needed for hydration
-          volume24hUSD: '0',
-          fees24hUSD: '0',
-          fees7dUSD: '0',
-          volume7dAvgUSD: '0',
-          fees7dAvgUSD: '0',
-          apr7d: 0,
+          // Stub metrics — hydration only needs identity, not metric values.
+          // Sigma-filter / volatility default to INSUFFICIENT_DATA.
+          metrics: {
+            tvlUSD: '0',
+            volume24hUSD: '0',
+            fees24hUSD: '0',
+            fees7dUSD: '0',
+            volume7dAvgUSD: '0',
+            fees7dAvgUSD: '0',
+            apr7d: 0,
+            feeApr24h: null,
+            feeApr7dAvg: null,
+            feeAprPrimary: null,
+            feeAprSource: 'unavailable',
+            volatility: {
+              token0: { ref: '', sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+              token1: { ref: '', sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+              pair: { sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+              velocity: null,
+              pivotCurrency: 'usd',
+              computedAt: new Date(0).toISOString(),
+            },
+            sigmaFilter: {
+              feeApr: null,
+              sigmaSqOver8_365d: null,
+              sigmaSqOver8_60d: null,
+              marginLongTerm: null,
+              marginShortTerm: null,
+              verdictLongTerm: 'INSUFFICIENT_DATA',
+              verdictShortTerm: 'INSUFFICIENT_DATA',
+              verdictAgreement: 'INSUFFICIENT_DATA',
+            },
+          },
         };
 
         // Select pool (sets selectedPool, baseToken=token0, quoteToken=token1)

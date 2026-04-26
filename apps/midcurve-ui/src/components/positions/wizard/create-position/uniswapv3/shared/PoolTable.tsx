@@ -48,10 +48,10 @@ export function PoolTable({
    * APR may be unreliable when pool has low/no liquidity, volume, or fees
    */
   const shouldShowAprWarning = (pool: PoolSearchResultItem): boolean => {
-    const tvl = parseFloat(pool.tvlUSD) || 0;
-    const volume = parseFloat(pool.volume24hUSD) || 0;
-    const fees = parseFloat(pool.fees24hUSD) || 0;
-    const apr = pool.apr7d || 0;
+    const tvl = parseFloat(pool.metrics.tvlUSD) || 0;
+    const volume = parseFloat(pool.metrics.volume24hUSD) || 0;
+    const fees = parseFloat(pool.metrics.fees24hUSD) || 0;
+    const apr = pool.metrics.apr7d || 0;
 
     // Warning if APR > 0 but pool metrics suggest unreliable data
     if (apr > 0 && tvl === 0) return true; // Empty pool
@@ -75,13 +75,13 @@ export function PoolTable({
   const getNumericValue = (pool: PoolSearchResultItem, column: SortColumn): number => {
     switch (column) {
       case 'tvlUSD':
-        return parseFloat(pool.tvlUSD) || 0;
+        return parseFloat(pool.metrics.tvlUSD) || 0;
       case 'volume24hUSD':
-        return parseFloat(pool.volume24hUSD) || 0;
+        return parseFloat(pool.metrics.volume24hUSD) || 0;
       case 'fees24hUSD':
-        return parseFloat(pool.fees24hUSD) || 0;
+        return parseFloat(pool.metrics.fees24hUSD) || 0;
       case 'apr7d':
-        return pool.apr7d || 0;
+        return pool.metrics.apr7d || 0;
     }
   };
 
@@ -210,13 +210,13 @@ export function PoolTable({
                       </span>
                     </div>
                   </td>
-                  <td className="py-3 text-right">{formatCurrency(pool.tvlUSD)}</td>
-                  <td className="py-3 text-right">{formatCurrency(pool.volume24hUSD)}</td>
-                  <td className="py-3 text-right">{formatCurrency(pool.fees24hUSD)}</td>
+                  <td className="py-3 text-right">{formatCurrency(pool.metrics.tvlUSD)}</td>
+                  <td className="py-3 text-right">{formatCurrency(pool.metrics.volume24hUSD)}</td>
+                  <td className="py-3 text-right">{formatCurrency(pool.metrics.fees24hUSD)}</td>
                   <td className="py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <span className="text-green-400">
-                        {formatPercent(pool.apr7d)}
+                        {formatPercent(pool.metrics.apr7d)}
                       </span>
                       {shouldShowAprWarning(pool) && (
                         <span

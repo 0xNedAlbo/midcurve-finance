@@ -24,6 +24,7 @@ import {
 import { apiLogger, apiLog } from '@/lib/logger';
 import { prisma } from '@/lib/prisma';
 import { createPreflightResponse } from '@/lib/cors';
+import { getPoolSigmaFilterService } from '@/lib/services';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
@@ -146,6 +147,30 @@ export async function GET(
         });
       }
 
+      // 3b. σ-filter enrichment (PRD §3.2-§3.4)
+      const poolHash = `uniswapv3/${validatedChainId}/${normalizedAddress}`;
+      let sigmaResult;
+      try {
+        const sigmaResults = await getPoolSigmaFilterService().enrichPools([
+          {
+            poolHash,
+            token0Hash: `erc20/${validatedChainId}/${feeData.token0.address}`,
+            token1Hash: `erc20/${validatedChainId}/${feeData.token1.address}`,
+            tvlUSD: feeData.tvlUSD,
+            // PoolFeeData uses legacy field names (volumeUSD/feesUSD); these
+            // are the same 24h values used by other endpoints.
+            fees24hUSD: feeData.feesUSD,
+            fees7dAvgUSD: feeData.fees7dAvgUSD,
+          },
+        ]);
+        sigmaResult = sigmaResults.get(poolHash);
+      } catch (error) {
+        apiLogger.warn(
+          { requestId, poolHash, error },
+          'Sigma-filter enrichment failed, returning metrics without sigma data'
+        );
+      }
+
       // 4. Build response
       const metricsData: PoolMetricsData = {
         chainId: validatedChainId,
@@ -160,6 +185,28 @@ export async function GET(
         token0Price: feeData.token0.price,
         token1Price: feeData.token1.price,
         calculatedAt: feeData.calculatedAt,
+        feeApr24h: sigmaResult?.feeApr24h ?? null,
+        feeApr7dAvg: sigmaResult?.feeApr7dAvg ?? null,
+        feeAprPrimary: sigmaResult?.feeAprPrimary ?? null,
+        feeAprSource: sigmaResult?.feeAprSource ?? 'unavailable',
+        volatility: sigmaResult?.volatility ?? {
+          token0: { ref: '', sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+          token1: { ref: '', sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+          pair: { sigma60d: { status: 'insufficient_history' }, sigma365d: { status: 'insufficient_history' } },
+          velocity: null,
+          pivotCurrency: 'usd',
+          computedAt: new Date(0).toISOString(),
+        },
+        sigmaFilter: sigmaResult?.sigmaFilter ?? {
+          feeApr: null,
+          sigmaSqOver8_365d: null,
+          sigmaSqOver8_60d: null,
+          marginLongTerm: null,
+          marginShortTerm: null,
+          verdictLongTerm: 'INSUFFICIENT_DATA',
+          verdictShortTerm: 'INSUFFICIENT_DATA',
+          verdictAgreement: 'INSUFFICIENT_DATA',
+        },
       };
 
       const response = createSuccessResponse(metricsData, {

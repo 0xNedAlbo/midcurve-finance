@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import type { ApiResponse } from '../common/index.js';
+import type { PoolMetricsBlock } from './pool-metrics-shared.js';
 
 // ============================================================================
 // REQUEST TYPES
@@ -116,38 +117,11 @@ export interface PoolSearchResultItem {
   /** Token1 information */
   token1: PoolSearchTokenInfo;
 
-  /** Current Total Value Locked in USD */
-  tvlUSD: string;
   /**
-   * Most recent 24h trading volume in USD (last complete UTC day; the
-   * in-progress current UTC day is excluded)
+   * Pool metrics — TVL, volume, fees, fee-APR, volatility, and σ-filter
+   * verdict. See `PoolMetricsBlock` for the full schema.
    */
-  volume24hUSD: string;
-  /**
-   * Most recent 24h fees collected in USD (last complete UTC day; the
-   * in-progress current UTC day is excluded)
-   */
-  fees24hUSD: string;
-  /** Sum of fees from last 7 complete UTC days in USD */
-  fees7dUSD: string;
-  /**
-   * Average daily trading volume in USD across the last 7 complete UTC days.
-   * Excludes today's partial day. Falls back to fewer days for young pools.
-   */
-  volume7dAvgUSD: string;
-  /**
-   * Average daily fees collected in USD across the last 7 complete UTC days.
-   * Excludes today's partial day. Falls back to fewer days for young pools.
-   */
-  fees7dAvgUSD: string;
-  /**
-   * 7-day average APR
-   *
-   * Calculated as: (avgDailyFees * 365) / tvl * 100
-   * Where avgDailyFees = fees7dUSD / N, and N is the number of complete days
-   * observed (1-7). Excludes today's partial day. Rounded to 2 decimal places.
-   */
-  apr7d: number;
+  metrics: PoolMetricsBlock;
 
   /**
    * Whether this pool is in user's favorites

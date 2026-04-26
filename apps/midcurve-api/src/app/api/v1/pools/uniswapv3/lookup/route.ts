@@ -22,10 +22,20 @@ import {
 } from '@midcurve/api-shared';
 import type { LookupPoolByAddressData, PoolSearchResultItem } from '@midcurve/api-shared';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getSubgraphClient, getFavoritePoolService, getUniswapV3PoolService } from '@/lib/services';
+import {
+  getSubgraphClient,
+  getFavoritePoolService,
+  getPoolSigmaFilterService,
+  getUniswapV3PoolService,
+} from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
-import { getEvmConfig, isUniswapV3SubgraphSupported } from '@midcurve/services';
+import {
+  getEvmConfig,
+  isUniswapV3SubgraphSupported,
+  type PoolSigmaDescriptor,
+} from '@midcurve/services';
 import type { Erc20Token } from '@midcurve/shared';
+import { buildPoolMetricsBlock, type PoolMetricsInput } from '@/lib/pool-metrics-block';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,7 +93,15 @@ export async function GET(request: NextRequest): Promise<Response> {
       const subgraphClient = getSubgraphClient();
       const poolService = getUniswapV3PoolService();
 
-      const chainPromises = lookupChains.map(async (chainId) => {
+      // Per-chain: discover pool + (optional) subgraph metrics. σ-filter
+      // enrichment is done in a single batch after all chains return so that
+      // tokens shared across chains are deduplicated (PRD §6.3).
+      interface ChainLookup {
+        result: PoolSearchResultItem;
+        subgraph: PoolMetricsInput;
+      }
+
+      const chainPromises = lookupChains.map(async (chainId): Promise<ChainLookup | null> => {
         try {
           // 1. Discover pool (checks local DB first, then on-chain contract)
           let pool;
@@ -97,7 +115,40 @@ export async function GET(request: NextRequest): Promise<Response> {
             return null;
           }
 
-          // 2. Build base result from discovered pool
+          // 2. Default subgraph metrics — zeros for chains without subgraph
+          let subgraph: PoolMetricsInput = {
+            tvlUSD: '0',
+            volume24hUSD: '0',
+            fees24hUSD: '0',
+            fees7dUSD: '0',
+            volume7dAvgUSD: '0',
+            fees7dAvgUSD: '0',
+            apr7d: 0,
+          };
+
+          // 3. Enrich with subgraph metrics if available for this chain
+          if (isUniswapV3SubgraphSupported(chainId)) {
+            try {
+              const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [address]);
+              const poolMetrics = metricsMap.get(address.toLowerCase());
+              if (poolMetrics) {
+                subgraph = {
+                  tvlUSD: poolMetrics.tvlUSD,
+                  volume24hUSD: poolMetrics.volume24hUSD,
+                  fees24hUSD: poolMetrics.fees24hUSD,
+                  fees7dUSD: poolMetrics.fees7dUSD,
+                  volume7dAvgUSD: poolMetrics.volume7dAvgUSD,
+                  fees7dAvgUSD: poolMetrics.fees7dAvgUSD,
+                  apr7d: poolMetrics.apr7d,
+                };
+              }
+            } catch (error) {
+              apiLogger.warn({ chainId, address, error }, 'Subgraph metrics enrichment failed, using zero metrics');
+            }
+          }
+
+          // 4. Build base PoolSearchResultItem with placeholder metrics —
+          // the metrics block is filled in below after σ-enrichment.
           const chainName = evmConfig.getChainConfig(chainId).name;
           const result: PoolSearchResultItem = {
             poolAddress: pool.address,
@@ -114,45 +165,51 @@ export async function GET(request: NextRequest): Promise<Response> {
               symbol: pool.token1.symbol,
               decimals: pool.token1.decimals,
             },
-            tvlUSD: '0',
-            volume24hUSD: '0',
-            fees24hUSD: '0',
-            fees7dUSD: '0',
-            volume7dAvgUSD: '0',
-            fees7dAvgUSD: '0',
-            apr7d: 0,
+            metrics: buildPoolMetricsBlock(subgraph, undefined),
             isFavorite: false, // Will be enriched below
           };
 
-          // 3. Enrich with subgraph metrics if available for this chain
-          if (isUniswapV3SubgraphSupported(chainId)) {
-            try {
-              const metricsMap = await subgraphClient.getPoolsMetricsBatch(chainId, [address]);
-              const poolMetrics = metricsMap.get(address.toLowerCase());
-
-              if (poolMetrics) {
-                result.tvlUSD = poolMetrics.tvlUSD;
-                result.volume24hUSD = poolMetrics.volume24hUSD;
-                result.fees24hUSD = poolMetrics.fees24hUSD;
-                result.fees7dUSD = poolMetrics.fees7dUSD;
-                result.volume7dAvgUSD = poolMetrics.volume7dAvgUSD;
-                result.fees7dAvgUSD = poolMetrics.fees7dAvgUSD;
-                result.apr7d = poolMetrics.apr7d;
-              }
-            } catch (error) {
-              apiLogger.warn({ chainId, address, error }, 'Subgraph metrics enrichment failed, using zero metrics');
-            }
-          }
-
-          return result;
+          return { result, subgraph };
         } catch (error) {
           apiLogger.warn({ chainId, address, error }, 'Failed to lookup pool on chain');
           return null;
         }
       });
 
-      const results = await Promise.all(chainPromises);
-      const pools = results.filter((p): p is PoolSearchResultItem => p !== null);
+      const lookups = (await Promise.all(chainPromises)).filter(
+        (l): l is ChainLookup => l !== null
+      );
+
+      // σ-filter enrichment: build descriptors for all pools at once so the
+      // unique-token dedup (PRD §6.3) works across chains.
+      if (lookups.length > 0) {
+        const descriptors: PoolSigmaDescriptor[] = lookups.map(({ result, subgraph }) => ({
+          poolHash: `uniswapv3/${result.chainId}/${result.poolAddress}`,
+          token0Hash: `erc20/${result.chainId}/${result.token0.address}`,
+          token1Hash: `erc20/${result.chainId}/${result.token1.address}`,
+          tvlUSD: subgraph.tvlUSD,
+          fees24hUSD: subgraph.fees24hUSD,
+          fees7dAvgUSD: subgraph.fees7dAvgUSD,
+        }));
+
+        try {
+          const sigmaResults = await getPoolSigmaFilterService().enrichPools(descriptors);
+          for (const lookup of lookups) {
+            const sigma = sigmaResults.get(
+              `uniswapv3/${lookup.result.chainId}/${lookup.result.poolAddress}`
+            );
+            lookup.result.metrics = buildPoolMetricsBlock(lookup.subgraph, sigma);
+          }
+        } catch (error) {
+          apiLogger.warn(
+            { address, error },
+            'Sigma-filter enrichment failed, returning metrics without sigma data'
+          );
+          // metrics blocks already populated with INSUFFICIENT_DATA defaults
+        }
+      }
+
+      const pools = lookups.map((l) => l.result);
 
       // Enrich with favorite status
       if (pools.length > 0) {
@@ -168,7 +225,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       }
 
       // Sort by TVL descending
-      pools.sort((a, b) => parseFloat(b.tvlUSD) - parseFloat(a.tvlUSD));
+      pools.sort((a, b) => parseFloat(b.metrics.tvlUSD) - parseFloat(a.metrics.tvlUSD));
 
       apiLog.businessOperation(
         apiLogger,

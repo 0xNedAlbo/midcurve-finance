@@ -18,11 +18,13 @@ import {
   GetUniswapV3PoolParamsSchema,
   GetUniswapV3PoolQuerySchema,
   type GetUniswapV3PoolData,
+  type PoolMetricsBlock,
 } from '@midcurve/api-shared';
 import { serializeUniswapV3Pool } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { getUniswapV3PoolService } from '@/lib/services';
+import { getPoolSigmaFilterService, getUniswapV3PoolService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
+import { buildPoolMetricsBlock } from '@/lib/pool-metrics-block';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -161,18 +163,40 @@ export async function GET(
         throw error;
       }
 
-      // 4. Optionally enrich with subgraph metrics
-      let metricsData;
+      // 4. Optionally enrich with subgraph metrics + σ-filter
+      //
+      // Use getPoolsMetricsBatch (single-element) instead of getPoolMetrics:
+      // it returns the full canonical field set (including fees7dUSD and
+      // apr7d) with the consistent volume24hUSD/fees24hUSD naming used by
+      // the other pool endpoints.
+      let metricsData: PoolMetricsBlock | undefined;
       if (metrics) {
         try {
-          const poolMetrics = await subgraphClient.getPoolMetrics(validatedChainId, validatedAddress);
-          metricsData = {
-            tvlUSD: poolMetrics.tvlUSD,
-            volumeUSD: poolMetrics.volumeUSD,
-            feesUSD: poolMetrics.feesUSD,
-            volume7dAvgUSD: poolMetrics.volume7dAvgUSD,
-            fees7dAvgUSD: poolMetrics.fees7dAvgUSD,
-          };
+          const batch = await subgraphClient.getPoolsMetricsBatch(
+            validatedChainId,
+            [validatedAddress]
+          );
+          const subgraphResult = batch.get(validatedAddress.toLowerCase());
+
+          if (subgraphResult) {
+            // Build descriptor for σ-filter enrichment (PRD §3.2-§3.4)
+            const poolHash = `uniswapv3/${validatedChainId}/${subgraphResult.poolAddress}`;
+            const token0Hash = `erc20/${validatedChainId}/${subgraphResult.token0.address}`;
+            const token1Hash = `erc20/${validatedChainId}/${subgraphResult.token1.address}`;
+
+            const sigmaResults = await getPoolSigmaFilterService().enrichPools([
+              {
+                poolHash,
+                token0Hash,
+                token1Hash,
+                tvlUSD: subgraphResult.tvlUSD,
+                fees24hUSD: subgraphResult.fees24hUSD,
+                fees7dAvgUSD: subgraphResult.fees7dAvgUSD,
+              },
+            ]);
+
+            metricsData = buildPoolMetricsBlock(subgraphResult, sigmaResults.get(poolHash));
+          }
         } catch (error) {
           // Graceful degradation: log warning but don't fail request
           apiLogger.warn(
