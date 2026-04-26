@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import type { ApiResponse } from '../common/index.js';
 import type { PoolSearchResultItem } from './pool-search.js';
+import type { PoolMetricsBlock } from './pool-metrics-shared.js';
 
 /**
  * Path parameters for pool lookup
@@ -59,44 +60,16 @@ export interface GetUniswapV3PoolData {
   pool: UniswapV3Pool;
 
   /**
-   * Optional subgraph metrics (only included if enrichMetrics=true)
-   * Includes 24-hour TVL, volume, and fees data
+   * Pool metrics block — only included when `metrics=true` query param is set.
+   *
+   * Contains TVL, volume, fees, fee-APR, volatility, and σ-filter verdict.
+   * See `PoolMetricsBlock` for the full schema.
+   *
+   * **Naming change (PRD-pool-sigma-filter migration):** the previous
+   * `volumeUSD` / `feesUSD` fields are now `volume24hUSD` / `fees24hUSD` to
+   * align with the other pool endpoints (`search`, `favorites`, `lookup`).
    */
-  metrics?: {
-    /**
-     * Total Value Locked in USD
-     * @example "1234567.89"
-     */
-    tvlUSD: string;
-
-    /**
-     * 24-hour trading volume in USD (last complete UTC day; the in-progress
-     * current UTC day is excluded to avoid partial-day under-reporting)
-     * @example "567890.12"
-     */
-    volumeUSD: string;
-
-    /**
-     * 24-hour fees collected in USD (last complete UTC day; the in-progress
-     * current UTC day is excluded to avoid partial-day under-reporting)
-     * @example "1234.56"
-     */
-    feesUSD: string;
-
-    /**
-     * Average daily trading volume in USD across the last 7 complete UTC days.
-     * Excludes today's partial day. Falls back to fewer days for young pools.
-     * @example "498765.43"
-     */
-    volume7dAvgUSD: string;
-
-    /**
-     * Average daily fees collected in USD across the last 7 complete UTC days.
-     * Excludes today's partial day. Falls back to fewer days for young pools.
-     * @example "1098.76"
-     */
-    fees7dAvgUSD: string;
-  };
+  metrics?: PoolMetricsBlock;
 
   /**
    * Optional fee data for APR calculations (only included if fees=true)

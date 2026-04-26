@@ -8,6 +8,11 @@
  */
 
 import type { ApiResponse } from '../../common/api-response.js';
+import type {
+  FeeAprSource,
+  SigmaFilterBlock,
+  VolatilityBlock,
+} from '../sigma-filter.js';
 
 /**
  * Request parameters for getting pool metrics (from URL path)
@@ -109,6 +114,39 @@ export interface PoolMetricsData {
    * Timestamp when metrics were calculated
    */
   calculatedAt: Date;
+
+  // -------------------- σ-filter additions (PRD §3.2–§3.4) --------------------
+
+  /**
+   * Fee-APR from the most recent 24h fees: `fees24hUSD * 365 / tvlUSD`.
+   * **Unit:** raw rate. `null` when `tvlUSD` is missing or zero.
+   *
+   * Note: this endpoint exposes `volumeUSD`/`feesUSD` (no `24h` infix) for
+   * legacy reasons; the field below is the same as
+   * `feesUSD * 365 / tvlUSD`.
+   */
+  feeApr24h: number | null;
+
+  /**
+   * Fee-APR from the 7-day average fees: `fees7dAvgUSD * 365 / tvlUSD`.
+   * **Unit:** raw rate. `null` when `tvlUSD` is missing or zero.
+   */
+  feeApr7dAvg: number | null;
+
+  /**
+   * Primary fee-APR consumed by the verdict — currently `feeApr7dAvg`.
+   * **Unit:** raw rate. `null` when unavailable.
+   */
+  feeAprPrimary: number | null;
+
+  /** Source window for `feeAprPrimary`. */
+  feeAprSource: FeeAprSource;
+
+  /** Per-token σ vs USD plus synthetic cross-pair σ (PRD §3.3). */
+  volatility: VolatilityBlock;
+
+  /** σ-filter verdict: `feeApr` vs `σ²/8` at both windows (PRD §3.4). */
+  sigmaFilter: SigmaFilterBlock;
 }
 
 /**

@@ -39,6 +39,7 @@ export * from './services/quote-token/index.js';
 export * from './services/pool-search/index.js';
 export * from './services/cache/index.js';
 export * from './services/coingecko-token/index.js';
+export * from './services/volatility/index.js';
 export * from './services/favorite-pool/index.js';
 export * from './services/block/index.js';
 export * from './services/close-order/index.js';

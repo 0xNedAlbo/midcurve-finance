@@ -351,8 +351,32 @@ export function formatPnl(pnl: PnlResponseRaw): Record<string, unknown> {
 /**
  * Pool detail response from `GET /api/v1/pools/uniswapv3/:chainId/:address`.
  * Matches the wire shape: serialized pool nested under `pool`, with optional
- * subgraph `metrics` and `feeData` siblings.
+ * `metrics` (PoolMetricsBlock per PRD-pool-sigma-filter) and `feeData` siblings.
  */
+interface SigmaResultRaw {
+  status: 'ok' | 'insufficient_history' | 'token_not_listed' | 'fetch_failed';
+  value?: number;
+  sigmaSqOver8?: number;
+  nReturns?: number;
+}
+interface VolatilityBlockRaw {
+  token0: { ref: string; sigma60d: SigmaResultRaw; sigma365d: SigmaResultRaw };
+  token1: { ref: string; sigma60d: SigmaResultRaw; sigma365d: SigmaResultRaw };
+  pair: { sigma60d: SigmaResultRaw; sigma365d: SigmaResultRaw };
+  velocity: number | null;
+  pivotCurrency: 'usd';
+  computedAt: string;
+}
+interface SigmaFilterBlockRaw {
+  feeApr: number | null;
+  sigmaSqOver8_365d: number | null;
+  sigmaSqOver8_60d: number | null;
+  marginLongTerm: number | null;
+  marginShortTerm: number | null;
+  verdictLongTerm: 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
+  verdictShortTerm: 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
+  verdictAgreement: 'AGREE' | 'DIVERGENT' | 'INSUFFICIENT_DATA';
+}
 interface PoolDetailRaw {
   pool: {
     protocol: string;
@@ -364,12 +388,86 @@ interface PoolDetailRaw {
   };
   metrics?: {
     tvlUSD: string;
-    volumeUSD: string;
-    feesUSD: string;
+    volume24hUSD: string;
+    fees24hUSD: string;
+    fees7dUSD: string;
     volume7dAvgUSD: string;
     fees7dAvgUSD: string;
+    apr7d: number | null;
+    feeApr24h: number | null;
+    feeApr7dAvg: number | null;
+    feeAprPrimary: number | null;
+    feeAprSource: '24h' | '7d_avg' | 'unavailable';
+    volatility: VolatilityBlockRaw;
+    sigmaFilter: SigmaFilterBlockRaw;
   };
   feeData?: Record<string, unknown>;
+}
+
+/**
+ * Format a raw rate (e.g. 0.2512) as a percentage string ("25.1%").
+ * Returns null when input is null. Used for fee-APR, σ, σ²/8, margin.
+ */
+function fmtRate(rate: number | null | undefined, decimals = 1): string | null {
+  if (rate === null || rate === undefined) return null;
+  return formatPercentage(rate * 100, decimals);
+}
+
+/** Same as fmtRate but always emits a leading sign — used for margins. */
+function fmtSignedRate(rate: number | null | undefined, decimals = 1): string | null {
+  if (rate === null || rate === undefined) return null;
+  const display = formatPercentage(rate * 100, decimals);
+  return rate >= 0 ? `+${display}` : display;
+}
+
+/**
+ * Format a single σ-result block (per-token-vs-USD or per-pair-per-window).
+ * `value` and `sigmaSqOver8` are raw rates → percentage strings; `status`,
+ * `nReturns` are passed through. Missing fields are emitted as null.
+ */
+function formatSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
+  return {
+    status: r.status,
+    value: fmtRate(r.value),
+    sigmaSqOver8: fmtRate(r.sigmaSqOver8),
+    nReturns: r.nReturns ?? null,
+  };
+}
+
+function formatVolatility(v: VolatilityBlockRaw): Record<string, unknown> {
+  return {
+    token0: {
+      ref: v.token0.ref,
+      sigma60d: formatSigmaResult(v.token0.sigma60d),
+      sigma365d: formatSigmaResult(v.token0.sigma365d),
+    },
+    token1: {
+      ref: v.token1.ref,
+      sigma60d: formatSigmaResult(v.token1.sigma60d),
+      sigma365d: formatSigmaResult(v.token1.sigma365d),
+    },
+    pair: {
+      sigma60d: formatSigmaResult(v.pair.sigma60d),
+      sigma365d: formatSigmaResult(v.pair.sigma365d),
+    },
+    velocity:
+      v.velocity !== null && v.velocity !== undefined ? v.velocity.toFixed(3) : null,
+    pivotCurrency: v.pivotCurrency,
+    computedAt: v.computedAt,
+  };
+}
+
+function formatSigmaFilter(s: SigmaFilterBlockRaw): Record<string, unknown> {
+  return {
+    feeApr: fmtRate(s.feeApr),
+    sigmaSqOver8_365d: fmtRate(s.sigmaSqOver8_365d),
+    sigmaSqOver8_60d: fmtRate(s.sigmaSqOver8_60d),
+    marginLongTerm: fmtSignedRate(s.marginLongTerm),
+    marginShortTerm: fmtSignedRate(s.marginShortTerm),
+    verdictLongTerm: s.verdictLongTerm,
+    verdictShortTerm: s.verdictShortTerm,
+    verdictAgreement: s.verdictAgreement,
+  };
 }
 
 /**
@@ -407,16 +505,33 @@ export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
     token1,
     metrics: metrics
       ? {
+          // Money fields — dual-emit per convention §3.2 (display + raw).
           tvl: fmtUsd(metrics.tvlUSD),
           tvlRaw: metrics.tvlUSD,
-          volume24h: fmtUsd(metrics.volumeUSD),
-          volume24hRaw: metrics.volumeUSD,
-          fees24h: fmtUsd(metrics.feesUSD),
-          fees24hRaw: metrics.feesUSD,
+          volume24h: fmtUsd(metrics.volume24hUSD),
+          volume24hRaw: metrics.volume24hUSD,
+          fees24h: fmtUsd(metrics.fees24hUSD),
+          fees24hRaw: metrics.fees24hUSD,
+          fees7d: fmtUsd(metrics.fees7dUSD),
+          fees7dRaw: metrics.fees7dUSD,
           volume7dAvg: fmtUsd(metrics.volume7dAvgUSD),
           volume7dAvgRaw: metrics.volume7dAvgUSD,
           fees7dAvg: fmtUsd(metrics.fees7dAvgUSD),
           fees7dAvgRaw: metrics.fees7dAvgUSD,
+          // Percentages — single-emit humanized (convention §73).
+          // `apr7d` arrives as a percentage already (e.g. 25.12).
+          apr7d:
+            metrics.apr7d !== null && metrics.apr7d !== undefined
+              ? formatPercentage(metrics.apr7d, 2)
+              : null,
+          // Fee-APR raw rates → percentage strings.
+          feeApr24h: fmtRate(metrics.feeApr24h, 2),
+          feeApr7dAvg: fmtRate(metrics.feeApr7dAvg, 2),
+          feeAprPrimary: fmtRate(metrics.feeAprPrimary, 2),
+          feeAprSource: metrics.feeAprSource,
+          // Volatility & σ-filter (PRD-pool-sigma-filter §3.3, §3.4).
+          volatility: formatVolatility(metrics.volatility),
+          sigmaFilter: formatSigmaFilter(metrics.sigmaFilter),
         }
       : null,
     feeData: feeData ?? null,

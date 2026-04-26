@@ -36,6 +36,7 @@ import {
   UniswapV3VaultPositionService,
   UniswapV3VaultLedgerService,
   UserWalletService,
+  PoolSigmaFilterService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -335,5 +336,15 @@ export function getSubgraphClient(): UniswapV3SubgraphClient {
  */
 export function getJournalService(): JournalService {
   return JournalService.getInstance();
+}
+
+/**
+ * Get singleton instance of PoolSigmaFilterService.
+ *
+ * Used to enrich pool API responses with σ-filter verdict, fee-APR, and
+ * volatility blocks. See PRD-pool-sigma-filter.md.
+ */
+export function getPoolSigmaFilterService(): PoolSigmaFilterService {
+  return PoolSigmaFilterService.getInstance();
 }
 
