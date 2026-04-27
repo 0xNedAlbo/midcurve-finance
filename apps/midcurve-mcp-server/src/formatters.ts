@@ -18,8 +18,12 @@ import {
 import type {
   AprPeriodData,
   AprPeriodsResponse,
+  PairSigmaResult,
+  PoolSearchResultItem,
   PositionAccountingResponse,
   SerializedCloseOrder,
+  SigmaFilterBlock,
+  VolatilityBlock,
 } from '@midcurve/api-shared';
 import type { PositionContext } from './lib/position-context.js';
 
@@ -353,31 +357,12 @@ export function formatPnl(pnl: PnlResponseRaw): Record<string, unknown> {
  * Matches the wire shape: serialized pool nested under `pool`, with optional
  * `metrics` (PoolMetricsBlock per PRD-pool-sigma-filter) and `feeData` siblings.
  */
-interface SigmaResultRaw {
-  status: 'ok' | 'insufficient_history' | 'token_not_listed' | 'fetch_failed';
-  value?: number;
-  sigmaSqOver8?: number;
-  nReturns?: number;
-}
-interface VolatilityBlockRaw {
-  token0: { ref: string; sigma60d: SigmaResultRaw; sigma365d: SigmaResultRaw };
-  token1: { ref: string; sigma60d: SigmaResultRaw; sigma365d: SigmaResultRaw };
-  pair: { sigma60d: SigmaResultRaw; sigma365d: SigmaResultRaw };
-  velocity: number | null;
-  pivotCurrency: 'usd';
-  computedAt: string;
-}
-interface SigmaFilterBlockRaw {
-  feeApr: number | null;
-  sigmaSqOver8_365d: number | null;
-  sigmaSqOver8_60d: number | null;
-  marginLongTerm: number | null;
-  marginShortTerm: number | null;
-  verdictLongTerm: 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
-  verdictShortTerm: 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
-  verdictAgreement: 'AGREE' | 'DIVERGENT' | 'INSUFFICIENT_DATA';
-}
 interface PoolDetailRaw {
+  // TODO(#52): replace this hand-written subset with the canonical pool wire
+  // shape once #52 introduces a true plain-object wire type in
+  // @midcurve/api-shared. The canonical `GetUniswapV3PoolData['pool']` is the
+  // UniswapV3Pool class type (Date fields, methods) — not what's actually on
+  // the wire. The subset below visibly advertises that gap.
   pool: {
     protocol: string;
     feeBps: number;
@@ -398,8 +383,8 @@ interface PoolDetailRaw {
     feeApr7dAvg: number | null;
     feeAprPrimary: number | null;
     feeAprSource: '24h' | '7d_avg' | 'unavailable';
-    volatility?: VolatilityBlockRaw;
-    sigmaFilter?: SigmaFilterBlockRaw;
+    volatility?: VolatilityBlock;
+    sigmaFilter?: SigmaFilterBlock;
   };
   feeData?: Record<string, unknown>;
   /**
@@ -431,7 +416,7 @@ function fmtSignedRate(rate: number | null | undefined, decimals = 1): string | 
  * interpretation, so `sigmaSqOver8` is never present on the wire — emit
  * `{status, value, nReturns}` only.
  */
-function formatTokenSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
+function formatTokenSigmaResult(r: PairSigmaResult): Record<string, unknown> {
   return {
     status: r.status,
     value: fmtRate(r.value),
@@ -443,7 +428,7 @@ function formatTokenSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
  * Pair σ block. Carries `sigmaSqOver8` (the LVR rate of the synthetic
  * cross-pair) which feeds the σ-filter verdict.
  */
-function formatPairSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
+function formatPairSigmaResult(r: PairSigmaResult): Record<string, unknown> {
   return {
     status: r.status,
     value: fmtRate(r.value),
@@ -452,7 +437,7 @@ function formatPairSigmaResult(r: SigmaResultRaw): Record<string, unknown> {
   };
 }
 
-function formatVolatility(v: VolatilityBlockRaw): Record<string, unknown> {
+function formatVolatility(v: VolatilityBlock): Record<string, unknown> {
   return {
     token0: {
       ref: v.token0.ref,
@@ -475,7 +460,7 @@ function formatVolatility(v: VolatilityBlockRaw): Record<string, unknown> {
   };
 }
 
-function formatSigmaFilter(s: SigmaFilterBlockRaw): Record<string, unknown> {
+function formatSigmaFilter(s: SigmaFilterBlock): Record<string, unknown> {
   return {
     feeApr: fmtRate(s.feeApr),
     sigmaSqOver8_365d: fmtRate(s.sigmaSqOver8_365d),
@@ -485,6 +470,11 @@ function formatSigmaFilter(s: SigmaFilterBlockRaw): Record<string, unknown> {
     verdictLongTerm: s.verdictLongTerm,
     verdictShortTerm: s.verdictShortTerm,
     verdictAgreement: s.verdictAgreement,
+    coverageLongTerm:
+      s.coverageLongTerm !== null && s.coverageLongTerm !== undefined
+        ? s.coverageLongTerm.toFixed(3)
+        : null,
+    coverageBand: s.coverageBand,
   };
 }
 
@@ -564,38 +554,6 @@ export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
 // Pool Search Result (POST /api/v1/pools/uniswapv3/search)
 // =============================================================================
 
-interface PoolSearchTokenInfoRaw {
-  address: string;
-  symbol: string;
-  decimals: number;
-}
-
-interface PoolSearchResultRaw {
-  poolAddress: string;
-  chainId: number;
-  chainName: string;
-  feeTier: number;
-  token0: PoolSearchTokenInfoRaw;
-  token1: PoolSearchTokenInfoRaw;
-  metrics: {
-    tvlUSD: string;
-    volume24hUSD: string;
-    fees24hUSD: string;
-    fees7dUSD: string;
-    volume7dAvgUSD: string;
-    fees7dAvgUSD: string;
-    apr7d: number | null;
-    feeApr24h?: number | null;
-    feeApr7dAvg?: number | null;
-    feeAprPrimary?: number | null;
-    feeAprSource?: '24h' | '7d_avg' | 'unavailable';
-    volatility?: VolatilityBlockRaw;
-    sigmaFilter?: SigmaFilterBlockRaw;
-  };
-  isFavorite?: boolean;
-  userProvidedInfo?: { isToken0Quote: boolean };
-}
-
 /**
  * Format a single pool search result for MCP output. Mirrors `formatPool`'s
  * shape (canonical token0/token1, dual-emitted USD fields, humanized
@@ -603,7 +561,7 @@ interface PoolSearchResultRaw {
  * (`isFavorite`, `userProvidedInfo`).
  */
 export function formatPoolSearchResult(
-  result: PoolSearchResultRaw
+  result: PoolSearchResultItem
 ): Record<string, unknown> {
   const fmtUsd = (raw: string | undefined): string | null =>
     raw ? formatUSDValue(raw) : null;

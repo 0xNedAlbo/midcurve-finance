@@ -35,6 +35,26 @@ export type SigmaVerdict = 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
 export type VerdictAgreement = 'AGREE' | 'DIVERGENT' | 'INSUFFICIENT_DATA';
 
 /**
+ * Discrete 5-band mapping derived from the LVR-coverage ratio
+ * (`feeApr / sigmaSqOver8_365d`). See RFC-0001 for canonical cutoffs.
+ *
+ * Cutoffs (half-open intervals, left bound inclusive):
+ * - `coverage < 0.5` → `deep_red`
+ * - `0.5 ≤ coverage < 0.9` → `red`
+ * - `0.9 ≤ coverage < 1.5` → `yellow`
+ * - `1.5 ≤ coverage < 3.0` → `green`
+ * - `coverage ≥ 3.0` → `deep_green`
+ * - `coverage === null` → `insufficient_data`
+ */
+export type CoverageBand =
+  | 'deep_red'
+  | 'red'
+  | 'yellow'
+  | 'green'
+  | 'deep_green'
+  | 'insufficient_data';
+
+/**
  * Source window used for `feeAprPrimary`.
  */
 export type FeeAprSource = '24h' | '7d_avg' | 'unavailable';
@@ -133,4 +153,22 @@ export interface SigmaFilterBlock {
   verdictShortTerm: SigmaVerdict;
   /** Agreement between long-term and short-term verdicts. */
   verdictAgreement: VerdictAgreement;
+  /**
+   * LVR-coverage ratio: `feeApr / sigmaSqOver8_365d`.
+   *
+   * Multiplicative analogue to `marginLongTerm`. `null` when either operand
+   * is null or `sigmaSqOver8_365d <= 0` (defensive — the σ-filter shouldn't
+   * produce non-positive σ²/8 for an `ok` window, but division-by-zero
+   * safety is cheap).
+   *
+   * See RFC-0001.
+   */
+  coverageLongTerm: number | null;
+  /**
+   * Discrete 5-band mapping derived from `coverageLongTerm`.
+   *
+   * `'insufficient_data'` exactly when `coverageLongTerm === null`.
+   * See RFC-0001 for cutoffs.
+   */
+  coverageBand: CoverageBand;
 }

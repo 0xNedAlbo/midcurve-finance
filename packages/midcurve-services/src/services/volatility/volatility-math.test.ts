@@ -4,6 +4,8 @@ import {
   annualisedSigma,
   bucketByIsoDate,
   cascadeStatus,
+  coverageBand,
+  coverageRatio,
   dailyLogReturns,
   feeAprFromTvlAndFees,
   pairSigmaForWindow,
@@ -427,6 +429,90 @@ describe('cascadeStatus', () => {
 
   it('returns ok for empty input', () => {
     expect(cascadeStatus()).toBe('ok');
+  });
+});
+
+describe('coverageRatio', () => {
+  it('returns null when feeApr is null', () => {
+    expect(coverageRatio(null, 0.05)).toBeNull();
+  });
+
+  it('returns null when sigmaSqOver8 is null', () => {
+    expect(coverageRatio(0.25, null)).toBeNull();
+  });
+
+  it('returns null when sigmaSqOver8 is zero', () => {
+    expect(coverageRatio(0.25, 0)).toBeNull();
+  });
+
+  it('returns null when sigmaSqOver8 is negative (defensive)', () => {
+    expect(coverageRatio(0.25, -0.01)).toBeNull();
+  });
+
+  it('computes feeApr / sigmaSqOver8 when both operands are valid', () => {
+    expect(coverageRatio(0.25, 0.1)).toBeCloseTo(2.5, 12);
+    expect(coverageRatio(0.05, 0.1)).toBeCloseTo(0.5, 12);
+  });
+
+  it('handles a zero feeApr (degenerate but well-defined)', () => {
+    expect(coverageRatio(0, 0.1)).toBe(0);
+  });
+});
+
+describe('coverageBand', () => {
+  it('returns insufficient_data when coverage is null', () => {
+    expect(coverageBand(null)).toBe('insufficient_data');
+  });
+
+  it('returns deep_red for coverage strictly below 0.5', () => {
+    expect(coverageBand(0)).toBe('deep_red');
+    expect(coverageBand(0.4999)).toBe('deep_red');
+  });
+
+  it('returns red on the inclusive lower bound 0.5', () => {
+    expect(coverageBand(0.5)).toBe('red');
+  });
+
+  it('returns red across [0.5, 0.9)', () => {
+    expect(coverageBand(0.7)).toBe('red');
+    expect(coverageBand(0.8999)).toBe('red');
+  });
+
+  it('returns yellow on the inclusive lower bound 0.9', () => {
+    expect(coverageBand(0.9)).toBe('yellow');
+  });
+
+  it('returns yellow across [0.9, 1.5)', () => {
+    expect(coverageBand(1.0)).toBe('yellow');
+    expect(coverageBand(1.4999)).toBe('yellow');
+  });
+
+  it('returns green on the inclusive lower bound 1.5', () => {
+    expect(coverageBand(1.5)).toBe('green');
+  });
+
+  it('returns green across [1.5, 3.0)', () => {
+    expect(coverageBand(2.0)).toBe('green');
+    expect(coverageBand(2.9999)).toBe('green');
+  });
+
+  it('returns deep_green on the inclusive lower bound 3.0', () => {
+    expect(coverageBand(3.0)).toBe('deep_green');
+  });
+
+  it('returns deep_green for arbitrarily large coverage', () => {
+    expect(coverageBand(10)).toBe('deep_green');
+    expect(coverageBand(1_000)).toBe('deep_green');
+  });
+
+  it('round-trip with sigmaVerdict: coverage < 1 ⇒ FAIL, coverage > 1 ⇒ PASS', () => {
+    // The verdict uses strict feeApr > sigmaSqOver8, so the ↔ at exactly
+    // coverage = 1.0 lands on FAIL — we test strict inequalities only.
+    const feeApr = 0.05;
+    expect(coverageRatio(feeApr, feeApr * 2)).toBeCloseTo(0.5, 12); // < 1
+    expect(sigmaVerdict(feeApr, feeApr * 2)).toBe('FAIL');
+    expect(coverageRatio(feeApr, feeApr / 2)).toBeCloseTo(2.0, 12); // > 1
+    expect(sigmaVerdict(feeApr, feeApr / 2)).toBe('PASS');
   });
 });
 

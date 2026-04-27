@@ -107,16 +107,25 @@ describe('PoolSigmaFilterService.enrichPools', () => {
 
   describe('happy path — both legs ok', () => {
     it('produces a PASS verdict when feeApr exceeds σ²/8', async () => {
-      // Token A: tiny vol (~0% daily change) → σ ≈ 0
-      // Token B: tiny vol → σ ≈ 0 → cross-pair σ ≈ 0 → σ²/8 ≈ 0
-      // feeApr from large fees / large tvl → comfortably > 0
+      // Token A: small alternating ±0.1% returns → small but non-zero σ →
+      // strictly positive σ²/8 (avoids the coverage-ratio defensive guard
+      // for zero-denominator while keeping σ²/8 ≪ feeApr).
+      // Token B: constant → σ ≈ 0 → cross-pair σ ≈ σ_A.
+      // feeApr from large fees / large tvl → comfortably > σ²/8.
+      const seriesA: DailyPriceSeries = {
+        ref: 'coingecko/token-a',
+        pivotCurrency: 'usd',
+        status: 'ok',
+        closes: makeAlternatingSeries(0.001, 366),
+        fetchedAt: new Date().toISOString(),
+      };
       const { service } = buildMocks({
         tokenResolutions: new Map([
           [TOKEN_A, 'token-a'],
           [TOKEN_B, 'token-b'],
         ]),
         seriesEntries: [
-          { geckoId: 'token-a', series: constantGrowthSeries('token-a', 1, 1.0) },
+          { geckoId: 'token-a', series: seriesA },
           { geckoId: 'token-b', series: constantGrowthSeries('token-b', 1, 1.0) },
         ],
       });
@@ -145,6 +154,10 @@ describe('PoolSigmaFilterService.enrichPools', () => {
       expect(pool!.sigmaFilter.verdictAgreement).toBe('AGREE');
       expect(pool!.sigmaFilter.marginLongTerm).not.toBeNull();
       expect(pool!.sigmaFilter.marginLongTerm!).toBeGreaterThan(0);
+      // RFC-0001: deep_green band when feeApr ≫ σ²/8 (constant series ⇒ σ ≈ 0).
+      expect(pool!.sigmaFilter.coverageLongTerm).not.toBeNull();
+      expect(pool!.sigmaFilter.coverageLongTerm!).toBeGreaterThan(3);
+      expect(pool!.sigmaFilter.coverageBand).toBe('deep_green');
     });
 
     it('produces a FAIL verdict when feeApr is below σ²/8', async () => {
@@ -184,6 +197,10 @@ describe('PoolSigmaFilterService.enrichPools', () => {
       expect(pool.sigmaFilter.verdictLongTerm).toBe('FAIL');
       expect(pool.sigmaFilter.verdictShortTerm).toBe('FAIL');
       expect(pool.sigmaFilter.verdictAgreement).toBe('AGREE');
+      // RFC-0001: tiny feeApr against large σ²/8 ⇒ coverage ≪ 0.5 ⇒ deep_red.
+      expect(pool.sigmaFilter.coverageLongTerm).not.toBeNull();
+      expect(pool.sigmaFilter.coverageLongTerm!).toBeLessThan(0.5);
+      expect(pool.sigmaFilter.coverageBand).toBe('deep_red');
     });
   });
 
@@ -220,6 +237,9 @@ describe('PoolSigmaFilterService.enrichPools', () => {
       expect(pool.sigmaFilter.verdictShortTerm).toBe('INSUFFICIENT_DATA');
       expect(pool.sigmaFilter.verdictAgreement).toBe('INSUFFICIENT_DATA');
       expect(pool.sigmaFilter.marginLongTerm).toBeNull();
+      // RFC-0001: null feeApr ⇒ null coverage ⇒ insufficient_data band.
+      expect(pool.sigmaFilter.coverageLongTerm).toBeNull();
+      expect(pool.sigmaFilter.coverageBand).toBe('insufficient_data');
     });
 
     it('cascades token_not_listed: if either leg is unlisted, pair is non-ok', async () => {
