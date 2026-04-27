@@ -203,7 +203,16 @@ export function PoolTable({
                   <td className="py-3">
                     <div className="flex flex-col">
                       <span className="font-medium">
-                        {pool.token0.symbol} / {pool.token1.symbol}
+                        {(() => {
+                          // Render in user-intended base/quote orientation when
+                          // the result carries userProvidedInfo (search / favorites).
+                          // Direct-Address results have no orientation → fall back
+                          // to pool-native token0/token1 ordering.
+                          const isToken0Quote = pool.userProvidedInfo?.isToken0Quote;
+                          const baseSymbol = isToken0Quote === true ? pool.token1.symbol : pool.token0.symbol;
+                          const quoteSymbol = isToken0Quote === true ? pool.token0.symbol : pool.token1.symbol;
+                          return `${baseSymbol} / ${quoteSymbol}`;
+                        })()}
                       </span>
                       <span className="text-sm text-slate-400">
                         {pool.chainName} • {formatFeeTier(pool.feeTier)}
