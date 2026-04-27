@@ -34,7 +34,7 @@ export function PoolTableSection({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 relative z-20">
         <h3 className="text-lg font-semibold text-white">Available Pools</h3>
         <PoolTableColumnManager visibleColumns={visibleColumns} />
       </div>

@@ -268,7 +268,7 @@ export function PoolTable({
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-auto">
         <table className="w-full text-left">
-          <thead className="sticky top-0 bg-slate-800/90 backdrop-blur-sm">
+          <thead className="sticky top-0 z-10 bg-slate-800/90 backdrop-blur-sm">
             <tr className="border-b border-slate-700">
               <th className="pb-3 text-slate-400 font-medium w-10"></th>
               <th className="pb-3 text-slate-400 font-medium">Pool</th>
