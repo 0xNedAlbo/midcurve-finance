@@ -258,6 +258,37 @@ function baseSearchResult(): SearchResult {
       feeApr7dAvg: 0.2512,
       feeAprPrimary: 0.2512,
       feeAprSource: '7d_avg',
+      volatility: {
+        token0: {
+          ref: '',
+          sigma60d: { status: 'insufficient_history' },
+          sigma365d: { status: 'insufficient_history' },
+        },
+        token1: {
+          ref: '',
+          sigma60d: { status: 'insufficient_history' },
+          sigma365d: { status: 'insufficient_history' },
+        },
+        pair: {
+          sigma60d: { status: 'insufficient_history' },
+          sigma365d: { status: 'insufficient_history' },
+        },
+        velocity: null,
+        pivotCurrency: 'usd',
+        computedAt: '2026-04-26T00:00:00.000Z',
+      },
+      sigmaFilter: {
+        feeApr: null,
+        sigmaSqOver8_365d: null,
+        sigmaSqOver8_60d: null,
+        marginLongTerm: null,
+        marginShortTerm: null,
+        verdictLongTerm: 'INSUFFICIENT_DATA',
+        verdictShortTerm: 'INSUFFICIENT_DATA',
+        verdictAgreement: 'INSUFFICIENT_DATA',
+        coverageLongTerm: null,
+        coverageBand: 'insufficient_data',
+      },
     },
   };
 }
@@ -301,12 +332,5 @@ describe('formatPoolSearchResult', () => {
       userProvidedInfo: { isToken0Quote: false },
     });
     expect(out2.userProvidedInfo).toEqual({ isToken0Quote: false });
-  });
-
-  it('handles missing volatility / sigmaFilter blocks (search results may omit them)', () => {
-    const out = formatPoolSearchResult(baseSearchResult());
-    const m = out.metrics as Record<string, unknown>;
-    expect(m.volatility).toBeNull();
-    expect(m.sigmaFilter).toBeNull();
   });
 });
