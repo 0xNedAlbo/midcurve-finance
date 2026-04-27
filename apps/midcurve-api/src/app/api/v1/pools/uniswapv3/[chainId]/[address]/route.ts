@@ -9,7 +9,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/middleware/with-auth';
 import { UniswapV3SubgraphClient } from '@midcurve/services';
-import type { UniswapV3Pool } from '@midcurve/shared';
 import {
   createSuccessResponse,
   createErrorResponse,
@@ -237,10 +236,8 @@ export async function GET(
       const serializedPool = serializeUniswapV3Pool(pool);
 
       // 6. Build response
-      // Note: serializedPool has bigints/dates as strings for JSON compatibility
-      // The type cast is safe because the serialized structure matches UniswapV3Pool
       const responseData: GetUniswapV3PoolData = {
-        pool: serializedPool as unknown as UniswapV3Pool,
+        pool: serializedPool,
         ...(metricsData && { metrics: metricsData }),
         ...(feeData && { feeData }),
         ...(typeof isToken0Quote === 'boolean' && {

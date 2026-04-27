@@ -61,6 +61,13 @@ export interface CreateErc20TokenData {
  */
 export type CreateErc20TokenResponse = ApiResponse<CreateErc20TokenData>;
 
+// Alias of CreateErc20TokenData — they share the wire shape today; split into
+// a standalone type if they ever diverge (e.g. create-input gains a field that
+// doesn't ship on the wire). Used for composing wire-shape types like
+// UniswapV3PoolWire where naming the create endpoint at the call site would be
+// misleading.
+export type Erc20TokenWire = CreateErc20TokenData;
+
 /**
  * Token search candidate from CoinGecko (lightweight, not in database yet)
  *

@@ -23,6 +23,8 @@ import type {
   SerializedCloseOrder,
   AutomationState,
   SwapDirection,
+  UniswapV3PoolWire,
+  Erc20TokenWire,
 } from '@midcurve/api-shared';
 
 import type { CloseOrder } from '@midcurve/database';
@@ -90,14 +92,16 @@ export function serializeBigInt<T>(obj: T): SerializedValue {
  * Serialize UniswapV3Pool for JSON response
  *
  * Converts all bigint fields in pool state to strings for JSON compatibility.
+ * Return type is pinned to {@link UniswapV3PoolWire} so consumers can rely on
+ * the canonical wire shape (no class methods, bigints as strings).
  *
  * @param pool - UniswapV3Pool from service layer
- * @returns JSON-serializable pool object
+ * @returns JSON-serializable pool object matching UniswapV3PoolWire
  */
-export function serializeUniswapV3Pool(pool: UniswapV3Pool) {
+export function serializeUniswapV3Pool(pool: UniswapV3Pool): UniswapV3PoolWire {
   return {
     id: pool.id,
-    protocol: pool.protocol,
+    protocol: 'uniswapv3',
     token0: serializeErc20Token(pool.token0 as Erc20Token),
     token1: serializeErc20Token(pool.token1 as Erc20Token),
     feeBps: pool.feeBps,
@@ -136,16 +140,18 @@ export function serializeUniswapV3PoolState(state: UniswapV3PoolState) {
 /**
  * Serialize Erc20Token for JSON response
  *
- * Converts Date fields to ISO strings.
- * No bigint fields in token type.
+ * Converts Date fields to ISO strings. No bigint fields in token type.
+ * Return type is pinned to {@link Erc20TokenWire} for consistency with
+ * `serializeUniswapV3Pool`. The `tokenType` literal is fixed because the
+ * input is already narrowed to Erc20Token.
  *
  * @param token - Erc20Token from service layer
- * @returns JSON-serializable token object
+ * @returns JSON-serializable token object matching Erc20TokenWire
  */
-export function serializeErc20Token(token: Erc20Token) {
+export function serializeErc20Token(token: Erc20Token): Erc20TokenWire {
   return {
     id: token.id,
-    tokenType: token.tokenType,
+    tokenType: 'erc20',
     name: token.name,
     symbol: token.symbol,
     decimals: token.decimals,

@@ -28,8 +28,11 @@
  */
 
 import { useMutation } from '@tanstack/react-query';
-import type { UniswapV3Pool } from '@midcurve/shared';
-import type { GetUniswapV3PoolData, PoolUserProvidedInfo } from '@midcurve/api-shared';
+import type {
+  GetUniswapV3PoolData,
+  PoolUserProvidedInfo,
+  UniswapV3PoolWire,
+} from '@midcurve/api-shared';
 import { apiClient } from '@/lib/api-client';
 
 export interface DiscoverPoolParams {
@@ -52,9 +55,13 @@ export interface DiscoverPoolParams {
 
 export interface DiscoverPoolResult {
   /**
-   * The discovered pool data with fresh on-chain state
+   * The discovered pool data with fresh on-chain state.
+   *
+   * Wire shape from the API (bigints as strings, Dates as ISO strings, no
+   * class methods). Pass through `UniswapV3Pool.fromJSON()` if you need an
+   * in-memory class instance for math/formatting helpers.
    */
-  pool: UniswapV3Pool;
+  pool: UniswapV3PoolWire;
 
   /**
    * Echoed base/quote orientation when `isToken0Quote` was supplied in the
