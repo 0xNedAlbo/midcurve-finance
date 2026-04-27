@@ -6,10 +6,37 @@
  */
 
 import { z } from 'zod';
-import type { UniswapV3Pool } from '@midcurve/shared';
+import type {
+  UniswapV3PoolConfigJSON,
+  UniswapV3PoolStateJSON,
+} from '@midcurve/shared';
 import type { ApiResponse } from '../common/index.js';
+import type { Erc20TokenWire } from '../tokens/erc20.js';
 import type { PoolSearchResultItem, PoolUserProvidedInfo } from './pool-search.js';
 import type { PoolMetricsBlock } from './pool-metrics-shared.js';
+
+/**
+ * Wire shape of a UniswapV3Pool as returned by the API.
+ *
+ * Mirrors the output of `serializeUniswapV3Pool` in midcurve-api: bigints are
+ * `string`, `Date` fields are ISO 8601 strings, and there are no methods.
+ *
+ * Use this type for any payload that came back from `apiClient` (or for a
+ * formatter parameter that consumes one). The canonical `UniswapV3Pool` class
+ * type from `@midcurve/shared` is for in-memory domain use only — it advertises
+ * methods and bigint fields that don't survive JSON serialization.
+ */
+export interface UniswapV3PoolWire {
+  id: string;
+  protocol: 'uniswapv3';
+  token0: Erc20TokenWire;
+  token1: Erc20TokenWire;
+  feeBps: number;
+  config: UniswapV3PoolConfigJSON;
+  state: UniswapV3PoolStateJSON;
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
 
 /**
  * Path parameters for pool lookup
@@ -69,8 +96,11 @@ export interface GetUniswapV3PoolData {
   /**
    * Pool data with fresh on-chain state
    * State (price, liquidity, tick) is always current
+   *
+   * Wire shape (bigints as strings, no class methods) — see
+   * {@link UniswapV3PoolWire}.
    */
-  pool: UniswapV3Pool;
+  pool: UniswapV3PoolWire;
 
   /**
    * Pool metrics block — only included when `metrics=true` query param is set.

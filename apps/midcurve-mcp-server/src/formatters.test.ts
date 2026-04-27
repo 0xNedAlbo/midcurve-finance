@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Erc20TokenWire } from '@midcurve/api-shared';
 import { formatPool, formatPoolSearchResult } from './formatters.js';
 
 /**
@@ -10,27 +11,38 @@ import { formatPool, formatPoolSearchResult } from './formatters.js';
 
 type PoolDetail = Parameters<typeof formatPool>[0];
 
-const WETH = {
+const WETH: Erc20TokenWire = {
+  id: 'tok-weth-base',
+  tokenType: 'erc20',
+  name: 'Wrapped Ether',
   symbol: 'WETH',
   decimals: 18,
   config: {
     address: '0x4200000000000000000000000000000000000006',
     chainId: 8453,
   },
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
-const USDC = {
+const USDC: Erc20TokenWire = {
+  id: 'tok-usdc-base',
+  tokenType: 'erc20',
+  name: 'USD Coin',
   symbol: 'USDC',
   decimals: 6,
   config: {
     address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     chainId: 8453,
   },
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
 function basePool(): PoolDetail {
   return {
     pool: {
+      id: 'pool-weth-usdc-base',
       protocol: 'uniswapv3',
       feeBps: 500,
       token0: WETH,
@@ -38,13 +50,20 @@ function basePool(): PoolDetail {
       config: {
         chainId: 8453,
         address: '0xd0b53D9277642d899DF5C87A3966A349A798F224',
+        token0: WETH.config.address,
+        token1: USDC.config.address,
+        feeBps: 500,
         tickSpacing: 10,
       },
       state: {
         sqrtPriceX96: '1234567890',
-        liquidity: '987654321',
         currentTick: 200000,
+        liquidity: '987654321',
+        feeGrowthGlobal0: '0',
+        feeGrowthGlobal1: '0',
       },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
     },
   };
 }
