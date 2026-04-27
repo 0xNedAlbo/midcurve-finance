@@ -89,6 +89,8 @@ const HEALTHY_METRICS: NonNullable<PoolDetail['metrics']> = {
     verdictLongTerm: 'PASS',
     verdictShortTerm: 'PASS',
     verdictAgreement: 'AGREE',
+    coverageLongTerm: 3.93,
+    coverageBand: 'deep_green',
   },
 };
 
@@ -174,6 +176,8 @@ describe('formatPool', () => {
       verdictLongTerm: 'INSUFFICIENT_DATA',
       verdictShortTerm: 'INSUFFICIENT_DATA',
       verdictAgreement: 'INSUFFICIENT_DATA',
+      coverageLongTerm: null,
+      coverageBand: 'insufficient_data',
     };
     const detail = { ...basePool(), metrics };
     const out = formatPool(detail);

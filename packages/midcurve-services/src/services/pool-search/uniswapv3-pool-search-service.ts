@@ -368,6 +368,8 @@ export class UniswapV3PoolSearchService {
             verdictLongTerm: 'INSUFFICIENT_DATA',
             verdictShortTerm: 'INSUFFICIENT_DATA',
             verdictAgreement: 'INSUFFICIENT_DATA',
+            coverageLongTerm: null,
+            coverageBand: 'insufficient_data',
           },
         };
 

@@ -36,6 +36,8 @@ import type {
 import {
   alignDailySeries,
   cascadeStatus,
+  coverageBand,
+  coverageRatio,
   feeAprFromTvlAndFees,
   pairSigmaForWindow,
   sigmaVerdict,
@@ -360,6 +362,8 @@ function buildSigmaFilter(
   const verdictShortTerm: SigmaVerdict = sigmaVerdict(feeApr, sigmaSqOver8_60d);
   const agreement = verdictAgreement(verdictLongTerm, verdictShortTerm);
 
+  const coverageLongTerm = coverageRatio(feeApr, sigmaSqOver8_365d);
+
   return {
     feeApr,
     sigmaSqOver8_365d,
@@ -369,5 +373,7 @@ function buildSigmaFilter(
     verdictLongTerm,
     verdictShortTerm,
     verdictAgreement: agreement,
+    coverageLongTerm,
+    coverageBand: coverageBand(coverageLongTerm),
   };
 }

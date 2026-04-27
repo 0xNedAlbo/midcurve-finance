@@ -206,6 +206,8 @@ export async function GET(
           verdictLongTerm: 'INSUFFICIENT_DATA',
           verdictShortTerm: 'INSUFFICIENT_DATA',
           verdictAgreement: 'INSUFFICIENT_DATA',
+          coverageLongTerm: null,
+          coverageBand: 'insufficient_data',
         },
       };
 

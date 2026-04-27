@@ -376,6 +376,14 @@ interface SigmaFilterBlockRaw {
   verdictLongTerm: 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
   verdictShortTerm: 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
   verdictAgreement: 'AGREE' | 'DIVERGENT' | 'INSUFFICIENT_DATA';
+  coverageLongTerm: number | null;
+  coverageBand:
+    | 'deep_red'
+    | 'red'
+    | 'yellow'
+    | 'green'
+    | 'deep_green'
+    | 'insufficient_data';
 }
 interface PoolDetailRaw {
   pool: {
@@ -485,6 +493,11 @@ function formatSigmaFilter(s: SigmaFilterBlockRaw): Record<string, unknown> {
     verdictLongTerm: s.verdictLongTerm,
     verdictShortTerm: s.verdictShortTerm,
     verdictAgreement: s.verdictAgreement,
+    coverageLongTerm:
+      s.coverageLongTerm !== null && s.coverageLongTerm !== undefined
+        ? s.coverageLongTerm.toFixed(3)
+        : null,
+    coverageBand: s.coverageBand,
   };
 }
 

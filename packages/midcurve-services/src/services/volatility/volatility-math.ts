@@ -13,6 +13,7 @@
  */
 
 import type {
+  CoverageBand,
   PairSigmaResult,
   SigmaResult,
   SigmaStatus,
@@ -225,6 +226,42 @@ export function sigmaVerdict(
   if (sigmaSqOver8 === null || feeApr === null) return 'INSUFFICIENT_DATA';
   if (feeApr > sigmaSqOver8) return 'PASS';
   return 'FAIL';
+}
+
+/**
+ * LVR-coverage ratio — `feeApr / sigmaSqOver8` (RFC-0001).
+ *
+ * Multiplicative analogue to the additive `feeApr - sigmaSqOver8` margin.
+ * Returns `null` when either operand is null or `sigmaSqOver8 <= 0`
+ * (defensive — division-by-zero / negative-denominator guard).
+ */
+export function coverageRatio(
+  feeApr: number | null,
+  sigmaSqOver8: number | null,
+): number | null {
+  if (feeApr === null || sigmaSqOver8 === null) return null;
+  if (sigmaSqOver8 <= 0) return null;
+  return feeApr / sigmaSqOver8;
+}
+
+/**
+ * Discrete 5-band mapping for the LVR-coverage ratio (RFC-0001).
+ *
+ * Half-open intervals, left bound inclusive:
+ * - `coverage < 0.5` → `deep_red`
+ * - `0.5 ≤ coverage < 0.9` → `red`
+ * - `0.9 ≤ coverage < 1.5` → `yellow`
+ * - `1.5 ≤ coverage < 3.0` → `green`
+ * - `coverage ≥ 3.0` → `deep_green`
+ * - `coverage === null` → `insufficient_data`
+ */
+export function coverageBand(coverage: number | null): CoverageBand {
+  if (coverage === null) return 'insufficient_data';
+  if (coverage < 0.5) return 'deep_red';
+  if (coverage < 0.9) return 'red';
+  if (coverage < 1.5) return 'yellow';
+  if (coverage < 3.0) return 'green';
+  return 'deep_green';
 }
 
 /**

@@ -7,6 +7,7 @@
  */
 
 import type {
+  CoverageBand,
   PairVolatilityBlock,
   SigmaFilterBlock,
   SigmaResult,
@@ -18,6 +19,7 @@ import type {
 } from '@midcurve/api-shared';
 
 export type {
+  CoverageBand,
   PairVolatilityBlock,
   SigmaFilterBlock,
   SigmaResult,
