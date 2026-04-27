@@ -37,6 +37,7 @@ import {
   UniswapV3VaultLedgerService,
   UserWalletService,
   PoolSigmaFilterService,
+  UserSettingsService,
 } from '@midcurve/services';
 
 // Service instances (lazy-initialized)
@@ -63,6 +64,7 @@ let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
 let _uniswapV3VaultPositionService: UniswapV3VaultPositionService | null = null;
 let _userWalletService: UserWalletService | null = null;
+let _userSettingsService: UserSettingsService | null = null;
 
 /**
  * Get singleton instance of AuthUserService
@@ -268,6 +270,16 @@ export function getFavoritePoolService(): FavoritePoolService {
     _favoritePoolService = new FavoritePoolService();
   }
   return _favoritePoolService;
+}
+
+/**
+ * Get singleton instance of UserSettingsService
+ */
+export function getUserSettingsService(): UserSettingsService {
+  if (!_userSettingsService) {
+    _userSettingsService = new UserSettingsService();
+  }
+  return _userSettingsService;
 }
 
 /**

@@ -19,8 +19,12 @@
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
-import { DEFAULT_USER_SETTINGS } from '@midcurve/shared';
-import type { FavoritePoolEntry, UserSettingsData } from '@midcurve/shared';
+import { DEFAULT_USER_SETTINGS, POOL_TABLE_COLUMN_IDS } from '@midcurve/shared';
+import type {
+  FavoritePoolEntry,
+  PoolTableColumnId,
+  UserSettingsData,
+} from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -69,6 +73,33 @@ function normalizeEntries(raw: unknown): FavoritePoolEntry[] {
 }
 
 /**
+ * Normalize the raw `poolTableVisibleColumns` JSON value into a typed array.
+ *
+ * - Falls back to defaults when the stored value is missing or not an array
+ *   (covers legacy rows predating this field).
+ * - Drops unknown ids silently — schema may have removed columns since the
+ *   row was written.
+ * - De-duplicates while preserving first occurrence.
+ */
+function normalizeColumns(raw: unknown): PoolTableColumnId[] {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_USER_SETTINGS.poolTableVisibleColumns];
+  }
+  const known = new Set<string>(POOL_TABLE_COLUMN_IDS);
+  const seen = new Set<PoolTableColumnId>();
+  const result: PoolTableColumnId[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    if (!known.has(item)) continue;
+    const id = item as PoolTableColumnId;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
+/**
  * User Settings Service
  *
  * Manages per-user settings stored as a single JSON structure.
@@ -111,6 +142,7 @@ export class UserSettingsService {
       ...DEFAULT_USER_SETTINGS,
       ...(raw as Partial<UserSettingsData>),
       favoritePoolHashes: normalizeEntries(raw.favoritePoolHashes),
+      poolTableVisibleColumns: normalizeColumns(raw.poolTableVisibleColumns),
     };
 
     log.methodExit(this.logger, 'getByUserId', { found: true });
@@ -144,6 +176,7 @@ export class UserSettingsService {
       ...DEFAULT_USER_SETTINGS,
       ...(raw as Partial<UserSettingsData>),
       favoritePoolHashes: normalizeEntries(raw.favoritePoolHashes),
+      poolTableVisibleColumns: normalizeColumns(raw.poolTableVisibleColumns),
     };
 
     log.methodExit(this.logger, 'upsert', { userId });
@@ -232,5 +265,47 @@ export class UserSettingsService {
   ): Promise<boolean> {
     const entries = await this.getFavoritePoolEntries(userId);
     return entries.some((e) => e.hash === poolHash);
+  }
+
+  // ============================================================================
+  // POOL TABLE VISIBLE COLUMNS OPERATIONS
+  // ============================================================================
+
+  /**
+   * Returns the user's visible pool-table columns (lazy-defaulted from storage).
+   */
+  async getPoolTableVisibleColumns(
+    userId: string
+  ): Promise<PoolTableColumnId[]> {
+    const settings = await this.getByUserId(userId);
+    return settings.poolTableVisibleColumns;
+  }
+
+  /**
+   * Replaces the user's visible pool-table columns.
+   *
+   * Drops unknown ids and de-duplicates before persisting.
+   */
+  async updatePoolTableVisibleColumns(
+    userId: string,
+    columns: readonly string[]
+  ): Promise<UserSettingsData> {
+    log.methodEntry(this.logger, 'updatePoolTableVisibleColumns', {
+      userId,
+      columnCount: columns.length,
+    });
+
+    const normalized = normalizeColumns(columns);
+    const current = await this.getByUserId(userId);
+    const updated: UserSettingsData = {
+      ...current,
+      poolTableVisibleColumns: normalized,
+    };
+
+    const result = await this.upsert(userId, updated);
+    log.methodExit(this.logger, 'updatePoolTableVisibleColumns', {
+      columnCount: result.poolTableVisibleColumns.length,
+    });
+    return result;
   }
 }

@@ -39,6 +39,47 @@ export interface FavoritePoolEntry {
 }
 
 /**
+ * Pool table column identifier — controls which metric columns the user
+ * has chosen to make visible in the pool search table.
+ *
+ * Column ordering inside the table is fixed in component code; the user
+ * controls visibility only.
+ */
+export type PoolTableColumnId =
+  | 'tvl'
+  | 'feeApr7d'
+  | 'lvrCoverage'
+  | 'volume7dAvg'
+  | 'fees24h'
+  | 'lvrThreshold'
+  | 'margin'
+  | 'coverageRatio'
+  | 'sigmaPair365d'
+  | 'velocity'
+  | 'verdict60d'
+  | 'verdictAgreement';
+
+/**
+ * Runtime list of all valid `PoolTableColumnId` values.
+ * Single source of truth for validation when reading stored settings or
+ * accepting user input.
+ */
+export const POOL_TABLE_COLUMN_IDS: readonly PoolTableColumnId[] = [
+  'tvl',
+  'feeApr7d',
+  'lvrCoverage',
+  'volume7dAvg',
+  'fees24h',
+  'lvrThreshold',
+  'margin',
+  'coverageRatio',
+  'sigmaPair365d',
+  'velocity',
+  'verdict60d',
+  'verdictAgreement',
+] as const;
+
+/**
  * UserSettingsData interface
  *
  * Defines the shape of the settings JSON column.
@@ -63,6 +104,19 @@ export interface UserSettingsData {
    * Determines how token lots are selected for disposal.
    */
   costBasisMethod: CostBasisMethod;
+
+  /**
+   * Pool search table columns the user has chosen to make visible.
+   *
+   * Column display order is hardcoded in the table component; this list
+   * only controls visibility. Star and Pool columns are always visible
+   * and not represented here.
+   *
+   * **Storage compatibility**: legacy installations predating this field
+   * fall back to `DEFAULT_USER_SETTINGS.poolTableVisibleColumns` via the
+   * read-side spread in `UserSettingsService.getByUserId`.
+   */
+  poolTableVisibleColumns: PoolTableColumnId[];
 }
 
 /**
@@ -71,4 +125,5 @@ export interface UserSettingsData {
 export const DEFAULT_USER_SETTINGS: UserSettingsData = {
   favoritePoolHashes: [],
   costBasisMethod: 'fifo',
+  poolTableVisibleColumns: ['tvl', 'feeApr7d', 'lvrCoverage'],
 };
