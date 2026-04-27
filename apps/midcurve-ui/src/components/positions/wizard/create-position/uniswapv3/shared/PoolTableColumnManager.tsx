@@ -56,7 +56,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManagerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const updateMutation = useUpdatePoolTableColumns();
@@ -64,16 +63,6 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  useEffect(() => {
-    if (isOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      setMenuPosition({
-        top: rect.bottom + 4,
-        right: window.innerWidth - rect.right,
-      });
-    }
-  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -120,7 +109,7 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
         key={id}
         type="button"
         onClick={() => toggle(id)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-200 hover:bg-slate-700/50 cursor-pointer rounded transition-colors"
+        className="w-full flex items-center gap-2 px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-700/50 cursor-pointer rounded transition-colors"
       >
         <span
           className={`w-4 h-4 flex items-center justify-center rounded border ${
@@ -155,10 +144,11 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
         createPortal(
           <div
             ref={popoverRef}
-            className="fixed z-50 flex bg-slate-800/95 border border-slate-700 rounded-lg p-2 shadow-xl backdrop-blur-sm"
+            className="fixed z-50 flex bg-slate-800/95 border border-slate-700 rounded-lg p-1.5 shadow-xl backdrop-blur-sm"
             style={{
-              top: `${menuPosition.top}px`,
-              right: `${menuPosition.right}px`,
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
             }}
             role="menu"
           >
@@ -169,17 +159,17 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
               <div
                 key={section.title}
                 className={`flex flex-col ${
-                  sectionIdx > 0 ? 'border-l border-slate-700/50 pl-2 ml-2' : ''
+                  sectionIdx > 0 ? 'border-l border-slate-700/50 pl-1.5 ml-1.5' : ''
                 }`}
               >
-                <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
+                <div className="px-2 py-1 text-xs uppercase tracking-wide text-slate-500">
                   {section.title}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-1">
                   {chunk(section.items, ITEMS_PER_COLUMN).map((group, groupIdx) => (
                     <div
                       key={groupIdx}
-                      className="flex flex-col min-w-[200px]"
+                      className="flex flex-col min-w-[180px]"
                     >
                       {group.map(renderRow)}
                     </div>
