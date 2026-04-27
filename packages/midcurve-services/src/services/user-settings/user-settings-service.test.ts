@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UserSettingsService } from './user-settings-service.js';
 import type { PrismaClient } from '@midcurve/database';
-import type { FavoritePoolEntry } from '@midcurve/shared';
+import type { FavoritePoolEntry, PoolTableColumnId } from '@midcurve/shared';
 
 /**
  * UserSettingsService — lazy backwards-compatibility for `favoritePoolHashes`.
@@ -268,6 +268,155 @@ describe('UserSettingsService — favoritePoolHashes lazy compat', () => {
       findUnique.mockResolvedValue(row([{ hash: 'uniswapv3/1/0xAAA' }]));
       const isFav = await service.isFavoritePoolHash('u1', 'uniswapv3/1/0xZZZ');
       expect(isFav).toBe(false);
+    });
+  });
+});
+
+describe('UserSettingsService — poolTableVisibleColumns', () => {
+  const findUnique = vi.fn();
+  const upsert = vi.fn();
+  const mockPrisma = {
+    userSettings: { findUnique, upsert },
+  } as unknown as PrismaClient;
+
+  let service: UserSettingsService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    service = new UserSettingsService({ prisma: mockPrisma });
+  });
+
+  function row(value: unknown): { settings: unknown } {
+    return {
+      settings: {
+        favoritePoolHashes: [],
+        costBasisMethod: 'fifo',
+        poolTableVisibleColumns: value,
+      },
+    };
+  }
+
+  const DEFAULT_COLUMNS: PoolTableColumnId[] = ['tvl', 'feeApr7d', 'lvrCoverage'];
+
+  describe('getPoolTableVisibleColumns — read normalization', () => {
+    it('returns defaults when no row exists', async () => {
+      findUnique.mockResolvedValue(null);
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual(DEFAULT_COLUMNS);
+    });
+
+    it('returns defaults when the field is missing (legacy row)', async () => {
+      findUnique.mockResolvedValue({
+        settings: { favoritePoolHashes: [], costBasisMethod: 'fifo' },
+      });
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual(DEFAULT_COLUMNS);
+    });
+
+    it('returns defaults when the field is not an array', async () => {
+      findUnique.mockResolvedValue(row('not-an-array'));
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual(DEFAULT_COLUMNS);
+    });
+
+    it('round-trips a valid stored array', async () => {
+      findUnique.mockResolvedValue(
+        row(['tvl', 'feeApr7d', 'volume7dAvg', 'verdict60d'])
+      );
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual<PoolTableColumnId[]>([
+        'tvl',
+        'feeApr7d',
+        'volume7dAvg',
+        'verdict60d',
+      ]);
+    });
+
+    it('drops unknown ids silently', async () => {
+      findUnique.mockResolvedValue(
+        row(['tvl', 'unknownColumn', 'feeApr7d', null, 42, 'lvrCoverage'])
+      );
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual<PoolTableColumnId[]>([
+        'tvl',
+        'feeApr7d',
+        'lvrCoverage',
+      ]);
+    });
+
+    it('de-duplicates while preserving first occurrence', async () => {
+      findUnique.mockResolvedValue(
+        row(['tvl', 'feeApr7d', 'tvl', 'lvrCoverage', 'feeApr7d'])
+      );
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual<PoolTableColumnId[]>([
+        'tvl',
+        'feeApr7d',
+        'lvrCoverage',
+      ]);
+    });
+
+    it('accepts an empty array (user can hide everything)', async () => {
+      findUnique.mockResolvedValue(row([]));
+      const cols = await service.getPoolTableVisibleColumns('u1');
+      expect(cols).toEqual([]);
+    });
+  });
+
+  describe('updatePoolTableVisibleColumns — write normalization', () => {
+    it('persists the validated set and returns the full settings', async () => {
+      findUnique.mockResolvedValue(row(DEFAULT_COLUMNS));
+      upsert.mockImplementation(async ({ update }: { update: { settings: unknown } }) => ({
+        settings: update.settings,
+      }));
+
+      const result = await service.updatePoolTableVisibleColumns('u1', [
+        'tvl',
+        'volume7dAvg',
+        'lvrThreshold',
+      ]);
+
+      expect(result.poolTableVisibleColumns).toEqual<PoolTableColumnId[]>([
+        'tvl',
+        'volume7dAvg',
+        'lvrThreshold',
+      ]);
+      const upsertArgs = upsert.mock.calls[0][0];
+      const persisted = upsertArgs.update.settings as {
+        poolTableVisibleColumns: unknown[];
+      };
+      expect(persisted.poolTableVisibleColumns).toEqual([
+        'tvl',
+        'volume7dAvg',
+        'lvrThreshold',
+      ]);
+    });
+
+    it('drops unknown ids before persisting', async () => {
+      findUnique.mockResolvedValue(row(DEFAULT_COLUMNS));
+      upsert.mockImplementation(async ({ update }: { update: { settings: unknown } }) => ({
+        settings: update.settings,
+      }));
+
+      const result = await service.updatePoolTableVisibleColumns('u1', [
+        'tvl',
+        'bogus',
+        'lvrCoverage',
+      ]);
+      expect(result.poolTableVisibleColumns).toEqual<PoolTableColumnId[]>([
+        'tvl',
+        'lvrCoverage',
+      ]);
+    });
+
+    it('persists an empty array verbatim', async () => {
+      findUnique.mockResolvedValue(row(DEFAULT_COLUMNS));
+      upsert.mockImplementation(async ({ update }: { update: { settings: unknown } }) => ({
+        settings: update.settings,
+      }));
+
+      const result = await service.updatePoolTableVisibleColumns('u1', []);
+      expect(result.poolTableVisibleColumns).toEqual([]);
     });
   });
 });

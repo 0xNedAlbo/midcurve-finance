@@ -206,6 +206,11 @@ export const queryKeys = {
     me: () => [...queryKeys.user.all, 'me'] as const,
     wallets: () => [...queryKeys.user.all, 'wallets'] as const,
     apiKeys: () => [...queryKeys.user.all, 'api-keys'] as const,
+    settings: {
+      all: () => [...queryKeys.user.all, 'settings'] as const,
+      poolTableColumns: () =>
+        [...queryKeys.user.settings.all(), 'pool-table-columns'] as const,
+    },
   },
 
   // ============================================

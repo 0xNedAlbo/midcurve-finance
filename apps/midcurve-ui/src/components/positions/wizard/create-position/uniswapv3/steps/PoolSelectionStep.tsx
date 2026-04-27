@@ -7,7 +7,7 @@ import {
   type PoolSelectionTab,
 } from '../context/CreatePositionWizardContext';
 import { WizardSummaryPanel } from '../shared/WizardSummaryPanel';
-import { PoolTable } from '../shared/PoolTable';
+import { PoolTableSection } from '../shared/PoolTableSection';
 import { TokenSetSearchInput } from '../shared/TokenSetSearchInput';
 import { usePoolSearch } from '@/hooks/pools/usePoolSearch';
 import { usePoolLookup } from '@/hooks/pools/usePoolLookup';
@@ -402,7 +402,7 @@ export function PoolSelectionStep() {
   const renderVisual = () => {
     if (state.poolSelectionTab === 'favorites') {
       return (
-        <PoolTable
+        <PoolTableSection
           pools={favoritePools}
           selectedPoolAddress={state.selectedPool?.poolAddress || null}
           onSelectPool={handleSelectPool}
@@ -414,7 +414,7 @@ export function PoolSelectionStep() {
 
     if (state.poolSelectionTab === 'direct') {
       return (
-        <PoolTable
+        <PoolTableSection
           pools={lookupPools}
           selectedPoolAddress={state.selectedPool?.poolAddress || null}
           onSelectPool={handleSelectPool}
@@ -425,7 +425,7 @@ export function PoolSelectionStep() {
     }
 
     return (
-      <PoolTable
+      <PoolTableSection
         pools={pools}
         selectedPoolAddress={state.selectedPool?.poolAddress || null}
         onSelectPool={handleSelectPool}

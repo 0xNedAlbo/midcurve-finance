@@ -1,9 +1,19 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Star, ChevronUp, ChevronDown } from 'lucide-react';
 import type { PoolSearchResultItem } from '@midcurve/api-shared';
+import type { PoolTableColumnId } from '@midcurve/shared';
+import { LvrCoveragePill } from './LvrCoveragePill';
 
-type SortColumn = 'tvlUSD' | 'volume24hUSD' | 'fees24hUSD' | 'apr7d';
+type SortColumn = 'tvlUSD' | 'volume24hUSD' | 'fees24hUSD' | 'apr7d' | 'volume7dAvgUSD';
 type SortDirection = 'asc' | 'desc';
+
+interface ColumnDef {
+  id: PoolTableColumnId;
+  label: string;
+  align: 'left' | 'right';
+  sortKey?: SortColumn;
+  render: (pool: PoolSearchResultItem) => ReactNode;
+}
 
 interface PoolTableProps {
   pools: PoolSearchResultItem[];
@@ -11,7 +21,182 @@ interface PoolTableProps {
   onSelectPool: (pool: PoolSearchResultItem) => void;
   onToggleFavorite?: (pool: PoolSearchResultItem) => void;
   isLoading?: boolean;
+  visibleColumns: PoolTableColumnId[];
 }
+
+const formatCurrency = (value: string | number) => {
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  if (numValue >= 1_000_000) {
+    return `$${(numValue / 1_000_000).toFixed(1)}M`;
+  }
+  if (numValue >= 1_000) {
+    return `$${(numValue / 1_000).toFixed(1)}K`;
+  }
+  return `$${numValue.toFixed(0)}`;
+};
+
+const formatPercent = (value: number) => `${value.toFixed(1)}%`;
+
+const formatSignedPercent = (value: number | null) => {
+  if (value === null) return 'n/a';
+  const pct = value * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
+};
+
+const formatRatio = (value: number | null, digits = 2) => {
+  if (value === null) return 'n/a';
+  return value.toFixed(digits);
+};
+
+const formatRawPercent = (value: number | null) => {
+  if (value === null) return 'n/a';
+  return `${(value * 100).toFixed(1)}%`;
+};
+
+const formatFeeTier = (feeTier: number) => `${(feeTier / 10000).toFixed(2)}%`;
+
+/**
+ * APR may be unreliable when pool has low/no liquidity, volume, or fees.
+ */
+const shouldShowAprWarning = (pool: PoolSearchResultItem): boolean => {
+  const tvl = parseFloat(pool.metrics.tvlUSD) || 0;
+  const volume = parseFloat(pool.metrics.volume24hUSD) || 0;
+  const fees = parseFloat(pool.metrics.fees24hUSD) || 0;
+  const apr = pool.metrics.apr7d || 0;
+
+  if (apr > 0 && tvl === 0) return true;
+  if (apr > 0 && fees === 0) return true;
+  if (volume === 0) return true;
+
+  return false;
+};
+
+/**
+ * Column registry. Display order is the array order; visibility is controlled
+ * by the `visibleColumns` prop.
+ */
+const COLUMNS: ColumnDef[] = [
+  {
+    id: 'tvl',
+    label: 'TVL',
+    align: 'right',
+    sortKey: 'tvlUSD',
+    render: (pool) => formatCurrency(pool.metrics.tvlUSD),
+  },
+  {
+    id: 'feeApr7d',
+    label: 'ø APR 7d',
+    align: 'right',
+    sortKey: 'apr7d',
+    render: (pool) => (
+      <div className="flex items-center justify-end gap-1">
+        <span className="text-green-400">{formatPercent(pool.metrics.apr7d)}</span>
+        {shouldShowAprWarning(pool) && (
+          <span
+            className="text-yellow-400 text-xs font-bold cursor-help"
+            title="APR may be unreliable: low TVL, volume, or fees"
+          >
+            !
+          </span>
+        )}
+      </div>
+    ),
+  },
+  {
+    id: 'lvrCoverage',
+    label: 'LVR-Coverage',
+    align: 'right',
+    render: (pool) => (
+      <div className="flex justify-end">
+        <LvrCoveragePill pool={pool} />
+      </div>
+    ),
+  },
+  {
+    id: 'volume7dAvg',
+    label: 'Volume 7d avg',
+    align: 'right',
+    sortKey: 'volume7dAvgUSD',
+    render: (pool) => formatCurrency(pool.metrics.volume7dAvgUSD),
+  },
+  {
+    id: 'fees24h',
+    label: 'Fees 24h',
+    align: 'right',
+    sortKey: 'fees24hUSD',
+    render: (pool) => formatCurrency(pool.metrics.fees24hUSD),
+  },
+  {
+    id: 'lvrThreshold',
+    label: 'LVR threshold',
+    align: 'right',
+    render: (pool) => formatRawPercent(pool.metrics.sigmaFilter.sigmaSqOver8_365d),
+  },
+  {
+    id: 'margin',
+    label: 'Margin',
+    align: 'right',
+    render: (pool) => {
+      const v = pool.metrics.sigmaFilter.marginLongTerm;
+      if (v === null) return <span className="text-slate-500">n/a</span>;
+      const pct = v * 100;
+      const cls = pct >= 0 ? 'text-green-400' : 'text-red-400';
+      return <span className={cls}>{formatSignedPercent(v)}</span>;
+    },
+  },
+  {
+    id: 'coverageRatio',
+    label: 'Coverage ratio',
+    align: 'right',
+    render: (pool) => formatRatio(pool.metrics.sigmaFilter.coverageLongTerm),
+  },
+  {
+    id: 'sigmaPair365d',
+    label: 'σ pair (365d)',
+    align: 'right',
+    render: (pool) => {
+      const v = pool.metrics.volatility.pair.sigma365d.value;
+      return formatRawPercent(v ?? null);
+    },
+  },
+  {
+    id: 'velocity',
+    label: 'Velocity',
+    align: 'right',
+    render: (pool) => formatRatio(pool.metrics.volatility.velocity),
+  },
+  {
+    id: 'verdict60d',
+    label: 'Verdict 60d',
+    align: 'right',
+    render: (pool) => {
+      const v = pool.metrics.sigmaFilter.verdictShortTerm;
+      const cls =
+        v === 'PASS'
+          ? 'text-green-400'
+          : v === 'FAIL'
+            ? 'text-red-400'
+            : 'text-slate-500';
+      return <span className={cls}>{v === 'INSUFFICIENT_DATA' ? 'n/a' : v}</span>;
+    },
+  },
+  {
+    id: 'verdictAgreement',
+    label: 'Agreement',
+    align: 'right',
+    render: (pool) => {
+      const v = pool.metrics.sigmaFilter.verdictAgreement;
+      const cls =
+        v === 'AGREE'
+          ? 'text-green-400'
+          : v === 'DIVERGENT'
+            ? 'text-yellow-400'
+            : 'text-slate-500';
+      return <span className={cls}>{v === 'INSUFFICIENT_DATA' ? 'n/a' : v}</span>;
+    },
+  },
+];
 
 export function PoolTable({
   pools,
@@ -19,54 +204,15 @@ export function PoolTable({
   onSelectPool,
   onToggleFavorite,
   isLoading = false,
+  visibleColumns,
 }: PoolTableProps) {
   const [sortColumn, setSortColumn] = useState<SortColumn>('tvlUSD');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  const formatCurrency = (value: string | number) => {
-    const numValue = typeof value === 'string' ? parseFloat(value) : value;
-    if (numValue >= 1_000_000) {
-      return `$${(numValue / 1_000_000).toFixed(1)}M`;
-    }
-    if (numValue >= 1_000) {
-      return `$${(numValue / 1_000).toFixed(1)}K`;
-    }
-    return `$${numValue.toFixed(0)}`;
-  };
-
-  const formatPercent = (value: number) => {
-    return `${value.toFixed(1)}%`;
-  };
-
-  const formatFeeTier = (feeTier: number) => {
-    // feeTier is in basis points (e.g., 3000 = 0.3%)
-    return `${(feeTier / 10000).toFixed(2)}%`;
-  };
-
-  /**
-   * Check if APR warning should be shown
-   * APR may be unreliable when pool has low/no liquidity, volume, or fees
-   */
-  const shouldShowAprWarning = (pool: PoolSearchResultItem): boolean => {
-    const tvl = parseFloat(pool.metrics.tvlUSD) || 0;
-    const volume = parseFloat(pool.metrics.volume24hUSD) || 0;
-    const fees = parseFloat(pool.metrics.fees24hUSD) || 0;
-    const apr = pool.metrics.apr7d || 0;
-
-    // Warning if APR > 0 but pool metrics suggest unreliable data
-    if (apr > 0 && tvl === 0) return true; // Empty pool
-    if (apr > 0 && fees === 0) return true; // No recent fees
-    if (volume === 0) return true; // No trading activity
-
-    return false;
-  };
-
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
-      // Toggle direction if clicking same column
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
-      // Default to descending for new column
       setSortColumn(column);
       setSortDirection('desc');
     }
@@ -80,61 +226,27 @@ export function PoolTable({
         return parseFloat(pool.metrics.volume24hUSD) || 0;
       case 'fees24hUSD':
         return parseFloat(pool.metrics.fees24hUSD) || 0;
+      case 'volume7dAvgUSD':
+        return parseFloat(pool.metrics.volume7dAvgUSD) || 0;
       case 'apr7d':
         return pool.metrics.apr7d || 0;
     }
   };
 
-  // Sort pools with favorites at top, then by selected column
   const sortedPools = [...pools].sort((a, b) => {
-    // Favorites always first
     if (a.isFavorite && !b.isFavorite) return -1;
     if (!a.isFavorite && b.isFavorite) return 1;
 
-    // Then sort by selected column
     const aValue = getNumericValue(a, sortColumn);
     const bValue = getNumericValue(b, sortColumn);
 
-    if (sortDirection === 'asc') {
-      return aValue - bValue;
-    }
+    if (sortDirection === 'asc') return aValue - bValue;
     return bValue - aValue;
   });
 
-  const SortHeader = ({
-    column,
-    label,
-    className = '',
-  }: {
-    column: SortColumn;
-    label: string;
-    className?: string;
-  }) => {
-    const isActive = sortColumn === column;
-    return (
-      <th
-        onClick={() => handleSort(column)}
-        className={`pb-3 font-medium cursor-pointer select-none transition-colors hover:text-slate-200 ${
-          isActive ? 'text-blue-400' : 'text-slate-400'
-        } ${className}`}
-      >
-        <div className="flex items-center justify-end gap-1">
-          <span>{label}</span>
-          <span className="w-4 h-4 flex items-center justify-center">
-            {isActive ? (
-              sortDirection === 'desc' ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronUp className="w-4 h-4" />
-              )
-            ) : (
-              <ChevronDown className="w-4 h-4 opacity-0 group-hover:opacity-30" />
-            )}
-          </span>
-        </div>
-      </th>
-    );
-  };
+  const orderedVisibleColumns: ColumnDef[] = COLUMNS.filter((c) =>
+    visibleColumns.includes(c.id)
+  );
 
   if (isLoading) {
     return (
@@ -154,18 +266,55 @@ export function PoolTable({
 
   return (
     <div className="h-full flex flex-col">
-      <h3 className="text-lg font-semibold text-white mb-4">Available Pools</h3>
-
       <div className="flex-1 overflow-auto">
         <table className="w-full text-left">
-          <thead className="sticky top-0 bg-slate-800/90 backdrop-blur-sm">
+          <thead className="sticky top-0 z-10 bg-slate-800/90 backdrop-blur-sm">
             <tr className="border-b border-slate-700">
               <th className="pb-3 text-slate-400 font-medium w-10"></th>
               <th className="pb-3 text-slate-400 font-medium">Pool</th>
-              <SortHeader column="tvlUSD" label="TVL" className="text-right" />
-              <SortHeader column="volume24hUSD" label="Volume 24h" className="text-right" />
-              <SortHeader column="fees24hUSD" label="Fees 24h" className="text-right" />
-              <SortHeader column="apr7d" label="ø APR 7d" className="text-right" />
+              {orderedVisibleColumns.map((col) => {
+                const headerAlign = col.align === 'right' ? 'text-right' : 'text-left';
+                if (!col.sortKey) {
+                  return (
+                    <th
+                      key={col.id}
+                      className={`pb-3 font-medium text-slate-400 ${headerAlign}`}
+                    >
+                      {col.label}
+                    </th>
+                  );
+                }
+                const sortKey = col.sortKey;
+                const isActive = sortColumn === sortKey;
+                return (
+                  <th
+                    key={col.id}
+                    onClick={() => handleSort(sortKey)}
+                    className={`pb-3 font-medium cursor-pointer select-none transition-colors hover:text-slate-200 ${
+                      isActive ? 'text-blue-400' : 'text-slate-400'
+                    } ${headerAlign}`}
+                  >
+                    <div
+                      className={`flex items-center gap-1 ${
+                        col.align === 'right' ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      <span>{col.label}</span>
+                      <span className="w-4 h-4 flex items-center justify-center">
+                        {isActive ? (
+                          sortDirection === 'desc' ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronUp className="w-4 h-4" />
+                          )
+                        ) : (
+                          <ChevronDown className="w-4 h-4 opacity-0 group-hover:opacity-30" />
+                        )}
+                      </span>
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="text-white">
@@ -204,13 +353,11 @@ export function PoolTable({
                     <div className="flex flex-col">
                       <span className="font-medium">
                         {(() => {
-                          // Render in user-intended base/quote orientation when
-                          // the result carries userProvidedInfo (search / favorites).
-                          // Direct-Address results have no orientation → fall back
-                          // to pool-native token0/token1 ordering.
                           const isToken0Quote = pool.userProvidedInfo?.isToken0Quote;
-                          const baseSymbol = isToken0Quote === true ? pool.token1.symbol : pool.token0.symbol;
-                          const quoteSymbol = isToken0Quote === true ? pool.token0.symbol : pool.token1.symbol;
+                          const baseSymbol =
+                            isToken0Quote === true ? pool.token1.symbol : pool.token0.symbol;
+                          const quoteSymbol =
+                            isToken0Quote === true ? pool.token0.symbol : pool.token1.symbol;
                           return `${baseSymbol} / ${quoteSymbol}`;
                         })()}
                       </span>
@@ -219,24 +366,14 @@ export function PoolTable({
                       </span>
                     </div>
                   </td>
-                  <td className="py-3 text-right">{formatCurrency(pool.metrics.tvlUSD)}</td>
-                  <td className="py-3 text-right">{formatCurrency(pool.metrics.volume24hUSD)}</td>
-                  <td className="py-3 text-right">{formatCurrency(pool.metrics.fees24hUSD)}</td>
-                  <td className="py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <span className="text-green-400">
-                        {formatPercent(pool.metrics.apr7d)}
-                      </span>
-                      {shouldShowAprWarning(pool) && (
-                        <span
-                          className="text-yellow-400 text-xs font-bold cursor-help"
-                          title="APR may be unreliable: low TVL, volume, or fees"
-                        >
-                          !
-                        </span>
-                      )}
-                    </div>
-                  </td>
+                  {orderedVisibleColumns.map((col) => (
+                    <td
+                      key={col.id}
+                      className={`py-3 ${col.align === 'right' ? 'text-right' : 'text-left'}`}
+                    >
+                      {col.render(pool)}
+                    </td>
+                  ))}
                 </tr>
               );
             })}
