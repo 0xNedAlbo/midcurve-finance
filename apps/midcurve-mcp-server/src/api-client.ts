@@ -57,6 +57,40 @@ export class ApiClient {
     return body as T;
   }
 
+  /**
+   * POST an endpoint that returns the standard `{ success, data, meta }` envelope.
+   * Returns the unwrapped `data` field.
+   */
+  async post<T>(path: string, payload: unknown): Promise<T> {
+    const url = this.buildUrl(path);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new ApiError(
+        `API returned non-JSON response (HTTP ${response.status})`,
+        response.status,
+        'INVALID_RESPONSE'
+      );
+    }
+    if (!response.ok) {
+      this.throwApiError(body, response.status);
+    }
+    if (!isObject(body) || body.success !== true) {
+      this.throwApiError(body, response.status);
+    }
+    return (body as unknown as ApiResponse<T>).data;
+  }
+
   private async fetchBody(path: string, query?: Record<string, unknown>): Promise<unknown> {
     const url = this.buildUrl(path, query);
     const response = await fetch(url, {

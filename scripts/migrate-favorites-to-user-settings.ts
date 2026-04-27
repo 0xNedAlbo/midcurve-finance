@@ -18,7 +18,7 @@
  */
 
 import { PrismaClient } from '@midcurve/database';
-import type { UserSettingsData } from '@midcurve/shared';
+import type { FavoritePoolEntry, UserSettingsData } from '@midcurve/shared';
 import { DEFAULT_USER_SETTINGS } from '@midcurve/shared';
 
 const prisma = new PrismaClient();
@@ -94,8 +94,23 @@ async function main() {
     });
 
     if (existing) {
-      const existingSettings = existing.settings as unknown as UserSettingsData;
-      const existingSet = new Set(existingSettings.favoritePoolHashes);
+      const existingSettings = existing.settings as unknown as { favoritePoolHashes?: unknown[] };
+      const existingRawEntries = Array.isArray(existingSettings.favoritePoolHashes)
+        ? existingSettings.favoritePoolHashes
+        : [];
+      const existingEntries: FavoritePoolEntry[] = existingRawEntries
+        .map((e): FavoritePoolEntry | null => {
+          if (typeof e === 'string') return { hash: e };
+          if (e && typeof e === 'object' && typeof (e as { hash?: unknown }).hash === 'string') {
+            const obj = e as { hash: string; isToken0Quote?: unknown };
+            return typeof obj.isToken0Quote === 'boolean'
+              ? { hash: obj.hash, isToken0Quote: obj.isToken0Quote }
+              : { hash: obj.hash };
+          }
+          return null;
+        })
+        .filter((e): e is FavoritePoolEntry => e !== null);
+      const existingSet = new Set(existingEntries.map((e) => e.hash));
       const newHashes = poolHashes.filter((h) => !existingSet.has(h));
 
       if (newHashes.length === 0) {
@@ -104,8 +119,12 @@ async function main() {
       }
 
       const merged: UserSettingsData = {
-        ...existingSettings,
-        favoritePoolHashes: [...newHashes, ...existingSettings.favoritePoolHashes],
+        ...DEFAULT_USER_SETTINGS,
+        ...(existingSettings as unknown as Partial<UserSettingsData>),
+        favoritePoolHashes: [
+          ...newHashes.map((hash): FavoritePoolEntry => ({ hash })),
+          ...existingEntries,
+        ],
       };
 
       await prisma.userSettings.update({
@@ -119,7 +138,7 @@ async function main() {
     } else {
       const settings: UserSettingsData = {
         ...DEFAULT_USER_SETTINGS,
-        favoritePoolHashes: poolHashes,
+        favoritePoolHashes: poolHashes.map((hash): FavoritePoolEntry => ({ hash })),
       };
 
       await prisma.userSettings.create({

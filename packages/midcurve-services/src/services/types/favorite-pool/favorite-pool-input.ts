@@ -19,6 +19,13 @@ export interface AddFavoritePoolInput {
 
   /** Pool contract address (will be validated and normalized) */
   poolAddress: string;
+
+  /**
+   * Optional base/quote orientation to persist with the favorite.
+   * When provided, surfaces on subsequent reads via
+   * `FavoritePoolItem.userProvidedInfo.isToken0Quote`.
+   */
+  isToken0Quote?: boolean;
 }
 
 /**

@@ -1,14 +1,15 @@
 /**
  * usePoolSearch Hook
  *
- * React Query hook for searching Uniswap V3 pools by token sets.
- * Returns pools with favorite status for authenticated users.
+ * React Query hook for searching Uniswap V3 pools by base/quote token sets.
+ * Returns pools annotated with `userProvidedInfo.isToken0Quote` (derived
+ * from the quote-side input) and `isFavorite` for authenticated users.
  *
  * Usage:
  * ```tsx
  * const { pools, isLoading, error } = usePoolSearch({
- *   tokenSetA: ['WETH', 'stETH'],
- *   tokenSetB: ['USDC', 'USDT'],
+ *   base: ['WETH', 'stETH'],
+ *   quote: ['USDC', 'USDT'],
  *   chainIds: [1, 42161],
  *   sortBy: 'apr7d',
  *   limit: 20,
@@ -22,20 +23,25 @@ import { apiClient } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 
 /**
- * Search parameters for pool search
+ * Search parameters for pool search.
+ *
+ * `base`/`quote` accept exact token symbols (case-insensitive — must match a
+ * CoinGecko symbol exactly) or EIP-55 addresses. Fuzzy/prefix resolution is
+ * the consumer's responsibility (the token picker upstream handles it).
  */
 export interface PoolSearchParams {
   /**
-   * First set of tokens (addresses or symbols)
+   * Base side of the pair.
    * @example ["WETH", "stETH"]
    */
-  tokenSetA: string[];
+  base: string[];
 
   /**
-   * Second set of tokens (addresses or symbols)
+   * Quote side of the pair. Determines `userProvidedInfo.isToken0Quote`
+   * on each result.
    * @example ["USDC", "USDT"]
    */
-  tokenSetB: string[];
+  quote: string[];
 
   /**
    * Chain IDs to search on
@@ -110,16 +116,17 @@ export interface UsePoolSearchReturn {
  *
  * Features:
  * - Multi-chain search
- * - Symbol or address input
+ * - Symbol or address input (exact match — see PoolSearchParams)
  * - Favorite status enrichment
+ * - Per-result `userProvidedInfo.isToken0Quote` orientation
  * - Sorting by various metrics
  *
  * @param props - Search parameters
  * @returns Pool search results and query state
  */
 export function usePoolSearch({
-  tokenSetA,
-  tokenSetB,
+  base,
+  quote,
   chainIds,
   sortBy = 'tvlUSD',
   sortDirection = 'desc',
@@ -127,12 +134,12 @@ export function usePoolSearch({
   enabled = true,
 }: UsePoolSearchProps): UsePoolSearchReturn {
   // Only enable query when both token sets have at least one token
-  const hasValidInput = tokenSetA.length > 0 && tokenSetB.length > 0 && chainIds.length > 0;
+  const hasValidInput = base.length > 0 && quote.length > 0 && chainIds.length > 0;
 
   const query = useQuery({
     queryKey: queryKeys.pools.uniswapv3.search({
-      tokenSetA,
-      tokenSetB,
+      base,
+      quote,
       chainIds,
       sortBy,
       limit,
@@ -141,8 +148,8 @@ export function usePoolSearch({
       const response = await apiClient.post<PoolSearchResponse['data']>(
         '/api/v1/pools/uniswapv3/search',
         {
-          tokenSetA,
-          tokenSetB,
+          base,
+          quote,
           chainIds,
           sortBy,
           sortDirection,

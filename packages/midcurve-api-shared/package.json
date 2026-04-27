@@ -54,6 +54,8 @@
     "dev": "tsup src/index.ts --format esm,cjs --dts --out-dir dist --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
     "yalc:link": "yalc link @midcurve/shared && npm install",
     "yalc:update": "yalc update @midcurve/shared",
     "yalc:unlink": "yalc remove @midcurve/shared && npm install",

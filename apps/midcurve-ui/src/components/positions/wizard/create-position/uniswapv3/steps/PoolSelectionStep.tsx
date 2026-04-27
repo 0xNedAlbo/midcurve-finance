@@ -60,19 +60,19 @@ export function PoolSelectionStep() {
   const discoverPool = useDiscoverPool();
 
   // Token set state - arrays of selected tokens
-  const [tokenSetA, setTokenSetA] = useState<TokenSearchResult[]>([]);
-  const [tokenSetB, setTokenSetB] = useState<TokenSearchResult[]>([]);
+  const [baseTokens, setBaseTokens] = useState<TokenSearchResult[]>([]);
+  const [quoteTokens, setQuoteTokens] = useState<TokenSearchResult[]>([]);
   const [directAddress, setDirectAddress] = useState('');
   const [selectedChainIds, setSelectedChainIds] = useState<number[]>([1, 42161, 8453]); // Ethereum, Arbitrum, Base
 
   // Pool search hook
   const { pools, isLoading } = usePoolSearch({
-    tokenSetA: tokenSetA.map((t) => t.symbol),
-    tokenSetB: tokenSetB.map((t) => t.symbol),
+    base: baseTokens.map((t) => t.symbol),
+    quote: quoteTokens.map((t) => t.symbol),
     chainIds: selectedChainIds,
     sortBy: 'tvlUSD',
     limit: 50,
-    enabled: state.poolSelectionTab === 'search' && tokenSetA.length > 0 && tokenSetB.length > 0,
+    enabled: state.poolSelectionTab === 'search' && baseTokens.length > 0 && quoteTokens.length > 0,
   });
 
   // Toggle favorite mutation
@@ -105,7 +105,9 @@ export function PoolSelectionStep() {
     enabled: state.poolSelectionTab === 'direct' && isValidEthereumAddress(debouncedAddress),
   });
 
-  // Transform FavoritePoolItem to PoolSearchResultItem for PoolTable
+  // Transform FavoritePoolItem to PoolSearchResultItem for PoolTable.
+  // Forward stored userProvidedInfo so downstream consumers (the wizard
+  // SELECT_POOL reducer, the favorite-toggle handler) can read the orientation.
   const transformFavoriteToSearchResult = useCallback(
     (favorite: FavoritePoolItem): PoolSearchResultItem => {
       const chainMeta = getChainMetadataByChainId(favorite.chainId);
@@ -126,6 +128,9 @@ export function PoolSelectionStep() {
         },
         metrics: favorite.metrics,
         isFavorite: true,
+        ...(favorite.userProvidedInfo && {
+          userProvidedInfo: favorite.userProvidedInfo,
+        }),
       };
     },
     []
@@ -139,25 +144,25 @@ export function PoolSelectionStep() {
 
   // Token selection handlers
   const handleTokenASelect = useCallback((token: TokenSearchResult) => {
-    setTokenSetA((prev) => {
+    setBaseTokens((prev) => {
       if (prev.some((t) => t.symbol === token.symbol)) return prev;
       return [...prev, token];
     });
   }, []);
 
   const handleTokenARemove = useCallback((token: TokenSearchResult) => {
-    setTokenSetA((prev) => prev.filter((t) => t.symbol !== token.symbol));
+    setBaseTokens((prev) => prev.filter((t) => t.symbol !== token.symbol));
   }, []);
 
   const handleTokenBSelect = useCallback((token: TokenSearchResult) => {
-    setTokenSetB((prev) => {
+    setQuoteTokens((prev) => {
       if (prev.some((t) => t.symbol === token.symbol)) return prev;
       return [...prev, token];
     });
   }, []);
 
   const handleTokenBRemove = useCallback((token: TokenSearchResult) => {
-    setTokenSetB((prev) => prev.filter((t) => t.symbol !== token.symbol));
+    setQuoteTokens((prev) => prev.filter((t) => t.symbol !== token.symbol));
   }, []);
 
   // Chain toggle handler
@@ -169,7 +174,20 @@ export function PoolSelectionStep() {
     );
   }, []);
 
-  // Handle favorite toggle
+  // Handle favorite toggle.
+  //
+  // Forward `pool.userProvidedInfo?.isToken0Quote` on the add path so the
+  // favorite is persisted with the active base/quote orientation:
+  //   - Search-tab results carry the user's currently-selected orientation
+  //     (derived server-side from the search request's `quote` array) →
+  //     forwarded unchanged.
+  //   - Favorites-tab results carry the previously-stored orientation →
+  //     re-favoriting from this tab is a no-op for role.
+  //   - Direct-Address results have no orientation — forwarded as undefined
+  //     (legacy-equivalent storage).
+  //
+  // On the remove path, the role is irrelevant — toggleFavorite.mutate
+  // ignores `isToken0Quote` when `isFavorite === true`.
   const handleToggleFavorite = useCallback(
     (pool: PoolSearchResultItem) => {
       toggleFavorite.mutate({
@@ -177,6 +195,9 @@ export function PoolSelectionStep() {
         chainId: pool.chainId,
         poolAddress: pool.poolAddress,
         isFavorite: pool.isFavorite ?? false,
+        ...(pool.userProvidedInfo && {
+          isToken0Quote: pool.userProvidedInfo.isToken0Quote,
+        }),
       });
     },
     [toggleFavorite]
@@ -200,6 +221,9 @@ export function PoolSelectionStep() {
         const result = await discoverPool.mutateAsync({
           chainId: pool.chainId,
           address: pool.poolAddress,
+          ...(pool.userProvidedInfo && {
+            isToken0Quote: pool.userProvidedInfo.isToken0Quote,
+          }),
         });
         // Deserialize JSON to class instance for proper method access
         const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
@@ -282,24 +306,24 @@ export function PoolSelectionStep() {
         <div className="space-y-4">
           <TokenSetSearchInput
             label="Base Token"
-            selectedTokens={tokenSetA}
+            selectedTokens={baseTokens}
             onTokenSelect={handleTokenASelect}
             onTokenRemove={handleTokenARemove}
             chainIds={selectedChainIds}
             placeholder="Search..."
             maxTokens={4}
-            excludeTokens={tokenSetB}
+            excludeTokens={quoteTokens}
           />
 
           <TokenSetSearchInput
             label="Quote Token"
-            selectedTokens={tokenSetB}
+            selectedTokens={quoteTokens}
             onTokenSelect={handleTokenBSelect}
             onTokenRemove={handleTokenBRemove}
             chainIds={selectedChainIds}
             placeholder="Search..."
             maxTokens={4}
-            excludeTokens={tokenSetA}
+            excludeTokens={baseTokens}
           />
 
           <div className="flex items-center gap-4">

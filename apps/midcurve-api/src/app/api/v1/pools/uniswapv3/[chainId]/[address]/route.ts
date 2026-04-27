@@ -48,6 +48,9 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Query params:
  * - metrics (optional): Include subgraph metrics (TVL, volume, fees). Defaults to false.
  * - fees (optional): Include fee data for APR calculations (24h volumes, token prices). Defaults to false.
+ * - isToken0Quote (optional): If provided, response includes
+ *   `userProvidedInfo: { isToken0Quote }` (pure echo — metrics/feeData are
+ *   not reoriented).
  */
 export async function GET(
   request: NextRequest,
@@ -102,7 +105,7 @@ export async function GET(
         });
       }
 
-      const { metrics, fees } = queryResult.data;
+      const { metrics, fees, isToken0Quote } = queryResult.data;
 
       // 3. Discover pool (creates if new, refreshes if existing)
       // This ensures we always return fresh on-chain state
@@ -240,6 +243,9 @@ export async function GET(
         pool: serializedPool as unknown as UniswapV3Pool,
         ...(metricsData && { metrics: metricsData }),
         ...(feeData && { feeData }),
+        ...(typeof isToken0Quote === 'boolean' && {
+          userProvidedInfo: { isToken0Quote },
+        }),
       };
 
       const response = createSuccessResponse(responseData, {

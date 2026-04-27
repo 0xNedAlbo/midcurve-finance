@@ -7,16 +7,20 @@
  * Methods:
  * - getByUserId: Get settings for a user (returns defaults if no row exists)
  * - upsert: Create or replace entire settings JSON
- * - addFavoritePoolHash: Prepend a pool hash to favorites (idempotent)
- * - removeFavoritePoolHash: Remove a pool hash from favorites (idempotent)
- * - getFavoritePoolHashes: Get the user's favorite pool hashes
+ * - addFavoritePoolEntry: Prepend a favorite pool entry (idempotent, optionally pinning isToken0Quote)
+ * - removeFavoritePoolEntry: Remove a favorite by pool hash (idempotent)
+ * - getFavoritePoolEntries: Get the user's favorite pool entries
  * - isFavoritePoolHash: Check if a pool hash is in the user's favorites
+ *
+ * Storage compatibility: legacy installations stored `favoritePoolHashes`
+ * as `string[]`. Reads normalize legacy entries to `FavoritePoolEntry`
+ * on the fly; writes always emit the object shape.
  */
 
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { Prisma } from '@midcurve/database';
 import { DEFAULT_USER_SETTINGS } from '@midcurve/shared';
-import type { UserSettingsData } from '@midcurve/shared';
+import type { FavoritePoolEntry, UserSettingsData } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 
@@ -32,10 +36,42 @@ export interface UserSettingsServiceDependencies {
 }
 
 /**
+ * Normalize a single stored entry into `FavoritePoolEntry`.
+ *
+ * Accepts either the legacy `string` shape or the new object shape.
+ */
+function normalizeEntry(raw: unknown): FavoritePoolEntry | null {
+  if (typeof raw === 'string') {
+    return { hash: raw };
+  }
+  if (raw && typeof raw === 'object' && 'hash' in raw && typeof (raw as { hash: unknown }).hash === 'string') {
+    const obj = raw as { hash: string; isToken0Quote?: unknown };
+    if (typeof obj.isToken0Quote === 'boolean') {
+      return { hash: obj.hash, isToken0Quote: obj.isToken0Quote };
+    }
+    return { hash: obj.hash };
+  }
+  return null;
+}
+
+/**
+ * Normalize the raw `favoritePoolHashes` JSON value into `FavoritePoolEntry[]`.
+ * Drops malformed entries silently — they have no place in the typed runtime.
+ */
+function normalizeEntries(raw: unknown): FavoritePoolEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const result: FavoritePoolEntry[] = [];
+  for (const item of raw) {
+    const entry = normalizeEntry(item);
+    if (entry) result.push(entry);
+  }
+  return result;
+}
+
+/**
  * User Settings Service
  *
  * Manages per-user settings stored as a single JSON structure.
- * Follows the WebhookConfigService 1:1 pattern.
  */
 export class UserSettingsService {
   private readonly prisma: PrismaClient;
@@ -51,7 +87,10 @@ export class UserSettingsService {
   // ============================================================================
 
   /**
-   * Gets settings for a user
+   * Gets settings for a user.
+   *
+   * Normalizes the stored `favoritePoolHashes` JSON (which may be a legacy
+   * `string[]`) into `FavoritePoolEntry[]` before returning.
    *
    * @returns The user's settings, or DEFAULT_USER_SETTINGS if no row exists
    */
@@ -67,12 +106,19 @@ export class UserSettingsService {
       return { ...DEFAULT_USER_SETTINGS };
     }
 
+    const raw = row.settings as unknown as Record<string, unknown>;
+    const settings: UserSettingsData = {
+      ...DEFAULT_USER_SETTINGS,
+      ...(raw as Partial<UserSettingsData>),
+      favoritePoolHashes: normalizeEntries(raw.favoritePoolHashes),
+    };
+
     log.methodExit(this.logger, 'getByUserId', { found: true });
-    return row.settings as unknown as UserSettingsData;
+    return settings;
   }
 
   /**
-   * Creates or replaces the entire settings JSON for a user
+   * Creates or replaces the entire settings JSON for a user.
    */
   async upsert(
     userId: string,
@@ -93,84 +139,98 @@ export class UserSettingsService {
       },
     });
 
+    const raw = result.settings as unknown as Record<string, unknown>;
+    const normalized: UserSettingsData = {
+      ...DEFAULT_USER_SETTINGS,
+      ...(raw as Partial<UserSettingsData>),
+      favoritePoolHashes: normalizeEntries(raw.favoritePoolHashes),
+    };
+
     log.methodExit(this.logger, 'upsert', { userId });
-    return result.settings as unknown as UserSettingsData;
+    return normalized;
   }
 
   // ============================================================================
-  // FAVORITE POOL HASH OPERATIONS
+  // FAVORITE POOL ENTRY OPERATIONS
   // ============================================================================
 
   /**
-   * Prepends a pool hash to the user's favorites (idempotent)
+   * Prepends a favorite pool entry to the user's favorites (idempotent).
    *
-   * If the hash already exists, it is moved to the front.
+   * If an entry with the same `hash` already exists, it is removed first and
+   * the new entry — including the (possibly updated) `isToken0Quote` — is
+   * prepended. Always writes the new object shape, regardless of whether the
+   * caller provided an orientation.
    */
-  async addFavoritePoolHash(
+  async addFavoritePoolEntry(
     userId: string,
-    poolHash: string
+    hash: string,
+    isToken0Quote?: boolean
   ): Promise<UserSettingsData> {
-    log.methodEntry(this.logger, 'addFavoritePoolHash', { userId, poolHash });
+    log.methodEntry(this.logger, 'addFavoritePoolEntry', {
+      userId,
+      hash,
+      isToken0Quote,
+    });
 
     const current = await this.getByUserId(userId);
-
-    // Remove if already present (will re-prepend)
-    const filtered = current.favoritePoolHashes.filter((h) => h !== poolHash);
+    const filtered = current.favoritePoolHashes.filter((e) => e.hash !== hash);
+    const newEntry: FavoritePoolEntry =
+      typeof isToken0Quote === 'boolean'
+        ? { hash, isToken0Quote }
+        : { hash };
     const updated: UserSettingsData = {
       ...current,
-      favoritePoolHashes: [poolHash, ...filtered],
+      favoritePoolHashes: [newEntry, ...filtered],
     };
 
     const result = await this.upsert(userId, updated);
-    log.methodExit(this.logger, 'addFavoritePoolHash', {
+    log.methodExit(this.logger, 'addFavoritePoolEntry', {
       totalFavorites: result.favoritePoolHashes.length,
     });
     return result;
   }
 
   /**
-   * Removes a pool hash from the user's favorites (idempotent)
+   * Removes a favorite pool entry by hash (idempotent).
    */
-  async removeFavoritePoolHash(
+  async removeFavoritePoolEntry(
     userId: string,
-    poolHash: string
+    hash: string
   ): Promise<UserSettingsData> {
-    log.methodEntry(this.logger, 'removeFavoritePoolHash', {
-      userId,
-      poolHash,
-    });
+    log.methodEntry(this.logger, 'removeFavoritePoolEntry', { userId, hash });
 
     const current = await this.getByUserId(userId);
     const updated: UserSettingsData = {
       ...current,
       favoritePoolHashes: current.favoritePoolHashes.filter(
-        (h) => h !== poolHash
+        (e) => e.hash !== hash
       ),
     };
 
     const result = await this.upsert(userId, updated);
-    log.methodExit(this.logger, 'removeFavoritePoolHash', {
+    log.methodExit(this.logger, 'removeFavoritePoolEntry', {
       totalFavorites: result.favoritePoolHashes.length,
     });
     return result;
   }
 
   /**
-   * Returns the user's favorite pool hashes
+   * Returns the user's favorite pool entries (lazy-normalized from storage).
    */
-  async getFavoritePoolHashes(userId: string): Promise<string[]> {
+  async getFavoritePoolEntries(userId: string): Promise<FavoritePoolEntry[]> {
     const settings = await this.getByUserId(userId);
     return settings.favoritePoolHashes;
   }
 
   /**
-   * Checks if a pool hash is in the user's favorites
+   * Checks if a pool hash is in the user's favorites.
    */
   async isFavoritePoolHash(
     userId: string,
     poolHash: string
   ): Promise<boolean> {
-    const hashes = await this.getFavoritePoolHashes(userId);
-    return hashes.includes(poolHash);
+    const entries = await this.getFavoritePoolEntries(userId);
+    return entries.some((e) => e.hash === poolHash);
   }
 }

@@ -46,6 +46,11 @@ export interface FavoritePoolResult {
   poolId: string;
   /** The full pool object */
   pool: UniswapV3Pool;
+  /**
+   * Stored base/quote orientation for this favorite. Undefined for legacy
+   * entries or favorites added without a role context.
+   */
+  isToken0Quote?: boolean;
 }
 
 /**
@@ -142,8 +147,13 @@ export class FavoritePoolService {
    * If the pool is already favorited, moves it to the front (most recent).
    */
   async addFavorite(input: AddFavoritePoolInput): Promise<FavoritePoolResult> {
-    const { userId, chainId, poolAddress } = input;
-    log.methodEntry(this.logger, 'addFavorite', { userId, chainId, poolAddress });
+    const { userId, chainId, poolAddress, isToken0Quote } = input;
+    log.methodEntry(this.logger, 'addFavorite', {
+      userId,
+      chainId,
+      poolAddress,
+      isToken0Quote,
+    });
 
     // 1. Discover the pool (this triggers token discovery as well)
     this.logger.debug(
@@ -161,27 +171,35 @@ export class FavoritePoolService {
       'Pool discovered successfully'
     );
 
-    // 2. Store pool hash in user settings
+    // 2. Store pool hash + optional orientation in user settings
     const poolHash = this.poolService.createHash({
       chainId,
       address: poolAddress,
     });
 
-    await this.userSettingsService.addFavoritePoolHash(userId, poolHash);
+    await this.userSettingsService.addFavoritePoolEntry(
+      userId,
+      poolHash,
+      isToken0Quote
+    );
 
     this.logger.info(
-      { userId, poolHash, poolId: pool.id },
+      { userId, poolHash, poolId: pool.id, isToken0Quote },
       'Pool added to favorites'
     );
 
     log.methodExit(this.logger, 'addFavorite', { poolHash });
 
-    return {
+    const result: FavoritePoolResult = {
       poolHash,
       userId,
       poolId: pool.id,
       pool,
     };
+    if (typeof isToken0Quote === 'boolean') {
+      result.isToken0Quote = isToken0Quote;
+    }
+    return result;
   }
 
   // ============================================================================
@@ -203,7 +221,7 @@ export class FavoritePoolService {
       address: poolAddress,
     });
 
-    await this.userSettingsService.removeFavoritePoolHash(userId, poolHash);
+    await this.userSettingsService.removeFavoritePoolEntry(userId, poolHash);
 
     this.logger.info(
       { userId, poolHash },
@@ -227,13 +245,13 @@ export class FavoritePoolService {
     const { userId, limit = 50, offset = 0 } = input;
     log.methodEntry(this.logger, 'listFavorites', { userId, limit, offset });
 
-    // 1. Get favorite pool hashes from settings
-    const allHashes = await this.userSettingsService.getFavoritePoolHashes(userId);
+    // 1. Get favorite pool entries from settings (lazy-normalized from storage)
+    const allEntries = await this.userSettingsService.getFavoritePoolEntries(userId);
 
     // 2. Apply pagination
-    const paginatedHashes = allHashes.slice(offset, offset + limit);
+    const paginatedEntries = allEntries.slice(offset, offset + limit);
 
-    if (paginatedHashes.length === 0) {
+    if (paginatedEntries.length === 0) {
       log.methodExit(this.logger, 'listFavorites', { count: 0 });
       return [];
     }
@@ -242,10 +260,10 @@ export class FavoritePoolService {
     // Hash format: "uniswapv3/{chainId}/{poolAddress}"
     const results: FavoritePoolResult[] = [];
 
-    for (const hash of paginatedHashes) {
-      const parts = hash.split('/');
+    for (const entry of paginatedEntries) {
+      const parts = entry.hash.split('/');
       if (parts.length !== 3 || parts[0] !== 'uniswapv3') {
-        this.logger.debug({ poolHash: hash }, 'Invalid pool hash format, skipping');
+        this.logger.debug({ poolHash: entry.hash }, 'Invalid pool hash format, skipping');
         continue;
       }
 
@@ -254,16 +272,20 @@ export class FavoritePoolService {
 
       const pool = await this.poolService.discover({ chainId, poolAddress });
       if (!pool) {
-        this.logger.debug({ poolHash: hash }, 'Pool discovery returned null, skipping');
+        this.logger.debug({ poolHash: entry.hash }, 'Pool discovery returned null, skipping');
         continue;
       }
 
-      results.push({
-        poolHash: hash,
+      const result: FavoritePoolResult = {
+        poolHash: entry.hash,
         userId,
         poolId: pool.id,
         pool,
-      });
+      };
+      if (typeof entry.isToken0Quote === 'boolean') {
+        result.isToken0Quote = entry.isToken0Quote;
+      }
+      results.push(result);
     }
 
     // 5. Enrich with metrics from subgraph
@@ -374,9 +396,8 @@ export class FavoritePoolService {
     }
 
     // Get all favorite hashes as a Set for O(1) lookups
-    const favoriteHashes = new Set(
-      await this.userSettingsService.getFavoritePoolHashes(userId)
-    );
+    const entries = await this.userSettingsService.getFavoritePoolEntries(userId);
+    const favoriteHashes = new Set(entries.map((e) => e.hash));
 
     const result = new Set<string>();
     for (const pool of pools) {
@@ -408,8 +429,8 @@ export class FavoritePoolService {
   async countFavorites(userId: string): Promise<number> {
     log.methodEntry(this.logger, 'countFavorites', { userId });
 
-    const hashes = await this.userSettingsService.getFavoritePoolHashes(userId);
-    const count = hashes.length;
+    const entries = await this.userSettingsService.getFavoritePoolEntries(userId);
+    const count = entries.length;
 
     log.methodExit(this.logger, 'countFavorites', { userId, count });
     return count;

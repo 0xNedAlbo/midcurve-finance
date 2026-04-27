@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import type { UniswapV3Pool } from '@midcurve/shared';
 import type { ApiResponse } from '../common/index.js';
-import type { PoolSearchResultItem } from './pool-search.js';
+import type { PoolSearchResultItem, PoolUserProvidedInfo } from './pool-search.js';
 import type { PoolMetricsBlock } from './pool-metrics-shared.js';
 
 /**
@@ -45,6 +45,19 @@ export interface GetUniswapV3PoolQuery {
    * @example true
    */
   fees?: boolean;
+
+  /**
+   * Optional base/quote orientation echoed back via
+   * `userProvidedInfo.isToken0Quote` on the response.
+   *
+   * When `true`/`false`, the response includes
+   * `userProvidedInfo: { isToken0Quote }`. When omitted, the field is not
+   * included and the response uses pool-native token0/token1 ordering.
+   *
+   * Pure echo — metrics/feeData are not reoriented based on this flag.
+   * @example true
+   */
+  isToken0Quote?: boolean;
 }
 
 /**
@@ -112,6 +125,13 @@ export interface GetUniswapV3PoolData {
      */
     calculatedAt: string;
   };
+
+  /**
+   * User-provided role annotation echoed from the `isToken0Quote` query
+   * parameter. Only present when the request supplied that param. Pool
+   * itself remains role-agnostic — this is purely query-side metadata.
+   */
+  userProvidedInfo?: PoolUserProvidedInfo;
 }
 
 /**
@@ -157,6 +177,12 @@ export const GetUniswapV3PoolQuerySchema = z.object({
     .default('false')
     .transform((val) => val === 'true')
     .pipe(z.boolean()),
+
+  isToken0Quote: z
+    .string()
+    .optional()
+    .transform((val) => (val === undefined ? undefined : val === 'true'))
+    .pipe(z.boolean().optional()),
 });
 
 // ============================================================================

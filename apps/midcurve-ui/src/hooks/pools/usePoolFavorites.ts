@@ -86,12 +86,16 @@ export function usePoolFavorites({
 // ============================================================================
 
 /**
- * Input for adding a pool to favorites
+ * Input for adding a pool to favorites.
+ *
+ * `isToken0Quote` (optional) pins a base/quote orientation to the favorite —
+ * surfaces on subsequent reads via `FavoritePoolItem.userProvidedInfo`.
  */
 export interface AddFavoriteInput {
   protocol: string;
   chainId: number;
   poolAddress: string;
+  isToken0Quote?: boolean;
 }
 
 /**
@@ -104,7 +108,14 @@ export function useAddPoolFavorite() {
     mutationFn: async (input: AddFavoriteInput) => {
       const response = await apiClient.post<AddFavoritePoolData>(
         '/api/v1/pools/favorites',
-        input
+        {
+          protocol: input.protocol,
+          chainId: input.chainId,
+          poolAddress: input.poolAddress,
+          ...(typeof input.isToken0Quote === 'boolean' && {
+            isToken0Quote: input.isToken0Quote,
+          }),
+        }
       );
       return response.data;
     },
@@ -173,13 +184,18 @@ export function useRemovePoolFavorite() {
 // ============================================================================
 
 /**
- * Input for toggling a pool's favorite status
+ * Input for toggling a pool's favorite status.
+ *
+ * On the add path, `isToken0Quote` (optional) pins the base/quote orientation
+ * for the favorite — typically forwarded from the active search result's
+ * `userProvidedInfo.isToken0Quote`. Ignored on the remove path.
  */
 export interface ToggleFavoriteInput {
   protocol: string;
   chainId: number;
   poolAddress: string;
   isFavorite: boolean;
+  isToken0Quote?: boolean;
 }
 
 /**
@@ -206,13 +222,17 @@ export function useTogglePoolFavorite() {
         );
         return { action: 'removed' as const, data: response.data };
       } else {
-        // Not favorited, so add
+        // Not favorited, so add — forward isToken0Quote if the caller has
+        // an active orientation (search-tab path); omit otherwise.
         const response = await apiClient.post<AddFavoritePoolData>(
           '/api/v1/pools/favorites',
           {
             protocol: input.protocol,
             chainId: input.chainId,
             poolAddress: input.poolAddress,
+            ...(typeof input.isToken0Quote === 'boolean' && {
+              isToken0Quote: input.isToken0Quote,
+            }),
           }
         );
         return { action: 'added' as const, data: response.data };
