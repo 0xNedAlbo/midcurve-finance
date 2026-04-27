@@ -4,7 +4,7 @@ You are working on a GitHub issue as a bug fix. The issue is: $ARGUMENTS
 
 ## Async clarification protocol
 
-This workflow is asynchronous. When you need input from me — clarifying questions OR plan confirmation — DO NOT prompt me interactively. Instead, post a comment on the issue, print a short summary in the terminal, and STOP. I'll tell you when the response is in the issue; you then fetch the latest comments and continue.
+This workflow is asynchronous, including when Claude Code runs in Plan Mode. When you need input from me — clarifying questions OR plan confirmation — DO NOT prompt me interactively, and DO NOT use Plan Mode's default behavior of presenting the plan in the terminal. Instead, post a comment on the issue, print a short summary in the terminal, and STOP. I'll tell you when the response is in the issue; you then fetch the latest comments and continue.
 
 ## Steps
 
