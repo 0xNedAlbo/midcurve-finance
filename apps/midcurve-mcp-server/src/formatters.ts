@@ -358,6 +358,11 @@ export function formatPnl(pnl: PnlResponseRaw): Record<string, unknown> {
  * `metrics` (PoolMetricsBlock per PRD-pool-sigma-filter) and `feeData` siblings.
  */
 interface PoolDetailRaw {
+  // TODO(#52): replace this hand-written subset with the canonical pool wire
+  // shape once #52 introduces a true plain-object wire type in
+  // @midcurve/api-shared. The canonical `GetUniswapV3PoolData['pool']` is the
+  // UniswapV3Pool class type (Date fields, methods) — not what's actually on
+  // the wire. The subset below visibly advertises that gap.
   pool: {
     protocol: string;
     feeBps: number;
