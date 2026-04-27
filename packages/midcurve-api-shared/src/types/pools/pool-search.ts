@@ -2,10 +2,11 @@
  * Pool Search Endpoint Types
  *
  * Types for the POST /api/v1/pools/uniswapv3/search endpoint.
- * Allows searching for pools by token sets across multiple chains.
+ * Allows searching for pools by base/quote token sets across multiple chains.
  */
 
 import { z } from 'zod';
+import { isValidAddress, normalizeAddress } from '@midcurve/shared';
 import type { ApiResponse } from '../common/index.js';
 import type { PoolMetricsBlock } from './pool-metrics-shared.js';
 
@@ -16,29 +17,39 @@ import type { PoolMetricsBlock } from './pool-metrics-shared.js';
 /**
  * POST /api/v1/pools/uniswapv3/search - Request body
  *
- * Search for pools matching token sets across multiple chains.
+ * Search for pools matching base × quote token sets across multiple chains.
+ *
+ * Each pool result is annotated with `userProvidedInfo.isToken0Quote`,
+ * derived per result by checking which of the pool's token0/token1 appears
+ * in the `quote` array.
+ *
+ * **Symbol/address contract**: `base` and `quote` accept exact token symbols
+ * (case-insensitive — must match a CoinGecko symbol exactly) or EIP-55
+ * addresses. Fuzzy / prefix resolution is the consumer's responsibility —
+ * passing `"eth"` will not match `WETH`/`stETH`/`rETH`.
  */
 export interface PoolSearchRequest {
   /**
-   * First set of tokens (addresses or symbols)
+   * Base side of the pair.
    *
-   * Can be:
-   * - Token addresses (e.g., "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-   * - Token symbols (e.g., "WETH", "stETH")
+   * Accepts exact token symbols (case-insensitive — must match a CoinGecko
+   * symbol exactly) or EIP-55 addresses. Fuzzy / prefix resolution is the
+   * consumer's responsibility.
    *
    * @example ["WETH", "stETH"]
    * @example ["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"]
    */
-  tokenSetA: string[];
+  base: string[];
 
   /**
-   * Second set of tokens (addresses or symbols)
+   * Quote side of the pair.
    *
-   * Same format as tokenSetA.
+   * Same format as `base`. The cartesian product `base × quote` is searched
+   * (with same-token-on-both-sides pairs excluded per chain).
    *
    * @example ["USDC", "USDT", "DAI"]
    */
-  tokenSetB: string[];
+  quote: string[];
 
   /**
    * Chain IDs to search on
@@ -100,6 +111,23 @@ export interface PoolSearchTokenInfo {
 }
 
 /**
+ * User-provided role annotation echoed onto a pool result.
+ *
+ * Carries the user's intended base/quote orientation derived from the
+ * search request (or echoed from the pool detail endpoint). Pool itself
+ * remains role-agnostic — this is purely query-side metadata.
+ */
+export interface PoolUserProvidedInfo {
+  /**
+   * Whether the pool's `token0` is the quote side from the user's perspective.
+   *
+   * `true` → token0 = quote, token1 = base
+   * `false` → token0 = base, token1 = quote
+   */
+  isToken0Quote: boolean;
+}
+
+/**
  * Single pool search result
  */
 export interface PoolSearchResultItem {
@@ -130,6 +158,14 @@ export interface PoolSearchResultItem {
    * undefined/missing when not authenticated.
    */
   isFavorite?: boolean;
+
+  /**
+   * User-provided role annotation derived from the search request's
+   * `quote` array. Indicates which of `token0`/`token1` the user intends
+   * as the quote side, allowing consumers to render pairs in user-intended
+   * orientation regardless of pool-native token order.
+   */
+  userProvidedInfo?: PoolUserProvidedInfo;
 }
 
 /**
@@ -168,54 +204,83 @@ export interface PoolSearchResponse extends ApiResponse<PoolSearchData> {
 const SUPPORTED_CHAIN_IDS = [1, 42161, 8453, 10, 137] as const;
 
 /**
- * POST /api/v1/pools/uniswapv3/search - Request validation
+ * Canonicalize a `base` / `quote` entry for verbatim equality comparison.
+ * - Addresses: EIP-55 normalized.
+ * - Symbols: uppercased (case-insensitive compare).
  */
-export const PoolSearchRequestSchema = z.object({
-  tokenSetA: z
-    .array(z.string().min(1, 'Token cannot be empty'))
-    .min(1, 'tokenSetA must have at least one token')
-    .max(10, 'tokenSetA cannot have more than 10 tokens'),
+function canonicalizeTokenInput(input: string): string {
+  if (isValidAddress(input)) {
+    return normalizeAddress(input);
+  }
+  return input.toUpperCase();
+}
 
-  tokenSetB: z
-    .array(z.string().min(1, 'Token cannot be empty'))
-    .min(1, 'tokenSetB must have at least one token')
-    .max(10, 'tokenSetB cannot have more than 10 tokens'),
+/**
+ * POST /api/v1/pools/uniswapv3/search - Request validation
+ *
+ * Trivial-case rejection: rejects only `|base| = |quote| = 1 ∧ base[0] === quote[0]`
+ * (after EIP-55 normalize for addresses, case-insensitive compare for symbols).
+ * Richer queries like `base=["WETH","stETH"], quote=["WETH","stETH"]` pass and
+ * are handled at the service layer with per-chain self-exclusion.
+ */
+export const PoolSearchRequestSchema = z
+  .object({
+    base: z
+      .array(z.string().min(1, 'Token cannot be empty'))
+      .min(1, 'base must have at least one token')
+      .max(10, 'base cannot have more than 10 tokens'),
 
-  chainIds: z
-    .array(
-      z
-        .number()
-        .int('Chain ID must be an integer')
-        .refine(
-          (id) => SUPPORTED_CHAIN_IDS.includes(id as (typeof SUPPORTED_CHAIN_IDS)[number]),
-          (id) => ({ message: `Chain ID ${id} is not supported. Supported: ${SUPPORTED_CHAIN_IDS.join(', ')}` })
-        )
-    )
-    .min(1, 'At least one chain ID is required')
-    .max(5, 'Cannot search more than 5 chains at once'),
+    quote: z
+      .array(z.string().min(1, 'Token cannot be empty'))
+      .min(1, 'quote must have at least one token')
+      .max(10, 'quote cannot have more than 10 tokens'),
 
-  sortBy: z
-    .enum([
-      'tvlUSD',
-      'volume24hUSD',
-      'fees24hUSD',
-      'volume7dAvgUSD',
-      'fees7dAvgUSD',
-      'apr7d',
-    ])
-    .optional()
-    .default('tvlUSD'),
+    chainIds: z
+      .array(
+        z
+          .number()
+          .int('Chain ID must be an integer')
+          .refine(
+            (id) => SUPPORTED_CHAIN_IDS.includes(id as (typeof SUPPORTED_CHAIN_IDS)[number]),
+            (id) => ({ message: `Chain ID ${id} is not supported. Supported: ${SUPPORTED_CHAIN_IDS.join(', ')}` })
+          )
+      )
+      .min(1, 'At least one chain ID is required')
+      .max(5, 'Cannot search more than 5 chains at once'),
 
-  sortDirection: z.enum(['asc', 'desc']).optional().default('desc'),
+    sortBy: z
+      .enum([
+        'tvlUSD',
+        'volume24hUSD',
+        'fees24hUSD',
+        'volume7dAvgUSD',
+        'fees7dAvgUSD',
+        'apr7d',
+      ])
+      .optional()
+      .default('tvlUSD'),
 
-  limit: z
-    .number()
-    .int('Limit must be an integer')
-    .min(1, 'Limit must be at least 1')
-    .max(100, 'Limit cannot exceed 100')
-    .optional()
-    .default(20),
-});
+    sortDirection: z.enum(['asc', 'desc']).optional().default('desc'),
+
+    limit: z
+      .number()
+      .int('Limit must be an integer')
+      .min(1, 'Limit must be at least 1')
+      .max(100, 'Limit cannot exceed 100')
+      .optional()
+      .default(20),
+  })
+  .refine(
+    (data) => {
+      if (data.base.length !== 1 || data.quote.length !== 1) return true;
+      return canonicalizeTokenInput(data.base[0]!) !== canonicalizeTokenInput(data.quote[0]!);
+    },
+    {
+      message:
+        'base and quote cannot be the same single token. Provide at least one differing token to express the desired pair.',
+      path: ['quote'],
+    }
+  );
 
 /**
  * Inferred type from schema (for runtime validation)

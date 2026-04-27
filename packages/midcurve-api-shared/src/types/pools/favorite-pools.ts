@@ -12,6 +12,7 @@ import type { UniswapV3Pool } from '@midcurve/shared';
 import type { ApiResponse } from '../common/index.js';
 import type { BigIntToString } from '../common/serialization.js';
 import type { PoolMetricsBlock } from './pool-metrics-shared.js';
+import type { PoolUserProvidedInfo } from './pool-search.js';
 
 // ============================================================================
 // REQUEST TYPES
@@ -44,6 +45,15 @@ export interface AddFavoritePoolRequest {
    * @example "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
    */
   poolAddress: string;
+
+  /**
+   * Optional base/quote orientation to persist with the favorite.
+   *
+   * If provided, the favorite is stored with this orientation and returned
+   * via `FavoritePoolItem.userProvidedInfo` on subsequent reads. If omitted,
+   * the favorite is stored without orientation (matching legacy entries).
+   */
+  isToken0Quote?: boolean;
 }
 
 /**
@@ -139,6 +149,14 @@ export interface FavoritePoolItem {
    * verdict. See `PoolMetricsBlock` for the full schema.
    */
   metrics: PoolMetricsBlock;
+
+  /**
+   * Stored base/quote orientation for this favorite, if the user pinned one
+   * when favoriting (or has been re-favorited from a search result that
+   * carried orientation). Legacy entries that pre-date this field surface
+   * with `userProvidedInfo` undefined.
+   */
+  userProvidedInfo?: PoolUserProvidedInfo;
 }
 
 /**
@@ -258,6 +276,8 @@ export const AddFavoritePoolRequestSchema = z.object({
     .string()
     .min(1, 'Pool address is required')
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address format'),
+
+  isToken0Quote: z.boolean().optional(),
 });
 
 /**
@@ -423,6 +443,15 @@ export interface GenericAddFavoritePoolRequest {
    * @example "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
    */
   poolAddress: string;
+
+  /**
+   * Optional base/quote orientation to persist with the favorite.
+   *
+   * If provided, the favorite is stored with this orientation and returned
+   * via `FavoritePoolItem.userProvidedInfo` on subsequent reads. If omitted,
+   * the favorite is stored without orientation (matching legacy entries).
+   */
+  isToken0Quote?: boolean;
 }
 
 /**
@@ -454,6 +483,8 @@ export const GenericAddFavoritePoolRequestSchema = z.object({
     .string()
     .min(1, 'Pool address is required')
     .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid pool address format'),
+
+  isToken0Quote: z.boolean().optional(),
 });
 
 /**

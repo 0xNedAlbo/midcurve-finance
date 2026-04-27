@@ -30,6 +30,7 @@ import { buildConvertPriceAndTickTool } from './tools/convert-price-and-tick.js'
 import { buildGetPnlTool } from './tools/get-pnl.js';
 import { buildListCloseOrdersTool } from './tools/list-close-orders.js';
 import { buildGetPoolTool } from './tools/get-pool.js';
+import { buildSearchPoolsTool } from './tools/search-pools.js';
 import { buildListNotificationsTool } from './tools/list-notifications.js';
 
 async function main(): Promise<void> {
@@ -101,9 +102,10 @@ async function main(): Promise<void> {
   register(buildGetPnlTool(client));
   register(buildListCloseOrdersTool(client));
   register(buildGetPoolTool(client));
+  register(buildSearchPoolsTool(client));
   register(buildListNotificationsTool(client));
 
-  log.info({ count: 16 }, 'tools registered');
+  log.info({ count: 17 }, 'tools registered');
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

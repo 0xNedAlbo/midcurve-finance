@@ -20,6 +20,15 @@ const inputSchema = {
     .optional()
     .default(false)
     .describe('Include fee data for APR calculations.'),
+  isToken0Quote: z
+    .boolean()
+    .optional()
+    .describe(
+      'Optional base/quote orientation echoed back via `userProvidedInfo.isToken0Quote`. ' +
+        'When supplied, the response includes `userProvidedInfo: { isToken0Quote }`; when omitted, ' +
+        'no orientation is attached and the canonical pool-native token0/token1 ordering applies. ' +
+        'Pure echo — metrics/feeData are not reoriented.'
+    ),
 };
 
 export function buildGetPoolTool(client: ApiClient) {
@@ -61,9 +70,16 @@ export function buildGetPoolTool(client: ApiClient) {
       inputSchema,
     },
     handler: async (args: { [K in keyof typeof inputSchema]: z.infer<(typeof inputSchema)[K]> }) => {
+      const query: Record<string, unknown> = {
+        metrics: args.metrics,
+        fees: args.fees,
+      };
+      if (typeof args.isToken0Quote === 'boolean') {
+        query.isToken0Quote = args.isToken0Quote;
+      }
       const pool = await client.get<Parameters<typeof formatPool>[0]>(
         `/api/v1/pools/uniswapv3/${args.chainId}/${args.address}`,
-        { metrics: args.metrics, fees: args.fees }
+        query
       );
 
       return {

@@ -15,8 +15,8 @@
  * ```typescript
  * const service = new UniswapV3PoolSearchService();
  * const results = await service.searchPools({
- *   tokenSetA: ['WETH', 'stETH'],
- *   tokenSetB: ['USDC', 'USDT'],
+ *   base: ['WETH', 'stETH'],
+ *   quote: ['USDC', 'USDT'],
  *   chainIds: [1, 42161],
  *   sortBy: 'apr7d',
  *   limit: 20,
@@ -43,6 +43,9 @@ import type { UniswapV3PoolSearchInput, ResolvedTokenAddress } from '../types/po
  * Same shape as `PoolSearchResultItem` from `@midcurve/api-shared` (minus the
  * route-only `isFavorite` flag) — metrics are nested under a single
  * `PoolMetricsBlock` containing TVL/volume/fees alongside σ-filter verdict.
+ *
+ * `userProvidedInfo.isToken0Quote` is derived per pool by checking whether
+ * `token0` resolves to a member of the `quote` set on that chain.
  */
 export interface PoolSearchResult {
   /** Pool contract address (EIP-55 checksummed). */
@@ -59,6 +62,12 @@ export interface PoolSearchResult {
   token1: PoolSearchSubgraphResult['token1'];
   /** Pool metrics — TVL, volume, fees, fee-APR, volatility, σ-filter verdict. */
   metrics: PoolMetricsBlock;
+  /**
+   * User-provided base/quote orientation derived from the request's `quote`
+   * array. Indicates which of `token0`/`token1` the user intends as the
+   * quote side.
+   */
+  userProvidedInfo: { isToken0Quote: boolean };
 }
 
 /**
@@ -107,8 +116,8 @@ export class UniswapV3PoolSearchService {
    */
   async searchPools(input: UniswapV3PoolSearchInput): Promise<PoolSearchResult[]> {
     log.methodEntry(this.logger, 'searchPools', {
-      tokenSetA: input.tokenSetA,
-      tokenSetB: input.tokenSetB,
+      base: input.base,
+      quote: input.quote,
       chainIds: input.chainIds,
       sortBy: input.sortBy,
       limit: input.limit,
@@ -119,8 +128,8 @@ export class UniswapV3PoolSearchService {
     const limit = Math.min(input.limit ?? 20, 100);
 
     // Validate inputs
-    if (input.tokenSetA.length === 0 || input.tokenSetB.length === 0) {
-      this.logger.warn('Empty token set provided, returning empty results');
+    if (input.base.length === 0 || input.quote.length === 0) {
+      this.logger.warn('Empty base/quote set provided, returning empty results');
       log.methodExit(this.logger, 'searchPools', { reason: 'empty_input' });
       return [];
     }
@@ -132,25 +141,56 @@ export class UniswapV3PoolSearchService {
     }
 
     // Step 1: Resolve token symbols to addresses for each chain
-    const resolvedTokensA = await this.resolveTokens(input.tokenSetA, input.chainIds);
-    const resolvedTokensB = await this.resolveTokens(input.tokenSetB, input.chainIds);
+    const resolvedBase = await this.resolveTokens(input.base, input.chainIds);
+    const resolvedQuote = await this.resolveTokens(input.quote, input.chainIds);
 
     this.logger.debug(
       {
-        resolvedTokensA: resolvedTokensA.length,
-        resolvedTokensB: resolvedTokensB.length,
+        resolvedBase: resolvedBase.length,
+        resolvedQuote: resolvedQuote.length,
       },
       'Tokens resolved'
     );
 
-    // Group resolved tokens by chain
-    const tokensByChain = this.groupTokensByChain(resolvedTokensA, resolvedTokensB);
+    // Group resolved tokens by chain — keep base/quote separate so we can
+    // (a) build the per-chain quote set used for `userProvidedInfo` derivation
+    // and (b) apply per-chain self-exclusion in the cartesian product.
+    const tokensByChain = this.groupTokensByChain(resolvedBase, resolvedQuote);
 
-    // Step 2: Query each chain in parallel
+    // Build the per-chain quote-address set (lowercased — same canonical form
+    // the subgraph uses) so result-side `isToken0Quote` derivation is a
+    // simple O(1) membership check per pool.
+    const quoteAddressesByChain = new Map<number, Set<string>>();
+    for (const [chainId, sets] of tokensByChain) {
+      quoteAddressesByChain.set(chainId, new Set(sets.quote));
+    }
+
+    // Step 2: Query each chain in parallel.
+    //
+    // The Uniswap subgraph search expects two address sets and matches pools
+    // where `(token0, token1)` is one element from each in either order
+    // (cartesian product). We pass the union of base + quote per chain
+    // because the subgraph filter is set-based, then perform per-chain
+    // self-exclusion before issuing the query: if a chain ends up with no
+    // valid `(b, q)` pair (b ≠ q), skip the chain — consistent with how
+    // unresolved symbols already cause a chain to be skipped.
     const chainQueries = input.chainIds.map(async (chainId) => {
       const chainTokens = tokensByChain.get(chainId);
-      if (!chainTokens || chainTokens.setA.length === 0 || chainTokens.setB.length === 0) {
+      if (!chainTokens || chainTokens.base.length === 0 || chainTokens.quote.length === 0) {
         this.logger.debug({ chainId }, 'No tokens for chain, skipping');
+        return [];
+      }
+
+      // Per-chain self-exclusion: ensure at least one (b, q) with b !== q.
+      // Lowercased compare matches the subgraph's canonical form.
+      const hasValidPair = chainTokens.base.some((b) =>
+        chainTokens.quote.some((q) => q !== b)
+      );
+      if (!hasValidPair) {
+        this.logger.debug(
+          { chainId },
+          'No valid (base, quote) pair after self-exclusion, skipping'
+        );
         return [];
       }
 
@@ -165,10 +205,17 @@ export class UniswapV3PoolSearchService {
       }
 
       try {
-        return await this.subgraphClient.searchPoolsByTokenSets(
+        const subgraphResults = await this.subgraphClient.searchPoolsByTokenSets(
           chainId,
-          chainTokens.setA,
-          chainTokens.setB
+          chainTokens.base,
+          chainTokens.quote
+        );
+        // Defensive: filter pools where token0 === token1 (impossible on
+        // Uniswap V3 by construction, but the search method's set-based
+        // semantics could in principle echo a same-token pair if the same
+        // address appears on both sides). Compare lowercased.
+        return subgraphResults.filter(
+          (p) => p.token0.address.toLowerCase() !== p.token1.address.toLowerCase()
         );
       } catch (error) {
         this.logger.error(
@@ -235,9 +282,12 @@ export class UniswapV3PoolSearchService {
       }
     }
 
-    const uniquePools: PoolSearchResult[] = uniquePending.map(({ subgraph, chainName }) =>
-      this.assembleResult(subgraph, chainName, sigmaResults),
-    );
+    const uniquePools: PoolSearchResult[] = uniquePending.map(({ subgraph, chainName }) => {
+      const quoteSet = quoteAddressesByChain.get(subgraph.chainId);
+      const isToken0Quote =
+        quoteSet?.has(subgraph.token0.address.toLowerCase()) ?? false;
+      return this.assembleResult(subgraph, chainName, sigmaResults, isToken0Quote);
+    });
 
     // Step 6: Sort
     const sortedPools = this.sortPools(uniquePools, sortBy, sortDirection);
@@ -268,6 +318,7 @@ export class UniswapV3PoolSearchService {
     subgraph: PoolSearchSubgraphResult,
     chainName: string,
     sigmaResults: ReadonlyMap<string, PoolSigmaResult>,
+    isToken0Quote: boolean,
   ): PoolSearchResult {
     const poolHash = `uniswapv3/${subgraph.chainId}/${subgraph.poolAddress}`;
     const sigma = sigmaResults.get(poolHash);
@@ -328,6 +379,7 @@ export class UniswapV3PoolSearchService {
       token0: subgraph.token0,
       token1: subgraph.token1,
       metrics,
+      userProvidedInfo: { isToken0Quote },
     };
   }
 
@@ -405,37 +457,38 @@ export class UniswapV3PoolSearchService {
   }
 
   /**
-   * Group resolved tokens by chain ID
+   * Group resolved base/quote tokens by chain ID.
+   *
+   * Addresses are lowercased — that's the canonical form the subgraph uses
+   * and the form used by the per-chain quote-set membership check.
    */
   private groupTokensByChain(
-    tokensA: ResolvedTokenAddress[],
-    tokensB: ResolvedTokenAddress[]
-  ): Map<number, { setA: string[]; setB: string[] }> {
-    const result = new Map<number, { setA: string[]; setB: string[] }>();
+    base: ResolvedTokenAddress[],
+    quote: ResolvedTokenAddress[]
+  ): Map<number, { base: string[]; quote: string[] }> {
+    const result = new Map<number, { base: string[]; quote: string[] }>();
 
-    // Group setA by chain
-    for (const token of tokensA) {
+    for (const token of base) {
       let entry = result.get(token.chainId);
       if (!entry) {
-        entry = { setA: [], setB: [] };
+        entry = { base: [], quote: [] };
         result.set(token.chainId, entry);
       }
-      // Add lowercase address (subgraph uses lowercase)
-      if (!entry.setA.includes(token.address.toLowerCase())) {
-        entry.setA.push(token.address.toLowerCase());
+      const lower = token.address.toLowerCase();
+      if (!entry.base.includes(lower)) {
+        entry.base.push(lower);
       }
     }
 
-    // Group setB by chain
-    for (const token of tokensB) {
+    for (const token of quote) {
       let entry = result.get(token.chainId);
       if (!entry) {
-        entry = { setA: [], setB: [] };
+        entry = { base: [], quote: [] };
         result.set(token.chainId, entry);
       }
-      // Add lowercase address (subgraph uses lowercase)
-      if (!entry.setB.includes(token.address.toLowerCase())) {
-        entry.setB.push(token.address.toLowerCase());
+      const lower = token.address.toLowerCase();
+      if (!entry.quote.includes(lower)) {
+        entry.quote.push(lower);
       }
     }
 

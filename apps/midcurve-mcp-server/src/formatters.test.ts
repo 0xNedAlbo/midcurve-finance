@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPool } from './formatters.js';
+import { formatPool, formatPoolSearchResult } from './formatters.js';
 
 /**
  * Fixture shapes mirror the API's `serializeUniswapV3Pool` output (see
@@ -203,6 +203,106 @@ describe('formatPool', () => {
     const detail = { ...basePool(), metrics: metrics as NonNullable<PoolDetail['metrics']> };
     const out = formatPool(detail);
     const m = out.metrics as Record<string, unknown>;
+    expect(m.sigmaFilter).toBeNull();
+  });
+
+  it('omits userProvidedInfo when not supplied (issue #45)', () => {
+    const out = formatPool(basePool());
+    expect('userProvidedInfo' in out).toBe(false);
+  });
+
+  it('echoes userProvidedInfo when supplied (issue #45)', () => {
+    const out = formatPool({ ...basePool(), userProvidedInfo: { isToken0Quote: true } });
+    expect(out.userProvidedInfo).toEqual({ isToken0Quote: true });
+
+    const out2 = formatPool({ ...basePool(), userProvidedInfo: { isToken0Quote: false } });
+    expect(out2.userProvidedInfo).toEqual({ isToken0Quote: false });
+  });
+});
+
+// =============================================================================
+// formatPoolSearchResult (issue #45)
+// =============================================================================
+
+type SearchResult = Parameters<typeof formatPoolSearchResult>[0];
+
+function baseSearchResult(): SearchResult {
+  return {
+    poolAddress: '0xd0b53D9277642d899DF5C87A3966A349A798F224',
+    chainId: 8453,
+    chainName: 'Base',
+    feeTier: 500,
+    token0: {
+      address: '0x4200000000000000000000000000000000000006',
+      symbol: 'WETH',
+      decimals: 18,
+    },
+    token1: {
+      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      symbol: 'USDC',
+      decimals: 6,
+    },
+    metrics: {
+      tvlUSD: '12500000.5',
+      volume24hUSD: '50000000',
+      fees24hUSD: '25000',
+      fees7dUSD: '175000',
+      volume7dAvgUSD: '50000000',
+      fees7dAvgUSD: '25000',
+      apr7d: 25.12,
+      feeApr24h: 0.2512,
+      feeApr7dAvg: 0.2512,
+      feeAprPrimary: 0.2512,
+      feeAprSource: '7d_avg',
+    },
+  };
+}
+
+describe('formatPoolSearchResult', () => {
+  it('formats the canonical fields and dual-emits USD money', () => {
+    const out = formatPoolSearchResult(baseSearchResult());
+    expect(out.pair).toBe('WETH/USDC');
+    expect(out.feeTier).toBe('0.05%');
+    const m = out.metrics as Record<string, unknown>;
+    expect(m.tvlRaw).toBe('12500000.5');
+    expect(typeof m.tvl).toBe('string');
+    expect(m.apr7d).toBe('25.12%');
+    expect(m.feeApr7dAvg).toBe('25.12%');
+  });
+
+  it('defaults isFavorite to false when omitted, echoes when present', () => {
+    const out = formatPoolSearchResult(baseSearchResult());
+    expect(out.isFavorite).toBe(false);
+
+    const out2 = formatPoolSearchResult({ ...baseSearchResult(), isFavorite: true });
+    expect(out2.isFavorite).toBe(true);
+  });
+
+  it('omits userProvidedInfo when not supplied', () => {
+    const out = formatPoolSearchResult(baseSearchResult());
+    expect('userProvidedInfo' in out).toBe(false);
+  });
+
+  it('echoes userProvidedInfo when supplied (orientation pivot)', () => {
+    // token0 is in the user's quote set
+    const out = formatPoolSearchResult({
+      ...baseSearchResult(),
+      userProvidedInfo: { isToken0Quote: true },
+    });
+    expect(out.userProvidedInfo).toEqual({ isToken0Quote: true });
+
+    // token0 is NOT in the user's quote set
+    const out2 = formatPoolSearchResult({
+      ...baseSearchResult(),
+      userProvidedInfo: { isToken0Quote: false },
+    });
+    expect(out2.userProvidedInfo).toEqual({ isToken0Quote: false });
+  });
+
+  it('handles missing volatility / sigmaFilter blocks (search results may omit them)', () => {
+    const out = formatPoolSearchResult(baseSearchResult());
+    const m = out.metrics as Record<string, unknown>;
+    expect(m.volatility).toBeNull();
     expect(m.sigmaFilter).toBeNull();
   });
 });

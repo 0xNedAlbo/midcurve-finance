@@ -232,13 +232,20 @@ function wizardReducer(
     case 'SET_POOL_TAB':
       return { ...state, poolSelectionTab: action.tab };
 
-    case 'SELECT_POOL':
-      // Default: token0 is base, token1 is quote (user can swap later)
+    case 'SELECT_POOL': {
+      // Honor user-provided base/quote orientation when present
+      // (search-tab and favorites-tab results carry it). For results
+      // without orientation (Direct Address tab), fall back to the
+      // pool-native default: token0 = base, token1 = quote. The Flip
+      // button still works either way.
+      const isToken0Quote = action.pool.userProvidedInfo?.isToken0Quote;
+      const baseToken = isToken0Quote === true ? action.pool.token1 : action.pool.token0;
+      const quoteToken = isToken0Quote === true ? action.pool.token0 : action.pool.token1;
       return {
         ...state,
         selectedPool: action.pool,
-        baseToken: action.pool.token0,
-        quoteToken: action.pool.token1,
+        baseToken,
+        quoteToken,
         // Reset tick range (will be set when current tick is fetched)
         tickLower: 0,
         tickUpper: 0,
@@ -263,6 +270,7 @@ function wizardReducer(
         totalQuoteValue: '0',
         liquidity: '0',
       };
+    }
 
     case 'CLEAR_POOL':
       return {

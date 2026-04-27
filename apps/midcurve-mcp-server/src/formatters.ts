@@ -402,6 +402,12 @@ interface PoolDetailRaw {
     sigmaFilter?: SigmaFilterBlockRaw;
   };
   feeData?: Record<string, unknown>;
+  /**
+   * Optional echo of the request's `isToken0Quote` query param (PRD-issue-#45).
+   * When present, surfaced unchanged on the formatted output so consumers can
+   * pivot to base/quote orientation. Pool itself remains role-agnostic.
+   */
+  userProvidedInfo?: { isToken0Quote: boolean };
 }
 
 /**
@@ -488,7 +494,7 @@ function formatSigmaFilter(s: SigmaFilterBlockRaw): Record<string, unknown> {
  * §3.1 ("Embedded pool summary vs standalone pool detail").
  */
 export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
-  const { pool, metrics, feeData } = detail;
+  const { pool, metrics, feeData, userProvidedInfo } = detail;
   const token0 = {
     address: pool.token0.config.address,
     symbol: pool.token0.symbol,
@@ -549,7 +555,94 @@ export function formatPool(detail: PoolDetailRaw): Record<string, unknown> {
         }
       : null,
     feeData: feeData ?? null,
+    ...(userProvidedInfo && { userProvidedInfo }),
     state: pool.state,
+  };
+}
+
+// =============================================================================
+// Pool Search Result (POST /api/v1/pools/uniswapv3/search)
+// =============================================================================
+
+interface PoolSearchTokenInfoRaw {
+  address: string;
+  symbol: string;
+  decimals: number;
+}
+
+interface PoolSearchResultRaw {
+  poolAddress: string;
+  chainId: number;
+  chainName: string;
+  feeTier: number;
+  token0: PoolSearchTokenInfoRaw;
+  token1: PoolSearchTokenInfoRaw;
+  metrics: {
+    tvlUSD: string;
+    volume24hUSD: string;
+    fees24hUSD: string;
+    fees7dUSD: string;
+    volume7dAvgUSD: string;
+    fees7dAvgUSD: string;
+    apr7d: number | null;
+    feeApr24h?: number | null;
+    feeApr7dAvg?: number | null;
+    feeAprPrimary?: number | null;
+    feeAprSource?: '24h' | '7d_avg' | 'unavailable';
+    volatility?: VolatilityBlockRaw;
+    sigmaFilter?: SigmaFilterBlockRaw;
+  };
+  isFavorite?: boolean;
+  userProvidedInfo?: { isToken0Quote: boolean };
+}
+
+/**
+ * Format a single pool search result for MCP output. Mirrors `formatPool`'s
+ * shape (canonical token0/token1, dual-emitted USD fields, humanized
+ * percentages, σ-filter / volatility blocks) and adds search-specific fields
+ * (`isFavorite`, `userProvidedInfo`).
+ */
+export function formatPoolSearchResult(
+  result: PoolSearchResultRaw
+): Record<string, unknown> {
+  const fmtUsd = (raw: string | undefined): string | null =>
+    raw ? formatUSDValue(raw) : null;
+  const m = result.metrics;
+  return {
+    chainId: result.chainId,
+    chainName: result.chainName,
+    poolAddress: result.poolAddress,
+    pair: `${result.token0.symbol}/${result.token1.symbol}`,
+    feeBps: result.feeTier,
+    feeTier: `${(result.feeTier / 10_000).toFixed(2)}%`,
+    token0: result.token0,
+    token1: result.token1,
+    metrics: {
+      tvl: fmtUsd(m.tvlUSD),
+      tvlRaw: m.tvlUSD,
+      volume24h: fmtUsd(m.volume24hUSD),
+      volume24hRaw: m.volume24hUSD,
+      fees24h: fmtUsd(m.fees24hUSD),
+      fees24hRaw: m.fees24hUSD,
+      fees7d: fmtUsd(m.fees7dUSD),
+      fees7dRaw: m.fees7dUSD,
+      volume7dAvg: fmtUsd(m.volume7dAvgUSD),
+      volume7dAvgRaw: m.volume7dAvgUSD,
+      fees7dAvg: fmtUsd(m.fees7dAvgUSD),
+      fees7dAvgRaw: m.fees7dAvgUSD,
+      apr7d:
+        m.apr7d !== null && m.apr7d !== undefined
+          ? formatPercentage(m.apr7d, 2)
+          : null,
+      feeApr24h: fmtRate(m.feeApr24h ?? null, 2),
+      feeApr7dAvg: fmtRate(m.feeApr7dAvg ?? null, 2),
+      feeAprPrimary: fmtRate(m.feeAprPrimary ?? null, 2),
+      feeAprSource: m.feeAprSource ?? 'unavailable',
+      volatility: m.volatility ? formatVolatility(m.volatility) : null,
+      sigmaFilter: m.sigmaFilter ? formatSigmaFilter(m.sigmaFilter) : null,
+    },
+    isFavorite: result.isFavorite ?? false,
+    ...(result.userProvidedInfo && { userProvidedInfo: result.userProvidedInfo }),
   };
 }
 

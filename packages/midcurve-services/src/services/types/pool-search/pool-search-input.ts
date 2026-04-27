@@ -6,20 +6,18 @@
  */
 
 /**
- * Pool search input for finding pools by token sets
+ * Pool search input for finding pools by base/quote token sets
  *
- * Searches for pools where:
- * - token0 is in tokenSetA AND token1 is in tokenSetB, OR
- * - token0 is in tokenSetB AND token1 is in tokenSetA
- *
- * This allows finding all pools between two groups of tokens.
+ * Searches the cartesian product `base × quote` per chain (with same-token
+ * pairs excluded). Each result is annotated with `userProvidedInfo.isToken0Quote`
+ * derived per pool by checking which side appears in `quote`.
  *
  * @example
  * ```typescript
  * const input: UniswapV3PoolSearchInput = {
- *   tokenSetA: ['WETH', 'stETH'],    // Base tokens
- *   tokenSetB: ['USDC', 'USDT'],     // Quote tokens
- *   chainIds: [1, 42161],            // Search on Ethereum and Arbitrum
+ *   base: ['WETH', 'stETH'],
+ *   quote: ['USDC', 'USDT'],
+ *   chainIds: [1, 42161],
  *   sortBy: 'tvlUSD',
  *   limit: 20,
  * };
@@ -27,26 +25,30 @@
  */
 export interface UniswapV3PoolSearchInput {
   /**
-   * First set of tokens (addresses or symbols)
+   * Base side of the pair (addresses or exact CoinGecko symbols).
    *
    * Can be:
    * - Token addresses (any case, will be normalized)
-   * - Token symbols (will be resolved via CoingeckoTokenService)
+   * - Token symbols — must match a CoinGecko symbol exactly
+   *   (case-insensitive). Fuzzy / prefix matching is the consumer's
+   *   responsibility.
    *
    * @example ['0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', '0xae7ab96520de3a18e5e111b5eaab095312d7fe84']
    * @example ['WETH', 'stETH']
    */
-  tokenSetA: string[];
+  base: string[];
 
   /**
-   * Second set of tokens (addresses or symbols)
+   * Quote side of the pair (addresses or exact CoinGecko symbols).
    *
-   * Same format as tokenSetA.
+   * Same format as `base`. Determines `userProvidedInfo.isToken0Quote` on
+   * each result — if a pool's `token0` resolves to a member of this set
+   * (per chain), `isToken0Quote = true`.
    *
    * @example ['0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', '0xdAC17F958D2ee523a2206206994597C13D831ec7']
    * @example ['USDC', 'USDT']
    */
-  tokenSetB: string[];
+  quote: string[];
 
   /**
    * Chain IDs to search on

@@ -34,12 +34,15 @@ export async function OPTIONS(request: NextRequest): Promise<Response> {
  * Returns pools sorted by TVL with 7-day APR calculation.
  *
  * Request body:
- * - tokenSetA (required): Array of token addresses or symbols
- * - tokenSetB (required): Array of token addresses or symbols
+ * - base (required): Array of token addresses or exact CoinGecko symbols
+ * - quote (required): Array of token addresses or exact CoinGecko symbols
  * - chainIds (required): Array of chain IDs to search
  * - sortBy (optional): Field to sort by (tvlUSD, volume24hUSD, fees24hUSD, volume7dAvgUSD, fees7dAvgUSD, apr7d)
  * - sortDirection (optional): Sort direction (asc, desc)
  * - limit (optional): Maximum results to return (1-100, default: 20)
+ *
+ * Each result is annotated with `userProvidedInfo.isToken0Quote`, derived
+ * per pool by checking which side appears in the request's `quote` array.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   return withAuth(request, async (user, requestId) => {
@@ -82,17 +85,17 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { tokenSetA, tokenSetB, chainIds, sortBy, sortDirection, limit } = validation.data;
+      const { base, quote, chainIds, sortBy, sortDirection, limit } = validation.data;
 
       apiLog.businessOperation(
         apiLogger,
         requestId,
         'searching',
         'uniswapv3-pools',
-        `${chainIds.join(',')}-${tokenSetA.length}x${tokenSetB.length}`,
+        `${chainIds.join(',')}-${base.length}x${quote.length}`,
         {
-          tokenSetA,
-          tokenSetB,
+          base,
+          quote,
           chainIds,
           sortBy,
           limit,
@@ -101,8 +104,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
       // Search pools via service
       const results = await getUniswapV3PoolSearchService().searchPools({
-        tokenSetA,
-        tokenSetB,
+        base,
+        quote,
         chainIds,
         sortBy,
         sortDirection,

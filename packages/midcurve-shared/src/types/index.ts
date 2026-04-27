@@ -5,7 +5,7 @@
 
 // User types
 export type { User } from './user.js';
-export type { UserSettingsData, CostBasisMethod } from './user-settings.js';
+export type { UserSettingsData, CostBasisMethod, FavoritePoolEntry } from './user-settings.js';
 export { DEFAULT_USER_SETTINGS } from './user-settings.js';
 
 // ============================================================================

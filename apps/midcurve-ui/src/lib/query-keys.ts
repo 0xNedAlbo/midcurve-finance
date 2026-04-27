@@ -148,11 +148,11 @@ export const queryKeys = {
       detail: (chainId: number, address: string) =>
         [...queryKeys.pools.uniswapv3.details(), chainId, address] as const,
 
-      // Search (token sets + chain IDs → list of pools)
+      // Search (base/quote token sets + chain IDs → list of pools)
       searches: () => [...queryKeys.pools.uniswapv3.all, 'search'] as const,
       search: (params: {
-        tokenSetA: string[];
-        tokenSetB: string[];
+        base: string[];
+        quote: string[];
         chainIds: number[];
         sortBy?: string;
         limit?: number;

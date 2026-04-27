@@ -88,7 +88,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      const { protocol, chainId, poolAddress } = validation.data;
+      const { protocol, chainId, poolAddress, isToken0Quote } = validation.data;
 
       // 2. Delegate to protocol-specific service
       apiLog.businessOperation(
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         'addFavorite',
         'FavoritePool',
         `${protocol}/${chainId}/${poolAddress}`,
-        { protocol, chainId, poolAddress }
+        { protocol, chainId, poolAddress, isToken0Quote }
       );
 
       let result;
@@ -110,6 +110,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               userId: user.id,
               chainId,
               poolAddress,
+              ...(typeof isToken0Quote === 'boolean' && { isToken0Quote }),
             });
           } catch (error) {
             if (error instanceof Error) {
@@ -221,6 +222,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         poolAddress: result.pool.address,
         pool: serializedPool as unknown as FavoritePoolItem['pool'],
         metrics: metricsBlock,
+        ...(typeof result.isToken0Quote === 'boolean' && {
+          userProvidedInfo: { isToken0Quote: result.isToken0Quote },
+        }),
       };
 
       const responseData: AddFavoritePoolData = {
@@ -368,6 +372,9 @@ export async function GET(request: NextRequest): Promise<Response> {
           poolAddress: fav.pool.address,
           pool: serializedPool as unknown as FavoritePoolItem['pool'],
           metrics: buildPoolMetricsBlock(subgraphInput, sigma),
+          ...(typeof fav.isToken0Quote === 'boolean' && {
+            userProvidedInfo: { isToken0Quote: fav.isToken0Quote },
+          }),
         });
       }
 
