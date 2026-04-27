@@ -42,6 +42,16 @@ const ADDITIONAL_COLUMNS: ColumnDef[] = [
   { id: 'verdictAgreement', label: 'Verdict agreement' },
 ];
 
+const ITEMS_PER_COLUMN = 4;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
 export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManagerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -144,22 +154,36 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
         createPortal(
           <div
             ref={popoverRef}
-            className="fixed z-50 min-w-[220px] bg-slate-800/95 border border-slate-700 rounded-lg p-2 shadow-xl backdrop-blur-sm"
+            className="fixed z-50 bg-slate-800/95 border border-slate-700 rounded-lg p-2 shadow-xl backdrop-blur-sm"
             style={{
               top: `${menuPosition.top}px`,
               right: `${menuPosition.right}px`,
             }}
             role="menu"
           >
-            <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
-              Default columns
-            </div>
-            {DEFAULT_COLUMNS.map(renderRow)}
-            <div className="my-1 border-t border-slate-700/50" />
-            <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
-              Additional columns
-            </div>
-            {ADDITIONAL_COLUMNS.map(renderRow)}
+            {[
+              { title: 'Default columns', items: DEFAULT_COLUMNS },
+              { title: 'Additional columns', items: ADDITIONAL_COLUMNS },
+            ].map((section, sectionIdx) => (
+              <div
+                key={section.title}
+                className={sectionIdx === 0 ? 'mb-2' : ''}
+              >
+                <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
+                  {section.title}
+                </div>
+                <div className="flex gap-2">
+                  {chunk(section.items, ITEMS_PER_COLUMN).map((group, groupIdx) => (
+                    <div
+                      key={groupIdx}
+                      className="flex flex-col min-w-[200px]"
+                    >
+                      {group.map(renderRow)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>,
           document.body
         )}
