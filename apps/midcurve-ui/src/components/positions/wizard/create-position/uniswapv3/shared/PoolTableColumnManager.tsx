@@ -1,12 +1,16 @@
 /**
  * Pool Table Column Manager
  *
- * Gear icon + popover that lets the user toggle which metric columns are
- * visible in the pool search table. Persists immediately via the
+ * Gear icon + portal-rendered popover that lets the user toggle which metric
+ * columns are visible in the pool search table. Persists immediately via the
  * `useUpdatePoolTableColumns` mutation; optimistic update keeps it snappy.
+ *
+ * The popover renders into `document.body` via `createPortal` so it escapes
+ * any parent overflow/clipping context (e.g. the surrounding section card).
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Settings, Check } from 'lucide-react';
 import type { PoolTableColumnId } from '@midcurve/shared';
 import { useUpdatePoolTableColumns } from '@/hooks/user-settings/usePoolTableColumns';
@@ -40,15 +44,33 @@ const ADDITIONAL_COLUMNS: ColumnDef[] = [
 
 export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManagerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const updateMutation = useUpdatePoolTableColumns();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setIsOpen(false);
@@ -104,8 +126,9 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
   };
 
   return (
-    <div className="relative inline-block" ref={containerRef}>
+    <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setIsOpen((v) => !v)}
         className="p-1.5 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 cursor-pointer transition-colors"
@@ -116,22 +139,30 @@ export function PoolTableColumnManager({ visibleColumns }: PoolTableColumnManage
         <Settings className="w-4 h-4" />
       </button>
 
-      {isOpen && (
-        <div
-          className="absolute right-0 top-full mt-1 z-30 min-w-[220px] bg-slate-800/95 border border-slate-700 rounded-lg p-2 shadow-xl backdrop-blur-sm"
-          role="menu"
-        >
-          <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
-            Default columns
-          </div>
-          {DEFAULT_COLUMNS.map(renderRow)}
-          <div className="my-1 border-t border-slate-700/50" />
-          <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
-            Additional columns
-          </div>
-          {ADDITIONAL_COLUMNS.map(renderRow)}
-        </div>
-      )}
-    </div>
+      {isOpen &&
+        mounted &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            className="fixed z-50 min-w-[220px] bg-slate-800/95 border border-slate-700 rounded-lg p-2 shadow-xl backdrop-blur-sm"
+            style={{
+              top: `${menuPosition.top}px`,
+              right: `${menuPosition.right}px`,
+            }}
+            role="menu"
+          >
+            <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
+              Default columns
+            </div>
+            {DEFAULT_COLUMNS.map(renderRow)}
+            <div className="my-1 border-t border-slate-700/50" />
+            <div className="px-3 py-1.5 text-xs uppercase tracking-wide text-slate-500">
+              Additional columns
+            </div>
+            {ADDITIONAL_COLUMNS.map(renderRow)}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
