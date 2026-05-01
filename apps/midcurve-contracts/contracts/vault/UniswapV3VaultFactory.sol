@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {INonfungiblePositionManagerMinimal} from "../position-closer/interfaces/INonfungiblePositionManagerMinimal.sol";
+import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePositionManagerMinimal.sol";
 import {UniswapV3Vault} from "./UniswapV3Vault.sol";
 import {AllowlistedUniswapV3Vault} from "./AllowlistedUniswapV3Vault.sol";
 

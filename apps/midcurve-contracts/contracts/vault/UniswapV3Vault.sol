@@ -6,10 +6,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IMultiTokenVault, MintParams, BurnParams} from "./interfaces/IMultiTokenVault.sol";
-import {INonfungiblePositionManagerMinimal} from "../position-closer/interfaces/INonfungiblePositionManagerMinimal.sol";
-import {IUniswapV3PoolMinimal} from "../position-closer/interfaces/IUniswapV3PoolMinimal.sol";
-import {LiquidityAmounts} from "../position-closer/libraries/LiquidityAmounts.sol";
-import {TickMath} from "../position-closer/libraries/TickMath.sol";
+import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePositionManagerMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
+import {LiquidityAmounts} from "../libraries/LiquidityAmounts.sol";
+import {TickMath} from "../libraries/TickMath.sol";
 
 /// @title UniswapV3Vault
 /// @notice Wraps a single Uniswap V3 NFT position into fungible ERC-20 shares.

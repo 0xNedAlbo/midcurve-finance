@@ -5,7 +5,7 @@ import {AppStorage, LibAppStorage, TriggerMode, OrderStatus, SwapDirection, Vaul
 import {IUniswapV3VaultPositionCloserV1} from "../interfaces/IUniswapV3VaultPositionCloserV1.sol";
 import {IUniswapV3VaultMinimal} from "../interfaces/IUniswapV3VaultMinimal.sol";
 import {IMidcurveSwapRouter} from "../../swap-router/interfaces/IMidcurveSwapRouter.sol";
-import {IUniswapV3PoolMinimal} from "../../position-closer/interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
 import {BurnParams} from "../../vault/interfaces/IMultiTokenVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";

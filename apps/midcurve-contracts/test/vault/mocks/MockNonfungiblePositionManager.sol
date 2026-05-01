@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {INonfungiblePositionManagerMinimal} from
-    "../../../contracts/position-closer/interfaces/INonfungiblePositionManagerMinimal.sol";
+    "../../../contracts/interfaces/INonfungiblePositionManagerMinimal.sol";
 
 /// @title MockNonfungiblePositionManager
 /// @notice Simulates the Uniswap V3 NonfungiblePositionManager for vault testing.

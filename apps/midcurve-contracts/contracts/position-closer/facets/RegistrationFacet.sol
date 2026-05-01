@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {AppStorage, LibAppStorage, TriggerMode, OrderStatus, SwapDirection, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
 import {IUniswapV3PositionCloserV1} from "../interfaces/IUniswapV3PositionCloserV1.sol";
-import {INonfungiblePositionManagerMinimal} from "../interfaces/INonfungiblePositionManagerMinimal.sol";
+import {INonfungiblePositionManagerMinimal} from "../../interfaces/INonfungiblePositionManagerMinimal.sol";
 
 /// @title RegistrationFacet
 /// @notice Facet for registering and cancelling close orders

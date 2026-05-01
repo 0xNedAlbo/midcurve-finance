@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {AppStorage, LibAppStorage, TriggerMode, OrderStatus, CloseOrder, Modifiers} from "../storage/AppStorage.sol";
-import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
 
 /// @title ViewFacet
 /// @notice Facet for reading order state and configuration
