@@ -19,6 +19,8 @@ contract MockStakingNFPM {
         uint128 liquidity;
         uint128 tokensOwed0;
         uint128 tokensOwed1;
+        uint256 feeGrowthInside0LastX128;
+        uint256 feeGrowthInside1LastX128;
     }
 
     mapping(uint256 => Position) internal _positions;
@@ -64,6 +66,15 @@ contract MockStakingNFPM {
         _positions[tokenId_].tokensOwed1 += fees1_;
     }
 
+    function setFeeGrowthInsideLastForTesting(
+        uint256 tokenId_,
+        uint256 fg0Last_,
+        uint256 fg1Last_
+    ) external {
+        _positions[tokenId_].feeGrowthInside0LastX128 = fg0Last_;
+        _positions[tokenId_].feeGrowthInside1LastX128 = fg1Last_;
+    }
+
     // ============ NFPM interface ============
 
     function positions(uint256 tokenId_)
@@ -94,8 +105,8 @@ contract MockStakingNFPM {
             p.tickLower,
             p.tickUpper,
             p.liquidity,
-            0,
-            0,
+            p.feeGrowthInside0LastX128,
+            p.feeGrowthInside1LastX128,
             p.tokensOwed0,
             p.tokensOwed1
         );
@@ -126,7 +137,9 @@ contract MockStakingNFPM {
             tickUpper: params.tickUpper,
             liquidity: liquidity_,
             tokensOwed0: 0,
-            tokensOwed1: 0
+            tokensOwed1: 0,
+            feeGrowthInside0LastX128: 0,
+            feeGrowthInside1LastX128: 0
         });
         _owners[tokenId_] = params.recipient;
     }
@@ -217,14 +230,49 @@ contract MockUniFactory {
     }
 }
 
-/// @notice Trivial pool mock — only slot0() is read by the vault's quoteSwap path.
+/// @notice Pool mock that supports the slot0 / feeGrowth / ticks reads driving the
+///         vault's `quoteSwap()` math (principal + uncollected-fees, including
+///         the unsnapshotted feeGrowthInside delta).
 contract MockUniPool {
     uint160 public sqrtPriceX96;
     int24 public currentTick;
 
+    uint256 public feeGrowthGlobal0X128;
+    uint256 public feeGrowthGlobal1X128;
+
+    struct TickData {
+        uint128 liquidityGross;
+        int128 liquidityNet;
+        uint256 feeGrowthOutside0X128;
+        uint256 feeGrowthOutside1X128;
+        bool initialized;
+    }
+
+    mapping(int24 => TickData) private _ticks;
+
     constructor(uint160 sqrtPriceX96_, int24 tick_) {
         sqrtPriceX96 = sqrtPriceX96_;
         currentTick = tick_;
+    }
+
+    function setPrice(uint160 sqrtPriceX96_, int24 tick_) external {
+        sqrtPriceX96 = sqrtPriceX96_;
+        currentTick = tick_;
+    }
+
+    function setFeeGrowthGlobal(uint256 fg0, uint256 fg1) external {
+        feeGrowthGlobal0X128 = fg0;
+        feeGrowthGlobal1X128 = fg1;
+    }
+
+    function setTickData(int24 tick, uint256 fgOutside0X128, uint256 fgOutside1X128) external {
+        _ticks[tick] = TickData({
+            liquidityGross: 0,
+            liquidityNet: 0,
+            feeGrowthOutside0X128: fgOutside0X128,
+            feeGrowthOutside1X128: fgOutside1X128,
+            initialized: true
+        });
     }
 
     function slot0()
@@ -233,5 +281,32 @@ contract MockUniPool {
         returns (uint160, int24, uint16, uint16, uint16, uint8, bool)
     {
         return (sqrtPriceX96, currentTick, 0, 0, 0, 0, true);
+    }
+
+    function ticks(int24 tick)
+        external
+        view
+        returns (
+            uint128 liquidityGross,
+            int128 liquidityNet,
+            uint256 feeGrowthOutside0X128,
+            uint256 feeGrowthOutside1X128,
+            int56 tickCumulativeOutside,
+            uint160 secondsPerLiquidityOutsideX128,
+            uint32 secondsOutside,
+            bool initialized
+        )
+    {
+        TickData storage t = _ticks[tick];
+        return (
+            t.liquidityGross,
+            t.liquidityNet,
+            t.feeGrowthOutside0X128,
+            t.feeGrowthOutside1X128,
+            0,
+            0,
+            0,
+            t.initialized
+        );
     }
 }

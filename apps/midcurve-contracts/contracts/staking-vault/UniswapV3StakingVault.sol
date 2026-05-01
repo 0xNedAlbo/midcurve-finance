@@ -4,12 +4,14 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {Multicall} from "@openzeppelin/contracts/utils/Multicall.sol";
 
 import {INonfungiblePositionManagerMinimal} from
     "../interfaces/INonfungiblePositionManagerMinimal.sol";
 import {IUniswapV3PoolMinimal} from "../interfaces/IUniswapV3PoolMinimal.sol";
 import {LiquidityAmounts} from "../libraries/LiquidityAmounts.sol";
 import {TickMath} from "../libraries/TickMath.sol";
+import {LibUniswapV3Fees} from "../libraries/LibUniswapV3Fees.sol";
 
 import {IStakingVault, StakeParams, SwapStatus, SwapQuote} from "./interfaces/IStakingVault.sol";
 import {IFlashCloseCallback} from "./interfaces/IFlashCloseCallback.sol";
@@ -18,7 +20,7 @@ import {IFlashCloseCallback} from "./interfaces/IFlashCloseCallback.sol";
 /// @notice Per-stake vault wrapping a single Uniswap V3 NFT position with a quote-side
 ///         yield target. Deployed as an EIP-1167 clone via UniswapV3StakingVaultFactory.
 /// @dev Implements RFC-0003 (issue #58). Non-transferable owner; one-shot lifecycle.
-contract UniswapV3StakingVault is IStakingVault, ReentrancyGuard {
+contract UniswapV3StakingVault is IStakingVault, ReentrancyGuard, Multicall {
     using SafeERC20 for IERC20;
 
     enum State {
@@ -315,14 +317,29 @@ contract UniswapV3StakingVault is IStakingVault, ReentrancyGuard {
     }
 
     /// @dev Compute (base, quote) the vault would hold after closing the UV3 position
-    ///      and collecting fees. Uses NFPM.positions() for liquidity and tokensOwed.
-    ///      tokensOwed reflects fees up to the last NFPM interaction; finer-grained
-    ///      fee accrual since the last interaction is intentionally NOT included.
-    ///      Cross-block drift between quoteSwap() and swap() is absorbed by the
-    ///      slippage checks in swap() (see spec §12).
+    ///      and collecting fees. Includes BOTH already-snapshotted fees from
+    ///      `tokensOwed*` AND not-yet-snapshotted fees living in the pool's
+    ///      `feeGrowthInside` state (the only place fees accrue while the NFT
+    ///      sits idle in the vault). Without the live component this view would
+    ///      report `Underwater`/Case 4 for the entire active life of the
+    ///      position whenever the path to settlement runs through fees.
     function _expectedBalancesAfterClose() internal view returns (uint256 b, uint256 q) {
-        (,,,,,,, uint128 liquidity,,, uint128 owed0, uint128 owed1) = positionManager.positions(tokenId);
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint128 liquidity,
+            uint256 fgInside0Last,
+            uint256 fgInside1Last,
+            uint128 owed0,
+            uint128 owed1
+        ) = positionManager.positions(tokenId);
 
+        // Principal at current pool price
         uint256 amount0;
         uint256 amount1;
         if (liquidity > 0) {
@@ -333,8 +350,12 @@ contract UniswapV3StakingVault is IStakingVault, ReentrancyGuard {
                 LiquidityAmounts.getAmountsForLiquidity(sqrtPriceX96, sqrtRatioAX96, sqrtRatioBX96, liquidity);
         }
 
-        amount0 += uint256(owed0);
-        amount1 += uint256(owed1);
+        // All uncollected fees: snapshotted (tokensOwed*) + live (feeGrowthInside delta).
+        (uint256 fees0, uint256 fees1) = LibUniswapV3Fees.uncollectedFees(
+            pool, _tickLower, _tickUpper, liquidity, fgInside0Last, fgInside1Last, owed0, owed1
+        );
+        amount0 += fees0;
+        amount1 += fees1;
 
         if (isToken0Quote) {
             q = amount0;
@@ -535,27 +556,8 @@ contract UniswapV3StakingVault is IStakingVault, ReentrancyGuard {
         );
     }
 
-    // ============ Multicall ============
-
-    /// @inheritdoc IStakingVault
-    /// @dev Per-call state checks remain authoritative — multicall does not bypass them.
-    function multicall(bytes[] calldata data)
-        external
-        override
-        returns (bytes[] memory results)
-    {
-        results = new bytes[](data.length);
-        for (uint256 i = 0; i < data.length; i++) {
-            (bool ok, bytes memory ret) = address(this).delegatecall(data[i]);
-            if (!ok) {
-                // Bubble up revert reason
-                assembly {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            }
-            results[i] = ret;
-        }
-    }
+    // Multicall is provided by OZ's `Multicall` mixin (see inheritance list).
+    // Per-call state checks remain authoritative — multicall does not bypass them.
 
     function _resolvePool(address t0, address t1, uint24 fee) internal view returns (address resolved) {
         address uniFactory = positionManager.factory();

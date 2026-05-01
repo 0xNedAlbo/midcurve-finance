@@ -103,7 +103,6 @@ interface IStakingVault {
     /// @notice Owner-driven exit using a flash-loan / external-swap helper contract.
     function flashClose(address callbackTarget, bytes calldata data) external;
 
-    // ============ OZ Multicall mixin ============
-
-    function multicall(bytes[] calldata calls) external returns (bytes[] memory);
+    // OZ `Multicall` mixin (`function multicall(bytes[] calldata) external returns (bytes[] memory)`)
+    // is provided directly by the implementation via inheritance — see UniswapV3StakingVault.
 }

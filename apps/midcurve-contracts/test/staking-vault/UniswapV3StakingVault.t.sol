@@ -3,15 +3,12 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 import {UniswapV3StakingVault} from "../../contracts/staking-vault/UniswapV3StakingVault.sol";
-import {
-    IStakingVault,
-    StakeParams,
-    SwapStatus,
-    SwapQuote
-} from "../../contracts/staking-vault/interfaces/IStakingVault.sol";
+import {StakeParams, SwapStatus, SwapQuote} from
+    "../../contracts/staking-vault/interfaces/IStakingVault.sol";
 
 import {
     MockStakingNFPM,
@@ -739,4 +736,323 @@ contract UniswapV3StakingVaultTest is Test {
         SwapQuote memory q = vault.quoteSwap();
         assertEq(uint256(q.status), uint256(SwapStatus.Underwater));
     }
+
+    // ============ quoteSwap — live (unsnapshotted) fees ============
+
+    /// @notice Without the live-fee component, an unattended NFT (no decreaseLiquidity /
+    ///         collect calls between stake() and settlement) would always classify as
+    ///         Underwater while fees actually exist in the pool. This test asserts the
+    ///         live-fee path flips classification once feeGrowthInside delta is added.
+    function test_quoteSwap_liveFees_flipsCaseFromUnderwaterToExecutable() public {
+        // L = 1 keeps principal contribution effectively zero relative to the staked
+        // amounts (B = 10_000, Q = 10_000), so the fee component is the only swing
+        // variable in the case classification.
+        uint256 tokenId = _stake(10_000, 10_000, 1, true, 100);
+
+        // Phase 1: no live fees → both b, q ≈ 0 → Case 4.
+        SwapQuote memory q0 = vault.quoteSwap();
+        assertEq(uint256(q0.status), uint256(SwapStatus.Underwater));
+
+        // Phase 2: pump live fees on the quote side only.
+        // Library does: fees = (inside - inside_last) * L / Q128. With L = 1, set
+        // inside_delta = 10_300 * Q128 → fees_quote = 10_300 (pushes q over Q+T = 10_100).
+        uint256 Q128 = 1 << 128;
+        pool.setTickData(TICK_LOWER, 0, 0);
+        pool.setTickData(TICK_UPPER, 0, 0);
+        nfpm.setFeeGrowthInsideLastForTesting(tokenId, 0, 0);
+        // isToken0Quote = true → token0 is quote; pump global0 only.
+        pool.setFeeGrowthGlobal(10_300 * Q128, 0);
+
+        SwapQuote memory q1 = vault.quoteSwap();
+        // q ≈ 10_300 > Q+T = 10_100 (surplus quote)
+        // b ≈ 0 < B = 10_000 (deficit base) → Case 3
+        assertEq(uint256(q1.status), uint256(SwapStatus.Executable));
+        assertEq(q1.tokenIn, address(tokenB)); // base
+        assertEq(q1.tokenOut, address(tokenA)); // quote
+        // amountOut ≈ q - (Q+T) = 10_300 - 10_100 = 200 (± principal)
+        assertApproxEqAbs(q1.amountOut, 200, 5);
+        // requiredMin ≈ B - b = 10_000 - 0 = 10_000 (± principal)
+        assertApproxEqAbs(q1.minAmountIn, 10_000, 5);
+    }
+
+    /// @notice Live fees can also lift the vault out of Case 4 onto Case 1 (no swap).
+    function test_quoteSwap_liveFees_reachNoSwapNeeded() public {
+        uint256 tokenId = _stake(10_000, 10_000, 1, true, 100);
+        uint256 Q128 = 1 << 128;
+        pool.setTickData(TICK_LOWER, 0, 0);
+        pool.setTickData(TICK_UPPER, 0, 0);
+        nfpm.setFeeGrowthInsideLastForTesting(tokenId, 0, 0);
+        // Push BOTH sides over their floors: quote >= 10_100 AND base >= 10_000.
+        pool.setFeeGrowthGlobal(11_000 * Q128, 11_000 * Q128);
+
+        SwapQuote memory q = vault.quoteSwap();
+        assertEq(uint256(q.status), uint256(SwapStatus.NoSwapNeeded));
+    }
+
+    // ============ flashClose — Cases 2, 3, 4 (callback bridges deficit) ============
+
+    /// @notice flashClose on a Case 2 close: vault has surplus base + deficit quote.
+    ///         Helper "flash-loans" the missing quote in to satisfy expectedQuote.
+    function test_flashClose_case2_callbackBridgesQuoteDeficit() public {
+        uint256 tokenId = _stake(1_000, 800, 500, true, 100); // Q=1000, B=800, T=100
+        // Case 2: b=900>B, q=900<Q+T=1100. Vault pushes 900 base + 900 quote to callback.
+        _arrangeClose(tokenId, 900, 900);
+
+        MockFlashCloseCallback cb = _setupFlashCallback();
+        // Callback needs to return (B=800 base, Q+T=1100 quote). It already has 900
+        // base and 900 quote post-push. Pre-fund 200 quote so it can return 1100.
+        tokenA.mint(address(cb), 200);
+        cb.setMode(MockFlashCloseCallback.Mode.Exact);
+
+        uint256 baseBefore = tokenB.balanceOf(alice);
+        uint256 quoteBefore = tokenA.balanceOf(alice);
+
+        vm.prank(alice);
+        vault.flashClose(address(cb), "");
+
+        // baseReward = finalBase - stakedBase = 800 - 800 = 0
+        // quoteReward = finalQuote - stakedQuote = 1100 - 1000 = 100
+        assertEq(vault.baseReward(), 0);
+        assertEq(vault.quoteReward(), 100);
+        assertEq(uint256(vault.state()), uint256(UniswapV3StakingVault.State.Settled));
+        assertEq(tokenB.balanceOf(alice), baseBefore + 800);
+        assertEq(tokenA.balanceOf(alice), quoteBefore + 1_100);
+    }
+
+    /// @notice flashClose on a Case 3 close: vault has deficit base + surplus quote.
+    function test_flashClose_case3_callbackBridgesBaseDeficit() public {
+        uint256 tokenId = _stake(1_000, 800, 500, true, 100);
+        // Case 3: b=700<B, q=1300>Q+T. Vault pushes 700 base + 1300 quote to callback.
+        _arrangeClose(tokenId, 1_300, 700);
+
+        MockFlashCloseCallback cb = _setupFlashCallback();
+        // Pre-fund 100 base so callback can return (800 base, 1100 quote).
+        tokenB.mint(address(cb), 100);
+        cb.setMode(MockFlashCloseCallback.Mode.Exact);
+
+        uint256 baseBefore = tokenB.balanceOf(alice);
+        uint256 quoteBefore = tokenA.balanceOf(alice);
+
+        vm.prank(alice);
+        vault.flashClose(address(cb), "");
+
+        assertEq(vault.baseReward(), 0);
+        assertEq(vault.quoteReward(), 100);
+        assertEq(tokenB.balanceOf(alice), baseBefore + 800);
+        assertEq(tokenA.balanceOf(alice), quoteBefore + 1_100);
+    }
+
+    /// @notice flashClose on a Case 4 close: deficit on BOTH sides. Helper must
+    ///         externally fund both — only path out for the owner.
+    function test_flashClose_case4_callbackBridgesBothDeficits() public {
+        uint256 tokenId = _stake(1_000, 800, 500, true, 100);
+        // Case 4: b=500<B, q=500<Q+T. Vault pushes 500 base + 500 quote to callback.
+        _arrangeClose(tokenId, 500, 500);
+
+        MockFlashCloseCallback cb = _setupFlashCallback();
+        // Pre-fund: 300 base + 600 quote so callback can return (800, 1100).
+        tokenB.mint(address(cb), 300);
+        tokenA.mint(address(cb), 600);
+        cb.setMode(MockFlashCloseCallback.Mode.Exact);
+
+        uint256 baseBefore = tokenB.balanceOf(alice);
+        uint256 quoteBefore = tokenA.balanceOf(alice);
+
+        vm.prank(alice);
+        vault.flashClose(address(cb), "");
+
+        assertEq(vault.baseReward(), 0);
+        assertEq(vault.quoteReward(), 100);
+        assertEq(tokenB.balanceOf(alice), baseBefore + 800);
+        assertEq(tokenA.balanceOf(alice), quoteBefore + 1_100);
+    }
+
+    // ============ Multicall (OZ mixin) ============
+
+    /// @notice OZ Multicall composes inner state-changing calls via delegatecall;
+    ///         each inner call's state checks must still fire normally.
+    function test_multicall_composes_setYieldTarget() public {
+        _stake(1_000, 800, 500, true, 100);
+
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = abi.encodeWithSelector(UniswapV3StakingVault.setYieldTarget.selector, 250);
+        calls[1] = abi.encodeWithSelector(UniswapV3StakingVault.setYieldTarget.selector, 500);
+
+        vm.prank(alice);
+        vault.multicall(calls);
+
+        assertEq(vault.yieldTarget(), 500);
+    }
+
+    function test_multicall_revertsIfInnerCallReverts() public {
+        _stake(1_000, 800, 500, true, 100);
+
+        bytes[] memory calls = new bytes[](1);
+        // setYieldTarget from non-owner inside a multicall — inner call's onlyOwner reverts.
+        calls[0] = abi.encodeWithSelector(UniswapV3StakingVault.setYieldTarget.selector, 250);
+
+        vm.prank(bob);
+        vm.expectRevert(UniswapV3StakingVault.NotOwner.selector);
+        vault.multicall(calls);
+    }
+
+    // ============ ERC-777 / fee-on-transfer reentrancy on stake() and swap() ============
+
+    /// @dev Stake `mal`-as-quote into a fresh clone. Returns vault `v` ready for the
+    ///      reentrancy probe — `mal.armAttack()` will trigger reentry on the next
+    ///      transferFrom called against `mal`.
+    function _setupMaliciousVault()
+        internal
+        returns (UniswapV3StakingVault v, ReentrantToken mal, MockERC20 plainBase, uint256 tid)
+    {
+        v = UniswapV3StakingVault(Clones.clone(address(implementation)));
+        v.initialize(alice);
+
+        mal = new ReentrantToken();
+        plainBase = new MockERC20("B", "B");
+
+        bool malIsToken0 = address(mal) < address(plainBase);
+        address t0 = malIsToken0 ? address(mal) : address(plainBase);
+        address t1 = malIsToken0 ? address(plainBase) : address(mal);
+        bool isQ0 = malIsToken0; // quote = mal
+
+        MockUniPool poolNew = new MockUniPool(SQRT_PRICE_X96, 0);
+        uniFactory.setPool(t0, t1, FEE, address(poolNew));
+
+        // Stake B=800 base + Q=1000 quote, T=100. desired == used.
+        uint256 desired0 = isQ0 ? 1_000 : 800;
+        uint256 desired1 = isQ0 ? 800 : 1_000;
+        nfpm.setNextMintResult(500, desired0, desired1);
+
+        mal.mintForTest(alice, desired0 + desired1); // generous
+        plainBase.mint(alice, desired0 + desired1);
+
+        vm.startPrank(alice);
+        IERC20(t0).approve(address(v), type(uint256).max);
+        IERC20(t1).approve(address(v), type(uint256).max);
+        StakeParams memory sp = StakeParams({
+            token0: t0,
+            token1: t1,
+            fee: FEE,
+            tickLower: TICK_LOWER,
+            tickUpper: TICK_UPPER,
+            amount0Desired: desired0,
+            amount1Desired: desired1,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: DEADLINE
+        });
+        tid = v.stake(sp, isQ0, 100);
+        vm.stopPrank();
+
+        // Arrange Case 2 close: vault holds (b=900, q=900) after _closePosition.
+        nfpm.setLiquidityForTesting(tid, 1);
+        nfpm.setNextDecreaseResult(tid, 900, 900);
+        mal.mintForTest(address(nfpm), 900);
+        plainBase.mint(address(nfpm), 900);
+
+        mal.setTarget(address(v));
+    }
+
+    function test_stake_reentrancy_isBlocked() public {
+        // Build a fresh vault but DON'T stake yet; arm the malicious token first
+        // so it reenters during the very first stake() call.
+        UniswapV3StakingVault v = UniswapV3StakingVault(Clones.clone(address(implementation)));
+        v.initialize(alice);
+
+        ReentrantToken mal = new ReentrantToken();
+        MockERC20 plainBase = new MockERC20("B", "B");
+
+        bool malIsToken0 = address(mal) < address(plainBase);
+        address t0 = malIsToken0 ? address(mal) : address(plainBase);
+        address t1 = malIsToken0 ? address(plainBase) : address(mal);
+        bool isQ0 = malIsToken0;
+
+        MockUniPool poolNew = new MockUniPool(SQRT_PRICE_X96, 0);
+        uniFactory.setPool(t0, t1, FEE, address(poolNew));
+
+        nfpm.setNextMintResult(500, isQ0 ? 1_000 : 800, isQ0 ? 800 : 1_000);
+        mal.mintForTest(alice, 2_000);
+        plainBase.mint(alice, 2_000);
+
+        // Arm: malicious quote token reenters swap() during its transferFrom.
+        mal.setTarget(address(v));
+        mal.armAttack();
+
+        vm.startPrank(alice);
+        IERC20(t0).approve(address(v), type(uint256).max);
+        IERC20(t1).approve(address(v), type(uint256).max);
+        StakeParams memory sp = StakeParams({
+            token0: t0,
+            token1: t1,
+            fee: FEE,
+            tickLower: TICK_LOWER,
+            tickUpper: TICK_UPPER,
+            amount0Desired: isQ0 ? 1_000 : 800,
+            amount1Desired: isQ0 ? 800 : 1_000,
+            amount0Min: 0,
+            amount1Min: 0,
+            deadline: DEADLINE
+        });
+        // The malicious token's reentry into v.swap() inside its transferFrom must
+        // be caught by `nonReentrant` (outer stake set _status = ENTERED), bubbling
+        // up to revert the outer stake.
+        vm.expectRevert();
+        v.stake(sp, isQ0, 100);
+        vm.stopPrank();
+    }
+
+    function test_swap_reentrancy_isBlocked() public {
+        (UniswapV3StakingVault v, ReentrantToken mal, MockERC20 plainBase,) =
+            _setupMaliciousVault();
+
+        mal.armAttack();
+
+        // Executor pays 250 quote (mal) → vault calls mal.transferFrom which
+        // reenters v.swap() — must revert via nonReentrant.
+        mal.mintForTest(executor, 250);
+        vm.prank(executor);
+        IERC20(address(mal)).approve(address(v), 250);
+
+        vm.prank(executor);
+        vm.expectRevert();
+        v.swap(address(mal), 250, address(plainBase), 0);
+    }
 }
+
+/// @notice Minimal ERC-20 with a `transferFrom` hook that re-enters a target
+///         vault's `swap()` once. Models the ERC-777 / fee-on-transfer
+///         reentrancy threat called out in spec §19.
+contract ReentrantToken is ERC20 {
+    address public target;
+    bool public attack;
+
+    constructor() ERC20("Reentrant", "REE") {}
+
+    function setTarget(address t) external {
+        target = t;
+    }
+
+    function armAttack() external {
+        attack = true;
+    }
+
+    function mintForTest(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount)
+        public
+        override
+        returns (bool)
+    {
+        bool ok = super.transferFrom(from, to, amount);
+        if (attack && target != address(0)) {
+            attack = false; // single-shot; avoid recursion
+            // Try to reenter swap() — vault's nonReentrant guard MUST revert.
+            UniswapV3StakingVault(target).swap(address(0), 0, address(0), 0);
+        }
+        return ok;
+    }
+}
+
