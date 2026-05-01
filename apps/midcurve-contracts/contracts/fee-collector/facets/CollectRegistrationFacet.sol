@@ -3,8 +3,8 @@ pragma solidity ^0.8.20;
 
 import {AppStorage, LibAppStorage, CollectOrderStatus, SwapDirection, CollectOrder, Modifiers} from "../storage/AppStorage.sol";
 import {IUniswapV3FeeCollectorV1} from "../interfaces/IUniswapV3FeeCollectorV1.sol";
-import {INonfungiblePositionManagerMinimal} from "../../position-closer/interfaces/INonfungiblePositionManagerMinimal.sol";
-import {IUniswapV3PoolMinimal} from "../../position-closer/interfaces/IUniswapV3PoolMinimal.sol";
+import {INonfungiblePositionManagerMinimal} from "../../interfaces/INonfungiblePositionManagerMinimal.sol";
+import {IUniswapV3PoolMinimal} from "../../interfaces/IUniswapV3PoolMinimal.sol";
 
 /// @title CollectRegistrationFacet
 /// @notice Facet for registering and cancelling fee collect orders
