@@ -90,4 +90,33 @@ interface INonfungiblePositionManagerMinimal is IERC721Minimal {
     function collect(CollectParams calldata params)
         external
         returns (uint256 amount0, uint256 amount1);
+
+    /// @notice Parameters for minting a new position
+    struct MintParams {
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    /// @notice Mints a new Uniswap V3 position NFT
+    /// @param params The parameters for minting
+    /// @return tokenId The ID of the minted NFT
+    /// @return liquidity The liquidity added to the position
+    /// @return amount0 The amount of token0 actually consumed
+    /// @return amount1 The amount of token1 actually consumed
+    function mint(MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+
+    /// @notice Returns the address of the Uniswap V3 Factory
+    function factory() external view returns (address);
 }
