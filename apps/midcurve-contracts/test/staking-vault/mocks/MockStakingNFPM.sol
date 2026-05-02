@@ -38,6 +38,11 @@ contract MockStakingNFPM {
     mapping(uint256 => uint256) public nextDecrease0;
     mapping(uint256 => uint256) public nextDecrease1;
 
+    // Controllable increaseLiquidity() result, keyed per tokenId.
+    mapping(uint256 => uint128) public nextIncreaseLiquidity;
+    mapping(uint256 => uint256) public nextIncrease0;
+    mapping(uint256 => uint256) public nextIncrease1;
+
     constructor(address factory_) {
         factory = factory_;
     }
@@ -55,6 +60,17 @@ contract MockStakingNFPM {
     function setNextDecreaseResult(uint256 tokenId_, uint256 amount0_, uint256 amount1_) external {
         nextDecrease0[tokenId_] = amount0_;
         nextDecrease1[tokenId_] = amount1_;
+    }
+
+    function setNextIncreaseResult(
+        uint256 tokenId_,
+        uint128 liquidity_,
+        uint256 amount0Used_,
+        uint256 amount1Used_
+    ) external {
+        nextIncreaseLiquidity[tokenId_] = liquidity_;
+        nextIncrease0[tokenId_] = amount0Used_;
+        nextIncrease1[tokenId_] = amount1Used_;
     }
 
     function setLiquidityForTesting(uint256 tokenId_, uint128 liquidity_) external {
@@ -144,12 +160,29 @@ contract MockStakingNFPM {
         _owners[tokenId_] = params.recipient;
     }
 
-    function increaseLiquidity(INonfungiblePositionManagerMinimal.IncreaseLiquidityParams calldata)
+    function increaseLiquidity(INonfungiblePositionManagerMinimal.IncreaseLiquidityParams calldata params)
         external
         payable
-        returns (uint128, uint256, uint256)
+        returns (uint128 liquidity_, uint256 amount0, uint256 amount1)
     {
-        revert("not implemented");
+        Position storage p = _positions[params.tokenId];
+        liquidity_ = nextIncreaseLiquidity[params.tokenId];
+        amount0 = nextIncrease0[params.tokenId];
+        amount1 = nextIncrease1[params.tokenId];
+
+        if (amount0 > 0) {
+            IERC20(p.token0).transferFrom(msg.sender, address(this), amount0);
+        }
+        if (amount1 > 0) {
+            IERC20(p.token1).transferFrom(msg.sender, address(this), amount1);
+        }
+
+        p.liquidity += liquidity_;
+
+        // Reset so a follow-up increase without setup yields zero (no accidental reuse).
+        nextIncreaseLiquidity[params.tokenId] = 0;
+        nextIncrease0[params.tokenId] = 0;
+        nextIncrease1[params.tokenId] = 0;
     }
 
     function decreaseLiquidity(INonfungiblePositionManagerMinimal.DecreaseLiquidityParams calldata params)
