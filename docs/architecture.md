@@ -87,11 +87,12 @@ midcurve-finance/
 ├── apps/
 │   ├── midcurve-ui/              # Vite SPA - React frontend
 │   ├── midcurve-api/             # Next.js REST API backend
-│   ├── midcurve-automation/      # Price monitoring & order execution
-│   ├── midcurve-onchain-data/    # Real-time blockchain event subscriptions
-│   ├── midcurve-business-logic/  # Event-driven rules & scheduled tasks
+│   ├── midcurve-automation/      # Range monitoring & close-order execution
+│   ├── midcurve-onchain-data/    # Real-time blockchain event subscriptions/pollers
+│   ├── midcurve-business-logic/  # Event-driven rules, accounting, scheduled tasks
 │   ├── midcurve-signer/          # Transaction signing service
-│   └── midcurve-contracts/       # Solidity smart contracts (Foundry)
+│   ├── midcurve-contracts/       # Solidity smart contracts (Foundry)
+│   └── midcurve-mcp-server/      # Read-only MCP server for Claude clients
 ├── packages/
 │   ├── midcurve-shared/          # @midcurve/shared - Domain types & utilities
 │   ├── midcurve-services/        # @midcurve/services - Business logic
@@ -133,18 +134,20 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 - Workers (Background processors)
 
 **Contains:**
-- **Core Types:**
-  - Token types (`Token`, `Erc20Token`, `SolanaToken`)
-  - Pool types (`Pool`, `UniswapV3Pool`)
-  - Position types (`Position`, `UniswapV3Position`)
-  - User types (`User`, `AuthWalletAddress`)
-  - Pool price types (`PoolPrice`)
-  - Ledger event types (`PositionLedgerEvent`)
+- **Core Types** (under `src/types/`):
+  - Tokens (`Token`, `Erc20Token`, `SolanaToken`), CoinGecko types, quote-token results
+  - Pool & pool-price types (`Pool`, `UniswapV3Pool`, `PoolPrice`)
+  - Positions (`Position`, `UniswapV3Position`, vault positions), simulation result types
+  - Position ledger events, APR period and summary types
+  - User, user settings, API key, wallet-perimeter types
+  - Accounting types (journal entries, token lots), automation types
+  - Shared-contract and on-chain-subscription types
 
-- **Utilities:**
+- **Utilities & Math:**
   - EVM address utilities (validation, normalization, comparison)
-  - UniswapV3 math functions (price conversions, liquidity calculations)
-  - Mathematical helpers for DeFi calculations
+  - UniswapV3 math (sqrtPriceX96 ↔ price/tick conversions, liquidity ↔ token amounts)
+  - Conversion helpers, formatting utilities (compact-value, fraction-format)
+  - Contract ABIs (`src/abis/`) and chain config (`src/config/`)
 
 **Key Characteristics:**
 - Zero dependencies on databases or services
@@ -168,29 +171,31 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 - Workers (Background processors)
 
 **Contains:**
-- **Services:**
-  - `TokenService` - Generic token CRUD operations
-  - `Erc20TokenService` - ERC-20 specialized service with on-chain discovery
 
-- **Clients:**
-  - `CoinGeckoClient` - Token enrichment with distributed caching
+- **Service domains** (under `src/services/`):
+  - **Auth & users:** `auth`, `user`, `user-settings`, `wallet-perimeter`
+  - **Tokens:** `token`, `coingecko-token`, `quote-token`, `token-lot`
+  - **Pools:** `pool`, `pool-price`, `pool-search`, `favorite-pool`
+  - **Positions:** `position`, `position-list`, `position-ledger`, `position-apr`
+  - **Automation:** `automation`, `close-order`, `swap-router`
+  - **Accounting:** `journal` (journal entries, account definitions)
+  - **Notifications:** `notifications` (in-app + webhook)
+  - **Other:** `cache`, `system-config`, `block`, `transaction`, `volatility`
 
-- **Cache:**
-  - `CacheService` - PostgreSQL-based distributed cache (shared across workers/serverless functions)
-
-- **Config:**
-  - `EvmConfig` - RPC endpoint management for all EVM chains
-  - Chain configuration and public client creation
-
-- **Utilities:**
-  - ERC-20 contract readers (requires viem and RPC access)
-  - APR calculation utilities
-  - Request scheduling and rate limiting
+- **External clients** (under `src/clients/`):
+  - `coingecko` — token enrichment with distributed caching
+  - `etherscan` — block/tx lookups
+  - `evm` — RPC endpoint management, public clients, contract readers
+  - `paraswap` — DEX aggregator quotes (UI swap feature only)
+  - `prisma` — Prisma client wiring
+  - `signer` — internal client for the signer service
+  - `subgraph` — Uniswap V3 subgraph queries
 
 **Key Characteristics:**
 - Distributed caching via PostgreSQL (no Redis required)
 - Address normalization for EVM chains (EIP-55 checksumming)
 - Multi-chain support (Ethereum, Arbitrum, Base)
+- Domain-event publishing via the outbox pattern (consumed by business-logic)
 
 **Documentation:** See [packages/midcurve-services/CLAUDE.md](../packages/midcurve-services/CLAUDE.md)
 
@@ -266,12 +271,17 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
   - `@midcurve/database` exports the generated Prisma client
   - Type-safe database queries
 
-- **Models:**
-  - User, Session, AuthWalletAddress
-  - Token, Pool, Position
-  - CloseOrder, AutomationContract
-  - PositionLedgerEvent, AprPeriod
-  - Cache (for distributed caching)
+- **Models** (~28 models + supporting enums), grouped by domain:
+  - **Identity & auth:** `User`, `Session`, `ApiKey`, `UserSettings`, `UserWallet`, `UserAllowListEntry`
+  - **Tokens:** `Token`, `CoingeckoToken`
+  - **Positions (UniswapV3):** `Position`, `PositionLedgerEvent`, `PositionAprPeriod`, `PositionRangeStatus`
+  - **Close orders & automation:** `CloseOrder`, `AutomationLog`, `OnchainDataSubscribers`, `SharedContract`, `KnownProtocolAddress`
+  - **Accounting (journal-entry pipeline):** `AccountDefinition`, `JournalEntry`, `JournalLine`, `TokenLot`, `TokenLotState`, `TokenLotDisposal` (with `TokenLotTransferEvent` enum)
+  - **Notifications:** `UserNotification`, `UserWebhookConfig` (with `NotificationEventType` enum)
+  - **Domain events (outbox pattern):** `DomainEvent`, `DomainEventOutbox`
+  - **Infrastructure:** `Cache` (distributed cache), `SystemConfig` (e.g. WalletConnect project ID set via setup wizard)
+
+> Pool data is stored inside `Position`/`SharedContract` rows and protocol-specific JSON `config`/`state` fields (per the platform-agnostic design). There is no separate `Pool` table. Wallet addresses are tracked via `UserWallet` (no standalone `AuthWalletAddress` table).
 
 **Key Characteristics:**
 - Single source of truth - All services use the same schema
@@ -318,7 +328,8 @@ const user = await prisma.user.findUnique({
 - Cross-origin API calls - Uses `apiClient` with `credentials: 'include'`
 - Type safety - Imports types from @midcurve/api-shared
 - Wallet integration - RainbowKit for connection, Wagmi for transactions
-- Build-time env vars - `VITE_API_URL`, `VITE_WALLETCONNECT_PROJECT_ID`
+- **Runtime config via setup wizard:** the WalletConnect project ID is configured by an admin in the in-app setup wizard, persisted in `SystemConfig`, and served from `GET /api/config`. It is **not** a build-time env var.
+- **API URL resolution:** `window.__ENV__.apiUrl` (injected by the docker entrypoint into `/config.js` from runtime `API_URL`) → `VITE_API_URL` (local dev fallback) → empty (Vite proxy in dev).
 
 **Directory Structure:**
 ```
@@ -355,12 +366,18 @@ midcurve-ui/
 
 **API Routes:**
 - `GET /api/health` - Health check
+- `GET /api/config` - Runtime config served to the UI (WalletConnect project ID, configured/unconfigured state, operator address)
 - `/api/v1/auth/*` - SIWE authentication (nonce, verify, logout)
-- `/api/v1/user/*` - User profile, wallets, API keys
-- `/api/v1/tokens/erc20/*` - Token discovery and enrichment
-- `/api/v1/pools/uniswapv3/*` - Pool data and pricing
-- `/api/v1/positions/*` - Position CRUD, history, APR
-- `/api/v1/automation/*` - Close orders and position automation
+- `/api/v1/user/*` - User profile, wallets, API keys, settings
+- `/api/v1/admin/*` - Admin operations (setup wizard, system config, allowlist)
+- `/api/v1/tokens/*` - Token discovery and enrichment (ERC-20 + CoinGecko)
+- `/api/v1/pools/*` - Pool data and pricing (UniswapV3)
+- `/api/v1/positions/*` - Position CRUD, history, APR, simulations
+- `/api/v1/transactions/*` - On-chain transaction status / lookups
+- `/api/v1/swap/*` - DEX swap quotes and execution helpers
+- `/api/v1/automation/*` - Close orders, range alerts, vault positions
+- `/api/v1/accounting/*` - Journal entries, P&L statements, cost-basis reporting
+- `/api/v1/notifications/*` - In-app notifications and webhook configs
 
 **Key Characteristics:**
 - Session-based auth - Custom session middleware with cookies
@@ -417,26 +434,32 @@ midcurve-signer/
 
 ---
 
-### @midcurve/automation - Price Monitoring & Order Execution
+### @midcurve/automation - Range Monitoring & Close-Order Execution
 
 **Location:** `apps/midcurve-automation/`
 
-**Purpose:** Automated position management for Uniswap V3 positions. Monitors pool prices and executes close orders when user-defined trigger conditions are met.
+**Purpose:** Automated position management for Uniswap V3 positions. Monitors pool prices, tracks range exits, and executes close orders (NFT-position and vault-position variants) when user-defined trigger conditions are met.
 
 **Technology:**
-- **Next.js 15** - API server with standalone output
-- **RabbitMQ** - Event-driven order processing
+- **Next.js 15** - Health-check / status API with standalone output
+- **RabbitMQ** - Event-driven order processing (competing consumers, retry via delay queue)
 - **MidcurveSwapRouter** - On-chain DEX aggregator for post-close token swaps
 
-**Components:**
-- **Price Monitor Worker** - Consumes RabbitMQ pool price events, detects trigger conditions
-- **Order Executor Worker** - Executes close orders via Diamond proxy contract
+**Workers** (under `src/workers/`):
+- `range-monitor.ts` — platform-agnostic range-monitor worker; consumes pool-price events from RabbitMQ and emits range-exit events
+- `uniswapv3/uniswapv3-close-order-monitor.ts` — watches close-order trigger conditions (SIL/TIP) for UniswapV3 positions and enqueues executions
+- `uniswapv3/uniswapv3-close-order-executor.ts` — executes close orders via the Diamond proxy contract
+- `uniswapv3/uniswapv3-nft-execution.ts` — execution path for direct NFT positions
+- `uniswapv3/uniswapv3-vault-execution.ts` — execution path for vault-held positions (uses VaultPositionCloser)
+
+> Worker file names follow `.claude/rules/platform-agnostic-design.md` — platform-specific workers live under a platform-named subdirectory and carry a platform prefix in the file/class name.
 
 **Key Characteristics:**
 - Event-driven - RabbitMQ for async processing
 - Atomic execution - Diamond proxy contract closes position in one tx
 - Slippage protection - Configurable minimum amounts
 - Multi-chain - Deployed on all supported EVM chains
+- Bounded retries - `MAX_EXECUTION_ATTEMPTS=3`, retry via 60s-TTL delay queue
 
 **Directory Structure:**
 ```
@@ -466,21 +489,26 @@ midcurve-automation/
 - **RabbitMQ** - Event publisher
 - **Pino** - Structured logging
 
-**Subscribers (8 independent workers):**
-1. **UniswapV3PoolPriceSubscriber** - Subscribes to Swap events for pools with active positions
-2. **PositionLiquiditySubscriber** - Monitors NFPM IncreaseLiquidity/DecreaseLiquidity events
-3. **NfpmTransferSubscriber** - Tracks NFT mint/burn/transfer (position lifecycle)
-4. **Erc20ApprovalSubscriber** - Listens to ERC-20 Approval events
-5. **Erc20BalanceSubscriber** - Listens to ERC-20 Transfer events for balance tracking
-6. **EvmTxStatusSubscriber** - Polls RPC for transaction confirmations
-7. **CloseOrderSubscriber** - Polls on-chain close order state changes
-8. **PositionEventHandler** - Manages dynamic subscription updates when positions change
+**Workers** (under `src/workers/`) — a mix of WebSocket subscribers, polling workers, and RabbitMQ consumers, plus domain-event handlers under `src/events/`:
+
+*Platform-agnostic (EVM-wide):*
+- `erc20-approval-subscriber.ts` — WebSocket subscription to ERC-20 `Approval` events for tracked spenders
+- `erc20-balance-subscriber.ts` — WebSocket subscription to ERC-20 `Transfer` events for balance tracking
+- `evm-tx-status-subscriber.ts` — polls RPC for confirmation status of pending transactions
+
+*Uniswap V3 (under `workers/uniswapv3/`):*
+- `uniswapv3-pool-price-poller.ts` — periodic on-chain reads of pool `slot0` for price updates
+- `uniswapv3-pool-price-consumer.ts` — RabbitMQ consumer that fans pool-price events out to internal handlers
+- `uniswapv3-close-order-poller.ts` — polls on-chain close-order state changes via the Diamond proxy view facets
+
+*Domain-event handlers (under `src/events/`):*
+- React to `OnchainDataSubscribers` table changes (entity created/closed) and dynamically add/remove the on-chain subscriptions above.
 
 **Key Characteristics:**
-- WebSocket-based - Real-time event streaming from RPC endpoints
-- Batched connections - Configurable pools-per-WebSocket (default 1000)
-- Dynamic subscriptions - Auto-updates when positions are created/closed
-- Publishes to RabbitMQ exchanges: `pool-prices`, `position-liquidity-events`, `close-order-events`
+- Hybrid streaming + polling - WebSocket where supported, polling for state that doesn't emit events
+- DB-driven subscriptions - One `OnchainDataSubscribers` row per tracked entity; subscription IDs of the form `auto:{consumer}:{entityId}` per `.claude/rules/automation-workers.md`
+- Domain-event triggered - No interval timers; subscription syncing is driven by domain events
+- Publishes to RabbitMQ - exchanges include `pool-prices`, `position-liquidity-events`, `close-order-events`
 
 **Directory Structure:**
 ```
@@ -508,16 +536,33 @@ midcurve-onchain-data/
 - **node-cron** - Scheduled task execution
 - **Pino** - Structured logging
 
-**Active Rules:**
-1. **RefreshCoingeckoTokensRule** - Daily token data refresh (cron: 3:17 AM UTC)
-2. **EnrichCoingeckoTokensRule** - Token enrichment every 5 minutes
-3. **UpdatePositionOnLiquidityEventRule** - Processes liquidity events from RabbitMQ
-4. **ProcessCloseOrderEventsRule** - Syncs close orders with on-chain state
+**Active Rules** (organized by `src/rules/` subdirectory):
+
+*Token enrichment (top-level):*
+- `RefreshCoingeckoTokensRule` — daily token-list refresh from CoinGecko
+- `EnrichCoingeckoTokensRule` — incremental enrichment of newly seen tokens
+
+*Accounting — UniswapV3 NFT positions (`accounting/uniswapv3/`):*
+- `UniswapV3PostJournalEntriesRule` — posts double-entry journal entries from position ledger events
+- `UniswapV3ReconcileCostBasisRule` — periodic cost-basis reconciliation against on-chain truth
+- `UniswapV3ReevaluateOnWalletChangeRule` — re-evaluates positions when a user adds/removes a wallet
+- `UniswapV3JournalBackfillRule` — backfills journal entries for historical positions
+
+*Accounting — UniswapV3 vault positions (`accounting/uniswapv3-vault/`):*
+- `UniswapV3VaultPostJournalEntriesRule` — vault-position variant of the journal-posting rule
+
+*Close orders (`close-orders/uniswapv3/`):*
+- `UniswapV3ProcessCloseOrderEventsRule` — syncs close orders with on-chain state, emits domain events
+
+*Automation infrastructure (`automation/`):*
+- `RefuelOperatorRule` — keeps the operator EOA topped up on each chain via the gas escrow
+
 **Key Characteristics:**
 - Rule-based architecture - Abstract `BusinessRule` base class with lifecycle hooks
 - RuleRegistry - Manages rule registration, startup, shutdown
 - SchedulerService - Singleton cron scheduler with execution metrics
-- Consumes from RabbitMQ: `position-liquidity-events`, `close-order-events`
+- Consumes from RabbitMQ: `pool-prices`, `position-liquidity-events`, `close-order-events`, plus the domain-events exchange
+- Accounting pipeline: ledger events → journal entries → cost-basis reconciliation → P&L reporting
 
 **Directory Structure:**
 ```
@@ -537,11 +582,38 @@ midcurve-business-logic/
 
 ---
 
+### @midcurve/mcp-server - Read-Only MCP Server for Claude Clients
+
+**Location:** `apps/midcurve-mcp-server/`
+
+**Purpose:** Model Context Protocol (MCP) server that lets a Claude client (Claude Desktop, Claude Code, etc.) query a user's Midcurve portfolio over the existing REST API in **read-only** mode. Runs locally on the user's machine; talks to the production API using a per-user API key (`mck_…`).
+
+**Technology:**
+- **Node.js 20+** - Standalone runtime, distributed as a `bin` (`midcurve-mcp`)
+- **`@modelcontextprotocol/sdk`** - MCP server SDK
+- **tsup** - Build to a single bundled `dist/index.js` with shebang
+- **Pino** - Structured logging
+- **Zod** - Tool input validation
+
+**Tools exposed (16, all read-only):**
+- *Identity & portfolio:* `get_user`, `list_positions`, `get_position`, `get_pnl`, `list_close_orders`, `get_pool`, `list_notifications`
+- *Per-position deep-dive:* `get_position_conversion`, `get_position_accounting`, `get_position_apr`
+- *Per-position simulation:* `simulate_position_at_price`, `generate_position_pnl_curve`
+- *Pure-math helpers:* `compute_token_amounts_for_range`, `simulate_swap_output`, `compute_liquidity_for_budget`, `convert_price_and_tick`
+
+**Key Characteristics:**
+- Runs outside the docker stack — invoked directly by the Claude client
+- Authenticated via per-user API key issued from the UI's API Keys page
+- Read-only contract — composes `@midcurve/api-shared` types and `@midcurve/shared` math; never mutates state
+- Setup details and tool reference: see [apps/midcurve-mcp-server/README.md](../apps/midcurve-mcp-server/README.md)
+
+---
+
 ### @midcurve/contracts - Solidity Smart Contracts
 
 **Location:** `apps/midcurve-contracts/`
 
-**Purpose:** Solidity smart contracts for Uniswap V3 position management. Implements the Diamond Proxy Pattern (EIP-2535) for upgradeable position closer contracts and a DEX aggregator (MidcurveSwapRouter) for post-close token swaps.
+**Purpose:** Solidity smart contracts for Uniswap V3 position management, vault staking, fee collection, and treasury operations. Implements the Diamond Proxy Pattern (EIP-2535) for upgradeable closer/collector contracts and a DEX aggregator (MidcurveSwapRouter) for post-close token swaps.
 
 **Technology:**
 - **Solidity 0.8.28** - Smart contract language
@@ -551,38 +623,63 @@ midcurve-business-logic/
 
 **Contracts:**
 
-**Position Closer (Diamond Pattern):**
-- `Diamond.sol` - EIP-2535 diamond proxy entry point
-- `RegistrationFacet.sol` - Register/cancel close orders
-- `ExecutionFacet.sol` - Execute close orders (delegates swaps to MidcurveSwapRouter)
-- `ViewFacet.sol` - Read-only views (getOnChainOrder, getCloseOrderList)
-- `OwnershipFacet.sol` - NFT ownership checks
-- `VersionFacet.sol` - Contract version tracking
-- `MulticallFacet.sol` - Batch call support
-- `UniswapV3PositionCloserFactory.sol` - Factory for deploying position closers
+**Position Closer (`contracts/position-closer/`, Diamond Pattern):**
+- `diamond/Diamond.sol` - EIP-2535 diamond proxy entry point
+- `facets/RegistrationFacet.sol` - Register/cancel close orders
+- `facets/ExecutionFacet.sol` - Execute close orders (delegates swaps to MidcurveSwapRouter)
+- `facets/ViewFacet.sol` - Read-only views (`getOnChainOrder`, `getCloseOrderList`)
+- `facets/OwnershipFacet.sol` - NFT ownership checks
+- `facets/VersionFacet.sol` - Contract version tracking
+- `facets/MulticallFacet.sol` - Batch call support
+- `UniswapV3PositionCloserFactory.sol` (top level) - Factory for deploying position closers
 
-**Swap Router (DEX Aggregator):**
+**Vault Position Closer (`contracts/vault-position-closer/`, Diamond Pattern):**
+Diamond variant tailored for vault-held positions; uses the same facet model (`RegistrationFacet`, `ExecutionFacet`, `ViewFacet`, `MulticallFacet`, `VersionFacet`, plus `OwnerUpdateFacet`). Implements `IUniswapV3VaultPositionCloserV1` and integrates with the Vault contracts below.
+
+**Vaults (`contracts/vault/`):**
+- `UniswapV3Vault.sol` - Multi-token vault that holds Uniswap V3 NFTs on behalf of users (ERC-4626-like deposit/withdraw + position management)
+- `AllowlistedUniswapV3Vault.sol` - Allowlist-gated variant
+- `UniswapV3VaultFactory.sol` - Factory for deploying vaults
+
+**Staking Vault (`contracts/staking-vault/`):**
+- `UniswapV3StakingVault.sol` - Staking vault with top-up, partial unstake, and fractional `flashClose` semantics (see SPEC-0003a)
+- `UniswapV3StakingVaultFactory.sol` - Factory
+- `IFlashCloseCallback` - Flash-close callback interface (`expectedBase`/`expectedQuote` are floor-rounded)
+
+**Fee Collector (`contracts/fee-collector/`, Diamond Pattern):**
+Diamond contract for collecting and distributing protocol fees. Facets: `CollectRegistrationFacet`, `CollectExecutionFacet`, `CollectViewFacet`, `CollectOwnerUpdateFacet`, `MulticallFacet`, `VersionFacet`.
+
+**Treasury (`contracts/treasury/`):**
+- `MidcurveTreasury.sol` - Holds protocol-owned assets; integrates with WETH wrapping helper (`IWETH`).
+
+**Swap Router (`contracts/swap-router/`, DEX Aggregator):**
 - `MidcurveSwapRouter.sol` - Main router with `sell()` function
-- `UniswapV3Adapter.sol` - Uniswap V3 venue adapter
-- Extensible to additional venues (Balancer, Curve, etc.)
+- `adapters/UniswapV3Adapter.sol` - Uniswap V3 venue adapter
+- `adapters/ParaswapAdapter.sol` - Paraswap venue adapter
+- Extensible to additional venues (Balancer, Curve, etc.) via `IVenueAdapter`
+
+**Mocks (`contracts/mocks/`, plus `MockUSD.sol` / `ManagedMockToken.sol` at top level):**
+Test fixtures for local Anvil development.
 
 **Directory Structure:**
 ```
 midcurve-contracts/
 ├── contracts/
-│   ├── position-closer/
-│   │   ├── diamond/          # Diamond proxy core
-│   │   ├── facets/           # Business logic facets
-│   │   ├── interfaces/       # Contract interfaces
-│   │   ├── libraries/        # Math libraries (LiquidityAmounts, TickMath)
-│   │   ├── storage/          # AppStorage struct
-│   │   └── init/             # Initialization logic
-│   └── swap-router/
-│       ├── MidcurveSwapRouter.sol
-│       ├── adapters/         # Venue adapters
-│       └── interfaces/       # Router & adapter interfaces
+│   ├── position-closer/         # Diamond proxy for closing UniswapV3 NFT positions
+│   ├── vault-position-closer/   # Diamond variant for vault-held positions
+│   ├── vault/                   # UniswapV3Vault + factory + allowlisted variant
+│   ├── staking-vault/           # UniswapV3StakingVault + factory (flashClose)
+│   ├── fee-collector/           # Diamond for protocol-fee collection
+│   ├── treasury/                # MidcurveTreasury
+│   ├── swap-router/             # MidcurveSwapRouter + UniswapV3/Paraswap adapters
+│   ├── interfaces/              # Shared minimal interfaces (IERC721, NFPM, etc.)
+│   ├── libraries/               # Math libs (LiquidityAmounts, TickMath, LibSqrtPrice, LibUniswapV3Fees)
+│   ├── mocks/                   # Test fixtures
+│   ├── MockUSD.sol              # Top-level mock token
+│   ├── ManagedMockToken.sol     # Top-level mock token
+│   └── UniswapV3PositionCloserFactory.sol  # Factory at top level
 ├── script/                   # Foundry deployment scripts (.sol)
-├── scripts/                  # TypeScript deployment helpers
+├── scripts/                  # TypeScript deployment helpers (viem)
 ├── lib/                      # forge-std, openzeppelin-contracts
 ├── foundry.toml              # Foundry configuration
 └── package.json
@@ -637,7 +734,7 @@ midcurve-contracts/
 ┌─────────────────────────────────────┐
 │     @midcurve/shared (Types)        │  <- Pure types (no dependencies)
 │  - Token, Pool, Position            │
-│  - AuthWalletAddress, User          │
+│  - User, accounting, automation     │
 │  - Utilities (address, math)        │
 └─────────────────────────────────────┘
            ↑ imports          ↑ imports
@@ -929,10 +1026,13 @@ DATABASE_URL="postgresql://devuser:devpass@localhost:5432/midcurve_dev"
 NODE_ENV="development"
 ```
 
-**UI (Vite - build-time variables):**
+**UI (Vite — local dev):**
 ```bash
-VITE_API_URL="http://localhost:3001"
-VITE_WALLETCONNECT_PROJECT_ID="your-walletconnect-project-id"
+VITE_API_URL="http://localhost:3001"   # local dev fallback; empty uses Vite proxy
+# In Docker, the API URL is injected at runtime as API_URL into /config.js by the
+# entrypoint script and read via window.__ENV__.apiUrl — not a build-time variable.
+# WalletConnect project ID is configured via the in-app setup wizard and persisted
+# to SystemConfig — it is NOT a build-time env var.
 ```
 
 **API (Next.js - runtime variables):**
