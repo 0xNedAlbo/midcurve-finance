@@ -53,6 +53,7 @@ export * from './close-orders';
 // Accounting rules (double-entry journal system, protocol-specific)
 export { UniswapV3PostJournalEntriesRule, UniswapV3ReconcileCostBasisRule, UniswapV3ReevaluateOnWalletChangeRule } from './accounting/uniswapv3';
 export { UniswapV3VaultPostJournalEntriesRule } from './accounting/uniswapv3-vault';
+export { UniswapV3StakingPostJournalEntriesRule } from './accounting/uniswapv3-staking';
 
 // Automation rules
 export { RefuelOperatorRule } from './automation/refuel-operator';
