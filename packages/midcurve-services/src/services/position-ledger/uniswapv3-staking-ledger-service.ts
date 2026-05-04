@@ -19,7 +19,7 @@
  *   This differs from UniswapV3LedgerService where COLLECT events add fees to PnL.
  */
 
-import { decodeAbiParameters } from 'viem';
+import { decodeAbiParameters, parseAbiItem, type Address, type PublicClient } from 'viem';
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import {
     UniswapV3StakingPositionLedgerEvent,
@@ -29,6 +29,7 @@ import {
     valueOfToken1AmountInToken0,
 } from '@midcurve/shared';
 import type {
+    UniswapV3StakingPosition,
     UniswapV3StakingPositionLedgerEventRow,
     UniswapV3StakingLedgerEventConfig,
     UniswapV3StakingLedgerEventState,
@@ -40,6 +41,16 @@ import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import type { UniswapV3PoolPriceService } from '../pool-price/uniswapv3-pool-price-service.js';
+import type { EvmConfig } from '../../config/evm.js';
+import {
+    getPositionManagerAddress,
+    UNISWAP_V3_POSITION_MANAGER_ABI,
+} from '../../config/uniswapv3.js';
+import { getDomainEventPublisher } from '../../events/index.js';
+import type {
+    PositionLedgerEventPayload,
+    PositionLiquidityRevertedPayload,
+} from '../../events/types.js';
 
 // ============================================================================
 // EVENT SIGNATURES
@@ -62,14 +73,94 @@ export const STAKING_VAULT_EVENT_SIGNATURES = {
 export type ValidStakingEventType = keyof typeof STAKING_VAULT_EVENT_SIGNATURES;
 
 // ============================================================================
+// PARSED ABI ITEMS (for client.getLogs filtering)
+// ============================================================================
+
+const STAKING_VAULT_PARSED_EVENTS = {
+    STAKE: parseAbiItem(
+        'event Stake(address indexed owner, uint256 base, uint256 quote, uint256 yieldTarget, uint256 tokenId)',
+    ),
+    YIELD_TARGET_SET: parseAbiItem(
+        'event YieldTargetSet(address indexed owner, uint256 oldTarget, uint256 newTarget)',
+    ),
+    PARTIAL_UNSTAKE_BPS_SET: parseAbiItem(
+        'event PartialUnstakeBpsSet(address indexed owner, uint16 oldBps, uint16 newBps)',
+    ),
+    SWAP: parseAbiItem(
+        'event Swap(address indexed executor, address tokenIn, uint256 amountIn, address tokenOut, uint256 amountOut, uint16 effectiveBps)',
+    ),
+    UNSTAKE: parseAbiItem(
+        'event Unstake(address indexed owner, uint256 base, uint256 quote)',
+    ),
+    CLAIM_REWARDS: parseAbiItem(
+        'event ClaimRewards(address indexed owner, uint256 baseAmount, uint256 quoteAmount)',
+    ),
+    FLASH_CLOSE_INITIATED: parseAbiItem(
+        'event FlashCloseInitiated(address indexed owner, uint16 bps, address indexed callbackTarget, bytes data)',
+    ),
+} as const;
+
+/**
+ * Factory event used by `resolveFromBlock` to find a vault clone's birth block.
+ * `vault` is indexed (topic[2]), so we filter by it directly in `getLogs`.
+ */
+const VAULT_CREATED_EVENT = parseAbiItem(
+    'event VaultCreated(address indexed owner, address indexed vault)',
+);
+
+// ============================================================================
+// STAKING VAULT READ ABI (subset used by populateChainContext)
+// ============================================================================
+
+const STAKING_VAULT_READ_ABI = [
+    {
+        type: 'function', name: 'state', stateMutability: 'view',
+        inputs: [], outputs: [{ type: 'uint8' }],
+    },
+    {
+        type: 'function', name: 'stakedBase', stateMutability: 'view',
+        inputs: [], outputs: [{ type: 'uint256' }],
+    },
+    {
+        type: 'function', name: 'stakedQuote', stateMutability: 'view',
+        inputs: [], outputs: [{ type: 'uint256' }],
+    },
+    {
+        type: 'function', name: 'rewardBufferBase', stateMutability: 'view',
+        inputs: [], outputs: [{ type: 'uint256' }],
+    },
+    {
+        type: 'function', name: 'rewardBufferQuote', stateMutability: 'view',
+        inputs: [], outputs: [{ type: 'uint256' }],
+    },
+] as const;
+
+/** Map `vault.state()` uint8 result back to the typed `StakingState`. */
+const STAKING_STATE_BY_INDEX: Record<number, StakingState> = {
+    0: 'Empty',
+    1: 'Staked',
+    2: 'FlashCloseInProgress',
+    3: 'Settled',
+};
+
+function stakingStateFromIndex(idx: number): StakingState {
+    const state = STAKING_STATE_BY_INDEX[idx];
+    if (state === undefined) {
+        throw new Error(`Unknown vault state index: ${idx}`);
+    }
+    return state;
+}
+
+// ============================================================================
 // RAW LOG TYPES
 // ============================================================================
 
 /**
  * Optional pre-fetched chain state for events that need it.
  *
- * Subscribers (PR2) populate these via NFPM/vault contract reads.
- * Unit tests inject them directly into fixtures.
+ * Populated by `syncFromChain` via NFPM and vault contract reads at the
+ * appropriate block heights. Unit tests inject the same shape directly
+ * into fixtures to exercise `importLogsForPosition` in isolation.
  *
  * Required fields by event type:
  * - Stake: `vaultStateBefore`, `liquidityAfter` (all fields below required for top-up disambiguation)
@@ -1337,5 +1428,412 @@ export class UniswapV3StakingLedgerService {
             yieldQuoteValue,
             source,
         };
+    }
+
+    // ============================================================================
+    // CHAIN IMPORT (PR2) — pull logs, populate context, import, publish events
+    // ============================================================================
+
+    /**
+     * Sync the position's ledger from chain.
+     *
+     * Mirrors `UniswapV3PositionService.refreshAllPositionLogs` (canonical
+     * reference for the NFT version) but is hosted on the ledger service
+     * directly because there is no `UniswapV3StakingPositionService` yet
+     * (that's PR4). This method:
+     *
+     *  1. Resolves `fromBlock`:
+     *     - If a prior event exists: `MIN(finalizedBlock, lastEvent.blockNumber)`
+     *       so any unfinalized tail is re-pulled and reorgs heal.
+     *     - Otherwise: search the factory's `VaultCreated` event for this
+     *       vault to find its birth block (analog of `findNftMintBlock`).
+     *  2. Pulls all 7 vault events via `client.getLogs` over [fromBlock, toBlock]
+     *     in parallel.
+     *  3. Populates per-log `StakingLogChainContext` via NFPM/vault contract reads.
+     *  4. Calls `importLogsForPosition` (PR1) — handles validation, decoding,
+     *     flashClose composition, dedup, reorg detection, recalc.
+     *  5. Publishes domain events via the outbox-backed `DomainEventPublisher`:
+     *     - `position.liquidity.reverted` per blockHash from
+     *       `importResult.allDeletedEvents` (revert events first).
+     *     - `position.liquidity.{increased,decreased}` for each newly inserted
+     *       STAKING_DEPOSIT / STAKING_DISPOSE event. Markers don't publish.
+     */
+    async syncFromChain(
+        position: UniswapV3StakingPosition,
+        evmConfig: EvmConfig,
+        poolPriceService: UniswapV3PoolPriceService,
+        opts: { toBlock?: number | 'latest'; factoryAddress?: string } = {},
+        dbTx?: PrismaTransactionClient,
+    ): Promise<StakingImportLogsResult> {
+        const chainId = position.chainId;
+        const vaultAddress = position.vaultAddress;
+        const ownerAddress = position.ownerAddress;
+        const underlyingTokenId = position.underlyingTokenId;
+        const factoryAddress = opts.factoryAddress ?? position.factoryAddress;
+        const client = evmConfig.getPublicClient(chainId);
+
+        const lastEvent = await this.findLast(dbTx);
+        const fromBlock = await this.resolveFromBlock(
+            client, evmConfig, chainId, vaultAddress, factoryAddress, lastEvent,
+        );
+        const toBlock: bigint | 'latest' =
+            opts.toBlock === undefined || opts.toBlock === 'latest'
+                ? 'latest'
+                : BigInt(opts.toBlock);
+
+        this.logger.info(
+            { positionId: this.positionId, chainId, vaultAddress, fromBlock: fromBlock.toString(), toBlock: toBlock.toString() },
+            'Starting staking-vault sync',
+        );
+
+        const rawLogs = await this.fetchStakingVaultLogs(
+            client, vaultAddress, fromBlock, toBlock,
+        );
+
+        // Populate chainContext for each log that needs it.
+        const enrichedLogs: StakingRawLogInput[] = await Promise.all(
+            rawLogs.map(async (log) => {
+                const chainContext = await this.populateChainContext(
+                    client, vaultAddress, underlyingTokenId, log,
+                );
+                return chainContext === null ? log : { ...log, chainContext };
+            }),
+        );
+
+        const importResult = await this.importLogsForPosition(
+            position,
+            chainId,
+            ownerAddress,
+            enrichedLogs,
+            poolPriceService,
+            dbTx,
+        );
+
+        await this.publishImportEvents(position, importResult, dbTx);
+
+        return importResult;
+    }
+
+    /**
+     * Resolve `fromBlock` using the same MIN(finalized, lastEvent) rule as the
+     * NFT canonical service. When no events exist for this position, search
+     * the factory for the vault's birth block.
+     */
+    private async resolveFromBlock(
+        client: PublicClient,
+        evmConfig: EvmConfig,
+        chainId: number,
+        vaultAddress: string,
+        factoryAddress: string | undefined,
+        lastEvent: UniswapV3StakingPositionLedgerEvent | null,
+    ): Promise<bigint> {
+        if (!lastEvent) {
+            if (!factoryAddress) {
+                throw new Error(
+                    `resolveFromBlock: no prior event for position ${this.positionId} ` +
+                    `and no factoryAddress provided to find the vault's birth block`,
+                );
+            }
+            const birthBlock = await this.findVaultBirthBlock(client, factoryAddress, vaultAddress);
+            if (birthBlock === null) {
+                throw new Error(
+                    `resolveFromBlock: VaultCreated event not found for vault ${vaultAddress} ` +
+                    `in factory ${factoryAddress}`,
+                );
+            }
+            return birthBlock;
+        }
+
+        // With a prior event, resume at MIN(finalizedBlock, lastEvent.blockNumber).
+        const finalityConfig = evmConfig.getFinalityConfig(chainId);
+        let finalizedBlockNumber: bigint;
+        if (finalityConfig.type === 'blockTag') {
+            const finalizedBlock = await client.getBlock({ blockTag: 'finalized' });
+            finalizedBlockNumber = finalizedBlock.number;
+        } else {
+            const currentBlock = await client.getBlockNumber();
+            finalizedBlockNumber = currentBlock - BigInt(finalityConfig.minBlockHeight);
+        }
+        const lastEventBlock = lastEvent.typedConfig.blockNumber;
+        return finalizedBlockNumber < lastEventBlock ? finalizedBlockNumber : lastEventBlock;
+    }
+
+    /**
+     * Find the block where the factory deployed this vault clone.
+     * Filters `VaultCreated` events by the indexed `vault` topic.
+     */
+    private async findVaultBirthBlock(
+        client: PublicClient,
+        factoryAddress: string,
+        vaultAddress: string,
+    ): Promise<bigint | null> {
+        const logs = await client.getLogs({
+            address: factoryAddress as Address,
+            event: VAULT_CREATED_EVENT,
+            args: { vault: vaultAddress as Address },
+            fromBlock: 0n,
+            toBlock: 'latest',
+        });
+        if (logs.length === 0) return null;
+        // First match wins; clones are 1:1 so there should be exactly one.
+        return logs[0]!.blockNumber!;
+    }
+
+    /**
+     * Fetch all 7 staking-vault event types over [fromBlock, toBlock] in parallel
+     * and merge into a single `StakingRawLogInput[]` sorted by (blockNumber, logIndex).
+     */
+    private async fetchStakingVaultLogs(
+        client: PublicClient,
+        vaultAddress: string,
+        fromBlock: bigint,
+        toBlock: bigint | 'latest',
+    ): Promise<StakingRawLogInput[]> {
+        const common = {
+            address: vaultAddress as Address,
+            fromBlock,
+            toBlock,
+        };
+
+        const [stake, yieldTargetSet, partialBpsSet, swap, unstake, claim, flashCloseInit] = await Promise.all([
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.STAKE }),
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.YIELD_TARGET_SET }),
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.PARTIAL_UNSTAKE_BPS_SET }),
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.SWAP }),
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.UNSTAKE }),
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.CLAIM_REWARDS }),
+            client.getLogs({ ...common, event: STAKING_VAULT_PARSED_EVENTS.FLASH_CLOSE_INITIATED }),
+        ]);
+
+        const allLogs = [...stake, ...yieldTargetSet, ...partialBpsSet, ...swap, ...unstake, ...claim, ...flashCloseInit];
+        allLogs.sort((a, b) => {
+            const blockDiff = Number(a.blockNumber! - b.blockNumber!);
+            if (blockDiff !== 0) return blockDiff;
+            return a.logIndex! - b.logIndex!;
+        });
+
+        return allLogs.map((log) => ({
+            address: log.address,
+            topics: log.topics as unknown as string[],
+            data: log.data,
+            blockNumber: log.blockNumber!,
+            blockHash: log.blockHash!,
+            transactionHash: log.transactionHash!,
+            transactionIndex: log.transactionIndex!,
+            logIndex: log.logIndex!,
+            removed: (log as { removed?: boolean }).removed ?? false,
+        }));
+    }
+
+    /**
+     * Populate `StakingLogChainContext` for a log via NFPM and vault reads.
+     * Returns `null` if the event type does not require chain context
+     * (markers, standalone Unstake/ClaimRewards).
+     *
+     * Per-block deduplication is intentionally NOT done here — premature at
+     * staking volumes per the SPEC discussion; the NFT canonical service does
+     * not dedup either. Revisit if a single position ever sees N>10 events
+     * in a single block in production.
+     */
+    private async populateChainContext(
+        client: PublicClient,
+        vaultAddress: string,
+        underlyingTokenId: number,
+        log: StakingRawLogInput,
+    ): Promise<StakingLogChainContext | null> {
+        const topic0 = log.topics[0]?.toLowerCase();
+        const blockNumber = typeof log.blockNumber === 'string'
+            ? BigInt(log.blockNumber)
+            : log.blockNumber;
+        const blockBefore = blockNumber - 1n;
+        const tokenIdBigInt = BigInt(underlyingTokenId);
+        const nfpm = getPositionManagerAddress(await this.resolveChainIdFromClient(client));
+
+        if (topic0 === STAKING_VAULT_EVENT_SIGNATURES.STAKE.toLowerCase()) {
+            const [stateIdx, liquidityAfter] = await Promise.all([
+                client.readContract({
+                    address: vaultAddress as Address,
+                    abi: STAKING_VAULT_READ_ABI,
+                    functionName: 'state',
+                    args: [],
+                    blockNumber: blockBefore,
+                }) as Promise<number>,
+                this.readNfpmLiquidity(client, nfpm, tokenIdBigInt, blockNumber),
+            ]);
+            return {
+                vaultStateBefore: stakingStateFromIndex(Number(stateIdx)),
+                liquidityAfter,
+            };
+        }
+
+        if (topic0 === STAKING_VAULT_EVENT_SIGNATURES.SWAP.toLowerCase()) {
+            const [
+                stakedBaseBefore, stakedQuoteBefore,
+                rewardBufferBaseBefore, rewardBufferQuoteBefore,
+                rewardBufferBaseAfter,  rewardBufferQuoteAfter,
+                liquidityAfter,
+            ] = await Promise.all([
+                this.readVaultUint(client, vaultAddress, 'stakedBase', blockBefore),
+                this.readVaultUint(client, vaultAddress, 'stakedQuote', blockBefore),
+                this.readVaultUint(client, vaultAddress, 'rewardBufferBase', blockBefore),
+                this.readVaultUint(client, vaultAddress, 'rewardBufferQuote', blockBefore),
+                this.readVaultUint(client, vaultAddress, 'rewardBufferBase', blockNumber),
+                this.readVaultUint(client, vaultAddress, 'rewardBufferQuote', blockNumber),
+                this.readNfpmLiquidity(client, nfpm, tokenIdBigInt, blockNumber),
+            ]);
+            return {
+                stakedBaseBefore,
+                stakedQuoteBefore,
+                rewardBufferBaseDelta: rewardBufferBaseAfter - rewardBufferBaseBefore,
+                rewardBufferQuoteDelta: rewardBufferQuoteAfter - rewardBufferQuoteBefore,
+                liquidityAfter,
+            };
+        }
+
+        if (topic0 === STAKING_VAULT_EVENT_SIGNATURES.FLASH_CLOSE_INITIATED.toLowerCase()) {
+            const liquidityAfter = await this.readNfpmLiquidity(
+                client, nfpm, tokenIdBigInt, blockNumber,
+            );
+            return { liquidityAfter };
+        }
+
+        // Markers + Unstake + ClaimRewards: no chain context needed.
+        return null;
+    }
+
+    /**
+     * Resolve the chainId from a PublicClient. Used only by populateChainContext
+     * to pick the correct NFPM address — the client is already chain-bound.
+     */
+    private async resolveChainIdFromClient(client: PublicClient): Promise<number> {
+        // Cheaper than `await client.getChainId()` because viem caches it on the client.
+        const chain = client.chain;
+        if (chain?.id) return chain.id;
+        return await client.getChainId();
+    }
+
+    /** Read a uint256 view function from the staking vault at a block. */
+    private async readVaultUint(
+        client: PublicClient,
+        vaultAddress: string,
+        functionName: 'stakedBase' | 'stakedQuote' | 'rewardBufferBase' | 'rewardBufferQuote',
+        blockNumber: bigint,
+    ): Promise<bigint> {
+        const result = await client.readContract({
+            address: vaultAddress as Address,
+            abi: STAKING_VAULT_READ_ABI,
+            functionName,
+            args: [],
+            blockNumber,
+        });
+        return result as bigint;
+    }
+
+    /** Read the underlying NFT's liquidity from the NFPM at a block. */
+    private async readNfpmLiquidity(
+        client: PublicClient,
+        nfpmAddress: Address,
+        tokenId: bigint,
+        blockNumber: bigint,
+    ): Promise<bigint> {
+        const data = await client.readContract({
+            address: nfpmAddress,
+            abi: UNISWAP_V3_POSITION_MANAGER_ABI,
+            functionName: 'positions',
+            args: [tokenId],
+            blockNumber,
+        });
+        // positions() returns a 12-tuple; liquidity is at index 7.
+        const tuple = data as readonly [
+            bigint, Address, Address, Address, number, number, number,
+            bigint, bigint, bigint, bigint, bigint,
+        ];
+        return tuple[7];
+    }
+
+    /**
+     * Publish domain events for a completed import.
+     *
+     * Order matches the NFT canonical (`refreshAllPositionLogs` lines 1655–1785):
+     * 1. Revert events (per blockHash) for every event in `allDeletedEvents`.
+     * 2. Insert events for every newly persisted ledger row:
+     *    - STAKING_DEPOSIT  → position.liquidity.increased
+     *    - STAKING_DISPOSE  → position.liquidity.decreased
+     *    - Markers          → no publish
+     *
+     * Routing keys are auto-built by `buildPositionRoutingKey` from
+     * `position.positionHash` (yields `uniswapv3-staking` as the position-type
+     * segment). Both event types use the existing `PositionLedgerEventPayload` /
+     * `PositionLiquidityRevertedPayload` contracts so PR3's consumer is uniform.
+     */
+    private async publishImportEvents(
+        position: UniswapV3StakingPosition,
+        importResult: StakingImportLogsResult,
+        dbTx?: PrismaTransactionClient,
+    ): Promise<void> {
+        const publisher = getDomainEventPublisher();
+
+        // 1. Reverts grouped by blockHash.
+        if (importResult.allDeletedEvents.length > 0) {
+            const blockHashCounts = new Map<string, number>();
+            for (const event of importResult.allDeletedEvents) {
+                const bh = event.typedConfig.blockHash;
+                blockHashCounts.set(bh, (blockHashCounts.get(bh) ?? 0) + 1);
+            }
+            for (const [blockHash, deletedCount] of blockHashCounts) {
+                await publisher.createAndPublish<PositionLiquidityRevertedPayload>(
+                    {
+                        type: 'position.liquidity.reverted',
+                        entityId: position.id,
+                        entityType: 'position',
+                        userId: position.userId,
+                        payload: {
+                            positionId: position.id,
+                            positionHash: position.positionHash,
+                            blockHash,
+                            deletedCount,
+                            revertedAt: new Date().toISOString(),
+                        },
+                        source: 'business-logic',
+                    },
+                    dbTx,
+                );
+            }
+        }
+
+        // 2. Inserts.
+        for (const result of importResult.perLogResults) {
+            if (result.action !== 'inserted') continue;
+
+            const { eventType, blockTimestamp } = result.eventDetail;
+            let domainEventType:
+                | 'position.liquidity.increased'
+                | 'position.liquidity.decreased'
+                | null = null;
+            if (eventType === 'STAKING_DEPOSIT') {
+                domainEventType = 'position.liquidity.increased';
+            } else if (eventType === 'STAKING_DISPOSE') {
+                domainEventType = 'position.liquidity.decreased';
+            }
+            // Markers (STAKING_YIELD_TARGET_SET / STAKING_PENDING_BPS_SET) → no publish.
+            if (!domainEventType) continue;
+
+            await publisher.createAndPublish<PositionLedgerEventPayload>(
+                {
+                    type: domainEventType,
+                    entityId: position.id,
+                    entityType: 'position',
+                    userId: position.userId,
+                    payload: {
+                        positionId: position.id,
+                        positionHash: position.positionHash,
+                        ledgerInputHash: result.inputHash,
+                        eventTimestamp: blockTimestamp.toISOString(),
+                    },
+                    source: 'business-logic',
+                },
+                dbTx,
+            );
+        }
     }
 }
