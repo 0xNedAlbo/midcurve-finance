@@ -1,13 +1,15 @@
 {
   "chainId": 42161,
   "network": "arbitrum",
-  "deployedAt": "2026-03-12T00:00:00Z",
+  "deployedAt": "2026-05-04T00:00:00Z",
   "contracts": {
     "UniswapV3PositionCloser": "0xA28ec2Bd1b24B6DB85550854Cc326857e2D30C2D",
     "MidcurveSwapRouter": "0x5aE412a2105345f770FC6862Be7e8Fb90245C50a",
     "UniswapV3Vault": "0xD85A1ECB2F8515D8f542B1efcb10409E47be643c",
     "AllowlistedUniswapV3Vault": "0xFf266AA88BD2B1496eb354116b70D845d8a896c6",
     "UniswapV3VaultFactory": "0xB9605C30d5e68D535d45E663cfA06A429AA83A3b",
-    "UniswapV3VaultPositionCloser": "0x13d13B15BbE9b06C0279a7aB5f0a898EA3f25A40"
+    "UniswapV3VaultPositionCloser": "0x13d13B15BbE9b06C0279a7aB5f0a898EA3f25A40",
+    "UniswapV3StakingVault": "0x7f8b35eafF873Dabb70aFe027949e79884b2dB88",
+    "UniswapV3StakingVaultFactory": "0x2Cc277Cd2CF5d78F18f0627a1DA2aA48b7C57EB1"
   }
 }
