@@ -919,6 +919,8 @@ enum TokenLotTransferEvent {
   VAULT_BURN
   DEPOSIT_TO_PROTOCOL
   WITHDRAWAL_FROM_PROTOCOL
+  STAKING_DEPOSIT
+  STAKING_DISPOSE
 
   @@schema("accounting")
 }

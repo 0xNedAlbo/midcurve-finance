@@ -39,5 +39,24 @@ export {
   type DecodedVaultLogData,
 } from './uniswapv3-vault-ledger-service.js';
 
+export {
+  UniswapV3StakingLedgerService,
+  type UniswapV3StakingLedgerServiceConfig,
+  type UniswapV3StakingLedgerServiceDependencies,
+  type CreateStakingLedgerEventInput,
+  type StakingRawLogInput,
+  type StakingLogChainContext,
+  type StakingLedgerAggregates,
+  type StakingSingleLogResult,
+  type StakingImportLogsResult,
+  // Staking event validation and decoding
+  STAKING_VAULT_EVENT_SIGNATURES,
+  validateStakingEvent,
+  decodeStakingLogData,
+  type ValidStakingEventType,
+  type ValidateStakingEventResult,
+  type DecodedStakingLogData,
+} from './uniswapv3-staking-ledger-service.js';
+
 // Re-export APR types for backward compatibility
 export type { AprPeriodData } from '../types/position-apr/index.js';

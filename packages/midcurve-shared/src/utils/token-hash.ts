@@ -8,6 +8,7 @@
  * - ERC-20: "erc20/{chainId}/{address}" → { tokenType: 'erc20', chainId, address }
  * - ERC-721: "erc721/{chainId}/{contractAddress}/{tokenId}" → { tokenType: 'erc721', chainId, contractAddress, tokenId }
  * - Basic Currency: "basic-currency/{currencyCode}" → { tokenType: 'basic-currency', currencyCode }
+ * - Staking Share: "staking-share/{chainId}/{vaultAddress}" → { tokenType: 'staking-share', chainId, vaultAddress }
  *
  * @example
  * ```typescript
@@ -53,10 +54,26 @@ export interface BasicCurrencyTokenHashData {
 }
 
 /**
+ * Parsed staking-share token hash.
+ *
+ * Represents a synthetic share token for a single UniswapV3StakingVault clone.
+ * Vault clones are owner-bound 1:1, so the vault address alone disambiguates.
+ */
+export interface StakingShareTokenHashData {
+  tokenType: 'staking-share';
+  chainId: number;
+  vaultAddress: string;
+}
+
+/**
  * Discriminated union of all parsed token hash types.
  * Extend this union when adding new token type support.
  */
-export type ParsedTokenHash = Erc20TokenHashData | Erc721TokenHashData | BasicCurrencyTokenHashData;
+export type ParsedTokenHash =
+  | Erc20TokenHashData
+  | Erc721TokenHashData
+  | BasicCurrencyTokenHashData
+  | StakingShareTokenHashData;
 
 // ============================================================================
 // CREATION
@@ -140,6 +157,36 @@ export function createBasicCurrencyTokenHash(currencyCode: string): string {
   return `basic-currency/${currencyCode}`;
 }
 
+/**
+ * Create a token hash for a UniswapV3StakingVault staking share.
+ *
+ * Vault clones are owner-bound 1:1, so vaultAddress is the disambiguator.
+ *
+ * @param chainId - EVM chain ID (must be a positive integer)
+ * @param vaultAddress - EIP-55 normalized vault contract address (caller must normalize)
+ * @returns Token hash string in format "staking-share/{chainId}/{vaultAddress}"
+ * @throws Error if any parameter is invalid
+ */
+export function createStakingShareTokenHash(chainId: number, vaultAddress: string): string {
+  if (chainId === undefined || chainId === null) {
+    throw new Error('chainId is required for staking-share token hash creation');
+  }
+  if (typeof chainId !== 'number' || !Number.isInteger(chainId) || chainId <= 0) {
+    throw new Error(`chainId must be a positive integer, got ${chainId}`);
+  }
+
+  if (!vaultAddress || typeof vaultAddress !== 'string') {
+    throw new Error('vaultAddress is required for staking-share token hash creation');
+  }
+  if (!vaultAddress.startsWith('0x') || vaultAddress.length !== 42) {
+    throw new Error(
+      `vaultAddress must be a valid 0x-prefixed 42-character hex string, got "${vaultAddress}"`
+    );
+  }
+
+  return `staking-share/${chainId}/${vaultAddress}`;
+}
+
 // ============================================================================
 // PARSING
 // ============================================================================
@@ -213,6 +260,23 @@ export function parseTokenHash(hash: string): ParsedTokenHash {
         throw new Error(`Invalid currencyCode in tokenHash: empty string`);
       }
       return { tokenType: 'basic-currency', currencyCode };
+    }
+
+    case 'staking-share': {
+      if (parts.length !== 3) {
+        throw new Error(
+          `Invalid staking-share tokenHash: "${hash}" (expected "staking-share/{chainId}/{vaultAddress}")`
+        );
+      }
+      const chainId = Number(parts[1]);
+      const vaultAddress = parts[2]!;
+      if (!Number.isInteger(chainId) || chainId <= 0) {
+        throw new Error(`Invalid chainId in tokenHash: "${parts[1]}"`);
+      }
+      if (!vaultAddress.startsWith('0x') || vaultAddress.length !== 42) {
+        throw new Error(`Invalid vaultAddress in tokenHash: "${parts[2]}"`);
+      }
+      return { tokenType: 'staking-share', chainId, vaultAddress };
     }
 
     default:

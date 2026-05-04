@@ -16,7 +16,7 @@ import type { TokenInterface } from '../token/index.js';
  * Supported position protocols.
  * Extensible for future protocols (orca, raydium, etc.)
  */
-export type PositionProtocol = 'uniswapv3' | 'uniswapv3-vault';
+export type PositionProtocol = 'uniswapv3' | 'uniswapv3-vault' | 'uniswapv3-staking';
 
 /**
  * Supported position types.
