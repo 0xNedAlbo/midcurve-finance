@@ -25,6 +25,7 @@ const CONTRACT_NAME_TO_KEBAB: Record<string, string> = {
   AllowlistedUniswapV3Vault: 'allowlisted-uniswap-v3-vault',
   UniswapV3VaultFactory: 'uniswap-v3-vault-factory',
   UniswapV3VaultPositionCloser: 'uniswap-v3-vault-position-closer',
+  UniswapV3StakingVaultFactory: 'uniswap-v3-staking-vault-factory',
 };
 
 interface DeploymentFile {

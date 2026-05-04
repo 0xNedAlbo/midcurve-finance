@@ -24,6 +24,7 @@ export const SharedContractName = {
   MIDCURVE_TREASURY: 'MidcurveTreasury',
   UNISWAP_V3_VAULT_FACTORY: 'UniswapV3VaultFactory',
   UNISWAP_V3_VAULT_POSITION_CLOSER: 'UniswapV3VaultPositionCloser',
+  UNISWAP_V3_STAKING_VAULT_FACTORY: 'UniswapV3StakingVaultFactory',
 } as const;
 
 export type SharedContractName =

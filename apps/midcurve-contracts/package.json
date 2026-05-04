@@ -21,6 +21,7 @@
     "deploy:diamond": "tsx scripts/deploy-diamond.ts",
     "deploy:vault-diamond": "tsx scripts/deploy-vault-diamond.ts",
     "deploy:swap-router": "tsx scripts/deploy-swap-router.ts",
+    "deploy:staking-vault": "tsx scripts/deploy-staking-vault.ts",
     "db:reset-local": "tsx scripts/reset-local-chain-db.ts",
     "db:upsert-contract": "tsx scripts/upsert-shared-contract.ts"
   },
