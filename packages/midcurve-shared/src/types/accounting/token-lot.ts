@@ -22,7 +22,9 @@ export type TokenLotTransferEvent =
   | 'VAULT_MINT'
   | 'VAULT_BURN'
   | 'DEPOSIT_TO_PROTOCOL'
-  | 'WITHDRAWAL_FROM_PROTOCOL';
+  | 'WITHDRAWAL_FROM_PROTOCOL'
+  | 'STAKING_DEPOSIT'
+  | 'STAKING_DISPOSE';
 
 /**
  * Transfer events that create new token lots (acquisitions).
@@ -31,7 +33,8 @@ export type AcquisitionTransferEvent =
   | 'INCREASE_POSITION'
   | 'TRANSFER_IN'
   | 'VAULT_MINT'
-  | 'WITHDRAWAL_FROM_PROTOCOL';
+  | 'WITHDRAWAL_FROM_PROTOCOL'
+  | 'STAKING_DEPOSIT';
 
 /**
  * Transfer events that consume existing token lots (disposals).
@@ -40,4 +43,5 @@ export type DisposalTransferEvent =
   | 'DECREASE_POSITION'
   | 'TRANSFER_OUT'
   | 'VAULT_BURN'
-  | 'DEPOSIT_TO_PROTOCOL';
+  | 'DEPOSIT_TO_PROTOCOL'
+  | 'STAKING_DISPOSE';
