@@ -1047,10 +1047,17 @@ describe('UniswapV3StakingLedgerService', () => {
             return client;
         }
 
-        function makeEvmConfig(client: ReturnType<typeof makeMockClient>) {
+        type FinalityOverride =
+            | { type: 'blockTag' }
+            | { type: 'blockHeight'; minBlockHeight: number };
+
+        function makeEvmConfig(
+            client: ReturnType<typeof makeMockClient>,
+            finality: FinalityOverride = { type: 'blockTag' },
+        ) {
             return {
                 getPublicClient: vi.fn(() => client),
-                getFinalityConfig: vi.fn(() => ({ type: 'blockTag' as const })),
+                getFinalityConfig: vi.fn(() => finality),
             } as any;
         }
 
@@ -1352,6 +1359,49 @@ describe('UniswapV3StakingLedgerService', () => {
                 (c) => (c[0] as { event?: { name: string } }).event?.name === 'Stake',
             );
             expect((stakeCallB?.[0] as { fromBlock: bigint }).fromBlock).toBe(300n);
+
+            // Case C: finality.type === 'blockHeight' (L2 path — Arbitrum/Base).
+            // currentBlock=600, minBlockHeight=100 → derived finalized = 500.
+            // lastEvent.block = 500 → MIN(500, 500) = 500.
+            const clientC = makeMockClient({
+                currentBlock: 600n,
+                logsByEventName: {
+                    Stake: [], YieldTargetSet: [], PartialUnstakeBpsSet: [],
+                    Swap: [], Unstake: [], ClaimRewards: [], FlashCloseInitiated: [],
+                },
+            });
+            await service.syncFromChain(
+                makePosition(),
+                makeEvmConfig(clientC, { type: 'blockHeight', minBlockHeight: 100 }),
+                poolPriceService,
+            );
+            const stakeCallC = clientC.getLogs.mock.calls.find(
+                (c) => (c[0] as { event?: { name: string } }).event?.name === 'Stake',
+            );
+            expect((stakeCallC?.[0] as { fromBlock: bigint }).fromBlock).toBe(500n);
+            // Sanity: the blockHeight branch uses getBlockNumber (not getBlock)
+            expect(clientC.getBlockNumber).toHaveBeenCalled();
+            expect(clientC.getBlock).not.toHaveBeenCalled();
+
+            // Case D: same blockHeight finality, but currentBlock - minBlockHeight < lastEvent.block
+            // → MIN(derived finalized, lastEvent.block) picks the derived finalized.
+            // currentBlock=400, minBlockHeight=200 → derived = 200; lastEvent.block=500 → MIN=200.
+            const clientD = makeMockClient({
+                currentBlock: 400n,
+                logsByEventName: {
+                    Stake: [], YieldTargetSet: [], PartialUnstakeBpsSet: [],
+                    Swap: [], Unstake: [], ClaimRewards: [], FlashCloseInitiated: [],
+                },
+            });
+            await service.syncFromChain(
+                makePosition(),
+                makeEvmConfig(clientD, { type: 'blockHeight', minBlockHeight: 200 }),
+                poolPriceService,
+            );
+            const stakeCallD = clientD.getLogs.mock.calls.find(
+                (c) => (c[0] as { event?: { name: string } }).event?.name === 'Stake',
+            );
+            expect((stakeCallD?.[0] as { fromBlock: bigint }).fromBlock).toBe(200n);
         });
 
         // ----------------------------------------------------------------------
