@@ -71,6 +71,7 @@ export {
   type UniswapV3StakingPositionConfigJSON,
   type UniswapV3StakingPositionState,
   type UniswapV3StakingPositionStateJSON,
+  type UniswapV3StakingPositionMetrics,
   type StakingState,
   stakingPositionStateToJSON,
   stakingPositionStateFromJSON,
