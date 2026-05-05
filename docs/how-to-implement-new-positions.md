@@ -126,9 +126,21 @@ The four-component decomposition is fixed (`realizedPnl` / `realizedCashflow` / 
 - Where is the line between "Capital Returned" (account 3100) and "Realized Gain" (account 4100)? This is decided by the **principal anchor** for the position. For NFT positions, principal is what was deposited, so any positive disposal value above proportional cost basis is gain. For staking vaults, principal is `(stakedBase, stakedQuote)`, and the yield-target share `T × bps / 10000` is income, not gain — booked to `Fee Income` (account 4000), independent of the gain/loss check.
 - Is the protocol **Model A** (yield ∉ pnl, booked as income) or **Model B** (yield rolled into pnl)? Default is Model A; deviating requires a written argument.
 
+### 2.4 Computation as code
+
+Once 2.1–2.3 are settled, lock the derivation rules in TypeScript so the spec and the implementation stay in sync. Convention:
+
+- New folder `packages/midcurve-shared/src/metrics/<protocol>/`.
+- Two files: `common-metrics.ts` (one function per common metric from 2.1) and `specific-metrics.ts` (one function per type-specific metric from 2.2).
+- Each metric is a `compute<MetricName>()` function. Function signatures are deliberately *not* fixed — even for common metrics where the metric name matches across protocols. Different protocols may need different inputs (live chain reads vs. ledger aggregates vs. config snapshots), and the convention's value is in the *naming*, not the call shape.
+- **`compute*` functions are pure.** All inputs come in as arguments; the output is deterministic. No RPC reads, no database queries, no API calls, no file-system access, no clock or randomness, no global state, no argument mutation. I/O lives in the service layer that *calls* `compute*` — the function itself only computes.
+- The purity rule means metric correctness is testable without mocks: a unit test against `computeXyz()` is a few lines, fully reproducible, and isolates any bug in the math from any bug in the data plumbing.
+
+The point is to have a single source of truth for *how* a metric is computed. Service code, tests, and review can all reference these functions by name; the tables in 2.1/2.2 say *what* gets computed, the file in `metrics/<protocol>/` says *how*.
+
 ### Output
 
-A document with two tables: one for the common metric mapping (one row per common field, four columns matching the questions in 2.1), one for the type-specific metrics (name, semantics, on-chain source, UI consumer). This is appended to `docs/positions/<protocol>.md`.
+Two artefacts. **Documentation:** a section appended to `docs/positions/<protocol>.md` with two tables — one for the common metric mapping (one row per common field, four columns matching the questions in 2.1), one for the type-specific metrics (name, semantics, on-chain source, UI consumer). **Code:** the `packages/midcurve-shared/src/metrics/<protocol>/` folder with `common-metrics.ts` and `specific-metrics.ts` per 2.4.
 
 ---
 
