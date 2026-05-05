@@ -126,9 +126,19 @@ The four-component decomposition is fixed (`realizedPnl` / `realizedCashflow` / 
 - Where is the line between "Capital Returned" (account 3100) and "Realized Gain" (account 4100)? This is decided by the **principal anchor** for the position. For NFT positions, principal is what was deposited, so any positive disposal value above proportional cost basis is gain. For staking vaults, principal is `(stakedBase, stakedQuote)`, and the yield-target share `T × bps / 10000` is income, not gain — booked to `Fee Income` (account 4000), independent of the gain/loss check.
 - Is the protocol **Model A** (yield ∉ pnl, booked as income) or **Model B** (yield rolled into pnl)? Default is Model A; deviating requires a written argument.
 
-### 2.4 Computation as code
+### 2.4 Domain events
 
-Once 2.1–2.3 are settled, lock the derivation rules in TypeScript so the spec and the implementation stay in sync. Convention:
+Ledger events trigger downstream consumers (journal-posting rule, reconciliation rule, APR service, notifications) via domain events on the `position-liquidity-events` exchange. The question to answer here is whether the existing event family suffices or whether the new protocol needs new routing keys, payload extensions, or a dedicated exchange.
+
+Default answer: the existing infrastructure suffices. Routing keys follow the convention `position.liquidity.<protocol>.<eventType>`, and consumers filter by topic — adding a new protocol means adding a new `<protocol>` segment to the routing key, not a new exchange. The payload shape (positionId, eventId, eventType, blockNumber, txHash, plus event-specific `config`) generalises across protocols.
+
+A new protocol needs to deviate only when one of the following holds: it produces an event that has no analog in the existing taxonomy and demands a payload field outside the `config` envelope; it requires a different delivery guarantee (e.g. ordered per-vault delivery vs. unordered per-position); or it introduces a new consumer that cannot be satisfied by adding a topic subscription to the existing exchange. None of these is common.
+
+Decide here, not in phase 4 or 6. Phase 6 (accounting rule) presupposes that domain events exist and have a known shape; deferring this decision causes the phase-6 work to either invent an ad-hoc shape or block on retroactive guide updates. If the answer is "reuse existing", say so explicitly in the spec section; if "new", specify the routing key family and any payload deltas.
+
+### 2.5 Computation as code
+
+Once 2.1–2.4 are settled, lock the derivation rules in TypeScript so the spec and the implementation stay in sync. Convention:
 
 - New folder `packages/midcurve-shared/src/metrics/<protocol>/`.
 - Two files: `common-metrics.ts` (one function per common metric from 2.1) and `specific-metrics.ts` (one function per type-specific metric from 2.2).
@@ -140,7 +150,7 @@ The point is to have a single source of truth for *how* a metric is computed. Se
 
 ### Output
 
-Two artefacts. **Documentation:** a section appended to `docs/positions/<protocol>.md` with two tables — one for the common metric mapping (one row per common field, four columns matching the questions in 2.1), one for the type-specific metrics (name, semantics, on-chain source, UI consumer). **Code:** the `packages/midcurve-shared/src/metrics/<protocol>/` folder with `common-metrics.ts` and `specific-metrics.ts` per 2.4.
+Two artefacts. **Documentation:** a section appended to `docs/positions/<protocol>.md` with two tables — one for the common metric mapping (one row per common field, four columns matching the questions in 2.1), one for the type-specific metrics (name, semantics, on-chain source, UI consumer), plus the domain-event decision from 2.4. **Code:** the `packages/midcurve-shared/src/metrics/<protocol>/` folder with `common-metrics.ts` and `specific-metrics.ts` per 2.5.
 
 ---
 
@@ -209,7 +219,7 @@ A document at `docs/positions/<protocol>.md` (UI section) with four sub-sections
 - Ledger event mapping: per `EventType`, which delta fields are written, what goes into the `config` JSON, and how is `tokenValue` computed?
 - Chain-context reads: chain-from-previous (default for sequential events) vs. RPC anchor (only for genesis or unbacked first reads). See the SPEC-0003b PR2 discussion in issue #63 for the canonical pattern.
 - Reorg handling: `deleteAllByBlockHash` cascade, revert event publishing.
-- Domain events on the `position-liquidity-events` exchange: routing key conventions, payload shapes.
+- Domain-event publishing mechanics: routing-key construction (per phase 2.4 decision), payload assembly, retry/redelivery semantics.
 
 ## Phase 5 — Service topology
 
@@ -238,6 +248,7 @@ These are anti-goals. If you find yourself doing one of these, stop and reread p
 - **Building endpoints before the UI concept exists.** The endpoint catalog *is* the UI concept's contract. Specifying endpoints first creates pressure to keep them when the UI later finds them irrelevant.
 - **Adding a refresh cache before the lifecycle is mapped.** Caches that are blind to lifecycle transitions silently break user actions. Cache by block number, not by wall-clock.
 - **Deferring accounting-line decisions to the journal-posting rule.** Decisions about which proceeds component is principal vs. income vs. gain belong in phase 2.3 (PnL decomposition). Pushing them down causes balance bugs that surface only in test.
+- **Deferring the domain-event decision to phase 4 or 6.** The shape and routing of domain events is a phase-2 concept question, not a phase-4 wiring question. Phase 6 (accounting rule) presupposes a known event shape; deferring forces ad-hoc shapes or retroactive guide updates.
 
 ---
 
