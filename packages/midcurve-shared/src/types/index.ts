@@ -152,6 +152,7 @@ export type {
   UniswapV3StakingPositionConfigJSON,
   UniswapV3StakingPositionState,
   UniswapV3StakingPositionStateJSON,
+  UniswapV3StakingPositionMetrics,
   StakingState,
 } from './position/index.js';
 

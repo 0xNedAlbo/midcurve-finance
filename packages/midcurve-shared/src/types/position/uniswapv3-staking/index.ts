@@ -21,3 +21,5 @@ export {
   stakingPositionStateToJSON,
   stakingPositionStateFromJSON,
 } from './uniswapv3-staking-position-state.js';
+
+export { type UniswapV3StakingPositionMetrics } from './uniswapv3-staking-position-metrics.js';

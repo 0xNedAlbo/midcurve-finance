@@ -15,5 +15,8 @@ export type {
 export { UniswapV3VaultPositionService } from './uniswapv3-vault-position-service.js';
 export type { UniswapV3VaultPositionServiceDependencies } from './uniswapv3-vault-position-service.js';
 
+export { UniswapV3StakingPositionService } from './uniswapv3-staking-position-service.js';
+export type { UniswapV3StakingPositionServiceDependencies } from './uniswapv3-staking-position-service.js';
+
 export { PositionArchiveService } from './position-archive-service.js';
 export type { PositionArchiveServiceDependencies } from './position-archive-service.js';
