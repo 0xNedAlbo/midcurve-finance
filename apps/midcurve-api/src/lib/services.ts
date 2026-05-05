@@ -35,6 +35,9 @@ import {
   JournalService,
   UniswapV3VaultPositionService,
   UniswapV3VaultLedgerService,
+  UniswapV3StakingPositionService,
+  UniswapV3StakingLedgerService,
+  UniswapV3StakingAprService,
   UserWalletService,
   PoolSigmaFilterService,
   UserSettingsService,
@@ -63,6 +66,7 @@ let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
 let _uniswapV3VaultPositionService: UniswapV3VaultPositionService | null = null;
+let _uniswapV3StakingPositionService: UniswapV3StakingPositionService | null = null;
 let _userWalletService: UserWalletService | null = null;
 let _userSettingsService: UserSettingsService | null = null;
 
@@ -314,6 +318,38 @@ export function getUniswapV3VaultPositionService(): UniswapV3VaultPositionServic
     _uniswapV3VaultPositionService = new UniswapV3VaultPositionService();
   }
   return _uniswapV3VaultPositionService;
+}
+
+// =============================================================================
+// UniswapV3 Staking Vault factories (SPEC-0003b PR4b)
+// =============================================================================
+
+/** Get singleton instance of `UniswapV3StakingPositionService`. */
+export function getUniswapV3StakingPositionService(): UniswapV3StakingPositionService {
+  if (!_uniswapV3StakingPositionService) {
+    _uniswapV3StakingPositionService = new UniswapV3StakingPositionService();
+  }
+  return _uniswapV3StakingPositionService;
+}
+
+/**
+ * Create a `UniswapV3StakingLedgerService` for a specific position.
+ * Not a singleton — each position requires its own scoped instance.
+ */
+export function getUniswapV3StakingPositionLedgerService(
+  positionId: string,
+): UniswapV3StakingLedgerService {
+  return new UniswapV3StakingLedgerService({ positionId });
+}
+
+/**
+ * Create a `UniswapV3StakingAprService` for a specific position.
+ * Not a singleton — each position requires its own scoped instance.
+ */
+export function getUniswapV3StakingAprService(
+  positionId: string,
+): UniswapV3StakingAprService {
+  return new UniswapV3StakingAprService({ positionId });
 }
 
 /**

@@ -191,6 +191,58 @@ describe('PositionListService', () => {
     );
   });
 
+  it('smoke: uniswapv3-staking row passes through findMany + pool enrichment', async () => {
+    // SPEC-0003b PR4b refinement #4 — staking positions have the same
+    // pool-config primitives as uniswapv3/uniswapv3-vault, so the lean list
+    // path and the includePool enrichment must work without protocol-specific
+    // branches. State (yieldTarget, vaultState) intentionally lives only on
+    // the protocol-specific detail endpoint, not on PositionListRow.
+    const stakingRow = {
+      ...baseRow,
+      id: 'cuid_v3_staking',
+      positionHash: 'uniswapv3-staking/8453/0xVAULT',
+      protocol: 'uniswapv3-staking',
+      type: 'STAKING_VAULT',
+      config: {
+        chainId: 8453,
+        vaultAddress: '0x000000000000000000000000000000000000Va01',
+        poolAddress: POOL_WETH_USDC_BASE,
+        token0Address: WETH_BASE,
+        token1Address: USDC_BASE,
+        feeBps: 500,
+        tickSpacing: 10,
+        tickLower: 200820,
+        tickUpper: 200920,
+        isToken0Quote: false,
+        priceRangeLower: '0',
+        priceRangeUpper: '0',
+      },
+    };
+
+    vi.mocked(mockPrisma.position.findMany).mockResolvedValue([stakingRow] as any);
+    vi.mocked(mockPrisma.position.count).mockResolvedValue(1);
+    vi.mocked(mockPrisma.token.findMany).mockResolvedValue(
+      tokenRows.filter((t) =>
+        t.tokenHash === `erc20/8453/${WETH_BASE}` ||
+        t.tokenHash === `erc20/8453/${USDC_BASE}`,
+      ) as any,
+    );
+
+    const result = await service.list('user_1', { includePool: true });
+
+    expect(result.positions).toHaveLength(1);
+    const [row] = result.positions;
+    expect(row.protocol).toBe('uniswapv3-staking');
+    expect(row.pool).toEqual({
+      chainId: 8453,
+      poolAddress: POOL_WETH_USDC_BASE,
+      feeBps: 500,
+      isToken0Quote: false,
+      token0: { address: WETH_BASE, symbol: 'WETH', decimals: 18 },
+      token1: { address: USDC_BASE, symbol: 'USDC', decimals: 6 },
+    });
+  });
+
   it('skips token lookup entirely when result set is empty', async () => {
     vi.mocked(mockPrisma.position.findMany).mockResolvedValue([] as any);
     vi.mocked(mockPrisma.position.count).mockResolvedValue(0);

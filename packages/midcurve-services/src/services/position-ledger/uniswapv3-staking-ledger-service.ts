@@ -51,6 +51,13 @@ import type {
     PositionLedgerEventPayload,
     PositionLiquidityRevertedPayload,
 } from '../../events/types.js';
+import { UniswapV3StakingAprService } from '../position-apr/uniswapv3-staking-apr-service.js';
+import {
+    calculateAprBps,
+    calculateDurationSeconds,
+    calculateTimeWeightedCostBasis,
+} from '../../utils/apr/apr-calculations.js';
+import type { AprPeriodData } from '../types/position-apr/index.js';
 
 // ============================================================================
 // EVENT SIGNATURES
@@ -571,6 +578,7 @@ export class UniswapV3StakingLedgerService {
     private readonly positionId: string;
     private readonly protocol = 'uniswapv3-staking' as const;
     private readonly logger: ServiceLogger;
+    private readonly _aprService: UniswapV3StakingAprService;
 
     constructor(
         config: UniswapV3StakingLedgerServiceConfig,
@@ -579,6 +587,10 @@ export class UniswapV3StakingLedgerService {
         this.positionId = config.positionId;
         this.prisma = deps.prisma ?? prismaClient;
         this.logger = createServiceLogger('uniswapv3-staking-ledger');
+        this._aprService = new UniswapV3StakingAprService(
+            { positionId: config.positionId },
+            { prisma: this.prisma },
+        );
     }
 
     // ============================================================================
@@ -1237,6 +1249,8 @@ export class UniswapV3StakingLedgerService {
         const events = await this.findAll(tx);
 
         if (events.length === 0) {
+            // Wipe APR periods — there's nothing to bracket. Mirrors NFT/Vault.
+            await this._aprService.deleteAllAprPeriods(tx);
             return {
                 liquidityAfter: 0n,
                 costBasisAfter: 0n,
@@ -1248,11 +1262,23 @@ export class UniswapV3StakingLedgerService {
 
         UniswapV3StakingLedgerService.sortByBlockchainCoordinates(events);
 
+        // Wipe existing APR periods — we'll regenerate them as we walk the chain.
+        await this._aprService.deleteAllAprPeriods(tx);
+
         let liquidityAfter = 0n;
         let costBasisAfter = 0n;
         let pnlAfter = 0n;
         let collectedYieldAfter = 0n;
         let previousEventId: string | null = null;
+
+        // APR period tracking — bracketed by STAKING_DISPOSE events.
+        // Staking has no separate fee-collection moment; yield is realized at
+        // each dispose. So each STAKING_DISPOSE closes one period and opens
+        // the next. The first period opens at the first event in the chain.
+        let periodStartTimestamp: Date | null = null;
+        let periodStartEventId: string | null = null;
+        let periodCostBasisSnapshots: Array<{ timestamp: Date; costBasisAfter: bigint }> = [];
+        let periodEventCount = 0;
 
         for (const event of events) {
             const state = event.typedState;
@@ -1301,6 +1327,48 @@ export class UniswapV3StakingLedgerService {
                     liquidityAfter = previousLiquidity;
                     break;
                 }
+            }
+
+            // APR period accumulation — open period if not already open.
+            if (periodStartTimestamp === null) {
+                periodStartTimestamp = event.timestamp;
+                periodStartEventId = event.id;
+            }
+            periodCostBasisSnapshots.push({ timestamp: event.timestamp, costBasisAfter });
+            periodEventCount++;
+
+            // STAKING_DISPOSE closes the current APR period.
+            if (state.eventType === 'STAKING_DISPOSE') {
+                if (periodStartTimestamp && periodCostBasisSnapshots.length >= 2) {
+                    try {
+                        const timeWeightedCostBasis = calculateTimeWeightedCostBasis(periodCostBasisSnapshots);
+                        const durationSeconds = calculateDurationSeconds(periodStartTimestamp, event.timestamp);
+                        const aprBps =
+                            durationSeconds > 0 && timeWeightedCostBasis > 0n
+                                ? calculateAprBps(deltaCollectedYield, timeWeightedCostBasis, durationSeconds)
+                                : 0;
+
+                        const aprPeriod: AprPeriodData = {
+                            startEventId: periodStartEventId!,
+                            endEventId: event.id,
+                            startTimestamp: periodStartTimestamp,
+                            endTimestamp: event.timestamp,
+                            durationSeconds,
+                            costBasis: timeWeightedCostBasis,
+                            collectedYieldValue: deltaCollectedYield,
+                            aprBps,
+                            eventCount: periodEventCount,
+                        };
+                        await this._aprService.persistAprPeriod(aprPeriod, tx);
+                    } catch (e) {
+                        this.logger.warn({ error: e }, 'Skipping invalid APR period');
+                    }
+                }
+                // Open the next period at this event.
+                periodStartTimestamp = event.timestamp;
+                periodStartEventId = event.id;
+                periodCostBasisSnapshots = [{ timestamp: event.timestamp, costBasisAfter }];
+                periodEventCount = 0;
             }
 
             await this.updateEventAggregates(

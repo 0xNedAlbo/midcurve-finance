@@ -25,7 +25,10 @@ import {
   getDomainEventPublisher,
   type PositionLifecyclePayload,
 } from '@midcurve/services';
-import { getUniswapV3PositionService } from '@/lib/services';
+import {
+  getUniswapV3PositionService,
+  getUniswapV3StakingPositionService,
+} from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { Address } from 'viem';
@@ -76,18 +79,29 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
 
       const { chainIds, walletAddress } = validation.data;
+      const targetAddress = (walletAddress ?? user.address) as Address;
 
-      // 2. Run wallet position discovery
-      const result =
-        await getUniswapV3PositionService().discoverWalletPositions(
+      // 2. Run NFT + staking-vault wallet scans in parallel.
+      const [nftResult, stakingResult] = await Promise.all([
+        getUniswapV3PositionService().discoverWalletPositions(
           user.id,
-          (walletAddress ?? user.address) as Address,
+          targetAddress,
           chainIds,
-        );
+        ),
+        getUniswapV3StakingPositionService().discoverWalletPositions(
+          user.id,
+          targetAddress,
+          chainIds,
+        ),
+      ]);
 
       // 3. Publish position.created domain events for downstream processing
       const eventPublisher = getDomainEventPublisher();
-      for (const position of result.positions) {
+      const allNewPositions = [
+        ...nftResult.positions,
+        ...stakingResult.positions,
+      ];
+      for (const position of allNewPositions) {
         await eventPublisher.createAndPublish<PositionLifecyclePayload>({
           type: 'position.created',
           entityType: 'position',
@@ -101,12 +115,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // 4. Return stats
+      // 4. Return aggregated stats across NFT + staking
       const responseData: DiscoverPositionsData = {
-        found: result.found,
-        imported: result.imported,
-        skipped: result.skipped,
-        errors: result.errors,
+        found: nftResult.found + stakingResult.found,
+        imported: nftResult.imported + stakingResult.imported,
+        skipped: nftResult.skipped + stakingResult.skipped,
+        errors: nftResult.errors + stakingResult.errors,
       };
 
       apiLog.businessOperation(
@@ -115,12 +129,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         'discovered',
         'positions',
         user.id,
-        {
-          found: result.found,
-          imported: result.imported,
-          skipped: result.skipped,
-          errors: result.errors,
-        },
+        { ...responseData },
       );
 
       const response = createSuccessResponse(responseData);

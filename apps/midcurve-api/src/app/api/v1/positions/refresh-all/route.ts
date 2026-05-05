@@ -20,7 +20,11 @@ import {
 import { apiLogger, apiLog } from '@/lib/logger';
 import { createPreflightResponse } from '@/lib/cors';
 import { prisma } from '@/lib/prisma';
-import { getUniswapV3PositionService } from '@/lib/services';
+import {
+  getUniswapV3PositionService,
+  getUniswapV3VaultPositionService,
+  getUniswapV3StakingPositionService,
+} from '@/lib/services';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,6 +50,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         },
         select: {
           id: true,
+          protocol: true,
           updatedAt: true,
           config: true,
         },
@@ -79,13 +84,23 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
       }
 
-      // Refresh each position using the existing service
-      const positionService = getUniswapV3PositionService();
+      // Per-protocol dispatch — each protocol has its own refresh path.
       let refreshedCount = 0;
 
-      // Refresh each position sequentially
       for (const p of positions) {
-        await positionService.refresh(p.id);
+        if (p.protocol === 'uniswapv3') {
+          await getUniswapV3PositionService().refresh(p.id);
+        } else if (p.protocol === 'uniswapv3-vault') {
+          await getUniswapV3VaultPositionService().refresh(p.id);
+        } else if (p.protocol === 'uniswapv3-staking') {
+          await getUniswapV3StakingPositionService().refresh(p.id);
+        } else {
+          apiLogger.warn(
+            { requestId, positionId: p.id, protocol: p.protocol },
+            'refresh-all: skipping position with unknown protocol',
+          );
+          continue;
+        }
         refreshedCount++;
       }
 

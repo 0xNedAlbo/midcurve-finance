@@ -8,5 +8,11 @@ export {
     type UniswapV3AprServiceDependencies,
 } from './uniswapv3-apr-service.js';
 
+export {
+    UniswapV3StakingAprService,
+    type UniswapV3StakingAprServiceConfig,
+    type UniswapV3StakingAprServiceDependencies,
+} from './uniswapv3-staking-apr-service.js';
+
 // Re-export types for convenience
 export type { AprPeriodData } from '../types/position-apr/index.js';

@@ -12,6 +12,8 @@ import type {
   UniswapV3PositionState,
   UniswapV3VaultPosition,
   UniswapV3VaultPositionState,
+  UniswapV3StakingPosition,
+  UniswapV3StakingPositionState,
   Erc20Token,
 } from '@midcurve/shared';
 import {
@@ -352,6 +354,106 @@ export function serializeUniswapV3VaultPosition(position: UniswapV3VaultPosition
       priceRangeUpper: position.typedConfig.priceRangeUpper.toString(),
     },
     state: serializeUniswapV3VaultPositionState(position.typedState),
+
+    // Timestamps
+    createdAt: position.createdAt.toISOString(),
+    updatedAt: position.updatedAt.toISOString(),
+  };
+}
+
+// ============================================================================
+// UNISWAPV3 STAKING VAULT POSITION SERIALIZATION
+// ============================================================================
+
+/**
+ * Serialize UniswapV3StakingPositionState for JSON response.
+ */
+export function serializeUniswapV3StakingPositionState(state: UniswapV3StakingPositionState) {
+  return {
+    vaultState: state.vaultState,
+    stakedBase: state.stakedBase.toString(),
+    stakedQuote: state.stakedQuote.toString(),
+    yieldTarget: state.yieldTarget.toString(),
+    pendingBps: state.pendingBps,
+    unstakeBufferBase: state.unstakeBufferBase.toString(),
+    unstakeBufferQuote: state.unstakeBufferQuote.toString(),
+    rewardBufferBase: state.rewardBufferBase.toString(),
+    rewardBufferQuote: state.rewardBufferQuote.toString(),
+    liquidity: state.liquidity.toString(),
+    isOwnedByUser: state.isOwnedByUser,
+    unclaimedYieldBase: state.unclaimedYieldBase.toString(),
+    unclaimedYieldQuote: state.unclaimedYieldQuote.toString(),
+    sqrtPriceX96: state.sqrtPriceX96.toString(),
+    currentTick: state.currentTick,
+    poolLiquidity: state.poolLiquidity.toString(),
+    feeGrowthGlobal0: state.feeGrowthGlobal0.toString(),
+    feeGrowthGlobal1: state.feeGrowthGlobal1.toString(),
+  };
+}
+
+/**
+ * Serialize UniswapV3StakingPosition for JSON response.
+ *
+ * Mirrors `serializeUniswapV3VaultPosition` but uses staking-specific
+ * config/state shapes.
+ */
+export function serializeUniswapV3StakingPosition(position: UniswapV3StakingPosition) {
+  return {
+    id: position.id,
+    positionHash: position.positionHash,
+    protocol: position.protocol as 'uniswapv3-staking',
+    ownerWallet: null as string | null,
+    userId: position.userId,
+    type: position.type,
+
+    // PnL fields
+    currentValue: position.currentValue.toString(),
+    costBasis: position.costBasis.toString(),
+    realizedPnl: position.realizedPnl.toString(),
+    unrealizedPnl: position.unrealizedPnl.toString(),
+    realizedCashflow: position.realizedCashflow.toString(),
+    unrealizedCashflow: position.unrealizedCashflow.toString(),
+
+    // Yield fields
+    collectedYield: position.collectedYield.toString(),
+    unclaimedYield: position.unclaimedYield.toString(),
+    lastYieldClaimedAt: position.lastYieldClaimedAt?.toISOString() ?? new Date(0).toISOString(),
+    totalApr: position.totalApr,
+    baseApr: position.baseApr ?? null,
+    rewardApr: position.rewardApr ?? null,
+
+    // Price range
+    priceRangeLower: position.priceRangeLower.toString(),
+    priceRangeUpper: position.priceRangeUpper.toString(),
+
+    // Pool (same underlying UniswapV3 pool)
+    pool: serializeUniswapV3Pool(position.pool as UniswapV3Pool),
+    isToken0Quote: position.isToken0Quote,
+
+    // Lifecycle
+    positionOpenedAt: position.positionOpenedAt.toISOString(),
+    archivedAt: position.archivedAt?.toISOString() ?? null,
+    isArchived: position.isArchived,
+
+    // Protocol-specific config
+    config: {
+      chainId: position.typedConfig.chainId,
+      vaultAddress: position.typedConfig.vaultAddress,
+      factoryAddress: position.typedConfig.factoryAddress,
+      ownerAddress: position.typedConfig.ownerAddress,
+      underlyingTokenId: position.typedConfig.underlyingTokenId,
+      isToken0Quote: position.typedConfig.isToken0Quote,
+      poolAddress: position.typedConfig.poolAddress,
+      token0Address: position.typedConfig.token0Address,
+      token1Address: position.typedConfig.token1Address,
+      feeBps: position.typedConfig.feeBps,
+      tickSpacing: position.typedConfig.tickSpacing,
+      tickLower: position.typedConfig.tickLower,
+      tickUpper: position.typedConfig.tickUpper,
+      priceRangeLower: position.typedConfig.priceRangeLower.toString(),
+      priceRangeUpper: position.typedConfig.priceRangeUpper.toString(),
+    },
+    state: serializeUniswapV3StakingPositionState(position.typedState),
 
     // Timestamps
     createdAt: position.createdAt.toISOString(),

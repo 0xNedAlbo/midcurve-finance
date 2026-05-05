@@ -94,9 +94,41 @@ interface StoredEvent {
     state: Record<string, unknown>;
 }
 
+interface StoredAprPeriod {
+    id: string;
+    positionId: string;
+    startEventId: string;
+    endEventId: string;
+    startTimestamp: Date;
+    endTimestamp: Date;
+    durationSeconds: number;
+    costBasis: string;
+    collectedYieldValue: string;
+    aprBps: number;
+    eventCount: number;
+}
+
 class FakePrisma {
     public store: StoredEvent[] = [];
+    public aprStore: StoredAprPeriod[] = [];
     private nextId = 1;
+    private nextAprId = 1;
+
+    positionAprPeriod = {
+        create: vi.fn(async ({ data }: { data: any }) => {
+            const row: StoredAprPeriod = { id: `apr_${this.nextAprId++}`, ...data };
+            this.aprStore.push(row);
+            return row;
+        }),
+        findMany: vi.fn(async ({ where }: any) => {
+            return this.aprStore.filter((e) => e.positionId === where.positionId);
+        }),
+        deleteMany: vi.fn(async ({ where }: any) => {
+            const before = this.aprStore.length;
+            this.aprStore = this.aprStore.filter((e) => e.positionId !== where.positionId);
+            return { count: before - this.aprStore.length };
+        }),
+    };
 
     positionLedgerEvent = {
         create: vi.fn(async ({ data }: { data: any }) => {
@@ -935,6 +967,115 @@ describe('UniswapV3StakingLedgerService', () => {
             // deltaPnl = 4500 - 1500 = 3000 (purely principal-floor gain)
             expect(BigInt(dispose.deltaPnl)).toBeGreaterThan(0n);
             expect(dispose.deltaCollectedYield).toBe('0');
+        });
+    });
+
+    // ============================================================================
+    // PR4b — APR period bracketing (added by recalculateAggregates)
+    // ============================================================================
+
+    describe('APR period tracking', () => {
+        it('Stake → Dispose → persists exactly one APR period bracketed by the dispose', async () => {
+            const stake = makeStakeLog(100n, '0xtxA', '0xblkA', 0, {
+                base: 1000n, quote: 500n, yieldTarget: 100n, tokenId: 42n,
+                chainContext: { vaultStateBefore: 'Empty', liquidityAfter: 1_000_000n },
+            });
+            const swap = makeSwapLog(200n, '0xtxB', '0xblkB', 0, {
+                tokenIn: TOKEN1, amountIn: 250n, tokenOut: TOKEN0, amountOut: 250n,
+                effectiveBps: 5000,
+                chainContext: {
+                    stakedBaseBefore: 1000n, stakedQuoteBefore: 500n,
+                    rewardBufferBaseDelta: 50n, rewardBufferQuoteDelta: 25n,
+                    liquidityAfter: 500_000n,
+                },
+            });
+
+            await service.importLogsForPosition(
+                POSITION_CONTEXT, CHAIN_ID, OWNER_ADDRESS, [stake, swap], poolPriceService,
+            );
+
+            // recalculateAggregates ran during importLogsForPosition (post pass).
+            // Expect exactly one APR period whose endTimestamp matches the dispose.
+            expect(fake.aprStore).toHaveLength(1);
+            const period = fake.aprStore[0]!;
+            expect(period.collectedYieldValue).toBe('75'); // yieldQuoteValue from dispose: 50*1 + 25 = 75
+            expect(period.eventCount).toBeGreaterThanOrEqual(1);
+            // The period brackets at the dispose — endEventId points at the swap's ledger event.
+            const swapRow = fake.store.find((e) => e.eventType === 'STAKING_DISPOSE');
+            expect(period.endEventId).toBe(swapRow!.id);
+        });
+
+        it('Stake-only (no dispose) → no APR periods persisted', async () => {
+            const stake = makeStakeLog(100n, '0xtxA', '0xblkA', 0, {
+                base: 1000n, quote: 500n, yieldTarget: 100n, tokenId: 42n,
+                chainContext: { vaultStateBefore: 'Empty', liquidityAfter: 1_000_000n },
+            });
+            await service.importLogsForPosition(
+                POSITION_CONTEXT, CHAIN_ID, OWNER_ADDRESS, [stake], poolPriceService,
+            );
+            expect(fake.aprStore).toHaveLength(0);
+        });
+
+        it('multiple disposes → one APR period per dispose; sum of collectedYieldValue matches ledger total', async () => {
+            const stake = makeStakeLog(100n, '0xtxA', '0xblkA', 0, {
+                base: 1000n, quote: 500n, yieldTarget: 100n, tokenId: 42n,
+                chainContext: { vaultStateBefore: 'Empty', liquidityAfter: 1_000_000n },
+            });
+            const swap1 = makeSwapLog(200n, '0xtx1', '0xblk1', 0, {
+                tokenIn: TOKEN1, amountIn: 0n, tokenOut: TOKEN0, amountOut: 0n,
+                effectiveBps: 2500,
+                chainContext: {
+                    stakedBaseBefore: 1000n, stakedQuoteBefore: 500n,
+                    rewardBufferBaseDelta: 30n, rewardBufferQuoteDelta: 10n, // yield = 40
+                    liquidityAfter: 750_000n,
+                },
+            });
+            const swap2 = makeSwapLog(300n, '0xtx2', '0xblk2', 0, {
+                tokenIn: TOKEN1, amountIn: 0n, tokenOut: TOKEN0, amountOut: 0n,
+                effectiveBps: 5000,
+                chainContext: {
+                    stakedBaseBefore: 1000n, stakedQuoteBefore: 500n,
+                    rewardBufferBaseDelta: 20n, rewardBufferQuoteDelta: 15n, // yield = 35
+                    liquidityAfter: 375_000n,
+                },
+            });
+
+            await service.importLogsForPosition(
+                POSITION_CONTEXT, CHAIN_ID, OWNER_ADDRESS, [stake, swap1, swap2], poolPriceService,
+            );
+
+            expect(fake.aprStore).toHaveLength(2);
+            const totalYield = fake.aprStore.reduce(
+                (sum, p) => sum + BigInt(p.collectedYieldValue),
+                0n,
+            );
+            // Yield total across both periods = 40 + 35 = 75.
+            expect(totalYield).toBe(75n);
+        });
+
+        it('rerun (idempotency at recalc level) — old periods wiped before regen', async () => {
+            const stake = makeStakeLog(100n, '0xtxA', '0xblkA', 0, {
+                base: 1000n, quote: 500n, yieldTarget: 100n, tokenId: 42n,
+                chainContext: { vaultStateBefore: 'Empty', liquidityAfter: 1_000_000n },
+            });
+            const swap = makeSwapLog(200n, '0xtxB', '0xblkB', 0, {
+                tokenIn: TOKEN1, amountIn: 0n, tokenOut: TOKEN0, amountOut: 0n,
+                effectiveBps: 5000,
+                chainContext: {
+                    stakedBaseBefore: 1000n, stakedQuoteBefore: 500n,
+                    rewardBufferBaseDelta: 50n, rewardBufferQuoteDelta: 25n,
+                    liquidityAfter: 500_000n,
+                },
+            });
+
+            await service.importLogsForPosition(
+                POSITION_CONTEXT, CHAIN_ID, OWNER_ADDRESS, [stake, swap], poolPriceService,
+            );
+            const after1 = fake.aprStore.length;
+
+            // Re-run recalc directly — should wipe + regenerate, not duplicate.
+            await service.recalculateAggregates(false);
+            expect(fake.aprStore.length).toBe(after1); // same count, not 2x
         });
     });
 
