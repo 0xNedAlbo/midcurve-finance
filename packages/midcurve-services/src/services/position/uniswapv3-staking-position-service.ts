@@ -309,10 +309,18 @@ export class UniswapV3StakingPositionService {
      *
      * Throws `INVALID_VAULT_CONTRACT` if the address isn't a valid staking
      * vault on the given chain (the on-chain reads will fail).
+     *
+     * Note: there is no `quoteTokenAddress` override. `isToken0Quote` is
+     * on-chain immutable for staking vaults (encoded at `stake()`), and
+     * PR1's ledger service uses it as ground truth in every disposal
+     * calculation. A caller-supplied override that disagrees with
+     * `vault.isToken0Quote()` would silently corrupt all subsequent PnL
+     * math. This is the staking-specific divergence from
+     * `UniswapV3VaultPositionService.discover`.
      */
     async discover(
         userId: string,
-        params: { chainId: number; vaultAddress: string; quoteTokenAddress?: string },
+        params: { chainId: number; vaultAddress: string },
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3StakingPosition> {
         const { chainId } = params;
@@ -356,17 +364,6 @@ export class UniswapV3StakingPositionService {
             );
         }
 
-        // Optional override: caller can force a different quote-token assignment.
-        // Note: SPEC §9.4 says the per-staking-position `switch-quote-token` endpoint
-        // is NOT supported (vault encodes `isToken0Quote` immutably on `stake()`),
-        // but we still let the discover caller pass an override for parity with
-        // the vault service's signature.
-        let resolvedIsToken0Quote = isToken0Quote;
-        if (params.quoteTokenAddress) {
-            resolvedIsToken0Quote =
-                normalizeAddress(params.quoteTokenAddress).toLowerCase() === normalizeAddress(token0Addr).toLowerCase();
-        }
-
         // Discover tokens + pool concurrently
         const [token0, token1, pool] = await Promise.all([
             this._erc20TokenService.discover({ address: normalizeAddress(token0Addr), chainId }),
@@ -391,9 +388,9 @@ export class UniswapV3StakingPositionService {
         const factoryAddress = (factoryRow?.config as { address?: string } | undefined)?.address ?? '';
 
         // Compute price range bounds in quote-token units
-        const baseTokenAddr = resolvedIsToken0Quote ? token1.address : token0.address;
-        const quoteTokenAddr = resolvedIsToken0Quote ? token0.address : token1.address;
-        const baseDecimals = resolvedIsToken0Quote ? token1.decimals : token0.decimals;
+        const baseTokenAddr = isToken0Quote ? token1.address : token0.address;
+        const quoteTokenAddr = isToken0Quote ? token0.address : token1.address;
+        const baseDecimals = isToken0Quote ? token1.decimals : token0.decimals;
         const priceRangeLower = tickToPrice(tickLower, baseTokenAddr, quoteTokenAddr, baseDecimals);
         const priceRangeUpper = tickToPrice(tickUpper, baseTokenAddr, quoteTokenAddr, baseDecimals);
 
@@ -409,7 +406,7 @@ export class UniswapV3StakingPositionService {
             factoryAddress,
             ownerAddress: normalizeAddress(ownerAddr),
             underlyingTokenId: Number(tokenId),
-            isToken0Quote: resolvedIsToken0Quote,
+            isToken0Quote: isToken0Quote,
             poolAddress: normalizeAddress(poolAddr),
             token0Address: token0.address,
             token1Address: token1.address,

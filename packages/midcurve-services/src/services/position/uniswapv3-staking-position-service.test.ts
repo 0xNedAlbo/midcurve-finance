@@ -490,20 +490,23 @@ describe('UniswapV3StakingPositionService', () => {
     });
 
     // -------------------------------------------------------------------------
-    // 6. refresh — always orchestrates ledger sync + state refresh (NO updatedAt cache)
+    // 6. refresh — no updatedAt short-circuit (would catch a regression that
+    //    re-introduces the 15-second cache).
     // -------------------------------------------------------------------------
-    it('refresh — always calls syncFromChain + refreshOnChainState (no updatedAt short-circuit)', async () => {
-        // Position was just updated 1ms ago — would be a cache hit if we had a 15s cache.
+    it('refresh — two back-to-back calls both invoke syncFromChain (no updatedAt cache)', async () => {
+        // Position was updated 1ms ago — a hypothetical 15s cache would short-circuit.
         const recentRow = makePositionRow({ updatedAt: new Date(Date.now() - 1) });
         prismaMock.position.findFirst.mockResolvedValue(recentRow);
 
         const { service } = makeService({});
         await service.refresh(POSITION_ID);
+        await service.refresh(POSITION_ID);
 
-        // refreshAllPositionLogs called → syncFromChain called
-        expect(mockLedgerInstance.syncFromChain).toHaveBeenCalledTimes(1);
-        // refreshOnChainState ran → position.update called
-        expect(prismaMock.position.update).toHaveBeenCalled();
+        // The invariant: refresh always pulls fresh chain state. A regression
+        // that re-introduces the 15s cache would yield only 1 call here.
+        expect(mockLedgerInstance.syncFromChain).toHaveBeenCalledTimes(2);
+        // refreshOnChainState ran on each call → position.update called twice.
+        expect(prismaMock.position.update).toHaveBeenCalledTimes(2);
     });
 
     // -------------------------------------------------------------------------
@@ -579,34 +582,39 @@ describe('UniswapV3StakingPositionService', () => {
     });
 
     // -------------------------------------------------------------------------
-    // 11. reset — journal-rebuild boundary: same liquidity.{increased,decreased}
-    //     publish call set as the original import.
+    // 11. reset — journal-rebuild contract.
+    //
+    // ⚠️ Test boundary limitation: `syncFromChain` is mocked, so this test
+    // CANNOT directly verify the publisher call set after reset matches the
+    // original import (the planned "same `ledgerInputHash` set, same count,
+    // same chain order" assertion is impossible across a mocked package
+    // boundary). What we CAN verify here:
+    //   - `deleteAll` was invoked exactly once.
+    //   - `syncFromChain` was invoked exactly once for the rebuild.
+    //   - No `position.liquidity.reverted` events were emitted from reset
+    //     itself (refinement #3).
+    //
+    // Re-emission CORRECTNESS — that PR2's `syncFromChain` re-publishes the
+    // same `position.liquidity.{increased,decreased}` events as the original
+    // import — is verified at PR2's `syncFromChain` test layer (the staking
+    // ledger service's tests). PR3's rule consumes those events deterministically
+    // via its idempotency check (`journalService.isProcessed`), so a correct
+    // re-emission from PR2 plus the FK cascade from `deleteAll` yields a
+    // correct journal rebuild end-to-end.
     // -------------------------------------------------------------------------
-    it('reset — re-publishes the same liquidity.{increased,decreased} events as the original import', async () => {
+    it('reset — invokes deleteAll + syncFromChain exactly once each, no revert events', async () => {
         prismaMock.position.findFirst.mockResolvedValue(makePositionRow());
         const { service } = makeService({});
 
-        // First import: syncFromChain pretend-publishes 1 increased + 1 decreased.
-        // We capture the events by counting publisher calls of the right types.
-        // After PR2's syncFromChain runs, those publishes are emitted by the
-        // ledger service internally — but here we mock syncFromChain to be a
-        // no-op and instead assert that reset calls syncFromChain (which would
-        // re-emit the events identically).
         await service.refresh(POSITION_ID);
         const initialSyncCalls = mockLedgerInstance.syncFromChain.mock.calls.length;
 
         await service.reset(POSITION_ID);
 
-        // After reset: ledger deleteAll + a fresh syncFromChain call. The fresh
-        // syncFromChain pulls the same on-chain history → re-emits the same
-        // liquidity.{increased,decreased} events. We verify the boundary: the
-        // ledger service is invoked exactly once more for the rebuild.
         expect(mockLedgerInstance.syncFromChain.mock.calls.length).toBe(initialSyncCalls + 1);
         expect(mockLedgerInstance.deleteAll).toHaveBeenCalledTimes(1);
 
-        // Ensure no `position.liquidity.reverted` was emitted by reset itself
-        // (refinement #3 boundary: PR3 rebuild relies on the increase/decrease
-        // re-emission from PR2's syncFromChain, not on revert noise from reset).
+        // Refinement #3: reset must NOT emit `position.liquidity.reverted`.
         const revertCount = mockCreateAndPublish.mock.calls.filter(
             (c) => c[0].type === 'position.liquidity.reverted',
         ).length;
