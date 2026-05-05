@@ -62,7 +62,13 @@ import { UniswapV3PoolService } from '../pool/uniswapv3-pool-service.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import { EvmBlockService } from '../block/evm-block-service.js';
 import { UniswapV3PoolPriceService } from '../pool-price/uniswapv3-pool-price-service.js';
-import { UniswapV3StakingLedgerService } from '../position-ledger/uniswapv3-staking-ledger-service.js';
+import {
+    UniswapV3StakingLedgerService,
+    type StakingImportLogsResult,
+    type StakingLedgerAggregates,
+} from '../position-ledger/uniswapv3-staking-ledger-service.js';
+import { UniswapV3StakingAprService } from '../position-apr/uniswapv3-staking-apr-service.js';
+import type { AprSummary } from '@midcurve/shared';
 import { CacheService } from '../cache/index.js';
 import { SharedContractService } from '../automation/shared-contract-service.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
@@ -486,9 +492,16 @@ export class UniswapV3StakingPositionService {
         userId: string,
         walletAddress: string,
         chainIds?: number[],
-    ): Promise<{ found: number; imported: number; skipped: number; errors: number }> {
+    ): Promise<{
+        positions: UniswapV3StakingPosition[];
+        found: number;
+        imported: number;
+        skipped: number;
+        errors: number;
+    }> {
         const supportedChains = chainIds ?? this._evmConfig.getSupportedChainIds();
         const ownerAddress = normalizeAddress(walletAddress);
+        const positions: UniswapV3StakingPosition[] = [];
         let found = 0;
         let imported = 0;
         let skipped = 0;
@@ -534,7 +547,11 @@ export class UniswapV3StakingPositionService {
                 }
 
                 try {
-                    await this.discover(userId, { chainId, vaultAddress: vaultAddr });
+                    const newPosition = await this.discover(userId, {
+                        chainId,
+                        vaultAddress: vaultAddr,
+                    });
+                    positions.push(newPosition);
                     imported++;
                 } catch (e) {
                     this.logger.warn(
@@ -546,7 +563,7 @@ export class UniswapV3StakingPositionService {
             }
         }
 
-        return { found, imported, skipped, errors };
+        return { positions, found, imported, skipped, errors };
     }
 
     // =========================================================================
@@ -567,8 +584,12 @@ export class UniswapV3StakingPositionService {
         blockNumber: number | 'latest' = 'latest',
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3StakingPosition> {
-        await this.refreshAllPositionLogs(id, blockNumber, dbTx);
-        return this.refreshOnChainState(id, blockNumber, dbTx);
+        // Recalc-threading optimization (PR4a review point #4):
+        // syncFromChain already runs recalculateAggregates pre+post; we thread
+        // the post result into refreshOnChainState so it doesn't run a third
+        // pass.
+        const importResult = await this.refreshAllPositionLogs(id, blockNumber, dbTx);
+        return this.refreshOnChainState(id, blockNumber, dbTx, importResult.postImportAggregates);
     }
 
     // =========================================================================
@@ -609,13 +630,50 @@ export class UniswapV3StakingPositionService {
         await ledgerService.deleteAll(dbTx);
 
         // Reimport — emits `position.liquidity.{increased,decreased}` for PR3 to rebuild.
-        await this.refreshAllPositionLogs(id, 'latest', dbTx);
-        return this.refreshOnChainState(id, 'latest', dbTx);
+        // Same recalc-threading optimization as `refresh()` (PR4a review point #4).
+        const importResult = await this.refreshAllPositionLogs(id, 'latest', dbTx);
+        return this.refreshOnChainState(id, 'latest', dbTx, importResult.postImportAggregates);
     }
 
     // =========================================================================
     // FETCH METRICS (non-persisted)
     // =========================================================================
+
+    /**
+     * Compute APR summary for the position using the staking APR service.
+     * Used by the `/apr` REST endpoint (PR4b).
+     */
+    async fetchAprSummary(
+        id: string,
+        blockNumber: number | 'latest' = 'latest',
+        tx?: PrismaTransactionClient,
+    ): Promise<AprSummary> {
+        const position = await this.findById(id, tx);
+        if (!position) throw new Error(`Staking-vault position not found: ${id}`);
+
+        const ledgerService = new UniswapV3StakingLedgerService(
+            { positionId: id },
+            { prisma: this.prisma },
+        );
+        const aggregates = await ledgerService.recalculateAggregates(
+            position.isToken0Quote,
+            tx,
+        );
+
+        const aprService = new UniswapV3StakingAprService(
+            { positionId: id },
+            { prisma: this.prisma },
+        );
+        return aprService.calculateSummary(
+            {
+                positionOpenedAt: position.positionOpenedAt,
+                costBasis: aggregates.costBasisAfter,
+                unclaimedYield: 0n, // PR4a limitation — see fetchMetrics
+            },
+            blockNumber,
+            tx,
+        );
+    }
 
     async fetchMetrics(
         id: string,
@@ -691,7 +749,7 @@ export class UniswapV3StakingPositionService {
         id: string,
         blockNumber: number | 'latest' = 'latest',
         dbTx?: PrismaTransactionClient,
-    ): Promise<void> {
+    ): Promise<StakingImportLogsResult> {
         const position = await this.findById(id, dbTx);
         if (!position) throw new Error(`Staking-vault position not found: ${id}`);
 
@@ -702,8 +760,10 @@ export class UniswapV3StakingPositionService {
 
         // PR2's syncFromChain handles: block-range resolution, log fetching,
         // chain-context population, ledger import, AND domain event publishing.
-        // The position service is a thin orchestration layer here.
-        await ledgerService.syncFromChain(
+        // The position service is a thin orchestration layer here. Returns the
+        // import result so callers can thread `postImportAggregates` to
+        // `refreshOnChainState` and skip a redundant recalculateAggregates pass.
+        return await ledgerService.syncFromChain(
             position,
             this._evmConfig,
             this._poolPriceService,
@@ -723,6 +783,7 @@ export class UniswapV3StakingPositionService {
         id: string,
         blockNumber: number | 'latest' = 'latest',
         dbTx?: PrismaTransactionClient,
+        precomputedAggregates?: StakingLedgerAggregates,
     ): Promise<UniswapV3StakingPosition> {
         const position = await this.findById(id, dbTx);
         if (!position) throw new Error(`Staking-vault position not found: ${id}`);
@@ -766,14 +827,17 @@ export class UniswapV3StakingPositionService {
 
         const unclaimedYield = 0n; // see comment above
 
+        // Recalc-threading optimization (PR4a review point #4): when called from
+        // refresh()/reset(), syncFromChain has already run recalculateAggregates
+        // (pre + post). Use the threaded `postImportAggregates` and skip the
+        // redundant pass. Direct callers (e.g. integration tests) can omit the
+        // param and we'll fetch aggregates ourselves.
         const ledgerService = new UniswapV3StakingLedgerService(
             { positionId: id },
             { prisma: this.prisma },
         );
-        const aggregates = await ledgerService.recalculateAggregates(
-            position.isToken0Quote,
-            dbTx,
-        );
+        const aggregates = precomputedAggregates
+            ?? await ledgerService.recalculateAggregates(position.isToken0Quote, dbTx);
 
         const unrealizedPnl = currentValue - aggregates.costBasisAfter;
 
@@ -785,6 +849,19 @@ export class UniswapV3StakingPositionService {
             select: { timestamp: true },
         });
         const correctedOpenedAt = firstEvent?.timestamp ?? position.positionOpenedAt;
+
+        // APR summary — use the staking APR service, fed by the periods that
+        // recalculateAggregates persisted for this position.
+        const aprService = new UniswapV3StakingAprService(
+            { positionId: id },
+            { prisma: this.prisma },
+        );
+        const aprSummary = await aprService.calculateSummary(
+            { positionOpenedAt: correctedOpenedAt, costBasis: aggregates.costBasisAfter, unclaimedYield },
+            blockNumber,
+            dbTx,
+        );
+        const persistedApr = aprSummary.belowThreshold ? null : aprSummary.totalApr;
 
         const isClosedTransition =
             onChain.vaultState === 'Settled' && position.typedState.vaultState !== 'Settled';
@@ -799,6 +876,9 @@ export class UniswapV3StakingPositionService {
                 unrealizedPnl: unrealizedPnl.toString(),
                 collectedYield: aggregates.collectedYieldAfter.toString(),
                 unclaimedYield: unclaimedYield.toString(),
+                totalApr: persistedApr,
+                baseApr: persistedApr,
+                rewardApr: 0,
                 positionOpenedAt: correctedOpenedAt,
             },
         });

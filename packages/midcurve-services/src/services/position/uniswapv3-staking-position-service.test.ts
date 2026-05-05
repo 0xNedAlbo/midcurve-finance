@@ -30,12 +30,31 @@ const { prismaMock, mockCreateAndPublish, mockLedgerInstance } = vi.hoisted(() =
         positionLedgerEvent: {
             findFirst: vi.fn(),
         },
+        positionAprPeriod: {
+            findMany: vi.fn(async () => []),
+            create: vi.fn(),
+            deleteMany: vi.fn(async () => ({ count: 0 })),
+        },
         token: { findUnique: vi.fn() },
         $transaction: vi.fn(),
     },
     mockCreateAndPublish: vi.fn(async () => 'evt_id'),
     mockLedgerInstance: {
-        syncFromChain: vi.fn(async () => ({ perLogResults: [], allDeletedEvents: [] })),
+        // PR2 → PR4b: syncFromChain returns the import result; PR4b's
+        // refresh()/reset() thread `postImportAggregates` to refreshOnChainState
+        // so the position service skips a redundant recalculateAggregates pass.
+        syncFromChain: vi.fn(async () => ({
+            perLogResults: [],
+            allDeletedEvents: [],
+            preImportAggregates: {
+                liquidityAfter: 0n, costBasisAfter: 0n, realizedPnlAfter: 0n,
+                collectedYieldAfter: 0n, realizedCashflowAfter: 0n,
+            },
+            postImportAggregates: {
+                liquidityAfter: 0n, costBasisAfter: 0n, realizedPnlAfter: 0n,
+                collectedYieldAfter: 0n, realizedCashflowAfter: 0n,
+            },
+        })),
         deleteAll: vi.fn(async () => undefined),
         recalculateAggregates: vi.fn(async () => ({
             liquidityAfter: 0n,
@@ -358,22 +377,28 @@ describe('UniswapV3StakingPositionService', () => {
         vi.clearAllMocks();
         // Reset hoisted mocks (vi.clearAllMocks doesn't reach them)
         mockCreateAndPublish.mockReset().mockResolvedValue('evt_id');
-        mockLedgerInstance.syncFromChain.mockReset().mockResolvedValue({
-            perLogResults: [], allDeletedEvents: [],
-        });
-        mockLedgerInstance.deleteAll.mockReset().mockResolvedValue(undefined);
-        mockLedgerInstance.recalculateAggregates.mockReset().mockResolvedValue({
+        const zeroAggregates = {
             liquidityAfter: 0n,
             costBasisAfter: 0n,
             realizedPnlAfter: 0n,
             collectedYieldAfter: 0n,
             realizedCashflowAfter: 0n,
+        };
+        mockLedgerInstance.syncFromChain.mockReset().mockResolvedValue({
+            perLogResults: [], allDeletedEvents: [],
+            preImportAggregates: zeroAggregates,
+            postImportAggregates: zeroAggregates,
         });
+        mockLedgerInstance.deleteAll.mockReset().mockResolvedValue(undefined);
+        mockLedgerInstance.recalculateAggregates.mockReset().mockResolvedValue(zeroAggregates);
         prismaMock.position.findFirst.mockReset();
         prismaMock.position.create.mockReset();
         prismaMock.position.update.mockReset().mockResolvedValue(makePositionRow());
         prismaMock.position.delete.mockReset();
         prismaMock.positionLedgerEvent.findFirst.mockReset().mockResolvedValue(null);
+        prismaMock.positionAprPeriod.findMany.mockReset().mockResolvedValue([]);
+        prismaMock.positionAprPeriod.create.mockReset();
+        prismaMock.positionAprPeriod.deleteMany.mockReset().mockResolvedValue({ count: 0 });
         prismaMock.token.findUnique.mockReset().mockImplementation(async (q: any) => {
             const hash = q.where.tokenHash as string;
             const addr = hash.split('/').pop()!;
@@ -441,7 +466,13 @@ describe('UniswapV3StakingPositionService', () => {
 
         const result = await service.discoverWalletPositions(USER_ID, OWNER_ADDRESS, [CHAIN_ID]);
 
-        expect(result).toEqual({ found: 0, imported: 0, skipped: 0, errors: 0 });
+        expect(result).toEqual({
+            positions: [],
+            found: 0,
+            imported: 0,
+            skipped: 0,
+            errors: 0,
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -609,6 +640,10 @@ describe('UniswapV3StakingPositionService', () => {
         await service.refresh(POSITION_ID);
         const initialSyncCalls = mockLedgerInstance.syncFromChain.mock.calls.length;
 
+        // Reset the recalc-call counter so the threading assertion below is
+        // scoped to just the reset() invocation, not the prior refresh().
+        mockLedgerInstance.recalculateAggregates.mockClear();
+
         await service.reset(POSITION_ID);
 
         expect(mockLedgerInstance.syncFromChain.mock.calls.length).toBe(initialSyncCalls + 1);
@@ -619,6 +654,21 @@ describe('UniswapV3StakingPositionService', () => {
             (c) => c[0].type === 'position.liquidity.reverted',
         ).length;
         expect(revertCount).toBe(0);
+
+        // PR4a review point #4 / PR4b — recalc-threading invariant.
+        // After reset:
+        //   - syncFromChain returns a stub StakingImportLogsResult with
+        //     `postImportAggregates` (mocked above).
+        //   - reset() threads that into refreshOnChainState, which must NOT
+        //     call recalculateAggregates itself (it consumes the threaded value).
+        // The fetchAprSummary path inside reset doesn't run, but
+        // refreshOnChainState's own recalc — the one we're optimizing away —
+        // is what we're asserting absence of.
+        //
+        // Note: the position service's `fetchAprSummary` (a separate REST entry
+        // point) DOES still call recalculateAggregates; that's not in scope
+        // here because reset() doesn't invoke it.
+        expect(mockLedgerInstance.recalculateAggregates).not.toHaveBeenCalled();
     });
 
     // -------------------------------------------------------------------------

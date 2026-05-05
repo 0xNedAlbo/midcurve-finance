@@ -13,3 +13,6 @@ export * from './uniswapv3/index.js';
 
 // UniswapV3 Vault-specific types
 export * from './uniswapv3-vault/index.js';
+
+// UniswapV3 Staking Vault-specific types (SPEC-0003b)
+export * from './uniswapv3-staking/index.js';
